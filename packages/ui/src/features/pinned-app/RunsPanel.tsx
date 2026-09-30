@@ -4,22 +4,30 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { externalAppKey, useStore } from '../../store/store.js'
 
 /**
- * 한 앱의 실행 기록 (M4 B-7) — 고정 화면 옆에 여닫는 판.
+ * One app's run history (M4 B-7) — a panel that opens and closes beside the pinned view.
  *
- * "누가 무엇을 실행했는지 남긴다"(A-6)의 로컬 절반이 사람 눈에 닿는 자리다. 화면이 부른 것, 세션의
- * 에이전트가 부른 것, 다른 앱이 중개로 부른 것이 같은 한 길을 지나 한 줄씩 남는다. 앱을 쓰는 사람이
- * "방금 누른 것이 정말 앱에 닿았나", "에이전트가 이 앱으로 무엇을 했나"를 앱을 떠나지 않고 본다.
+ * This is where the local half of "record who ran what" (A-6) reaches the person's eyes. A call
+ * from the view, a call from a session's agent, and a call brokered through another app all pass
+ * through the same single path and each leave one row. Someone using the app can see "did what I
+ * just pressed actually reach the app" and "what did the agent do with this app" without leaving
+ * the app.
  *
- * 다시 읽는 때: 판을 열 때, 이 판에 보이는 줄이 서거나 세션이 이어지거나 끝날 때마다(`external_app_runs_changed`의 카운터),
- * 그리고 사람이 누를 때. 그 신호는 host가 기록의 모든 줄에서 낸다 — 거절된 호출도, 읽기 전용 도구의 호출과 그것이 세운 사슬도
- * (앱이 부탁한 에이전트는 몇 분을 돈다). 화면이 듣는 "바뀌었다"(`external_app_state_changed`)에 기대던 동안에는 읽기 전용 도구가
- * 세운 사슬이 Refresh를 누를 때까지 보이지 않았다: 그 신호는 읽기 전용 도구의 호출에 오지 않는다(#190), 그리고 몇 초마다 다시
- * 읽기는 판이 이미 들고 있는 줄이 돌 때만 돌았다.
- * 실패(앱이 실패를 답했다, host가 거절했다)는 줄 왼쪽의 밝은 선과 이유 한 줄로 드러난다. 밝기는 막힌
- * 것의 몫이라는 팔레트 규칙 그대로다.
+ * When it re-reads: when the panel opens, every time a row visible in this panel is created, its
+ * session continues, or it ends (the counter on `external_app_runs_changed`), and when the person
+ * presses the button. The host emits that signal for every row in the record — a rejected call, a
+ * read-only tool call, and the chain it starts too (an agent an app asked for can run for several
+ * minutes). While this relied on the "changed" signal the view listens for (`external_app_state_changed`),
+ * a chain started by a read-only tool call stayed invisible until Refresh was pressed: that signal
+ * does not fire for a read-only tool call (#190), and re-reading every few seconds only ran while a
+ * row the panel already held was still running.
+ * A failure (the app answered with a failure, the host rejected it) is shown by a bright line on the
+ * left of the row and one line stating the reason. Brightness belongs to whatever is blocked, exactly
+ * the palette rule.
  *
- * 기록은 사슬로 선다(M4 D-6): 이 앱이 부른 다른 앱의 줄, 이 앱(또는 그 앱)이 Centralu에 부탁한 줄(에이전트·다른 앱·host
- * 데이터)이 그것을 일으킨 줄 아래에 들여 쓰인다. 에이전트를 부탁한 줄에서는 그 세션으로 건너갈 수 있다(Open session).
+ * The history is laid out as a chain (M4 D-6): a row for another app this app called, and a row for
+ * something this app (or that app) asked Centralu for (an agent, another app, host data) is indented
+ * under the row that caused it. A row where an agent was asked for lets a person jump to that session
+ * (Open session).
  */
 export function RunsPanel({ appId, projectId }: { appId: string; projectId: string | null }) {
   const platform = usePlatform()
@@ -44,7 +52,7 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
       alive = false
     }
   }, [platform, appId, projectId])
-  // `changed`가 바뀔 때마다 — 이 판에 보이는 줄이 서거나 끝났다
+  // Every time `changed` changes — a row visible in this panel was created or ended
   useEffect(() => load(), [load, changed])
   const nameOf = (r: AppRun) => apps.find((a) => a.appId === r.appId && a.projectId === r.projectId)?.name ?? r.appId
 
@@ -90,11 +98,14 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
 }
 
 /**
- * 이 앱에 대해 기억된 능력의 답 (M4 D-4) — 사람이 한 번 답한 것이 여기 남는다. 잘못 누른 거절도, 이제는 거두고 싶은 허락도
- * 여기서 잊는다(Forget). 잊으면 다음에 그 능력을 쓰려 할 때 다시 묻는다. 매니페스트의 `uses`가 바뀐 뒤의 옛 답은 더 쓰이지
- * 않는다 — "outdated"로 보인다.
+ * The remembered answers to capability questions for this app (M4 D-4) — an answer the person gave
+ * once stays here. A decline pressed by mistake, or a grant now worth taking back, is forgotten from
+ * here (Forget). Forgetting it means it is asked again the next time that capability is needed. An
+ * old answer no longer applies once the manifest's `uses` has changed — it shows as "outdated."
  *
- * 다시 읽는 때: 판을 열 때, 이 판의 기록이 바뀔 때(답한 부탁의 줄은 곧 세션을 잇거나 거절로 끝난다), 화면의 물음이 바뀔 때, 잊은 뒤.
+ * When it re-reads: when the panel opens, when this panel's history changes (an answered request's
+ * row soon either continues into a session or ends as a decline), when the view's question changes,
+ * and after forgetting one.
  */
 function Permissions({ appId, projectId, changed }: { appId: string; projectId: string | null; changed: number }) {
   const platform = usePlatform()
@@ -149,10 +160,13 @@ function Permissions({ appId, projectId, changed }: { appId: string; projectId: 
 }
 
 /**
- * 이 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 지난 하루와 30일 동안 몇 번, 얼마나 오래, 토큰을 얼마나. 앱은 사람의 에이전트를
- * 빌려 쓴다 — 그 몫이 앱마다 여기 보인다. 고리에 빠진 앱은 이 숫자가 먼저 말한다. 에이전트를 부탁한 적이 없는 앱에는 서지 않는다.
+ * The agent usage this app has asked for (M4 D-5) — how many times, how long, and how many tokens,
+ * over the last day and the last 30 days. An app borrows the person's own agent to use — its share
+ * is shown here per app. An app stuck in a loop is what this number states first. It does not appear
+ * at all for an app that has never asked for an agent.
  *
- * 다시 읽는 때: 기록을 다시 읽을 때마다(`runs`가 바뀐다) — 에이전트의 줄이 끝나면 쓰임도 바뀐다.
+ * When it re-reads: every time the history is re-read (`runs` changes) — usage changes as soon as an
+ * agent's row ends.
  */
 function AgentUseSection({ appId, projectId, runs }: { appId: string; projectId: string | null; runs: AppRun[] | null }) {
   const platform = usePlatform()
@@ -192,7 +206,7 @@ function UseLine({ label, use, testId }: { label: string; use: AgentUse; testId:
   )
 }
 
-/** 합한 시간 — "42 s", "3m 20s", "2h 5m" */
+/** A summed duration — "42 s", "3m 20s", "2h 5m" */
 function longDuration(ms: number): string {
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s} s`
@@ -200,7 +214,7 @@ function longDuration(ms: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 }
 
-/** 토큰 수 — "850", "12.4k", "3.1M" */
+/** A token count — "850", "12.4k", "3.1M" */
 function tokenCount(n: number): string {
   if (n < 1000) return String(n)
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
@@ -208,9 +222,11 @@ function tokenCount(n: number): string {
 }
 
 /**
- * 기록을 사슬로 편다 (M4 D-6) — host는 이 앱의 줄과 그 아래의 사슬을 한 목록(최근 것부터)으로 준다. 부모가 목록에 있는 줄은
- * 그 부모 바로 아래에, 나머지는 맨 위에 선다. 맨 위는 최근 것부터, 한 부모 아래는 **일어난 순서대로** — 한 호출 안의 일은
- * 위에서 아래로 읽혀야 한다. 들여쓰기 깊이를 함께 준다.
+ * Lays the history out as a chain (M4 D-6) — the host provides this app's rows and the chain below
+ * them as one list (newest first). A row whose parent is in the list is placed right under that
+ * parent; the rest go at the top level. The top level is newest first, but under one parent it is
+ * **in the order things happened** — what happens inside one call has to read top to bottom.
+ * Indentation depth is provided along with each row.
  */
 export function chainRuns(runs: AppRun[]): { run: AppRun; depth: number }[] {
   const ids = new Set(runs.map((r) => r.id))
@@ -226,16 +242,16 @@ export function chainRuns(runs: AppRun[]): { run: AppRun; depth: number }[] {
     if (seen.has(r.id)) return
     seen.add(r.id)
     out.push({ run: r, depth })
-    // 받은 목록은 최근 것부터다 — 뒤집으면 같은 시각의 줄까지 일어난 순서가 된다(정렬은 안정적이다)
+    // The received list is newest first — reversing it puts even rows sharing a timestamp back in the order they happened (the sort is stable)
     for (const c of [...(kids.get(r.id) ?? [])].reverse().sort((a, b) => a.createdAt - b.createdAt)) walk(c, depth + 1)
   }
   for (const r of roots) walk(r, 0)
-  // 부모끼리 서로를 가리키는 줄(있을 수 없지만)도 버리지 않는다
+  // Even a row whose parent points at itself (should never happen, but) is not dropped
   for (const r of runs) walk(r, 0)
   return out
 }
 
-/** 사람이 읽는 결말 — 기록의 말(`rejected`)과 화면의 말(refused)은 같은 것이다 */
+/** The outcome as a person reads it — the record's word (`rejected`) and the view's word (refused) are the same thing */
 const STATUS: Record<AppRun['status'], string> = {
   running: 'running',
   ok: 'ok',
@@ -260,18 +276,18 @@ function RunRow({
   onOpenSession,
 }: {
   run: AppRun
-  /** 사슬 안의 깊이 — 0은 맨 위 */
+  /** Depth within the chain — 0 is the top level */
   depth: number
-  /** 이 판의 앱의 줄인가 — 아니면 사슬 아래의 다른 앱의 줄이다 */
+  /** Is this a row of this panel's own app — otherwise it is another app's row further down the chain */
   own: boolean
   appName: string
   sessionName: string | undefined
-  /** 이 줄이 세운 에이전트 세션으로 건너간다 — 세션이 남아 있을 때만 */
+  /** Jumps to the agent session this row created — only when the session still exists */
   onOpenSession: (() => void) | undefined
 }) {
   const failed = run.status === 'error' || run.status === 'rejected'
   const when = new Date(run.createdAt)
-  // 부탁의 줄은 앱이 Centralu에 부탁한 것이다 — 부른 쪽이 아니라 부탁한 앱을 적는다
+  // A broker row is something an app asked Centralu for — it states the app that asked, not the caller
   const broker = run.kind === 'broker'
   const caller = broker
     ? `Asked by ${appName}`

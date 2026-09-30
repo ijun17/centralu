@@ -7,27 +7,33 @@ import { useToolMeta, useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 import { appIdHint, deriveAppId } from './newAppId.js'
 
-/** 칸 하나의 생김새 — 새 세션 창과 같은 모양이어야 "같은 종류의 창"으로 읽힌다 */
+/** What one field looks like — it has to match the new session dialog's shape to read as "the same kind of dialog" */
 const inputClass =
   'w-full rounded border border-edge bg-void px-2 py-1.5 text-[12px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none'
 
-/** 내장 앱의 id — 외부 앱은 가져갈 수 없다(host의 reservedIds와 같은 명부) */
+/** The ids of built-in apps — an external app cannot claim these (the same list as the host's reservedIds) */
 const BUILTIN_IDS = APPS.map((a) => a.id)
 
 /**
- * 새 앱 (M4 C-1) — 이름과 만드는 에이전트를 묻고, host가 템플릿으로 앱을 펼치고 그 앱의 만드는 세션을 세운다.
+ * New app (M4 C-1) — asks for a name and the agent that builds it, and the host unpacks the app
+ * from a template and starts that app's builder session.
  *
- * 묻는 것은 둘이다. **이름**(사람이 부를 말)과 **누가 만드나**(만드는 세션의 도구). id는 이름에서 지어 보여 주고
- * 고칠 수 있게 둔다 — 폴더 이름이자 세션의 서버 이름이라 규칙이 있고(newAppId.ts), 판정은 host와 한 벌이다
- * (`newAppIdProblem`). 창이 먼저 막는 것은 모양뿐이다: 이미 있는 id·신뢰·템플릿은 host가 판정하고, 거절하면 그 말을
- * **그대로** 보인다. 창이 host의 말을 제 말로 바꿔 적으면, 둘이 어긋나는 날 사람은 틀린 이유를 읽는다.
+ * Two things are asked for. **The name** (what the person calls it) and **who builds it** (the
+ * builder session's tool). The id is derived from the name, shown, and left editable — since it is
+ * both a folder name and a session's server name, it has rules (newAppId.ts), and the validation is
+ * the same one the host uses (`newAppIdProblem`). All this dialog blocks up front is the shape: an
+ * id that already exists, trust, and the template are judged by the host, and if it rejects it, that
+ * wording is shown **exactly as-is.** If the dialog rewrote the host's wording in its own words, the
+ * day the two drift apart the person would read the wrong reason.
  *
- * 도구는 새 세션 창과 같은 규칙이다: 열 때마다 다시 감지하고(방금 로그인했을 수 있다), 기본 도구를 못 쓰면 쓸 수 있는
- * 쪽으로 한 번 옮기고, 못 쓰는 도구를 골랐으면 까닭과 고치는 명령을 말한다. 못 쓰는 도구로는 만들지 않는다 — 앱은
- * 서도 만드는 세션이 서지 못하면, 사람은 고칠 사람이 없는 앱 앞에 선다.
+ * The tool follows the same rule as the new session dialog: detected again every time it opens (the
+ * person may have just logged in), switched once to whichever is usable if the default tool is not,
+ * and if an unusable tool is chosen, the reason and the fix command are stated. Nothing is created
+ * with an unusable tool — even if the app itself comes to exist, if its builder session cannot start,
+ * the person is left facing an app nobody can fix.
  *
- * 신뢰하지 않은 프로젝트에는 host가 앱을 만들지 않는다(앱은 이 기계에서 도는 코드다). 거절을 받기 전에 그 사실을
- * 말하고, 그 자리에서 신뢰할 수 있게 한다.
+ * The host does not create an app in an untrusted project (an app is code that runs on this
+ * machine). That fact is stated before the rejection arrives, with a way to trust it right there.
  */
 export function NewAppDialog({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {
   const platform = usePlatform()
@@ -37,8 +43,10 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)
   const allTools = useTools()
   /*
-   * 기본 도구는 host가 고를 것과 같게 짐작한다 — 프로젝트 앱은 그 프로젝트의 기본, 사용자 폴더 앱은 오케스트레이터의
-   * 도구. 짐작이 틀려도 창은 **고른 도구를 늘 실어 보낸다**: 보여 준 필과 다른 도구로 세션이 서는 일이 없다.
+   * The default tool is guessed to match what the host would choose — a project app defaults to
+   * that project's default, a user-folder app to the orchestrator's tool. Even when the guess is
+   * wrong, the dialog **always sends the tool actually selected**: a session never starts with a
+   * different tool than the one shown selected.
    */
   const [tool, setTool] = useState<ToolName>(
     (projectId ? project?.defaultTool : orchestratorTool) ?? allTools[0]?.name ?? '',
@@ -46,7 +54,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const toolMeta = useToolMeta(tool)
   const [tools, setTools] = useState<ToolStatus[] | null>(null)
   const [name, setName] = useState('')
-  /** 사람이 id를 손댔으면 그 값, 아니면 null — 이름을 고치는 동안 지은 id가 따라간다 */
+  /** The value the person entered if they touched the id, otherwise null — the derived id keeps following as the name is edited */
   const [idEdit, setIdEdit] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +63,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const problem = newAppIdProblem(id, BUILTIN_IDS)
   const untrusted = !!project && !project.trusted
 
-  // 열 때마다 감지한다 — 사용자가 방금 설치·로그인했을 수 있다
+  // Detected every time it opens — the person may have just installed or logged in
   const detect = useCallback(async () => {
     try {
       setTools(await platform.agents.detect())
@@ -67,7 +75,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
     void detect()
   }, [detect])
 
-  // 기본 도구를 못 쓰는데 다른 하나가 멀쩡하면 **한 번만** 옮긴다(새 세션 창과 같은 규칙) — 그 뒤 고른 것은 두고 본다
+  // Switches **exactly once** if the default tool is unusable but the other one is fine (the same rule as the new session dialog) — anything picked after that is left alone
   const autoPicked = useRef(false)
   useEffect(() => {
     if (!tools || autoPicked.current) return
@@ -103,7 +111,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
             await createApp({ projectId, id, name: name.trim(), tool })
             onClose()
           } catch (err) {
-            // host의 말 그대로 — 토스트는 2.5초 뒤 사라져 "눌러도 아무 일이 없다"로 보인다. 창 안에 남긴다
+            // Exactly the host's own wording — a toast disappears after 2.5 seconds and would look like "nothing happened when pressed." Kept inside the dialog instead
             setError((err as Error).message)
           } finally {
             setBusy(false)
@@ -179,7 +187,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
                 </button>
               ))}
             </div>
-            {/* 못 쓰는 이유를 숨기지 않는다 — 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 */}
+            {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
             {blocked && (
               <p className="mt-1.5 text-[11px] leading-relaxed text-ash" data-testid="new-app-tool-blocked">
                 {info(tool)?.installed

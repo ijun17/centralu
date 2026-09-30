@@ -4,14 +4,19 @@ import { useStore } from '../../store/store.js'
 import { PermissionCard, approvalKeyAction } from '../approval/ApprovalCard.jsx'
 
 /**
- * 고정 화면 위의 능력 물음 (M4 D-4) — 이 앱의 화면에서 시작된 사슬이 능력(에이전트, 다른 앱, host 데이터)을 처음 쓰려 한다.
+ * A capability question over a pinned view (M4 D-4) — a chain started by this app's view is trying to
+ * use a capability (an agent, another app, host data) for the first time.
  *
- * 화면에서 시작된 호출에는 세션이 없다. 사람이 누른 것은 이 화면이고, 부탁은 그 누름에서 나왔다 — 그래서 물음이 이 화면
- * 위에 선다(세션에서 시작된 사슬의 물음은 그 세션의 승인 카드다). 모양은 세션의 카드와 같다(`PermissionCard`): 같은 물음은
- * 어디에 서든 같은 얼굴이어야 한다. 능력을 쓰려는 앱이 이 앱이 부른 다른 앱이면 그 앱의 이름이 카드에 선다.
+ * A call started from a view has no session. What the person pressed was this view, and the request
+ * came out of that press — so the question stands over this view (a question from a chain started by
+ * a session is that session's approval card instead). Its shape matches the session card
+ * (`PermissionCard`): the same question must wear the same face no matter where it stands. If the app
+ * trying to use the capability is another app this app called, that app's name appears on the card.
  *
- * 답할 때까지 화면의 호출은 기다린다(host가 진행 알림으로 살려 둔다). 답하지 않고 5분이 지나면 host가 거절로 닫고, 이 카드는
- * 목록에서 사라진다. 키는 세션의 카드와 같은 y/n — 이 화면을 보고 있을 때만 받는다.
+ * The view's call waits until it is answered (the host keeps it alive with progress notifications).
+ * If 5 minutes pass unanswered, the host closes it as declined, and this card disappears from the
+ * list. The keys are the same y/n as a session card — received only while this view is being looked
+ * at.
  */
 export function CapabilityAsk({ question, visible }: { question: AppQuestion; visible: boolean }) {
   const answer = useStore((s) => s.answerAppQuestion)
@@ -25,7 +30,7 @@ export function CapabilityAsk({ question, visible }: { question: AppQuestion; vi
         typing: t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable,
         covered: st.inboxOpen || st.usageOpen || st.settingsOpen || st.paletteOpen || st.overlay !== null || st.view !== 'app',
       })
-      // "항상 허용"은 없다 — 답은 어차피 기억된다
+      // There is no "always allow" — the answer is remembered either way
       if (!action || action.decision === 'always') return
       void answer(question.id, action.decision)
       e.preventDefault()

@@ -22,13 +22,14 @@ import { PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo } from './reorder.js'
 import { foldSummary, type FoldSummaryState } from './fold.js'
 
 /**
- * 끌어서 순서 바꾸기.
+ * Drag-to-reorder.
  *
- * 끌고 있는 것의 **종류를 MIME으로 밝힌다.** 그래야 세션을 프로젝트 자리에
- * 떨어뜨렸을 때 아무 일도 안 일어난다 — 종류를 안 보면 엉뚱한 목록이 재배열된다.
+ * **The kind of thing being dragged is stated as a MIME type.** That is what makes dropping a
+ * session onto a project's spot do nothing — without checking the kind, the wrong list gets
+ * reordered.
  *
- * 놓일 자리는 선으로 보여준다. 선이 없으면 손을 떼기 전까지 어디로 갈지 알 수 없고,
- * 그러면 놓아 보고 되돌리는 일이 반복된다.
+ * The drop spot is shown as a line. Without the line there is no way to know where it will land
+ * until the hand lifts, so the person drops it, sees it is wrong, and undoes it, over and over.
  */
 function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) => void) {
   const [edge, setEdge] = useState<'top' | 'bottom' | null>(null)
@@ -58,10 +59,10 @@ function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) 
 }
 
 /**
- * 세션 한 줄. 끌 수 있고, 다른 줄을 받을 수 있다.
+ * One session row. It can be dragged, and can receive another row being dropped on it.
  *
- * 줄마다 놓기 상태를 따로 들고 있어야 **그 줄에만** 선이 그려진다 —
- * 하나로 묶어 두면 어느 줄 위인지 매번 다시 계산해야 한다.
+ * Each row has to hold its own drop state so the line is drawn **only on that row** — combining
+ * them into one would mean recomputing which row it is over on every event.
  */
 function SessionRow({
   id,
@@ -73,13 +74,15 @@ function SessionRow({
   id: string
   onReorder: (draggedId: string, before: boolean) => void
   /**
-   * 이름을 고치는 동안은 끌 수 없다. draggable인 조상 안의 input은 브라우저가
-   * 글자 선택 대신 **끌기**로 해석해서, 고치려고 문지르면 줄이 통째로 딸려온다.
+   * Not draggable while the name is being edited. An input inside a draggable ancestor gets a
+   * text-selection drag from the browser interpreted as **dragging the element** instead, so
+   * rubbing across it to fix the name drags the whole row along with it.
    */
   draggable: boolean
   /**
-   * 매니저 아래에 들여 그려지는 워크트리 세션인가 (#69).
-   * 들여쓰기 + 세로 안내선 — 계급은 사이드바에만 산다 (그리드는 평평하다, 설계 결정).
+   * Is this a worktree session, drawn indented under its manager (#69)? Indentation plus a
+   * vertical guide line — hierarchy lives only in the sidebar (the grid is flat, a design
+   * decision).
    */
   nested?: boolean
   children: ReactNode
@@ -102,19 +105,23 @@ function SessionRow({
 }
 
 /**
- * 놓일 자리 표시 — 얇은 선 하나면 충분하다.
+ * The drop-spot indicator — a single thin line is enough.
  *
- * **테두리로 그리면 안 된다.** border는 요소의 크기를 1px 늘려서, 표시가 줄을 옮길
- * 때마다 목록 전체가 그만큼 밀린다 — 끌고 다니면 딸깍딸깍 튀는 그 느낌이다
- * (도그푸딩 지적). 게다가 손이 노리는 지점이 계속 움직이니 놓기도 어려워진다.
+ * **Must not be drawn with a border.** A border grows an element by 1px, so every time the
+ * indicator moves to a different row the whole list shifts by that amount — while dragging, it
+ * reads as a constant little jump (a dogfooding finding). Worse, the spot the hand is aiming for
+ * keeps moving, which makes dropping harder too.
  *
- * **선은 줄의 안이 아니라 경계에 선다** (도그푸딩 2026-09-10: "같은 자리인데 선이 살짝
- * 올라갔다 내려간다"). 한 경계는 두 줄이 나눠 갖는다 — 위 줄에게는 '아래쪽', 아래 줄에게는
- * '위쪽'이다. inset 그림자는 그것을 **각자의 안쪽**에 그려서, 같은 자리를 가리키는 두 표시가
- * 서로 2~3px 어긋난 자리에 떴다. 손이 경계를 오갈 때마다 선이 그만큼 튀어 보인 이유다.
+ * **The line sits on the boundary between rows, not inside a row** (dogfooding, 2026-09-10:
+ * "it is the same spot, but the line nudges up and down slightly"). One boundary is shared by two
+ * rows — it is the "bottom" for the row above and the "top" for the row below. An inset shadow
+ * draws that on **each row's own inside edge**, so the two indicators pointing at the same
+ * boundary ended up 2-3px apart. That is why the line appeared to jump by that amount every time
+ * the hand crossed the boundary.
  *
- * 절대 배치한 가짜 요소(after)를 경계 위(-1px)에 놓으면 두 표현이 **같은 픽셀**에 겹친다.
- * 박스 크기를 안 건드리는 성질은 그대로다 — absolute는 레이아웃에 자리를 요구하지 않는다.
+ * Placing an absolutely positioned pseudo-element (`after`) right on the boundary (-1px) instead
+ * makes the two rows' indicators land on **the same pixel**. It keeps the property of not
+ * affecting box size — `absolute` does not claim space in the layout.
  */
 const DROP_LINE = 'after:pointer-events-none after:absolute after:inset-x-0 after:z-10 after:h-0.5 after:bg-ash after:content-[""]'
 
@@ -123,19 +130,20 @@ function dropLine(edge: 'top' | 'bottom' | null): string {
   return `${DROP_LINE} ${edge === 'top' ? 'after:-top-px' : 'after:-bottom-px'}`
 }
 
-/** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
+/** The observation lane — high density, using as little space as possible (docs/architecture.md design principle 1) */
 export function Sidebar() {
   const projectIds = useStore((s) => Object.keys(s.projects).join(','))
   const ids = projectIds ? projectIds.split(',') : []
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
-  // 최소 폭은 실픽셀 고정 — 글자를 키워도 목록을 좁힐 수 있는 한계는 그대로다
+  // The minimum width is fixed in real pixels — the limit on how narrow the list can get stays the
+  // same even when text is zoomed in
   const zoom = useTextZoom()
   const platform = usePlatform()
   const addProject = useStore((s) => s.addProject)
   const setToast = useStore((s) => s.setToast)
   const [adding, setAdding] = useState(false)
-  // 오케스트레이터가 이 버튼을 가리키는 중인가 (#63)
+  // Is the orchestrator currently pointing at this button (#63)?
   const hint = useStore((s) => s.addProjectHint)
 
   return (
@@ -165,24 +173,27 @@ export function Sidebar() {
       )}
       <UserApps />
       {/*
-        **누르는 곳과 나타나는 곳이 같아야 한다** (이슈 #4).
-        예전엔 상단 바 오른쪽 끝에 있었다 — 화면 반대편을 눌러 놓고, 결과는
-        왼쪽 사이드바에서 찾아야 했다. 새 프로젝트는 목록 **끝**에 붙으므로
-        버튼도 목록 끝에 둔다: 누른 자리 바로 아래에 결과가 자란다.
+        **Where the person presses and where the result appears must be the same place** (issue
+        #4). It used to live at the far right of the top bar — the person pressed one side of the
+        screen and had to go find the result in the sidebar on the other side. A new project is
+        appended to the **end** of the list, so the button lives at the end of the list too: the
+        result grows right below where it was pressed.
 
-        오케스트레이터·그리드처럼 밝히지 않는다. 저 둘은 자주 오가는 문이고
-        이건 가끔 한 번 하는 일이라, 목록을 읽는 동안은 물러나 있어야 한다.
+        It is not lit up the way the orchestrator and the grid button are. Those two are doors
+        used constantly, while this is something done rarely, so it has to stay unobtrusive while
+        the list is being read.
       */}
       <div className="px-2 py-2">
         <button
           /*
-           * 오케스트레이터가 여기를 가리키면 불이 켜진다 (#63).
+           * Lights up when the orchestrator is pointing here (#63).
            *
-           * 대화 안에 또 하나의 폴더 피커를 두는 대신 **이 버튼 하나를 밝힌다** —
-           * 문은 앱에 하나여야 하고, 두 번째 문을 그리면 사람은 "프로젝트는
-           * 오케스트레이터에게 시키는 것"으로 배운다. 유채색은 쓰지 않는다
-           * (팔레트 규칙): 평소 물러나 있던 이 버튼이 chalk로 올라오는 것만으로
-           * 화면에서 가장 밝은 것이 되고, 그게 곧 "여기"라는 뜻이다.
+           * Instead of putting a second folder picker inside the conversation, **this one button
+           * lights up** — the app should have one door for this, and drawing a second door
+           * teaches the person that "projects are something you ask the orchestrator to do." No
+           * chromatic color is used (the palette rule): this button, normally muted, becoming
+           * chalk is by itself enough to make it the brightest thing on screen, and that
+           * brightness itself means "here."
            */
           className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors disabled:opacity-40 ${
             hint
@@ -190,13 +201,14 @@ export function Sidebar() {
               : 'border-edge text-slate hover:border-graphite hover:text-chalk'
           }`}
           /*
-           * **폴더를 고르는 방법은 앱에 하나뿐이어야 한다.**
+           * **There should be exactly one way to pick a folder in this app.**
            *
-           * 여기는 원래 절대 경로를 손으로 치는 창을 열었다 — 웹 개발 시절의 폴백이
-           * Tauri로 넘어오며 그대로 남은 것이다. 첫 실행 화면은 진작 네이티브 피커를
-           * 쓰고 있었으니, 같은 일을 두 방법으로 시키면서 **더 자주 쓰는 쪽에 더 나쁜
-           * 방법**을 두고 있었다 (Finder 열고 경로 복사해서 돌아오기).
-           * 창이 통째로 사라지고 버튼이 곧 피커가 된다.
+           * This used to open a window where the person typed an absolute path by hand — a
+           * fallback left over from the web-development days that carried straight over into
+           * Tauri. The first-run screen was already using the native picker, so the same task had
+           * two ways to do it, and **the more frequently used one had the worse method** (open
+           * Finder, copy the path, come back and paste it). The dialog is gone entirely, and the
+           * button itself is now the picker.
            */
           onClick={async () => {
             setAdding(true)
@@ -223,27 +235,31 @@ export function Sidebar() {
 }
 
 /**
- * 오케스트레이터로 가는 문 — **말로 관제**.
+ * The door to the orchestrator — **directing by talking**.
  *
- * 그리드 바로 위에 둔다. 둘은 같은 것을 보는 두 방식이라 나란히 서야 한다:
- *   오케스트레이터  한 창에서 말로 시킨다
- *   그리드    여러 창을 눈으로 본다
+ * Placed directly above the grid. The two are two ways of looking at the same thing, so they
+ * should stand side by side:
+ *   orchestrator  direct sessions by talking, in one window
+ *   grid          watch several windows with your eyes
  *
- * 프로젝트 밑이 아니다. 이 세션은 프로젝트에 속하지 않는다 —
- * 여러 프로젝트를 가로지르는 것이 존재 이유이기 때문이다.
+ * Not nested under a project. This session does not belong to any project — crossing multiple
+ * projects is the whole reason it exists.
  *
- * **아직 실험 중이라고 버튼에 적는다** (이슈 #1). 생김새가 그리드와 똑같아서
- * 사람이 그 차이를 모른 채 눌렀다. 표식을 오케스트레이터 화면 **안**에 두면
- * 이미 누른 뒤라 늦는다 — 막으려는 피해가 "모른 채 누르는 것"이기 때문이다.
+ * **The button spells out that it is still experimental** (issue #1). It looks identical to the
+ * grid button, and people pressed it without knowing the difference. Putting the label **inside**
+ * the orchestrator screen would be too late — the person has already pressed it by then, and the
+ * harm being prevented is exactly "pressing it without knowing."
  *
- * 팔레트 규칙(styles/index.css)을 그대로 따른다: **긴급도는 밝기로, 종류는 형태로.**
- * 글자는 slate(배경 정보 자리)다. 밝히면 그리드 버튼보다 급해 보이는 거짓말이 된다 —
- * '실험 중'은 급한 것이 아니라 **알고 눌러야 하는 것**이다.
+ * Follows the palette rule (styles/index.css) as is: **urgency is brightness, kind is shape.**
+ * The text is slate (the color reserved for background information). Making it brighter would be
+ * a lie that it is more urgent than the grid button — "experimental" is not urgent, it is
+ * **something the person should press knowingly.**
  *
- * 테두리는 한때 점선이었다. 근거는 "사이드바를 좁히면 글자는 잘려 사라지고 형태만
- * 남는다"였는데, **재보니 사실이 아니었다.** 'Experimental' 배지는 `shrink-0`이라
- * 가장 좁은 폭(180px, 버튼 163px)에서도 63px 그대로 서 있고, 대신 잘리는 것은 이름
- * 쪽이다. 지키던 것이 없었으니 점선도 남을 이유가 없다.
+ * The border used to be dashed. The reasoning was "when the sidebar narrows, the text gets
+ * clipped away and only the shape is left," but **measuring it showed that was not true.** The
+ * 'Experimental' badge is `shrink-0`, so it stands at its full 63px even at the narrowest width
+ * (180px, with the button at 163px) — what gets clipped instead is the name. Since there was
+ * nothing the dashed border was protecting, there was no reason for it to stay either.
  */
 function OrchestratorButton() {
   const view = useStore((s) => s.view)
@@ -259,13 +275,14 @@ function OrchestratorButton() {
             ? 'border-slate/50 bg-graphite text-chalk'
             : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
         }`}
-        // 그리드와 같은 규칙: 토글이 아니라 선택이다. 나가려면 다른 것을 고른다
+        // The same rule as the grid: a selection, not a toggle. To leave, choose something else
         onClick={() => void open()}
         /*
-          오케스트레이터도 하나의 세션이다. 첫 대화 전에는 아직 세션 자체가 없으므로
-          끌어서 만들지는 않는다 — 화면을 여는 것만으로 프로세스를 만들지 않는 #63 규칙을
-          여기서도 지킨다. 한 번 대화가 생긴 뒤에는 다른 세션 줄처럼 Grid로 끌어다 놓을 수
-          있다. GridView가 ID를 받는 쪽은 원래 공통이라, 이곳이 빠져 있던 유일한 입구였다.
+          The orchestrator is a session too. Before the first conversation, no session exists yet,
+          so it is not made draggable — that keeps the #63 rule that opening a screen alone never
+          creates a process. Once a conversation exists, it can be dragged into the grid like any
+          other session row. The side that receives an ID into GridView was already shared code;
+          this was the only entry point still missing from it.
         */
         draggable={!!id}
         onDragStart={(e) => {
@@ -293,17 +310,19 @@ function OrchestratorButton() {
 }
 
 /**
- * 주인 없는 세션들 (사용자 요청 2026-09-09) — **사이드바가 받는 자리**.
+ * Homeless sessions (user request, 2026-09-09) — **the spot the sidebar catches them in**.
  *
- * 규칙 하나로 정리됐다: **세션에 뜻을 준 앱이 그 세션의 집이고, 집이 없으면 사이드바가
- * 받는다.** 그래서 관제 앱이 켜져 있는 동안 반장 세션은 여기 안 선다 — 업무 줄이 곧
- * 반장이라, 예전처럼 같은 것이 이름만 다른 두 줄로 서지 않는다.
+ * This settled on one rule: **the app that gave a session its meaning is that session's home, and
+ * when there is no home, the sidebar catches it.** That is why the foreman session no longer
+ * stands here while the control app is enabled — the work-item row now is the foreman, so the same
+ * thing no longer stands as two rows with different names the way it used to.
  *
- * 여기 서는 것은 갈 곳이 없어진 세션뿐이다: 앱이 꺼졌거나(토글), 명부에서 사라졌거나,
- * 아무 앱도 자기 것이라 하지 않은 옛 행. **앱을 꺼도 닿을 수 있어야 한다**는 규칙이
- * 이 목록으로 지켜진다 — 안 그러면 토글 하나가 세션을 화면에서 지워 버린다.
+ * The only sessions that land here are ones that lost somewhere to go: the app was disabled
+ * (toggled off), the app disappeared from the registry, or an old row that no app ever claimed as
+ * its own. The rule that **a session must still be reachable even after its app is disabled** is
+ * kept by this list existing — otherwise a single toggle would erase a session from the screen.
  *
- * 프로젝트가 있는 세션은 프로젝트 아래에 있으므로 여기 오지 않는다.
+ * Sessions that belong to a project live under that project, so they do not come here.
  */
 function HomelessSessions() {
   const sessions = useStore((s) => s.sessions)
@@ -312,9 +331,9 @@ function HomelessSessions() {
   const focusSession = useStore((s) => s.focusSession)
   const homeless = Object.values(sessions).filter((s) => {
     if (s.projectId || s.kind === 'orchestrator') return false
-    if (!s.appId) return true // 주인을 말한 앱이 없다
-    if (!APPS.some((a) => a.id === s.appId)) return true // 명부에서 사라진 앱
-    return apps[s.appId]?.enabled === false // 꺼진 앱
+    if (!s.appId) return true // no app claims ownership
+    if (!APPS.some((a) => a.id === s.appId)) return true // app has disappeared from the registry
+    return apps[s.appId]?.enabled === false // app is disabled
   })
   if (homeless.length === 0) return null
   return (
@@ -340,14 +359,16 @@ function HomelessSessions() {
 }
 
 /**
- * 그리드로 가는 문.
+ * The door to the grid.
  *
- * **프로젝트와 다르게 생겨야 한다.** 목록의 다른 줄과 같은 모양이면 "프로젝트 하나"로
- * 읽히는데, 이건 프로젝트가 아니라 **보는 방식**이다. 둥근 박스로 감싸 목록에서
- * 떼어 놓는다 — 같은 종류가 아니라는 걸 글자보다 모양이 먼저 말한다.
+ * **It has to look different from a project.** If it had the same shape as the other rows in the
+ * list, it would read as "one more project," but this is not a project, it is **a way of
+ * watching**. Wrapping it in a rounded box sets it apart from the list — the shape says it is a
+ * different kind of thing before the text does.
  *
- * 세션을 여기 떨어뜨리면 그리드로 들어가면서 그 세션이 올라간다. 화면을 먼저
- * 열고 다시 끌어야 한다면 두 번 일하는 셈이라, 끌어온 김에 한 번에 처리한다.
+ * Dropping a session here switches into the grid and adds that session to it. If the person had to
+ * open the screen first and then drag it in separately, that would be doing the work twice, so
+ * dropping it here handles both steps at once.
  *
  * **The Experimental badge is gone** (2026-08-27, by the user's call). It went up when the
  * grid shipped looking finished while the spec still listed it under non-goals (issue #25) —
@@ -373,10 +394,10 @@ function GridButton() {
             : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
         } ${over ? 'shadow-[inset_0_0_0_2px_var(--color-ash)]' : ''}`}
         /*
-          토글이 아니라 **선택**이다.
-          껐다 켜는 스위치로 두면 "이전 화면 위에 잠깐 덮은 것"처럼 읽힌다 —
-          실제로 그렇게 오해를 샀다. 사이드바의 다른 줄들과 같은 규칙으로 둔다:
-          누르면 이것을 보고, 나가려면 다른 것을 고른다.
+          A **selection**, not a toggle.
+          Making it an on/off switch reads as "a layer briefly covering the previous screen" — it
+          actually was misread that way. It follows the same rule as the other rows in the
+          sidebar: pressing it shows this, and leaving it means choosing something else.
         */
         onClick={() => setView('grid')}
         aria-pressed={active}
@@ -405,7 +426,7 @@ function GridButton() {
   )
 }
 
-/** 나뉜 화면 — 그리드가 하는 일을 그대로 그린 기호 */
+/** A split screen — a symbol drawn to depict exactly what the grid does */
 function GridIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
@@ -418,13 +439,15 @@ function GridIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * 세션 목록을 트리 순서로 편다 (#69): 매니저 바로 아래에 그 워크트리 자식들.
+ * Lays out the session list in tree order (#69): a manager immediately followed by its worktree
+ * children.
  *
- * 계급은 사이드바에만 산다 — 그리드·인박스·팔레트는 평평한 목록 그대로다 (설계 결정:
- * "The hierarchy lives in the sidebar; the grid stays a flat set of panels").
+ * Hierarchy lives only in the sidebar — the grid, the inbox and the palette all stay flat lists
+ * (design decision: "The hierarchy lives in the sidebar; the grid stays a flat set of panels").
  *
- * 부모가 이 목록에 없으면(아카이브됨 등) 자식은 최상위로 그린다 — 들여쓰기는 관계의
- * 표시일 뿐이라, 부모가 안 보이는데 들여 그리면 없는 것 아래 매달린 것처럼 보인다.
+ * If the parent is not in this list (archived, etc.), the child is drawn at the top level —
+ * indentation is only a sign of a relationship, and drawing it indented while the parent is
+ * invisible would make it look like it is hanging under nothing.
  */
 function orderAsTree(
   sessions: SessionSummary[],
@@ -453,15 +476,16 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const focusedSessionId = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
   const sessions = useSessionsOf(projectId)
-  // 창의 열림은 스토어가 든다 — 첫 실행 화면도 이 창을 열어야 하기 때문이다
+  // Whether the dialog is open is held by the store — the first-run screen also needs to open this dialog
   const newSessionOpen = useStore((s) => s.newSessionFor === projectId)
   const openNewSession = useStore((s) => s.openNewSession)
   const [confirming, setConfirming] = useState<string | null>(null)
-  /** 인수인계 확인 창이 떠 있는 세션 (없으면 null) */
+  /** The session whose handoff confirmation dialog is open (null when none is) */
   const [handingOff, setHandingOff] = useState<string | null>(null)
-  /** 열린 세션 메뉴 — 줄이 여럿이라 앵커는 ref가 아니라 누른 버튼 요소로 든다 */
+  /** The open session menu — since there are many rows, the anchor is the pressed button element, not a ref */
   const [sessionMenu, setSessionMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
-  /** 지금 이름을 고치는 중인 세션. 한 번에 하나만 — 두 줄이 동시에 입력창이면 어느 쪽이 활성인지 모른다 */
+  /** The session whose name is currently being edited. Only one at a time — with two rows as inputs
+   * simultaneously there is no way to tell which one is active */
   const [renaming, setRenaming] = useState<string | null>(null)
   const renameSession = useStore((s) => s.rename)
   const deleteSession = useStore((s) => s.deleteSession)
@@ -470,31 +494,32 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const reorderProjects = useStore((s) => s.reorderProjects)
   const reorderSessions = useStore((s) => s.reorderSessions)
   const selected = useIsProjectSelected(projectId)
-  // 매니저의 워크트리 제안이 이 프로젝트를 가리키는가 (#69) — + 버튼이 밝아진다
+  // Does the manager's worktree proposal point at this project (#69)? The + button lights up
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [managerDialog, setManagerDialog] = useState(false)
-  // 새 앱 창 (M4 C-1) — 새 세션 창처럼 프로젝트 줄의 메뉴에서 연다
+  // New app dialog (M4 C-1) — opened from the project row's menu, like the new session dialog
   const [newAppOpen, setNewAppOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  // 방금 등록해서 신뢰를 묻는 중인가 (M4, 결정 3) — 한 번만 묻고, 답하면 걷힌다
+  // Is trust being asked about right after registration (M4, decision 3)? Asked only once, then dismissed once answered
   const askingTrust = useStore((s) => s.trustAsk === projectId)
-  // 이 프로젝트의 앱 (M4 B-2) — 세션 아래에 같은 줄 모양으로 선다
+  // This project's apps (M4 B-2) — stand below the sessions, in the same row shape
   const projectApps = useProjectApps(projectId)
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)
-  /** 메뉴가 매달릴 자리 — 누른 버튼이다 (사이드바 모서리가 아니라) */
+  /** Where the menu hangs from — the pressed button (not a corner of the sidebar) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
   const [deleting, setDeleting] = useState(false)
-  // 접힘 (#205) — 스토어가 든다: 프로젝트마다 기억하고 다시 켜도 남는다
+  // Fold state (#205) — held by the store: remembered per project and persists across restarts
   const folded = useStore((s) => s.foldedProjects.includes(projectId))
   const toggleFold = useStore((s) => s.toggleProjectFold)
   const foldOthers = useStore((s) => s.foldOtherProjects)
   const manyProjects = useStore((s) => Object.keys(s.projects).length > 1)
-  // 펼쳐져 있으면 줄마다 제 표식이 상태를 말한다 — 같은 것을 이름 줄에서 또 말하지 않는다
+  // When expanded, each row's own mark already states its state — do not repeat it on the name line
   const summary = folded ? foldSummary(sessions) : []
 
   /*
-   * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면
-   * 훅 순서가 달라져 React가 던진다 — 프로젝트를 지우는 순간에 터지는 종류다.
+   * Hooks are called **before any early return**. If even one render happens without a project,
+   * the hook order shifts and React throws — the kind of crash that hits right when a project is
+   * being deleted.
    */
   const drop = useDropLine(PROJECT_MIME, (draggedId, before) => {
     const ids = Object.keys(useStore.getState().projects)
@@ -510,7 +535,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       data-folded={folded || undefined}
       {...drop.handlers}
     >
-      {/* 이름 줄을 잡아서 옮긴다 — 섹션 전체를 draggable로 두면 세션 끌기와 겹친다 */}
+      {/* Grabbed and moved by its name line — making the whole section draggable would conflict with dragging sessions */}
       <header
         className="group flex items-baseline gap-2 pl-2.5 pr-3"
         draggable
@@ -520,14 +545,18 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         }}
       >
         {/*
-          접기 화살표 (#205). **접는 문은 이것 하나다** — 이름은 프로젝트 화면을 여는 자리라(#206)
-          누르기가 접기를 겸하면 둘 중 하나가 늘 엇나간다. 호버로 펴기도 쓰지 않는다: 마우스가 지나는
-          동안 목록이 펴졌다 접히면 누르려던 줄이 밀려나고, 기다리는 세션도 가려진다 (요청 원문).
+          The fold arrow (#205). **This is the one and only door for folding** — the name is where
+          the project screen opens (#206), so if pressing it also folded, one of the two would
+          always misfire. Expand-on-hover is not used either: if the list expands and collapses as
+          the mouse passes over, the row the person meant to press gets shoved out of place, and a
+          waiting session gets hidden too (from the original request).
 
-          ⋯와 달리 **늘 보인다.** 접혀 있다는 것은 행동이 아니라 상태라, 호버해야 보이면 줄이 왜
-          없는지 물을 곳이 없다. 화살표는 세션 줄의 도구 표식과 같은 세로줄에 서고(pl-2.5 + 버튼),
-          그래서 이름도 세션 이름과 같은 자리에서 시작한다 — 트리가 트리로 읽힌다. 이름 줄은 글자
-          기준선으로 맞추므로, 글자 없는 버튼은 감싼 칸으로 가운데에 따로 세운다.
+          Unlike that, it is **always visible.** Being folded is a state, not an action, and if it
+          only shows on hover there is nowhere to ask why a row is missing. The arrow stands in the
+          same vertical column as a session row's tool mark (pl-2.5 + button), so the name also
+          starts at the same spot as a session name — the tree reads as a tree. Since the name line
+          aligns on the text baseline, the button with no text is centered separately inside a
+          wrapping box.
         */}
         <span className="-my-1 flex shrink-0 self-center">
           <IconButton
@@ -539,10 +568,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           </IconButton>
         </span>
         {/*
-          프로젝트 이름을 누르면 깃·파일·터미널을 볼 수 있다 (세션을 고르지 않아도).
-          브랜치·변경 수·동시 세션 같은 배경 정보는 **이름 아래에 줄을 만들지 않는다** —
-          프로젝트가 여럿이면 그 줄들이 쌓여 정작 봐야 할 세션 목록을 밀어낸다.
-          대신 물어볼 때(호버·포커스) 툴팁으로 답한다.
+          Pressing the project name shows git, files and the terminal (without selecting a
+          session). Background information like branch, change count or concurrent sessions
+          **does not get its own row under the name** — with several projects, those rows would
+          stack up and push out the session list that actually needs to be seen. Instead, it is
+          answered by a tooltip when asked for (hover, focus).
         */}
         <Tooltip
           content={<ProjectDetail project={project} />}
@@ -562,23 +592,26 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         </Tooltip>
 
         {/*
-          자리를 새로 차지하지 않는 표식만 이름 줄에 남긴다.
-          특히 동시 세션은 데이터 유실 위험을 알리는 신호라, 툴팁 뒤로 완전히
-          숨기면 "막지 말고 보이게 하라"를 어기게 된다 (FR-2).
+          Only marks that claim no new space stay on the name line.
+          Concurrent sessions in particular is a signal that warns of a data-loss risk, and
+          hiding it entirely behind a tooltip would violate "show it, do not block it" (FR-2).
         */}
         <ProjectMarks project={project} />
         {summary.length > 0 && <FoldSummary name={project.name} counts={summary} />}
         {/*
-          이 줄의 모든 동작이 한 버튼 뒤에 있다 (도그푸딩 요청).
+          Every action on this row sits behind one button (a dogfooding request).
 
-          예전에는 `+`(새 세션)가 **항상** 보였다. 그때의 이유는 "새 세션은 가장 자주 하는
-          일이라 있는 줄도 몰랐다가 나오면 안 된다"였고, 그 이유는 여전히 옳다 — 다만 그
-          사이 이 줄에 할 일이 셋이 됐다(새 세션·워크트리 매니저·프로젝트 삭제). 셋을 다
-          아이콘으로 늘어놓으면 프로젝트 이름보다 버튼이 길어진다. 그래서 하나로 접고,
-          대신 **평소에는 감춘다**: 접힌 버튼이 늘 떠 있으면 목록을 읽는 눈만 방해한다.
+          `+` (new session) used to be **always visible.** The reason at the time was "new session
+          is the most frequent action, so it must not stay invisible until it suddenly appears,"
+          and that reason is still right — except that in the meantime this row picked up three
+          actions (new session, worktree manager, delete project). Lining up all three as icons
+          would make the button row longer than the project name. So they are folded into one, and
+          **it stays hidden by default** instead: a folded button that is always on screen only
+          gets in the way of eyes reading the list.
 
-          감췄지만 잃지 않는다 — 키보드 포커스(focus-within)와 워크트리 제안(#69)은
-          호버 없이도 버튼을 꺼낸다. 특히 제안: 숨은 버튼을 반짝이게 해봐야 아무도 못 본다.
+          Hidden, but not made unreachable — keyboard focus (focus-within) and a worktree
+          proposal (#69) surface the button without hovering. The proposal case especially:
+          making a hidden button breathe is useless if nobody can see it.
         */}
         <span
           ref={menuAnchor}
@@ -591,9 +624,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           data-worktree-proposal={proposalHere || undefined}
         >
           {/*
-            IconButton이 아니라 맨 버튼이다 — 툴팁을 떼기 위해서 (도그푸딩 2026-09-02).
-            누르면 이름 붙은 메뉴가 바로 그 자리에 뜨는 버튼이라, 호버 툴팁은 설명이
-            아니라 열린 메뉴 옆에 겹쳐 남는 소음이었다. 스크린리더용 이름은 남긴다.
+            A plain button, not an IconButton — to drop the tooltip (dogfooding, 2026-09-02).
+            Since pressing it opens a named menu right there, a hover tooltip was not an
+            explanation but noise left overlapping the open menu. The screen-reader name stays.
           */}
           <button
             type="button"
@@ -623,13 +656,16 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       {askingTrust && <TrustAsk project={project} />}
 
       {/*
-        접히면 세션 줄과 앱 줄이 함께 빠진다 (#205). 신뢰 질문(위)은 남는다 — 줄이 아니라 답을 기다리는
-        물음이다. 창들(아래)도 그대로다: 접기는 보는 방식이지 하던 일을 닫는 것이 아니다.
+        Folding removes the session rows and the app rows together (#205). The trust question
+        (above) stays — it is not a row, it is a question waiting for an answer. Dialogs (below)
+        stay too: folding is a way of viewing, not closing whatever work was in progress.
 
-        **접힌 프로젝트에는 세션을 떨어뜨릴 수 없다.** 세션은 제 프로젝트 안에서만 자리를 바꾸고
-        (onReorder가 그 프로젝트의 목록만 다룬다), 놓을 자리는 세션 줄이다 — 접힌 프로젝트에는 줄이
-        없으니 선도 서지 않고 놓아도 아무 일이 없다. 끌고 지나갈 때 펴 주지도 않는다: 펴서 보여 줄
-        자리가 전부 받지 않을 자리다. 제 프로젝트가 접혀 있으면 끌 줄 자체가 없다.
+        **A session cannot be dropped onto a folded project.** A session only changes position
+        within its own project (onReorder only touches that project's own list), and the drop spot
+        is a session row — a folded project has no rows, so no line appears and dropping does
+        nothing. It also does not expand while being dragged over: the whole point of expanding it
+        to show it would be a spot that never accepts the drop anyway. If a session's own project
+        is folded, there is no row to drag from it in the first place.
       */}
       {!folded && (
         <ul className="mt-1.5">
@@ -642,9 +678,10 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                 id={s.id}
                 nested={nested}
                 /*
-                 * 자식 줄은 끌 수 없다 — 자리가 곧 소속이다 (#69). 부모 아래 들여
-                 * 그려지는 줄을 손으로 옮기게 두면, 옮긴 자리가 소속처럼 읽히는데
-                 * 실제 소속(parentSessionId)은 그대로라 화면이 거짓말을 하게 된다.
+                 * A child row cannot be dragged — position is membership (#69). Letting a row
+                 * drawn indented under a parent be moved by hand would make the new position read
+                 * as membership, while the actual membership (parentSessionId) stays unchanged,
+                 * and the screen would end up lying.
                  */
                 draggable={renaming !== s.id && !nested}
                 onReorder={(draggedId, before) =>
@@ -665,7 +702,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     initial={s.name}
                     onDone={(name) => {
                       setRenaming(null)
-                      // 같은 이름이면 왕복할 이유가 없다 (실패 토스트가 뜰 이유도 없다)
+                      // No reason for a round trip when the name is unchanged (and no reason for a failure toast either)
                       if (name && name !== s.name) void renameSession(s.id, name)
                     }}
                   />
@@ -674,22 +711,26 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     <button
                       onClick={() => focusSession(s.id)}
                       /*
-                        이름을 두 번 누르면 그 자리에서 고친다 — 파일 탐색기·탭 이름의 관행이라
-                        버튼을 못 찾은 사람도 손이 먼저 안다. 연필 버튼은 그 관행을 모르는
-                        사람을 위한 두 번째 입구다: 어느 한쪽만 두면 절반은 이름을 못 고친다.
+                        Double-clicking the name edits it in place — the same convention as file
+                        explorers and tab names, so the hand knows it before the person even finds
+                        the button. The pencil button is a second entry point for a person who does
+                        not know that convention: keeping only one of the two would leave half the
+                        people unable to rename anything.
                       */
                       onDoubleClick={() => setRenaming(s.id)}
                       data-testid={`session-row-${s.id}`}
                       /*
-                        안읽음(FR-16)은 이름 밝기가 말한다 (아래 truncate의 text-chalk).
-                        화면에 없는 사실을 테스트가 볼 수 있게 속성으로도 남긴다 —
-                        클래스 이름을 단언하면 색을 고칠 때마다 테스트가 깨진다.
+                        Unread (FR-16) is stated by the name's brightness (the text-chalk on the
+                        truncate span below). It is also kept as an attribute so a test can see a
+                        fact not otherwise present on screen — asserting a class name would break
+                        the test every time the color gets adjusted.
                       */
                       data-unread={(unread && !focused) || undefined}
                       /*
-                        오른쪽 여백은 호버에 나타나는 버튼 **두 개**를 비켜야 한다.
-                        pr-8은 삭제 하나만 있던 시절의 값이라, 연필이 늘면서 긴 이름이
-                        버튼 밑으로 들어간다 — 가려진 글자는 잘린 글자보다 나쁘다.
+                        The right padding has to clear **two** buttons that appear on hover.
+                        pr-8 is a value from when only delete existed; once the pencil was added, a
+                        long name would run in underneath the buttons — text hidden under a button
+                        is worse than text truncated.
                       */
                       className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-[13px] transition-colors ${
                         focused
@@ -698,15 +739,17 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       }`}
                     >
                       {/*
-                        표식 하나가 두 가지를 말한다: 글자는 도구, 테두리는 상태.
-                        점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
+                        One mark states two things: the letter is the tool, the border is the
+                        state. A separate dot right next to the mark would read as overlapping the
+                        two, and blur both instead.
                       */}
                       <ToolMark tool={s.tool} state={s.state} />
                       <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
                       {/*
-                        병합됨 (#69) — 이 브랜치의 작업이 줄기에 들어갔다. 이력이지 진행 중인
-                        일이 아니라는 표시고, 이 상태의 자식은 매니저 삭제를 붙들지 않는다.
-                        트리 정리는 사람이 삭제 대화에서 한다 (거긴 이미 무엇이 남는지 말한다).
+                        Merged (#69) — this branch's work has landed on the trunk. A sign that it
+                        is history, not ongoing work, and a child in this state does not block the
+                        manager from being deleted. Cleaning up the tree is left to the person in
+                        the delete dialog (which already states what is left).
                       */}
                       {s.merged && (
                         <span
@@ -718,9 +761,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         </span>
                       )}
                       {/*
-                        PR 칩 (#76 stage 3) — gh로 측정한 이 브랜치의 풀 리퀘스트.
-                        merged가 서면 안 그린다: PR 병합은 merged 배지를 함께 켜고,
-                        13px 줄에서 같은 결말을 두 번 말하면 둘 다 흐려진다.
+                        The PR chip (#76 stage 3) — this branch's pull request, measured through
+                        gh. Not drawn once merged is showing: a merged PR also lights up the merged
+                        badge, and stating the same outcome twice on a 13px row blurs both.
                       */}
                       {s.pr && !s.merged && (
                         <span
@@ -733,24 +776,29 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         </span>
                       )}
                       {/*
-                        안읽음 점은 여기 있다가 **지워졌다** (도그푸딩 2026-09-02).
+                        An unread dot used to be here and **was removed** (dogfooding, 2026-09-02).
 
-                        같은 사실을 이 줄에서 세 번째로 말하고 있었다: 도구 표식의 테두리가
-                        상태를(턴이 끝나면 ash 링), 이름 밝기가 안읽음을(위의 text-chalk)
-                        이미 말한다. 딴 데 있는 동안 턴이 끝나면 셋이 한꺼번에 켜지니
-                        점은 정보를 더하지 않고 "저건 또 뭐지"라는 질문만 더했다 —
-                        실제로 그 질문을 받았다. 판정(lastReadSeq·markRead)은 그대로다.
+                        It was stating the same fact for a third time on this row: the tool mark's
+                        border already states the state (an ash ring when a turn ends), and the
+                        name's brightness already states unread (the text-chalk above). Since all
+                        three lit up together when a turn ended while the person was away, the dot
+                        added no information, only the question "what is that now" — and that
+                        question was actually asked. The determination logic (lastReadSeq, markRead)
+                        is unchanged.
                       */}
                     </button>
                     {/*
-                      아이콘 넷(연필·인수인계·워크트리·삭제) 대신 메뉴 하나 (도그푸딩 요청 —
-                      프로젝트 줄과 같은 문법). 아이콘이 넷이 되자 이름 없는 그림 맞추기가
-                      됐고, 그중 둘(인수인계·삭제)은 잘못 누르면 안 되는 것이었다.
+                      One menu instead of four icons (pencil, handoff, worktree, delete) — a
+                      dogfooding request, the same grammar as the project row. With four icons it
+                      turned into an unlabeled game of matching pictures, and two of them (handoff,
+                      delete) were the kind that must not be pressed by mistake.
                     */}
                     {/*
-                      오른쪽 여백은 프로젝트 헤더의 px-3과 같아야 한다 — 둘은 사이드바에서
-                      같은 세로줄에 서는 버튼이라, 4px과 12px로 달라 두면 눈에 바로 걸린다
-                      (도그푸딩 지적). 한쪽만 고치면 다시 어긋나므로 값을 맞춰 둔다.
+                      The right padding has to match the project header's px-3 — the two are
+                      buttons standing in the same vertical column in the sidebar, and leaving them
+                      at 4px and 12px stood out immediately to the eye (a dogfooding finding).
+                      Fixing only one side would put them out of alignment again, so the value is
+                      kept matched.
                     */}
                     <span
                       className={`absolute right-3 top-1/2 flex -translate-y-1/2 items-center transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 ${
@@ -758,12 +806,12 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       }`}
                       data-testid={`session-actions-${s.id}`}
                     >
-                      {/* 프로젝트 ⋯와 같은 맨 버튼 — 이름 붙은 메뉴가 바로 뜨므로 툴팁은 소음이다 */}
+                      {/* A plain button like the project's ⋯ — a named menu opens right away, so a tooltip is noise */}
                       <button
                         type="button"
                         aria-label={`Actions for ${s.name}`}
                         onClick={(e) => {
-                          // updater 안에서 읽으면 늦다 — React가 핸들러를 끝내며 currentTarget을 비운다
+                          // Reading it inside the updater is too late — React clears currentTarget once the handler returns
                           const el = e.currentTarget
                           setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
                         }}
@@ -805,7 +853,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         <ConfirmDelete
           sessionId={confirming}
           name={sessions.find((s) => s.id === confirming)?.name ?? 'Session'}
-          // 프로젝트 기본값이 아니라 이 세션의 도구다 — 어디에 기록이 남는지 알려주는 문장이라 틀리면 안 된다
+          // This session's own tool, not the project default — this sentence states where the transcript ends up, so it must not be wrong
           tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool ?? ''}
           onCancel={() => setConfirming(null)}
           onConfirm={(deleteWorktree, deleteExternal) => {
@@ -819,20 +867,20 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         <ConfirmHandoff
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
           tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool ?? ''}
-          // 죽은 세션 판정 (#78): 에러거나 한도에 걸린 세션에게 노트를 부탁하는 것은
-          // 응답 불능인 상대에게 유언장을 부탁하는 것이다 — 기록 모드를 미리 선택한다
+          // Determining a dead session (#78): asking a session that has errored or hit a rate limit
+          // to write a handoff note is asking someone who cannot respond for a will — the transcript mode is pre-selected
           dead={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? s.state === 'error' || !!s.limit : false
           })()}
-          // 카드가 떠 있으면 에이전트에게 부탁하는 길은 막힌다 — 부탁이 질문의 답으로 갔다 (#174, 스토어와 같은 판정)
+          // Asking the agent is blocked while a card is up — the request would go through as the answer to a question (#174, same determination as the store)
           blocked={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? handoffBlockedBy(s) : null
           })()}
           onCancel={() => setHandingOff(null)}
           onConfirm={(tool, deleteOld, mode) => {
-            // 창은 닫고 진행은 세션 안에서 보인다 — 인수인계 요청과 글이 그대로 대화에 남는다
+            // The dialog closes and progress is shown inside the session — the handoff request and its text stay in the conversation as is
             void handoffSession(handingOff, { tool, deleteOld, mode })
             setHandingOff(null)
           }}
@@ -843,13 +891,16 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 }
 
 /**
- * 앱 줄 (M4 B-2) — 세션 줄과 같은 모양, 같은 자리. 누르면 고정 화면으로 연다.
+ * An app row (M4 B-2) — same shape, same spot as a session row. Pressing it opens the pinned app
+ * screen.
  *
- * 세션과 앱이 한 목록에 서도 섞여 읽히지 않게, 표식은 **형태**로 가른다(세션은 도구 글자 칩, 앱은 창
- * 그림). 상태는 오른쪽 끝의 한 단어뿐이고, 평소(쉬는 중·떠 있음)에는 아무것도 적지 않는다. 앱은 처음
- * 필요할 때 뜨고 쉬면 내려가므로 "stopped"는 고장이 아니라 보통이다. 늘 적혀 있으면 정작 봐야 할
- * 한 단어(failed)가 묻힌다. 열 수 없는 앱(신뢰하지 않음·깨짐·멈춤)은 표식을 흐리게 하고, 이유는
- * 줄에 머물면 보인다.
+ * So sessions and apps standing in one list do not read as mixed together, the mark is split by
+ * **shape** (a session gets a tool-letter chip, an app gets a window icon). Status is a single word
+ * at the far right, and nothing at all is written for the normal cases (idle, running). Since an
+ * app comes up on first need and goes down when idle, "stopped" is ordinary, not a breakage. If it
+ * were always written, the one word that actually matters (failed) would get buried. An app that
+ * cannot be opened (untrusted, broken, stalled) has its mark dimmed, and the reason is visible by
+ * staying on the row.
  */
 const APP_HINT: Partial<Record<ExternalAppStatus, string>> = {
   starting: 'starting',
@@ -857,7 +908,7 @@ const APP_HINT: Partial<Record<ExternalAppStatus, string>> = {
   failed: 'failed',
   untrusted: 'not trusted',
   invalid: 'invalid',
-  // 가져온 앱이 사람의 확인을 기다린다 (M4 E-3) — 열면 확인 창이 선다
+  // An imported app is waiting for the person's confirmation (M4 E-3) — opening it brings up the confirmation dialog
   unconfirmed: 'not enabled',
 }
 
@@ -874,13 +925,14 @@ function AppRows({ apps, testId }: { apps: ExternalCatalogApp[]; testId: string 
 
 function AppRow({ app }: { app: ExternalCatalogApp }) {
   const openApp = useStore((s) => s.openApp)
-  // 세션 줄과 같은 규칙: 지금 그 화면을 **보고 있을 때만** 밝다(selectors의 useSelectedSessionId)
+  // Same rule as a session row: lit only while **currently looking at** that screen (useSelectedSessionId in selectors)
   const active = useStore(
     (s) => s.view === 'app' && s.focusedApp?.appId === app.appId && (s.focusedApp?.projectId ?? null) === app.projectId,
   )
   /*
-   * 이 앱의 화면에서 시작된 사슬이 사람의 답을 기다린다 (M4 D-4) — 고정 화면을 보고 있지 않아도 여기서 보인다. 누르면 그
-   * 화면이 열리고 물음이 거기 서 있다. 밝은 말로 적는다: 막힌 것의 몫이다(팔레트 규칙).
+   * A chain started from this app's screen is waiting on the person's answer (M4 D-4) — visible
+   * here even without the pinned app screen open. Pressing it opens that screen, with the question
+   * standing there. Written in a bright word: that belongs to whatever is blocked (the palette rule).
    */
   const asking = useStore((s) => s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId))
   const hint = asking ? 'asks you' : APP_HINT[app.info.status]
@@ -897,7 +949,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
           active ? 'border-l-ash bg-graphite/40 text-chalk' : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
         }`}
       >
-        {/* 도구 칩(17px)과 같은 폭 — 세션 이름과 앱 이름이 같은 세로줄에서 시작한다 */}
+        {/* Same width as the tool chip (17px) — a session name and an app name start at the same vertical column */}
         <span className={`flex size-[17px] shrink-0 items-center justify-center ${app.status.runnable ? '' : 'opacity-50'}`}>
           <AppIcon />
         </span>
@@ -917,17 +969,20 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * 사용자 폴더의 앱 (M4 B-2, 결정 1) — 여러 프로젝트에서 쓰는 앱이라 어느 프로젝트 아래에도 서지 않고
- * 자기 무리를 갖는다. 프로젝트 블록과 같은 모양의 머리글이다.
+ * Apps in the user's folder (M4 B-2, decision 1) — used across several projects, so they do not
+ * stand under any one project and get their own group instead. A header with the same shape as a
+ * project block.
  *
- * **앱이 없어도 무리는 선다 (M4 C-1).** 예전에는 앱이 없으면 무리도 없었는데, 그러면 첫 사용자 폴더 앱을 만들
- * 자리가 없다 — "New app"이 이 머리글에 있기 때문이다. 비어 있을 때는 머리글 한 줄뿐이고 글자는 물러나 있다
- * (배경 정보의 밝기). 버튼은 늘 보인다: 빈 무리에서 누를 것이 그것 하나라, 호버에 숨기면 무리가 왜 있는지 모른다.
+ * **The group exists even with no apps in it (M4 C-1).** It used to be that no apps meant no group,
+ * but then there was no place to create the first user-folder app — because "New app" lives on
+ * this header. When empty, it is a single header line with the text pulled back (background-
+ * information brightness). The button stays visible: in an empty group it is the one thing there
+ * is to press, and hiding it on hover would leave no clue why the group exists at all.
  */
 function UserApps() {
   const apps = useUserApps()
   const [newAppOpen, setNewAppOpen] = useState(false)
-  // 가져오기 (M4 E-3) — 창은 앱 전체에 하나다(딥링크도 같은 창을 연다), 그래서 스토어가 연다
+  // Import (M4 E-3) — there is one dialog for the whole app (a deep link opens the same dialog too), so the store opens it
   const openImport = useStore((s) => s.openImport)
   return (
     <section className="border-b border-edge/70 py-2.5" data-testid="user-apps">
@@ -955,14 +1010,16 @@ function UserApps() {
 }
 
 /**
- * 등록할 때 한 번 묻는 신뢰 (M4, 결정 3).
+ * Trust asked once at registration (M4, decision 3).
  *
- * 모달이 아니라 그 프로젝트 줄 아래에 선다. 등록 직후에는 새 세션 창이 곧바로 뜨는 길(오케스트레이터의
- * 폴더 고르기)이 있어서, 창 위에 창을 얹으면 둘 다 반쯤만 읽힌다. 여기 서 있으면 세션 창을 닫고 와도
- * 질문이 그대로 있다. 답하지 않은 프로젝트는 신뢰하지 않은 채로 남는다 — 모르는 사이에 켜지는
- * 쪽이 아니라 모르는 사이에 꺼져 있는 쪽이 안전하다.
+ * Not a modal — it stands under that project's own row. Right after registration there is a path
+ * (the orchestrator's folder picker) that immediately opens a new-session dialog, and stacking a
+ * dialog on top of a dialog would leave both only half-read. Standing here, the question is still
+ * there even after the session dialog is closed and the person comes back. A project left
+ * unanswered stays untrusted — it is safer to default to silently off than to silently on.
  *
- * 말은 하는 일 그대로 적는다: 신뢰하면 이 프로젝트의 앱이 돌고 프로젝트 설정이 적용된다.
+ * The wording states exactly what happens: trusting it lets this project's apps run and its
+ * settings apply.
  */
 function TrustAsk({ project }: { project: ProjectInfo }) {
   const answer = useStore((s) => s.answerTrustAsk)
@@ -1001,15 +1058,17 @@ function TrustAsk({ project }: { project: ProjectInfo }) {
 }
 
 /**
- * 인수인계 확인 창 (도그푸딩 요청).
+ * The handoff confirmation dialog (a dogfooding request).
  *
- * 순서를 문장으로 다 말한다 — 이 버튼 하나가 "글 부탁 → 새 세션 → (기본값) 진짜 삭제"
- * 세 단계를 묶기 때문이다. 파괴가 끝에 있으므로 경고는 삭제 팔레트로 선다 (프로젝트
- * 삭제와 같은 문법). 이름 타이핑은 요구하지 않는다: 마지막 단계가 실패해도 세션 둘이
- * 남을 뿐 잃는 것이 없고, 성공했다면 잃는 것은 사람이 방금 읽고 승인한 그것뿐이다.
+ * States the whole sequence in sentences — because this one button bundles three steps together:
+ * "ask for a note → new session → (by default) actually delete." Since destruction is at the end,
+ * the warning stands in the delete palette (the same grammar as project deletion). Typing the name
+ * is not required: if the last step fails, nothing is lost, there are just two sessions left over,
+ * and if it succeeds, the only thing lost is exactly what the person just read and approved.
  *
- * 받는 에이전트를 고를 수 있다 (도그푸딩 요청) — 글은 그냥 텍스트라 도구를 가리지
- * 않는다. 기본은 지금 도구. 삭제도 체크박스다: 끄면 갈아타기가 아니라 분기가 된다.
+ * The receiving agent can be chosen (a dogfooding request) — the note is plain text, so it does
+ * not lock in a tool. It defaults to the current tool. Deletion is also a checkbox: turning it off
+ * turns this from switching tools into branching.
  */
 function ConfirmHandoff({
   name,
@@ -1021,18 +1080,20 @@ function ConfirmHandoff({
 }: {
   name: string
   tool: ToolName
-  /** 에러·한도로 응답 불능인 세션 (#78) — 기본값 셋(모드·대상·삭제)이 통째로 뒤집힌다 */
+  /** A session unable to respond due to an error or a rate limit (#78) — all three defaults (mode, target, deletion) flip together */
   dead: boolean
-  /** 떠 있는 카드 (#174) — 있으면 에이전트에게 부탁할 수 없다. 기록 모드는 묻지 않으므로 그대로 된다 */
+  /** A card currently up (#174) — while one is up, the agent cannot be asked. The record mode does not ask, so it goes through as is */
   blocked: 'question' | 'approval' | null
   onConfirm: (tool: ToolName, deleteOld: boolean, mode: 'agent' | 'record') => void
   onCancel: () => void
 }) {
   /*
-   * 죽은 세션의 기본값 반전 (#78): 모드는 기록으로(묻지 않는다), 대상은 **반대 도구**로
-   * (서비스가 죽어서 넘기는데 같은 도구가 기본이면 한 클릭이 함정이다), 삭제는 해제로
-   * (후임자가 확인될 때까지 원본 보존). 초기값만 뒤집는다 — 이후 라디오를 바꿔도
-   * 다른 선택을 몰래 따라 바꾸지 않는다 (조용한-행동 금지).
+   * Defaults are inverted for a dead session (#78): mode defaults to record (no asking), the
+   * target defaults to **the other tool** (if the service is down and that is why the handoff is
+   * happening, defaulting to the same tool is a one-click trap), and deletion defaults to off
+   * (keep the original until the successor is confirmed working). Only the initial values are
+   * flipped — changing one radio afterward never silently changes another selection (no silent
+   * actions).
    */
   const tools = useTools()
   const otherTool = tools.find((t) => t.name !== tool)?.name ?? tool
@@ -1046,7 +1107,7 @@ function ConfirmHandoff({
         <p className="text-[13px] text-chalk">Hand off to a fresh session?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
 
-        {/* 노트의 출처 — 살아 있으면 에이전트가 쓰고, 죽었으면 앱이 기록으로 만든다 (#78) */}
+        {/* Where the note comes from — a live session writes it itself, a dead one has the app build it from the transcript (#78) */}
         <p className="mt-3 text-[10px] uppercase text-slate">Handoff note</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Handoff note source">
           {(
@@ -1085,7 +1146,7 @@ function ConfirmHandoff({
           </p>
         )}
 
-        {/* 받는 에이전트 — 다른 도구를 고르면 모델·강도 같은 도구별 설정은 물려주지 않는다 */}
+        {/* The receiving agent — choosing a different tool does not carry over tool-specific settings like model or reasoning effort */}
         <p className="mt-3 text-[10px] uppercase text-slate">Hand off to</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Hand off to">
           {tools.map((t) => (
@@ -1160,15 +1221,16 @@ function ConfirmHandoff({
 }
 
 /**
- * 세션 이름을 그 자리에서 고친다 (이슈 #5).
+ * Edits a session name in place (issue #5).
  *
- * **모달을 띄우지 않는다.** 이름은 다른 이름들 사이에서 골라야 뜻이 생긴다 —
- * 화면을 덮으면 무엇과 헷갈렸는지 안 보이는 채로 이름을 짓게 된다.
- * 자동 이름이 첫 프롬프트를 잘라 쓰기 때문에 `This session is being continued…`가
- * 넷씩 나란히 서던 문제라, 고치는 동안 나머지 넷이 보여야 한다.
+ * **No modal is shown.** A name only gets its meaning by being chosen among the other names — if
+ * a dialog covers the screen, the person ends up naming it without being able to see what it might
+ * be confused with. This was the problem where auto-generated names, since they truncate the first
+ * prompt, produced four rows all reading `This session is being continued…` in a row, so the other
+ * four rows have to stay visible while one is being edited.
  *
- * 빈 이름은 **취소로 친다.** 지우고 나가는 실수로 이름 없는 줄을 만들면
- * 그 줄은 목록에서 아무것도 가리키지 못한다.
+ * An empty name is **treated as a cancel.** If a slip of deleting the text and clicking away
+ * produced a nameless row, that row could no longer point at anything in the list.
  */
 function SessionNameInput({
   id,
@@ -1181,9 +1243,9 @@ function SessionNameInput({
 }) {
   const [text, setText] = useState(initial)
   /*
-   * Enter로 확정하면 입력창이 사라지는데, 사라지는 순간 blur도 한 번 더 온다.
-   * 막지 않으면 같은 이름으로 두 번 보낸다 — 한 번은 성공하고 한 번은 실패해서
-   * 아무 이유 없는 오류 토스트가 뜬다.
+   * Confirming with Enter makes the input disappear, and disappearing also fires one more blur
+   * event. Without a guard, the same name gets sent twice — one succeeds and one fails, and an
+   * error toast pops up for no apparent reason.
    */
   const done = useRef(false)
   const finish = (name: string) => {
@@ -1198,15 +1260,15 @@ function SessionNameInput({
       className="w-full border-l-2 border-l-ash bg-graphite/40 py-1.5 pl-2.5 pr-3 text-[13px] text-chalk outline-none"
       value={text}
       onChange={(e) => setText(e.target.value)}
-      // 자동 이름은 통째로 갈아치우는 게 보통이라 전체를 잡아 둔다 (덧붙이려면 → 한 번)
+      // An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append instead)
       onFocus={(e) => e.currentTarget.select()}
       onKeyDown={(e) => {
-        // 전역 단축키(⌘K 등)가 타이핑을 가로채지 않게 여기서 멈춘다
+        // Stopped here so global shortcuts (⌘K, etc.) do not intercept the typing
         e.stopPropagation()
         if (e.key === 'Enter') finish(text)
         else if (e.key === 'Escape') finish(initial)
       }}
-      // 다른 곳을 눌러 나가도 고친 값을 살린다 — 확정 버튼이 따로 없다
+      // Clicking elsewhere to leave still keeps the edited value — there is no separate confirm button
       onBlur={() => finish(text)}
       data-testid={`session-name-input-${id}`}
       spellCheck={false}
@@ -1215,27 +1277,30 @@ function SessionNameInput({
 }
 
 /**
- * 삭제 확인.
+ * Delete confirmation.
  *
- * **무엇이 지워지고 무엇이 남는지를 분명히 말한다.**
- * "되돌릴 수 없습니다"만 쓰면 사실과 다르다 — 도구(클로드·코덱스)에는 대화가
- * 그대로 남아서 '+ → 이전 대화'로 되찾을 수 있다. 실제보다 무섭게 말하면
- * 사람은 정리하지 못하고 목록만 쌓인다.
+ * **States plainly what is deleted and what stays behind.**
+ * Writing only "this cannot be undone" would not be true — the underlying tool (Claude, Codex)
+ * still keeps the conversation, and it can be recovered through '+ → previous conversation.'
+ * Making it sound scarier than it is leaves the person unable to clean up, and rows just pile up.
  */
 /**
- * 프로젝트 줄의 행동 메뉴.
+ * The action menu on a project row.
  *
- * 아이콘 세 개 대신 목록 하나인 이유는 **이름이 필요해서**다. `+`는 새 세션이라고
- * 배울 수 있었지만, 가지 아이콘이 워크트리 매니저이고 휴지통이 프로젝트 삭제라는 건
- * 눌러 보기 전에는 모른다 — 그리고 그중 하나는 눌러 보면 안 되는 것이다.
+ * The reason it is one labeled list instead of three icons is **that names are needed.** `+` could
+ * be learned to mean new session, but there is no way to know before pressing that a branch icon
+ * means the worktree manager and a trash icon means deleting the project — and one of those is the
+ * kind of thing that must not be pressed just to find out.
  *
- * 삭제는 **맨 아래, 선 하나 아래**다. 위쪽 둘은 매일 하는 일이고 이건 한 번 하는 일이라,
- * 손이 기억으로 움직일 때 같은 무리에 있으면 안 된다.
+ * Delete sits **at the very bottom, below a divider.** The two above it are things done every day,
+ * while this is something done once, and they must not sit in the same group when the hand is
+ * moving from memory.
  */
 /**
- * 사이드바 줄 메뉴의 공통 껍데기 — 배치(줌 보정·뒤집기·가장자리)와 닫힘 규칙이 여기 산다.
- * 프로젝트 메뉴에서 뽑아냈다: 세션 줄도 같은 메뉴를 갖게 되면서, 이 계산을 두 번
- * 적으면 한쪽만 고치는 미래가 눈에 보였다 (줌 보정이 이미 한 번 그랬다).
+ * The shared shell for sidebar row menus — placement (zoom compensation, flipping, edge handling)
+ * and the closing rules live here. Pulled out of the project menu: once session rows needed the
+ * same menu, writing this calculation twice would foreseeably end up with only one copy fixed later
+ * (the zoom compensation already went through that once).
  */
 function RowMenu({
   anchorEl,
@@ -1251,19 +1316,22 @@ function RowMenu({
   const ref = useRef<HTMLDivElement>(null)
 
   /*
-   * **누른 버튼 아래에 뜬다.**
+   * **Appears right below the button that opened it.**
    *
-   * 예전에는 `absolute right-2 top-6`이었다. 이 줄에는 자기 positioned 조상이 없어서
-   * 그 좌표는 사이드바 전체를 기준으로 풀렸고, 어느 프로젝트를 누르든 메뉴는 사이드바
-   * 우상단 한 자리에 떴다 — 열 번째 프로젝트를 눌렀는데 답이 맨 위에서 나온다
-   * (도그푸딩 지적). 메뉴는 **자기를 부른 것 옆에** 있어야 무엇에 대한 메뉴인지 읽힌다.
+   * It used to be `absolute right-2 top-6`. This row has no positioned ancestor of its own, so
+   * that coordinate resolved against the sidebar as a whole, and no matter which project was
+   * pressed, the menu always landed at one fixed spot near the top right of the sidebar — pressing
+   * the tenth project produced its answer at the very top (a dogfooding finding). A menu has to sit
+   * **next to whatever called it** for it to read as a menu about that thing.
    *
-   * `fixed`인 이유: 사이드바는 `overflow-y-auto`라, 흐름 안에 두면 목록 아래쪽 프로젝트의
-   * 메뉴가 잘린다. 뷰포트 기준으로 띄우면 잘릴 상자가 없다.
+   * Why `fixed`: the sidebar has `overflow-y-auto`, so placing it in normal flow would clip the
+   * menu for projects lower in the list. Positioning it relative to the viewport leaves no box to
+   * clip against.
    *
-   * 아래에 자리가 없으면 위로 뒤집는다. 그래서 높이를 **먼저 재야** 하는데, 높이는
-   * 그려 봐야 안다 — useLayoutEffect(그리기 전에 돈다)로 재고 자리를 정하므로,
-   * 자리가 안 정해진 프레임은 화면에 나가지 않는다 (visibility로 가려 둔다).
+   * If there is no room below, it flips upward. That means the height has to be **measured first**,
+   * and the height is only known once it is rendered — so it is measured and placed with
+   * useLayoutEffect (which runs before paint), and any frame where the position is not yet decided
+   * never reaches the screen (hidden via visibility).
    */
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
   useLayoutEffect(() => {
@@ -1271,15 +1339,19 @@ function RowMenu({
       const el = ref.current
       if (!anchorEl || !el) return
       /*
-       * **전부 레이아웃 px로 환산해서 계산한다** — 확대(--text-zoom) 때문이다.
+       * **Everything is computed after converting to layout pixels** — because of zoom
+       * (--text-zoom).
        *
-       * getBoundingClientRect는 확대가 곱해진 화면 px를 주는데, 여기서 정한 top/right는
-       * 확대된 루트 안의 길이라 그릴 때 확대가 **한 번 더** 곱해진다. 그대로 섞으면
-       * 확대 1.1에서 메뉴가 버튼보다 24px 아래, 103px 왼쪽에 떴다 (1.25에선 54px/249px —
-       * 실측. 도그푸딩 "메뉴 위치가 이상해"의 정체다). e2e가 확대 1.0에서만 재서 놓쳤다.
+       * getBoundingClientRect returns screen pixels already multiplied by the zoom, but the
+       * top/right set here are lengths inside the zoomed root, so the zoom gets multiplied in
+       * **a second time** when it is rendered. Mixing them as-is put the menu 24px below and 103px
+       * to the left of the button at zoom 1.1 (54px/249px at 1.25 — measured; this is what the
+       * dogfooding report "the menu position looks wrong" turned out to be). The e2e tests missed
+       * it because they only measured at zoom 1.0.
        *
-       * 창 크기(innerWidth/Height)는 확대를 모르고, offsetHeight는 원래 레이아웃 px다 —
-       * 화면 px(rect)와 창 px만 확대로 나눠서 한 좌표계로 모은다.
+       * The window size (innerWidth/Height) has no notion of zoom, and offsetHeight is already in
+       * raw layout pixels — only the screen pixels (rect) and the window pixels are divided by
+       * zoom, so everything lands in one coordinate system.
        */
       const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
       const r = anchorEl.getBoundingClientRect()
@@ -1287,26 +1359,27 @@ function RowMenu({
       const w = el.offsetWidth
       const winH = window.innerHeight / zoom
       const winW = window.innerWidth / zoom
-      const GAP = 4 // 버튼과 메뉴 사이 — 붙여 놓으면 어디까지가 버튼인지 안 보인다
-      const EDGE = 8 // 창 가장자리에 딱 붙지 않게
+      const GAP = 4 // Between the button and the menu — if flush, it is unclear where the button ends
+      const EDGE = 8 // Keeps it from sitting flush against the window edge
       const below = r.bottom / zoom + GAP
       setPos({
         top: below + h <= winH - EDGE ? below : Math.max(EDGE, r.top / zoom - GAP - h),
         /*
-         * 오른쪽 끝을 버튼에 맞춘다 — 메뉴가 버튼에서 흘러나온 것처럼 읽힌다.
-         * 단 왼쪽 가장자리도 지킨다 (도그푸딩: 사이드바가 좁으면 메뉴가 창 왼쪽 밖으로
-         * 나가 안 보였다). right는 "창 오른쪽에서 얼마"라 값이 클수록 메뉴가 왼쪽으로
-         * 가는데, 버튼이 창 왼쪽 가까이 서면 메뉴 폭만큼이 화면 밖이 된다 —
-         * 메뉴의 왼쪽 끝이 EDGE 안쪽에 남도록 위에서 자른다.
+         * The menu's right edge lines up with the button's — it reads as flowing out of the
+         * button. But the left edge is also protected (dogfooding: with a narrow sidebar, the menu
+         * ran off the left side of the window and became invisible). `right` means "how far from
+         * the window's right edge," so a larger value pushes the menu further left, and if the
+         * button sits close to the window's left edge, an entire menu-width can end up off screen —
+         * this clamps it so the menu's left edge stays within EDGE.
          */
         right: Math.max(EDGE, Math.min(winW - r.right / zoom, winW - EDGE - w)),
       })
     }
     place()
     /*
-     * 사이드바가 스크롤되면 버튼은 움직이는데 fixed 메뉴는 안 움직인다 — 다시 붙인다.
-     * capture로 듣는 이유: 스크롤은 버블링하지 않아서 window의 일반 리스너로는
-     * 사이드바 안쪽 스크롤이 안 잡힌다.
+     * When the sidebar scrolls, the button moves but the fixed menu does not — this re-attaches
+     * it. Listened to in the capture phase because scroll does not bubble, so a plain listener on
+     * window would not catch scrolling inside the sidebar.
      */
     window.addEventListener('scroll', place, true)
     window.addEventListener('resize', place)
@@ -1316,15 +1389,16 @@ function RowMenu({
     }
   }, [anchorEl])
   /*
-   * 바깥을 누르면 닫는다. 메뉴가 열린 채로 다른 프로젝트를 누르면 두 메뉴가 동시에
-   * 떠 있는 것처럼 보이는데, 실제로는 각자 자기 상태를 들고 있어 아무도 안 닫힌다.
+   * Closes when the person clicks outside it. If another project is pressed while a menu is open,
+   * it can look as if two menus are open at once, but in fact each one holds its own state, so
+   * neither closes the other.
    */
   useEffect(() => {
     const away = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose()
     }
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    // capture: 아래에서 stopPropagation 하는 줄들이 있어도 닫힘은 반드시 온다
+    // capture: the close still fires even when a row below calls stopPropagation
     window.addEventListener('mousedown', away, true)
     window.addEventListener('keydown', esc, true)
     return () => {
@@ -1346,7 +1420,7 @@ function RowMenu({
   )
 }
 
-/** 메뉴 한 줄. 닫기는 onClick에 묶어서 받는다 — 여는 쪽이 onClose를 안다 */
+/** One menu row. Closing is bundled into onClick — the caller that opens it is the one that knows onClose */
 function ActionRow({
   label,
   onClick,
@@ -1391,7 +1465,7 @@ function ProjectMenu({
   onNewApp: () => void
   onStartManager: () => void
   onToggleTrust: () => void
-  /** 프로젝트가 둘 이상일 때만 — 하나뿐이면 접을 "다른" 것이 없다 */
+  /** Only when there are two or more projects — with just one, there is no "other" to fold */
   onFoldOthers?: () => void
   onDelete: () => void
 }) {
@@ -1403,13 +1477,16 @@ function ProjectMenu({
     <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
       <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
       {/*
-        새 앱 (M4 C-1) — 새 세션 바로 아래. 둘 다 "이 프로젝트에 무엇을 하나 더"라서 같은 무리다. 신뢰하지 않은
-        프로젝트에서도 나온다: 창이 까닭을 말하고 그 자리에서 신뢰하게 한다(메뉴에서 줄이 사라지면 왜 없는지 물을 곳이 없다).
+        New app (M4 C-1) — right below new session. Both are "add one more thing to this project,"
+        so they belong in the same group. It shows up even for an untrusted project too: the dialog
+        states why and lets the person trust it right there (if the row disappeared from the menu
+        instead, there would be nowhere to ask why it is missing).
       */}
       <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />
       {/*
-        매니저 자리를 **먼저** 만드는 문 (#76). 저장소이면서 아직 자리가 없을 때만 나온다 —
-        만들고 나면 그 자리는 세션 목록에 줄로 서 있으므로, 같은 일을 하는 문이 둘이 되지 않는다.
+        The door to **first** create the manager slot (#76). Shown only when it is a git repo and
+        that slot does not exist yet — once created, that slot stands as a row in the session list,
+        so there never end up being two doors that do the same thing.
       */}
       {project.git?.isRepo && !project.worktreeManager && (
         <ActionRow
@@ -1419,9 +1496,10 @@ function ProjectMenu({
         />
       )}
       {/*
-        신뢰 (M4, 결정 3). 등록할 때 한 번 묻고, 그 뒤로는 여기서 바꾼다. 켜고 끄는 한 줄이지
-        확인 창이 아니다: 끄는 쪽은 앱을 내리고 설정을 무시하는 안전한 방향이고, 켜는 쪽은 사람이
-        메뉴를 열고 이름을 읽고 누른 것이다.
+        Trust (M4, decision 3). Asked once at registration, and changed from here afterward. A
+        single toggle row, not a confirmation dialog: turning it off is the safe direction, which
+        stops apps and ignores settings, and turning it on is something the person did by opening
+        the menu, reading the label and pressing it.
       */}
       <ActionRow
         label={project.trusted ? 'Stop trusting this project' : 'Trust this project'}
@@ -1429,9 +1507,10 @@ function ProjectMenu({
         testId={`toggle-trust-${project.name}`}
       />
       {/*
-        한 번에 접기 (#205). 하나에 집중할 때 다른 프로젝트를 하나씩 접으러 다니지 않게 — 이 프로젝트는
-        펴 두고 나머지를 접는다. 되돌리기는 따로 두지 않는다: 접힌 줄도 기다리는 수를 말하고, 펴기는
-        화살표 한 번이다.
+        Fold everything else at once (#205). Lets a person focus on one project without going and
+        folding every other project one by one — this project stays expanded while the rest fold.
+        No separate undo is provided: a folded row still states how many sessions are waiting, and
+        expanding it is one press of the arrow.
       */}
       {onFoldOthers && (
         <ActionRow
@@ -1452,11 +1531,13 @@ function ProjectMenu({
 }
 
 /**
- * 세션 줄의 행동 메뉴 (도그푸딩: 호버 아이콘이 넷까지 늘었다 — 연필·인수인계·워크트리·
- * 삭제. 프로젝트 줄이 아이콘 셋에서 메뉴로 간 것과 같은 이유다: **이름이 필요하다.**
- * 인수인계 화살표가 무엇인지는 눌러 보기 전에 모르고, 그중 둘은 눌러 보면 안 되는 것이다.)
+ * The action menu on a session row (dogfooding: the hover icons grew to four — pencil, handoff,
+ * worktree, delete. The same reason the project row moved from three icons to a menu applies:
+ * **names are needed.** There is no way to know what a handoff arrow icon means before pressing it,
+ * and two of them are the kind that must not be pressed just to find out.)
  *
- * 삭제는 맨 아래 선 하나 아래 — 매일 하는 일과 한 번 하는 일을 같은 무리에 두지 않는다.
+ * Delete sits at the very bottom, below a divider — everyday actions and once-in-a-while actions
+ * do not belong in the same group.
  */
 function SessionMenu({
   session,
@@ -1484,7 +1565,7 @@ function SessionMenu({
   return (
     <RowMenu anchorEl={anchorEl} testId={`session-menu-open-${session.id}`} onClose={onClose}>
       <ActionRow label="Rename" onClick={pick(onRename)} testId={`rename-session-${session.id}`} />
-      {/* 매니저 줄에만 — 이 세션 아래에 워크트리 세션을 하나 더 (#69) */}
+      {/* Manager rows only — add one more worktree session under this one (#69) */}
       {managerOfLive > 0 && (
         <ActionRow
           label="New worktree session"
@@ -1492,7 +1573,7 @@ function SessionMenu({
           testId={`new-worktree-session-${session.id}`}
         />
       )}
-      {/* 워크트리 세션은 아직 못 한다 — 워크트리의 수명이 세션에 묶여 있다 */}
+      {/* A worktree session cannot do this yet — the worktree's lifetime is tied to the session */}
       {!session.worktree && (
         <ActionRow
           label="Hand off to a fresh session…"
@@ -1531,17 +1612,19 @@ function ConfirmDelete({
    * for good** from Settings → Trash. The dialog says so in its first lines: a session that leaves the sidebar with
    * no word about where it went and how it comes back is the retired archive (FR-20).
    *
-   * 도구 쪽 원본까지 지울지 (도그푸딩 "진짜로 삭제"). **기본은 지운다** — 처음엔
-   * 남기는 쪽이 기본이었는데, 삭제를 누르는 사람의 실제 의도는 정리라서 "지웠는데
-   * 파일은 남는" 반쪽 삭제가 오히려 어긋났다 (도그푸딩 재지적). 끄면 안내문이 같은
-   * 자리에서 "도구에는 남는다"로 바뀐다 (프로젝트 삭제와 같은 문법: 두 문장을 같이
-   * 띄워 고르게 하지 않는다).
+   * Whether to also delete the original on the tool's side too (dogfooding: "really delete it").
+   * **Defaults to deleting it** — it used to default to keeping it, but a person pressing delete
+   * actually means to clean up, so a half-delete that "deleted it, but the file is still there"
+   * turned out to be the wrong feel (a second dogfooding finding). Turning it off swaps the notice
+   * in the same spot to "it stays on the tool's side" (the same grammar as project deletion: the
+   * two sentences are never shown together for the person to pick between).
    */
   const [deleteExternal, setDeleteExternal] = useState(true)
 
   /*
-   * 워크트리 세션인지, 거기 커밋 안 된 변경이 있는지 **모달을 여는 순간 묻는다.**
-   * 세션 목록에는 경로만 있고 더러운지는 없다 — 그건 파일시스템을 봐야 아는 사실이다.
+   * Whether this is a worktree session, and whether it has uncommitted changes, is **asked the
+   * moment the dialog opens.** The session list only holds the path, not whether it is dirty —
+   * that is a fact only the filesystem can answer.
    */
   const [wt, setWt] = useState<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>(
     null,
@@ -1597,8 +1680,9 @@ function ConfirmDelete({
         </label>
 
         {/*
-          워크트리는 **세션과 수명이 다르다.** 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있어
-          기본은 남기는 쪽이다. 지우려면 사람이 직접 켠다 — 그리고 무엇을 잃는지 먼저 읽는다.
+          A worktree's **lifetime differs from the session's.** Hours of an agent's work can be
+          sitting there, so it defaults to being kept. Deleting it requires the person to turn it
+          on by hand — and to read first what would be lost.
         */}
         {wt && (
           <div className="mt-3 rounded border border-edge bg-panel p-2.5" data-testid="delete-worktree">
@@ -1645,11 +1729,12 @@ function ConfirmDelete({
 }
 
 /**
- * 이름 줄에 얹는 표식 — 세로 공간을 새로 쓰지 않는다.
+ * Marks placed on the name line — they claim no new vertical space.
  *
- * 한때 여기 "같은 폴더에서 N개가 돈다"(⧉N)는 경고가 있었다. 뺐다 (사용자 요청 2026-09-07):
- * 같은 폴더에서 여럿을 돌리는 것은 이 앱에서 **하기로 하고 하는 일**이고, 정말 갈라놓고
- * 싶으면 워크트리가 그 답이다. 매번 켜져 있는 경고는 조언이 아니라 배경음이 된다.
+ * A warning used to live here, "N running in the same folder" (⧉N). It was removed (user request,
+ * 2026-09-07): running several sessions in the same folder is **an intentional choice** in this
+ * app, and a worktree is the answer if the person actually wants them kept apart. A warning that
+ * is always on becomes background noise, not advice.
  */
 function ProjectMarks({ project }: { project: ProjectInfo }) {
   const changed = project.git?.changedFiles ?? 0
@@ -1657,13 +1742,14 @@ function ProjectMarks({ project }: { project: ProjectInfo }) {
 
   return (
     /*
-      **이름 바로 옆에 붙인다.** ml-auto로 반대쪽 끝까지 밀어 놨더니, 이 숫자들이
-      무엇에 대한 것인지 이름과 떨어져서 안 읽혔다 (도그푸딩: "이 숫자는 뭐야?").
-      바로 옆에 있으면 "이 프로젝트의 변경 22개"로 한 덩어리로 읽힌다.
+      **Placed right next to the name.** Pushed to the far end with ml-auto, these numbers used to
+      read as disconnected from what they were about, sitting far from the name (dogfooding: "what
+      is this number?"). Right next to it, it reads as one unit: "22 changes in this project."
 
-      설명은 **앱 툴팁**으로 준다. 브라우저 기본 title은 1~2초를 기다려야 뜨는데,
-      "이게 뭐지?" 싶을 때 그만큼 멈춰 있어야 하면 그냥 안 물어보게 된다.
-      숫자만 있고 단위가 없는 표식일수록 답이 빨라야 한다.
+      The explanation is given through the **app's own tooltip.** The browser's default title takes
+      one or two seconds to appear, and if a person wondering "what is this" has to wait that long,
+      they simply stop asking. The fewer units a bare-number mark has, the faster the answer needs
+      to come.
     */
     <span className="readout flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
       {changed > 0 && (
@@ -1686,15 +1772,20 @@ function ProjectMarks({ project }: { project: ProjectInfo }) {
 }
 
 /**
- * 접힌 프로젝트의 상태 요약 (#205) — 가려진 세션 줄들이 무엇을 기다리는지, 센 수로.
+ * The status summary for a folded project (#205) — what the hidden session rows are waiting for,
+ * as counts.
  *
- * **세션 줄과 같은 표식을 쓴다.** 새 기호를 만들면 사람은 그것을 또 배워야 하고, 줄의 표식과 요약이
- * 다른 말을 하는 것처럼 읽힌다. 그래서 칩 모양·링 색(RING)·회전(cc-orbit)이 ToolMark와 같고, 도구
- * 글자 자리에 수가 들어갈 뿐이다. 승인은 순백 링이라 접힌 줄에서도 화면에서 가장 밝은 것이 된다 —
- * 밝기가 곧 긴급도라는 이 앱의 규칙이 접힌 줄에서도 그대로 선다.
+ * **Uses the same marks as a session row.** Inventing a new symbol would mean the person has to
+ * learn it too, and it would read as the row's mark and the summary saying different things. So the
+ * chip shape, ring color (RING) and spin (cc-orbit) match ToolMark exactly, and only the count sits
+ * where the tool letter would. Approval is a pure white ring, so it stays the brightest thing on
+ * screen even in a folded row — this app's rule that brightness is urgency holds in a folded row
+ * too.
  *
- * 이름 줄 오른쪽 끝(⋯ 바로 앞)에 선다. 여럿이 접혀 있으면 요약이 한 세로줄로 모여, 누가 부르는지를
- * 위에서 아래로 한 번 훑어 읽는다. 뜻은 앱 툴팁이 말한다 — 수만 있는 표식일수록 답이 빨라야 한다.
+ * It stands at the far right of the name line (right before the ⋯). With several projects folded,
+ * the summaries line up in one vertical column, readable top to bottom in a single glance to see
+ * who is calling. The meaning is given by the app's own tooltip — the fewer units a bare-number
+ * mark has, the faster the answer needs to come.
  */
 function FoldSummary({ name, counts }: { name: string; counts: { state: FoldSummaryState; count: number }[] }) {
   const label = counts.map((c) => `${c.count} ${stateLabel(c.state).toLowerCase()}`).join(' · ')
@@ -1711,9 +1802,9 @@ function FoldSummary({ name, counts }: { name: string; counts: { state: FoldSumm
   )
 }
 
-/** ToolMark와 같은 칩 — 글자 대신 수. 멈춘 상태(오류)는 ToolMark처럼 글자를 흐린다 */
+/** A chip like ToolMark — a count instead of a letter. A stalled state (error) dims the text just like ToolMark does */
 function StateCount({ state, count }: { state: FoldSummaryState; count: number }) {
-  // 그리드 칸·세션 표식과 **같은 각도**로 돈다 (components/orbit.ts)
+  // Spins at **the same angle** as a grid panel or a session mark (components/orbit.ts)
   useOrbitSync(state === 'working')
   return (
     <span
@@ -1732,7 +1823,7 @@ function StateCount({ state, count }: { state: FoldSummaryState; count: number }
   )
 }
 
-/** 툴팁 내용 — 평소엔 자리를 안 주지만 물어보면 전부 답한다 */
+/** Tooltip content — claims no space by default, but answers everything when asked */
 function ProjectDetail({ project }: { project: ProjectInfo }) {
   return (
     <span className="block" data-testid={`project-detail-${project.name}`}>
@@ -1742,7 +1833,7 @@ function ProjectDetail({ project }: { project: ProjectInfo }) {
       </span>
       <span className="mt-1 block">
         {project.git?.denied ? (
-          // '저장소 아님'으로 표시하면 사용자가 엉뚱한 결론을 낸다 — 할 일은 권한 부여다
+          // Showing this as "not a repo" would lead the person to the wrong conclusion — what is actually needed is granting permission
           <span className="text-chalk" data-testid="git-denied">
             Folder access permission required — System Settings → Privacy & Security → Files and Folders
           </span>
@@ -1760,30 +1851,34 @@ function ProjectDetail({ project }: { project: ProjectInfo }) {
 }
 
 /**
- * 어느 도구의 세션인가.
+ * Which tool's session this is.
  *
- * **공식 로고를 쓰지 않는다.** 두 회사의 마크는 상표이고 각자 브랜드 가이드라인이 있다 —
- * 로고 파일을 앱에 넣어 배포하면 그 규칙에 걸릴 수 있다. 우리 글리프면 그 문제 자체가 없고,
- * 무채색·형태로 구분하는 이 앱의 규칙과도 맞는다.
+ * **No official logo is used.** Both companies' marks are trademarks with their own brand
+ * guidelines — bundling a logo file into the app and distributing it could run into those rules.
+ * With our own glyph, that problem does not exist at all, and it fits this app's own rule of
+ * distinguishing things by shape in grayscale.
  *
- * 이게 없으면 제목이 비슷한 두 세션을 구분할 방법이 없다 (도그푸딩에서 실제로 착각했다).
+ * Without this, there would be no way to tell apart two sessions with similar titles (this was
+ * actually mixed up during dogfooding).
  */
 /**
- * 세션 표식 — 도구와 상태를 한 자리에서.
+ * The session mark — tool and state, in one spot.
  *
- * **공식 로고를 쓰지 않는다.** 두 회사의 마크는 상표이고 각자 브랜드 가이드라인이 있다 —
- * 로고 파일을 앱에 넣어 배포하면 그 규칙에 걸릴 수 있다. 우리 글리프면 그 문제 자체가 없고,
- * 무채색·형태로 구분하는 이 앱의 규칙과도 맞는다.
+ * **No official logo is used.** Both companies' marks are trademarks with their own brand
+ * guidelines — bundling a logo file into the app and distributing it could run into those rules.
+ * With our own glyph, that problem does not exist at all, and it fits this app's own rule of
+ * distinguishing things by shape in grayscale.
  *
- * 테두리가 상태다. 밝을수록 급하다 — 이 앱 전체를 관통하는 규칙 그대로다.
- * '작업 중'만 회전한다: 멈춘 것과 도는 것은 정지 화면에서도 구분되므로,
- * "일하는 중인가 멈춘 건가"라는 질문에 움직임만큼 확실히 답하는 게 없다.
+ * The border is the state. Brighter means more urgent — the same rule that runs through this whole
+ * app. Only 'working' spins: a stalled state and a running one are already distinguishable even in
+ * a still frame, but nothing answers "is it working or has it stopped" as certainly as motion does.
  *
- * 멈춘 상태(한도·오류)는 글자를 흐리게 해서 활성 상태와 구분한다.
- * 여섯 상태를 테두리 밝기만으로 다 가르기는 어려워서, 이름은 툴팁에 그대로 싣는다.
+ * A stalled state (rate-limited, error) dims the letter to set it apart from an active state. With
+ * six states, telling them all apart by border brightness alone is hard, so the name is carried in
+ * full in the tooltip.
  */
 const RING: Record<SessionState, string> = {
-  working: '', // cc-orbit가 배경을 맡는다
+  working: '', // cc-orbit takes over the background
   waiting_approval: 'var(--color-beacon)',
   error: 'var(--color-beacon)',
   waiting_input: 'var(--color-ash)',
@@ -1795,7 +1890,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
   const meta = useToolMeta(tool)
   const label = `${meta.label} · ${stateLabel(state)}`
   const stalled = state === 'limited' || state === 'error'
-  // 그리드 칸 테두리와 **같은 각도**로 돈다 (components/orbit.ts)
+  // Spins at **the same angle** as a grid panel's border (components/orbit.ts)
   useOrbitSync(state === 'working')
 
   return (
@@ -1809,21 +1904,24 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
     >
       <span
         /*
-         * 밝은 칩에 어두운 글자 — 목록에서 한눈에 잡히되,
-         * 순백(beacon)은 쓰지 않는다. 그건 "나를 기다리는 것"의 몫이라
-         * 여기서 써버리면 진짜 신호가 묻힌다. 한 단계 낮은 chalk를 쓴다.
-         * 글자는 터미널 폰트(모노) — 한 글자 기호는 폭이 고정돼야 줄이 흔들리지 않는다.
+         * A dark letter on a bright chip — grabs the eye in the list at a glance, but pure white
+         * (beacon) is not used. That belongs to "something is waiting for me," and using it here
+         * would bury the real signal. One step down, chalk, is used instead. The letter is set in
+         * the terminal font (monospace) — a single-character glyph needs a fixed width, or the row
+         * would jitter.
          */
         /*
-          어두운 바탕에 밝은 글자다. 밝은 칩이었더니 회전하는 궤도가 그 밝기에 묻혀
-          정작 '작업 중'이 안 보였다 — 표식이 상태를 겸하는데 상태가 안 보이면
-          표식을 옮긴 의미가 없다.
+          A bright letter on a dark background. With a bright chip, the spinning orbit ring got
+          buried in that brightness, and 'working' itself became invisible — the mark doubles as
+          the state indicator, and if the state cannot be seen, moving the mark here loses its
+          point.
 
-          사이드바 배경(pit)과 칩 배경(void)은 두 단계 차이뿐이라 테두리 하나로는
-          잘 안 떨어진다. 테두리를 더 밝게 올리는 대신 **키캡과 같은 손길**(cc-chip)을
-          쓴다: 위쪽 1px 하이라이트와 아래쪽 그림자. 밝기를 더 쓰지 않고도 물체로
-          떨어져 보이는데, 밝기는 이 앱에서 긴급도를 말하는 자원이라 장식에 쓰면
-          그만큼 신호가 깎인다.
+          The sidebar background (pit) and the chip background (void) differ by only two steps, so
+          a single border does not separate them well. Instead of raising the border brightness
+          further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
+          a shadow underneath. It reads as a separate object without spending more brightness, and
+          brightness is the resource this app uses to state urgency, so spending it on decoration
+          would cut into that signal by the same amount.
         */
         className={`readout cc-chip flex size-[14px] items-center justify-center rounded-[3.5px] border border-graphite bg-void text-[9px] font-semibold leading-none text-chalk ${
           stalled ? 'opacity-50' : ''

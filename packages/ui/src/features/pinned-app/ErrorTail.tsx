@@ -6,10 +6,10 @@ import { CloseIcon } from '../../components/icons.jsx'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import type { AppBuilder } from './useAppBuilder.js'
 
-/** 보이는 표준에러의 줄 수 — 끝부분이다. 묶음 전체는 만드는 세션에 간다 */
+/** The number of stderr lines shown — just the tail. The full bundle goes to the builder session */
 const TAIL_LINES = 8
 
-/** 묶음의 종류 → 사람이 읽을 한 줄 */
+/** A bundle's kind → a line for a person to read */
 function titleOf(b: AppErrorBundle): string {
   if (b.kind === 'start') return 'The app could not start'
   if (b.kind === 'crash') return 'The app stopped'
@@ -17,17 +17,21 @@ function titleOf(b: AppErrorBundle): string {
 }
 
 /**
- * 오류가 만드는 쪽에 닿는다 (M4 C-6) — 앱이 뜨지 못했거나, 죽었거나, 도구가 던졌을 때 고정 화면 아래에 그 묶음의 끝을
- * 보이고, "Send to builder" 한 번으로 만드는 세션에 넘긴다.
+ * A way for an error to reach the builder (M4 C-6) — when the app fails to start, dies, or a tool
+ * throws, that bundle's tail is shown below the pinned view, and one press of "Send to builder"
+ * hands it to the builder session.
  *
- * **자동으로 보내지 않는다.** 에이전트가 사람 모르게 고치고 깨뜨리기를 되풀이하는 것을 막는다(플랜 C-6). 보내는 것은
- * 사람이 누른 그 한 번이고, 한 묶음은 한 번만 간다 — host가 보냈다고 적고(`sentAt`) 두 번째를 거절한다. 그래서 다시
- * 연 화면도, 다른 창도 "보냈다"를 안다.
+ * **Nothing is sent automatically.** This prevents an agent from repeatedly fixing and breaking
+ * things without the person knowing (plan C-6). Sending happens only on that one press by the
+ * person, and one bundle is only sent once — the host records that it was sent (`sentAt`) and
+ * rejects a second attempt. So a reopened view, or a different dialog, also knows it was "sent."
  *
- * 무엇을 보이나: 가장 최근 묶음. 앱이 멈춰 있으면(crashed·failed) 언제 난 것이든, 아니면 **이 화면을 연 뒤에** 난 도구
- * 실패만 — 앱이 멀쩡히 도는데 지난주의 실패를 내밀면 그것은 경고가 아니라 소음이다. 사람이 걷으면(×) 그 묶음은 다시
- * 서지 않는다. 다시 읽는 때: host가 묶음을 새로 들 때(목록의 `lastErrorAt`), 앱의 상태가 바뀔 때. "바뀌었다" 알림은
- * 쓰지 않는다 — 읽기 전용 도구의 실패는 그 알림을 내지 않는다.
+ * What is shown: the most recent bundle. If the app is stopped (crashed, failed), any bundle
+ * regardless of when it happened; otherwise, only a tool failure that happened **after this view was
+ * opened** — showing last week's failure while the app is running fine is noise, not a warning. Once
+ * a person dismisses it (×), that bundle does not come back. When it re-reads: when the host records
+ * a new bundle (the list's `lastErrorAt`), and when the app's status changes. The "changed"
+ * notification is not used — a read-only tool's failure does not emit that notification.
  */
 export function ErrorTail({
   app,
@@ -38,20 +42,20 @@ export function ErrorTail({
   app: ExternalCatalogApp | undefined
   builder: AppBuilder
   onShowBuilder: () => void
-  /** 이 앱의 기록 판을 연다 — 사람이 거절한 능력을 잊는 자리(Permissions → Forget)가 거기 있다 */
+  /** Opens this app's Runs panel — the place to forget a capability the person declined (Permissions → Forget) lives there */
   onShowRuns: () => void
 }) {
   const platform = usePlatform()
   const appId = app?.appId
   const projectId = app?.projectId ?? null
   const status = app?.info.status
-  // host가 묶음을 새로 들면 목록의 이 값이 바뀐다 — 읽기 전용 도구의 실패도(그것은 "바뀌었다"를 내지 않는다)
+  // This value in the list changes whenever the host records a new bundle — including a read-only tool's failure (which does not emit "changed")
   const lastErrorAt = app?.info.lastErrorAt
   const [bundle, setBundle] = useState<AppErrorBundle | null>(null)
   const [dismissed, setDismissed] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  /** 이 화면이 선 때 — 앱이 도는 동안에는 이 뒤의 실패만 보인다 */
+  /** When this view was mounted — while the app is running, only a failure after this point is shown */
   const since = useRef(Date.now())
 
   useEffect(() => {
@@ -60,7 +64,7 @@ export function ErrorTail({
     platform.apps
       .errors(appId, projectId)
       .then((r) => alive && setBundle(r.latest))
-      // 못 읽으면 옛 것을 둔다 — 다음 신호가 다시 읽는다
+      // On a failed read, the old value is left in place — the next signal will trigger a re-read
       .catch(() => {})
     return () => {
       alive = false
@@ -76,7 +80,7 @@ export function ErrorTail({
     setError(null)
     try {
       await platform.apps.sendError(app.appId, app.projectId, bundle.at)
-      // 보냈다는 사실은 host가 든다 — 다시 읽어 그 답(sentAt)으로 그린다
+      // The fact that it was sent is recorded by the host — re-reading draws it from that answer (sentAt)
       const r = await platform.apps.errors(app.appId, app.projectId)
       setBundle(r.latest)
     } catch (e) {
@@ -88,9 +92,11 @@ export function ErrorTail({
   const tail = bundle.stderr.slice(-TAIL_LINES)
 
   /*
-   * 사람이 거절한 능력 때문에 멈춘 호출 (M4 D-4) — 앱의 버그가 아니라 사람의 결정이다. 스택도 "Send to builder"도 내밀지 않는다: 보내면
-   * 만드는 에이전트가 멀쩡한 코드를 "고친다". 무엇을 거절했는지와 되돌리는 자리(그 앱의 기록 판의 Permissions → Forget)를 말한다.
-   * 옛 host의 묶음에는 이 칸이 없다 — 없으면 보통의 실패다.
+   * A call blocked because the person declined a capability (M4 D-4) — this is the person's
+   * decision, not a bug in the app. Neither a stack trace nor "Send to builder" is offered: sending
+   * it would have the builder agent "fix" perfectly fine code. It states what was declined and where
+   * to reverse it (that app's Runs panel, Permissions → Forget). A bundle from an older host does not
+   * have this field — its absence means an ordinary failure.
    */
   const denied = bundle.denied ?? null
   if (denied) {

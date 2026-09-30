@@ -2,46 +2,47 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_FILE_ICON, iconForFile } from './fileIcon.js'
 
 /**
- * 이 표는 하드코딩된 목록이다 — 그래서 **못 따라왔을 때 어떻게 되는지**가 제일 중요하다.
- * 모르는 확장자가 빈칸이 되면 목록이 망가지지만, 기본 아이콘으로 떨어지면 멀쩡하다.
+ * This table is a hardcoded list — which is why **what happens when it falls behind** matters most
+ * of all. An unknown extension turning into a blank would break the list, but falling back to the
+ * default icon keeps it looking fine.
  */
 describe('iconForFile', () => {
-  it('아는 확장자는 제 아이콘을 쓴다', () => {
+  it('uses its own icon for a known extension', () => {
     expect(iconForFile('App.tsx')).not.toBe(DEFAULT_FILE_ICON)
     expect(iconForFile('main.rs')).not.toBe(DEFAULT_FILE_ICON)
     expect(iconForFile('logo.svg')).not.toBe(DEFAULT_FILE_ICON)
   })
 
-  it('같은 계열은 같은 아이콘을 공유한다', () => {
+  it('shares one icon within the same family', () => {
     expect(iconForFile('a.jpg')).toBe(iconForFile('b.png'))
     expect(iconForFile('a.yml')).toBe(iconForFile('b.yaml'))
     expect(iconForFile('a.ts')).toBe(iconForFile('b.mts'))
   })
 
-  it('처음 보는 확장자는 기본 파일 아이콘 — 빈칸이 되지 않는다', () => {
+  it('falls back to the default file icon for an extension it has never seen — never a blank', () => {
     expect(iconForFile('main.zig')).toBe(DEFAULT_FILE_ICON)
     expect(iconForFile('page.astro')).toBe(DEFAULT_FILE_ICON)
   })
 
-  it('확장자가 없어도 기본 파일 아이콘', () => {
+  it('falls back to the default file icon when there is no extension', () => {
     expect(iconForFile('LICENSE')).toBe(DEFAULT_FILE_ICON)
     expect(iconForFile('Makefile')).toBe(DEFAULT_FILE_ICON)
     expect(iconForFile('weird.')).toBe(DEFAULT_FILE_ICON)
   })
 
-  it('이름 자체가 종류인 것들 — 확장자로는 안 잡힌다', () => {
+  it('identifies things by name itself — not caught by an extension', () => {
     expect(iconForFile('Dockerfile')).not.toBe(DEFAULT_FILE_ICON)
     expect(iconForFile('.gitignore')).not.toBe(DEFAULT_FILE_ICON)
-    // 맨 앞의 점은 확장자가 아니다
+    // A leading dot is not an extension
     expect(iconForFile('.env')).toBe(DEFAULT_FILE_ICON)
   })
 
-  it('대소문자를 가리지 않는다 — README.MD도 마크다운이다', () => {
+  it('is case-insensitive — README.MD is markdown too', () => {
     expect(iconForFile('README.MD')).toBe(iconForFile('readme.md'))
     expect(iconForFile('DOCKERFILE')).toBe(iconForFile('Dockerfile'))
   })
 
-  it('점이 여러 개면 마지막 것을 쓴다', () => {
+  it('uses the last one when there are multiple dots', () => {
     expect(iconForFile('types.d.ts')).toBe(iconForFile('x.ts'))
   })
 })

@@ -25,19 +25,23 @@ import { registerSlottedView } from './slots.js'
 type Mode = 'full' | 'slot' | 'hidden'
 
 /**
- * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
+ * The pinned view (M4 B-2) — an app opened from the sidebar takes over the main area.
  *
- * **연 화면은 모두 붙어 있다.** 보이는 것은 하나뿐이고 나머지는 `display: none`으로 숨는다. 세션을
- * 보러 갔다 돌아와도 같은 iframe, 같은 문서, 같은 인스턴스다. 화면에는 상태가 없다는 규격의 말은
- * "다시 뜨면 새로 읽는다"는 뜻이지, 다시 띄워도 된다는 뜻이 아니다. 다시 띄우면 입력하던 칸, 펼쳐
- * 둔 목록, 스크롤이 날아가고, 앱은 home을 또 한 번 받는다. iframe은 DOM에서 떼는 순간 문서를 버리고
- * (옮기기만 해도 다시 읽는다), 숨기기만 하면 문서가 산다. 그래서 이 층은 App의 가운데 레인에서 **자리를
- * 바꾸지 않는 한 자식**으로 늘 그려진다.
+ * **Every open view stays mounted.** Only one is visible; the rest are hidden with `display: none`.
+ * Going to look at a session and coming back is still the same iframe, the same document, the same
+ * instance. The spec's statement that a view holds no state means "it reads fresh when it comes back
+ * up," not that it is fine to remount it. Remounting would drop whatever field was being typed in,
+ * whatever list was expanded, and the scroll position, and the app would receive `home` all over
+ * again. An iframe discards its document the moment it is detached from the DOM (even just moving it
+ * causes a fresh read), while merely hiding it keeps the document alive. So this layer is always
+ * rendered in App's center lane as **a child that never changes position.**
  *
- * 내려가는 길은 셋뿐이고, 셋 다 규격의 teardown을 먼저 보낸다(AppFrame의 약속: 떼기 전에 부른다).
- *   닫기               사람이 ×를 눌렀다
- *   앱이 사라졌다       폴더를 지웠다, 프로젝트를 지웠다
- *   앱이 더 돌 수 없다  신뢰를 잃었다, 매니페스트가 깨졌다 — 화면의 HTML도 그 프로젝트의 코드다
+ * There are exactly three paths down, and all three send the spec's teardown first (AppFrame's
+ * contract: called before detaching).
+ *   close                    the person pressed ×
+ *   the app has disappeared  its folder was deleted, its project was deleted
+ *   the app can no longer run  it lost trust, its manifest broke — the view's HTML is also that
+ *                              project's code
  */
 export function PinnedApps() {
   const pinned = useStore((s) => s.pinnedViews)
@@ -77,17 +81,17 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   const close = useStore((s) => s.closeApp)
   const setToast = useStore((s) => s.setToast)
   const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Your apps'))
-  // 기록 판(B-7)은 화면마다 따로 연다 — 한 앱의 기록을 보던 사람이 다른 앱으로 가면 그 앱의 화면이 먼저다
+  // The Runs panel (B-7) opens independently per view — a person watching one app's runs moving to another app sees that app's own panel state first
   const [runsOpen, setRunsOpen] = useState(false)
-  // 비밀 판 (M4 E) — 선언한 비밀이 있는 앱에만 선다. 빈 것이 있으면 머리글의 단추가 그 수를 말한다
+  // The Secrets panel (M4 E) — only exists for an app that declares secrets. If any are unset, the header's button states the count
   const [secretsOpen, setSecretsOpen] = useState(false)
-  // 판 (M4 E-1) — 사용자 폴더 앱은 떠 둔 스냅샷과 되돌리기, 프로젝트 앱은 git의 커밋(읽기만)
+  // The Versions panel (M4 E-1) — a snapshot history and a way back for a user-folder app; git's own commits (read-only) for a project app
   const [versionsOpen, setVersionsOpen] = useState(false)
   const missing = missingSecrets(app)
-  // 만드는 세션 (C-5) — 아래 입력줄이 말을 보내는 곳이고, 그 대화를 화면 옆에 여닫는다(BuilderPane)
+  // The builder session (C-5) — the input row below sends into it, and its conversation opens and closes beside the view (BuilderPane)
   const builder = useAppBuilder(pv.projectId, pv.appId)
   const [builderOpen, setBuilderOpen] = useState(false)
-  // 옆에 연 만드는 세션의 대화는 화면에 있는 세션이다 — 그 턴 끝은 카드가 아니라 바람이다(`isOnScreen`)
+  // A builder session's conversation opened beside it is a session that is on screen — its turn ending is a breeze, not a card (`isOnScreen`)
   const setBuilderPane = useStore((s) => s.setBuilderPane)
   const paneSession = builderOpen && visible && builder.id ? builder.id : null
   useEffect(() => {
@@ -98,8 +102,9 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     }
   }, [paneSession, setBuilderPane])
   /*
-   * 이 앱의 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 먼저 온 것부터 하나씩. 목록 자체를 고르고 여기서 거른다: 고르는 함수가
-   * 매번 새 배열을 돌려주면 스토어가 바뀔 때마다 새 값으로 읽힌다.
+   * A capability question from a chain started by this app's view (M4 D-4) — one at a time, oldest
+   * first. The whole list is selected and filtered here: if the selector itself returned a new
+   * array every time, it would read as a new value on every store change.
    */
   const questions = useStore((s) => s.appQuestions)
   const asking = useMemo(
@@ -108,9 +113,10 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   )
 
   /*
-   * 화면의 `ui/message` (B-4) — 어느 세션으로 보낼지 묻는다(MessageAsk). 사람이 고르기 전에는 아무것도
-   * 보내지 않고, 화면의 요청은 답을 기다린다. 먼저 온 물음이 남아 있으면 그것은 거절로 닫는다(링크
-   * 확인과 같은 규칙, AppFrame). 글이 한 조각도 없는 말은 묻지 않고 거절한다 — 보낼 것이 없다.
+   * The view's `ui/message` (B-4) — asks which session to send it to (MessageAsk). Nothing is sent
+   * before the person chooses, and the view's request waits for an answer. If an earlier question is
+   * still pending, it is closed as declined (the same rule as link confirmation, AppFrame). A
+   * message with not a single piece of text is declined without asking — there is nothing to send.
    */
   const sendViewMessage = useStore((s) => s.sendViewMessage)
   const [ask, setAsk] = useState<MessageAskState | null>(null)
@@ -141,22 +147,24 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     askRef.current = null
     setAsk(null)
     /*
-     * 대화 안 화면과 **같은 길**로 보낸다 (`apps.viewMessage`) — 고른 대화에는 앱이 보낸 말로 남고, 에이전트는 host가
-     * "앱의 글"로 감싼 모양을 받는다. 사람의 말(`send`)로 보내면 앱의 글이 사람의 지시로 둔갑한다. 틀은 host가 짓는다.
+     * Sent through **the same path** as an in-conversation view (`apps.viewMessage`) — it lands in
+     * the chosen conversation as a message from the app, and the agent receives it wrapped by the
+     * host as "the app's text." Sending it as the person's own message (`send`) would disguise the
+     * app's text as the person's own instruction. The host builds the frame around it.
      */
     const sent = pv.instanceId ? await sendViewMessage(sessionId, pv.instanceId, a.text) : false
     if (sent) setToast(`Sent to ${useStore.getState().sessions[sessionId]?.name ?? 'the session'}`)
     a.resolve(sent)
   }
-  // 화면이 내려가면(닫기·다시 시작·신뢰를 잃음) 묻던 것도 거절로 닫는다 — 답할 화면이 없다
+  // When the view goes down (closed, restarted, loses trust), a pending question closes as declined too — there is no view left to answer it
   useEffect(() => {
     if (pv.phase !== 'open') settleAsk(false)
   }, [pv.phase, settleAsk])
   useEffect(() => () => void settleAsk(false), [settleAsk])
 
   /*
-   * 그려진 프레임을 스토어에 올린다 (C-4) — 앱이 새 코드로 다시 뜨면 스토어가 이 화면을 다시 여는데(reloadPinnedView),
-   * 그 전에 이 손잡이로 teardown을 보낸다.
+   * Registers the rendered frame with the store (C-4) — when the app comes back up with new code,
+   * the store reopens this view (reloadPinnedView), but sends teardown through this handle first.
    */
   useEffect(() => {
     if (pv.phase !== 'open' || !pv.instanceId) return
@@ -170,10 +178,11 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   }, [canOpen, pv.phase, pv.key, start])
 
   /*
-   * 신뢰를 잃었거나 매니페스트가 깨졌다 — 앱이 더 돌 수 없다. 화면(앱의 HTML)도 그 프로젝트의 코드라서
-   * 함께 내린다. 자리는 남기고 idle로 돌린다: 다시 신뢰하면 이 자리에서 다시 연다.
+   * Trust was lost, or the manifest broke — the app can no longer run. The view (the app's own HTML)
+   * is also that project's code, so it comes down along with it. The slot is kept and returned to
+   * idle: trusting it again reopens it in this same slot.
    */
-  // 가져온 앱이 다시 확인을 기다려도(M4 E-3) 같다 — 켠 뒤 무엇을 돌리는지가 바뀌었으면 화면의 HTML도 사람이 보기 전의 코드다
+  // The same applies when an imported app is waiting to be reconfirmed (M4 E-3) — if what runs after enabling it changed, the view's HTML is also code the person has not yet reviewed
   const blocked = app?.info.status === 'untrusted' || app?.info.status === 'invalid' || app?.info.status === 'unconfirmed'
   useEffect(() => {
     if (!blocked || pv.phase !== 'open') return
@@ -188,8 +197,9 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   }, [blocked, pv.phase, pv.key, release])
 
   /*
-   * 앱이 사라졌다. **한 번이라도 본 앱만** 사라진 것으로 친다 — 목록을 다시 읽는 사이의 빈 순간을
-   * 사라짐으로 읽으면, 멀쩡한 화면이 닫힌다.
+   * The app has disappeared. **Only an app seen at least once** is treated as having disappeared —
+   * reading the empty moment between re-reads of the list as a disappearance would close a perfectly
+   * fine view.
    */
   const seen = useRef(false)
   if (app) seen.current = true
@@ -214,7 +224,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     await frame.current?.teardown()
     close(pv.key)
   }
-  // 다시 시작도 화면을 내리는 길이다 — teardown을 먼저 보낸다
+  // Restarting is also a way the view goes down — teardown is sent first
   const restart = useStore((s) => s.restartApp)
   const onRestart = async () => {
     await frame.current?.teardown()
@@ -252,7 +262,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               {app.status.label}
             </span>
           )}
-          {/* 새 코드로 다시 열었다 (C-4) — 잠깐 서는 한 마디. 너무 자주 바뀌어 저절로 열지 않았으면 사람이 누른다 */}
+          {/* Reopened with new code (C-4) — a brief note that appears momentarily. If it changed too often to reopen on its own, the person presses it */}
           {pv.phase === 'open' && pv.updatedAt && <UpdatedCue key={pv.updatedAt} at={pv.updatedAt} testId="pinned-updated" />}
           {pv.phase === 'open' && pv.stale && (
             <button
@@ -331,8 +341,9 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
         </header>
       )}
       {/*
-        화면 칸은 늘 이 줄의 첫 자식이다. 판을 여닫아도 React가 화면 칸을 새로 만들지 않는다 — 새로 만들면
-        iframe이 떨어져 문서를 잃는다(이 파일 머리말).
+        The view's own box is always this row's first child. Opening and closing a side panel never
+        makes React recreate that box — recreating it would detach the iframe and lose the document
+        (see this file's header comment).
       */}
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
@@ -342,7 +353,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
           {asking && <CapabilityAsk question={asking} visible={mode !== 'hidden'} />}
         </div>
-        {/* 보일 때만 그린다 — 숨은 동안 같은 세션을 포커스 뷰가 그리면 한 대화가 두 칸에 선다 */}
+        {/* Drawn only while visible — if the focus view drew the same session while this is hidden, one conversation would stand in two panels */}
         {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}
         {visible && runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
         {visible && secretsOpen && app && <SecretsPanel app={app} />}
@@ -368,13 +379,15 @@ function Body({
   const trust = useStore((s) => s.setProjectTrusted)
   const title = app?.title ?? pv.appId
   /*
-   * 인스턴스가 열려 있는 동안은 **무슨 일이 있어도 프레임을 그린다.** 앱이 막히거나 사라지면 위의 효과가
-   * teardown을 보내고 자리를 되돌린다. 그 전에 여기서 안내문으로 갈아 끼우면 React가 iframe을 먼저 떼어,
-   * teardown이 닿을 창이 없어진다(AppFrame의 약속: 떼기 전에 부른다).
+   * While the instance is open, the frame is drawn **no matter what.** If the app gets blocked or
+   * disappears, the effect above sends teardown and reverts the slot. Swapping in a notice here
+   * before that would make React detach the iframe first, leaving no window left for teardown to
+   * reach (AppFrame's contract: called before detaching).
    *
-   * 떠 있던 앱이 죽었으면(B-6) 프레임 위에 이유와 "Restart"를 세운다. 프레임은 남긴다 — 앱은 다음 부름에
-   * 스스로 다시 뜨고(crashed), 사람이 보던 화면의 내용도 아직 거기 있다. 멈춘 앱(failed)은 스스로 다시
-   * 뜨지 않으므로 이 단추가 유일한 길이다.
+   * If a running app died (B-6), the reason and a "Restart" button are placed on top of the frame.
+   * The frame itself stays: the app comes back up on its own on the next call (crashed), and whatever
+   * was on screen is still there. A stopped app (failed) does not come back up on its own, so this
+   * button is the only way.
    */
   if (pv.phase === 'open' && pv.instanceId) {
     const down = app?.info.status === 'crashed' || app?.info.status === 'failed'
@@ -413,7 +426,7 @@ function Body({
     )
   }
   if (!app) return null
-  // 사람의 확인을 기다리는 가져온 앱 (M4 E-3) — 화면이 있든 없든 확인이 먼저다. 켜면 이 자리에서 앱이 열린다
+  // An imported app waiting for the person's confirmation (M4 E-3) — confirmation comes first whether or not it has a view. Enabling it opens the app right here
   if (app.info.status === 'unconfirmed') return <ReviewAndEnable app={app} />
   if (!app.info.home) {
     return (
@@ -439,7 +452,7 @@ function Body({
       </Notice>
     )
   }
-  // 멈춘 앱(연달아 못 떴다) — 스스로 다시 뜨지 않는다. 이유와 다시 시작하는 길을 함께 준다
+  // A stopped app (failed to start repeatedly) — it does not come back up on its own. The reason and a way to restart are given together
   if (app.info.status === 'failed') {
     return (
       <Notice testId="pinned-failed" title="This app stopped after failing repeatedly.">
@@ -488,12 +501,15 @@ function RestartButton({ onClick, className = '' }: { onClick: () => void; class
 }
 
 /**
- * 앱이 뜨는 동안의 자리 (B-6). 2026-09-14 결정: 비동기는 스켈레톤만 잘하면 된다.
+ * The placeholder while an app is starting up (B-6). Decision, 2026-09-14: doing the skeleton well
+ * is all the async case needs.
  *
- * 앱은 처음 필요할 때 뜬다. 그래서 쉬던 앱을 여는 순간이 곧 프로세스가 뜨는 순간이다(성능 예산: 스켈레톤은
- * 즉시, 첫 화면은 2초 안). 빈 영역이나 한 줄짜리 "Loading"은 멈춘 것과 구별되지 않는다. 화면이 설 자리의
- * 모양을 먼저 보이고, 무엇을 기다리는지는 한 줄로 말한다(뜨는 중인지, 여는 중인지, 다시 시작하는 중인지).
- * 조용한 색만 쓴다 — 기다림은 사람을 부르는 신호가 아니다(팔레트 규칙).
+ * An app starts up on first need, so opening a previously idle app is exactly the moment its process
+ * starts (performance budget: the skeleton appears instantly, the first screen within 2 seconds). An
+ * empty area or a bare one-line "Loading" is indistinguishable from something stalled. The shape of
+ * where the view will stand is shown first, and what it is waiting for is stated in one line
+ * (starting up, opening, or restarting). Only quiet colors are used — waiting is not a signal meant
+ * to call the person (the palette rule).
  */
 function Skeleton({ label }: { label: string }) {
   return (

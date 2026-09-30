@@ -1,13 +1,14 @@
 /**
- * 확장자 → vscode-icons 아이콘.
+ * Extension → vscode-icons icon.
  *
- * 아이콘은 vscode-icons(MIT)에서 가져왔다 — 익숙한 그림이라 이름을 읽기 전에 종류가 잡힌다.
- * 전체 1,200여 개를 다 넣지는 않는다. 앱 크기를 그만큼 쓸 이유가 없고,
- * **표에 없으면 기본 파일 아이콘으로 떨어지므로 빠뜨려도 빈칸이 되지 않는다.**
- * 이게 이 표를 안심하고 둘 수 있는 이유다 — 목록이 못 따라와도 화면은 멀쩡하다.
+ * The icons are taken from vscode-icons (MIT) — a familiar picture lets the kind register before the
+ * name is even read. Not all roughly 1,200 of them are included. There is no reason to spend that
+ * much app size, and **anything missing from this table falls back to the default file icon, so a
+ * gap never shows up as a blank.** That is what makes it safe to leave this table as is — even if
+ * the list falls behind, the screen still looks fine.
  *
- * 이름은 파일 전체로 먼저 본다: `Dockerfile`·`.gitignore`처럼 확장자가 아니라
- * 이름 자체가 종류인 것들이 있다.
+ * The name is checked as a whole first: things like `Dockerfile` and `.gitignore` are identified by
+ * their name itself, not by an extension.
  */
 import defaultFile from '../../assets/file-icons/default_file.svg'
 import ts from '../../assets/file-icons/file_type_typescript.svg'
@@ -50,7 +51,7 @@ import wasm from '../../assets/file-icons/file_type_wasm.svg'
 
 export const DEFAULT_FILE_ICON = defaultFile
 
-/** 이름 자체가 종류인 것들 — 확장자로는 잡히지 않는다 */
+/** Things identified by name itself — not caught by an extension */
 const BY_NAME: Record<string, string> = {
   dockerfile: docker,
   '.dockerignore': docker,
@@ -83,14 +84,14 @@ const BY_EXT: Record<string, string> = {
   wasm,
 }
 
-/** 파일 이름 하나로 아이콘을 정한다. 모르면 기본 파일 아이콘 — 빈칸은 없다 */
+/** Decides an icon from a single file name. Falls back to the default file icon when unknown — never blank */
 export function iconForFile(name: string): string {
   const lower = name.toLowerCase()
   const byName = BY_NAME[lower]
   if (byName) return byName
 
   const dot = lower.lastIndexOf('.')
-  // 맨 앞의 점은 확장자가 아니라 이름의 일부다 (.env)
+  // A leading dot is part of the name, not an extension (.env)
   if (dot <= 0 || dot === lower.length - 1) return DEFAULT_FILE_ICON
   return BY_EXT[lower.slice(dot + 1)] ?? DEFAULT_FILE_ICON
 }

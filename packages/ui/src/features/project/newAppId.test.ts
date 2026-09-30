@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { newAppIdProblem } from '@cc/protocol'
 import { appIdHint, deriveAppId } from './newAppId.js'
 
-describe('deriveAppId — 이름에서 짓는 id', () => {
-  it('판정이 통과시킬 모양으로 짓는다', () => {
+describe('deriveAppId — the id derived from a name', () => {
+  it('derives a shape the validation will pass', () => {
     const cases: [string, string][] = [
       ['Team Notes', 'team-notes'],
       ['  Resource   search!! ', 'resource-search'],
@@ -17,26 +17,26 @@ describe('deriveAppId — 이름에서 짓는 id', () => {
     }
   })
 
-  it('32자에서 자르고, 자른 끝의 하이픈은 뗀다', () => {
+  it('truncates at 32 characters and strips a trailing hyphen left by truncation', () => {
     const id = deriveAppId('a very long name for a small app that counts things')
     expect(id).toBe('a-very-long-name-for-a-small-app')
     expect(id.length).toBeLessThanOrEqual(32)
     expect(deriveAppId(`${'x'.repeat(31)} y`)).toBe('x'.repeat(31))
   })
 
-  it('영숫자로 바꿀 수 없는 이름은 빈 id다 — 지어내지 않는다', () => {
+  it('is an empty id for a name that cannot be converted to letters and digits — nothing is fabricated', () => {
     expect(deriveAppId('리소스 검색')).toBe('')
     expect(deriveAppId('---')).toBe('')
   })
 
-  it('예약어·app- 머리는 지어도 판정이 막는다 — 짓는 쪽이 판정을 흉내 내지 않는다', () => {
+  it('lets validation block a reserved word or an app- prefix even after deriving it — the derivation does not imitate the validation', () => {
     expect(newAppIdProblem(deriveAppId('Centralu tools'))).toBe('reserved')
     expect(newAppIdProblem(deriveAppId('App store'))).toBe('server-prefix')
   })
 })
 
-describe('appIdHint — 창의 말', () => {
-  it('빈 id는 적어 달라고 하고, 나머지는 까닭을 말한다', () => {
+describe('appIdHint — the wording shown in the dialog', () => {
+  it('asks for an id when empty, and states the reason for everything else', () => {
     expect(appIdHint('', 'shape')).toBe('Give the app an id: lowercase letters, digits and hyphens.')
     expect(appIdHint('my_app', 'shape')).toContain('lowercase letters, digits and hyphens')
     expect(appIdHint('centralu-x', 'reserved')).toContain('"centralu"')

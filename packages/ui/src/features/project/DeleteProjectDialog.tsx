@@ -4,24 +4,25 @@ import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
 
 /**
- * 프로젝트 삭제 (도그푸딩 요청).
+ * Deleting a project (a dogfooding request).
  *
- * **되돌릴 수 없는 일이 둘 있고, 크기가 다르다.** 하나는 이 앱의 기억(세션·대화·검색
- * 색인)이 사라지는 것이고, 다른 하나는 디스크의 폴더가 사라지는 것이다. 그래서 이 창은
- * 기본값으로 앞의 것만 하고, 뒤의 것은 사람이 직접 켜야 한다 — 그리고 켜는 순간
- * **설명문이 경고문으로 바뀐다.** 같은 자리에서 문장이 바뀌므로, 무엇이 달라졌는지
- * 읽으러 다른 곳을 볼 필요가 없다.
+ * **There are two irreversible actions here, and they are different in scale.** One is this app's
+ * own memory disappearing (sessions, conversations, the search index); the other is a folder on
+ * disk disappearing. So this dialog does only the first by default, and the person has to turn the
+ * second on by hand — and the moment it is turned on, **the description text turns into a warning.**
+ * The sentence changes in the same spot, so there is no need to look elsewhere to see what changed.
  *
- * 이름을 치게 하는 이유: 이 창에는 실수로 지나갈 수 있는 길이 없어야 한다. 확인 버튼
- * 하나짜리 창은 손이 기억으로 지나가고, 지나간 뒤에는 되돌릴 것이 없다. 이름을 치는
- * 동안 사람은 자기가 무엇을 지우는지 한 번 읽는다 — 그게 이 장치의 전부다.
+ * Why typing the name is required: this dialog must have no path a person can slip through by
+ * mistake. A dialog with just one confirm button is something the hand can click through from
+ * memory, and once through, there is nothing to undo. While typing the name, the person reads once
+ * what they are about to delete — that is the entire point of this device.
  *
  * **Its sessions go to Centralu's trash (#204), not with it** — only Settings deletes a conversation for good, and
  * a project took every one of its conversations at once. Both sentences below say so, and where to find them.
  *
- * 파일은 **휴지통으로** 간다. 앱의 파일 규칙 그대로다 (fs 포트: "Not a delete — that is
- * the whole decision"). 되돌릴 길을 OS가 하나 남겨두는 편이, 우리가 rm을 부르고
- * 사람의 미커밋 작업을 영영 없애는 것보다 낫다.
+ * The files go **to the trash.** Exactly the app's own file rule (the fs port: "Not a delete — that
+ * is the whole decision"). Leaving the OS one path back is better than calling `rm` ourselves and
+ * permanently destroying a person's uncommitted work.
  */
 export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo; onClose: () => void }) {
   const deleteProject = useStore((s) => s.deleteProject)
@@ -29,7 +30,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
   const [withFiles, setWithFiles] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // 공백만 흘리고 정확히 같아야 한다 — 대소문자까지. 비슷한 이름의 프로젝트가 이웃일 수 있다
+  // Only whitespace is trimmed off; it must match exactly, including case — a similarly named project may sit right next to it
   const armed = typed.trim() === project.name
 
   return (
@@ -45,7 +46,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             await deleteProject(project.id, withFiles)
             onClose()
           } catch (err) {
-            // 토스트는 2.5초 뒤 사라져 '눌러도 아무 일이 없다'로 보인다 — 창 안에 남긴다
+            // A toast disappears after 2.5 seconds and would look like "nothing happened when pressed" — kept inside the dialog instead
             setError((err as Error).message)
             setBusy(false)
           }
@@ -57,14 +58,15 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         </h2>
 
         {/*
-          같은 자리에서 설명이 경고로 바뀐다. 두 문장을 함께 띄우면 어느 쪽이 지금
-          벌어질 일인지 사람이 골라 읽어야 하는데, 그 고르기는 여기서 하면 안 되는 일이다.
+          The description turns into a warning in the same spot. Showing both sentences together
+          would make the person choose which one describes what is actually about to happen, and
+          that choosing is not something that should happen here.
         */}
         {/*
-          위험한 상태는 **빨갛다** (도그푸딩 요청). 색은 diff의 삭제 팔레트(--color-del)를
-          그대로 쓴다 — 이 앱에서 빨강은 이미 "없어지는 것"의 색이라, 새 언어를
-          만드는 게 아니라 있는 언어를 넓히는 것이다. 제일 아픈 문장(커밋 안 된
-          작업까지 간다)이 제일 진하다.
+          The dangerous state is **red** (a dogfooding request). The color is exactly the diff's
+          delete palette (--color-del) — red already means "this is disappearing" in this app, so
+          this extends the existing language rather than inventing a new one. The most painful
+          sentence (it reaches even uncommitted work) is the most saturated.
         */}
         {withFiles ? (
           <p
@@ -89,7 +91,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           }`}
           data-testid="delete-project-files-toggle"
         >
-          {/* 켜는 순간 체크도 빨갛다 — 경고문과 같은 palette, 같은 순간 */}
+          {/* The checkbox turns red the moment it is checked — the same palette as the warning, at the same moment */}
           <input
             type="checkbox"
             className={`mt-0.5 ${withFiles ? 'accent-del' : 'accent-ash'}`}
@@ -100,8 +102,9 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         </label>
 
         {/*
-          이름을 치는 칸은 **맨 아래**다. 위의 설명(또는 경고)을 읽고 내려오는 순서가
-          되어야, 치는 동작이 읽은 것에 대한 답이 된다.
+          The name field sits **at the very bottom.** The order has to be reading the description
+          (or warning) above and then coming down to it, so typing is an answer to what was just
+          read.
         */}
         <label className="mt-3 block text-[11px] text-ash" htmlFor="delete-project-name">
           Type <span className="readout text-chalk">{project.name}</span> to confirm
@@ -134,7 +137,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           >
             Cancel
           </button>
-          {/* 실행 버튼도 삭제 팔레트다 — 되돌릴 수 없는 일의 방아쇠가 중립색이면 안 된다 */}
+          {/* The action button is also in the delete palette — the trigger for something irreversible must not be a neutral color */}
           <button
             type="submit"
             disabled={!armed || busy}

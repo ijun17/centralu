@@ -7,21 +7,26 @@ import { useStore, type ChatAttachment, type PinnedView } from '../../store/stor
 import { isComposerSendKey } from '../session/composerKeys.js'
 import type { AppBuilder } from './useAppBuilder.js'
 
-/** 입력줄이 자라는 한계 — 네 줄쯤. 넘으면 칸 안에서 구른다(화면을 밀어내지 않는다) */
+/** The limit the input row grows to — about four lines. Beyond that it scrolls within its own box (it does not push the view down) */
 const MAX_H = 96
 
 /**
- * "여기를 고쳐 줘" 줄 (M4 C-5) — 고정 화면 아래의 얇은 입력줄. 여기 쓴 말은 이 앱의 만드는 세션으로 간다.
+ * The "fix this" row (M4 C-5) — a thin input row below the pinned view. What is written here goes
+ * to this app's builder session.
  *
- * **사람은 앱을 떠나지 않는다.** 보내도 화면은 그대로이고, 보냈다는 한 줄과 그 대화를 옆에 여는 길("Show")만 남는다.
- * 어느 앱의 어느 화면에서 왔는지는 host가 머리말로 붙인다(`apps.askBuilder`) — 이 줄이 적어 보내지 않는다. 앱이
- * 멈췄거나 마지막 실행이 실패했으면 그 사실도 host가 싣는다: "이 버튼이 안 된다"는 말은 그 실패와 함께 가야 한다.
+ * **The person never leaves the app.** After sending, the view stays exactly as it was, and only a
+ * one-line "sent" note and a way to open that conversation beside it ("Show") remain. Which app and
+ * which view it came from is attached by the host as a header (`apps.askBuilder`) — this row does
+ * not write that itself and send it. If the app is stopped or its last run failed, the host attaches
+ * that fact too: "this button does not work" has to travel together with that failure.
  *
- * 붙여 넣은 스크린샷은 입력창과 **같은 길**로 붙는다(`attachFile` → 만드는 세션의 첨부 폴더). 앱 화면을 직접 찍어
- * 붙이는 것은 다음 단계다(플랜 C-5: WKWebView가 그 길을 열어 주지 않는다).
+ * A pasted screenshot attaches through **the same path** as the composer (`attachFile` → the builder
+ * session's attachment folder). Capturing the app's own view directly is a later step (plan C-5:
+ * WKWebView does not open that path).
  *
- * 만드는 세션이 없으면(손으로 만든 앱, 지운 세션, 만들 때 서지 못한 세션) 입력줄 대신 그 사실과 세우는 단추를 둔다.
- * 신뢰하지 않은 프로젝트의 앱에는 세울 수 없으므로 아무것도 두지 않는다.
+ * When there is no builder session (a hand-created app, a deleted session, or a session that failed
+ * to start when created), that fact and a button to start one take the place of the input row.
+ * Nothing at all is shown for an app in an untrusted project, since one cannot be started there.
  */
 export function FixBar({
   app,
@@ -41,13 +46,13 @@ export function FixBar({
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [busy, setBusy] = useState(false)
-  /** 방금 보낸 곳 — 다시 쓰기 시작하면 걷힌다 */
+  /** Where it was just sent to — cleared once typing starts again */
   const [sent, setSent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // 높이는 값에서 나온다 (입력창과 같은 규칙 — 보내고 비우면 높이도 돌아온다)
+  // The height follows the value (the same rule as the composer — sending and clearing also restores the height)
   useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
@@ -95,7 +100,7 @@ export function FixBar({
     setBusy(true)
     setError(null)
     try {
-      // 바이트(data)는 이 줄의 썸네일용이다 — host에는 저장된 경로만 간다(입력창과 같다)
+      // The raw bytes (data) exist only for this row's own thumbnail — only the stored path is sent to the host (same as the composer)
       const files = attachments.map(({ data: _data, ...a }) => a)
       await platform.apps.askBuilder({
         appId: app.appId,
@@ -108,7 +113,7 @@ export function FixBar({
       setAttachments([])
       setSent(builderName ?? 'the builder')
     } catch (e) {
-      // host의 말 그대로 — 쓴 글과 첨부는 남긴다(다시 보낼 수 있게)
+      // Exactly the host's own wording — the typed text and attachments are kept (so it can be sent again)
       setError((e as Error).message)
     } finally {
       setBusy(false)

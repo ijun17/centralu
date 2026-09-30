@@ -6,14 +6,14 @@ import { isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 
-/** 칸 하나의 생김새. 셋이 같은 모양이어야 '같은 종류의 답'으로 읽힌다 */
+/** What one field looks like. All three must share a shape to read as "the same kind of answer" */
 const inputClass =
   'w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none'
 
 /**
- * 이전 세션 목록의 상태.
- * 'unsupported'는 실패가 아니라 **정상적인 결과**다 — 구버전 도구는 목록을 못 준다.
- * 그때도 새 세션은 그대로 만들 수 있어야 하므로 오류로 취급하지 않는다.
+ * The state of the past sessions list.
+ * 'unsupported' is not a failure, it is **a normal outcome** — an older tool version cannot
+ * provide the list. A new session still has to be creatable then, so it is not treated as an error.
  */
 type PastState =
   | { status: 'loading' }
@@ -21,10 +21,11 @@ type PastState =
   | { status: 'unsupported'; reason: string }
 
 /**
- * 쉼표로 적은 목록 하나를 읽는다 (#76).
+ * Reads one comma-separated list (#76).
  *
- * 저장할 때(아래 copyFiles.split)와 **같은 규칙이어야 한다** — 후보 칩이 "이미 골랐나"를
- * 다르게 세면, 눌러 넣은 항목이 눌러도 안 빠지는 상태가 생긴다.
+ * **Must use the same rule** as when it is saved (copyFiles.split below) — if the suggestion chip
+ * counted "is this already picked" differently, a pressed-in item could end up unable to be pressed
+ * back out.
  */
 const splitList = (s: string): string[] =>
   s
@@ -32,7 +33,7 @@ const splitList = (s: string): string[] =>
     .map((f) => f.trim())
     .filter(Boolean)
 
-/** 630MB · 8.5GB — 자릿수만 맞으면 된다. 이 숫자는 정확도가 아니라 규모를 말한다 */
+/** 630MB · 8.5GB — only the order of magnitude has to be right. This number states scale, not precision */
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n}B`
   const kb = n / 1024
@@ -41,7 +42,7 @@ function fmtBytes(n: number): string {
   return mb < 1024 ? `${Math.round(mb)}MB` : `${(mb / 1024).toFixed(1)}GB`
 }
 
-/** 방금 · 32분 전 · 3시간 전 · 5일 전 — 정확한 시각보다 '얼마나 됐나'가 중요하다 */
+/** just now · 32m ago · 3h ago · 5d ago — "how long ago" matters more than the exact time */
 function ago(ms: number): string {
   const min = Math.floor((Date.now() - ms) / 60000)
   if (min < 1) return 'just now'
@@ -53,22 +54,25 @@ function ago(ms: number): string {
 }
 
 /**
- * 세션 생성 (FR-7).
+ * Session creation (FR-7).
  *
- * **여기서 고르는 것은 도구와 "새로 시작 vs 이어가기"뿐이다.** 모델·권한은 세션을
- * 만든 뒤 헤더에서 바꾼다 — 시작하기 전에 정할 수 있는 것보다, 대화하며 바꿀 수
- * 있는 것이 실제로 더 유용하다. (도구만 예외인 이유: 프로세스 자체라 도중에 못 바꾼다)
+ * **The only things chosen here are the tool and "start fresh vs. resume."** Model and permissions
+ * are changed from the header after the session is created — something changeable while talking to
+ * it is actually more useful than something fixed before starting. (Tool is the one exception,
+ * because it is the process itself and cannot be changed partway through.)
  *
- * **첫 프롬프트 입력칸은 없다** (2026-08-27 도그푸딩: "조잡하고, 필요 없지 않나").
- * 만들자마자 입력창이 있는 화면으로 가는데 모달에서 미리 쓸 이유가 없다 — 세션
- * 이름이 되는 규칙(FR-18)도 입력창의 첫 메시지에 똑같이 적용된다 (manager가 send에서
- * 'New session'을 첫 문장으로 바꾼다). 소제목·안내문도 같은 이유로 걷어냈다:
- * 이 창의 본체는 대화 목록 하나다.
+ * **There is no first-prompt input field** (dogfooding, 2026-08-27: "this feels crude, and is it
+ * even necessary?"). It goes straight to a screen with its own input field the moment it is
+ * created, so there is no reason to type ahead of that in a dialog — the rule for what becomes the
+ * session name (FR-18) applies identically to the input field's first message (the manager rewrites
+ * the first sentence sent as 'New session'). The subheading and helper text were removed for the
+ * same reason: this dialog's body is nothing but the conversation list.
  *
- * 틀은 다른 창(Settings·Inbox)과 같다 — **머리 고정 / 본체 스크롤 / 발 고정.**
- * 도구와 시작 버튼은 창이 얼마나 길어지든 제자리에 있어야 하고, 길어지는 것은
- * 가운데(대화 목록·워크트리 설정)뿐이다. 예전에는 창 전체가 자라서, 워크트리를 켜고
- * 후보를 펼치면 시작 버튼이 화면 밖으로 밀려났다.
+ * The frame matches the other dialogs (Settings, Inbox) — **fixed header / scrolling body / fixed
+ * footer.** The tool row and the start button must stay in place no matter how long the dialog
+ * grows, and only the middle (the conversation list, worktree settings) is allowed to grow. The
+ * whole dialog used to grow instead, and turning on the worktree option and expanding the
+ * suggestions pushed the start button off screen.
  */
 export function NewSessionDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const platform = usePlatform()
@@ -76,12 +80,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const createSession = useStore((s) => s.createSession)
   const saveWorktreeSetup = useStore((s) => s.saveWorktreeSetup)
   const running = useSessionsOf(projectId)
-  // 워크트리는 깃 저장소에서만 만들 수 있다 — 아니면 체크박스를 죽이고 이유를 적는다
+  // A worktree can only be created in a git repository — otherwise the checkbox is disabled and the reason is stated
   const isRepo = !!project?.git
 
   /**
-   * 필을 세우는 목록은 접속할 때 받아 둔 것이고, 아래 `tools`는 **이 창을 열면서 다시**
-   * 물어본 것이다. 목록은 바뀔 일이 없지만 설치·로그인 여부는 방금 바뀌었을 수 있다.
+   * The list that builds the row of tool buttons is what was received at connect time, while
+   * `tools` below is asked for **again, when this dialog opens.** The list itself never changes,
+   * but whether a tool is installed or logged in may have just changed.
    */
   const allTools = useTools()
   const [tools, setTools] = useState<ToolStatus[] | null>(null)
@@ -89,22 +94,25 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const toolMeta = useToolMeta(tool)
   const [busy, setBusy] = useState(false)
   /**
-   * 이 세션만 워크트리에서 돌린다 (FR-2 옵션).
+   * Run only this session in a worktree (an FR-2 option).
    *
-   * **기본은 꺼짐이다.** 스펙이 정한 원칙이 "원본 디렉토리에서 직접 작업"이고,
-   * 워크트리는 원하는 사람만 켜는 격리 수단이다. 예외는 매니저 줄의 +로 열린
-   * 경우 하나 (#69) — 거기서는 켜진 채 열린다. 강제가 아니라 예열이다: 끄는 건 자유고,
-   * 초기값이라 열려 있는 동안 스토어를 다시 읽지 않는다 (mount마다 한 번).
+   * **Defaults to off.** The spec's stated principle is "work directly in the original directory,"
+   * and a worktree is an isolation mechanism that only a person who wants it turns on. The one
+   * exception is opening it from the + on a manager row (#69) — there it opens already turned on.
+   * That is a head start, not a requirement: turning it off is free, and since this is only the
+   * initial value, the store is not re-read again while the dialog stays open (read once per mount).
    */
   const [worktree, setWorktree] = useState(useStore.getState().newSessionWorktree)
   /**
-   * 브랜치 이름 (#69). 브랜치 이름이 곧 세션 이름이자 디렉토리 이름 — 사실상 영구라
-   * 만들기 전에 정할 자리가 있어야 한다. 비우면 host가 자동 이름을 쓴다 (강제 없음).
+   * The branch name (#69). The branch name is also the session name and the directory name —
+   * effectively permanent, so there has to be a place to set it before creation. Leaving it blank
+   * lets the host use an automatic name (no requirement to fill it in).
    */
   const [branch, setBranch] = useState(useStore.getState().newSessionBranch)
   /**
-   * 프로비저닝 (#69). 저장된 설정이 있으면 접힌 요약으로, 없으면(첫 사용) 펼친 채 —
-   * 처음 "아, node_modules 깔아야 하는데"가 떠오르는 순간에 입력칸이 눈앞에 있어야 한다.
+   * Provisioning (#69). Shown as a collapsed one-line summary if a setting is already saved, and
+   * expanded if there is none (first use) — right when the thought "oh, node_modules needs to be
+   * installed" first comes up, the input field needs to already be in front of the person.
    */
   const savedSetup = project?.worktreeSetup ?? null
   const [setupOpen, setSetupOpen] = useState(!savedSetup)
@@ -112,25 +120,30 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const [copyFiles, setCopyFiles] = useState(savedSetup?.copyFiles.join(', ') ?? '')
   const [error, setError] = useState<string | null>(null)
   /**
-   * 복사 후보 (#76) — git이 무시하는 것들, 곧 **새 워크트리에 없을 것들**.
+   * Copy candidates (#76) — things git ignores, in other words **things that will be missing from
+   * the new worktree.**
    *
-   * 목록을 내밀되 앱이 고르지는 않는다: "무시된 건 전부 복사"를 기본값으로 삼으면 이
-   * 저장소에서만 node_modules 637MB + Rust target 8.5GB가 딸려 온다. 대신 크기를 함께
-   * 보여준다 — 이 목록에서 사람이 실제로 하는 판단이 "이건 너무 크다"라서다.
-   * 워크트리를 켰을 때만 물어본다 (안 쓸 목록을 위해 du를 돌리지 않는다).
+   * The list is offered, but the app does not pick for the person: defaulting to "copy everything
+   * ignored" would drag in 637MB of node_modules plus an 8.5GB Rust target in this repository alone.
+   * The size is shown alongside instead — the judgment a person actually makes from this list is
+   * "this one is too big." It is only asked for once the worktree option is turned on (no need to
+   * run `du` for a list that will not be used).
    */
   /**
-   * 어디서 갈라질까 (사용자 지적 2026-09-07: "워커 만들 때 어디 브랜치에서 가져올지 정하는 게 없다").
+   * Where it branches off from (user finding, 2026-09-07: "when creating a worker, there is no way
+   * to choose which branch to fork from").
    *
-   * 기본값은 프로젝트의 줄기(매니저가 정한 것), 없으면 지금 브랜치 — 즉 **지금까지
-   * 조용히 일어나던 일을 글자로 적어 둔 것**이다. 목록은 거들 뿐이라 못 읽어도 만들기를
-   * 막지 않는다 (매니저 창과 같은 규칙).
+   * The default is the project's trunk (as set by the manager), or the current branch if there is
+   * none — in other words, **something that used to happen silently, now written out in words.**
+   * The list only assists, so being unable to read it does not block creation (the same rule as the
+   * manager dialog).
    */
   const trunk = project?.worktreeManager?.baseBranch || project?.git?.branch || ''
   /**
-   * null = 아직 손대지 않음 → 화면은 줄기를 보여준다. 빈 문자열은 **사람이 지운 것**이라
-   * 다르게 다룬다(그때는 host의 순서에 맡긴다). 상태를 줄기로 초기화하면 깃 정보가
-   * 늦게 오는 저장소에서 칸이 빈 채로 굳는다.
+   * null = untouched so far → the field shows the trunk. An empty string is **something the person
+   * cleared** and is handled differently (left to the host's own order in that case). Initializing
+   * the state to the trunk would leave the field frozen empty in a repository where git information
+   * arrives late.
    */
   const [base, setBase] = useState<string | null>(null)
   const baseValue = base ?? trunk
@@ -160,30 +173,32 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
     }
   }, [isRepo, worktree, ignored, platform, projectId])
 
-  // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)
+  // The past session to resume. null means 'new session' (the default)
   const [resume, setResume] = useState<ExternalSession | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const focusSession = useStore((s) => s.focusSession)
   const [past, setPast] = useState<PastState>({ status: 'loading' })
 
   /**
-   * 화살표로 고른 줄이 접힌 목록 밖에 있으면 따라간다 — **선택이 바뀔 때만**.
+   * Follows the row picked by the arrow keys when it is outside the collapsed list's view —
+   * **only when the selection changes.**
    *
-   * 예전에는 줄 자신의 `ref` 콜백에서 불렀다. 인라인 ref는 함수 정체가 매 렌더마다
-   * 달라져 React가 떼었다 다시 붙이므로, **렌더할 때마다** scrollIntoView가 돌았다.
-   * 이 창은 스토어를 구독하니(프로젝트·세션 목록) 세션 하나만 돌고 있어도 이벤트마다
-   * 다시 그려지고, 그때마다 목록이 선택된 줄로 도로 끌려갔다 — 워크트리를 켜서 창이
-   * 길어졌을 때 "스크롤이 잠시 뒤 맨 위로 돌아간다"가 이것이다 (도그푸딩 2026-09-07,
-   * 실측: 이벤트 한 번에 바깥 324→13, 안쪽 1140→0).
+   * This used to be called from the row's own `ref` callback. An inline ref's function identity is
+   * different on every render, so React detaches and reattaches it, which meant scrollIntoView ran
+   * **on every render.** This dialog subscribes to the store (the project, the session list), so
+   * even with just one session running, it re-renders on every event, and each time the list got
+   * yanked back to the selected row — this is what "the scroll position snaps back to the top after
+   * a moment" was, once the dialog grew from turning the worktree option on (dogfooding, 2026-09-07;
+   * measured: one event took the outer value from 324 to 13, the inner one from 1140 to 0).
    *
-   * `block: 'nearest'`라 이미 보이는 줄에는 아무 일도 하지 않는다 — 마우스로 고를 때
-   * 화면이 튀지 않는 이유가 그것이다.
+   * `block: 'nearest'` means nothing happens for a row already visible — that is why the screen does
+   * not jump while picking with the mouse.
    */
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [resume?.externalId])
 
-  // 다이얼로그를 열 때마다 감지한다 — 사용자가 방금 설치·로그인했을 수 있다
+  // Detected every time the dialog opens — the person may have just installed or logged in
   const detect = useCallback(async () => {
     try {
       setTools(await platform.agents.detect())
@@ -195,7 +210,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
     void detect()
   }, [detect])
 
-  // 도구를 바꾸면 목록도 바뀐다 — 이전 선택은 다른 도구의 것이므로 버린다
+  // Changing the tool changes the list too — the previous selection belonged to a different tool, so it is discarded
   useEffect(() => {
     let alive = true
     setResume(null)
@@ -217,14 +232,16 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   }, [platform, projectId, tool])
 
   /**
-   * 둘 중 **하나만** 쓸 수 있어도 앱은 정상으로 동작해야 한다 (제품 규칙).
+   * The app has to work normally even when only **one** of the two tools is usable (a product
+   * rule).
    *
-   * 기본 도구가 못 쓰는 상태인데 다른 하나가 멀쩡하면 **말없이 그쪽으로 옮긴다.**
-   * 안 그러면 Codex만 쓰는 사람이 다이얼로그를 열 때마다 "Claude에 로그인하라"는
-   * 벽을 만나고, 안 쓰는 도구에 로그인해야 창이 열린다 — 이 앱의 원칙("워크플로를
-   * 강요하지 않는다")에 정면으로 어긋난다.
+   * If the default tool is unusable but the other one works fine, this **silently switches to it.**
+   * Otherwise, a person who only uses Codex would hit a "log in to Claude" wall every time they
+   * opened the dialog, needing to log into a tool they never use just to open it — a direct
+   * violation of this app's principle ("do not force a workflow on the person").
    *
-   * 감지 결과가 처음 온 순간 **한 번만** 옮긴다. 그 뒤 사용자가 고른 것은 건드리지 않는다.
+   * The switch happens **exactly once**, the moment detection results first arrive. Anything the
+   * person picks after that is left untouched.
    */
   const autoPicked = useRef(false)
   useEffect(() => {
@@ -244,7 +261,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   }
   const blocked = tools ? !usable(tool) : false
 
-  // 복사로 딸려올 무게 — 이 목록에서 사람이 하는 판단이 "이건 너무 크다"라서 합계를 보여준다
+  // The weight that copying would drag along — the judgment a person makes from this list is "this is too big," so a total is shown
   const picks = splitList(copyFiles)
   const pickedBytes = (ignored ?? [])
     .filter((e) => picks.includes(e.path))
@@ -257,14 +274,18 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         onKeyDown={(e) => {
           if (e.key === 'Escape') return onClose()
           /*
-           * 목록이 이 창의 본체이므로 화살표가 목록을 고른다 — 마우스 없이
-           * ⌘N → ↓↓ → ↵ 로 이어가기가 끝나야 한다. 이미 열린 대화는 건너뛴다:
-           * 그 줄의 클릭은 '이동+닫기'라 화살표로 지나가다 창이 닫히면 안 된다.
+           * The list is this dialog's body, so the arrow keys pick within it — resuming has to be
+           * completable without a mouse, as ⌘N → ↓↓ → ↵. An already-open conversation is skipped
+           * over: clicking that row means "jump to it and close," and the dialog must not close
+           * while just passing over it with the arrow keys.
            */
           /*
-           * **입력칸 안의 화살표는 그 칸의 것이다** (#181). 폼 전체에 걸린 이 처리가 대상을 보지 않던 동안, Branch 칸에서
-           * 커서를 옮기려고 누른 ↓가 지난 대화를 조용히 골랐고(버튼이 Start → Load), 이어서 누른 Enter는 새 대화가
-           * 아니라 그 대화를 이어 붙였다. From 칸의 후보 목록(datalist)도 ↓로 열리지 않았다.
+           * **An arrow key inside an input field belongs to that field** (#181). While this handler,
+           * attached to the whole form, was not checking the target, a ↓ pressed in the Branch
+           * field to move the cursor silently picked a past conversation instead (the button changed
+           * from Start to Load), and the Enter pressed right after resumed that conversation instead
+           * of starting a new one. The From field's suggestion list (datalist) also failed to open
+           * on ↓.
            */
           if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && past.status === 'ok' && !isTextEntry(e.target)) {
             e.preventDefault()
@@ -280,9 +301,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           setError(null)
           try {
             /*
-             * 프로비저닝 설정은 **만들기 전에** 저장한다 (#69) — host가 워크트리를 만들면서
-             * 저장된 설정을 읽어 돌리므로, 순서가 바뀌면 방금 적은 셋업이 이번 생성에는
-             * 적용되지 않는다. 바뀌었을 때만 왕복한다.
+             * The provisioning setting is saved **before** creation (#69) — the host reads and runs
+             * the saved setting while creating the worktree, so if the order were reversed, the
+             * setup just typed would not apply to this creation. The round trip only happens when
+             * it actually changed.
              */
             if (worktree && setupOpen) {
               const next = { command: setupCommand.trim(), copyFiles: splitList(copyFiles) }
@@ -294,18 +316,18 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             }
             await createSession(projectId, {
               tool,
-              // 이전 세션을 골랐다면 도구에게 그 대화를 이어달라고 하고(resume),
-              // 화면에도 지난 대화를 복원한다(importHistory).
+              // If a past session was picked, the tool is asked to resume that conversation (resume),
+              // and the past conversation is also restored on screen (importHistory).
               resumeExternalId: resume?.externalId,
               importHistory: resume ? true : undefined,
               worktree: worktree || undefined,
               worktreeBranch: (worktree && branch.trim()) || undefined,
-              // 화면에 적힌 그대로 보낸다 — 비었을 때만 host의 순서(줄기 → HEAD)에 맡긴다
+              // Sent exactly as written on screen — only when empty is it left to the host's own order (trunk → HEAD)
               worktreeBase: (worktree && baseValue.trim()) || undefined,
             })
             onClose()
           } catch (err) {
-            // 토스트는 2.5초 뒤 사라져서 '눌러도 아무 일이 없다'로 보인다 — 모달 안에 남긴다
+            // A toast disappears after 2.5 seconds and would look like "nothing happened when pressed" — kept inside the modal instead
             setError((err as Error).message)
           } finally {
             setBusy(false)
@@ -313,16 +335,17 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         }}
       >
         {/*
-          머리는 고정하고 본체만 구른다 (Settings·Inbox와 같은 틀) — 워크트리를 켜면
-          입력칸과 후보 칩이 붙어 창이 화면 밖으로 자라던 자리다. 시작 버튼은
-          아래 붙박이라 어디까지 스크롤했든 항상 손에 있다.
+          The header stays fixed and only the body scrolls (the same frame as Settings and Inbox) —
+          this is exactly where turning on the worktree option used to add fields and suggestion
+          chips and grow the dialog off screen. The start button is pinned at the bottom, so it stays
+          within reach no matter how far the scroll has gone.
         */}
         <header className="shrink-0 border-b border-edge px-4 py-2.5">
           <h2 className="text-[13px] font-medium text-chalk">
             New session <span className="text-slate">·</span>{' '}
             <span className="text-ash">{project?.name}</span>
           </h2>
-          {/* 도구 — 소제목 없이 필 두 개면 뜻이 선다. 모델·권한은 만든 뒤 헤더에서 */}
+          {/* The tool — two buttons need no subheading to make their meaning clear. Model and permissions are set from the header after creation */}
           <div className="mt-2.5 flex gap-1.5">
             {allTools.map((t) => (
               <button
@@ -341,7 +364,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               </button>
             ))}
           </div>
-          {/* 못 쓰는 이유를 숨기지 않는다 — 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 */}
+          {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
           {blocked && (
             <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="tool-blocked">
               {info(tool)?.installed
@@ -353,8 +376,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {/*
-          이 창의 본체. 터미널에서 하던 대화를 그대로 끌고 올 수 있어야
-          이 앱이 '또 하나의 창'이 되지 않는다.
+          This dialog's body. Being able to carry a conversation over exactly as it was in the
+          terminal is what keeps this app from becoming 'just another window.'
         */}
           <div
             ref={listRef}
@@ -373,7 +396,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 Looking for past conversations…
               </p>
             )}
-            {/* 구버전 도구를 쓴다고 새 세션까지 막지 않는다 — 이유만 조용히 알린다 */}
+            {/* Using an older tool version does not block a new session too — only the reason is quietly stated */}
             {past.status === 'unsupported' && (
               <p
                 className="px-2.5 py-2 text-[11px] leading-relaxed text-slate"
@@ -393,8 +416,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   key={s.externalId}
                   selected={resume?.externalId === s.externalId}
                   onSelect={() => {
-                    // 이미 열려 있으면 또 만들지 않는다 — 그 세션으로 데려간다.
-                    // 표시만 하고 클릭을 막지 않았더니 같은 대화가 목록에 둘 생겼다 (실측).
+                    // Does not create another one if it is already open — jumps to that session instead.
+                    // Marking it visually without blocking the click used to let the same conversation end up twice in the list (measured).
                     if (s.importedAs) {
                       focusSession(s.importedAs)
                       onClose()
@@ -405,11 +428,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   testId={`past-${s.externalId}`}
                   title={s.title}
                   /*
-                  제목은 도구가 주는 것이고, 도구마다 뜻이 다르다:
-                    Claude — 요약(대화 전체를 대표한다)
-                    Codex  — **첫 사용자 메시지** (며칠 이어온 대화도 맨 처음 주제로 보인다)
-                  그래서 "언제까지 이어졌나"를 제목 옆에 분명히 적는다 —
-                  안 그러면 최근 대화가 옛날 것처럼 보여서 못 찾는다 (도그푸딩 지적).
+                  The title comes from the tool, and it means something different per tool:
+                    Claude — a summary (represents the whole conversation)
+                    Codex  — **the first user message** (even a conversation carried on for days
+                             shows as its very first topic)
+                  So "how recently it was last continued" is stated plainly next to the title —
+                  otherwise a recent conversation looks old and cannot be found (a dogfooding
+                  finding).
                 */
                   meta={[
                     `last ${ago(s.updatedAt)}`,
@@ -423,9 +448,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           </div>
 
           {/*
-          경고와 해법을 같은 자리에 둔다 — "같은 파일을 고치면 유실될 수 있다"의 해법이
-          워크트리다. 체크박스는 저장소일 때만 그린다: 쓸 수 없는 옵션의 설명은
-          만들기라는 일에는 소음이다.
+          The warning and its solution are placed in the same spot — the solution to "editing the
+          same files can lose changes" is a worktree. The checkbox is only drawn for a repository:
+          explaining an option that cannot even be used is noise for the task of creating a session.
         */}
           {running.length > 0 && (
             <p className="mt-2.5 text-[11px] leading-relaxed text-ash" data-testid="concurrent-warning">
@@ -451,10 +476,12 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             </label>
           )}
           {/*
-          켰을 때만 세부를 묻고, 물을 때는 **한 덩어리로** 묶는다 (삭제 확인 창의 워크트리
-          칸과 같은 모양) — 전체폭 입력칸이 그냥 쌓이면 체크박스에 딸린 것인지, 창에
-          딸린 것인지 눈으로 안 갈린다. 이름이 곧 세션 이름·디렉토리 이름이라(사실상 영구)
-          만들기 전이 정할 유일한 순간이다.
+          Details are only asked for once it is turned on, and when they are, they are grouped
+          **into one block** (the same shape as the worktree field in the delete confirmation
+          dialog) — stacking full-width input fields plainly would leave it unclear to the eye
+          whether they belong to the checkbox or to the dialog as a whole. Since the name becomes
+          both the session name and the directory name (effectively permanent), before creation is
+          the one and only moment to set it.
         */}
           {isRepo && worktree && (
             <div
@@ -462,9 +489,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               data-testid="worktree-options"
             >
               {/*
-                빈 칸의 결과를 적는다 (도그푸딩 2026-09-07: "이름 안 넣으면 브랜치명 뭐야?").
-                "blank = auto"는 자동이라는 사실만 말하고 무엇이 되는지는 안 말한다 —
-                host가 짓는 이름은 `centralu/<세션 id 앞 8자>`다 (manager.ts).
+                States what an empty field results in (dogfooding, 2026-09-07: "if I don't enter a
+                name, what does the branch get called?"). "blank = auto" only states the fact that
+                it is automatic, not what it becomes — the name the host derives is
+                `centralu/<first 8 chars of the session id>` (manager.ts).
               */}
               <Field label="Branch" hint="blank = centralu/<session id>">
                 <input
@@ -477,7 +505,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   className={inputClass}
                 />
               </Field>
-              {/* 새 브랜치가 **어디서** 갈라지는가 — 예전에는 화면 어디에도 없던 사실이다 */}
+              {/* **Where** the new branch forks from — a fact that used to live nowhere on screen */}
               <Field label="From" hint="the new branch forks from here">
                 <input
                   type="text"
@@ -496,9 +524,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 </datalist>
               </Field>
               {/*
-              프로비저닝 (#69) — 새 워크트리는 빈 작업대다 (추적 파일만 있고 node_modules도
-              gitignored .env도 없다). 여기 적은 것이 생성 때 자동으로 돈다: 복사 → 셋업.
-              저장돼 있으면 한 줄 요약으로 접는다 — 매번 펼치면 확인할 것 없는 확인이 된다.
+              Provisioning (#69) — a new worktree is an empty workbench (only tracked files exist:
+              no node_modules, no gitignored .env). What is written here runs automatically at
+              creation time: copy, then setup. When it is saved, it collapses to a one-line summary —
+              always expanding it would make it a confirmation with nothing to confirm.
             */}
               {setupOpen ? (
                 <div className="space-y-2.5" data-testid="worktree-setup-edit">
@@ -524,8 +553,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                       className={inputClass}
                     />
                     {/*
-                    후보를 **짚어만 준다** (#76). 누르면 위 칸에 들어가고, 다시 누르면 빠진다 —
-                    칸이 여전히 진실이라 손으로 친 것과 눌러 넣은 것이 갈리지 않는다.
+                    Candidates are only **pointed at** (#76). Pressing one adds it to the field
+                    above, pressing again removes it — the field remains the single source of truth,
+                    so something typed by hand and something added by pressing a chip are not
+                    distinguished from each other.
                   */}
                     {ignored && ignored.length > 0 && (
                       <div className="mt-1.5" data-testid="worktree-ignored-suggestions">
@@ -559,9 +590,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                           })}
                         </ul>
                         {/*
-                        고른 것의 **합계**를 적는다. 칩마다 크기가 붙어 있어도 사람은 그걸 더하지
-                        않는다 — Rust target 하나로 8.5GB가 붙는 저장소에서, 합계가 없으면
-                        워크트리를 만들고 나서야 무게를 안다.
+                        States the **total** of what is picked. Even with a size attached to every
+                        chip, a person does not add them up mentally — in a repository where the
+                        Rust target alone adds 8.5GB, without a total the weight would only be known
+                        after the worktree is already created.
                       */}
                         {picks.length > 0 && (
                           <p className="mt-1.5 text-[10px] text-slate" data-testid="copy-total">
@@ -601,9 +633,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         </div>
 
         {/*
-          단축키 안내는 걷어냈다 (2026-09-02 도그푸딩) — ↑↓·↵·esc는 목록이 있는 창이면
-          어차피 손이 먼저 아는 것이고, 매번 읽히는 자리에 놓기엔 값이 너무 작다.
-          동작은 그대로다: 안내만 없앴다.
+          The shortcut hint was removed (dogfooding, 2026-09-02) — ↑↓, ↵ and esc are things the hand
+          already knows in any dialog with a list, and the value is too small for a spot that gets
+          read every time. The behavior is unchanged: only the hint text is gone.
         */}
         <footer className="flex shrink-0 justify-end gap-2 border-t border-edge px-4 py-2.5">
           <button
@@ -614,7 +646,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             Cancel
           </button>
           <button
-            /* 입력칸이 사라졌으므로 Enter가 곧 시작이다 — 기본 포커스가 여기 있어야 한다 */
+            /* Since the input field is gone, Enter means start — this needs to hold the default focus */
             autoFocus
             className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
             disabled={busy || blocked}
@@ -629,15 +661,17 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 }
 
 /**
- * 라벨 + 칸.
+ * A label plus a field.
  *
- * 긴 안내를 placeholder에 넣던 것을 라벨로 올렸다 — placeholder는 **타이핑을 시작하는
- * 순간 사라져서**, 정작 "여기 뭘 적는 칸이었지"를 되묻는 순간에는 없다. 게다가 480px
- * 창에서 "Setup command, runs once in the new worktree (e.g. pnpm install)"는 잘려서
- * 끝까지 읽히지도 않았다.
+ * A long instruction that used to live in the placeholder was moved up into the label — a
+ * placeholder **disappears the moment typing starts**, so it is gone exactly when the person needs
+ * to ask again "what was I supposed to put here." On top of that, in a 480px dialog, "Setup command,
+ * runs once in the new worktree (e.g. pnpm install)" got truncated and could not even be read in
+ * full.
  *
- * label 대신 div인 이유: 이 안에 후보 칩(버튼)이 들어가는데, label 안의 클릭은 칸으로
- * 넘어간다 — 칩을 누를 때마다 입력칸이 잡히는 건 고르기를 방해한다.
+ * Why a div instead of a label: a suggestion chip (a button) sits inside it, and a click inside a
+ * label passes through to the field — the input field grabbing focus every time a chip is pressed
+ * would get in the way of picking one.
  */
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -652,8 +686,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /**
- * 목록 한 줄. 선택은 밝기로만 말한다 (무채색 규칙) —
- * 체크박스를 그리면 '설정'처럼 보이고, 여기서 하는 일은 고르기다.
+ * One list row. Selection is stated by brightness alone (the grayscale rule) — drawing a checkbox
+ * would make it look like a setting, and picking is what this actually does.
  */
 function PastRow({
   selected,

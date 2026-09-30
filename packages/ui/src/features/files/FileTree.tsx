@@ -9,8 +9,9 @@ import { hasDragFiles, hasDragPath, readDragPath, setDragPath } from './dragPath
 import { TabActions } from '../evidence/tabActions.jsx'
 
 /**
- * 파일 트리 (FR-5, C-2).
- * lazy 로드 — 열어본 디렉토리만 읽는다. 10k+ 저장소에서도 첫 렌더가 가벼워야 한다.
+ * The file tree (FR-5, C-2).
+ * A lazy load — only a directory that has actually been opened is read. The first render has to
+ * stay light even in a repository with 10k+ files.
  *
  * **Ignored files are shown by default** (issue #17). They used to be hidden until you
  * found this checkbox, and a hidden row does not look filtered — it looks like the file is
@@ -40,12 +41,13 @@ export function FileTree({ projectId }: { projectId: string }) {
   const [menu, setMenu] = useState<MenuState | null>(null)
 
   /*
-   * 바꾼 쪽이 다시 읽으라고 알려준다.
+   * The side that made a change signals that it should be re-read.
    *
-   * 우리가 바꾼 직후에는 감시자(#34)를 기다릴 이유가 없다 — 무엇이 바뀌었는지 이미
-   * 아는 시점이므로 **바뀐 디렉토리만** 즉시 표를 올린다. 트리 전체를 다시 읽는 쪽이
-   * 짧게 끝나지만, 열어둔 폴더가 스무 개인 저장소에서는 옮기기 한 번이 목록 요청 스무 개가
-   * 된다 — 이 파일 머리말의 lazy 원칙이 막으려는 것이 그것이다.
+   * Right after we make a change ourselves, there is no reason to wait for the watcher (#34) — the
+   * moment already knows what changed, so **only the changed directory's** stamp is bumped
+   * immediately. Re-reading the whole tree would be the shorter code, but in a repository with
+   * twenty folders expanded, one move would turn into twenty list requests — exactly what this
+   * file's header comment's lazy principle exists to prevent.
    */
   const refresh = useCallback((...dirs: string[]) => {
     setVersion((v) => {
@@ -56,24 +58,27 @@ export function FileTree({ projectId }: { projectId: string }) {
   }, [])
 
   /*
-   * 그리고 이제 **밖에서 바꾼 것도** 알려온다 (#34).
+   * And now **a change made outside** is also reported (#34).
    *
-   * 감시 집합은 펼쳐진 디렉토리 그 자체다 — 저장소 전체가 아니라. lazy 트리가
-   * 안 읽은 폴더는 화면에 없으니 감시할 이유도 없고, 그 덕에 Linux의 inotify
-   * 상한(디렉토리당 워치 하나)에도 안 닿는다. 루트('')는 늘 보이므로 늘 넣는다.
+   * The watched set is exactly the expanded directories — not the whole repository. A folder the
+   * lazy tree has not read is not on screen, so there is no reason to watch it either, and that
+   * keeps it from ever hitting Linux's inotify limit (one watch per directory). The root ('') is
+   * always visible, so it is always included.
    *
-   * 위의 refresh(우리가 바꾼 직후)와 같은 표를 쓴다 — 바뀌었다는 사실의 출처가
-   * 우리든 Finder든 에이전트든, 화면이 할 일은 같은 "그 디렉토리만 다시 읽기"다.
+   * This uses the same stamp table as `refresh` above (right after we make a change ourselves) —
+   * whether the source of "it changed" is us, Finder, or an agent, the screen's job is the same:
+   * "re-read that one directory."
    */
   const platform = usePlatform()
   const expanded = useStore((s) => s.expandedDirs[projectId])
   useEffect(() => {
-    // 등록 실패로 트리가 죽으면 안 된다 — 감시는 곁눈이지 본업이 아니다
+    // A failed watch registration must not break the tree — watching is a side glance, not the main job
     void platform.fs.watch(projectId, ['', ...(expanded ?? [])]).catch(() => {})
   }, [platform, projectId, expanded])
   useEffect(() => {
-    // 프로젝트를 떠날 때만 감시를 걷는다. 펼침이 바뀔 때마다 걷었다 다시 걸면
-    // 그 사이의 변화를 놓친다 — 위 효과는 집합을 갈아끼우기만 한다.
+    // The watch is only torn down when leaving the project. Tearing it down and re-setting it
+    // every time the expanded set changes would miss whatever changed in between — the effect
+    // above only swaps out the watched set.
     return () => {
       void platform.fs.watch(projectId, []).catch(() => {})
     }
@@ -87,12 +92,12 @@ export function FileTree({ projectId }: { projectId: string }) {
   )
 
   /*
-   * 지금 겨누고 있는 폴더는 **하나뿐이다.**
+   * There is **only one** folder currently being targeted.
    *
-   * 처음엔 자리마다 자기 상태를 들고 있었는데, 안쪽 폴더가 드롭을 가로채면(가장 가까운
-   * 자리가 이긴다) 바깥 폴더는 커서가 떠난 것을 알 방법이 없어 둘 다 밝은 채로 남았다.
-   * 밝은 자리가 둘이면 어디로 갈지 화면이 답을 두 개 하는 셈이다 — 답이 하나뿐인 사실은
-   * 상태도 하나여야 한다.
+   * Each row used to hold its own state at first, but when an inner folder intercepted the drop (the
+   * closest one wins), the outer folder had no way to know the cursor had left it, and both stayed
+   * lit. Two lit spots means the screen gives two answers to "where will it go" — a fact that has
+   * only one answer needs to be tracked as only one piece of state.
    */
   const [hover, setHover] = useState<string | null>(null)
   const ops = useFileOps(projectId, refresh)
@@ -106,8 +111,9 @@ export function FileTree({ projectId }: { projectId: string }) {
     <TreeCtx.Provider value={ctx}>
       <section className="flex min-h-0 flex-1 flex-col" data-testid="file-tree">
         {/*
-          제어는 탭 띠의 오른쪽 끝에 산다 (사용자 요청 2026-09-07) — 여기서 머리띠를 또
-          그리면 'Files' 탭 바로 아래에 'Project files'라고 한 번 더 쓰는 셈이었다.
+          Controls live at the right end of the tab strip (user request, 2026-09-07) — drawing yet
+          another header bar here would have effectively written "Project files" a second time
+          directly under the 'Files' tab.
         */}
         <TabActions>
           {/* 'Ignored' alone read as a state, not an action — it is the showing that is optional */}
@@ -133,10 +139,11 @@ export function FileTree({ projectId }: { projectId: string }) {
 }
 
 /**
- * 목록이 사는 자리이자 **프로젝트 루트의 드롭 자리**.
+ * Where the list lives, and also **the project root's drop target**.
  *
- * 마지막 줄 아래의 빈 공간이 루트를 뜻한다. 이게 없으면 폴더 안의 것을 다시 밖으로 꺼낼
- * 방법이 없다 — 루트는 자기 줄이 없는 유일한 디렉토리라서 겨눌 데가 없다.
+ * The empty space below the last row stands for the root. Without it, there would be no way to pull
+ * something inside a folder back out — the root is the one directory with no row of its own, so
+ * there is nowhere else to target it.
  */
 function TreeRoot({ projectId, showIgnored }: { projectId: string; showIgnored: boolean }) {
   const drop = useDropTarget('')
@@ -156,11 +163,11 @@ type MenuState = { target: MenuTarget; x: number; y: number }
 
 type TreeContext = {
   projectId: string
-  /** 다시 읽어야 하는 디렉토리마다 올라가는 표 — 감시자 대신이다 */
+  /** A stamp bumped for each directory that needs re-reading — stands in for a watcher */
   version: Record<string, number>
   ops: FileOps
   openMenu: (target: MenuTarget, x: number, y: number) => void
-  /** 지금 겨누고 있는 폴더 (`''`는 루트). 화면에서 밝은 자리는 언제나 하나다 */
+  /** The folder currently targeted (`''` is the root). Only one spot on screen is ever lit at a time */
   hover: string | null
   setHover: (dir: string | null) => void
 }
@@ -173,20 +180,21 @@ function useTree(): TreeContext {
   return ctx
 }
 
-/** `src/app/a.ts` → `src/app`. 루트는 빈 문자열 — listDir이 쓰는 표기 그대로다 */
+/** `src/app/a.ts` → `src/app`. The root is an empty string — exactly the notation listDir uses */
 function parentOf(path: string): string {
   const cut = path.lastIndexOf('/')
   return cut < 0 ? '' : path.slice(0, cut)
 }
 
 /**
- * 트리가 파일에 하는 네 가지 (#18, #19).
+ * The four things the tree does to files (#18, #19).
  *
- * **성공은 조용하고 실패는 시끄럽다.** 옮긴 결과는 줄이 움직이는 것으로 이미 보이므로
- * 토스트를 더하면 소음이지만, 실패는 아무것도 움직이지 않아서 말해주지 않으면
- * '조용한 무동작'이 된다 — 이 프로젝트가 금지하는 바로 그것이다.
- * 휴지통만 성공도 말한다: 줄이 사라지는 것은 "지웠다"까지만 말하고, **되돌릴 수 있다**는
- * 약속(#18의 결정 전체가 그것이다)은 어디로 갔는지 말해야 전해진다.
+ * **Success is quiet, failure is loud.** The result of a move is already visible as the row itself
+ * moving, so adding a toast would be noise, but a failure moves nothing, so without a word it becomes
+ * a 'silent no-op' — exactly what this project forbids. Only the trash also announces success: a row
+ * disappearing only says "it was deleted" as far as that goes, and the promise that **it can be
+ * brought back** (which is the whole point of #18's decision) only comes across by stating where it
+ * went.
  */
 function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
   const platform = usePlatform()
@@ -215,7 +223,7 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
       move: async (from: string, toDir: string) => {
         try {
           const res = await platform.fs.move(projectId, from, toDir)
-          // moved:false는 제자리에 놓은 것 — 빗나간 드롭이지 실패가 아니므로 말하지 않는다
+          // moved:false means it was dropped back where it already was — a missed drop, not a failure, so nothing is said
           if (res.moved) refresh(parentOf(from), toDir)
         } catch (e) {
           setToast((e as Error).message)
@@ -239,11 +247,12 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
 type FileOps = ReturnType<typeof useFileOps>
 
 /**
- * 파일 하나를 base64로.
+ * Turns one file into base64.
  *
- * dataURL은 `data:<mime>;base64,<본문>` 꼴이라 앞머리만 떼면 그대로 쓸 수 있고 변환은
- * 브라우저가 한다. 바이트를 직접 돌리면 큰 파일에서 문자열 이어붙이기가 화면을 수십 초
- * 멈추는데, 첨부에서 "파일이 안 붙는다"로 보고된 증상이 실제로 그것이었다.
+ * A dataURL has the shape `data:<mime>;base64,<body>`, so stripping the prefix leaves it directly
+ * usable, and the browser does the conversion. Handling the bytes directly makes string
+ * concatenation freeze the screen for tens of seconds on a large file, and the symptom reported as
+ * "the file will not attach" for attachments was actually exactly this.
  */
 function readBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -255,15 +264,16 @@ function readBase64(file: File): Promise<string> {
 }
 
 /**
- * 무언가를 받는 자리 — 폴더 줄 하나, 또는 트리 전체(= 프로젝트 루트).
+ * A drop target for something — either a single folder row, or the whole tree (= the project root).
  *
- * **떨어뜨린 곳이 무엇을 할지 정한다.** 같은 파일 줄을 끌어도 입력창에 놓으면 경로가
- * 문장에 들어가고(원래 있던 동작, `dragPath.ts`), 여기 놓으면 파일이 옮겨간다. 둘이
- * 섞이지 않는 이유는 입력창이 이 자리를 모르고 이 자리가 입력창을 모르기 때문이다.
+ * **Where it is dropped decides what happens.** Dragging the same file row, dropping it on the
+ * composer puts the path into the sentence (the pre-existing behavior, `dragPath.ts`), while
+ * dropping it here moves the file. The two never get mixed up because the composer knows nothing
+ * about this spot and this spot knows nothing about the composer.
  *
- * 무엇이 왔는지는 **실은 것**으로 가른다: 우리 MIME이면 트리 안의 이동, OS 파일이면 밖에서
- * 끌어온 것. 둘 다 아니면 `preventDefault`를 하지 않는다 — 그러면 브라우저가 "여기엔 못
- * 놓는다"고 커서로 말해준다.
+ * What arrived is told apart **by what it carries**: our own MIME type means a move within the tree,
+ * an OS file means something dragged in from outside. If it is neither, `preventDefault` is not
+ * called — which lets the browser tell the person "this cannot be dropped here" through the cursor.
  */
 function useDropTarget(dir: string) {
   const { ops, hover, setHover } = useTree()
@@ -275,15 +285,16 @@ function useDropTarget(dir: string) {
       onDragOver: (e: ReactDragEvent<HTMLElement>) => {
         if (!accepts(e.dataTransfer)) return
         e.preventDefault()
-        // 안쪽 폴더가 겨눠지면 바깥 폴더·루트는 겨눠지지 않는다 — 가장 가까운 자리가 이긴다
+        // Once an inner folder is targeted, the outer folder and root are not — the closest spot wins
         e.stopPropagation()
-        // 트리 안에서 끌어온 것은 옮기는 것이고 밖에서 온 파일은 사본이 들어오는 것이다.
-        // 커서가 이걸 말해주지 않으면 손을 놓기 전까지 무슨 일이 날지 알 수 없다.
+        // Something dragged from within the tree is a move, while a file from outside is a copy
+        // coming in. Without the cursor stating this, there would be no way to know what will
+        // happen before letting go.
         e.dataTransfer.dropEffect = hasDragPath(e.dataTransfer) ? 'move' : 'copy'
         setHover(dir)
       },
       onDragLeave: (e: ReactDragEvent<HTMLElement>) => {
-        // 자식으로 들어갈 때도 leave가 오므로 실제로 밖으로 나간 것만 본다
+        // A leave event also fires when entering a child, so only an actual exit outward is honored
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover(null)
       },
       onDrop: (e: ReactDragEvent<HTMLElement>) => {
@@ -319,16 +330,19 @@ function Dir({
   const stamp = version[path] ?? 0
 
   /*
-   * 한 번 읽으면 다시 안 읽으려고 `entries`를 가드로 뒀는데, 그게 **입력이 바뀌어도**
-   * 막았다. 다른 프로젝트의 세션을 골라 projectId가 바뀌어도 이미 채워진 entries
-   * 때문에 그대로 돌아나가서, 파일 트리가 옛 프로젝트를 계속 보여줬다 (도그푸딩 지적).
+   * `entries` was used as a guard to avoid re-reading once it had been read, but that also blocked
+   * it **even when the input changed.** Picking a session in a different project changed projectId,
+   * but it still bailed out early because entries was already populated, so the file tree kept
+   * showing the old project (a dogfooding finding).
    *
-   * 가드를 빼도 계속 읽지 않는다 — 이 효과는 open·projectId·path가 **바뀔 때만** 돈다.
-   * "다시 읽지 않는다"는 조건을 상태로 흉내 내지 말고 의존성으로 말하게 한다.
-   * `stamp`가 함께 있는 것도 같은 이유다: 파일을 옮기거나 지운 뒤 목록을 다시 읽어야
-   * 한다는 사실을 상태로 흉내 내지 않고 의존성으로 말한다.
+   * Removing the guard still does not cause repeated reads — this effect only runs when open,
+   * projectId or path **actually change.** The condition "do not re-read" is expressed through
+   * dependencies, not simulated with state. `stamp` is included for the same reason: the fact that
+   * the list needs re-reading after a file is moved or deleted is also expressed through a
+   * dependency, not simulated with state.
    *
-   * 응답이 늦게 오는 사이 프로젝트가 또 바뀔 수 있으므로 늦은 응답은 버린다.
+   * The project can change again while a response is still in flight, so a late response is
+   * discarded.
    */
   useEffect(() => {
     if (!open) return
@@ -401,11 +415,11 @@ function DirRow({
           openMenu({ path: entry.path, name: entry.name, isDir: true }, e.clientX, e.clientY)
         }}
         data-testid={`dir-${entry.path}`}
-        /* 폴더도 통째로 옮긴다 — 파일만 옮겨지는 트리는 절반만 움직인다 */
+        /* A folder is also moved as a whole — a tree where only files can be moved only works halfway */
         draggable
         onDragStart={(e) => setDragPath(e.dataTransfer, entry.path)}
       >
-        {/* 파일의 확장자 칸과 같은 폭 — 그래야 폴더와 파일의 이름이 한 줄에 선다 */}
+        {/* Same width as a file's extension column — so folder names and file names line up */}
         <span className="flex w-7 shrink-0 justify-center text-slate">
           <ChevronIcon open={open} />
         </span>
@@ -435,14 +449,15 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
           openMenu({ path: entry.path, name: entry.name, isDir: false }, e.clientX, e.clientY)
         }}
         data-testid={`file-${entry.path}`}
-        /* 대화에 파일을 얹는 가장 짧은 길 — 경로를 외워서 치지 않아도 되게.
-           같은 드래그가 폴더 위에서는 '옮기기'가 된다 (떨어뜨린 곳이 정한다) */
+        /* The shortest path to putting a file into the conversation — no need to memorize and type
+           the path. The same drag becomes a 'move' when dropped on a folder (the drop target
+           decides which) */
         draggable
         onDragStart={(e) => setDragPath(e.dataTransfer, entry.path)}
       >
         <FileKind name={entry.name} />
         <span className="truncate">{entry.name}</span>
-        {/* 에이전트가 방금 만진 파일 (FR-5) — 색이 아니라 기호로 */}
+        {/* A file the agent just touched (FR-5) — a symbol, not a color */}
         {touched.has(entry.path) && (
           <span className="ml-auto shrink-0 text-[9px] text-slate" title="Edited by agent">
             ◆
@@ -454,16 +469,17 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
 }
 
 /**
- * 오른쪽 클릭 메뉴 (#18, #19).
+ * The right-click menu (#18, #19).
  *
- * **지우기가 여기 있는 이유**가 이 메뉴가 있는 이유다. 줄에 지우기 버튼을 달면 열려던 손이
- * 지우기에 닿을 수 있는데, 여는 것과 지우는 것은 되돌리는 값이 다르다. 오른쪽 클릭은 왼쪽
- * 클릭과 아예 다른 동작이라 잘못 누를 수가 없고, 트리 줄에서 오른쪽 클릭이 하던 일이
- * 지금까지 없어서 뺏어 올 것도 없다.
+ * **The reason delete is here** is the reason this menu exists at all. Putting a delete button on
+ * the row means a hand aiming to open something could land on delete instead, and opening and
+ * deleting have very different costs to undo. A right click is an entirely different action from a
+ * left click, so it cannot be pressed by mistake, and there was nothing already using right-click on
+ * a tree row to take over from.
  *
- * 확인 대화상자는 없다 — 그게 #18의 결정이다. 휴지통은 누른 **뒤에도** 되돌릴 수 있고
- * 대화상자는 누르기 전까지만 되돌릴 수 있다. 물어보는 창은 결국 반사적으로 넘기게 되므로,
- * 되돌릴 수 있는 삭제가 언제나 낫다.
+ * There is no confirmation dialog — that is #18's decision. The trash can be undone **even after**
+ * pressing it, while a dialog can only be undone before pressing it. A dialog that asks ends up
+ * being clicked through reflexively anyway, so an undoable delete is always the better choice.
  */
 function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
   const { ops } = useTree()
@@ -471,9 +487,10 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   /*
-   * 바깥 클릭과 Escape로 닫는다 (SessionSettings와 같은 처리).
-   * **자기 자신은 빼야 한다** — mousedown은 click보다 먼저 와서, 안쪽까지 닫아 버리면
-   * 항목을 누르는 순간 메뉴가 사라지고 클릭은 어디에도 닿지 않는다.
+   * Closes on an outside click and on Escape (the same handling as SessionSettings).
+   * **It has to exclude itself** — mousedown fires before click, so closing it even for a click
+   * inside would make the menu disappear the instant an item is pressed, and the click would land
+   * on nothing.
    */
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -481,7 +498,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      // 가장 안쪽에 열린 것만 닫힌다 — 인박스·모달이 같이 닫히면 안 된다
+      // Only the innermost open thing closes — the inbox or a modal must not close along with it
       e.stopPropagation()
       close()
     }
@@ -495,10 +512,11 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
 
   const { target } = state
   /*
-   * 레이아웃 px로 환산해서 놓는다 (#183) — 사이드바 메뉴(RowMenu)와 같은 규칙이다. 클릭 좌표와 창
-   * 크기는 확대(--text-zoom)가 곱해진 화면 px인데, 여기 적는 left/top은 확대된 루트 안의 길이라
-   * 그릴 때 확대가 한 번 더 곱해진다. 그대로 쓰면 확대 1.25에서 메뉴가 클릭한 자리보다 오른쪽
-   * 아래에 떴고, 창 오른쪽 끝 근처에서는 창 밖으로 나갔다.
+   * Placed after converting to layout pixels (#183) — the same rule as the sidebar menu (RowMenu).
+   * The click coordinates and the window size are screen pixels already multiplied by zoom
+   * (--text-zoom), but the left/top set here are lengths inside the zoomed root, so zoom gets
+   * multiplied in a second time when rendered. Used as-is, the menu appeared below and to the right
+   * of the click at zoom 1.25, and near the right edge of the window it ran off the window entirely.
    */
   const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
   return (
@@ -507,7 +525,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
       role="menu"
       data-testid="file-menu"
       className="fixed z-40 w-56 overflow-hidden rounded border border-edge bg-panel shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
-      // 화면 끝에서 열면 메뉴가 창 밖으로 나간다 — 안쪽으로 당긴다
+      // Opening it near the edge of the screen would push the menu off the window — pulled back inward
       style={{
         left: Math.min(state.x / zoom, window.innerWidth / zoom - 232),
         top: Math.min(state.y / zoom, window.innerHeight / zoom - 76),
@@ -527,8 +545,9 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         Reveal in {fileManager}
       </button>
       {/*
-        지우기는 선 아래에 따로 둔다. 항목 둘이 붙어 있으면 위아래를 헷갈리는데, 위쪽은
-        잘못 눌러도 창이 하나 열릴 뿐이고 아래쪽은 파일이 사라진다.
+        Delete is set apart below a divider. With the two items touching, it would be easy to
+        confuse the top one for the bottom one — pressing the top one by mistake just opens a
+        window, while pressing the bottom one makes the file disappear.
       */}
       <button
         type="button"
@@ -548,14 +567,16 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
 }
 
 /**
- * 파일 종류 표식 — vscode-icons(MIT).
+ * The file-kind mark — vscode-icons (MIT).
  *
- * 익숙한 그림이라 이름을 읽기 전에 종류가 잡힌다. 이 앱은 색을 다 빼고 시작했으므로
- * 색을 들이는 건 그 자체로 결정인데, 파일 종류는 **상태가 아니라 분류**라
- * 밝기 체계("가장 밝은 것 = 나를 기다리는 것")와 겹치지 않는다.
- * 아이콘은 작고 채도가 낮아 목록을 훑는 눈을 뺏지도 않는다.
+ * A familiar picture lets the kind register before the name is even read. This app started out by
+ * stripping out all color, so bringing color in at all is itself a decision — but a file's kind is a
+ * **classification, not a state**, so it does not overlap with the brightness system ("the
+ * brightest thing = something waiting for me"). The icons are small and low-saturation, so they do
+ * not pull the eye away from skimming the list either.
  *
- * 표에 없는 확장자는 기본 파일 아이콘으로 떨어진다 — 목록이 못 따라와도 빈칸은 없다.
+ * An extension missing from the table falls back to the default file icon — even if the list falls
+ * behind, there is never a blank.
  */
 function FileKind({ name }: { name: string }) {
   return (
@@ -572,9 +593,11 @@ function FileKind({ name }: { name: string }) {
 }
 
 /**
- * 파생 계산은 훅에서 memo화한다 (셀렉터가 새 배열을 만들면 무한 리렌더).
- * 이 트리의 프로젝트에 속한 세션만 모은다 (#185) — 경로는 프로젝트 기준이라, 다른 프로젝트의
- * 세션이 만진 같은 이름의 경로에 표시가 붙으면 안 된다.
+ * The derived calculation is memoized in the hook (a selector that builds a new array causes an
+ * infinite re-render).
+ * Only sessions belonging to this tree's project are collected (#185) — paths are relative to the
+ * project, so a path with the same name touched by a session in a different project must not get
+ * marked.
  */
 function useTouched(projectId: string): Set<string> {
   const sessions = useStore((s) => s.sessions)

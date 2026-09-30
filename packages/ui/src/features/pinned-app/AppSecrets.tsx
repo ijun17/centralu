@@ -4,13 +4,17 @@ import { useStore } from '../../store/store.js'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 
 /**
- * 앱의 비밀 (M4 E) — 매니페스트가 선언한 이름마다 값이 들어 있는지와, 넣고·바꾸고·지우는 칸.
+ * An app's secrets (M4 E) — for each name the manifest declares, whether it has a value, and a field
+ * to set, replace or clear it.
  *
- * **값은 돌아오지 않는다.** host는 목록에 있음·없음만 싣고(값이 방송을 타지 않게), 이 칸은 보낸 값을 곧바로 잊는다. 그래서
- * "Replace"는 옛 값을 보여 주고 고치는 칸이 아니라 새 값을 받는 빈 칸이다. 비밀번호 칸이라 화면을 나누는 중에 넣어도 글자가
- * 보이지 않는다. 넣은 값은 앱이 **다음에 뜰 때** 받는다(떠 있던 앱은 host가 호출을 마친 뒤 내린다) — 그 사실을 한 줄로 말한다.
+ * **The value never comes back.** The host's list only carries set or not set (so the value never
+ * rides a broadcast), and this field forgets the value it sent right away. That is why "Replace" is
+ * not a field that shows the old value for editing, it is an empty field for entering a new one. It
+ * is a password field, so the characters stay hidden even while sharing the screen during a call. A
+ * value that was set reaches the app **the next time it starts** (a running app is brought down by
+ * the host once its current call finishes) — that fact is stated in one line.
  *
- * 고정 화면의 판과 설정의 앱 줄이 이 하나를 같이 쓴다.
+ * The pinned view's panel and the settings screen's app row share this one component.
  */
 export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
   const slots = app.info.secrets ?? []
@@ -33,7 +37,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const refresh = useStore((s) => s.refreshExternalApps)
-  // 칸을 여는 것은 비어 있을 때와 "Replace"를 눌렀을 때뿐이다 — 들어 있는 값을 가리는 칸을 늘 세워 두지 않는다
+  // The field only opens when empty or when "Replace" is pressed — a field that would hide a value already set is not kept standing all the time
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -45,13 +49,13 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
     setError(null)
     try {
       await platform.apps.setSecret(app.appId, app.projectId, name, value)
-      // 보냈으면 잊는다 — 이 칸이 값을 들고 있을 까닭이 더는 없다
+      // Once sent, it is forgotten — this field has no more reason to hold the value
       setDraft('')
       setEditing(false)
       setToast(value === null ? `Cleared ${name}` : `Saved ${name}. ${app.title} gets it the next time it starts`)
       void refresh()
     } catch (e) {
-      // host의 말 그대로 — 그 말에는 값이 없다(host가 싣지 않는다)
+      // Exactly the host's own wording — that wording never contains the value (the host never carries it)
       setError((e as Error).message)
     } finally {
       setBusy(false)
@@ -138,7 +142,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
   )
 }
 
-/** 고정 화면 옆에 여닫는 판 (기록 판과 같은 자리·모양) — 앱을 쓰다가 키가 빠진 것을 알게 되는 자리가 여기다 */
+/** A panel that opens and closes beside the pinned view (same spot and shape as the Runs panel) — where a missing key is discovered while using the app */
 export function SecretsPanel({ app }: { app: ExternalCatalogApp }) {
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-edge bg-pit" data-testid="secrets-panel" aria-label="Secrets">
@@ -152,7 +156,7 @@ export function SecretsPanel({ app }: { app: ExternalCatalogApp }) {
   )
 }
 
-/** 비어 있는 비밀의 수 — 고정 화면의 머리글과 설정의 줄이 "무엇이 빠졌나"를 한 마디로 말한다 */
+/** The count of unset secrets — the pinned view's header and the settings row state "what is missing" in one word */
 export function missingSecrets(app: ExternalCatalogApp | undefined): number {
   return app?.info.secrets?.filter((s) => !s.set).length ?? 0
 }

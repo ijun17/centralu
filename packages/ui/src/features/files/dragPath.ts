@@ -1,21 +1,23 @@
 /**
- * 파일 트리에서 입력창으로 경로를 끌어다 놓기.
+ * Dragging a path from the file tree and dropping it into the composer.
  *
- * 전용 MIME을 쓴다. 입력창의 드롭 처리는 원래 **OS에서 끌어온 파일**(첨부)을 위한 것이라,
- * 구분하지 않으면 트리에서 끌어온 것도 첨부로 가려다 `dataTransfer.files`가 비어 있어
- * **아무 일도 일어나지 않는다** — 이 프로젝트가 금지하는 조용한 무동작이다.
+ * A dedicated MIME type is used. The composer's drop handling was originally built for **files
+ * dragged in from the OS** (attachments), and without telling the two apart, something dragged from
+ * the tree would also try to become an attachment, find `dataTransfer.files` empty, and
+ * **nothing would happen** — the kind of silent no-op this project forbids.
  *
- * `text/plain`도 함께 싣는다: 다른 곳(터미널·에디터)에 떨어뜨렸을 때도 경로가 나와야 한다.
+ * `text/plain` is carried alongside it too: a path also has to come out when dropped somewhere else
+ * (a terminal, an editor).
  */
 export const PATH_MIME = 'application/x-cc-path'
 
 /**
- * `copyMove`인 이유 (#19).
+ * Why `copyMove` (#19).
  *
- * 같은 드래그가 **떨어지는 곳에 따라 두 가지**가 됐다: 입력창에 놓으면 경로가 문장에
- * 들어가고(복사), 트리의 폴더에 놓으면 파일이 그리로 옮겨간다(이동). 여기가 `copy`로
- * 고정돼 있으면 트리 쪽에서 `dropEffect = 'move'`를 세우는 순간 브라우저가 그 드롭을
- * **거절한다** — 오류 없이, 그냥 아무 일도 일어나지 않는 모양으로.
+ * The same drag becomes **one of two things depending on where it lands**: dropped on the composer,
+ * the path goes into the sentence (a copy); dropped on a folder in the tree, the file moves there (a
+ * move). If this were fixed to `copy`, the moment the tree side set `dropEffect = 'move'` the
+ * browser would **reject that drop** — with no error, just nothing happening at all.
  */
 export function setDragPath(dt: DataTransfer, path: string): void {
   dt.setData(PATH_MIME, path)
@@ -23,33 +25,33 @@ export function setDragPath(dt: DataTransfer, path: string): void {
   dt.effectAllowed = 'copyMove'
 }
 
-/** 드롭된 것이 우리 경로인가. 아니면 null — 그때는 첨부 경로로 간다 */
+/** Is what was dropped our own path? Otherwise null — in that case it is treated as an attachment path */
 export function readDragPath(dt: DataTransfer): string | null {
   const path = dt.getData(PATH_MIME)
   return path || null
 }
 
 /**
- * 끌고 있는 것이 우리 경로인가 — **내용을 읽지 않고** 판정한다.
+ * Is what is being dragged our own path — determined **without reading its content.**
  *
- * `dragover` 동안에는 `getData()`가 빈 문자열을 준다 (브라우저가 드롭 전까지 내용을
- * 가린다). 그래서 "이걸 받을 수 있는가"는 `types`로만 답할 수 있다. 이 구분이 없으면
- * 커서가 무엇을 할지 말해주지 못한 채 손을 놓아야 한다.
+ * During `dragover`, `getData()` returns an empty string (the browser hides the content until it is
+ * actually dropped). So "can this be accepted" can only be answered through `types`. Without this
+ * distinction, the hand would have to let go without the cursor ever indicating what would happen.
  */
 export function hasDragPath(dt: DataTransfer): boolean {
   return [...dt.types].includes(PATH_MIME)
 }
 
-/** OS에서 끌어온 파일인가 (#19의 '핀더에서 끌어다 넣기') */
+/** Is this a file dragged in from the OS (#19's "drag it in from Finder")? */
 export function hasDragFiles(dt: DataTransfer): boolean {
   return [...dt.types].includes('Files')
 }
 
 /**
- * 입력창에 `@경로`를 이어 붙인다.
+ * Appends `@path` to the composer's text.
  *
- * 자동완성이 `@`로 파일을 넣는 것과 **같은 모양이어야 한다** — 넣는 방법이 둘인데
- * 결과가 다르면 도구가 받는 문장이 달라진다.
+ * **Must produce the same shape** as autocomplete inserting a file with `@` — with two ways to
+ * insert a file, a different result would mean the tool receives a different sentence.
  */
 export function appendPath(text: string, path: string): string {
   const mention = `@${path}`
@@ -58,16 +60,18 @@ export function appendPath(text: string, path: string): string {
 }
 
 /**
- * 세션 칸이 받아야 할 드래그인가 (#116).
+ * Is this a drag the session panel should accept (#116)?
  *
- * 칸 전체가 드롭 자리가 되면서 **순서 바꾸기와 같은 면을 나눠 쓰게 됐다** — 그리드 칸은
- * 칸끼리 자리를 바꾸는 자리이기도 하고, 사이드바의 세션·프로젝트도 자기 MIME으로 끌린다.
- * 그래서 받을 것을 **목록으로** 적는다. "저쪽 것이 아니면 받는다"로 쓰면 새 MIME이 하나
- * 생길 때마다 칸이 남의 드롭을 말없이 삼키고, 그건 오류 없이 아무 일도 안 일어나는
- * 모양으로만 드러난다.
+ * Making the whole panel a drop target meant it **now shares the same surface as reordering** — a
+ * grid panel is also a place where panels swap positions with each other, and the sidebar's sessions
+ * and projects are also dragged with their own MIME types. So what to accept is written as **an
+ * explicit list.** Writing it as "accept anything that is not that other thing" would mean, every
+ * time a new MIME type is added, the panel silently swallows someone else's drop, and that would only
+ * ever surface as nothing happening, with no error.
  *
- * 받는 둘은 뒤에서 하는 일이 다르다: OS 파일은 첨부가 되고, 트리에서 끌어온 경로는
- * 문장에 들어간다 (입력창의 드롭 처리 그대로). 여기서는 "이 자리가 답할 드래그인가"만 가른다.
+ * The two things accepted do different work behind the scenes: an OS file becomes an attachment,
+ * while a path dragged from the tree goes into the sentence (exactly the composer's own drop
+ * handling). This function only decides "is this a drag this spot should answer."
  */
 export function isFileDrag(types: readonly string[]): boolean {
   return types.includes('Files') || types.includes(PATH_MIME)

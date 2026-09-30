@@ -25,16 +25,18 @@ import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, useTextZoom } from '../../store/store.js'
 
 /**
- * 증거 레인 (우측).
+ * The evidence lane (right side).
  *
- * 세 레인의 역할이 서로 다르다:
- *   좌 = 관찰(무엇이 나를 기다리나) · 중앙 = 조작(말을 건다) · 우 = 증거(정말 그랬나)
+ * The three lanes each play a different role:
+ *   left = observation (what is waiting for me) · center = action (talking to it) ·
+ *   right = evidence (did it actually do that)
  *
- * 여기 있는 것들은 대화를 **대신하는** 화면이 아니다. 에이전트가 "세 파일 고쳤습니다"라고
- * 말할 때 그 말을 확인하는 자리다. 그래서 중앙 탭이 아니라 옆에 함께 둔다.
+ * What lives here is not a screen that **replaces** the conversation. It is the place to check the
+ * claim when an agent says "I fixed three files." That is why it sits alongside the center tab
+ * rather than being one of its tabs.
  *
- * 자세히 보는 일(코드·diff·커밋)은 여기서 하지 않는다 — 340px에서 diff는 읽을 수 없다.
- * 클릭하면 넓은 오버레이가 대화 위에 펼쳐진다.
+ * Looking at something closely (code, a diff, a commit) does not happen here — a diff cannot be
+ * read at 340px. Clicking it expands into a wide overlay over the conversation.
  *
  * **This lane stays visible while that overlay is open** (issue #15). It used to be covered
  * by it, on the reasoning above — but "a diff needs more than 340px" is a reason not to draw
@@ -46,10 +48,11 @@ export function EvidencePanel() {
   const open = useStore((s) => s.panelOpen)
   const projectId = useStore((s) => {
     /*
-     * 프로젝트 없는 세션(반장)은 **직전 프로젝트로 폴백하지 않는다** (도그푸딩 지적
-     * 2026-09-06): 반장 옆에 마지막으로 보던 프로젝트의 파일·깃 기록이 서면, 반장이
-     * 그 폴더에서 시작한 것처럼 읽힌다 — 실제로는 오케스트레이터 홈에서 돈다.
-     * 폴백은 "아무 세션도 안 보는 중"을 위한 것이다.
+     * A session with no project (the foreman) **does not fall back to the last project** (a
+     * dogfooding finding, 2026-09-06): if the files and git history of the last-viewed project
+     * showed up next to the foreman, it would read as if the foreman started in that folder — when
+     * it actually runs from the orchestrator's home. The fallback exists for "not viewing any
+     * session at all."
      */
     const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
     return sess ? sess.projectId : s.focusedProjectId
@@ -57,7 +60,7 @@ export function EvidencePanel() {
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
   const width = useStore((s) => s.panelWidth)
   const setPanelWidth = useStore((s) => s.setPanelWidth)
-  // 최소 폭은 실픽셀 고정 (사이드바와 같은 규칙) — 글자 배율이 좁힘의 한계를 못 먹는다
+  // The minimum width is fixed in real pixels (the same rule as the sidebar) — text zoom does not eat into how narrow it can get
   const zoom = useTextZoom()
   const [resizing, setResizing] = useState(false)
   const isRepo = !!project?.git
@@ -71,8 +74,9 @@ export function EvidencePanel() {
    * retarget muscle memory every time a tab is dragged.
    */
   /*
-   * 명령 실행 장부를 이 프로젝트로 읽어 둔다 (#60 이관). 터미널 탭을 열어야만 읽으면
-   * UI 리로드 뒤 뱃지가 어둡다 — 돌고 있는 데브 서버는 탭을 열기 전에도 사실이다.
+   * The command-run ledger is loaded for this project up front (a carryover from #60). Loading it
+   * only once the terminal tab is opened would leave the badge dark right after a UI reload — a dev
+   * server that is already running is a fact even before the tab is opened.
    */
   useEffect(() => {
     if (projectId) void useStore.getState().loadCommandRuns(projectId)
@@ -98,13 +102,15 @@ export function EvidencePanel() {
   if (!projectId || !project) return null
 
   /*
-   * 열고 닫힐 때 **폭이 미끄러진다.**
+   * **The width slides** on open and close.
    *
-   * 예전엔 접힌 띠와 패널을 통째로 갈아 끼워서 화면이 툭 바뀌었다. 그러면 눈이
-   * "무엇이 어디로 갔는지" 따라가지 못해, 접은 건지 사라진 건지 순간 헷갈린다.
-   * 폭이 이어지면 같은 것이 접혔다는 게 저절로 읽힌다.
+   * The collapsed strip and the panel used to be swapped wholesale, and the screen changed abruptly.
+   * The eye then could not follow "what went where," and it was momentarily unclear whether
+   * something had collapsed or vanished. With the width flowing continuously, it reads on its own
+   * as the same thing having collapsed.
    *
-   * 끄는 중에는 전환을 끈다 — 매 프레임 보간하면 손을 따라오지 못하고 끈적해진다.
+   * The transition is turned off while dragging the resize handle — interpolating every frame
+   * cannot keep up with the hand and feels sticky.
    */
   return (
     <aside
@@ -129,14 +135,14 @@ export function EvidencePanel() {
           <PanelGroups projectId={projectId} project={project} isRepo={isRepo} />
         </>
       ) : (
-        // 닫혀 있어도 흔적은 남긴다 — 사라진 것과 접힌 것은 다르다
+        // Leaves a trace even while closed — vanished and collapsed are not the same thing
         <CollapsedRail projectId={projectId} isRepo={!!project.git} />
       )}
     </aside>
   )
 }
 
-/** 접힌 띠의 폭. CollapsedRail이 그리는 폭과 같아야 전환이 이어진다 */
+/** The collapsed strip's width. Has to match what CollapsedRail draws, or the transition breaks continuity */
 const RAIL_W = 32
 
 function PanelHeader({ projectName, branch }: { projectName: string; branch: string | null }) {
@@ -145,10 +151,11 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
   const openBranches = useStore((s) => s.openBranches)
 
   /*
-   * 머리글 높이는 **대화 쪽 머리글(SessionView의 HEADER)과 같아야 한다** — 둘은 나란히
-   * 서 있어서 1px만 어긋나도 경계가 두 겹으로 보인다. 여백으로 적던 동안 이쪽이 41px,
-   * 저쪽이 40px이었다(안에 든 것이 각각 24px·23px). 그래서 여백이 아니라 `h-10`으로
-   * 적는다: 안에 든 것이 바뀌어도 두 줄은 계속 한 줄이다.
+   * The header's height **has to match the conversation side's header** (SessionView's HEADER) —
+   * the two stand side by side, and even a 1px mismatch reads as a doubled boundary. Back when this
+   * was written as padding, this one came out to 41px and the other to 40px (their contents were
+   * 24px and 23px respectively). So it is written as `h-10`, not padding: the two rows stay one row
+   * even when their contents change.
    */
   return (
     <DragRegion className="flex h-10 items-center gap-2 border-b border-edge px-3">
@@ -180,7 +187,7 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
   )
 }
 
-/** 탭 사이 간격(gap-0.5)과 `…` 버튼의 폭 — 접기 계산이 쓰는 두 숫자 */
+/** The gap between tabs (gap-0.5) and the `…` button's width — the two numbers the collapse calculation uses */
 const TAB_GAP = 2
 const MORE_W = 26
 
@@ -251,25 +258,27 @@ function TabGroup({
   const panelSplit = useStore((s) => s.panelSplit)
   const setPanelSplit = useStore((s) => s.setPanelSplit)
   const [splitHint, setSplitHint] = useState(false)
-  /** 아래 묶음의 탭 띠 — 두 묶음의 경계가 이 띠의 윗변이라, 조절 손잡이가 여기 산다 */
+  /** The bottom group's tab strip — the boundary between the two groups is this strip's top edge, so the resize handle lives here */
   const stripRef = useRef<HTMLElement>(null)
-  /** 이 묶음의 제어 버튼이 그려질 자리 (tabActions.tsx) — 몸통이 포털로 여기에 그린다 */
+  /** Where this group's control buttons are drawn (tabActions.tsx) — the body renders here through a portal */
   const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
 
   /*
-   * 탭이 몇 개나 들어가나. 재는 자리는 **탭이 쓸 수 있는 칸**(fitRef)이지 띠 전체가 아니다 —
-   * 오른쪽 제어 버튼은 안 접히므로 애초에 남의 몫이고, `…` 버튼이 생겼다 사라졌다 해도
-   * 이 칸의 폭은 변하지 않아 계산이 자기 결과에 흔들리지 않는다.
+   * How many tabs fit. What is measured is **the space the tabs are allowed to use** (fitRef), not
+   * the whole strip — the control buttons on the right never collapse, so that space was never the
+   * tabs' to claim, and this space's own width does not change whether the `…` button appears or
+   * disappears, so the calculation does not get shaken by its own result.
    *
-   * 폭은 전부 레이아웃 px(offsetWidth·clientWidth)로만 잰다. rect는 확대(--text-zoom)가
-   * 곱해진 화면 px이라 둘을 섞으면 확대 상태에서 틀어진다 (이 파일의 경계 손잡이와 같은 규칙).
+   * Widths are measured entirely in layout pixels (offsetWidth, clientWidth). `rect` is a screen
+   * pixel already multiplied by zoom (--text-zoom), and mixing the two would throw things off while
+   * zoomed (the same rule as this file's boundary resize handle).
    */
   const fitRef = useRef<HTMLDivElement>(null)
   const [avail, setAvail] = useState(0)
   const [widths, setWidths] = useState<Partial<Record<PanelTab, number>>>({})
   const measure = useCallback((id: PanelTab, w: number) => {
     if (w <= 0) return
-    // 같은 값이면 같은 객체를 돌려준다 — 안 그러면 측정→렌더→측정으로 돈다
+    // Returns the same object for the same value — otherwise it loops measure → render → measure
     setWidths((prev) => (Math.abs((prev[id] ?? -1) - w) < 0.5 ? prev : { ...prev, [id]: w }))
   }, [])
 
@@ -314,13 +323,15 @@ function TabGroup({
         }}
       >
         {/*
-          경계 조절 손잡이 (도그푸딩 두 번째 지적으로 자리를 옮겼다). 처음에는 아래
-          몸통의 윗변에 뒀는데 그건 **탭 띠 아래**라, 사람이 잡는 "두 패널의 경계" —
-          위 몸통과 아래 탭 띠 사이 — 가 아니었다. 경계는 이 띠의 윗변이다.
+          The boundary resize handle (moved here after a second dogfooding finding). It originally
+          sat on the top edge of the bottom body, but that was **below the tab strip**, not the "the
+          boundary between the two panels" — the space between the top body and the bottom tab strip
+          — that a person actually grabs for. The boundary is this strip's top edge.
 
-          계산이 비율로만 도는 이유: rect는 확대(--text-zoom)가 곱해진 화면 px이고
-          offsetHeight는 레이아웃 px라, 섞으면 확대에서 틀어진다 — 전부 rect로 재서
-          비율만 뽑으면 단위가 지워진다.
+          Why the calculation runs entirely on ratios: `rect` is a screen pixel multiplied by zoom
+          (--text-zoom), while offsetHeight is a layout pixel, and mixing them throws things off
+          while zoomed — measuring everything with `rect` and taking only the ratio cancels the unit
+          out.
         */}
         {gi === 1 && (
           <ResizeHandle
@@ -330,7 +341,7 @@ function TabGroup({
             max={85}
             onReset={() => setPanelSplit(0.5)}
             onResize={(v) => {
-              // ResizeHandle 계약: v = 손잡이가 붙은 요소(이 띠)의 bottom - 포인터 y
+              // ResizeHandle's contract: v = the bottom of the element the handle is attached to (this strip) minus the pointer's y
               const strip = stripRef.current
               const col = strip?.parentElement
               const b0 = col?.querySelector<HTMLElement>('[data-testid="evidence-body-0"]')
@@ -344,9 +355,10 @@ function TabGroup({
           />
         )}
         {/*
-          왼쪽은 어디로 갈지(탭), 오른쪽은 지금 있는 곳에서 할 일(제어 버튼). 좁아지면
-          양보하는 쪽은 언제나 탭이다 — 제어 버튼은 보고 있는 것에 대한 행동이라 손 닿는
-          곳에 있어야 하고, 밀려난 탭은 `…` 뒤에서 이름으로 고를 수 있다.
+          The left side is where to go (tabs), the right side is what to do from where you already
+          are (control buttons). When space runs short, the tabs are always what gives way — the
+          control buttons are actions on what is being looked at and must stay within reach, and a
+          pushed-out tab can still be picked by name behind `…`.
         */}
         <div ref={fitRef} className="flex min-w-0 flex-1 items-center gap-0.5">
           <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
@@ -371,22 +383,24 @@ function TabGroup({
         <div
           ref={setActionSlot}
           className="flex shrink-0 items-center gap-1 pl-1"
-          /* 이름에 'evidence-tab-'을 쓰지 않는다 — 탭 목록을 그 접두사로 훑는 자리가 있다 */
+          /* Does not use 'evidence-tab-' in its name — there is a place that scans the tab list by that prefix */
           data-testid={gi === 0 ? 'evidence-actions' : `evidence-actions-${gi}`}
         />
       </nav>
       <div
         /*
-          overflow-hidden은 이웃 그룹을 지키는 담이다. 이게 없던 동안 위 그룹의 내용이
-          몸통을 넘치면 **아래 그룹의 탭 스트립 위에 그려졌다** (깃 탭의 고정 높이
-          History 스트립이 실제로 그랬다 — 도그푸딩 지적). 탭 하나가 무엇을 그리든
-          자기 몸통 밖으로는 못 나간다는 규칙을 내용물이 아니라 그릇이 지킨다.
+          overflow-hidden is the wall that protects the neighboring group. Without it, content from
+          the group above overflowing its body **got drawn on top of the tab strip of the group
+          below** (this actually happened with the git tab's fixed-height History strip — a
+          dogfooding finding). The rule that a tab, whatever it draws, cannot escape its own body is
+          enforced by the container, not by the content.
         */
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         /*
-          나뉜 두 몸통의 몫 (도그푸딩: 반반 고정은 "터미널은 좁아도 되고 diff는 넓어야
-          한다"를 못 담았다). 탭 띠는 고정 높이라 flexGrow가 몸통끼리만 나눈다 —
-          basis는 flex-1의 0 그대로라 grow 비가 곧 높이 비다.
+          Each split body's share (dogfooding: a fixed 50/50 split could not express "the terminal
+          can stay narrow but a diff needs to be wide"). The tab strip has a fixed height, so flexGrow
+          only divides space between the bodies — basis stays at flex-1's 0, so the grow ratio is
+          exactly the height ratio.
         */
         style={groups.length === 2 ? { flexGrow: gi === 0 ? panelSplit : 1 - panelSplit } : undefined}
         data-testid={`evidence-body-${gi}`}
@@ -445,11 +459,11 @@ const dropsLeft = (rect: { left: number; width: number }, clientX: number): bool
   clientX < rect.left + rect.width / 2
 
 /**
- * 접힌 탭들 (`…`).
+ * The collapsed tabs (`…`).
  *
- * 자리가 없어 접힌 것뿐이지 사라진 게 아니다 — 여기서 이름으로 고를 수 있다. 목록은
- * 띠 안이 아니라 띠 아래로 내려온다: 띠는 폭이 없어서 접은 것이라, 그 안에 목록을
- * 펼치면 같은 문제를 다시 만든다.
+ * They only collapsed for lack of room; they have not disappeared — this is where they can be
+ * picked by name. The list drops down below the strip, not inside it: the strip collapsed them
+ * because it ran out of width, so expanding a list inside it would just recreate the same problem.
  */
 function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPick: (t: PanelTab) => void }) {
   const [open, setOpen] = useState(false)
@@ -481,7 +495,7 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
       </button>
       {open && (
         <>
-          {/* 바깥을 누르면 닫힌다 — 메뉴 자체는 아래 z가 더 높다 */}
+          {/* Closes when clicked outside — the menu itself sits at a higher z below */}
           <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />
           <div
             className="cc-drop absolute left-0 top-full z-50 mt-1 min-w-28 overflow-hidden rounded border border-edge bg-panel py-0.5 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
@@ -525,15 +539,16 @@ function TabButton({
   onLayout: (groups: PanelGroup[]) => void
   onPick: (tab: PanelTab) => void
   projectId: string
-  /** 자기 폭을 띠에게 알린다 — 띠는 이 숫자들로 몇 개가 들어가는지 센다 */
+  /** Reports its own width to the strip — the strip uses these numbers to count how many fit */
   onMeasure?: (id: PanelTab, width: number) => void
 }) {
   // Each button keeps its own drop edge so the line is drawn on that button only —
   // the same call as the sidebar rows, for the same reason.
   const [edge, setEdge] = useState<'left' | 'right' | null>(null)
   /*
-   * 터미널 탭의 실행 뱃지 (#60 이관) — 데브 서버를 켜 두고 다른 탭을 보고 있어도
-   * "돌고 있다"는 사실이 탭에 남아야 한다. 이 구멍(창 닫으면 무표시)이 이관의 이유였다.
+   * The terminal tab's running badge (a carryover from #60) — even with a dev server left running
+   * while looking at another tab, the fact that "it is running" has to stay visible on the tab. This
+   * gap (nothing shown once the terminal window was closed) was the reason for the carryover.
    */
   const running = useStore((s) =>
     id === 'terminal' ? Object.values(s.commandRuns[projectId] ?? {}).some((r) => r.running) : false,
@@ -542,7 +557,7 @@ function TabButton({
   return (
     <button
       ref={(el) => {
-        // 글자 크기(--text-zoom)가 바뀌면 폭도 바뀐다 — 한 번 재고 마는 대신 계속 본다
+        // Width changes when the text size (--text-zoom) changes — it is watched continuously instead of measured just once
         if (!el || !onMeasure) return
         onMeasure(id, el.offsetWidth)
         const ro = new ResizeObserver(() => onMeasure(id, el.offsetWidth))
@@ -649,14 +664,14 @@ function TabBody({
   )
 }
 
-/** 패널을 접었을 때 남는 세로 띠. 어디로 갔는지 보이고, 변경 수는 접힌 채로도 읽힌다 */
+/** The vertical strip left behind when the panel is collapsed. Where it went stays visible, and the change count is still readable while collapsed */
 function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boolean }) {
   const togglePanel = useStore((s) => s.togglePanel)
   const platform = usePlatform()
   const sc = useShortcut()
   const touched = useGitRefreshKey(projectId)
   const [count, setCount] = useState<number | null>(null)
-  // 패널을 접어도 "명령이 돌고 있다"는 사실은 접히면 안 된다 (#60 이관의 이유)
+  // Collapsing the panel must not collapse the fact that "a command is running" (the reason for the #60 carryover)
   const running = useStore((s) => Object.values(s.commandRuns[projectId] ?? {}).some((r) => r.running))
 
   useEffect(() => {
@@ -664,7 +679,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       setCount(null)
       return
     }
-    // 프로젝트를 옮기는 사이 늦게 온 응답이 남의 프로젝트 숫자를 그리면 안 된다
+    // A response arriving late while switching projects must not draw another project's number
     let alive = true
     platform.git
       .status(projectId)
@@ -676,7 +691,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
   }, [platform, projectId, isRepo, touched])
 
   return (
-    /* 껍데기(폭·테두리·배경)는 바깥 aside가 갖는다 — 여기서 또 그리면 전환 중에 선이 겹친다 */
+    /* The shell (width, border, background) belongs to the outer aside — drawing it here too would double the line during the transition */
     <div
       className="flex h-full w-8 shrink-0 flex-col items-center gap-2 py-2"
       data-testid="evidence-rail"
@@ -709,7 +724,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
           <span className="size-1.5 animate-pulse rounded-full bg-chalk" />
         </button>
       )}
-      {/* 세로쓰기 — 접힌 띠가 무엇의 띠인지 말해준다 */}
+      {/* Vertical text — states what the collapsed strip is a strip of */}
       <span
         className="mt-1 text-[10px] text-slate"
         style={{ writingMode: 'vertical-rl' }}
@@ -722,8 +737,8 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
 }
 
 /**
- * 변경된 파일 — 이 앱에서 가장 자주 보는 목록.
- * 목록과 커밋까지만 여기서 하고, diff는 넓은 곳에서 편다.
+ * Changed files — the most frequently viewed list in this app.
+ * Only the list and committing happen here; a diff opens up somewhere wide.
  */
 function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean }) {
   const platform = usePlatform()
@@ -743,7 +758,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // 요청 세대 번호 — 프로젝트를 옮기는 사이 늦게 온 응답이 남의 목록을 그리면 안 된다
+  // A request generation number — a response arriving late while switching projects must not draw another project's list
   const statusGen = useRef(0)
   const refresh = useCallback(async () => {
     const gen = ++statusGen.current
@@ -755,7 +770,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
     }
   }, [platform, projectId])
 
-  // 에이전트가 파일을 건드리면 다시 읽는다 (증거는 최신이어야 의미가 있다)
+  // Re-reads whenever an agent touches a file (evidence only means something if it is current)
   useEffect(() => {
     void refresh()
   }, [refresh, touched])
@@ -769,7 +784,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
       await fn()
       await refresh()
     } catch (e) {
-      // RPC가 던지면(끊김·타임아웃) 잡는 곳이 없어 성공처럼 보였다 — 조용한 실패 금지
+      // When the RPC throws (disconnect, timeout), nothing caught it and it looked like a success — no silent failures
       setToast((e as Error).message)
     } finally {
       setBusy(false)
@@ -778,7 +793,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
 
   return (
     <section className="flex min-h-0 flex-1 flex-col border-b border-edge" data-testid="evidence-git">
-      {/* 이름표 'Changes'는 탭이 이미 한 말이라 뺐다 — 숫자와 버튼만 띠의 오른쪽으로 간다 */}
+      {/* The label 'Changes' was dropped since the tab already says it — only the count and buttons go to the right of the strip */}
       {files && files.length > 0 && (
         <TabActions>
           <span className="readout text-[10px] text-ash" data-testid="evidence-change-count">
@@ -808,10 +823,11 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
       ) : (
         <>
           {/*
-            스테이지된 것과 아닌 것을 **나눠서** 보여준다.
-            커밋에 무엇이 실릴지가 커밋 직전에 알아야 할 유일한 사실인데,
-            한 목록에 섞어두면 그걸 줄 끝의 작은 꼬리표로 읽어야 했다.
-            위가 실릴 것, 아래가 안 실릴 것 — 경계가 곧 답이다.
+            Staged and unstaged files are shown **split apart.**
+            What will actually go into the commit is the one fact that matters right before
+            committing, and mixing them into one list meant reading that off a small tag at the end
+            of each row instead. Above the boundary is what goes in, below it is what does not — the
+            boundary itself is the answer.
           */}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ChangeGroup
@@ -843,10 +859,11 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
       )}
       {!denied && files !== null && (
         /*
-         * 커밋은 좁은 곳에서도 되어야 한다 — 확인하고 바로 마무리하는 흐름이 끊기면 안 된다.
-         * 목록이 비어도 이 칸은 남는다 (#160). 커밋과 푸시를 따로 하는 가장 흔한 순서에서, 전부
-         * 커밋해 "No changes"가 되는 순간 Push가 함께 사라졌다 — 방금 만든 커밋을 올릴 길이
-         * 앱 안에 없었다.
+         * Committing has to work in a narrow space too — the flow of checking a change and then
+         * wrapping it up right there must not be broken. This block stays even when the list is
+         * empty (#160). In the most common sequence of committing and pushing as separate steps,
+         * the moment everything got committed and the state became "No changes," Push disappeared
+         * along with it — there was no way left in the app to push the commit just made.
          */
         <div className="mt-auto border-t border-edge px-3 py-2">
           <input
@@ -891,7 +908,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   )
 }
 
-/** 한 무리(스테이지됨 / 변경됨). 비어 있으면 머리글도 내보내지 않는다 */
+/** One group (staged / changed). Renders no header at all when empty */
 function ChangeGroup({
   title,
   files,
@@ -960,15 +977,16 @@ function ChangeRow({
         data-testid={`evidence-file-${file.path}`}
         title={`${file.path} — view diff`}
       >
-        {/* 종류는 색이 아니라 글자로 구분한다 (완전 무채색) */}
+        {/* The kind is told apart by a letter, not a color (strict grayscale) */}
         <span className="readout w-3 shrink-0 text-[10px] text-ash">{statusMark(file.status)}</span>
         <span className="truncate text-[12px] text-ash" dir="rtl">
           {file.path}
         </span>
       </button>
       {/*
-        파일 하나만 올리고 내리는 길. 이게 없으면 "이것만 빼고 커밋"을 하려고
-        터미널로 나가야 했다 — 확인하던 자리에서 그대로 끝낼 수 있어야 한다.
+        A way to stage or unstage just this one file. Without it, doing "commit everything except
+        this one" meant dropping out to the terminal — it must be possible to finish it right where
+        it was being reviewed.
       */}
       <button
         className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-slate opacity-0 transition-opacity hover:text-chalk focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-40"
@@ -984,19 +1002,21 @@ function ChangeRow({
 }
 
 /**
- * 기록 탭 — 로그를 **읽으러 오는** 자리 (#21).
+ * The History tab — the place a person comes to **read** the log (#21).
  *
- * 깃 탭 아래 살던 History 스트립의 후계이기도 하다. 그 스트립은 고정 높이라 분할(#20)
- * 에서 이웃 그룹의 탭 스트립을 덮었고, 같은 질문("어떻게 여기까지 왔나")을 이 탭이
- * 세로 한 칸으로 이미 답하고 있어서 스트립 쪽을 걷었다.
+ * It is also the successor to the History strip that used to live below the git tab. That strip had
+ * a fixed height, so with splitting (#20) it covered the neighboring group's tab strip, and since
+ * this tab already answers the same question ("how did we get here") with a full vertical column,
+ * the strip was removed.
  *
- * **선(레인 그래프)은 이제 여기서 그린다.** #21 때 이 탭이 날짜를 고르고 선을 버린
- * 이유는 "그래프는 저쪽(스트립)에 있다"였다 — 그 저쪽이 사라졌으므로 전제도 사라졌다.
- * 전체 폭의 탭에는 둘이 같이 설 자리가 있다: 선이 갈라짐·합쳐짐을, 날짜가 '얼마나
- * 됐나'를 말한다. 행 높이는 그래서 고정이다 — 선이 행 경계에서 맞물려야 이어져 보인다.
+ * **The lines (the lane graph) are now drawn here.** Back at #21, the reason this tab chose dates
+ * and dropped the lines was "the graph lives over there (the strip)" — now that "over there" is
+ * gone, that premise is gone too. A full-width tab has room for both: the lines state branching and
+ * merging, the date states "how long ago." Row height is therefore fixed — the lines only look
+ * continuous when they line up exactly at each row's boundary.
  *
- * 눌렀을 때 열리는 것도 새로 만들지 않는다: `openCommit`이 이미 넓은 오버레이의 기록
- * 탭을 그 커밋으로 펴 준다 (`git show`가 주는 diff 하나를 `DiffView`가 그린다).
+ * What opens on click is not reinvented either: `openCommit` already expands the History tab of the
+ * wide overlay to that commit (`DiffView` draws the single diff that `git show` returns).
  */
 function CommitHistory({ projectId }: { projectId: string }) {
   const platform = usePlatform()
@@ -1005,7 +1025,7 @@ function CommitHistory({ projectId }: { projectId: string }) {
   const [commits, setCommits] = useState<GitCommit[] | null>(null)
 
   useEffect(() => {
-    // 프로젝트를 옮기는 사이 늦게 온 응답이 남의 기록을 그리면 안 된다
+    // A response arriving late while switching projects must not draw another project's history
     let alive = true
     platform.git
       .log(projectId, COMMIT_LIMIT)
@@ -1016,7 +1036,7 @@ function CommitHistory({ projectId }: { projectId: string }) {
     }
   }, [platform, projectId, touched])
 
-  // 한 번만 읽는다 — 줄마다 시계를 보면 같은 목록 안에서 기준 시각이 달라진다
+  // Read once — checking the clock per row would give rows in the same list different reference times
   const now = Date.now()
   const withAuthor = commits ? hasMultipleAuthors(commits) : false
   const graph = useMemo(() => {
@@ -1045,14 +1065,14 @@ function CommitHistory({ projectId }: { projectId: string }) {
         {commits.map((c, i) => (
           <li key={c.sha}>
             <button
-              /* 높이 고정 — 행마다 높이가 다르면 선이 행 경계에서 어긋나 끊겨 보인다 */
+              /* Fixed height — if rows had different heights, the lines would misalign at row boundaries and look broken */
               className="flex w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-graphite/25"
               style={{ height: ROW_H }}
               onClick={() => openCommit(c.sha)}
               data-testid={`history-commit-${c.shortSha}`}
               title={`${c.subject} — ${c.author}`}
             >
-              {/* 왼쪽 여백은 그래프가 진다 (PAD_L) — px-3을 겹치면 점이 벽에서 두 배 멀어진다 */}
+              {/* The left padding is the graph's own job (PAD_L) — stacking px-3 on top would push the dot twice as far from the wall */}
               <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[12px] text-ash">{c.subject}</span>
@@ -1062,7 +1082,7 @@ function CommitHistory({ projectId }: { projectId: string }) {
                     commitAgo(c.when, now),
                     ...(withAuthor ? [c.author] : []),
                     ...(c.parents.length > 1 ? ['merge'] : []),
-                    // 어느 세션이 만들었나 (#50) — 훅 없이 관찰로 안 것. 사람 커밋에는 없다
+                    // Which session made it (#50) — known through observation, without a hook. Absent for a human commit
                     ...(c.sessionName ? [c.sessionName] : []),
                   ].join(' · ')}
                 </span>
@@ -1071,7 +1091,7 @@ function CommitHistory({ projectId }: { projectId: string }) {
           </li>
         ))}
       </ul>
-      {/* 조용히 끊긴 목록은 "더 오래된 커밋이 없다"고 거짓말하는 목록이다 */}
+      {/* A list that cuts off silently is a list lying that there are no older commits */}
       {commits.length >= COMMIT_LIMIT && (
         <p
           className="shrink-0 border-t border-edge px-3 py-1.5 text-[10px] text-slate"
@@ -1085,27 +1105,30 @@ function CommitHistory({ projectId }: { projectId: string }) {
 }
 
 /**
- * 줄 앞의 한 글자 (사용자 요청 2026-09-10: "새 파일이 물음표로 뜨는데 A로").
+ * The single letter in front of a row (user request, 2026-09-10: "a new file shows up as a
+ * question mark, but it should show A").
  *
- * git은 아직 추적하지 않는 파일을 `?`로 적는데, 화면에서 그건 **모른다**로 읽힌다 —
- * 실제로는 아는 사실(새 파일)이다. 사람이 읽는 글자는 M·A·D·R처럼 무슨 일이 있었나를
- * 말해야 하므로 A(added)로 적는다. 스테이징 여부는 이미 묶음(Staged/Changed)이 말하므로
- * 이 글자가 또 말할 필요가 없다.
+ * git writes a file it does not yet track as `?`, but on screen that reads as **unknown** — when
+ * it is actually a known fact (a new file). The letter a person reads should state what happened,
+ * the way M, A, D and R do, so it is written as A (added) instead. Whether it is staged is already
+ * stated by the group it is in (Staged/Changed), so this letter does not need to say it again.
  *
- * **데이터는 안 바꾼다.** host의 `'?'`는 "추적되지 않음"이라는 사실 그대로 남는다 —
- * 여기서 바꾸는 것은 표시뿐이다 (diff의 파일 밴드가 복사에는 원문을 남기는 것과 같은 규칙).
+ * **The data itself is not changed.** The host's `'?'` stays exactly as the fact "not tracked" — only
+ * the display is changed here (the same rule the diff's file band follows, keeping the original
+ * wording for a copy).
  */
 function statusMark(status: GitFileStatus['status']): string {
   return status === '?' ? 'A' : status.toUpperCase()
 }
 
 /**
- * 목록을 다시 읽을 시점을 아는 신호 — 둘을 합친다.
+ * The signal that knows when to re-read the list — two signals combined.
  *
- * 에이전트가 만진 파일 수는 턴 **도중**의 첫 편집을 알린다. 그것만으로는 모자랐다 (#160):
- * Bash의 `git commit`, 터미널에서 친 명령, 이미 만진 파일의 재편집은 이 수를 바꾸지 않는다.
- * 그래서 사이드바의 요약을 다시 읽게 하는 신호(턴 종료, 창 복귀, 승인, 브랜치 전환)가
- * 올리는 `gitEpoch`도 함께 본다.
+ * The count of files an agent touched reports the first edit **during** a turn. That alone was not
+ * enough (#160): a `git commit` run through Bash, a command typed into the terminal, or re-editing a
+ * file already touched does not change this count. So this also watches `gitEpoch`, which is bumped
+ * by the same signals that make the sidebar's summary re-read (turn end, window regaining focus, an
+ * approval, switching branches).
  */
 function useGitRefreshKey(projectId: string): string {
   const touched = useStore((s) => {

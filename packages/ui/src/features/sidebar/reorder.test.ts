@@ -4,29 +4,29 @@ import { dropsBefore, moveTo } from './reorder.js'
 describe('moveTo', () => {
   const ids = ['a', 'b', 'c', 'd']
 
-  it('앞으로 옮긴다', () => {
+  it('moves it forward', () => {
     expect(moveTo(ids, 'd', 'b', true)).toEqual(['a', 'd', 'b', 'c'])
   })
 
-  it('뒤로 옮긴다', () => {
+  it('moves it backward', () => {
     expect(moveTo(ids, 'a', 'c', false)).toEqual(['b', 'c', 'a', 'd'])
   })
 
-  it('바로 옆으로 옮기는 것도 어긋나지 않는다', () => {
+  it('does not go wrong when moving it right next door either', () => {
     expect(moveTo(ids, 'a', 'b', false)).toEqual(['b', 'a', 'c', 'd'])
     expect(moveTo(ids, 'b', 'a', true)).toEqual(['b', 'a', 'c', 'd'])
   })
 
-  it('자기 자신에 떨어뜨리면 아무 일도 없다', () => {
+  it('does nothing when dropped on itself', () => {
     expect(moveTo(ids, 'b', 'b', true)).toEqual(ids)
   })
 
-  it('모르는 id면 그대로 둔다 — 목록이 그 사이 바뀌었을 수 있다', () => {
+  it('leaves it unchanged for an unknown id — the list may have changed in the meantime', () => {
     expect(moveTo(ids, 'zz', 'b', true)).toEqual(ids)
     expect(moveTo(ids, 'a', 'zz', true)).toEqual(ids)
   })
 
-  it('원본을 건드리지 않는다', () => {
+  it('does not mutate the original', () => {
     const original = [...ids]
     moveTo(ids, 'a', 'c', false)
     expect(ids).toEqual(original)
@@ -36,17 +36,17 @@ describe('moveTo', () => {
 describe('dropsBefore', () => {
   const rect = { top: 100, height: 20 }
 
-  it('위쪽 절반이면 앞', () => {
+  it('is before when in the top half', () => {
     expect(dropsBefore(rect, 101)).toBe(true)
     expect(dropsBefore(rect, 109)).toBe(true)
   })
 
-  it('아래쪽 절반이면 뒤', () => {
+  it('is after when in the bottom half', () => {
     expect(dropsBefore(rect, 111)).toBe(false)
     expect(dropsBefore(rect, 119)).toBe(false)
   })
 
-  it('정확히 가운데는 뒤 — 경계가 어느 한쪽에 확정되어 있어야 손이 예측한다', () => {
+  it('is after exactly in the middle — the boundary has to fall on one fixed side so the hand can predict it', () => {
     expect(dropsBefore(rect, 110)).toBe(false)
   })
 })

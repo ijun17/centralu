@@ -4,16 +4,19 @@ import { useStore } from '../../store/store.js'
 import { useToolMeta } from '../../store/selectors.js'
 
 /**
- * 고정 화면의 `ui/message` — 어느 세션으로 보낼지 사람에게 묻는다 (M4 B-4).
+ * A pinned view's `ui/message` — asks the person which session to send it to (M4 B-4).
  *
- * 대화 안 화면의 말은 그 대화로 간다. 보낼 곳이 정해져 있다. 고정 화면에는 그런 대화가 없다. 앱이
- * 알아서 고르게 하면 화면(앱의 코드)이 사람 모르게 아무 세션에나 말을 넣을 수 있다. 그래서 **사람이
- * 고르기 전에는 아무것도 보내지 않는다.** 취소하면 화면은 거절을 받는다(보냈다고 믿지 않게).
+ * An in-conversation view's message goes to that conversation; where it is sent is already fixed.
+ * A pinned view has no such conversation. Letting the app pick on its own would let the view (the
+ * app's own code) put a message into any session without the person knowing. So **nothing is sent
+ * before the person chooses.** Canceling has the view receive a decline (so it never believes it
+ * was sent).
  *
- * 보낼 글을 그대로 보여 준다. 사람이 그 글을 읽고 고르는 것이 이 확인의 전부다. 글이 아닌 조각
- * (이미지 등)은 보내지 않고 그렇다고 적는다. 목록은 이 앱의 프로젝트 세션이 먼저이고, 그다음이
- * 오케스트레이터와 다른 프로젝트의 세션이다. 사용자 폴더 앱은 프로젝트가 없으므로 오케스트레이터가
- * 먼저다(결정 4: 사용자 폴더 앱은 오케스트레이터의 것이다).
+ * The text about to be sent is shown exactly as it is. The person reading that text and choosing is
+ * the entirety of this confirmation. A non-text part (an image, etc.) is not sent, and that fact is
+ * stated. The list ranks this app's own project sessions first, then the orchestrator and other
+ * projects' sessions. A user-folder app has no project, so the orchestrator comes first (decision 4:
+ * a user-folder app belongs to the orchestrator).
  */
 export type MessageAskState = { text: string; dropped: number; resolve: (sent: boolean) => void }
 
@@ -94,7 +97,7 @@ function Target({ session, project, onPick }: { session: SessionSummary; project
   )
 }
 
-/** 보낼 수 있는 세션, 가까운 것부터 — 이 앱의 프로젝트, 오케스트레이터, 나머지 */
+/** Sessions it can be sent to, nearest first — this app's project, the orchestrator, then the rest */
 export function messageTargets(all: SessionSummary[], projectId: string | null): SessionSummary[] {
   const rank = (s: SessionSummary) => {
     if (projectId && s.projectId === projectId) return 0
@@ -104,7 +107,7 @@ export function messageTargets(all: SessionSummary[], projectId: string | null):
   return [...all].sort((a, b) => rank(a) - rank(b))
 }
 
-/** 화면이 보낸 조각에서 글만 — 나머지는 센다 */
+/** Only the text from the parts a view sent — the rest are counted */
 export function messageText(content: unknown[]): { text: string; dropped: number } {
   const texts: string[] = []
   let dropped = 0

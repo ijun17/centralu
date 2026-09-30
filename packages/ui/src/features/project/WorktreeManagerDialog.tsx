@@ -5,16 +5,17 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Modal } from '../../components/Modal.jsx'
 
 /**
- * 워크트리 매니저 시작 (#76).
+ * Starting the worktree manager (#76).
  *
- * **이 창의 전부는 줄기를 고르는 것이다.** 매니저 자체에는 정할 것이 없다 — 이름도
- * 도구도 프로젝트가 정한다. 대신 줄기(base branch)는 우리가 지어낼 수 없다:
- * main·master·develop 중 무엇인지는 저장소마다 다르고, 틀린 기본값은 워크트리가
- * 엉뚱한 데서 갈라진 **뒤에야** 드러난다. 그래서 화면이 현재 브랜치를 채워 두고
- * 사람이 확인한다 — 짐작을 사람 눈앞에 놓고 확인받는 자리다.
+ * **This dialog is entirely about choosing the trunk.** There is nothing else to set for the
+ * manager itself — the project already decides its name and its tool. But the trunk (base branch)
+ * cannot be guessed on our own: whether it is main, master or develop differs by repository, and a
+ * wrong default only shows up **after** a worktree has already branched off from the wrong place.
+ * So the screen pre-fills the current branch and the person confirms it — this is the spot where a
+ * guess is put in front of the person to be confirmed.
  *
- * 한 번 정한 줄기는 세 질문의 답이 된다: 워크트리가 어디서 갈라지는가, 어디로
- * 병합하는가, 무엇을 기준으로 "병합됨"을 재는가.
+ * Once chosen, the trunk becomes the answer to three questions: where a worktree branches off from,
+ * where it merges to, and what "merged" is measured against.
  */
 export function WorktreeManagerDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const platform = usePlatform()
@@ -25,7 +26,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 목록은 거들 뿐이다 — 못 읽어도 현재 브랜치는 이미 손에 있으므로 만들기를 막지 않는다
+  // The list only assists — even if it fails to load, the current branch is already in hand, so it does not block creation
   useEffect(() => {
     let alive = true
     void platform.git
@@ -40,7 +41,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
   return (
     <Modal onClose={onClose} testId="worktree-manager-dialog">
       <form
-        /* 다른 모달과 같은 껍데기 — 나란히 열리는 창 둘의 바탕이 다르면 한쪽이 남의 앱처럼 보인다 */
+        /* The same shell as every other modal — if two dialogs opened side by side had different backgrounds, one would look like it belonged to a different app */
         className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onSubmit={async (e) => {
           e.preventDefault()
@@ -52,7 +53,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
             await create(projectId, trunk)
             onClose()
           } catch (err) {
-            // 토스트는 2.5초 뒤 사라져 '눌러도 아무 일이 없다'로 보인다 — 창 안에 남긴다
+            // A toast disappears after 2.5 seconds and would look like "nothing happened when pressed" — kept inside the dialog instead
             setError((err as Error).message)
           } finally {
             setBusy(false)
@@ -69,9 +70,10 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
           Branch to fork from
         </label>
         {/*
-          목록이 있으면 고르고, 없으면 직접 친다. 하나로 합치지 않는 이유: 브랜치가
-          수백 개인 저장소에서 select는 못 쓸 물건이 되고, 목록을 못 읽은 저장소에서
-          select만 있으면 아무것도 못 한다.
+          Pick from the list if there is one, or type it directly if there is not. The reason these
+          are not merged into a plain select: in a repository with hundreds of branches, a select
+          becomes unusable, and in a repository where the list failed to load, having only a select
+          would leave nothing that can be done at all.
         */}
         <input
           id="worktree-trunk"

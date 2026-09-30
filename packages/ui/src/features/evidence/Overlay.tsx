@@ -32,19 +32,23 @@ export function Overlay() {
   const overlay = useStore((s) => s.overlay)
   const close = useStore((s) => s.closeOverlay)
   const projectId = useStore((s) => {
-    // 연 쪽이 프로젝트를 말했으면 그것이 답이다 — 그리드의 옆 칸 링크 (#182)
+    // If whatever opened it stated a project, that is the answer — the grid's cross-panel link (#182)
     if (s.overlay?.kind === 'viewer' && s.viewerProjectId) return s.viewerProjectId
-    // 프로젝트 없는 세션(반장)은 직전 프로젝트로 폴백하지 않는다 — EvidencePanel과 같은 규칙
+    // A session with no project (the foreman) does not fall back to the last project — same rule as EvidencePanel
     const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
     return sess ? sess.projectId : s.focusedProjectId
   })
 
   /*
-   * esc로 걷는다. 입력창에서 눌러도 걷혀야 한다 — 덮인 채로 갇히면 안 된다.
+   * Dismissed with Esc. It has to dismiss even when pressed inside an input field — the person must
+   * not get trapped behind the cover.
    *
-   * **단, 이 층이 맨 위이고 키가 이 층 쪽에서 왔을 때만이다** (#181). 창의 캡처 단계에서 가로채면 모든 요소보다 먼저
-   * 받으므로, 옆에 그대로 보이는 증거 패널의 터미널(vim·less)에 Esc가 가지 않고 오버레이가 닫혔다. 위에 뜬 설정 창·
-   * 모달의 Esc도 먼저 가로채, 가려진 오버레이가 닫히고 설정 창은 한 번 더 눌러야 닫혔다.
+   * **But only when this layer is on top and the key actually came from this layer** (#181).
+   * Intercepting it in the window's capture phase means it arrives before every other element, so
+   * Esc meant for the terminal (vim, less) in the evidence panel visible right next to it never
+   * reached the terminal, and the overlay closed instead. It was also intercepting Esc meant for a
+   * settings dialog or a modal open above it, closing the hidden overlay underneath and leaving the
+   * settings dialog needing a second press to close.
    */
   useEffect(() => {
     if (!overlay) return
@@ -92,8 +96,10 @@ export function Overlay() {
 }
 
 /**
- * 오버레이가 이 Esc를 받는가 (#181). 위에 다른 층(모달·명령 창·설정·팔레트·인박스·사용량)이 떠 있으면 그 층의 것이고,
- * 오버레이 옆의 증거 패널에서 온 키는 그 패널의 것이다(터미널의 Esc).
+ * Does the overlay claim this Esc (#181)? If another layer (a modal, a command window, settings,
+ * the palette, the inbox, usage) is open above it, the key belongs to that layer, and a key coming
+ * from the evidence panel next to the overlay belongs to that panel instead (Esc inside the
+ * terminal).
  */
 export function overlayTakesEscape(
   st: { openLayers: number; settingsOpen: boolean; paletteOpen: boolean; inboxOpen: boolean; usageOpen: boolean },

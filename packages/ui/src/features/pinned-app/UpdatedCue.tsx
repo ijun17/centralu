@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react'
 
-/** 서 있는 시간 — 눈이 한 번 스치면 충분하다 */
+/** How long it stays visible — one glance is enough */
 const SHOWN_MS = 8_000
-/** 다시 연 지 이만큼 지났으면 서지 않는다 — 다른 데 갔다 돌아와 다시 그려진 화면에 옛 소식을 붙이지 않게 */
+/** If this much time has passed since it was reopened, it does not appear at all — so an old notice does not attach to a view redrawn after coming back from somewhere else */
 const FRESH_MS = 30_000
 
 /**
- * "Updated" — 앱이 새 코드로 다시 떠서 화면을 다시 열었다는 한 마디 (M4 C-4).
+ * "Updated" — a one-word note that the app came back up with new code and its view was reopened
+ * (M4 C-4).
  *
- * 만드는 에이전트가 고친 결과가 사람 앞에서 **소리 없이** 바뀌면, 사람은 화면이 바뀐 것인지 제가 잘못 본 것인지 모른다.
- * 그렇다고 사람을 부를 일은 아니다 — 기다림이나 소식은 조용한 색의 몫이다(팔레트 규칙). 그래서 제목 옆에 작은 글자
- * 하나가 잠깐 섰다가 걷힌다. 서는 시간은 이것이 그려진 때부터 잰다(`at`에서 재면, 새 화면이 뜨는 데 걸린 시간만큼
- * 깎인다). 다시 연 지 오래됐으면 다시 그려져도 서지 않는다.
+ * If the result of a builder agent's fix changes in front of the person **without a sound**, the
+ * person cannot tell whether the view changed or they just misread it. But it is not something that
+ * should call the person either — waiting and notices belong to quiet colors (the palette rule). So
+ * one small word stands briefly next to the title and then withdraws. Its visible duration is
+ * measured from when this component renders (measuring from `at` instead would eat into it by
+ * however long the new view took to come up). If it has been a while since the last reopen, it does
+ * not appear even on a fresh render.
  */
 export function UpdatedCue({ at, testId }: { at: number; testId: string }) {
   const [shown, setShown] = useState(() => Date.now() - at < FRESH_MS)

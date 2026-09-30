@@ -1,11 +1,11 @@
 /**
- * 끌어서 순서 바꾸기의 순수한 부분.
+ * The pure part of drag-to-reorder.
  *
- * DOM 이벤트에서 떼어내 두면 "어디에 놓았을 때 어떤 순서가 되는가"를
- * 브라우저 없이 검증할 수 있다 — 끌기 자체보다 이 계산이 틀리기 쉽다.
+ * Kept apart from the DOM events, "what order results from dropping it here" can be verified
+ * without a browser — this calculation is more prone to getting wrong than the dragging itself.
  */
 
-/** 끌고 있는 것이 무엇인지. 서로 다른 종류가 서로의 자리에 떨어지면 안 된다 */
+/** What is being dragged. Different kinds must not be dropped into each other's place. */
 export const PROJECT_MIME = 'application/x-cc-project'
 export const SESSION_MIME = 'application/x-cc-session'
 /**
@@ -16,11 +16,11 @@ export const SESSION_MIME = 'application/x-cc-session'
 export const PANEL_MIME = 'application/x-cc-panel'
 
 /**
- * `dragged`를 `target`의 앞(before) 또는 뒤로 옮긴 새 순서.
+ * The new order with `dragged` moved to before or after `target`.
  *
- * 자기 자신에게 떨어뜨리면 원래 순서를 그대로 돌려준다 — 아무 일도 없었던 것처럼.
- * 모르는 id면 역시 그대로다: 목록이 그 사이 바뀌었을 수 있는데,
- * 그때 억지로 끼워 넣는 것보다 아무것도 안 하는 편이 낫다.
+ * Dropping it on itself returns the original order unchanged — as if nothing happened. An
+ * unknown id is also left unchanged: the list may have changed in the meantime, and doing
+ * nothing is better than forcing it in regardless.
  */
 export function moveTo(ids: readonly string[], dragged: string, target: string, before: boolean): string[] {
   if (dragged === target) return [...ids]
@@ -33,10 +33,10 @@ export function moveTo(ids: readonly string[], dragged: string, target: string, 
 }
 
 /**
- * 커서가 요소의 위쪽 절반이면 그 앞에 놓는다.
+ * If the cursor is in the top half of the element, drop it before that element.
  *
- * 경계를 가운데로 잡으면 "이 줄 위" / "이 줄 아래"가 각각 절반씩이라
- * 어느 쪽으로 갈지 손이 예측할 수 있다.
+ * Placing the boundary at the middle gives "above this row" / "below this row" a half each, so
+ * the hand can predict which side it will land on.
  */
 export function dropsBefore(rect: { top: number; height: number }, clientY: number): boolean {
   return clientY < rect.top + rect.height / 2
