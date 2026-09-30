@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { buildInbox, countWaiting, detectFileConflicts, isUnread, type InboxItem } from '@cc/core'
-import { useStore, type AppState } from './store.js'
+import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 
@@ -99,6 +99,11 @@ export function useSelectedSessionId(): string | null {
 
 export function useIsProjectSelected(projectId: string): boolean {
   return useStore((s) => s.view === 'focus' && s.focusedProjectId === projectId && !s.focusedSessionId)
+}
+
+/** Is this project's screen, or one of its sessions, what the focus lane shows (the sidebar tints its group)? */
+export function useIsProjectOpen(projectId: string): boolean {
+  return useStore((s) => openProjectOf(s) === projectId)
 }
 
 export function useConflicts() {

@@ -8,7 +8,14 @@ import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { APPS } from '../../apps/registry.js'
 import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
 import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
-import { useIsProjectSelected, useSelectedSessionId, useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
+import {
+  useIsProjectOpen,
+  useIsProjectSelected,
+  useSelectedSessionId,
+  useSessionsOf,
+  useToolMeta,
+  useTools,
+} from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -498,6 +505,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const reorderProjects = useStore((s) => s.reorderProjects)
   const reorderSessions = useStore((s) => s.reorderSessions)
   const selected = useIsProjectSelected(projectId)
+  // Its screen or one of its sessions is on screen — the whole group is tinted (see the section below)
+  const open = useIsProjectOpen(projectId)
   // Does the manager's worktree proposal point at this project (#69)? The + button lights up
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [managerDialog, setManagerDialog] = useState(false)
@@ -533,15 +542,45 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   if (!project) return null
 
   return (
+    /*
+      Which project is on screen, stated in two layers (user request, 2026-10-01): the whole group — its name row,
+      its sessions and its apps, between two of the dividers below — is tinted, and the one row that is open keeps
+      the row mark inside it. A row mark alone says "this row"; with several projects open in the list the eye then
+      has to walk up to find whose row it is, and a folded project has no row to mark at all.
+
+      The tint is the selected Grid and Orchestrator buttons' graphite, at the strength of a row's hover rather than
+      a button's fill: it covers a dozen rows, and at full strength the group would outshine the row that is open in
+      it. It stays well under that row's own mark (graphite/40 plus the ash bar), which is what keeps the two layers
+      reading as "this project, and this row in it". It is drawn only for the focus lane (openProjectOf) — the grid
+      and the orchestrator light their own buttons.
+
+      The divider is the section's own bottom border. A colour change adds no size, so selecting a project moves
+      nothing in the list.
+    */
     <section
-      className={`relative border-b border-edge/70 py-2.5 ${dropLine(drop.edge)}`}
+      className={`relative border-b border-edge/70 py-2.5 transition-colors ${open ? 'bg-graphite/20' : ''} ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
       data-folded={folded || undefined}
+      data-selected={open || undefined}
       {...drop.handlers}
     >
-      {/* Grabbed and moved by its name line — making the whole section draggable would conflict with dragging sessions */}
+      {/*
+        Grabbed and moved by its name line — making the whole section draggable would conflict with dragging sessions.
+
+        When the project screen is open this line is marked the way an open session row is — the ash bar and the
+        graphite/40 band — so the name row and a session row say "open" in one grammar. It replaced an underline
+        under the name, which was too faint to find once the group around it was tinted too.
+
+        **The band must not move anything.** A session row is 31.5px tall (py-1.5 around a 13px line); this line
+        is only its text. The padding that makes the band a row's height is cancelled by an equal negative margin,
+        so every row below stands exactly where it did, and both are always on, so selecting it changes nothing
+        but colour. The bar is always there too, transparent until selected, with pl-2 + 2px keeping the arrow at
+        the old pl-2.5.
+      */}
       <header
-        className="group flex items-baseline gap-2 pl-2.5 pr-3"
+        className={`group -my-1.5 flex items-baseline gap-2 border-l-2 py-1.5 pl-2 pr-3 transition-colors ${
+          selected ? 'border-l-ash bg-graphite/40' : 'border-l-transparent'
+        }`}
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData(PROJECT_MIME, projectId)
@@ -557,7 +596,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 
           Unlike that, it is **always visible.** Being folded is a state, not an action, and if it
           only shows on hover there is nowhere to ask why a row is missing. The arrow stands in the
-          same vertical column as a session row's tool mark (pl-2.5 + button), so the name also
+          same vertical column as a session row's tool mark (the header's 2px bar + pl-2 + button), so the name also
           starts at the same spot as a session name — the tree reads as a tree. Since the name line
           aligns on the text baseline, the button with no text is centered separately inside a
           wrapping box.
@@ -583,12 +622,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           testId={`project-tip-${project.name}`}
         >
           <button
-            className={`truncate text-left text-[13px] font-medium tracking-tight transition-colors ${
-              selected
-                ? 'text-chalk underline decoration-graphite underline-offset-4'
-                : 'text-chalk hover:text-beacon'
+            className={`truncate text-left text-[13px] font-medium tracking-tight text-chalk transition-colors ${
+              selected ? '' : 'hover:text-beacon'
             }`}
             onClick={() => focusProject(projectId)}
+            aria-current={selected ? 'page' : undefined}
             data-testid={`project-header-${project.name}`}
           >
             {project.name}
@@ -724,6 +762,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */
                       onDoubleClick={() => setRenaming(s.id)}
                       data-testid={`session-row-${s.id}`}
+                      // The open row inside the tinted group — the same word an app row and the project's name row use
+                      aria-current={focused ? 'page' : undefined}
                       /*
                         Unread (FR-16) is stated by the name's brightness (the text-chalk on the
                         truncate span below). It is also kept as an attribute so a test can see a

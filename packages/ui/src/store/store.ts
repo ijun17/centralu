@@ -1817,6 +1817,26 @@ export function projectScreenOf(
 }
 
 /**
+ * The project the focus lane is showing — its screen, or one of its sessions — or null. The sidebar tints that
+ * project's group, so the person can see which project they are in as well as which row.
+ *
+ * Only the focus lane counts: the grid and the orchestrator are views of their own, lit by their own buttons, and a
+ * tinted project beside them would be a second answer to "what am I looking at".
+ *
+ * A focused session answers with **its own** project, not `focusedProjectId`. Opening a session that has no project
+ * (a coordinator) leaves `focusedProjectId` on the project looked at last, and reading that would tint a project the
+ * screen is not showing.
+ */
+export function openProjectOf(
+  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'sessions'>,
+): string | null {
+  if (!s.focusedSessionId) return projectScreenOf(s)
+  if (s.view !== 'focus') return null
+  const pid = s.sessions[s.focusedSessionId]?.projectId
+  return pid && s.projects[pid] ? pid : null
+}
+
+/**
  * The sessions the project screen shows right now: every session of the project the person has not hidden. The
  * trash (#204) needs no rule here — a trashed session is not in `sessions`.
  */
