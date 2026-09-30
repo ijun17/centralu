@@ -919,7 +919,7 @@ export const RpcMethods = {
   /**
    * Whether this project's code is allowed to run on this machine (M4 A-2, plan decision 3).
    *
-   * The default is "no" — simply opening a repository someone handed you must not let the app
+   * The default is "no" — simply opening a repository someone handed over must not let the app
    * server inside it run with the user's own permissions. Turning it off brings that project's
    * apps down immediately.
    */
