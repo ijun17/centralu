@@ -355,8 +355,8 @@ function TabGroup({
           />
         )}
         {/*
-          The left side is where to go (tabs), the right side is what to do from where you already
-          are (control buttons). When space runs short, the tabs are always what gives way — the
+          The left side is where to go (tabs), the right side is what to do from where the person
+          already is (control buttons). When space runs short, the tabs are always what gives way — the
           control buttons are actions on what is being looked at and must stay within reach, and a
           pushed-out tab can still be picked by name behind `…`.
         */}

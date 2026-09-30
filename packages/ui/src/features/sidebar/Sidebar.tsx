@@ -240,7 +240,7 @@ export function Sidebar() {
  * Placed directly above the grid. The two are two ways of looking at the same thing, so they
  * should stand side by side:
  *   orchestrator  direct sessions by talking, in one window
- *   grid          watch several windows with your eyes
+ *   grid          watch several windows at a glance
  *
  * Not nested under a project. This session does not belong to any project — crossing multiple
  * projects is the whole reason it exists.
