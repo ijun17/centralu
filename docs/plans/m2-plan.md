@@ -1,239 +1,277 @@
-# M2 실행 플랜 — 관제 완성 (v2)
+# M2 Plan — Control Completed (v2)
 
-> 기준: **에이전트가 무엇을 했는지 앱 안에서 판단할 수 있는가.**
-> M1.5까지는 "언제 나를 부르는지"를 풀었다. M2는 "부름에 답하려면 무엇을 봐야 하는가"를 푼다.
+> The bar: **can the person judge what the agent did from inside the app.**
+> Through M1.5, "when does it call me" got solved. M2 solves "what do I need to see to answer the call."
 >
-> 선행: [m1.5-result.md](m1.5-result.md) · 검증 프로토콜: [m1.5-plan.md](m1.5-plan.md)
+> Precedes from: [m1.5-result.md](m1.5-result.md) · Verification protocol: [m1.5-plan.md](m1.5-plan.md)
 >
-> **v2 (재검증 반영, 2026-08-15)**: v1은 독립 리뷰에서 REVISE 판정.
-> 사실 오류 3건(GitPort·FsPort·FR-7 코드 상태), 스펙 위반 1건(푸시), 누락 다수(탭 셸·마이그레이션·
-> 단축키 5종·알림 정책·FR-2 복구), 치명 2건(무채색↔diff 충돌 미인지, 번들링 스파이크가 맨 끝)을 정정했다.
+> **v2 (revised after independent review, 2026-08-15)**: v1 got a REVISE verdict from an independent review.
+> Corrected: 3 factual errors (the state of GitPort, FsPort and FR-7 in code), 1 spec violation (push),
+> numerous omissions (the tab shell, migrations, 5 missing shortcuts, the notification policy, FR-2
+> recovery), and 2 critical misses (not recognizing the achromatic-vs-diff conflict, and putting the
+> bundling spike dead last).
 
-## 지금 무엇이 막고 있나
+## What is blocking things right now
 
-M1.5로 앱은 계속 켜둘 수 있게 됐다. 그런데 실제로 쓰려고 하면 **판단할 근거가 화면에 없다**:
+M1.5 made it possible to leave the app running. But trying to actually use it, **the screen has no basis for judgment**:
 
-| 막는 것 | 지금 벌어지는 일 |
+| What blocks it | What happens now |
 |---|---|
-| 무엇이 바뀌었는지 못 본다 | 승인하려면 diff를 봐야 하는데, 앱에는 명령문 한 줄뿐이라 IDE로 나가야 한다 |
-| Codex를 못 쓴다 | 사용자가 실제로 두 도구를 쓰는데 앱은 하나만 안다 (FR-7 미완성) |
-| 지난 대화를 못 찾는다 | "그거 어디서 얘기했지"가 세션 몇 개만 넘어가면 바로 생긴다 |
-| 스크린샷을 못 붙인다 | 화면을 보여주며 지시하는 흔한 흐름이 막힌다 |
-| 배포 빌드가 없다 | 도그푸딩은 `.app`으로 해야 하는데 dev 모드만 검증됐다 |
+| Cannot see what changed | Approving requires seeing the diff, but the app has only a one-line command, so it means dropping out to the IDE |
+| Cannot use Codex | The person actually uses two tools, and the app only knows one (FR-7 unfinished) |
+| Cannot find a past conversation | "Where did we talk about that" starts happening as soon as there are more than a few sessions |
+| Cannot paste a screenshot | The common flow of showing the screen and giving instructions is blocked |
+| No release build | Dogfooding has to happen through the `.app`, but only dev mode has been verified |
 
-## 스펙 약속 대조표 (product-spec §8 M2 ↔ 이 플랜)
+## Spec-promise comparison table (product-spec §8 M2 ↔ this plan)
 
-| 스펙이 M2로 약속한 것 | 이 플랜에서 |
+| What the spec promised for M2 | Where it lands in this plan |
 |---|---|
-| Codex 어댑터 (FR-7 완성) | A + **모델·권한 프리셋 UI(A-3)** — 도구 선택만으로는 FR-7이 안 끝난다 |
-| 깃 패널 + IDE 줄 점프, 직후 커밋/스테이징/**푸시** | B (푸시 포함 — v1 플랜이 스펙과 달리 뺐던 것을 정정) |
-| 파일 트리 + 코드 뷰어 (FR-5, 6) | C |
-| 첨부/이미지 붙여넣기 (FR-13) | D |
-| 대화 전문 검색 (FR-21) | E |
-| 커맨드 팔레트 ⌘K, 단축키 설정 (FR-17 완성) | E + **미구현 단축키 5종(E-3)** — 설정 화면만으로는 FR-17이 안 끝난다 |
-| OS 알림 정책 | **E-5** — M1.5는 기본 정책만 구현, 설정 화면이 없다 |
-| (m0-findings가 M2로 이월) FR-2 복구 경로 재검토 | **B-8** |
+| Codex adapter (FR-7 complete) | A + **model/permission preset UI (A-3)** — tool selection alone does not finish FR-7 |
+| Git panel + IDE line jump, commit/stage/**push** right after | B (push included — corrects what the v1 plan dropped against the spec) |
+| File tree + code viewer (FR-5, FR-6) | C |
+| Attachments / pasting images (FR-13) | D |
+| Full-text conversation search (FR-21) | E |
+| Command palette ⌘K, shortcut settings (FR-17 complete) | E + **the 5 unimplemented shortcuts (E-3)** — the settings screen alone does not finish FR-17 |
+| OS notification policy | **E-5** — M1.5 only implemented the default policy, with no settings screen |
+| (carried into M2 from m0-findings) revisit the FR-2 recovery path | **B-8** |
 
 ---
 
-## 순서와 근거
+## Order and reasoning
 
-"위험이 큰 것부터"를 플랜 자신에게도 적용한다. v1은 검증된 것이 0인 번들링을 맨 끝에 뒀다 — 정정한다.
+"Riskiest first" applies to the plan itself too. v1 put bundling — the one thing verified 0 times
+— dead last. This corrects that.
 
 ```
-F-0 번들링 스파이크 ─┐(병렬)┌─ A Codex 어댑터
-                     └──────┴→ B 깃 패널 → C 트리·뷰어 → D 첨부 → E 검색·팔레트·설정 → F 배포 마감 → G 문서 정합
+F-0 bundling spike ─┐(parallel)┌─ A Codex adapter
+                    └──────────┴→ B git panel → C tree/viewer → D attachments → E search/palette/settings → F release wrap-up → G doc alignment
 ```
 
-1. **F-0 스파이크** — M2의 목적(도그푸딩 가능 상태)을 좌우하는 **단일 최대 미지수**가 사이드카 번들링이다.
-   실패하면 A~E의 전제(Node 사이드카 유지)가 흔들리므로 가장 먼저, Codex와 병렬로 확인한다.
-2. **A Codex** — 설계 약속("어댑터 하나만 추가")의 실전 검증. M0 덕에 프로토콜 위험은 낮다.
-3. **B 깃 패널** — 관제 가치 최대. 승인 판단의 근거.
-4. **C → D → E** — B가 만든 기반(탭 셸·CodeMirror·마이그레이션) 위에 쌓는다.
-5. **F 배포 마감 → G 문서 정합**.
+1. **F-0 spike** — the **single biggest unknown** deciding whether M2 reaches its goal (a dogfoodable
+   state) is sidecar bundling. If it fails, the premise behind A through E (keeping the Node sidecar)
+   comes into question, so it is checked first, in parallel with Codex.
+2. **A Codex** — the real-world test of the design's promise ("just add one adapter"). Protocol risk is low thanks to M0.
+3. **B git panel** — the biggest control-tower value. The basis for approval judgment.
+4. **C → D → E** — built on the foundation B creates (tab shell, CodeMirror, migrations).
+5. **F release wrap-up → G doc alignment**.
 
 ---
 
-## F-0. 사이드카 번들링 스파이크 (1일 상자, A와 병렬)
+## F-0. Sidecar bundling spike (1-day box, parallel with A)
 
-현재 상태를 정확히 적으면: `host_command()`는 **dev 경로만** 반환하고(`sidecar.rs` — "번들된 바이너리로 실행한다"는
-주석은 아직 사실이 아니다), `tauri.conf.json`에 `externalBin`/`resources`가 없으며, better-sqlite3는
-네이티브 애드온(`.node`)이고, `store.ts`는 `schema.sql`을 **소스 트리 상대 경로**로 읽는다. 넷 다 배포에서 깨진다.
+Stated precisely, the current state is this: `host_command()` returns **only the dev path**
+(`sidecar.rs` — the comment saying "runs as a bundled binary" is not yet true), `tauri.conf.json`
+has no `externalBin`/`resources`, better-sqlite3 is a native addon (`.node`), and `store.ts` reads
+`schema.sql` via a **path relative to the source tree**. All four break in a release build.
 
-- **F-0a. 번들 방식 결정** — 후보: ① Node SEA(네이티브 애드온에 가장 불리 — `.node` 별도 동봉 필요)
-  ② 시스템 Node 요구 ③ Bun 컴파일. **도그푸딩은 내 머신 한정이므로 ②를 폴백으로 열어둔다** —
-  ②라면 M2를 막지 않는 가장 싼 길이다.
-- **F-0b. hello-world host를 `.app`에 번들해 기동** — `host_command()` prod 분기 + `externalBin` 배선 +
-  `schema.sql` 동봉(또는 인라인)까지, 최소 host가 깨끗한 경로의 `.app`에서 ready 줄을 출력하면 통과.
-- 완료: 스파이크 결과(선택지·근거·발견한 함정)를 결과 문서에 기록. **여기서 막히면 즉시 보고** —
-  자동 게이트로 넘길 수 없는 제품 전제 문제다.
+- **F-0a. Decide on a bundling approach** — candidates: ① Node SEA (worst fit for the native addon —
+  `.node` needs bundling separately) ② requiring system Node ③ compiling with Bun. **Since dogfooding
+  is limited to my own machine, ② stays open as a fallback** — if it comes to ②, that is the cheapest
+  path that does not block M2.
+- **F-0b. Bundle and launch a hello-world host inside a `.app`** — up through the `host_command()`
+  prod branch, wiring up `externalBin`, and bundling (or inlining) `schema.sql`: this passes once a
+  minimal host prints its ready line from a `.app` on a clean path.
+- Done: the spike results (the choice made, the reasoning, the traps found) are recorded in the
+  result document. **If this stalls, report immediately** — it is a product-premise problem that
+  cannot be handed off to an automated gate.
 
-## A. Codex 어댑터 (FR-7 완성)
+## A. Codex adapter (FR-7 complete)
 
-M0에서 프로토콜·타입 생성기·승인 오버라이드를 확인했다([m0-findings.md](../spikes/m0-findings.md)).
+M0 already confirmed the protocol, the type generator and the approval override ([m0-findings.md](../spikes/m0-findings.md)).
 
-- **A-1. 프로토콜 바인딩 커밋** — `pnpm codex:bindings` 생성 스크립트 + 바인딩 커밋 + 최신성 CI 체크.
-- **A-2. CodexAdapter 구현** — stdio JSON-RPC, `initialize`→`initialized`, `thread/start`(approvalPolicy
-  오버라이드)·`turn/start`·`turn/interrupt`·`thread/resume`. 이벤트 변환은 m0-findings §B 표 그대로.
-  - **protocol 선행 작업을 명시한다**: `compaction` 이벤트 타입은 NormalizedEvent에 **아직 없다** —
-    protocol에 추가하고 core 리듀서·UI 마커까지 배선한다 (FR-14의 미구현분. A-4 판정에서 제외할 것).
-  - 완료: 계약 테스트 (녹화 픽스처 → NormalizedEvent 스냅샷), 승인 decision 6종 매핑
-    (`acceptForSession` = '항상 허용·세션'), capability 선언
-  - 완료: **좀비 검사** — Codex 프로세스 spawn 후 host를 SIGKILL, `pgrep`으로 잔존 0 확인
-    (M1.5 결함 1번 재발 방지 규칙을 태스크에 직접 연결)
-- **A-3. 세션 생성 다이얼로그 (FR-7의 나머지 전부)** — 도구 → **모델 → 권한 프리셋** → 시작 프롬프트.
-  현재 `permissionPreset: 'normal'` 하드코딩에 model은 아예 전달되지 않는다 (protocol 필드·
-  `projects.default_model` 컬럼은 이미 있고 전부 미사용).
-  - 완료: E2E — 고른 도구·모델·프리셋이 `createSession` 파라미터로 host까지 도달
-  - 완료: 프로젝트별 기본값(`default_tool`·`default_model`) 읽고 쓰기
-  - 완료: 미설치 도구 비활성 — 감지는 **다이얼로그 열 때마다** `agents.detect` 호출 (M1.5 E-1의 재감지 버튼과 동일 경로)
-  - 완료: E2E — 같은 프로젝트에 Claude·Codex 세션 동시 운용, 사이드바에서 구분
-- **A-4. 설계 약속 검증 (기준 재작성)** — v1의 "ui·core·protocol diff 0"은 자기모순이었다
-  (A-2·A-3이 셋 다 건드린다). 올바른 기준:
-  - `adapters/codex/**` 밖의 변경을 두 종류로 분류해 기록한다:
-    ① **어댑터를 붙이기 위해 불가피했던 변경** (= 설계 실패의 근거, 설계 문서 수정 사유)
-    ② **Codex가 새 기능을 가져와서 생긴 변경** (compaction 마커, 도구 선택 UI 등 — 정상)
-  - 완료: 분류 결과를 m2-result에 기록. ①이 있으면 architecture.md C3 절 수정까지가 완료 조건.
-- **A-5. 실 세션 스모크** (L3) — S9(승인 왕복, acceptForSession 포함)·S10(thread/resume)·S11(동시 진행).
-  모델: Codex 기본 모델 (최상위 금지).
+- **A-1. Commit the protocol bindings** — the `pnpm codex:bindings` generator script + committing the bindings + a CI check that they are current.
+- **A-2. Implement CodexAdapter** — stdio JSON-RPC, `initialize` → `initialized`, `thread/start`
+  (approvalPolicy override), `turn/start`, `turn/interrupt`, `thread/resume`. Event conversion
+  follows the m0-findings §B table exactly.
+  - **Calling out a protocol prerequisite**: the `compaction` event type does **not yet exist** in
+    NormalizedEvent — add it to the protocol and wire it through the core reducer and the UI marker
+    (this is the unimplemented part of FR-14; exclude it from the A-4 verdict).
+  - Done: contract tests (recorded fixtures → NormalizedEvent snapshots), the 6 approval decision
+    types mapped (`acceptForSession` = "always allow, session"), capability declaration
+  - Done: **zombie check** — spawn a Codex process, then SIGKILL the host and confirm 0 survivors
+    with `pgrep` (ties the M1.5 defect-1 regression rule directly to a task)
+- **A-3. Session-creation dialog (the rest of FR-7)** — tool → **model → permission preset** → start prompt.
+  Right now `permissionPreset: 'normal'` is hardcoded and model is not passed at all (the protocol
+  field and the `projects.default_model` column both already exist and go completely unused).
+  - Done: E2E — the chosen tool, model and preset reach the host through the `createSession` parameters
+  - Done: reading and writing per-project defaults (`default_tool`, `default_model`)
+  - Done: disabling uninstalled tools — detection calls `agents.detect` **every time the dialog
+    opens** (the same path as M1.5 E-1's re-detect button)
+  - Done: E2E — running Claude and Codex sessions concurrently in the same project, distinguished in the sidebar
+- **A-4. Verify the design's promise (criteria rewritten)** — v1's "0 diff in ui, core and protocol"
+  was self-contradictory (A-2 and A-3 touch all three). The correct criteria:
+  - Classify changes outside `adapters/codex/**` into two kinds and record them:
+    ① **changes that were unavoidable to attach the adapter** (= evidence the design fell short, a
+    reason to revise the design document)
+    ② **changes that came from Codex bringing a new feature along** (the compaction marker, the tool
+    selection UI, and so on — expected)
+  - Done: the classification is recorded in m2-result. If any ① exists, done requires also revising architecture.md §C3.
+- **A-5. Real-session smoke** (L3) — S9 (approval round trip, including acceptForSession), S10
+  (thread/resume), S11 (running concurrently). Model: Codex's default model (top-tier forbidden).
 
-**게이트**: F-0 통과 + Codex 실 세션 승인·재개 통과 → B 진행.
+**Gate**: F-0 passes + the Codex real-session approval and resume pass → proceed to B.
 
-## B. 깃 패널 (FR-4)
+## B. Git panel (FR-4)
 
-- **B-0. 포커스 뷰 탭 셸 (신설)** — B·C 전체의 선행조건인데 v1에 없었다. 현재 앱에는 탭 개념 자체가 없다.
-  대화/파일/깃/뷰어 탭 컨테이너 + `⌘⇧1~4` 전환 + `WorkspaceSnapshot.tab` 복원 + 빈 탭 상태.
-  - 완료: E2E — 탭 전환·재시작 후 탭 복원, L5-2 스크린샷 기준선에 탭 셸 추가
-- **B-1. GitPort 신설 (v1 오류 정정: "확장"이 아니다 — GitPort는 존재하지 않는다)** —
-  현재 깃은 `ProjectPort.gitStatus` 요약 하나뿐. 작업: ports에 `GitPort` 인터페이스 신설 +
-  `Platform.git` 필드 + protocol RPC 5종(`git.status/diff/log/commitDetail/branches/checkout`) +
-  rpc 핸들러 + `dev-services/git.ts` 확장(현재 27줄) + web/mock 구현 + 계약 테스트.
-  - 완료: 계약 테스트를 web/mock 두 구현에 동일 실행 (tauri는 web 재사용이므로 자동 포함)
-  - 완료: 비정상 경로 — 비저장소·거대 diff(수만 줄)·바이너리·detached HEAD·진행 중 merge 상태에서 안전
-- **B-2. Changes 탭 + diff 뷰** — **CodeMirror(merge view)를 여기서 지연 로드로 도입**하고,
-  **번들 회귀 테스트(초기 번들에 CodeMirror 미포함)도 B-2 완료 기준**이다 (v1은 C-3에 있어서
-  B 기간 내내 번들 오염을 방치할 뻔했다). 파일 변경 시 워처 갱신(debounce).
-  - **무채색 결정 적용**: diff는 색이 아니라 **배경 밝기 2단 + `+`/`-` 기호**로 표현한다.
-    styles.test.ts의 무채색 게이트(전 CSS R=G=B)는 그대로 유지하되, `.find()`가 CSS 파일 하나만
-    검사하던 것을 **모든 CSS 청크 순회**로 강화한다 (지연 로드 청크가 게이트를 우회하지 못하게).
-  - 완료: E2E diff 렌더 + 거대 diff 가상 스크롤, L5-2 기준선, L5-3 대비 확인
-  - 완료: 워처 가동 상태(프로젝트 4개)에서 유휴 CPU < 1% (§7.1 기준, 10초 샘플링) + FSEvents 핸들 수 기록
-- **B-3. History 탭** — 커밋 로그 + 커밋 클릭 시 변경 파일·diff. 그래프 선은 그리지 않는다(부모 관계만).
-- **B-4. Branches 탭** — **로컬/원격** 목록(v1이 원격을 빠뜨림)·현재 브랜치·체크아웃.
-  더티 상태 체크아웃: 스펙 문구는 "안내 후 중단"이나 철학("막지 말고 보이게")에 따라
-  **충돌 예상 파일을 보여주고 진행 여부를 묻는다** — 스펙과 다른 결정이므로 결정 목록에 기록.
-- **B-5. IDE 줄 점프** — diff·파일 목록 ⌘클릭 → `openInIde(path, line)` (SystemPort 기존 구현 재사용).
-- **B-6. 스테이징·커밋·푸시** — 스펙 v1.5 확정분 그대로 (v1 플랜이 푸시를 잘못 뺐다 — 존재하지 않는
-  "§1.5" 인용은 버전 레이블 오독). rebase·cherry-pick은 계속 비목표.
-  - 완료: 스테이지/언스테이지·커밋 메시지·커밋·**푸시**(업스트림 있는 브랜치 한정, 실패 시 원문 표시)
-- **B-7. 에이전트 변경 구분 + touchedPaths 영속화** — "에이전트가 만진 파일"은 **파일 단위**다
-  (`files_touched`는 경로만 준다 — 헝크 단위 아님을 명시). 현재 `touchedPaths`는 UI 메모리에만 있어
-  **재시작하면 사라진다** — 상시 가동 앱에서 재시작은 일상이므로 영속화가 선행이다.
-  - 방식: `sessions.touched_paths TEXT` 컬럼 (마이그레이션 E-0 선행) — 메시지 재구성안은
-    윈도잉(D-2)과 충돌하므로 기각
-- **B-8. FR-2 복구 경로 (m0-findings의 M2 이월분)** — 동일 파일 충돌 감지 시 "이 파일의 이전 상태 보기".
-  1차: tool_call 이벤트에 남은 변경 전 내용. 깃 패널이 있으니 diff 대조가 가장 싸게 붙는 시점이다.
+- **B-0. Focus-view tab shell (new)** — a prerequisite for all of B and C that was missing from v1.
+  The app currently has no concept of tabs at all. A tab container for conversation/files/git/viewer
+  + `⌘⇧1~4` switching + restoring `WorkspaceSnapshot.tab` + an empty-tab state.
+  - Done: E2E — switching tabs, restoring tabs after a restart, and adding the tab shell to the L5-2 screenshot baseline
+- **B-1. Create GitPort (v1 error corrected: this is not an "extension" — GitPort does not exist yet)** —
+  the only git support today is the one summary field, `ProjectPort.gitStatus`. Work: create a new
+  `GitPort` interface in ports + a `Platform.git` field + 5 protocol RPCs
+  (`git.status/diff/log/commitDetail/branches/checkout`) + the rpc handler + expanding
+  `dev-services/git.ts` (currently 27 lines) + web/mock implementations + contract tests.
+  - Done: run the same contract tests against both the web and mock implementations (tauri reuses
+    web, so it is automatically covered)
+  - Done: abnormal paths are safe — not a repo, a huge diff (tens of thousands of lines), binary
+    files, a detached HEAD, and mid-merge state
+- **B-2. Changes tab + diff view** — **introduce CodeMirror (merge view) here, lazy-loaded**, and
+  **a bundle-regression test (CodeMirror absent from the initial bundle) is also part of B-2's done
+  criteria** (v1 put this under C-3, which would have let bundle contamination go unnoticed for the
+  whole of B). The watcher refreshes on file changes (debounced).
+  - **Applying the achromatic decision**: diff is shown not with colour but with **2 steps of
+    background lightness + `+`/`-` marks**. The achromatic gate in styles.test.ts (all CSS R=G=B)
+    stays as is, but strengthens `.find()`, which used to check only one CSS file, into **walking
+    every CSS chunk** (so a lazy-loaded chunk cannot slip past the gate).
+  - Done: E2E diff rendering + virtual scrolling for a huge diff, L5-2 baseline, L5-3 contrast check
+  - Done: with the watcher running (4 projects), idle CPU < 1% (the §7.1 bar, sampled over 10
+    seconds) + the FSEvents handle count recorded
+- **B-3. History tab** — the commit log + clicking a commit shows its changed files and diff. No graph lines are drawn (parent relationships only).
+- **B-4. Branches tab** — the **local/remote** list (v1 dropped remote), current branch, checkout.
+  For checking out with a dirty state: the spec's wording says "warn, then stop," but following the
+  philosophy ("do not block, make visible") this instead **shows the files expected to conflict and
+  asks whether to proceed** — a decision that departs from the spec, so it is recorded in the decisions list.
+- **B-5. IDE line jump** — ⌘-click in the diff or file list → `openInIde(path, line)` (reuses the existing SystemPort implementation).
+- **B-6. Staging, commit, push** — exactly what the v1.5 spec already locked in (the v1 plan wrongly
+  dropped push — the "§1.5" it cited does not exist; that was a misreading of a version label).
+  Rebase and cherry-pick remain non-goals.
+  - Done: stage/unstage, commit message, commit, and **push** (limited to branches with an upstream, showing the raw error on failure)
+- **B-7. Distinguishing agent changes + persisting touchedPaths** — "files the agent touched" is
+  **file-level** (`files_touched` only gives paths — explicitly not hunk-level). Right now
+  `touchedPaths` lives only in UI memory and **is lost on restart** — since restarts are routine in
+  an always-on app, persisting it comes first.
+  - Approach: a `sessions.touched_paths TEXT` column (requires migration E-0 first) — reconstructing
+    it from messages was rejected because it conflicts with windowing (D-2)
+- **B-8. FR-2 recovery path (carried into M2 from m0-findings)** — "view this file's previous
+  state" when a same-file conflict is detected. 1st pass: the pre-change content left in the
+  tool_call event. With the git panel now in place, this is the cheapest point to add a diff comparison.
 
-## C. 파일 트리 + 코드 뷰어 (FR-5, FR-6)
+## C. File tree + code viewer (FR-5, FR-6)
 
-- **C-1. FsPort 완성 + 배선 (v1 오류 정정)** — FsPort는 정의만 있고 `watch`가 없으며 **Platform에
-  연결돼 있지도 않다** (고아 타입). 작업: `watch`를 `subscribe(handler): Unsubscribe` 규약(스트림)으로
-  추가 + `Platform.fs` 배선 + agent-host에 fs 서비스 신설(chokidar) + RPC 스트림 + web/mock 구현.
-- **C-2. 파일 트리** — lazy 로드, `.gitignore` 필터(**구현 주체 결정**: `git status --porcelain`의
-  ignored 목록을 재사용한다 — check-ignore 프로세스 남발도, 문법 재구현도 피한다), 깃 상태 오버레이는
-  **색이 아니라 M/A/U 글리프**(무채색 규칙 — 스펙의 "색상 표시" 문구는 G에서 갱신),
-  에이전트 최근 수정 하이라이트(B-7의 영속화된 touchedPaths).
-  - 완료: 10k+ 파일 저장소에서 첫 렌더 200ms 이내 (열어본 디렉토리만 읽는지)
-- **C-3. 코드 뷰어** — CodeMirror 읽기 전용(B-2의 지연 청크 재사용) + Shiki.
-  - **Shiki 제약 2건 선결**: ① 테마는 무채색 커스텀(굵기·밝기 단계만) ② 기본 oniguruma 엔진은 WASM인데
-    Tauri CSP에 `wasm-unsafe-eval`이 없다 → **`createJavaScriptRegexEngine`으로 시작**하고,
-    성능 문제가 실측되면 CSP 완화를 별도 결정으로 올린다. dev(브라우저)에서만 통과하고 Tauri에서
-    깨지는 유형이므로 **완료 기준에 "Tauri 앱에서 하이라이트 렌더 확인"을 명시**한다.
-  - 완료: 파일 내 검색·줄번호·줄 링크, 대용량(5MB)·바이너리·이미지 처리, L5-2 기준선
+- **C-1. Complete and wire up FsPort (v1 error corrected)** — FsPort exists only as a definition, has
+  no `watch`, and **is not even connected to Platform** (an orphaned type). Work: add `watch` as a
+  `subscribe(handler): Unsubscribe`-style stream contract + wire up `Platform.fs` + create a new fs
+  service in agent-host (chokidar) + an RPC stream + web/mock implementations.
+- **C-2. File tree** — lazy loading, a `.gitignore` filter (**decision on who implements this**:
+  reuse the ignored list from `git status --porcelain` — avoiding both spawning a flood of
+  check-ignore processes and reimplementing the syntax), the git status overlay as **M/A/U glyphs,
+  not colour** (the achromatic rule — the spec's "colour indicator" wording gets updated in G),
+  and a highlight for recently agent-modified files (the persisted touchedPaths from B-7).
+  - Done: first render under 200ms on a 10k+ file repository (confirms only opened directories get read)
+- **C-3. Code viewer** — CodeMirror, read-only (reuses B-2's lazy chunk) + Shiki.
+  - **2 Shiki constraints to settle first**: ① the theme is a custom achromatic one (weight and
+    lightness steps only) ② the default oniguruma engine is WASM, but Tauri's CSP has no
+    `wasm-unsafe-eval` → **start with `createJavaScriptRegexEngine`**, and raise loosening the CSP
+    as a separate decision if a performance problem is actually measured. Since this is the kind of
+    thing that passes in dev (browser) but breaks under Tauri, **the done criteria explicitly
+    require confirming highlight rendering inside the Tauri app**.
+  - Done: in-file search, line numbers, line links, handling large (5MB) files, binaries and images, L5-2 baseline
 
-## D. 첨부·이미지 붙여넣기 (FR-13)
+## D. Attachments and pasting images (FR-13)
 
-- **D-1. 입력창 첨부** — 클립보드 이미지·드래그앤드롭·파일 선택, 썸네일 미리보기.
-  - **저장 위치 결정**: 이미지는 base64로 messages.payload에 넣지 않는다 (DB 비대 + FTS 오염).
-    `~/.centralu/attachments/<sessionId>/`에 파일로 저장하고 payload에는 경로만.
-    아카이브된 세션 삭제 시 함께 정리.
-- **D-2. 어댑터 전달** — 프로젝트 내 파일은 @경로 멘션, 외부 파일·이미지는 도구 형식으로.
-  capability(`attachments`)로 UI 반영.
-  - 완료: L3 S13 — 실제 이미지 1장을 붙여 에이전트가 내용을 읽는다 (Claude·Codex 각 1회)
+- **D-1. Composer attachments** — clipboard images, drag-and-drop, file picker, thumbnail preview.
+  - **Decision on where they are stored**: images do not go into messages.payload as base64 (DB
+    bloat + FTS pollution). They are stored as files under `~/.centralu/attachments/<sessionId>/`,
+    with only the path in the payload. Cleaned up together when an archived session is deleted.
+- **D-2. Adapter delivery** — files inside the project go as @-path mentions; external files and
+  images go in the tool's own format. Reflected in the UI via the `attachments` capability.
+  - Done: L3 S13 — attach 1 real image and confirm the agent reads its content (1× each for Claude and Codex)
 
-## E. 검색·팔레트·설정 (FR-21, FR-17 완성, 알림 정책)
+## E. Search, palette and settings (FR-21, FR-17 complete, notification policy)
 
-- **E-0. 스키마 마이그레이션 러너 (신설 — E-1·B-7의 선행조건)** — 현재 store는 `CREATE TABLE IF NOT
-  EXISTS`만 실행해 **기존 DB에 컬럼·FTS 추가가 조용히 무시된다**. `~/.centralu/store.db`에는
-  이미 실사용 데이터가 있다. `user_version` 비교 → 순차 마이그레이션 → FTS 백필.
-  - 완료: v1 스키마 DB 파일을 열어 마이그레이션 후 기존 메시지가 검색되는 테스트
-- **E-1. 대화 전문 검색** — FTS5 (가용성은 재검증에서 확인 완료 — 이건 리스크가 아니다).
-  **진짜 리스크는 한국어 토크나이징**: 기본 unicode61은 조사 결합에서 재현율이 무너진다.
-  - 완료: **`승인`으로 검색해 `승인을` 포함 문장이 매치**되는 테스트 (tokenize=trigram 1차 검토,
-    인덱스 크기 함께 기록), 아카이브 포함, 결과에서 해당 위치로 점프
-- **E-2. 커맨드 팔레트 ⌘K** — 프로젝트·세션·동작·검색 결과 통합.
-  - 완료: L4 반복 조작 — 팔레트만으로 세션 10개 순회 (m1.5 L4-3 유형)
-- **E-3. FR-17 완성 = 설정 화면 + 미구현 단축키 5종** — v1은 설정 화면만 적었다. 현재 미구현:
-  `⌘1~9` 프로젝트 점프 · `j/k` 세션 이동(인박스 밖) · `⌘K` · `⌘⇧1~4` 탭 전환(B-0에서 구현) ·
-  `Enter/Esc` 입력창 포커스. 각각을 완료 기준으로 열거하고 설정 화면에서 변경·충돌 감지.
-- **E-4. 승인 규칙 관리** — 조회·삭제 + **등록 시 매치 미리보기**(core의 `previewMatches`가 이미 있는데
-  UI가 안 쓴다 — FR-3 약속의 미완성분).
-  - 선행: `approvals.rules` 결과에 `id`·`created_at` 추가 + `approvals.deleteRule` RPC 신설
-    (현재 삭제할 키 자체가 없다)
-- **E-5. OS 알림 정책 설정 (스펙 M2 항목, v1 누락)** — `NotifyPolicy`는 core에 있고 기본값만 쓴다.
-  설정 화면에서 승인/오류/전부완료/포그라운드 4개 토글 + 영속화.
+- **E-0. Schema migration runner (new — a prerequisite for E-1 and B-7)** — the store currently only
+  runs `CREATE TABLE IF NOT EXISTS`, so **adding a column or FTS to an existing DB gets silently
+  ignored**. `~/.centralu/store.db` already holds real-use data. Compare `user_version` → run
+  migrations in sequence → backfill FTS.
+  - Done: a test that opens a v1-schema DB file, migrates it, and confirms existing messages become searchable
+- **E-1. Full-text conversation search** — FTS5 (availability was confirmed in the re-review — this
+  is not a risk). **The real risk is Korean tokenization**: the default unicode61 loses recall once
+  particles get attached.
+  - Done: a test that **searches `승인` and matches a sentence containing `승인을`** (tokenize=trigram
+    reviewed as the 1st option, index size recorded alongside), covering archived sessions, and
+    jumping to the matched spot in the results
+- **E-2. Command palette ⌘K** — unifies projects, sessions, actions and search results.
+  - Done: L4 repeated operation — cycling through 10 sessions using only the palette (the m1.5 L4-3 pattern)
+- **E-3. FR-17 complete = settings screen + the 5 unimplemented shortcuts** — v1 only wrote down the
+  settings screen. Currently unimplemented: `⌘1~9` project jump · `j/k` session movement (outside
+  the inbox) · `⌘K` · `⌘⇧1~4` tab switching (implemented in B-0) · `Enter/Esc` composer focus.
+  Each is listed as its own done criterion, with change and conflict detection in the settings screen.
+- **E-4. Approval rule management** — viewing and deleting them, plus **a match preview at
+  registration time** (core's `previewMatches` already exists, but the UI does not use it — an
+  unfinished part of the FR-3 promise).
+  - Prerequisite: add `id` and `created_at` to the `approvals.rules` result + create a new
+    `approvals.deleteRule` RPC (right now there is not even a key to delete by)
+- **E-5. OS notification policy settings (a spec M2 item, missing from v1)** — `NotifyPolicy`
+  already exists in core and only the default is used. Add 4 toggles in the settings screen
+  (approval/error/all-done/foreground) + persistence.
 
-## F. 배포 빌드 마감
+## F. Release build wrap-up
 
-- **F-1. F-0 결과를 정식 반영** — 번들 스크립트·CI, 깨끗한 경로 `.app`에서 세션 생성 완주(S14),
-  SIGKILL 좀비 0 재확인. 코드 서명·노터라이제이션은 **도그푸딩(내 머신) 범위 밖으로 명시**.
-- **F-2. 성능 재측정** — 프로젝트 4개 + 세션 4개 + 깃·fs 워처 가동. §7.1 기준 + 워처 핸들 수.
-- **F-3. 전체 회귀** — L1~L5 전부, 실 세션 스모크 Claude·Codex 양쪽.
+- **F-1. Bring the F-0 result in for real** — the bundle script and CI, finishing a full session
+  creation flow (S14) from a `.app` on a clean path, and reconfirming 0 zombies after SIGKILL. Code
+  signing and notarization are **explicitly out of scope for dogfooding (my own machine)**.
+- **F-2. Re-measure performance** — 4 projects + 4 sessions + the git and fs watchers running.
+  Against the §7.1 bar, plus the watcher handle count.
+- **F-3. Full regression** — all of L1 through L5, real-session smoke for both Claude and Codex.
 
-## G. 문서 정합 (신설 — "버릴 코드"를 키우기 전에)
+## G. Doc alignment (new — before "code to throw away" grows any further)
 
-M1.5의 결정(WS 유지·git Rust 이관 보류)으로 낡아버린 문서를 이 플랜의 결정과 함께 정리한다:
+Documents that went stale because of M1.5 decisions (keeping WS, deferring the git-to-Rust move) get
+cleaned up together with this plan's own decisions:
 
-- `dev-services/git.ts`의 "버릴 코드다" 주석 — B-1이 이 파일을 6배로 키우므로 **착수 전에** 정정
-- `docs/agent-host.md` §5 (`--dev-services` 플래그는 존재하지 않는다, fs 서비스 서술 선반영 오류)
-- `docs/platform-abstraction.md` §5 4~6단계 지위 (보류임을 명시)
-- `docs/product-spec.md`: FR-4 "Rust git2" 구현 문구, FR-5 "M/A/U **색상**"(무채색 결정과 충돌),
-  B-4 체크아웃 동작, `sidecar.rs`의 "번들된 바이너리" 주석
-- `workspace` 테이블 layout JSON에 tab이 실리는지 B-0에서 확인해 스키마 문서화
+- The "code to throw away" comment in `dev-services/git.ts` — corrected **before starting**, since B-1 grows this file 6×
+- `docs/agent-host.md` §5 (the `--dev-services` flag does not exist; an error from describing the fs service ahead of building it)
+- `docs/platform-abstraction.md` §5, the status of steps 4–6 (mark them as deferred)
+- `docs/product-spec.md`: the FR-4 "Rust git2" implementation wording, FR-5 "M/A/U **colour**"
+  (conflicts with the achromatic decision), the B-4 checkout behaviour, and the "bundled binary" comment in `sidecar.rs`
+- Confirm in B-0 whether tab ends up in the `workspace` table's layout JSON, and document the schema
 
 ---
 
-## 검증 매트릭스 (페이즈 종료 체크리스트의 기계화)
+## Verification matrix (mechanizing the phase-end checklist)
 
-빈 칸이 없어야 페이즈 종료다. (L1 단위·계약 / L2 E2E / L3 실 세션 / L4 실사용 재현 / L5 시각)
+A phase ends only once there are no empty cells. (L1 unit/contract / L2 E2E / L3 real session / L4 real-use reproduction / L5 visual)
 
 | | L1 | L2 | L3 | L4 | L5 |
 |---|---|---|---|---|---|
-| F-0 | — | — | — | `.app`에서 host ready | — |
-| A | 계약(픽스처) | 도구 선택·동시 세션 | S9·S10·S11 | 좀비 검사(SIGKILL) | — |
-| B | GitPort 계약 | diff·비정상 경로 | S12(에이전트 변경 중 갱신) | 워처 유휴 CPU·핸들 | 탭 셸·diff 기준선+대비 |
-| C | fs 계약 | 트리·뷰어 | — | 10k 저장소 첫 렌더 | 뷰어 기준선 |
-| D | — | 첨부 미리보기 | S13(이미지 읽기 ×2 도구) | — | — |
-| E | 마이그레이션·FTS 한국어 | 팔레트·규칙 관리 | — | 팔레트 반복 조작 | 설정 화면 기준선 |
-| F | — | — | S14(`.app` 완주) | SIGKILL 좀비 0 | — |
+| F-0 | — | — | — | host ready in `.app` | — |
+| A | contract (fixtures) | tool selection, concurrent sessions | S9, S10, S11 | zombie check (SIGKILL) | — |
+| B | GitPort contract | diff, abnormal paths | S12 (updates mid agent-change) | watcher idle CPU, handles | tab shell, diff baseline + contrast |
+| C | fs contract | tree, viewer | — | first render on a 10k repo | viewer baseline |
+| D | — | attachment preview | S13 (reading an image, ×2 tools) | — | — |
+| E | migration, Korean FTS | palette, rule management | — | palette repeated operation | settings screen baseline |
+| F | — | — | S14 (full `.app` run) | 0 zombies from SIGKILL | — |
 
-M1.5에서 승격된 규칙 3개는 태스크에 직접 연결했다: 좀비 검사(A-2·F-1), 재연결 경로(A-2의 Codex
-프로세스도 대상), 경고 무시 금지(전 페이즈 — verify에 경고 0 포함).
+3 rules promoted from M1.5 are tied directly to tasks: the zombie check (A-2, F-1), the
+reconnection path (also covering A-2's Codex process), and never ignoring warnings (every phase — verify includes 0 warnings).
 
-## 알려진 결정 사항 (v2에서 확정)
+## Known decisions (locked in for v2)
 
-1. **무채색 유지** — diff는 밝기 2단 + `+`/`-`, 신택스는 무채색 테마, 깃 오버레이는 글리프.
-   근거: 사용자의 명시 결정("오로지 블랙 계열"). 도그푸딩에서 가독성 문제가 실증되면 그때 재론.
-   무채색 게이트는 전 CSS 청크 순회로 강화.
-2. **푸시 포함** — v1이 스펙(§8 M2, FR-4)과 달리 뺐던 것을 정정. 업스트림 있는 브랜치 한정.
-3. **git Rust 이관 보류 유지** — 측정으로 병목 확인 전까지. 단 G에서 문서를 현실에 맞춘다.
-4. **CodeMirror는 B-2에서 지연 도입, 번들 회귀 테스트도 B-2** — C까지 미루면 B 기간 내내 방치된다.
-5. **Shiki는 JS regex 엔진으로 시작** — Tauri CSP에 wasm-unsafe-eval을 넣지 않는다 (보안 결정 회피).
-6. **에이전트 변경 구분은 파일 단위** — files_touched가 주는 것이 경로뿐이다. 헝크 단위는 비목표.
-7. **번들링 폴백은 시스템 Node** — 도그푸딩이 내 머신 한정이므로, SEA가 막히면 ②로 M2를 통과시킨다.
-8. **체크아웃은 "보여주고 진행 여부를 묻는다"** — 스펙 문구("안내 후 중단")와 다르며 G에서 스펙 갱신.
+1. **Achromatic stays** — diff uses 2 steps of lightness + `+`/`-`, syntax uses an achromatic
+   theme, git overlays use glyphs. Reasoning: the user's explicit decision ("black tones only").
+   Revisit if a readability problem is demonstrated during dogfooding. The achromatic gate is
+   strengthened to walk every CSS chunk.
+2. **Push is included** — corrects what v1 dropped against the spec (§8 M2, FR-4). Limited to branches with an upstream.
+3. **Deferring the git-to-Rust move stays deferred** — until measurement confirms a bottleneck. G brings the documents in line with reality regardless.
+4. **CodeMirror is lazy-introduced in B-2, and the bundle-regression test is also in B-2** — deferring it to C would leave it unattended for the whole of B.
+5. **Shiki starts with the JS regex engine** — wasm-unsafe-eval is not added to Tauri's CSP (avoiding a security trade-off).
+6. **Distinguishing agent changes is file-level** — all files_touched gives is paths. Hunk-level is a non-goal.
+7. **The bundling fallback is system Node** — since dogfooding is limited to my own machine, if SEA gets stuck, option ② carries M2 through.
+8. **Checkout "shows the conflicts and asks whether to proceed"** — different from the spec's wording ("warn, then stop"); the spec gets updated in G.
 
-## M2 이후
+## After M2
 
-M2 완료 = **`.app`으로 도그푸딩 시작 가능**. 실사용 기간 → 불만 백로그 → M2.5 개선 → M3.
-도그푸딩 첫 확인 항목: m1.5-result의 유일한 미검증분(자리 비움 시 실제 OS 알림 배너).
+M2 done = **dogfooding can start through the `.app`**. Real-use period → complaint backlog → M2.5 improvements → M3.
+The first thing to check during dogfooding: the one thing m1.5-result left unverified (whether the OS notification banner actually appears while away).

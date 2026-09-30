@@ -1,121 +1,123 @@
-# M2 실행 결과 (2026-08-15)
+# M2 Result (2026-08-15)
 
-> **완료.** 이제 `.app`으로 도그푸딩을 시작할 수 있다.
-> 계획: [m2-plan.md](m2-plan.md) (v2, 독립 재검증 반영) · 선행: [m1.5-result.md](m1.5-result.md)
+> **Complete.** Dogfooding can now start through the `.app`.
+> Plan: [m2-plan.md](m2-plan.md) (v2, revised after independent re-review) · Precedes from: [m1.5-result.md](m1.5-result.md)
 
-## 페이즈별 결과
+## Results by phase
 
-| | 내용 | 결과 |
+| | Content | Result |
 |---|---|---|
-| **F-0** | 사이드카 번들링 스파이크 | ✅ [m2-f0-bundling.md](../spikes/m2-f0-bundling.md) — 함정 4개를 첫날에 제거 |
-| **A** | Codex 어댑터 (FR-7 완성) | ✅ 실 세션 통과, [설계 약속 검증](../spikes/m2-a4-design-verdict.md) |
-| **B** | 탭 셸 + 깃 패널 (FR-4) | ✅ 실제 저장소로 확인 (변경 15개 로드·diff·커밋) |
-| **C** | 파일 트리 + 코드 뷰어 (FR-5, 6) | ✅ lazy 로드, 가상 스크롤 |
-| **D** | 첨부·이미지 (FR-13) | ✅ 붙여넣기·드래그·파일선택 |
-| **E** | 검색·팔레트·설정 (FR-21, FR-17, 알림) | ✅ 마이그레이션 러너 포함 |
-| **F** | 배포 빌드 | ✅ `.app`·`.dmg`, 좀비 0, 성능 목표 달성 |
-| **G** | 문서 정합 | ✅ dev-services·플레이북·스펙 문구 정정 |
+| **F-0** | Sidecar bundling spike | ✅ [m2-f0-bundling.md](../spikes/m2-f0-bundling.md) — cleared 4 traps on day one |
+| **A** | Codex adapter (FR-7 complete) | ✅ passed with a real session, [design-promise verification](../spikes/m2-a4-design-verdict.md) |
+| **B** | Tab shell + git panel (FR-4) | ✅ confirmed against a real repository (loading 15 changes, diff, commit) |
+| **C** | File tree + code viewer (FR-5, FR-6) | ✅ lazy loading, virtual scrolling |
+| **D** | Attachments and images (FR-13) | ✅ paste, drag, file picker |
+| **E** | Search, palette, settings (FR-21, FR-17, notifications) | ✅ includes the migration runner |
+| **F** | Release build | ✅ `.app`/`.dmg`, 0 zombies, performance targets met |
+| **G** | Doc alignment | ✅ corrected dev-services, the playbook, spec wording |
 
-## 검증 현황
+## Verification status
 
-- 단위·계약 **231개** (`pnpm verify`) · E2E **42개** (`pnpm e2e`)
-- 실 세션 스모크: Claude(`pnpm smoke`) · **Codex(`pnpm smoke:codex`)** — S9 승인 왕복, S10 재개 후 맥락 기억, S11 좀비 0
-- 시각 게이트: 무채색 팔레트(R=G=B) + 필수 클래스 존재 + **번들 회귀**(CodeMirror·Shiki 미유입, JS 1.5MB 상한)
+- Unit + contract: **231** (`pnpm verify`) · E2E: **42** (`pnpm e2e`)
+- Real-session smoke: Claude (`pnpm smoke`) · **Codex (`pnpm smoke:codex`)** — S9 approval round trip, S10 remembers context after resume, S11 0 zombies
+- Visual gates: achromatic palette (R=G=B) + required classes present + **bundle regression** (no CodeMirror or Shiki leaking in, 1.5MB JS ceiling)
 
-## 성능 실측 (F-2, 배포 `.app` 기준)
+## Performance measurement (F-2, on the release `.app`)
 
-| 지표 | 목표 (§7.1) | 실측 |
+| Metric | Target (§7.1) | Measured |
 |---|---|---|
-| 유휴 CPU (프로젝트 2 + 세션 3) | < 1% | **0.0%** |
-| 메모리 (앱 98MB + 호스트 87MB) | < 400MB | **185MB** |
-| 앱 번들 크기 | — | 10MB |
+| Idle CPU (2 projects + 3 sessions) | < 1% | **0.0%** |
+| Memory (98MB app + 87MB host) | < 400MB | **185MB** |
+| App bundle size | — | 10MB |
 
-깃 워처를 붙인 뒤에도 유휴 CPU가 0이다 — **git2(Rust) 이관의 근거가 여전히 없다** (결정 3 유지).
+Idle CPU stays at 0 even with the git watcher attached — **there is still no case for moving to git2 (Rust)** (decision 3 stands).
 
-## 실측이 잡은 결함 (자동 테스트가 놓친 것)
+## Defects that measurement caught (what the automated tests missed)
 
-1. **Shift+숫자는 `e.key`가 `#`이 된다** → `e.code`(DigitN)로 판정. `⌘⇧3`이 전혀 동작하지 않았다.
-2. **셀렉터가 매번 새 배열을 만들어 무한 리렌더** (이 프로젝트에서 두 번째) → `useMemo` 훅으로.
-   깃 탭이 아예 렌더되지 않았는데, E2E는 "탭 상태가 바뀌었는가"만 봐서 통과했다.
-3. **시작 프롬프트가 대화창에 안 보였다** — 세션 생성 다이얼로그를 도입하며 생긴 새 경로.
-4. **trigram FTS는 3글자 미만을 못 찾는다** — 한국어 '승인'·'배포' 검색이 0건이었다.
-   3글자 미만은 LIKE로 넘긴다.
-5. **배포 앱이 보호 폴더(~/Desktop)의 git을 못 읽는데 "git 저장소 아님"이라고 표시**했다.
-   사용자가 할 일이 정반대(권한 부여 vs 아무것도 아님)라 `denied`를 구분해 안내한다.
+1. **Shift+digit makes `e.key` come out as `#`** → switched to judging by `e.code` (DigitN). `⌘⇧3` was not working at all.
+2. **A selector building a new array every time caused an infinite re-render loop** (the second
+   time in this project) → moved to a `useMemo` hook. The git tab was not rendering at all, but the
+   E2E test only checked "did the tab state change," so it passed.
+3. **The start prompt was not showing up in the conversation window** — a new path introduced along with the session-creation dialog.
+4. **trigram FTS cannot find anything under 3 characters** — searching Korean '승인' and '배포'
+   returned 0 hits. Anything under 3 characters now falls back to LIKE.
+5. **The release app could not read git inside a protected folder (~/Desktop), but displayed "not a
+   git repository."** Since what the person needs to do is the opposite in each case (grant
+   permission vs. nothing at all), `denied` now gets its own distinct message.
 
-## 계획에서 바꾼 결정
+## Decisions changed from the plan
 
-| 계획 | 실제 | 근거 |
+| Plan | Actual | Reasoning |
 |---|---|---|
-| CodeMirror(merge view) + Shiki | **둘 다 쓰지 않는다** | 읽기 전용에 편집기 엔진은 과하고, Shiki 기본 엔진은 WASM이라 Tauri CSP와 충돌. 번들 회귀 테스트로 재유입 차단 |
-| 생성 바인딩 642개 커밋 | **의존 계약 24개만 커밋** | import 0건·타입체크 제외라 죽은 무게였고 리뷰 신호를 덮었다. `--check`가 사라진 항목을 잡는다 (일부러 깨서 확인) |
-| Node SEA 우선 검토 | **시스템 Node** | better-sqlite3(네이티브 애드온) 때문에 재서명까지 필요 — 도그푸딩 대비 과함 |
+| CodeMirror (merge view) + Shiki | **Neither is used** | An editor engine is overkill for read-only, and Shiki's default engine is WASM, which conflicts with Tauri's CSP. A bundle-regression test blocks them from creeping back in |
+| Commit 642 generated bindings | **Only the 24 dependency contracts are committed** | With 0 imports and excluded from type-checking, it was dead weight that buried the review signal. `--check` catches anything that goes missing (confirmed by deliberately breaking it) |
+| Node SEA as the first option | **System Node** | better-sqlite3 (a native addon) would require re-signing too — overkill for dogfooding |
 
-## 알려진 한계 (도그푸딩에서 확인할 것)
+## Known limitations (to confirm during dogfooding)
 
-- **코드 서명·노터라이제이션 없음** — 첫 실행 시 보호 폴더 접근 권한을 물어보고, 거부하면 깃 기능이 죽는다.
-  (이제 "권한 필요"로 안내는 하지만, 근본 해결은 서명이다)
-- **Node 설치가 전제** — 없으면 "agent-host를 시작하지 못했습니다"로만 뜬다. 안내 문구 구체화 필요.
-- **자리 비움 시 OS 알림 배너**는 여전히 미검증 (M1.5부터 남은 유일한 항목) — 도그푸딩 첫 확인 대상.
-- Codex `thread/name/updated`는 짧은 세션에서 오지 않는다 (FR-18은 첫 프롬프트로 충족되므로 문제 아님).
+- **No code signing or notarization** — on first launch, it asks for protected-folder access, and
+  refusing kills the git features. (It now at least says "permission needed," but the real fix is signing.)
+- **Assumes Node is installed** — without it, all that shows is "could not start agent-host." The message needs to be more specific.
+- **The OS notification banner while away** is still unverified (the one item left over from M1.5) — the first thing to check during dogfooding.
+- Codex's `thread/name/updated` does not arrive for short sessions (not a problem, since FR-18 is satisfied by the first prompt).
 
-## 다음: 도그푸딩 → M2.5
+## Next: dogfooding → M2.5
 
-실제 프로젝트로 며칠 굴리고 불만을 백로그로 만든다. 실행:
+Run it on a real project for a few days and turn the complaints into a backlog. To run it:
 
 ```bash
 open "apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app"
-# 또는 개발 모드: pnpm host & pnpm dev
+# Or in dev mode: pnpm host & pnpm dev
 ```
 
-## 도그푸딩 1차 피드백 (M2.5 착수, 2026-08-15)
+## 1st round of dogfooding feedback (M2.5 kickoff, 2026-08-15)
 
-| 보고 | 원인·조치 |
+| Report | Cause / fix |
 |---|---|
-| 시작 버튼이 아무 반응 없음 | **배포 앱이 GUI라 로그인 셸 PATH를 못 받아** claude·codex를 미설치로 판정 → 도구 버튼 비활성 → 시작 버튼 비활성. 로그인 셸에게 PATH를 직접 물어보도록 수정(홈브류 고정 목록 아님 — nvm·mise·수동 설치도 잡힘). 못 쓰는 이유를 화면에 적어 '무반응'으로 보이지 않게 함 |
-| 모델 선택을 셀렉터로, 생성 후에도 변경 | 세션 헤더에 모델·권한 드롭다운 추가. 다음 턴부터 적용되고 재개 시에도 유지 (store v4) |
-| 생성 모달은 도구 선택만 | 모델·권한을 모달에서 제거. 시작 전에 정하는 것보다 대화하며 바꾸는 쪽이 쓸모 있다 |
-| 에이전트 응답 마크다운 렌더링 | react-markdown + gfm. 스트리밍 중 미완성 마크다운도 부분 렌더. 무채색 규칙 유지 |
+| The start button did nothing | **Being a GUI app, the release build never gets the login shell's PATH**, so claude and codex were judged not installed → the tool buttons were disabled → so was the start button. Fixed by asking the login shell for PATH directly (not a fixed Homebrew list — nvm, mise and manual installs all get picked up too). The reason it cannot be used is now written on screen, so it no longer looks like it is simply not responding |
+| Make model selection a dropdown, changeable after creation too | Added model/permission dropdowns to the session header. Takes effect from the next turn and persists across resume (store v4) |
+| The creation modal only offered tool selection | Removed model and permission from the modal. Deciding them mid-conversation turned out more useful than fixing them beforehand |
+| Render agent responses as markdown | react-markdown + gfm. Partially renders incomplete markdown during streaming too. Keeps the achromatic rule |
 
-**교훈**: PATH 문제는 dev 모드에서 절대 재현되지 않는다(터미널이 PATH를 준다).
-배포 앱 전용 결함이 하나 더 있었던 셈이고, 도그푸딩 첫날에 드러났다.
+**Lesson**: the PATH problem can never reproduce in dev mode (the terminal already provides PATH).
+This turned out to be one more defect specific to the release build, and it surfaced on the first day of dogfooding.
 
-## 미룬 것 (도그푸딩 중 발견, 2026-08-18)
+## Deferred (found during dogfooding, 2026-08-18)
 
-### 검색 색인이 대화의 37배로 자란다
+### The search index grows to 37× the size of the conversation
 
-실사용 DB 128MB를 뜯어보니:
+Digging into a real-use DB of 128MB:
 
 | | |
 |---|---|
-| 실제 메시지 payload | 3.3MB |
+| Actual message payload | 3.3MB |
 | `messages_fts_data` | 73.4MB |
 | `messages_fts_content` | 46.5MB |
 
-trigram 토크나이저를 쓴 것은 옳은 결정이었다 — 한국어는 조사가 붙어서
-`unicode61`로는 "승인"이 "승인을"을 못 찾는다 (v3 마이그레이션에 근거가 있다).
-다만 대가가 원문의 약 37배다.
+Choosing the trigram tokenizer was the right call — Korean attaches particles, so
+`unicode61` cannot find "승인을" when searching for "승인" (this is documented in the v3
+migration). The cost, though, is about 37× the original text.
 
-`content`가 46MB인 것은 FTS가 **원문 사본을 따로 들고 있다**는 뜻이다.
-`content=messages`(외부 콘텐츠)로 만들었다면 없었을 용량이다 — 여기가 먼저 볼 곳.
+`content` being 46MB means FTS is **keeping a separate copy of the original text**. That space
+would not exist with `content=messages` (external content) — this is the first place to look.
 
-지금 당장의 고장은 아니지만 **증가 속도가 대화의 37배**라 몇 달이면 GB가 된다.
-오케스트레이터의 `recall`이 이 색인을 쓸 예정이라 더 관련이 있다.
+This is not a breakage right now, but **growing at 37× the rate of the conversation** means it
+reaches gigabytes within months. It matters more because the orchestrator's `recall` is planned to use this index.
 
-### 다시 재보니 — 37배는 색인 설계가 아니라 중복이었다 (2026-08-19)
+### Measured again — the 37× was duplication, not the index design (2026-08-19)
 
-마이그레이션 11(색인을 메시지 rowid에 못 박고 VACUUM)이 돌고 난 뒤의 같은 DB:
+The same DB after migration 11 ran (pinning the index to the message rowid, then VACUUM):
 
-| | 전 (128MB) | 후 (23MB) |
+| | Before (128MB) | After (23MB) |
 |---|---|---|
-| 메시지 | 3.3MB | 10MB |
+| Messages | 3.3MB | 10MB |
 | `messages_fts_data` | 73.4MB | 5MB |
 | `messages_fts_content` | 46.5MB | 4MB |
 
-색인이 본문의 37배가 아니라 **0.9배**다. 원인은 trigram 토크나이저가 아니라 같은
-메시지가 색인에 8.6번씩 들어가 있던 것이었고, 그건 이미 고쳤다.
+The index is not 37× the body text — it is **0.9×**. The cause was not the trigram tokenizer;
+it was the same message getting into the index 8.6 times over, and that has already been fixed.
 
-`content=messages`(외부 콘텐츠)로 옮기면 `messages_fts_content` 4MB가 더 사라지지만,
-그 대가로 본문 갱신마다 색인을 손으로 맞춰야 한다(트리거 또는 delete+insert).
-**23MB에서 4MB를 아끼자고 살 위험이 아니다 — 안 한다.** 증가 속도를 다시 볼 근거가
-생기면 그때 연다.
+Moving to `content=messages` (external content) would remove the remaining 4MB in
+`messages_fts_content`, but at the cost of having to keep the index in sync by hand on every body
+update (a trigger, or delete+insert). **Saving 4MB out of 23MB is not a risk worth taking — this
+does not happen.** Revisit if there is ever a reason to look at the growth rate again.

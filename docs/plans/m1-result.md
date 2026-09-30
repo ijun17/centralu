@@ -1,50 +1,50 @@
-# M1 실행 결과 (2026-08-15)
+# M1 Result (2026-08-15)
 
-> Phase 0~6 완료. 자동 게이트 G0·G2·G3 통과. **남은 것은 G5(사람 확인)뿐이다.**
+> Phase 0–6 complete. Automated gates G0, G2 and G3 passed. **All that remains is G5 (human check).**
 
-## 통과한 게이트
+## Gates passed
 
-| 게이트 | 방식 | 결과 |
+| Gate | Method | Result |
 |---|---|---|
-| G0 스캐폴드 | 자동 (lint·depcruise) | ✅ 경계 규칙 위반 0, 규칙 자체를 검증하는 테스트 9개 |
-| G2 core | 자동 (FR-12 표 → 테스트) | ✅ 상태 6종·전이·긴급도가 스펙과 1:1 |
-| G3 실 세션 | 에이전트 자동 실행 | ✅ 실 Claude SDK로 승인 왕복 완주 |
-| **G5 관제 루프 체감** | **사람** | **⏳ 대기 중 — 아래 실행 방법 참조** |
+| G0 scaffold | automated (lint, depcruise) | ✅ 0 boundary-rule violations, 9 tests verifying the rules themselves |
+| G2 core | automated (FR-12 table → tests) | ✅ the 6 states, transitions and urgency match the spec 1:1 |
+| G3 real session | run automatically by the agent | ✅ completed a full approval round trip with the real Claude SDK |
+| **G5 feel of the control loop** | **human** | **⏳ pending — see how to run it below** |
 
-## 테스트 현황
+## Test status
 
-- 단위·통합 **180개** (`pnpm verify`): protocol 골든 22, core 69, agent-host 56, platform 계약 24, 경계 9
-- E2E **14개** (`pnpm e2e`): 관제 루프 시나리오 포함, 1.5초
-- 실 SDK 스모크 (`pnpm smoke`): 승인 요청 → 허용 → 턴 완료 → 영속화
+- Unit + integration, **180** (`pnpm verify`): protocol golden 22, core 69, agent-host 56, platform contract 24, boundary 9
+- E2E, **14** (`pnpm e2e`): includes the control-loop scenario, 1.5 seconds
+- Real-SDK smoke (`pnpm smoke`): approval request → allow → turn complete → persisted
 
-## 성능 (T6-2 1차 측정)
+## Performance (T6-2, 1st measurement)
 
-| 지표 | 목표 (§7.1) | 실측 |
+| Metric | Target (§7.1) | Measured |
 |---|---|---|
-| 유휴 CPU (host) | < 1% | **0.02%** ✅ |
-| host RSS | — | 273MB (tsx 개발 실행 기준, 번들 후 감소 예상) |
-| 웹 번들 | — | 295KB (gzip 89KB) |
-| UI 유휴 CPU·메모리 | 목표 있음 | Tauri 전환 후 실물로 측정 (M1.5) |
+| Idle CPU (host) | < 1% | **0.02%** ✅ |
+| host RSS | — | 273MB (dev run under tsx; expected to drop after bundling) |
+| Web bundle | — | 295KB (gzip 89KB) |
+| UI idle CPU / memory | target exists | to be measured on the real thing after the Tauri migration (M1.5) |
 
-## M1 범위에서 구현한 것
+## What was implemented in M1 scope
 
-FR-1 사이드바+포커스뷰 / FR-2 동시 세션 가시화 / FR-3 대화·승인(키보드·배너) /
-FR-12 상태 2종 분리·카운터·다음 대기 이동 / FR-15 인박스 / FR-16 읽음·안읽음 /
-FR-17 단축키(⌘I, ⌘⇧A, y/n/a, d) / FR-18 자동 이름 / FR-20 아카이브 /
-부수: 컨텍스트 게이지(FR-14), 한도 뱃지(FR-9 일부)
+FR-1 sidebar + focus view / FR-2 visibility of concurrent sessions / FR-3 conversation + approval (keyboard, banner) /
+FR-12 splitting the 2 status types, counters, jump to the next pending item / FR-15 inbox / FR-16 read/unread /
+FR-17 shortcuts (⌘I, ⌘⇧A, y/n/a, d) / FR-18 automatic naming / FR-20 archive /
+Along the way: the context gauge (FR-14), the limit badge (part of FR-9)
 
-## 구현 중 내린 결정 (사람 확인 없이 진행한 것)
+## Decisions made during implementation (proceeded without a human check)
 
-1. **사용자 훅·플러그인 미로드**: ClaudeAdapter가 `settingSources`를 지정하지 않아 Centralu 세션은 사용자 훅/플러그인 없이 뜬다. 근거: 관제 도구가 사용자의 개인 훅(알림·자동화)을 실행하면 예측 불가능. 되돌리려면 어댑터에서 `settingSources: ['user']` 추가.
-2. **세션 상태의 권위는 UI(core)**: agent-host는 core를 import하지 않으므로(경계 규칙) 저장용 "힌트"만 기록한다. 살아있는 상태는 UI의 리듀서가 계산한다.
-3. **웹 dev의 디렉토리 선택은 경로 입력**: 브라우저에 디렉토리 피커가 없어 텍스트 입력. Tauri에서 dialog 플러그인으로 교체 예정.
-4. **인박스에 `limited` 제외**: 한도는 내가 할 일이 없으므로 인박스(할 일 목록)가 아니라 사이드바·헤더에만 표시.
-5. **zustand 셀렉터는 useMemo 훅으로**: 셀렉터가 새 객체를 반환하면 무한 리렌더가 발생(실제로 겪음). 파생 계산은 `use*` 훅에서 memo화.
+1. **User hooks and plugins are not loaded**: ClaudeAdapter does not specify `settingSources`, so Centralu sessions start without the user's hooks or plugins. Reasoning: a control tool becomes unpredictable if it runs the user's personal hooks (notifications, automations). To reverse this, add `settingSources: ['user']` in the adapter.
+2. **The UI (core) is the authority on session status**: agent-host does not import core (boundary rule), so it only records a "hint" for storage. The live status is computed by the UI's reducer.
+3. **Directory selection in web dev is a path input**: the browser has no directory picker, so it is a text field. This will be replaced with the dialog plugin under Tauri.
+4. **`limited` is excluded from the inbox**: hitting a limit is not something requiring an action from the person, so it shows only in the sidebar and header, not in the inbox (the to-do list).
+5. **zustand selectors go through a useMemo hook**: a selector that returns a new object causes an infinite re-render loop (hit this in practice). Derived computations are memoized inside `use*` hooks.
 
-## G5 실행 방법 (사람이 할 일)
+## How to run G5 (what the person does)
 
 ```bash
-# 같은 셸 — 에이전트 호스트와 웹 UI가 같은 임시 토큰을 쓴다
+# Same shell — the agent host and the web UI share the same temporary token
 CC_HOST_TOKEN="$(openssl rand -hex 16)" || exit 1
 [ -n "$CC_HOST_TOKEN" ] || exit 1
 CC_HOST_TOKEN="$CC_HOST_TOKEN" pnpm host --port 5175 >/dev/null &
@@ -54,49 +54,44 @@ trap 'kill "$HOST_PID" 2>/dev/null || true' EXIT
 VITE_HOST_TOKEN="$CC_HOST_TOKEN" pnpm dev   # http://127.0.0.1:5174
 ```
 
-확인 시나리오 (§1.3 루프가 실제로 도는가):
+Verification scenario (does the §1.3 loop actually turn):
 
-1. 프로젝트 2개 등록 (＋ 프로젝트 → 절대 경로 입력)
-2. 각각 세션을 만들고 승인이 필요한 작업을 시킨다 (예: "README에 한 줄 추가해줘")
-3. 자리를 뜬 척하다가 **⌘I**로 인박스를 열어 대기 목록을 본다
-4. Enter로 점프 → **y**로 승인 → 자동으로 다음 항목
-5. 결과를 읽은 세션은 **d**로 아카이브해 인박스를 비운다
-6. **⌘⇧A**로 대기 세션만 순회해 본다
+1. Register 2 projects (+ Project → enter an absolute path)
+2. Create a session in each and give it a task that needs approval (e.g. "add a line to the README")
+3. Pretend to step away, then open the inbox with **⌘I** to see the pending list
+4. Jump with Enter → approve with **y** → automatically moves to the next item
+5. Once the result has been read, archive the session with **d** to clear the inbox
+6. Try cycling through only the pending sessions with **⌘⇧A**
 
-판정 기준: **"터미널 3탭보다 나은가?"** 여기서 나온 불만이 M1.5 백로그가 된다.
+The test: **"is this better than 3 terminal tabs?"** Whatever complaints come out of this become the M1.5 backlog.
 
-## 알려진 한계 (M1 범위 밖 — 의도된 것)
+## Known limitations (out of M1 scope — intentional)
 
-- 재시작 복원 미구현 (M1.5): host를 껐다 켜면 세션 프로세스는 사라진다. 대화 기록은 SQLite에 남는다.
-- Codex 어댑터 없음 (M2). 깃 패널·파일 트리·코드 뷰어·첨부 없음 (M2).
-- 승인 "항상 허용" 규칙이 세션 메모리에만 있고 재시작 후 복원되지 않는다 (M1.5에서 store 규칙과 연결).
-- 대화 가상 스크롤 미적용 (메시지 수백 개 이상에서 M1.5에 필요).
+- Restart recovery is not implemented (M1.5): stopping and restarting the host loses the session processes. The conversation record stays in SQLite.
+- No Codex adapter (M2). No git panel, file tree, code viewer or attachments (M2).
+- The "always allow" approval rule lives only in session memory and does not survive a restart (wired to store rules in M1.5).
+- No virtual scrolling for the conversation (needed in M1.5 once messages run into the hundreds).
 
-## 사후 수정 (G5 시도 중 발견)
+## Fixes made afterward (found while attempting G5)
 
-1. **Tailwind가 클래스를 생성하지 않던 문제** — v4 자동 소스 탐지는 Vite root(`apps/web`) 기준이라 모노레포의 `packages/ui` 컴포넌트를 못 찾았다. CSS가 기본 스타일 4KB만 나와 화면이 스타일 없이 렌더됨. `packages/ui/src/styles/index.css`에 `@source` 두 줄을 명시해 해결 (13.7KB로 정상화). E2E는 클래스가 아니라 `data-testid`로 검증하므로 이 결함을 잡지 못했다 — 시각 회귀는 테스트 범위 밖이라는 한계.
-2. **포트 충돌 시 raw 스택 트레이스** — `ws`가 http 서버 에러를 자기 인스턴스로 재방출해 프로세스가 죽었다. 이제 원인과 해결 방법 3가지를 안내하고 종료한다.
+1. **Tailwind was not generating classes** — v4's automatic source detection works from the Vite root (`apps/web`), so it never found the `packages/ui` components in the monorepo. CSS came out as only the 4KB base styles, and the screen rendered unstyled. Fixed by adding two `@source` lines in `packages/ui/src/styles/index.css` (back to a normal 13.7KB). E2E verifies with `data-testid`, not classes, so it never caught this defect — a reminder that visual regressions sit outside the scope of these tests.
+2. **A raw stack trace on port conflict** — `ws` re-emitted the http server's error on its own instance, which killed the process. It now reports the cause and 3 ways to fix it, then exits.
 
-## G5 실측 (2026-08-15, 실제 프로젝트 저장소 하나를 대상으로, 에이전트가 대행)
+## G5 measurement (2026-08-15, against one real project repository, run by an agent on the person's behalf)
 
-실 host + 실 Claude 세션으로 관제 루프를 처음부터 끝까지 돌렸다. 결과: **루프는 돈다.**
-프로젝트 등록(비-git 디렉토리 포함) → 세션 생성 → 승인 요청 수신 → 거부/허용 →
-인박스 순회 → `d` 정리까지 실제로 동작했고, cwd·컨텍스트 게이지·git 상태 표시도 정확했다.
+Ran the control loop end to end with a real host and a real Claude session. Result: **the loop turns.**
+Project registration (including a non-git directory) → session creation → receiving an approval request → reject/allow →
+cycling the inbox → cleanup with `d` all worked in practice, and the cwd, context gauge and git status display were all accurate.
 
-발견해 고친 결함 3건 (모두 회귀 테스트 추가):
+3 defects found and fixed (all with regression tests added):
 
-1. **인박스 단축키가 입력창에 먹히던 문제** — 메시지를 보낸 직후엔 입력창에 포커스가 남는데,
-   인박스 키 핸들러가 `TEXTAREA`면 무시하도록 되어 있어 `d`·`j`·`k`가 본문에 타이핑됐다.
-   실사용 순서에서 100% 재현되는데, E2E가 `body`를 먼저 클릭해 가려져 있었다.
-   → 인박스를 모달로 취급해 열릴 때 포커스를 가져오도록 수정.
-2. **전송 실패를 조용히 삼키던 문제** — 프로세스가 없는(호스트 재시작 후 복원된) 세션에
-   메시지를 보내면 말풍선만 남고 콘솔에만 오류가 찍혔다. 사용자는 영영 답을 기다린다.
-   → 실패 시 말풍선을 걷어내고 무엇을 해야 하는지 토스트로 알린다.
-3. **복원된 세션의 지난 대화가 비어 있던 문제** — SQLite에 기록이 남아 있는데 불러오지 않았다.
-   → 세션 포커스 시 저장된 대화를 불러온다 (`messagesToChat`이 그제야 실제로 쓰임).
+1. **Inbox shortcuts were swallowed by the composer** — right after sending a message, focus stays in the composer, and the inbox key handler was set to ignore keys when the target is a `TEXTAREA`, so `d`, `j` and `k` got typed into the message body instead. This reproduces 100% of the time in real usage order, but E2E tests were hiding it by clicking `body` first.
+   → Fixed by treating the inbox as a modal that takes focus when it opens.
+2. **A send failure was swallowed silently** — sending a message to a session with no live process (restored after a host restart) left only the message bubble on screen, with the error logged only to the console. The user would wait forever for a reply.
+   → On failure, the bubble is removed and a toast tells the person what to do.
+3. **A restored session's past conversation was empty** — the record was there in SQLite, but nothing loaded it.
+   → The stored conversation is now loaded when a session gets focus (`messagesToChat` is finally used for something).
 
-오해였던 것: 처음에 에이전트가 홈 디렉토리에 파일을 쓰려 해 cwd 버그로 의심했으나,
-`pwd` 확인 결과 세션 cwd는 정확했다. 모델이 "this directory"를 자기 방식으로 해석한 것.
+A false lead: the agent initially tried to write a file to the home directory, which looked like a cwd bug, but checking `pwd` showed the session cwd was correct. The model had simply interpreted "this directory" in its own way.
 
-교훈: E2E 16개가 전부 통과하는 상태에서도 위 3건이 남아 있었다. 테스트가 실제 사용 순서를
-재현하지 않으면(포커스 상태, 죽은 세션, 재시작 후) 통과는 통과대로 무의미하다.
+Lesson: all 16 E2E tests were passing while these 3 defects still lived. When tests do not reproduce the real order of use (focus state, a dead session, after a restart), a passing suite means nothing on its own.

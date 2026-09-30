@@ -1,17 +1,17 @@
-# 파일 타입 아이콘
+# File type icons
 
-출처: [vscode-icons](https://github.com/vscode-icons/vscode-icons) — **MIT 라이선스**.
-`icons/*.svg`에서 우리가 쓰는 것만 가져왔다 (전체는 1,200개가 넘어 앱에 다 넣을 이유가 없다).
+Source: [vscode-icons](https://github.com/vscode-icons/vscode-icons) — **MIT licence**.
+Only the ones actually used are pulled from `icons/*.svg` (the full set is over 1,200 icons, with no reason to ship all of them in the app).
 
-## 갱신
+## Updating
 
-`fileIcon.ts`의 표에 확장자를 추가할 때, 대응하는 svg가 없으면 같은 저장소에서 받아 이 폴더에 둔다:
+When adding an extension to the table in `fileIcon.ts`, if there is no matching svg yet, fetch it from the same repository and place it in this folder:
 
 ```
-https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/<이름>.svg
+https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/<name>.svg
 ```
 
-표에 없는 확장자는 `default_file.svg`로 떨어지므로, 빠뜨려도 빈칸이 되지는 않는다.
+An extension missing from the table falls back to `default_file.svg`, so leaving one out never results in a blank icon.
 
 ## LICENSE (vscode-icons)
 
