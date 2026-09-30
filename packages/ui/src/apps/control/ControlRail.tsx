@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-// 문서의 모양은 호스트 절반과 같은 한 벌이다 (M4 P-5) — 전에는 여기와 agent-host의
-// apps/control.ts에 따로 적혀 있었고, `notifies`의 필수 여부가 서로 달랐다.
+// The document's shape is one set shared with the host half (M4 P-5) — it used to be written
+// separately here and in agent-host's apps/control.ts, and the two disagreed on whether
+// `notifies` was required.
 import type { ControlDoc } from '@cc/protocol'
 import {
   answerQuestion,
@@ -18,28 +19,33 @@ import {
 } from '../api.js'
 
 /**
- * 관제 레일 (#80) — **사람의 작업대.**
+ * The control rail (#80) — the person's workbench.
  *
- * 사람은 N개 파이프라인에 박힌 하나의 공정이다: 에이전트가 한 바퀴 돌리면 사람
- * 차례가 오고, 그걸 후딱 처리하고 다음으로. 이 레일이 최적화하는 것은 그
- * **사람 턴의 처리량**이다 — 도착해서 맥락 찾기(스크롤)가 가장 큰 마찰이라
- * "무엇이 필요한가"를 줄에 먼저 쓰고, 한 줄짜리 답은 줄 안에서 끝낸다.
+ * The person is one stage embedded in N pipelines: the agent runs a lap, the person's turn
+ * comes up, they clear it quickly, and it moves on. What this rail optimizes for is the
+ * throughput of the person's turn — arriving and hunting for context (scrolling) is the biggest
+ * friction, so "what is needed" is written on the row first, and a one-line answer is finished
+ * right there in the row.
  *
- * 위 = 행동(내 차례), 아래 = 배경(진행 중) — 읽는 순서가 곧 우선순위다.
- * 진행 중 단면은 그리드의 감시 목적을 한 줄로 압축한 것이다: bypass로 도는
- * 세션은 멈추지 않으므로, 끼어들 타이밍은 대기 목록이 아니라 서사에서 읽힌다.
+ * Top = action (my turn), bottom = background (running) — the reading order is the priority
+ * order. The running section compresses the grid's monitoring purpose into a single line: a
+ * session running under bypass never stops, so the moment to step in is read from the narration,
+ * not from a waiting list.
  */
 
 /**
- * 판정 카운터 (#80: "계속 쓰는가"는 감이 아니라 숫자) — 줄 안 즉답과 레일 경유
- * 진입을 센다.
+ * A judgment counter (#80: "does anyone keep using this" is a number, not a feeling) — counts
+ * inline replies made right in the row and entries made by opening the rail.
  *
- * 알려진 경합: 이 문서는 host와 나눠 쓰고, 양쪽 모두 문서 **전체를** 읽고-고치고-통째로
- * 쓴다. 늦게 쓴 쪽이 먼저 쓴 쪽의 칸을 되돌린다 — UI가 옛 사본으로 쓰면 그 사이 host가 올린
- * 알림이나 업무가 사라진다. 창이 초 단위이던 두 자리는 막았다 (#178): host의
- * control_create_task는 반장을 기다린 뒤 문서를 다시 읽고, 스토어는 아직 읽지 못한 문서 위에
- * 쓰지 않는다(그때 `doc`은 null이라 이 함수가 `{ metrics }`만으로 문서 전체를 덮었다). 남은 것은
- * 방송이 사본을 맞추기 전의 ms 창이다. 없애려면 통째 쓰기 대신 칸 단위 갱신이나 판본 비교가 필요하다.
+ * A known race: this document is shared with the host, and both sides read the whole document,
+ * modify it, and write the whole thing back. Whichever side writes later reverts the field the
+ * earlier side wrote — if the UI writes from a stale copy, a notification or task the host added
+ * in between disappears. Two spots where the window was seconds wide have been closed (#178):
+ * host's control_create_task waits for the foreman and then re-reads the document, and the store
+ * does not write over a document it has not read yet (at that point `doc` was null, so this
+ * function overwrote the whole document with just `{ metrics }`). What remains is the
+ * millisecond-wide window before a broadcast catches the copy up. Closing it fully would need
+ * per-field updates or version comparison instead of a whole-document write.
  */
 export function bumpMetric(doc: ControlDoc | null, key: 'inlineReplies' | 'railOpens'): void {
   const metrics = { ...(doc?.metrics ?? {}) }
@@ -48,7 +54,7 @@ export function bumpMetric(doc: ControlDoc | null, key: 'inlineReplies' | 'railO
 }
 
 export function ControlRail() {
-  // 기다린 시간(waitingMs)이 흐르게 — 5초면 충분하다 (초시계가 아니라 감각이다)
+  // Lets the waiting time (waitingMs) tick forward — 5 seconds is enough (it is a sense of time, not a stopwatch)
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 5_000)
@@ -60,7 +66,8 @@ export function ControlRail() {
   const sessions = useSessionSummaries()
   const doc = useAppState<ControlDoc>('control')
 
-  // 오케스트레이터(상주 대화)와 반장(메타 층 — Tasks 섹션의 몫)은 뺀다
+  // Excludes the orchestrator (the resident conversation) and the foreman (the meta layer — the
+  // Tasks section's job)
   const meta = (id: string) => sessions[id]?.kind === 'orchestrator' || sessions[id]?.kind === 'coordinator'
   const mine = inbox.filter((i) => !meta(i.id))
   const running = Object.values(sessions).filter((s) => s.state === 'working' && !meta(s.id))
@@ -74,11 +81,12 @@ export function ControlRail() {
 
   return (
     <aside
-      // 폭·테두리는 슬롯(AppRails)의 것 — 레일은 내용만 채운다 (#81 소유권 경계)
+      // Width and border belong to the slot (AppRails) — the rail only fills in the content
+      // (#81 ownership boundary)
       className="flex w-full min-w-0 flex-col overflow-y-auto bg-void"
       data-testid="control-rail"
     >
-      {/* 기계가 사람을 지목해 부른 것들 — 세션 상태로는 안 드러나는 호출 (control_notify) */}
+      {/* Things where the machine called out the person by name — calls that do not show up as session state (control_notify) */}
       {notifies.length > 0 && (
         <section className="border-b border-edge px-3 py-2">
           <h2 className="text-[10px] uppercase text-slate">Notices</h2>
@@ -108,7 +116,7 @@ export function ControlRail() {
         </section>
       )}
 
-      {/* 내 차례 — 행동. 인박스 판정(@cc/core buildInbox)의 순서 그대로 */}
+      {/* My turn — action. In the exact order of the inbox's own judgment (@cc/core buildInbox) */}
       <section className="border-b border-edge px-3 py-2">
         <h2 className="text-[10px] uppercase text-slate">
           My turn {mine.length > 0 && <span className="text-chalk">{mine.length}</span>}
@@ -119,7 +127,8 @@ export function ControlRail() {
         ))}
       </section>
 
-      {/* 업무 — 반장이 조율하는 다중 세션 묶음 (#80 목적 2). 사람은 버스에서 내려 심판석으로 */}
+      {/* Tasks — a bundle of multiple sessions the foreman coordinates (#80 purpose 2). The
+          person steps off the bus and into the referee's seat */}
       <section className="border-b border-edge px-3 py-2" data-testid="rail-tasks">
         <div className="flex items-baseline justify-between">
           <h2 className="text-[10px] uppercase text-slate">Tasks {tasks.length > 0 && tasks.filter((t) => t.status === 'active').length}</h2>
@@ -146,8 +155,9 @@ export function ControlRail() {
                 </span>
               </button>
               {/*
-                구성원 — 반장의 시야를 사람도 본다 (도그푸딩 지적 2026-09-06: 숫자만으로는
-                어느 세션들이 이 업무인지 안 보였다). 칩을 누르면 그 세션으로 간다.
+                Members — the person sees the same view as the foreman (caught in dogfooding,
+                2026-09-06: the number alone did not show which sessions this task involved).
+                Pressing a chip goes to that session.
               */}
               <div className="mt-0.5 flex flex-wrap gap-1">
                 {t.members.map((id) => (
@@ -184,7 +194,7 @@ export function ControlRail() {
 
       {creating && <NewTaskDialog sessions={sessions} onClose={() => setCreating(false)} />}
 
-      {/* 진행 중 — 배경. 그리드의 감시를 세로 한 줄씩으로 압축 */}
+      {/* Running — background. Compresses the grid's monitoring into one line per session */}
       <section className="px-3 py-2">
         <h2 className="text-[10px] uppercase text-slate">Running {running.length > 0 && running.length}</h2>
         {running.length === 0 && <p className="mt-1.5 text-[11px] text-slate">No sessions working.</p>}
@@ -197,9 +207,10 @@ export function ControlRail() {
 }
 
 /**
- * 진행 중 한 줄 — **서사(말)가 정본, 도구는 보조** (도그푸딩 2026-09-05).
- * preview만 쓰면 툴 호출이 말을 덮어 "pnpm verify" 한 줄만 남는다 — 끼어들
- * 타이밍은 도구 이름이 아니라 에이전트가 무슨 생각으로 가는지에서 읽힌다.
+ * A running row — the narration (speech) is authoritative, the tool is secondary (dogfooding,
+ * 2026-09-05). Using preview alone lets a tool call overwrite the speech and leave only a line
+ * like "pnpm verify" — the moment to step in is read from what the agent is thinking, not from a
+ * tool name.
  */
 function RunningRow({ s }: { s: SessionSummary }) {
   const words = useLastWords(s.id)
@@ -217,7 +228,7 @@ function RunningRow({ s }: { s: SessionSummary }) {
   )
 }
 
-/** 초 단위는 소음이다 — 사람이 읽는 것은 "방금/몇 분/한참"의 감각 */
+/** Seconds are noise — what a person reads is the sense of "just now / a few minutes / a while" */
 function ago(ms: number): string {
   const m = Math.floor(ms / 60_000)
   if (m < 1) return 'now'
@@ -226,13 +237,15 @@ function ago(ms: number): string {
 }
 
 /**
- * 내 차례 한 줄 — "무엇이 필요한가"가 먼저, 한 줄짜리 답은 여기서 끝낸다.
- * 깊게 봐야 하면 이름을 눌러 그 세션으로 (피크 발명 없음 — 기존 포커스 뷰).
+ * A "my turn" row — "what is needed" comes first, and a one-line answer is finished right here.
+ * If a deeper look is needed, press the name to go to that session (no new "peek" invented —
+ * this is the existing focus view).
  */
 function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; unread: boolean; s?: SessionSummary }) {
   const [text, setText] = useState('')
   const [showDiff, setShowDiff] = useState(false)
-  // 말이 정본, preview는 대화가 안 실린 세션의 물러섬 (RunningRow와 같은 규칙)
+  // Speech is authoritative, preview is the fallback for a session with no conversation loaded
+  // (the same rule as RunningRow)
   const words = useLastWords(id)
   const doc = useAppState<ControlDoc>('control')
   if (!s) return null
@@ -265,7 +278,8 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
                   ? `${approval.detail.app.name} wants to ${approval.detail.text}`
                   : 'approval requested'}
           </p>
-          {/* diff는 줄에서 판단의 재료다 — 세션을 열지 않고 승인하려면 무엇이 바뀌는지 보여야 한다 */}
+          {/* The diff is the material for a decision right here in the row — approving without
+              opening the session requires seeing what actually changes */}
           {approval.detail.kind === 'file_edit' && showDiff && (
             <pre
               className="readout mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all rounded border border-edge bg-panel p-1.5 text-[9px] leading-snug text-ash"
@@ -312,7 +326,8 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
         <div className="mt-1">
           <p className="truncate text-[10px] text-slate">{question.question}</p>
           <div className="mt-1 flex flex-wrap gap-1">
-            {/* 다중 선택은 줄에서 안 끝난다 — 세션을 열어 온전한 카드로 답한다 */}
+            {/* A multi-select question does not get finished in a row — it is answered by opening
+                the session and its full card */}
             {!question.multiSelect &&
               question.options.slice(0, 3).map((o) => (
                 <button
@@ -338,9 +353,10 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
       {!approval && !question && s.state === 'waiting_input' && (
         <>
           {/*
-            마지막 활동은 자기 줄에 — placeholder에 넣었더니 "제안된 답장"처럼 읽혔다
-            (도그푸딩 2026-09-05: 입력창 안의 `pnpm verify`가 "이게 정상이야?"를 낳았다).
-            입력창은 언제나 빈 종이처럼 보여야 한다.
+            The last activity gets its own line — putting it in the placeholder read as a
+            "suggested reply" (dogfooding, 2026-09-05: `pnpm verify` sitting inside the composer
+            raised the question "is this normal?"). The composer must always look like a blank
+            sheet of paper.
           */}
           {(words ?? s.preview) && <p className="mt-1 truncate text-[10px] text-slate">{words ?? s.preview}</p>}
           <input
@@ -364,9 +380,10 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
 }
 
 /**
- * 업무 만들기 — 구성원을 고르고 목표를 적으면 반장이 선다.
- * 생성 로직은 host 앱 도구(control_create_task) 하나뿐이다: 오케스트레이터가 만들든
- * 사람이 이 창으로 만들든 같은 문을 지난다 (구현이 둘이면 한쪽이 낡는다).
+ * Creating a task — pick the members and write the goal, and a foreman stands up.
+ * There is exactly one piece of creation logic, the host's app tool (control_create_task):
+ * whether an orchestrator creates it or a person creates it through this dialog, both pass
+ * through the same door (two implementations means one of them goes stale).
  */
 function NewTaskDialog({ sessions, onClose }: { sessions: Record<string, SessionSummary>; onClose: () => void }) {
   const [title, setTitle] = useState('')

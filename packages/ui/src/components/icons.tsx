@@ -1,11 +1,12 @@
 /**
- * 아이콘.
+ * Icons.
  *
- * 이모지를 쓰지 않는다. 이모지는 (1) OS·폰트마다 생김새가 달라서 밀도를 맞출 수 없고,
- * (2) 대부분 유채색이라 "색은 diff 본문에만"이라는 이 앱의 규칙을 곧바로 깬다.
- * 선 굵기와 색을 우리가 정하는 SVG면 둘 다 문제가 없다.
+ * No emoji. Emoji (1) look different across OSes and fonts, so density cannot be controlled, and
+ * (2) are mostly full of hue, breaking this app's rule of "color only in the body of a diff"
+ * immediately. An SVG where we control the stroke weight and color has neither problem.
  *
- * `currentColor`를 쓰므로 색은 부모의 text-* 가 정한다 — 호버·비활성 상태가 저절로 따라온다.
+ * `currentColor` is used, so the color is decided by the parent's text-* class — hover and
+ * disabled states follow automatically.
  */
 export function PlusIcon({ size = 14 }: { size?: number }) {
   return (
@@ -15,7 +16,7 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/** 점 셋 — "여기에 더 있다". 글리프(⋯)가 아니라 도형이라 폰트를 타지 않는다 */
+/** Three dots — "there is more here". A shape, not a glyph (⋯), so it does not depend on the font */
 export function DotsIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden>
@@ -27,11 +28,11 @@ export function DotsIcon({ size = 14 }: { size?: number }) {
 }
 
 /**
- * 왕관 — 다른 세션을 부리는 오케스트레이터의 자리 표식.
+ * The crown — the marker for an orchestrator's role, directing other sessions.
  *
- * 상태가 아니라 역할을 말하므로, 응답 중일 때 도는 테두리와 한 자리를 다투지 않는다.
- * 사이드바와 세션 머리글이 서로 다른 그림을 쓰면 같은 역할이 두 얼굴을 갖게 되므로
- * 이 한 아이콘을 공유한다.
+ * It speaks a role, not a state, so it does not compete for the same spot with the border that
+ * spins while responding. If the sidebar and the session header used different drawings, the
+ * same role would end up with two faces, so this one icon is shared between them.
  */
 export function CrownIcon({ size = 13 }: { size?: number }) {
   return (
@@ -47,8 +48,9 @@ export function CrownIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * 앱 — 창 하나에 조작면 하나 (M4 B-2). 사이드바에서 앱 줄은 세션 줄과 나란히 서므로, 세션의 도구
- * 글자 칩과 **형태로** 갈라져야 한다(팔레트 규칙: 종류는 형태로, 긴급도는 밝기로).
+ * The app — one window, one control surface (M4 B-2). An app's row stands alongside session rows
+ * in the sidebar, so it has to be told apart from a session's tool-letter chip by shape (the
+ * palette's rule: kind by shape, urgency by brightness).
  */
 export function AppIcon({ size = 13 }: { size?: number }) {
   return (
@@ -69,14 +71,16 @@ export function CloseIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * 펼침 표시 — 꼬리 없는 화살표(셰브런).
+ * The expand/collapse indicator — an arrow with no tail (a chevron).
  *
- * 접힘은 오른쪽, 펼침은 아래쪽. **같은 글리프를 돌린다**:
- * 두 방향을 각각 그리면 굵기나 크기가 미묘하게 달라져 열고 닫을 때 툭 튀는데,
- * 회전이면 그럴 수가 없다. 도는 동작 자체가 "지금 열렸다"를 말해주기도 한다.
+ * Collapsed points right, expanded points down. The same glyph is rotated: drawing the two
+ * directions separately leaves subtle differences in weight or size, producing a jump when
+ * opening and closing, and rotation cannot do that. The rotation itself also says "this just
+ * opened".
  *
- * 채운 삼각형(▸▾)을 쓰다가 바꿨다 — 삼각형은 폰트가 그리는 것이라
- * 크기·정렬을 우리가 못 정하고, 무게가 글자보다 무거워 목록에서 이름보다 먼저 눈에 띈다.
+ * This replaced a filled triangle (▸▾) that was used before — a triangle is drawn by the font, so
+ * we cannot control its size or alignment, and its weight is heavier than text, so it caught the
+ * eye before the name did in a list.
  */
 export function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number }) {
   return (
@@ -99,7 +103,7 @@ export function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number 
   )
 }
 
-/** 보내기. 종이비행기는 "보낸다"의 거의 표준 기호라 글자보다 빨리 읽힌다 */
+/** Send. A paper airplane is nearly a universal symbol for "send", so it reads faster than text */
 export function SendIcon({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -115,11 +119,12 @@ export function SendIcon({ size = 15 }: { size?: number }) {
 }
 
 /**
- * 이름 고치기 — 연필.
+ * Rename — a pencil.
  *
- * 글자('Rename')를 쓰지 않는 이유는 이 자리(세션 줄 오른쪽 끝)가 삭제 버튼과
- * 나란히 서는 좁은 칸이라, 글자를 넣으면 줄마다 이름이 잘리기 때문이다.
- * 연필은 "고친다"의 거의 표준 기호라 아이콘으로 바꿔도 뜻이 약해지지 않는다.
+ * Text ('Rename') is not used here because this spot (the right end of a session row) is a
+ * narrow space standing next to the delete button, and adding text would truncate the name on
+ * every row. A pencil is nearly a universal symbol for "edit", so switching to an icon does not
+ * weaken the meaning.
  */
 export function PencilIcon({ size = 13 }: { size?: number }) {
   return (
@@ -144,16 +149,17 @@ export function PencilIcon({ size = 13 }: { size?: number }) {
  * button you press, and an outline reads as a shape being described rather than pressed.
  */
 /**
- * 실행 — 재생 삼각형.
+ * Run — a play triangle.
  *
- * 예전 삼각형은 16짜리 화판 안에서 7 × 9.2밖에 안 차지했고, 그걸 13px로 그렸다. 옆에
- * 나란히 서는 재시작 아이콘은 지름 11의 원을 14px로 그리니, **같은 줄에서 잉크의 폭이
- * 두 배 가까이 차이 났다.** 크기 숫자만 보면 13과 14로 비슷했는데도 눈에는 작았던 이유가
- * 그것이다 — 화판이 아니라 잉크가 크기를 정한다.
+ * The old triangle occupied only 7 x 9.2 inside a 16-unit canvas, and that was drawn at 13px.
+ * The restart icon standing right beside it draws an 11-diameter circle at 14px, so on the same
+ * row the ink width differed by nearly a factor of two. That is why it looked small even though
+ * the size numbers, 13 and 14, were close — it is the ink, not the canvas, that determines
+ * perceived size.
  *
- * 그래서 화판을 더 채우고(8.8 × 10.8) 15px로 그린다. 꼭짓점은 둥글다: 이 파일의 다른
- * 아이콘은 전부 `strokeLinecap="round"`라, 칼같이 뾰족한 삼각형 하나만 혼자 다른
- * 물건처럼 보였다.
+ * So the canvas is filled more (8.8 x 10.8) and drawn at 15px. The corners are rounded: every
+ * other icon in this file uses `strokeLinecap="round"`, and a single knife-sharp triangle looked
+ * like it belonged to a different set.
  */
 export function PlayIcon({ size = 15 }: { size?: number }) {
   return (
@@ -167,10 +173,11 @@ export function PlayIcon({ size = 15 }: { size?: number }) {
 }
 
 /**
- * 다시 시작 — 원을 그리는 화살표.
+ * Restart — an arrow drawing a circle.
  *
- * "Restart"라는 글자를 아이콘으로 바꾸면 뜻이 약해지므로, 거의 표준에 가까운
- * 기호를 쓴다. 화살촉이 있어야 '되돌린다'가 아니라 '다시 돈다'로 읽힌다.
+ * Turning the word "Restart" into an icon would weaken the meaning, so a nearly universal symbol
+ * is used instead. The arrowhead is what makes it read as "circling back around" rather than
+ * "reverting".
  */
 export function RestartIcon({ size = 14 }: { size?: number }) {
   return (
@@ -193,11 +200,12 @@ export function RestartIcon({ size = 14 }: { size?: number }) {
 }
 
 /**
- * 갈라지는 줄기 — 워크트리 매니저 (#76).
+ * A branching trunk — the worktree manager (#76).
  *
- * 점 세 개와 선으로 그린 브랜치는 거의 표준에 가까운 기호라, 이 앱에서 처음 보는
- * 버튼인데도 "깃의 무언가"로는 바로 읽힌다. 왕관(오케스트레이터)과 헷갈릴 일도 없다:
- * 하나는 자리이고 하나는 갈래라, 모양이 말하는 것이 서로 다르다.
+ * A branch drawn with three dots and lines is nearly a universal symbol, so even as a button
+ * never seen in this app before, it reads immediately as "something git". There is no risk of
+ * confusion with the crown (orchestrator) either: one speaks a role, the other a branching, so
+ * what the shapes say is entirely different.
  */
 export function BranchIcon({ size = 13 }: { size?: number }) {
   return (
@@ -206,7 +214,7 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
       <circle cx="4.5" cy="12.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="11.5" cy="3.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
       <path d="M4.5 5.1v5.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      {/* 줄기에서 갈라져 나온 가지가 다시 아래로 내려온다 — 갈라짐과 되돌아옴이 한 획에 */}
+      {/* A branch splitting off from the trunk comes back down again — branching and merging in one stroke */}
       <path
         d="M11.5 5.1v1.4a2.4 2.4 0 01-2.4 2.4H6.9"
         stroke="currentColor"
@@ -218,8 +226,8 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * 가져오기 — 쟁반으로 내려오는 화살표 (M4 E-3). "새 앱"(+)과 나란히 서므로 **형태로** 갈라진다: 만드는 것은 더하기, 들여오는 것은
- * 내려받기의 모양이다.
+ * Import — an arrow descending onto a tray (M4 E-3). It stands next to "new app" (+), so it is
+ * told apart by shape: creating is a plus, bringing something in is the shape of a download.
  */
 export function ImportIcon({ size = 13 }: { size?: number }) {
   return (

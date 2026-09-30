@@ -1,41 +1,46 @@
 import { useEffect } from 'react'
 
-/** styles/index.css의 회전 궤도. 이름을 문자열로 아는 곳은 여기 하나다 */
+/** The rotating orbit from styles/index.css. This is the one place its name is known as a string */
 const ORBIT = 'cc-orbit-spin'
 
 /**
- * 도는 것들은 **한 시계**를 본다.
+ * Everything that spins watches one clock.
  *
- * 사이드바 표식과 그리드 칸 테두리는 같은 궤도를 같은 1.4초로 돈다. 그런데도 화면에서
- * 서로 다른 속도로 보였다 — 주기가 아니라 **위상**이 달랐다. CSS 애니메이션은 요소가
- * 생긴 순간부터 세므로, 세션이 도는 중에 그리드로 넘어가면 칸의 궤도는 거기서 0부터
- * 시작한다. 실측으로 758ms, 거의 정반대였다(1.4초 주기의 195°). 눈은 두 개가 어긋난
- * 것까지는 읽어도 "위상이 다르다"고는 읽지 않는다. 그냥 따로 논다고 본다.
+ * The sidebar marker and the grid panel border rotate the same orbit at the same 1.4 seconds.
+ * And yet they showed up on screen at different speeds — not the period, the phase, that
+ * differed. A CSS animation counts from the moment the element is created, so if a session is
+ * spinning and then moves into the grid, the panel's orbit starts counting from 0 all over
+ * again. Measured, that was 758ms apart — nearly opposite (195° of a 1.4s period). The eye reads
+ * two things being out of sync, but it does not read "different phase" — it just sees them as
+ * unrelated.
  *
- * 그래서 각자의 시작점을 버리고 문서 시계의 원점에 못 박는다. 언제 생겼든 각도는
- * `(지금 % 1.4초)`로 같아지고, 이후로도 같이 간다.
+ * So each one's own starting point is discarded, and it is pinned instead to the origin of the
+ * document's clock. Regardless of when it was created, the angle becomes `(now % 1.4s)`, and it
+ * stays in step from then on.
  *
- * **CSS만으로 하는 방법을 먼저 재봤고, 버렸다.** `--cc-orbit`을 상속되게 바꿔 뿌리에서
- * 한 번만 돌리면 코드는 세 줄로 끝나지만, 상속되는 커스텀 속성이 매 프레임 바뀌면
- * 트리 전체가 다시 계산된다. 노드 12만 개(긴 대화 하나가 그 근처다)에서 프레임이
- * 16.7ms → 34.1ms로 두 배가 됐다. 도는 표식 하나 맞추자고 대화창을 절반 속도로
- * 만들 수는 없다. 이 방식은 상태가 바뀌는 순간에만 일하고, 프레임마다는 아무것도 안 한다.
+ * A CSS-only approach was measured first, and dropped. Making `--cc-orbit` inheritable and
+ * rotating it once at the root would finish the code in three lines, but an inheritable custom
+ * property changing every frame forces the whole tree to recalculate. At around 120,000 nodes
+ * (roughly what one long conversation reaches), the frame time doubled from 16.7ms to 34.1ms.
+ * The conversation cannot be run at half speed just to keep one spinning marker in sync. This
+ * approach only does work at the moment state changes, and does nothing at all per frame.
  */
 export function syncOrbits(): void {
-  // jsdom에는 이 API가 없다 — 단위 테스트에서 화면 없이 그려질 때가 있다
+  // jsdom does not have this API — a unit test sometimes renders without a screen
   if (typeof document === 'undefined' || typeof document.getAnimations !== 'function') return
   for (const anim of document.getAnimations()) {
     if ((anim as CSSAnimation).animationName !== ORBIT) continue
-    // 이미 맞은 것은 건드리지 않는다 — 다시 넣으면 그 프레임에 한 번 튄다
+    // Leaves one already in sync untouched — resetting it again would cause a single jump on that frame
     if (anim.startTime !== 0) anim.startTime = 0
   }
 }
 
 /**
- * 새로 도는 것이 생겼으면 전부 같은 각도로 맞춘다.
+ * Syncs everything spinning to the same angle whenever a new one appears.
  *
- * `key`는 "지금 도는 것들"을 나타내는 값이면 된다 — 그게 바뀔 때가 궤도가 새로 생기는
- * 순간이다. 마운트도 그 순간에 포함된다(처음 렌더에서 이미 돌고 있는 경우).
+ * `key` only needs to be a value that represents "what is currently spinning" — the moment it
+ * changes is the moment a new orbit is created. Mounting counts as that moment too (when
+ * something is already spinning on the first render).
  */
 export function useOrbitSync(key: string | boolean): void {
   useEffect(() => {

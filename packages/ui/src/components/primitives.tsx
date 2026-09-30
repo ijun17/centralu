@@ -3,9 +3,10 @@ import type { SessionState } from '@cc/protocol'
 import { useCapability } from '../app/PlatformProvider.jsx'
 
 /**
- * 상태 표시 (FR-12).
- * 색이 없으므로 긴급도는 밝기가, 종류는 형태가 말한다.
- * 승인 대기만 순백이고 나머지는 어둡다 — 화면에서 가장 밝은 것이 곧 나를 기다리는 것이다.
+ * The state indicator (FR-12).
+ * With no color, urgency is spoken by brightness and kind by shape.
+ * Only waiting-for-approval is pure white, everything else is dim — the brightest thing on
+ * screen is exactly what is waiting for me.
  */
 const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string }> = {
   waiting_approval: { glyph: '●', tone: 'beacon', label: 'Awaiting approval' },
@@ -16,7 +17,7 @@ const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string 
   idle: { glyph: '·', tone: 'text-slate', label: 'Idle' },
 }
 
-/** 상태의 한국어 이름. 점을 안 그리는 자리(도구 표식 등)에서도 같은 말을 써야 한다 */
+/** The state's spoken name. The same wording must be used wherever a dot is not drawn (e.g. a tool marker) */
 export const stateLabel = (state: SessionState): string => SIGNAL[state].label
 
 export function StateDot({ state }: { state: SessionState }) {
@@ -34,12 +35,13 @@ export function StateDot({ state }: { state: SessionState }) {
 }
 
 /**
- * 시그니처 요소 — 키보드 우선 도구라는 정체성.
+ * The signature element — the identity of a keyboard-first tool.
  *
- * `mod`·`alt`는 글리프가 아니라 **뜻**을 받는다 (이슈 #32). 이 맥에서 `⌘`인 키는 다른
- * 자판에서 `Ctrl`이고, 핸들러는 진작부터 둘 다 받고 있었다 — 화면만 없는 키를 누르라고
- * 말했다. `<Kbd>⌘</Kbd>`처럼 호출 지점에 기호를 적는 방식이 그 거짓말을 한 번에 열 파일로
- * 퍼뜨린 원인이라, 자판 이름은 이제 여기 한 곳에서만 들어온다.
+ * `mod` and `alt` take a meaning, not a glyph (issue #32). The key that is `⌘` on this Mac is
+ * `Ctrl` on another keyboard, and the handler had already been accepting both for a long time —
+ * only the screen was telling the person to press a key that did not exist. Writing the symbol
+ * at the call site, as in `<Kbd>⌘</Kbd>`, is what spread that lie across ten files at once, so
+ * the keyboard's name is now taken in from this one place only.
  */
 export function Kbd({
   children,
@@ -49,9 +51,9 @@ export function Kbd({
 }: {
   children?: ReactNode
   live?: boolean
-  /** 여기선 `⌘`, command 키가 없는 자판에선 `Ctrl` */
+  /** `⌘` here, `Ctrl` on a keyboard with no command key */
   mod?: boolean
-  /** 여기선 `⌥`, 그 밖에선 `Alt` */
+  /** `⌥` here, `Alt` everywhere else */
   alt?: boolean
 }) {
   const keys = useCapability('shortcutKeys')
@@ -71,8 +73,9 @@ export function formatWaiting(ms: number): string {
 }
 
 /**
- * 기다린 시간이 길수록 글자가 밝아진다.
- * 사람의 주의가 가장 비싼 자원이라는 전제를, 새 도형을 더하지 않고 밝기로만 말한다.
+ * The longer the wait, the brighter the text.
+ * Speaks the premise that a person's attention is the most expensive resource, using brightness
+ * alone rather than adding a new shape.
  */
 export function waitingTone(ms: number): string {
   if (ms > 10 * 60_000) return 'text-beacon'
@@ -81,13 +84,14 @@ export function waitingTone(ms: number): string {
 }
 
 /**
- * 툴팁.
+ * The tooltip.
  *
- * 브라우저 기본 title은 1~2초를 기다려야 뜨고 생김새를 앱과 맞출 수 없다.
- * 사이드바처럼 "평소엔 자리를 안 주지만 물어보면 바로 답해야 하는" 정보에는
- * 그 지연이 곧 정보가 없는 것과 같다.
+ * The browser's native title takes 1-2 seconds to appear and its look cannot be matched to the
+ * app. For information like the sidebar — normally taking up no space, but expected to answer
+ * immediately when asked — that delay is effectively no information at all.
  *
- * 마우스뿐 아니라 포커스에도 뜬다 — 키보드로만 도는 사람에게도 같은 정보가 필요하다.
+ * It appears on focus as well as on hover — someone navigating by keyboard alone needs the same
+ * information.
  */
 export function Tooltip({
   children,
@@ -99,21 +103,22 @@ export function Tooltip({
   children: ReactNode
   content: ReactNode
   testId?: string
-  /** 화면 아래쪽 요소는 위로 띄운다 — 아래로 띄우면 창 밖으로 나간다 */
+  /** An element near the bottom of the screen floats the tooltip upward — floating it downward would push it off the window */
   placement?: 'bottom' | 'top'
-  /** 오른쪽 끝 요소는 오른쪽 정렬 — 왼쪽 정렬이면 툴팁이 창 밖으로 밀린다 */
+  /** An element at the right edge aligns the tooltip to the right — left alignment would push the tooltip off the window */
   align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLSpanElement>(null)
   const tipRef = useRef<HTMLSpanElement>(null)
   /*
-   * **absolute가 아니라 fixed다** (도그푸딩: 사용량 도넛의 툴팁이 모달의 스크롤 상자에
-   * 아래가 잘렸다). 트리거 안의 absolute는 조상 어딘가의 overflow에 반드시 잘린다 —
-   * 사이드바(overflow-y-auto)의 버튼 툴팁도 같은 지뢰 위에 서 있었다. 뷰포트 기준으로
-   * 띄우면 잘릴 상자가 없다. 계산은 RowMenu(사이드바 메뉴)와 같은 규칙이다:
-   * 확대(--text-zoom)가 rect에는 곱해져 있고 fixed 길이에는 또 곱해질 것이므로,
-   * 전부 레이아웃 px로 환산해 한 좌표계에서 계산한다.
+   * fixed, not absolute (dogfooding: the usage donut's tooltip was clipped at the bottom by the
+   * modal's scroll box). An absolute inside the trigger is guaranteed to be clipped by an
+   * overflow somewhere among its ancestors — a sidebar button's tooltip (overflow-y-auto) was
+   * standing on the exact same mine. Floating it relative to the viewport leaves no box to be
+   * clipped by. The calculation follows the same rule as RowMenu (the sidebar menu): zoom
+   * (--text-zoom) is already multiplied into the rect and would be multiplied again into a fixed
+   * length, so everything is converted to layout px and calculated in one coordinate system.
    */
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   useLayoutEffect(() => {
@@ -133,7 +138,7 @@ export function Tooltip({
     const GAP = 4
     const EDGE = 8
     let top = placement === 'top' ? r.top / zoom - GAP - h : r.bottom / zoom + GAP
-    // 창을 벗어나면 반대쪽으로 뒤집는다 — placement는 기본 방향이지 약속이 아니다
+    // Flips to the other side if it would go past the window — placement is a default direction, not a guarantee
     if (placement === 'bottom' && top + h > winH - EDGE) top = r.top / zoom - GAP - h
     else if (placement === 'top' && top < EDGE) top = r.bottom / zoom + GAP
     const left = Math.max(
@@ -143,8 +148,9 @@ export function Tooltip({
     setPos({ top, left })
   }, [open, placement, align])
   /*
-   * 스크롤하면 잰 자리가 낡는다 — 다시 재는 대신 닫는다. 호버 툴팁은 손이 그대로면
-   * 곧 다시 뜨고, 스크롤 중인 손은 어차피 다른 데를 보고 있다.
+   * Scrolling makes the measured position stale — instead of measuring again, it closes. A
+   * hover tooltip reappears soon anyway if the hand stays put, and a hand that is scrolling is
+   * looking elsewhere regardless.
    */
   useEffect(() => {
     if (!open) return

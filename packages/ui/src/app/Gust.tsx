@@ -1,30 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/store.js'
 
-/** 바람이 지나가는 시간 (CSS의 cc-gust와 같아야 한다 — 끝나면 DOM에서 걷는다) */
+/** How long the gust takes to pass (must match cc-gust in the CSS — it is removed from the DOM
+ * once it ends) */
 const GUST_MS = 1100
 
 /**
- * 응답이 끝났다는 것을 **몸으로** 알려주는 한 번의 바람.
+ * A single gust that tells the body, not the eye, that a response has finished.
  *
- * 글자로 "끝났습니다"라고 적는 대신 화면이 한 번 숨을 쉰다. 읽지 않아도 알 수 있고,
- * 지나가면 아무것도 남기지 않으므로 화면을 어지럽히지 않는다.
+ * Instead of writing "finished" in text, the screen takes one breath. It can be noticed without
+ * being read, and since it leaves nothing behind once it passes, it does not clutter the screen.
  *
- * 지나간 뒤에는 DOM에서 걷는다. 투명한 채로 남겨두면 화면 전체를 덮는 요소가
- * 항상 하나 떠 있게 된다 — 지금은 pointer-events가 없어 괜찮지만, 그런 것이
- * 남아 있으면 언젠가 무언가를 가린다.
+ * It is removed from the DOM once it passes. Leaving it transparent would mean an element
+ * covering the whole screen is always floating there — harmless right now since it has no
+ * pointer-events, but something left lingering like that ends up covering something eventually.
  */
 export function Gust() {
   /*
-   * **끝난 시각 하나만 본다.**
+   * Only one thing is watched: the completion timestamp.
    *
-   * "보이는가"는 여기서 따지지 않는다 — 완료가 일어난 그 순간에 스토어가 이미 판정했다.
-   * 여기서 또 곱하면 세션을 옮겨 보이게 되는 순간에도 답이 참이 되어, 새로 끝난 것이
-   * 없는데 바람이 분다. 화면 상태를 의존성에 두지 않는 것이 이 컴포넌트의 요점이다.
+   * Whether it is "visible" is not decided here — the store already made that call at the exact
+   * moment completion happened. Multiplying that judgment here as well would make the answer true
+   * again at the moment a session becomes visible after switching, blowing a gust when nothing
+   * new actually finished. Not putting screen state in the dependency list is the whole point of
+   * this component.
    */
   const at = useStore((s) => s.completion?.at ?? null)
   const [blowing, setBlowing] = useState<number | null>(null)
-  /** 이미 분 시각은 다시 불지 않는다 — 사건 하나에 바람 하나 */
+  /** A timestamp that already blew does not blow again — one gust per event */
   const blown = useRef<number | null>(null)
 
   useEffect(() => {
@@ -42,7 +45,8 @@ export function Gust() {
       data-testid="gust"
       aria-hidden
     >
-      {/* key: 같은 세션이 연달아 끝나도 애니메이션이 처음부터 다시 돈다 */}
+      {/* key: even when the same session finishes back to back, the animation restarts from the
+          beginning */}
       <div key={blowing} className="cc-gust" />
     </div>
   )

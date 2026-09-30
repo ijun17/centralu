@@ -1,7 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import type { Platform, PlatformCapabilities } from '@cc/platform/ports'
 
-/** ui가 Platform을 받는 유일한 통로 (docs/platform-abstraction.md §4) */
+/** The only channel through which ui receives a Platform (docs/platform-abstraction.md §4) */
 const PlatformContext = createContext<Platform | null>(null)
 
 export function PlatformProvider({ platform, children }: { platform: Platform; children: ReactNode }) {

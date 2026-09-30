@@ -43,8 +43,9 @@ describe('terminal HTTP links', () => {
   })
 
   /*
-   * 데스크톱 웹뷰(WKWebView)에서 window.open은 아무것도 열지 않는다 — 새 창 처리기가 없으면
-   * wry가 요청을 버린다 (#159). 여는 일은 받은 열기 함수(플랫폼 포트)가 해야 한다.
+   * window.open opens nothing in the desktop webview (WKWebView) — with no new-window handler,
+   * wry drops the request (#159). Opening has to go through the given opener function (the
+   * platform port).
    */
   it('opens an activated link through the given opener, not window.open', () => {
     const { term, linksAt } = fakeTerm('go https://example.com')

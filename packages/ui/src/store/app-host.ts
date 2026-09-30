@@ -7,14 +7,16 @@ import { useStore } from './store.js'
 import { useCounts, useInbox } from './selectors.js'
 
 /**
- * 앱 런타임이 요구하는 표면의 **이 제품 쪽 구현** (#97).
+ * This product's own implementation of the surface the app runtime requires (#97).
  *
- * 방향이 여기서 뒤집힌다: 스토어가 런타임의 계약(apps/host.ts)을 임포트하고,
- * 런타임은 스토어를 모른다. 반대 방향 — 런타임이 스토어를 임포트하던 것 — 이
- * 인박스를 지우면 런타임이 컴파일되지 않게 만들던 그 매듭이었다.
+ * The direction is inverted here: the store imports the runtime's contract (apps/host.ts), and
+ * the runtime knows nothing about the store. The opposite direction — the runtime importing the
+ * store — was the exact knot that stopped the runtime from compiling the moment the inbox was
+ * removed.
  *
- * 앱이 쓰는 이름(api.ts)과 스토어가 쓰는 이름(setAppDoc 등)이 다른 자리가 있다.
- * 번역은 여기서 한 번 한다 — 런타임 쪽 이름은 앱 저자가 읽는 말이어야 한다.
+ * There are spots where the name an app uses (api.ts) differs from the name the store uses
+ * (setAppDoc, etc). The translation happens once, here — the runtime-side name has to be the
+ * wording an app author reads.
  */
 
 function useSessionSummaries(): Record<string, SessionSummary> {
@@ -26,12 +28,13 @@ function useFocusedSessionId(): string | null {
 }
 
 /**
- * 세션이 마지막으로 **말한** 문장 (#80 레일).
+ * The last sentence the session spoke (#80 rail).
  *
- * preview는 사이드바 힌트라 툴 호출이 오면 도구 제목으로 덮인다 — 서사로 쓰면
- * "pnpm verify" 한 줄만 남아 맥락이 사라진다 (도그푸딩 2026-09-05). 말과 도구를
- * 가르는 정본은 대화(chat)다. 대화가 아직 안 실린 세션(이번 기동에서 연 적도,
- * 살아 움직인 적도 없음)은 null — 호출자가 preview로 물러난다.
+ * preview is a sidebar hint, so it gets overwritten by the tool title the moment a tool call
+ * comes in — using it as the narration leaves only a line like "pnpm verify" with all context
+ * gone (dogfooding, 2026-09-05). The authoritative source that tells speech and tools apart is
+ * the conversation (chat). A session with no conversation loaded yet (never opened this session,
+ * never seen live) returns null, and the caller falls back to preview.
  */
 function useLastWords(sessionId: string): string | null {
   return useStore((s) => {
@@ -43,13 +46,13 @@ function useLastWords(sessionId: string): string | null {
         const lines = it.text.trim().split('\n').filter(Boolean)
         return (lines[lines.length - 1] ?? '').slice(0, 160)
       }
-      if (it.kind === 'user') break // 사람이 말한 뒤 아직 답이 없다 — 옛 답을 서사로 내밀지 않는다
+      if (it.kind === 'user') break // The person spoke and there is no answer yet — an old answer is not shown as the narration
     }
     return null
   })
 }
 
-/** 말 이후에 도구가 돌고 있으면 그 제목 — 서사(말)의 보조 줄 (#80 레일) */
+/** If a tool is running after that speech, its title — a secondary line to the narration (#80 rail) */
 function useRunningTool(sessionId: string): string | null {
   return useStore((s) => {
     const items = s.chat[sessionId]
@@ -63,7 +66,7 @@ function useRunningTool(sessionId: string): string | null {
   })
 }
 
-/** 앱 자신의 문서 — 처음 쓰는 순간 불러온다 (스토어는 앱 목록을 모른다: 순환 금지) */
+/** The app's own document — loaded the moment it is first used (the store does not know the app list: no cycles allowed) */
 function useAppState<T>(id: AppId): T | null {
   const doc = useStore((s) => s.apps[id]?.doc)
   const ensure = useStore((s) => s.ensureAppState)

@@ -2,46 +2,47 @@ import { describe, expect, it } from 'vitest'
 import type { ShortcutKeys } from '@cc/platform/ports'
 import { shortcut } from './shortcut.js'
 
-/** 맥 자판 — 기호라서 붙여 쓴다 */
+/** Mac keyboard — joined directly since these are symbols */
 const MAC: ShortcutKeys = { mod: '⌘', alt: '⌥', join: '' }
-/** 그 밖 — 이름이라서 이어 쓴다 */
+/** Everything else — joined with a separator since these are names */
 const PC: ShortcutKeys = { mod: 'Ctrl', alt: 'Alt', join: '+' }
 
-describe('단축키 표기 (#32)', () => {
-  it('맥에서는 지금까지 화면에 있던 그대로다', () => {
-    // 이 문자열들이 바뀌면 E2E와 설정 표가 같이 무너진다 — 스윕은 표기를 옮긴 게 아니라
-    // **어디서 정하는지**를 옮긴 것이다
+describe('shortcut notation (#32)', () => {
+  it('on a Mac this is exactly what was already on screen', () => {
+    // If these strings change, e2e and the settings table break together — the sweep moved
+    // where this is decided, not the notation itself
     expect(shortcut(MAC, 'mod', 'I')).toBe('⌘I')
     expect(shortcut(MAC, 'mod', '⇧A')).toBe('⌘⇧A')
     expect(shortcut(MAC, 'mod', '⇧1~4')).toBe('⌘⇧1~4')
     expect(shortcut(MAC, 'alt', 'a')).toBe('⌥a')
   })
 
-  it('command 키가 없는 자판에서는 Ctrl이라고 말한다', () => {
+  it('on a keyboard with no command key, it says Ctrl', () => {
     expect(shortcut(PC, 'mod', 'I')).toBe('Ctrl+I')
     expect(shortcut(PC, 'mod', 'K')).toBe('Ctrl+K')
     expect(shortcut(PC, 'alt', 'a')).toBe('Alt+a')
   })
 
   /*
-   * 구분자가 자판에 딸려 오는 이유.
+   * Why the separator comes attached to the keyboard.
    *
-   * 맥은 `⌘⇧A`처럼 붙여 쓰고 그게 읽히는 건 조각들이 기호이기 때문이다.
-   * 같은 규칙을 이름에 적용하면 `CtrlShiftA`가 된다 — 조합이 아니라 낱말로 보인다.
+   * A Mac joins directly, like `⌘⇧A`, and that reads fine because the pieces are symbols.
+   * Applying the same rule to names produces `CtrlShiftA` — that reads as one word, not a
+   * combination.
    */
-  it('이름이 붙어 버리지 않는다', () => {
+  it('names do not run together', () => {
     expect(shortcut(PC, 'mod', '⇧A')).toBe('Ctrl+⇧A')
     expect(shortcut(PC, 'mod', '⇧A')).not.toContain('Ctrl⇧')
   })
 
-  it('토큰이 아닌 조각은 자판이 뭐든 그대로 간다', () => {
-    // 'mod'·'alt' 둘만 번역한다. 나머지는 키 이름 그 자체다
+  it('a piece that is not a token passes through unchanged regardless of keyboard', () => {
+    // Only 'mod' and 'alt' are translated. Everything else is the key name itself
     expect(shortcut(MAC, 'esc')).toBe('esc')
     expect(shortcut(PC, 'mod', '1~9')).toBe('Ctrl+1~9')
   })
 
-  it('조각 하나면 이을 것도 없다', () => {
-    // ApprovalCard의 "Hold ⌥ and click…"처럼 조합키 하나만 부르는 자리가 있다
+  it('a single piece needs nothing to join', () => {
+    // Some places, like ApprovalCard's "Hold ⌥ and click…", call for just one modifier key
     expect(shortcut(MAC, 'alt')).toBe('⌥')
     expect(shortcut(PC, 'alt')).toBe('Alt')
   })

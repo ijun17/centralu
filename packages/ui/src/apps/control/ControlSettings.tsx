@@ -3,11 +3,13 @@ import { setAppState, useAppState, useSessionSummaries } from '../api.js'
 import type { ControlDoc, ForemanSettings } from '@cc/protocol'
 
 /**
- * 관제 앱 설정 (#81) — 판정 숫자와 선언형 감시(체크포인트 v1)의 자리.
+ * Control app settings (#81) — home for the judgment numbers and declarative watches
+ * (checkpoint v1).
  *
- * 감시는 "지켜봐 주고, 걸리면 부른다"다 (멈춤 아님 — bypass 세션은 도중에 멈출 수
- * 없다). 패턴은 툴 호출 한 줄(`도구: 제목 경로들`)에 대한 부분 일치고, 세션을
- * 고르면 그 세션만 본다. 걸리면 레일 Notices에 high로 선다.
+ * A watch means "keep an eye on it, and call out when it matches" (not a pause — a session
+ * running under bypass cannot be stopped partway). A pattern is a partial match against a single
+ * tool-call line (`tool: title paths`), and picking a session narrows it to just that session.
+ * A match lands as a high-priority notice on the rail.
  */
 export function ControlSettings() {
   const doc = useAppState<ControlDoc>('control')

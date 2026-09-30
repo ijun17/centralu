@@ -1,64 +1,68 @@
 @import 'tailwindcss';
 
 /*
- * Tailwind v4의 자동 소스 탐지는 Vite root(apps/web) 기준이라
- * 모노레포의 packages/ui 컴포넌트를 못 찾는다 → 명시적으로 선언한다.
- * 이게 없으면 유틸리티 클래스가 하나도 생성되지 않는다.
+ * Tailwind v4's automatic source detection is anchored to the Vite root (apps/web), so it cannot
+ * find the packages/ui components in this monorepo → declared explicitly.
+ * Without this, not a single utility class gets generated.
  */
 @source '../**/*.{ts,tsx}';
 @source '../../../../apps/*/src/**/*.{ts,tsx}';
 
 /*
- * ── 디자인 토큰 ────────────────────────────────────────────────
- * 완전 무채색. 색상(hue)이 하나도 없으므로 위계는 오직 밝기가 만든다.
+ * ── Design tokens ────────────────────────────────────────────────
+ * Fully achromatic. There is not a single hue, so hierarchy is built entirely by brightness.
  *
- * 그래서 규칙이 문자 그대로 성립한다:
- *   화면에서 가장 밝은 것 = 지금 나를 기다리는 것 (product-spec FR-12).
+ * So the rule holds literally:
+ *   the brightest thing on screen = what is waiting for me right now (product-spec FR-12).
  *
- * 긴급도는 밝기로, 종류는 형태로 구분한다 (색약·흑백 인쇄에서도 동일하게 읽힌다).
- *   ● 꽉 찬 원 = 내 조치를 기다림   ✕ = 고장
- *   ○ 빈 원   = 끝났음, 안 급함     ◆ = 진행 중 (호흡)   ▬ = 멈춤
+ * Urgency is told by brightness, kind by shape (reads the same for color-blind viewers and on a
+ * black-and-white printout).
+ *   ● filled circle = waiting on my action   ✕ = failed
+ *   ○ empty circle  = done, not urgent       ◆ = in progress (breathing)   ▬ = stopped
  */
 @theme {
-  /* 바탕 — 어두운 쪽 5단계 */
-  --color-void: #141414; /* 앱 바닥 */
-  --color-pit: #171717; /* 사이드바 */
-  --color-panel: #1d1d1d; /* 떠 있는 표면 */
-  --color-edge: #292929; /* 헤어라인 */
-  --color-graphite: #353535; /* 호버·눌림 */
+  /* Ground — 5 steps on the dark side */
+  --color-void: #141414; /* app floor */
+  --color-pit: #171717; /* sidebar */
+  --color-panel: #1d1d1d; /* floating surface */
+  --color-edge: #292929; /* hairline */
+  --color-graphite: #353535; /* hover / pressed */
   /*
-   * 관제탑의 바닥 — 칸들이 **놓여 있는** 판.
+   * The control tower's floor — the plate the panels sit on.
    *
-   * 여기만 밝기가 거꾸로다. 다른 화면에서는 바탕이 어둡고 표면이 밝지만,
-   * 그리드는 칸 안이 곧 세션 화면이라 안쪽이 void여야 글이 읽힌다.
-   * 그래서 바깥을 밝혀 칸을 파낸 것처럼 보이게 한다 —
-   * 안팎이 같은 void라 경계가 테두리 한 줄뿐이었고, 그래서 어디까지가 한 칸인지
-   * 눈으로 안 잡혔다 (도그푸딩: "패널 배경이랑 바깥이 똑같아서 헷갈린다").
-   * 실제로 보이는 건 칸 사이 틈과 가장자리뿐이라, 넓게 밝아지지 않는다.
+   * This is the one place where the brightness is inverted. On every other screen the ground is
+   * dark and the surface is bright, but in the grid the inside of a panel is the session screen
+   * itself, so the inside has to be void for text to read. So the outside is brightened instead,
+   * to make the panels look carved out —
+   * with inside and outside both the same void, the boundary was a single border line, and that
+   * made it hard to see by eye where one panel ended (dogfooding: "the panel background and the
+   * outside look the same, it's confusing"). What is actually visible is only the gaps between
+   * panels and the edges, so it does not brighten a large area.
    */
-  --color-deck: #272727; /* 그리드 바닥 */
+  --color-deck: #272727; /* grid floor */
 
-  /* 잉크 — 밝은 쪽 4단계. 밝기가 곧 긴급도다 */
-  --color-beacon: #ffffff; /* 나를 기다리는 것. 화면에서 유일하게 순백 */
-  --color-chalk: #e9e9e9; /* 본문 */
-  --color-ash: #909090; /* 보조 */
-  --color-slate: #5c5c5c; /* 배경 정보 */
+  /* Ink — 4 steps on the bright side. Brightness is urgency */
+  --color-beacon: #ffffff; /* what is waiting for me. The only pure white on screen */
+  --color-chalk: #e9e9e9; /* body text */
+  --color-ash: #909090; /* secondary */
+  --color-slate: #5c5c5c; /* background information */
 
   /*
-   * diff 전용 색 — **앱에서 유일하게 유채색을 쓰는 곳**이다.
+   * Colors reserved for diffs — the only place in the app that uses hue at all.
    *
-   * 무채색 규칙을 여기서만 푸는 이유: 추가/삭제의 초록·빨강은 학습된 관습이 아니라
-   * 거의 반사에 가깝다. 승인 여부를 판단하는 자리에서 그 반사를 버리고 `+`/`-`를
-   * 한 줄씩 읽게 하는 건 비용이 너무 크다.
-   * 대신 **diff 본문 밖으로 절대 나가지 않는다** — 상태·긴급도는 여전히 밝기가 말한다.
+   * Why the achromatic rule is relaxed only here: the green and red of additions and deletions
+   * are close to reflex, not a learned convention. At the spot where an approval decision gets
+   * made, discarding that reflex and making the person read `+`/`-` line by line costs too much.
+   * Instead, it never leaves the body of the diff — state and urgency are still spoken by
+   * brightness alone.
    */
   --color-add: #7ee787;
   --color-add-bg: #10251a;
   --color-del: #ffa198;
   --color-del-bg: #2b1517;
 
-  /* 기계가 쓴 글자(명령·경로·수치)는 모노, 사람과 모델의 말은 산스.
-     한글은 모노 폴백이 흐트러지므로 산스가 맡는다. */
+  /* Text a machine wrote (commands, paths, numbers) is mono; what a person or a model says is
+     sans. Korean breaks the mono fallback, so sans handles it. */
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard,
@@ -99,15 +103,17 @@
   html {
     color-scheme: dark;
     /*
-     * 전체 글자 크기(설정 → Appearance)가 루트 zoom으로 적용된다 — 그런데 vh/vw는
-     * zoom의 영향을 받지 않아서, 확대하면 100vh짜리 셸이 창보다 커져 맨 아래
-     * (세션 입력창)가 잘렸다 (도그푸딩 지적). 그래서 (1) 셸은 vh 대신 % 사슬로 잡고
-     * (html→body→#root→App), (2) 남은 vh/vw는 이 변수로 나눠 실제 창 기준으로 되돌린다.
-     * App.tsx의 효과가 zoom과 이 변수를 항상 같은 값으로 쓴다.
+     * Overall text size (Settings → Appearance) is applied as a root zoom — but vh/vw are not
+     * affected by zoom, so zooming in made the 100vh shell grow bigger than the window and cut
+     * off the bottom (the session composer) (caught in dogfooding). So (1) the shell is held with
+     * a chain of % instead of vh (html → body → #root → App), and (2) any remaining vh/vw is
+     * divided by this variable to bring it back to the real window size.
+     * The effect in App.tsx always keeps zoom and this variable at the same value.
      */
     --text-zoom: 1;
-    /* 데스크톱 앱은 창 자체가 스크롤되지 않는다.
-       이게 없으면 잡고 당길 때 웹처럼 고무줄로 튕긴다 (도그푸딩 지적). */
+    /* The desktop app's window itself does not scroll.
+       Without this, pulling at the edge bounces back like a rubber band, as on the web (caught
+       in dogfooding). */
     overscroll-behavior: none;
     height: 100%;
     overflow: hidden;
@@ -121,19 +127,20 @@
     height: 100%;
     overflow: hidden;
   }
-  /* 셸의 % 사슬의 마지막 고리 — 이게 없으면 App의 h-full이 auto에 기대어 0이 된다 */
+  /* The last link in the shell's % chain — without it App's h-full leans on auto and becomes 0 */
   #root {
     height: 100%;
   }
   /*
-   * WebKit은 zoom 배율에서 **모든 박스의 scrollWidth를 1px 올림한다**
-   * (실측: 배율 1.25에서 전 요소가 sw = cw + 1 — Playwright WebKit으로 확인).
-   * 그 1px 때문에 overflow가 auto인 곳마다 유령 가로 스크롤바가 선다 —
-   * 입력창(textarea의 기본 overflow가 auto)에서 실제로 나타났다 (도그푸딩).
-   * 이 앱의 textarea는 전부 줄바꿈하는 입력창이라 가로 스크롤이 옳은 경우가 없고,
-   * 세로 스크롤 컨테이너(.overflow-y-auto)도 마찬가지다 — 넘치면 잘리거나 말줄임이
-   * 답이지 가로 스크롤이 답인 자리가 아니다. 양축 스크롤이 진짜 필요한 곳
-   * (코드 뷰어·diff)은 overflow-auto를 쓰므로 이 규칙에 안 걸린다.
+   * WebKit rounds up every box's scrollWidth by 1px under a zoom factor
+   * (measured: at 1.25x, every element has sw = cw + 1 — confirmed with Playwright WebKit).
+   * That 1px puts a phantom horizontal scrollbar on every element with overflow auto —
+   * it actually showed up in the composer (textarea's default overflow is auto) (dogfooding).
+   * Every textarea in this app is a wrapping composer, so horizontal scroll is never the right
+   * answer there, and the same is true of vertical scroll containers (.overflow-y-auto) — when
+   * content overflows, clipping or an ellipsis is the answer, not horizontal scroll. Places that
+   * genuinely need scroll on both axes (the code viewer, diffs) use overflow-auto, so this rule
+   * does not catch them.
    */
   textarea {
     overflow-x: hidden;
@@ -141,13 +148,13 @@
   .overflow-y-auto {
     overflow-x: hidden;
   }
-  /* 창을 옮기는 손잡이 위에서는 글자가 잡히면 안 된다 — 선택이 드래그를 먹는다.
-     본문은 건드리지 않는다: 에이전트 답변은 복사할 수 있어야 한다. */
+  /* Text must not be selectable over the window-move handle — a selection would eat the drag.
+     The body text is left untouched: an agent's reply has to stay copyable. */
   [data-tauri-drag-region] {
     user-select: none;
     cursor: default;
   }
-  /* 내부 스크롤 영역도 경계에서 튕기지 않는다 */
+  /* Inner scroll areas also do not bounce at their boundary */
   [data-scroll],
   .overflow-auto,
   .overflow-y-auto {
@@ -161,15 +168,17 @@
     outline-offset: 1px;
   }
   /*
-   * 체크박스는 우리가 그린다 (도그푸딩: 창이 키를 잃으면 배경색이 달라졌다).
+   * We draw the checkbox ourselves (dogfooding: the background color changed when the window
+   * lost key focus).
    *
-   * 네이티브 컨트롤은 OS가 그리므로 창의 활성/비활성에 따라 색이 바뀐다 —
-   * accent-color로는 그 규칙을 못 이긴다(비활성 회색은 시맨틱 색이라 덮어쓸 자리가
-   * 없다). appearance: none으로 그리기를 가져오면 두 상태가 같은 픽셀이 된다.
+   * The OS draws native controls, so their color changes with the window's active/inactive state
+   * — accent-color cannot override that rule (the inactive gray is a semantic color with no room
+   * to override). Taking over drawing with appearance: none makes both states the same pixels.
    *
-   * 색은 변수 둘로 갈린다. 기존 accent-ash 클래스는 accent-color로는 이제 아무것도
-   * 못 하지만 "이 체크는 밝은 쪽"이라는 표지로 남는다 — 아래 매핑이 그 표지를 읽어
-   * call site 여섯 곳을 그대로 둔다. 지우면 매핑이 기본(graphite)으로 떨어진다.
+   * Color splits across two variables. The existing accent-ash class can no longer do anything
+   * through accent-color, but it stays as a marker meaning "this check is the bright kind" — the
+   * mapping below reads that marker and leaves the six call sites untouched. Removing it would
+   * let the mapping fall back to the default (graphite).
    */
   input[type='checkbox'] {
     --cc-check-bg: var(--color-graphite);
@@ -188,7 +197,8 @@
     --cc-check-bg: var(--color-ash);
     --cc-check-mark: var(--color-void);
   }
-  /* 위험을 켜는 체크 (프로젝트 삭제의 '폴더까지') — diff 삭제 팔레트를 그대로 쓴다 */
+  /* The check that turns on something dangerous (project deletion's "including the folder") —
+     reuses the diff-deletion palette as-is */
   input[type='checkbox'].accent-del {
     border-color: var(--color-del);
     --cc-check-bg: var(--color-del);
@@ -198,7 +208,8 @@
     background: var(--cc-check-bg);
     border-color: var(--cc-check-bg);
   }
-  /* 체크 표시 — 돌린 ㄴ자. url() SVG는 var() 색을 못 받아서 테두리 두 변으로 그린다 */
+  /* The checkmark — a rotated L shape. A url() SVG cannot take a var() color, so it is drawn with
+     two border sides instead */
   input[type='checkbox']:checked::after {
     content: '';
     position: absolute;
@@ -210,17 +221,18 @@
     border-bottom: 1.5px solid var(--cc-check-mark);
     transform: rotate(45deg);
   }
-  /* 마크다운 할 일 목록의 체크(읽기 전용)도 같은 그림 — 흐림만 더한다 */
+  /* The checkbox in a markdown to-do list (read-only) draws the same way — just adds fading */
   input[type='checkbox']:disabled {
     opacity: 0.6;
   }
   /*
-   * 선택 표시는 **반투명 흰빛**이다.
+   * The selection highlight is translucent white.
    *
-   * 전에는 graphite 단색이었는데, 내 말풍선 배경이 같은 graphite라 그 위에서는
-   * 선택해도 아무 변화가 없었다 (도그푸딩 지적). 알파를 쓰면 밑에 무엇이 깔려
-   * 있든 그만큼 밝아지므로, 앞으로 배경이 늘어나도 같은 문제가 다시 생기지 않는다.
-   * 순백 자체는 '나를 기다리는 것'의 몫이라 불투명도로 눌러 둔다.
+   * It used to be solid graphite, but my own message bubble's background is the same graphite,
+   * so selecting text on it produced no visible change (caught in dogfooding). Using alpha
+   * brightens whatever is underneath by the same amount no matter what it is, so the same problem
+   * cannot recur even if more backgrounds get added later. Pure white itself belongs to "what is
+   * waiting for me", so opacity keeps it dimmed.
    */
   ::selection {
     background: rgb(255 255 255 / 0.24);
@@ -246,18 +258,21 @@
 
 @layer components {
   /*
-   * 세션 표식 칩.
+   * The session marker chip.
    *
-   * 어두운 바탕에 밝은 글자인데, 사이드바 배경(pit #171717)과 칩 배경(void #141414)이
-   * 두 단계 차이뿐이라 테두리 하나로는 잘 안 떨어졌다.
+   * Bright text on a dark background, but the sidebar background (pit #171717) and the chip
+   * background (void #141414) are only two steps apart, so a single border did not separate them
+   * well.
    *
-   * 테두리를 더 밝게 올리는 대신 **키캡과 같은 손길**을 쓴다: 위쪽 1px 하이라이트와
-   * 아래쪽 그림자. 밝기를 더 쓰지 않고도 물체로 떨어져 보이고 — 밝기는 이 앱에서
-   * 긴급도를 말하는 자원이라 장식에 쓰면 그만큼 신호가 깎인다 —
-   * 키보드 키캡과 같은 언어라 화면이 한 벌로 읽힌다.
+   * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
+   * highlight on top and a shadow underneath. It reads as a distinct object without spending any
+   * more brightness — brightness is the resource this app uses to speak urgency, so spending it
+   * on decoration cuts into the signal by that much — and it speaks the same language as a
+   * keyboard keycap, so the screen reads as one consistent set.
    *
-   * 안쪽 그림자를 아주 옅게 한 겹 더 얹어 표면이 살짝 파인 것처럼 만든다.
-   * 회전 궤도가 이 칩을 두르므로, 칩이 뒤로 물러나야 궤도가 앞에 선다.
+   * One more very faint inner shadow is layered on top to make the surface look slightly
+   * recessed. The rotating orbit wraps around this chip, so the chip needs to recede for the
+   * orbit to sit in front of it.
    */
   .cc-chip {
     box-shadow:
@@ -266,9 +281,9 @@
       0 1px 0 rgb(0 0 0 / 0.6);
   }
 
-  /* 시그니처: 키캡.
-     키보드 우선 도구라는 정체성을 검정 위 검정의 촉감으로 말한다.
-     위쪽 1px 하이라이트와 아래쪽 그림자만으로 눌리는 물체처럼 보이게 한다. */
+  /* The signature: the keycap.
+     It speaks the identity of a keyboard-first tool with the feel of black on black.
+     Only a 1px highlight on top and a shadow underneath make it read as a pressable object. */
   .keycap {
     display: inline-flex;
     align-items: center;
@@ -290,22 +305,23 @@
     color: var(--color-chalk);
   }
 
-  /* 계기판 수치: 자릿수가 바뀌어도 위치가 흔들리지 않는다 */
+  /* Dashboard figures: the position does not shift when the digit count changes */
   .readout {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
   }
 
-  /* 색이 없으므로 "기다림"은 빛으로 말한다.
-     순백 위에 아주 옅은 광채를 얹어, 같은 흰색이어도 신호가 먼저 눈에 들어오게 한다. */
+  /* With no color to spend, "waiting" is spoken by light instead.
+     A very faint glow is laid over pure white, so even among the same white the signal draws
+     the eye first. */
   .beacon {
     color: var(--color-beacon);
     text-shadow: 0 0 6px rgb(255 255 255 / 0.45);
   }
 }
 
-/* 작업 중 표시는 살아있음을 알리는 최소한의 움직임만 갖는다 */
+/* The in-progress indicator carries only the minimum motion needed to say it is alive */
 @keyframes breathe {
   0%,
   100% {
@@ -327,16 +343,18 @@
 }
 
 /*
- * 천장에 매달리는 띠가 **매달리는 것처럼 보이게** 한다.
+ * Makes the bar hanging from the ceiling look like it is actually hanging.
  *
- * 실측으로는 이미 붙어 있다 (스크롤 칸 천장과의 간격 0px, 확대 0.9~1.2 전부 동일).
- * 그런데도 "안 붙었다"로 읽혔다 — 띠가 아무 예고 없이 그 자리에 **나타나기** 때문이다.
- * 나타난 것은 어디서 왔는지 모르니 떠 있는 것으로 보이고, 올라와서 멎은 것은
- * 천장에 닿은 것으로 보인다. 그래서 몇 px 아래에서 시작해 위로 올라와 멎는다.
+ * Measured, it is already flush (0px gap to the ceiling of the scroll panel, identical across
+ * zoom 0.9 to 1.2). And yet it read as "not attached" — because the bar appears at that spot with
+ * no warning at all. Something that appears looks like it is floating, since there is no telling
+ * where it came from, while something that rises and comes to rest reads as having touched the
+ * ceiling. So it starts a few px lower and rises up to rest.
  *
- * transform을 쓰고 fill-mode는 기본값(none)으로 둔다: 애니메이션이 끝나면 변환이
- * 사라져야 안쪽 backdrop-filter가 원래 기준으로 돌아온다 (transform이 남으면
- * 그 요소가 컨테이닝 블록이 되어 뒤에 비치는 것이 달라진다).
+ * Uses transform and leaves fill-mode at its default (none): the transform has to disappear once
+ * the animation ends so the inner backdrop-filter goes back to its original reference frame (if
+ * the transform is left in place, the element becomes a containing block and what shows through
+ * behind it changes).
  */
 @keyframes cc-hang {
   from {
@@ -352,7 +370,8 @@
   animation: cc-hang 180ms ease-out;
 }
 
-/* 다음 사용자 메시지가 다가오면 위로 비킨다 — 말풍선 위로 남아 가리면 안 된다. */
+/* Steps up out of the way as the next user message approaches — must not stay over the bubble
+   and cover it. */
 @keyframes cc-hang-out-up {
   from {
     opacity: 1;
@@ -367,7 +386,8 @@
   animation: cc-hang-out-up 140ms ease-in forwards;
 }
 
-/* 위로 되돌아 다음 메시지와의 충돌이 풀리면, 천장에서 아래로 내려와 다시 붙는다. */
+/* Once stepping up resolves the conflict with the next message, it comes back down from the
+   ceiling and re-attaches. */
 @keyframes cc-hang-in-down {
   from {
     opacity: 0;
@@ -388,15 +408,16 @@
   .cc-hang-in-down {
     animation: none;
   }
-  /* 애니메이션을 끈 경우에도 충돌하는 배너는 즉시 물러난다. */
+  /* Even with animation off, a conflicting banner steps out of the way immediately. */
   .cc-hang-out-up { opacity: 0; }
 }
 
 /*
- * cc-hang의 반대 방향 — 위(헤더)에서 내려와 멎는다. 명령 실행 창(#60)이 헤더의
- * ▶에서 열리는 드롭다운이 되면서(사용자 요청 2026-09-06) 생겼다: 버튼 아래에서
- * 내려오는 것은 그 버튼에서 나온 것으로 읽힌다. fill-mode를 남기지 않는 이유는
- * cc-hang과 같다 — transform이 남으면 컨테이닝 블록이 바뀐다.
+ * The opposite direction from cc-hang — comes down from above (the header) and settles. It came
+ * into being when the run-command window (#60) became a dropdown opening from the ▶ in the
+ * header (user request, 2026-09-06): something coming down from below a button reads as having
+ * come out of that button. The reason for not leaving a fill-mode is the same as cc-hang — a
+ * leftover transform changes the containing block.
  */
 @keyframes cc-drop {
   from {
@@ -419,10 +440,11 @@
 }
 
 /*
- * cc-hang의 퇴장 짝 — 올라온 자리로 도로 내려앉으며 사라진다. 설정 메뉴(위로 펴는
- * 메뉴)의 닫힘에 쓴다 (사용자 요청 2026-09-06: 열릴 때만 움직이고 닫힐 때 뚝 끊기면
- * 어디로 갔는지 안 읽힌다). 퇴장 애니메이션은 unmount를 늦춰야 보이므로, 쓰는 쪽은
- * animationend(또는 reduced-motion 대비 타이머)로 마무리를 자기가 챙긴다.
+ * The exit counterpart of cc-hang — settles back down into the spot it rose from and disappears.
+ * Used for closing the settings menu (a menu that unfolds upward) (user request, 2026-09-06:
+ * moving only on open and cutting off abruptly on close made it unreadable where it went). An
+ * exit animation only shows if unmount is delayed, so the caller handles finishing it itself, via
+ * animationend (or a timer as a fallback for reduced motion).
  */
 @keyframes cc-hang-out {
   from {
@@ -444,7 +466,8 @@
   }
 }
 
-/* cc-drop의 퇴장 짝 — 내려온 길로 도로 올라가며 사라진다 (명령 실행 드롭다운의 닫힘) */
+/* The exit counterpart of cc-drop — goes back up the way it came down and disappears (closing
+   the run-command dropdown) */
 @keyframes cc-drop-out {
   from {
     opacity: 1;
@@ -466,12 +489,13 @@
 }
 
 /*
- * 누른 버튼이 **일하는 중**임을 그 자리에서 말한다.
+ * Tells the person, right where they pressed, that the button is working.
  *
- * 재시작은 프로세스를 죽이고 다시 띄우는 일이라 몇 초가 걸리는데, 그동안 화면에는
- * 아무 일도 안 일어났다 — 그래서 한 번 더 누르게 되고, 그러면 방금 뜬 프로세스를
- * 또 죽인다. 도는 아이콘은 장식이 아니라 "받았고, 하는 중"이라는 응답이다.
- * (같은 시계: 도는 것들은 1.4초를 쓴다 — cc-orbit-spin과 같은 주기.)
+ * A restart kills the process and brings it back up, which takes a few seconds during which
+ * nothing appeared to happen on screen — so the person pressed again, killing the process that
+ * had just come back up. The spinning icon is not decoration, it is the response "received, and
+ * working on it".
+ * (Same clock: everything that spins uses 1.4s — the same period as cc-orbit-spin.)
  */
 @keyframes cc-spin {
   from {
@@ -483,11 +507,11 @@
 }
 .cc-spin {
   animation: cc-spin 1.4s linear infinite;
-  /* 아이콘이 제자리에서 돌게 — 기본 원점이면 글자 기준선을 축으로 흔들린다 */
+  /* Keeps the icon spinning in place — with the default origin it wobbles around the text baseline */
   transform-origin: 50% 50%;
 }
 
-/* 회전이 방해가 되는 사람에게는 밝기만 — breathe와 같은 처방 */
+/* For someone who finds rotation distracting, only brightness — the same prescription as breathe */
 @media (prefers-reduced-motion: reduce) {
   .cc-spin {
     animation: breathe 1.4s ease-in-out infinite;
@@ -495,20 +519,21 @@
 }
 
 /*
- * 마크다운 렌더링 (M2.5).
- * 무채색 규칙 유지 — 코드·인용은 색이 아니라 배경 밝기와 여백으로 구분한다.
- * 대화창 안이므로 여백을 촘촘하게: 문서가 아니라 말이다.
+ * Markdown rendering (M2.5).
+ * Keeps the achromatic rule — code and quotes are told apart by background brightness and
+ * spacing, not color.
+ * Since this sits inside the conversation, keep spacing tight: it is speech, not a document.
  */
 @layer components {
   .cc-md {
     font-size: 13px;
     line-height: 1.65;
-    /* 공백 없는 긴 문자열(URL·경로·해시)도 끊어서 가로 스크롤을 막는다 */
+    /* Breaks even long strings with no whitespace (URLs, paths, hashes) to prevent horizontal scroll */
     overflow-wrap: anywhere;
     word-break: break-word;
     min-width: 0;
   }
-  /* 표는 자기 안에서만 스크롤한다 — 대화창을 밀지 않는다 */
+  /* Tables scroll only within themselves — they do not push the conversation panel */
   .cc-md table,
   .cc-md pre {
     max-width: 100%;
@@ -590,42 +615,48 @@
   }
   .cc-md th { color: var(--color-chalk); font-weight: 600; background: var(--color-panel); }
   .cc-md td { color: var(--color-ash); }
-  /* 그리기는 전역 체크박스 규칙(base)이 맡는다 — 여기는 글줄 안 배치만 */
+  /* Drawing is left to the global checkbox rule (base) — this only handles inline placement */
   .cc-md input[type='checkbox'] { margin-right: 0.4em; vertical-align: -2px; }
 }
 
 /*
- * 은하수 궤도 — 세션 도구 표식이 '작업 중'일 때 두르는 회전 테두리.
+ * The galaxy orbit — the rotating border wrapped around a session's tool marker while it is
+ * "working".
  *
- * 점 하나가 깜빡이는 것보다 도는 것이 훨씬 잘 읽힌다. 깜빡임은 정지 화면에서도
- * 흉내 낼 수 있지만 회전은 매 프레임이 달라야 해서, 보는 순간 "살아 있다"가 확정된다.
+ * Rotation reads far more clearly than a single dot blinking. A blink can be imitated even by a
+ * frozen screen, but rotation has to be different every frame, so the instant it is seen, "it is
+ * alive" is settled.
  *
- * **색은 진짜 은하수로 간다.** 처음엔 거의 흰빛으로 눌러 놨었다 — 그때는 앱이 완전
- * 무채색이라 "가장 눈에 띄는 것 = 나를 기다리는 것"을 지키려면 그럴 수밖에 없었다.
- * 색 정책이 "보수적으로 더한다"로 바뀐 뒤에도 이 결정을 다시 보지 않아서, 낡은 전제
- * 위에 남아 있었다 (사용자가 "색을 뺀 거냐"고 물어 알았다).
+ * The color goes to an actual galaxy palette. It was originally held down to almost white —
+ * back then the app was fully achromatic, so that was the only way to keep "the most eye-catching
+ * thing = what is waiting for me". That decision was never revisited after the color policy
+ * changed to "add conservatively", so it was left standing on a stale premise (found when the
+ * user asked "did you take the color out?").
  *
- * 다만 지키는 선이 하나 있다: **순백보다 밝아지지 않는다.** 회전 궤도는 상태를
- * 말하므로 밝기 체계 안에 있고, 그 꼭대기는 여전히 '나를 기다리는 것'의 자리다.
- * 그래서 채도는 올리되 명도는 눌러, 색으로 눈에 띄되 밝기로는 이기지 않게 한다.
+ * There is still one line held: it never gets brighter than pure white. The rotating orbit speaks
+ * state, so it lives inside the brightness hierarchy, and the top of that hierarchy is still
+ * reserved for "what is waiting for me". So saturation is raised while lightness is held down,
+ * to stand out through color without winning on brightness.
  */
 /*
- * **도는 것은 그라디언트가 아니라 판이다.**
+ * What rotates is a plate, not a gradient.
  *
- * 처음에는 등록된 커스텀 속성(--cc-orbit)으로 conic-gradient의 각도를 돌렸다.
- * 각도 애니메이션은 컴포지터로 못 빠져서 매 프레임 스타일 재계산 + 그라디언트를
- * 다시 그린다 — WebKit 실측으로 '작업 중' 세션이 있는 것만으로 CPU 24~33%를
- * 상시 청구했고, 노트북에서는 그게 배터리로 나갔다 (perf-idle.spec.ts).
+ * It originally rotated the angle of a conic-gradient through a registered custom property
+ * (--cc-orbit). An angle animation cannot escape to the compositor, so it costs a style
+ * recalculation plus a gradient repaint every frame — measured on WebKit, merely having a
+ * "working" session was billing 24-33% CPU continuously, and on a laptop that came straight out
+ * of battery (perf-idle.spec.ts).
  *
- * 그래서 그라디언트는 한 번 그려두고 **그 판을 transform으로 돌린다.** 회전은
- * 컴포지터가 맡으므로 메인 스레드는 프레임마다 아무것도 안 한다. 판은 부모보다
- * 크게 만들어(대각선을 덮게) 돌아도 모서리가 비지 않는다.
+ * So the gradient is painted once, and that plate is rotated with transform instead. Rotation is
+ * then handled by the compositor, so the main thread does nothing per frame. The plate is made
+ * larger than its parent (enough to cover the diagonal), so no corner goes empty while rotating.
  */
 /*
- * scale(5)도 transform에 함께 넣는 이유: 판은 **제 크기로 한 번 래스터되고** GPU가
- * 확대한다. 크기를 inset으로 키우면(-200%) 25배 면적의 비트맵을 만들어 합성하게 되어
- * 그리드 4칸에서 CPU 9%가 남았다 — 확대는 각도를 보존하고, 1px 링에서 열화는 안 보인다.
- * 5배는 4.9:1 비율까지 대각선을 덮는다 (칸은 4:1까지 길어진다).
+ * Why scale(5) is also folded into the transform: the plate is rasterized once at its own size
+ * and the GPU enlarges it. Growing the size via inset (-200%) instead would build and composite a
+ * bitmap 25 times the area, which left only 9% CPU headroom with 4 grid panels — scaling up
+ * preserves the angle, and no degradation is visible on a 1px ring. 5x covers the diagonal up to
+ * a 4.9:1 aspect ratio (panels stretch up to 4:1).
  */
 @keyframes cc-orbit-spin {
   from {
@@ -638,9 +669,10 @@
 
 .cc-orbit {
   position: relative;
-  /* 도는 판을 배지의 둥근 모서리로 자른다 */
+  /* Clips the rotating plate to the badge's rounded corners */
   overflow: hidden;
-  /* z-index:-1인 판이 배지 밖(조상 배경 뒤)으로 꺼지지 않게 층을 가둔다 */
+  /* Contains the stacking so the z-index: -1 plate does not sink outside the badge (behind an
+     ancestor's background) */
   isolation: isolate;
 }
 
@@ -661,36 +693,39 @@
   animation: cc-orbit-spin 1.4s linear infinite;
 }
 
-/* 아이콘 칩 뒤로 깐다 — 크기는 scale이 맡으므로 판 자체는 배지 크기 그대로다 */
+/* Laid behind the icon chip — sizing is scale's job, so the plate itself stays badge-sized */
 .cc-orbit::before {
   inset: 0;
   z-index: -1;
 }
 
 /*
- * 같은 궤도를 **칸의 테두리**로 두른다 (그리드에서 응답 중인 패널).
+ * Wraps the same orbit around a panel's border (a panel that is responding, in the grid).
  *
- * 작은 표식 하나로는 칸이 여럿일 때 어느 것이 도는지 눈이 못 따라간다. 테두리는
- * 칸 전체를 가리키므로 곁눈으로도 잡힌다 — 그리드는 **보는 화면**이지 읽는 화면이 아니다.
+ * With just one small marker, the eye cannot track which panel is spinning when there are
+ * several. A border points at the whole panel, so it is caught even in peripheral vision — the
+ * grid is a screen to be looked at, not one to be read.
  *
- * **칸 크기를 건드리지 않는다.** border를 색만 바꾸면 회전을 못 그리고, 두께를 더하면
- * 격자 전체가 밀린다(사이드바에서 겪은 그 문제). 그래서 덧그린다: 절대 위치 레이어에
- * 궤도를 칠하고, 마스크로 **가장자리 1px만** 남긴다. 레이아웃은 한 픽셀도 안 움직인다.
+ * This does not touch the panel's size. Just changing the border's color cannot draw rotation,
+ * and adding thickness would push the whole grid (the same problem hit in the sidebar). So it is
+ * painted on top instead: an absolutely positioned layer is painted with the orbit, and a mask
+ * leaves only the outer 1px. Layout does not move by a single pixel.
  *
- * 가짜 요소가 아니라 **실제 자식**인 이유: 마스크(축 정렬)와 회전(매 프레임)이 한
- * 요소에 있으면 마스크까지 돌아버린다. 마스크는 이 레이어가 쥐고, 그 안에서 ::before
- * 판만 돈다 — 마스크는 자식까지 자르므로 링 밖으로는 아무것도 안 샌다.
+ * Why this is a real child rather than a pseudo-element: if a mask (axis-aligned) and a rotation
+ * (per frame) live on the same element, the mask ends up rotating too. This layer holds the mask,
+ * and only the ::before plate inside it rotates — since the mask also clips children, nothing
+ * leaks outside the ring.
  *
- * 이 마스크는 **칸이 온전한 픽셀에 설 때만** 네 변을 다 남긴다. 칸의 자리가 소수점이면
- * WebKit이 마스크를 칸과 다른 픽셀에 맞춰 한 변을 통째로 잃는다 — 그래서 그리드가 칸을
- * 정수 픽셀에 세운다 (GridView의 wholePixelTracks, #208).
+ * This mask keeps all four sides only when the panel sits on a whole pixel. When a panel's
+ * position is fractional, WebKit snaps the mask to a different pixel than the panel and loses one
+ * whole side — so the grid places panels on integer pixels (wholePixelTracks in GridView, #208).
  */
 .cc-orbit-ring-layer {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  /* 안쪽을 도려내 링만 남긴다 — 두 마스크의 차집합 */
+  /* Carves out the inside, leaving only the ring — the difference of the two masks */
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
@@ -701,42 +736,46 @@
   mask-composite: exclude;
   overflow: hidden;
   /*
-   * 대화·입력창 **위에** 얹히되 클릭은 통과시킨다.
+   * Sits on top of the conversation and the composer, while letting clicks pass through.
    *
-   * z가 1이던 시절 접힌 입력창(z-20)이 이 링의 아랫변을 덮었다 (사용자 지적 2026-09-10).
-   * 링은 칸의 테두리다 — 칸 안에 무엇이 떠 있든 테두리는 끊기면 안 된다. 그래서 칸 안의
-   * 어떤 층보다 위에 선다.
+   * When z was 1, the collapsed composer (z-20) covered the bottom edge of this ring (user's
+   * observation, 2026-09-10). The ring is the panel's border — whatever is floating inside the
+   * panel, the border must not be broken. So it sits above every layer inside the panel.
    */
   pointer-events: none;
   z-index: 30;
 }
 
-/* 크기는 scale이 맡는다 — 판은 칸 크기로 래스터된다 */
+/* Sizing is scale's job — the plate is rasterized at panel size */
 .cc-orbit-ring-layer::before {
   inset: 0;
 }
 
 /*
- * 돌지 않을 때의 표식 — **밝기만 남긴다.**
+ * The marker when it is not spinning — only brightness is kept.
  *
- * 무지개를 각도만 고정해 두는 방법도 있었지만, 멈춘 무지개는 "무슨 일이 있었는데 끝난
- * 자리"처럼 읽힌다. 회색 한 겹이 더 정직하다: 색이 아니라 **밝아짐**이 곧 "지금 돌고
- * 있다"는 말이고, 그 문법은 이 앱의 다른 상태들과 이미 같다.
+ * Freezing the rainbow at a fixed angle was also an option, but a stopped rainbow reads as
+ * "something happened here and it is over". A single layer of gray is more honest: it is
+ * brightening, not color, that says "this is spinning right now", and that grammar already
+ * matches this app's other states.
  *
- * 두 경우가 같은 그림을 쓴다.
- *  - 움직임에 민감한 사람 (prefers-reduced-motion)
- *  - 배터리 때문에 사람이 직접 끈 경우 (설정 → Appearance, 2026-09-13)
- * 둘은 이유가 다르고 결과가 같다 — 그래서 선언은 한 벌이다.
+ * Two cases share the same picture:
+ *  - someone sensitive to motion (prefers-reduced-motion)
+ *  - the person turned it off themselves, for battery (Settings → Appearance, 2026-09-13)
+ * The reasons differ and the outcome is the same — so there is one declaration for both.
  *
- * 그리드와 사이드바는 따로 끈다. 크기도 자리도 달라서 거슬리는 지점이 다르다.
+ * The grid and the sidebar are turned off separately. Their sizes and placements differ, so what
+ * feels distracting differs too.
  *
- * **그리드 칸의 회색은 덧그린 링이 아니라 칸의 테두리 자체다 (#208).** 멈춘 링은 돌
- * 판이 없으니 마스크로 도려낼 까닭도 없다. 그런데 마스크를 그대로 두었더니 WebKit이
- * 소수점 폭의 칸에서 마스크를 칸과 다른 픽셀에 맞춰 한 변이 통째로 사라졌다 (실측:
- * 1배율, 세 열, 가운데 칸의 오른쪽 변). 칸의 테두리는 브라우저가 칸과 같은 픽셀에
- * 그리므로 폭이 무엇이든 네 변이 다 선다. 칸 안의 층(접힌 입력창 z-20)은 칸의
- * overflow-hidden에 잘려 테두리에 닿지 못하고, 칸 밖의 층(파일·깃 화면)은 그대로 칸
- * 위에 있다 — 링이 z-30으로 지키던 두 가지를 테두리는 자리만으로 지킨다.
+ * The gray on a grid panel is not a ring painted on top, it is the panel's own border (#208). A
+ * stopped ring has no rotating plate, so there is no reason to carve it with a mask either. But
+ * leaving the mask in place made WebKit snap it to a different pixel than a fractional-width
+ * panel, losing one whole side (measured: at 1x zoom, three columns, the right side of the middle
+ * panel). A panel's own border is drawn by the browser on the same pixel as the panel, so all four
+ * sides show regardless of the width. A layer inside the panel (the collapsed composer, z-20) is
+ * clipped by the panel's overflow-hidden and cannot reach the border, and a layer outside the
+ * panel (the files/git screen) still sits above the panel — the two things the ring protected
+ * with z-30 are protected by the border with placement alone.
  */
 @media (prefers-reduced-motion: reduce) {
   .cc-orbit::before {
@@ -765,14 +804,16 @@
 }
 
 /*
- * 응답이 끝나면 화면을 한 번 쓸고 가는 바람.
+ * The gust that sweeps across the screen once, when a response finishes.
  *
- * 색은 세션 아이콘의 은하수 궤도와 **똑같은 것**을 쓴다. 회전하는 궤도가 "도는 중"이면
- * 옆으로 흐르는 이 띠는 "끝났다"다 — 같은 물감이라야 둘이 한 물건으로 읽힌다.
+ * Uses the exact same color as the galaxy orbit on the session icon. If the rotating orbit means
+ * "in progress", this band drifting sideways means "finished" — they have to share the same paint
+ * to read as one object.
  *
- * screen 혼합인 이유: 어두운 바탕 위에 물감을 덧칠하는 대신 **빛으로 얹는다.**
- * 덧칠하면 그 순간 화면이 가려지지만, 빛은 지나가면 아무것도 남기지 않는다.
- * 지키는 선은 궤도와 같다 — 순백보다 밝아지지 않는다(불투명도를 눌러 둔다).
+ * Why screen blending: instead of painting over the dark background, this lays light on top of
+ * it. Paint would obscure the screen for that instant, but light leaves nothing behind once it
+ * passes. The line held is the same as the orbit — it never gets brighter than pure white
+ * (opacity is kept down).
  */
 @keyframes cc-gust {
   0% {
@@ -792,19 +833,22 @@
 }
 
 /*
- * 띠는 **화면보다 훨씬 넓고, 나가면서 끝나지 않는다.**
+ * The band is far wider than the screen, and does not end by exiting.
  *
- * 한때 좁았다 — 화면을 덮으면 글자가 묻힌다고 봤기 때문인데, 묻힌 원인은 넓이가 아니라
- * 밝기였다(그때는 0.42였다). 그래서 밝기는 눌러 둔 채로 넓히기만 한다.
+ * It used to be narrow — the thinking was that covering the screen would bury the text, but what
+ * buried it was not the width, it was the brightness (0.42 at the time). So the brightness stays
+ * held down while only the width grows.
  *
- * 넓히는 것만으로는 부족했다. 실측해 보니 easing이 강한 ease-out이라 띠가 앞쪽에서
- * 거의 다 지나가 버린다 — 화면을 다 덮는 것은 15% 지점 한순간뿐이고, 절반쯤에는
- * 이미 35%만 남아 오른쪽 밖에서 사라졌다. **넓어졌는데도 화면 전체로는 안 보이는** 상태다.
+ * Widening alone was not enough. Measuring it showed the easing was a strong ease-out, so the band
+ * passes through almost entirely near the start — it covers the whole screen for one instant at
+ * the 15% mark, and by the halfway point only 35% of it remained, already vanishing off the right
+ * edge. Wider, and still not visible across the whole screen.
  *
- * 그래서 끝나는 방식을 바꿨다. 밖으로 빠져나가며 끝나는 대신 **화면을 덮은 채로 잦아든다**:
- * 끝 지점(25%)은 왼쪽 가장자리가 화면 왼쪽에 막 닿는 자리다. 밝기가 가장 센 구간
- * (25~60%)에서 내내 화면을 가득 덮고, 사라지는 일은 이동이 아니라 불투명도가 한다.
- * 움직임은 그대로 남으므로 여전히 바람이지, 켜졌다 꺼지는 판이 아니다.
+ * So the way it ends was changed. Instead of ending by exiting, it now fades while still covering
+ * the screen: the end point (25%) is where the left edge has just reached the left of the screen.
+ * It covers the screen fully throughout the brightest stretch (25-60%), and disappearing is done
+ * by opacity rather than motion. The motion is still there, so it is still a gust, not a panel
+ * switching on and off.
  */
 .cc-gust {
   position: absolute;
@@ -822,20 +866,22 @@
     #4ad6d0 80%,
     transparent 100%
   );
-  /* 번짐도 퍼짐이다 — 띠 가장자리가 화면 끝까지 흐려져 경계가 보이지 않는다 */
+  /* The blur is also part of the spread — the band's edges fade all the way to the screen edge
+     so no boundary is visible */
   filter: blur(80px);
   mix-blend-mode: screen;
   animation: cc-gust 1100ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
 }
 
 /*
- * 움직임에 민감한 사람에게 화면을 가로지르는 띠는 방해다.
- * 궤도에서와 같은 규칙 — 움직임을 걷고 밝기만 아주 짧게 남긴다.
+ * For someone sensitive to motion, a band sweeping across the screen is distracting.
+ * The same rule as the orbit — remove the motion and leave only a brief flash of brightness.
  */
 @media (prefers-reduced-motion: reduce) {
   .cc-gust {
     animation: cc-gust-still 420ms ease-out forwards;
-    /* 움직임이 없으면 띠를 화면 밖까지 늘려 둘 이유가 없다 — 화면에 딱 맞춰 아주 옅게 */
+    /* With no motion, there is no reason to keep the band stretched past the screen edge — fit
+       it exactly to the screen, very faint */
     left: 0;
     width: 100%;
     transform: none;

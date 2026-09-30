@@ -5,27 +5,31 @@ import { APPS } from '../apps/registry.js'
 import { externalAppKey, useStore, type AppState } from './store.js'
 
 /**
- * 앱 명부 하나 (M4 A-8) — 내장 앱과 외부 앱을 같은 목록으로.
+ * One app registry (M4 A-8) — built-in apps and external apps as a single list.
  *
- * 둘은 사는 방식이 다르다. 내장 앱(`control`)은 컴파일된 모듈이고 켜고 끄는 것이 전부다. 외부
- * 앱은 host가 발견한 폴더와 그 프로세스라, 범위(프로젝트·사용자 폴더)와 상태(뜨는 중·멈춤·이유)가
- * 있다. 그래도 화면(설정의 앱 목록, 사이드바의 앱 줄, 고정 화면)은 "이 앱이 무엇이고 지금 어떤가"를
- * 한 곳에서 물어야 한다. 화면마다 두 출처를 따로 읽어 합치면, 상태를 읽는 규칙(예: 신뢰하지 않은
- * 프로젝트의 앱은 열 수 없다)이 화면 수만큼 생기고 언젠가 하나가 어긋난다.
+ * The two live differently. A built-in app (`control`) is a compiled module, and the only thing
+ * to do with it is turn it on or off. An external app is a folder and a process the host
+ * discovered, so it has a scope (project or user folder) and a status (starting, stopped, why).
+ * Even so, the screens (the app list in Settings, an app's row in the sidebar, a pinned screen)
+ * all need to ask "what is this app, and how is it right now" in one place. If each screen read
+ * the two sources separately and merged them, the rule for reading status (e.g. an app in an
+ * untrusted project cannot be opened) would have to exist once per screen, and one of them would
+ * eventually drift out of sync.
  *
- * 이 파일이 스토어 **밖에** 있는 이유: 스토어는 내장 앱 명부를 모른다(명부 → 앱 → api → host의
- * 순환 금지, #97). 여기는 명부와 스토어를 둘 다 읽기만 한다.
+ * Why this file lives outside the store: the store does not know about the built-in app registry
+ * (registry → app → api → host must not cycle, #97). This file only reads both the registry and
+ * the store.
  */
 
-/** 상태를 사람에게 보이는 모양으로. 판정은 여기 한 곳이다 */
+/** Turns status into the shape shown to a person. The judgment lives in this one place */
 export type AppStatusView = {
-  /** 한두 단어 — 목록과 사이드바 줄이 쓴다 */
+  /** One or two words — used by the list and the sidebar row */
   label: string
-  /** 왜 그런가. 이유가 없는 상태(떠 있다, 쉬고 있다)는 null */
+  /** Why it is this way. null for a status with no reason (floating, resting) */
   reason: string | null
-  /** 지금 열 수 있는가. 아니면 화면 대신 이유와 할 일(신뢰하기, 다시 시작하기)을 보인다 */
+  /** Can it be opened right now. If not, the reason and the action to take (trust it, restart it) are shown instead of the screen */
   runnable: boolean
-  /** 목록에서의 밝기 — 막혀서 사람이 봐야 하는 것만 밝다(팔레트 규칙) */
+  /** Brightness in the list — only something blocked that the person needs to see is bright (the palette rule) */
   tone: 'quiet' | 'busy' | 'alert'
 }
 
@@ -40,12 +44,12 @@ export type BuiltinCatalogApp = {
 
 export type ExternalCatalogApp = {
   kind: 'external'
-  /** `externalAppKey` — 앱은 (프로젝트, id)로 하나다 */
+  /** `externalAppKey` — an app is uniquely identified by (project, id) */
   key: string
   appId: string
-  /** null은 사용자 폴더 앱 */
+  /** null means a user-folder app */
   projectId: string | null
-  /** 매니페스트의 이름, 없으면(깨진 매니페스트) 폴더 이름 */
+  /** The name from the manifest, or the folder name if there is none (a broken manifest) */
   title: string
   info: ExternalAppInfo
   status: AppStatusView
@@ -54,9 +58,9 @@ export type ExternalCatalogApp = {
 export type AppCatalog = {
   builtin: BuiltinCatalogApp[]
   external: ExternalCatalogApp[]
-  /** 프로젝트 id → 그 프로젝트의 앱 (이름순) */
+  /** project id → that project's apps (alphabetical) */
   byProject: Record<string, ExternalCatalogApp[]>
-  /** 사용자 폴더의 앱 (이름순) */
+  /** The user folder's apps (alphabetical) */
   user: ExternalCatalogApp[]
 }
 
@@ -71,7 +75,7 @@ export function appStatus(info: ExternalAppInfo): AppStatusView {
     case 'starting':
       return { label: 'Starting', reason: null, runnable: true, tone: 'busy' }
     case 'crashed':
-      // 다음에 부르면 (백오프 뒤) 다시 뜬다 — 열 수는 있다
+      // Comes back up on the next call (after backing off) — it can still be opened
       return { label: 'Crashed', reason: info.error, runnable: true, tone: 'alert' }
     case 'failed':
       return { label: 'Failed', reason: info.error ?? 'It failed to start several times in a row.', runnable: false, tone: 'alert' }
@@ -79,8 +83,10 @@ export function appStatus(info: ExternalAppInfo): AppStatusView {
       return { label: 'Not trusted', reason: UNTRUSTED_REASON, runnable: false, tone: 'quiet' }
     case 'unconfirmed':
       /*
-       * 가져온 앱이 사람의 확인을 기다린다 (M4 E-3) — 처음 들어와 아직 켜지 않았거나, 켠 뒤 무엇을 돌리는지(server)나 무엇을
-       * 쓰겠다는지(uses)가 바뀌었다. 둘 다 사람이 보고 켜야 풀린다. 이유는 host의 말이다.
+       * An imported app is waiting on the person's review (M4 E-3) — either it just arrived and
+       * has not been enabled yet, or after being enabled, what it runs (server) or what it claims
+       * to use (uses) changed. Both are resolved only once the person looks and enables it. The
+       * reason is the host's own wording.
        */
       return {
         label: info.imported?.confirmedAt ? 'Needs review' : 'Not enabled',
@@ -96,10 +102,11 @@ export function appStatus(info: ExternalAppInfo): AppStatusView {
 const byTitle = (a: ExternalCatalogApp, b: ExternalCatalogApp) => a.title.localeCompare(b.title) || a.appId.localeCompare(b.appId)
 
 /**
- * 순수 계산 — 훅과 시험이 같이 쓴다.
+ * A pure computation — shared by the hook and the tests.
  *
- * 순서는 이름순이다. 세션처럼 끌어서 정한 순서를 host에 적을 자리가 아직 없고, 발견 순서(폴더를
- * 읽은 순서)는 파일 시스템마다 달라 사이드바의 줄이 기동마다 뒤섞일 수 있다.
+ * The order is alphabetical. There is no place yet to write a drag-to-reorder order on the host,
+ * the way there is for sessions, and discovery order (the order folders were read in) differs by
+ * filesystem, which could shuffle the sidebar's rows on every startup.
  */
 export function buildCatalog(
   builtins: readonly AppModule[],
@@ -145,19 +152,19 @@ export function useAppCatalog(): AppCatalog {
 
 const NONE: ExternalCatalogApp[] = []
 
-/** 한 프로젝트의 앱 — 사이드바의 프로젝트 블록이 쓴다 */
+/** A single project's apps — used by the project's block in the sidebar */
 export function useProjectApps(projectId: string): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
   return useMemo(() => buildCatalog([], {}, external).byProject[projectId] ?? NONE, [external, projectId])
 }
 
-/** 사용자 폴더의 앱 — 프로젝트에 속하지 않으므로 사이드바에 자기 무리가 있다 */
+/** The user folder's apps — since they do not belong to a project, they get their own group in the sidebar */
 export function useUserApps(): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
   return useMemo(() => buildCatalog([], {}, external).user, [external])
 }
 
-/** 앱 하나 — 없으면(폴더가 사라졌다, 프로젝트를 지웠다) undefined */
+/** A single app — undefined if it is gone (the folder disappeared, the project was deleted) */
 export function useExternalApp(projectId: string | null, appId: string): ExternalCatalogApp | undefined {
   const external = useStore((s) => s.externalApps)
   return useMemo(() => {

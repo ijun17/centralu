@@ -3,23 +3,23 @@ import { isOnScreen } from './onscreen.js'
 
 const ctx = { focusedSessionId: 'a', orchestratorId: 'orc', gridPanels: ['b', 'c'] }
 
-describe('바람은 화면에 있는 세션이 끝났을 때만 분다', () => {
-  it('포커스 뷰 — 보고 있는 그 세션', () => {
+describe('the gust only blows when a session on screen finishes', () => {
+  it('focus view — the session being looked at', () => {
     expect(isOnScreen('focus', 'a', ctx)).toBe(true)
     expect(isOnScreen('focus', 'b', ctx)).toBe(false)
   })
 
-  it('오케스트레이터 화면 — 그 세션', () => {
+  it('orchestrator screen — that session', () => {
     expect(isOnScreen('orchestrator', 'orc', ctx)).toBe(true)
     expect(isOnScreen('orchestrator', 'a', ctx)).toBe(false)
   })
 
-  it('그리드 — 올라와 있는 칸 중 하나', () => {
+  it('grid — one of the panels that is up', () => {
     expect(isOnScreen('grid', 'c', ctx)).toBe(true)
     expect(isOnScreen('grid', 'a', ctx)).toBe(false)
   })
 
-  it('고정 화면 — 옆에 대화가 열린 만드는 세션 하나 (M4 C-5)', () => {
+  it('pinned screen — the one builder session whose conversation is open beside it (M4 C-5)', () => {
     expect(isOnScreen('app', 'builder', { ...ctx, builderPaneSessionId: 'builder' })).toBe(true)
     expect(isOnScreen('app', 'a', { ...ctx, builderPaneSessionId: 'builder' })).toBe(false)
     expect(isOnScreen('app', 'builder', ctx)).toBe(false)
@@ -34,10 +34,11 @@ describe('바람은 화면에 있는 세션이 끝났을 때만 분다', () => {
   })
 
   /*
-   * 이게 요점이다. 세션이 열 개면 화면 밖 완료도 열 번이고,
-   * 그때마다 화면을 쓸면 읽고 있던 것을 방해한다 — 그건 알림의 몫이다.
+   * This is the whole point. With ten sessions there are ten off-screen completions, and
+   * sweeping the screen for each one would interrupt whatever is being read — that job belongs
+   * to notifications instead.
    */
-  it('화면 밖에서 끝난 것은 불지 않는다', () => {
+  it('does not blow for something that finished off screen', () => {
     expect(isOnScreen('focus', 'zzz', ctx)).toBe(false)
     expect(isOnScreen('grid', 'zzz', ctx)).toBe(false)
     expect(isOnScreen('orchestrator', 'zzz', ctx)).toBe(false)

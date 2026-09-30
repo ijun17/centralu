@@ -2,14 +2,15 @@ import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { AppId, AppModule } from './contract.js'
 
 /**
- * 앱 id가 다시 닫히지 않게 (M4 P-1).
+ * Guards against the app id being closed back off (M4 P-1).
  *
- * 실행 중에 알게 된 이름(여기서는 JSON에서 읽은 문자열)으로 앱 모듈을 세우는 것이 외부 앱이
- * 명부에 서는 모양 그대로다. 합집합이 다시 닫히면 이 파일이 컴파일되지 않는다 — 검사는
- * `tsc -b`가 한다. vitest는 타입을 보지 않으므로, 실행 쪽 단언은 값이 그대로 실렸다는 것뿐이다.
+ * Building an app module with a name only known at runtime (here, a string read from JSON) is
+ * exactly the shape an external app takes when registering itself. If the union were closed back
+ * off, this file would fail to compile — that check is `tsc -b`'s job. vitest does not look at
+ * types, so the runtime assertion here only confirms the value made it through as-is.
  */
-describe('앱 id는 열린 문자열이다', () => {
-  it('빌드가 모르는 이름으로도 앱 모듈을 세울 수 있다', () => {
+describe('the app id is an open string', () => {
+  it('can build an app module even with a name the build does not know', () => {
     const discovered: string = JSON.parse('"resource-search"')
     const mod: AppModule = { id: discovered, title: 'Resource search' }
 

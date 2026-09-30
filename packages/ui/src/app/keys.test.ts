@@ -1,50 +1,52 @@
 import { describe, expect, it } from 'vitest'
 import { confirmKeyAction, isTextEntry, letterOf } from './keys.js'
 
-/** 실제 KeyboardEvent에서 이 함수가 보는 두 필드만 */
+/** Only the two fields this function looks at, from a real KeyboardEvent */
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
 
 /**
- * 글자 단축키를 자판이 만든 문자로만 읽던 것의 교정 (설정 화면의 `⌥a`가 맥에서 무반응).
+ * The fix for reading letter shortcuts only from the character the keyboard produced (the
+ * settings screen's `⌥a` did nothing on a Mac).
  *
- * 아래 값들은 상상이 아니라 **설치된 자판 배열에 직접 물어본 것**이다
+ * The values below are not invented — they were asked directly of the installed keyboard layout
  * (Carbon UCKeyTranslate, 2026-08-24):
  *
  *   ABC / U.S.     A = a    ⌥A = å
  *   2-Set Korean   A = ㅁ   ⌥A = a
  */
 describe('letterOf', () => {
-  it('라틴 글자로 왔으면 그대로 믿는다', () => {
+  it('trusts a Latin letter as-is when it arrives', () => {
     expect(letterOf(ev('a', 'KeyA'))).toBe('a')
     expect(letterOf(ev('Y', 'KeyY'))).toBe('y')
   })
 
-  it('⌥A는 å로 온다 — 설정이 광고하던 그 키가 여기서 죽어 있었다', () => {
+  it('⌥A arrives as å — the key the settings advertised was dead here', () => {
     expect(letterOf(ev('å', 'KeyA'))).toBe('a')
   })
 
-  it('한글 자판에서는 조합키 없이도 다른 글자로 온다', () => {
+  it('on a Korean keyboard layout, other characters arrive even with no modifier key', () => {
     expect(letterOf(ev('ㅁ', 'KeyA'))).toBe('a')
     expect(letterOf(ev('ㅓ', 'KeyJ'))).toBe('j')
     expect(letterOf(ev('ㅇ', 'KeyD'))).toBe('d')
   })
 
-  /** IME가 키를 삼키는 중이면 브라우저는 이 이름을 준다 — 자리는 그대로다 */
-  it('Process도 자리로 읽는다', () => {
+  /** The browser gives this name while an IME is swallowing the key — the position stays intact */
+  it('reads Process by position too', () => {
     expect(letterOf(ev('Process', 'KeyN'))).toBe('n')
   })
 
   /**
-   * **자리로 통일하지 않는 이유.** Dvorak에서 y는 QWERTY의 KeyF 자리에 있다. 자리만 보면
-   * 사용자가 f를 눌렀을 때 y로 읽고, y는 이 앱에서 승인이다 — 가장 잘못 눌리면 안 되는 것을
-   * 자판 배열 때문에 잘못 읽을 수는 없다. 라틴 글자로 온 것은 사용자가 실제로 낸 글자다.
+   * Why this does not standardize on position. On Dvorak, y sits at QWERTY's KeyF position.
+   * Reading position alone would read y when the person pressed f, and y is approval in this app
+   * — the thing that must never be misread cannot be misread because of a keyboard layout. A
+   * character that arrives as Latin is the character the person actually produced.
    */
-  it('Dvorak: 글자가 라틴이면 자리를 묻지 않는다 — f는 f다', () => {
+  it('Dvorak: when the character is Latin, position is not consulted — f is f', () => {
     expect(letterOf(ev('f', 'KeyY'))).toBe('f')
     expect(letterOf(ev('y', 'KeyF'))).toBe('y')
   })
 
-  it('글자가 아닌 것은 글자인 척하지 않는다', () => {
+  it('does not treat a non-letter as if it were a letter', () => {
     expect(letterOf(ev('Enter', 'Enter'))).toBeNull()
     expect(letterOf(ev('ArrowDown', 'ArrowDown'))).toBeNull()
     expect(letterOf(ev('1', 'Digit1'))).toBeNull()
@@ -53,11 +55,11 @@ describe('letterOf', () => {
   })
 })
 
-/** #181: 키가 사람이 보고 있는 대상에만 간다 */
-describe('isTextEntry — 글을 받는 칸 안의 화살표·Enter는 그 칸의 것이다 (#181)', () => {
+/** #181: a key goes only to what the person is looking at */
+describe('isTextEntry — arrow keys and Enter inside a text field belong to that field (#181)', () => {
   const el = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, isContentEditable: false, ...extra }) as unknown as EventTarget
 
-  it('입력칸·글상자·select·contenteditable은 글을 받는다', () => {
+  it('a text input, textarea, select and contenteditable all accept text', () => {
     expect(isTextEntry(el('INPUT', { type: 'text' }))).toBe(true)
     expect(isTextEntry(el('INPUT', { type: 'search' }))).toBe(true)
     expect(isTextEntry(el('TEXTAREA'))).toBe(true)
@@ -65,7 +67,7 @@ describe('isTextEntry — 글을 받는 칸 안의 화살표·Enter는 그 칸�
     expect(isTextEntry(el('DIV', { isContentEditable: true }))).toBe(true)
   })
 
-  it('단추·체크박스·빈 곳은 글을 받지 않는다 — 목록 고르기가 그대로 된다', () => {
+  it('a button, checkbox, or empty space does not accept text — list selection keeps working as-is', () => {
     expect(isTextEntry(el('BUTTON'))).toBe(false)
     expect(isTextEntry(el('INPUT', { type: 'checkbox' }))).toBe(false)
     expect(isTextEntry(el('FORM'))).toBe(false)
@@ -73,22 +75,22 @@ describe('isTextEntry — 글을 받는 칸 안의 화살표·Enter는 그 칸�
   })
 })
 
-describe('confirmKeyAction — 종료 확인 창의 Enter·Esc (#181)', () => {
+describe('confirmKeyAction — Enter and Esc on the quit confirmation dialog (#181)', () => {
   const k = (key: string, over: Partial<{ isComposing: boolean; onButton: boolean }> = {}) => ({
     key, isComposing: false, onButton: false, ...over,
   })
 
-  it('창 위의 Enter는 확인, Esc는 취소다', () => {
+  it('Enter on the dialog confirms, Esc cancels', () => {
     expect(confirmKeyAction(k('Enter'))).toBe('confirm')
     expect(confirmKeyAction(k('Escape'))).toBe('cancel')
     expect(confirmKeyAction(k('a'))).toBeNull()
   })
 
-  it('단추 위의 Enter는 그 단추의 것이다 — Cancel에서 누른 Enter가 앱을 끄면 안 된다', () => {
+  it('Enter on a button belongs to that button — Enter pressed on Cancel must not quit the app', () => {
     expect(confirmKeyAction(k('Enter', { onButton: true }))).toBeNull()
   })
 
-  it('조합 중인 키는 아무것도 아니다 — 조합을 끝내려는 Enter, 취소하려는 Esc', () => {
+  it('a key that is part of an IME composition means nothing — Enter to finish it, Esc to cancel it', () => {
     expect(confirmKeyAction(k('Enter', { isComposing: true }))).toBeNull()
     expect(confirmKeyAction(k('Escape', { isComposing: true }))).toBeNull()
     expect(confirmKeyAction(k('Process'))).toBeNull()

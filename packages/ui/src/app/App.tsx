@@ -31,11 +31,12 @@ import { attachAppHost } from '../apps/host.js'
 import { storeAppHost } from '../store/app-host.js'
 
 /*
- * 앱 런타임에 호스트를 얹는다 (#97) — **모듈 수준이라 첫 렌더보다 먼저다.**
+ * Attach the host to the app runtime (#97) — module scope, so this runs before the first render.
  *
- * 앱(레일·설정·전용 화면)은 전부 이 파일 아래에서 그려지므로, 여기서 한 번 얹으면
- * 어느 진입점(데스크톱·웹)으로 들어와도 앱이 서기 전에 호스트가 서 있다.
- * 효과 안에서 얹으면 첫 렌더가 빈 호스트를 만난다.
+ * Every app (rail, settings, dedicated screens) is rendered somewhere below this file, so
+ * attaching the host here once means it is standing before any app stands, no matter which
+ * entry point (desktop, web) the person came in through. Attaching it inside an effect would
+ * mean the first render meets an empty host.
  */
 attachAppHost(storeAppHost)
 
@@ -48,9 +49,10 @@ export function App({ platform }: { platform: Platform }) {
   }, [platform, attach])
 
   /*
-   * 앱 링크 (M4 E-4) — OS가 건넨 `centralu://app?url=…`. 모양이 맞으면 가져오기 창을 그 출처로 연다. 창은 사람이 Review를 누르기 전에는
-   * 아무것도 읽거나 내려받지 않는다: 링크를 누른 것은 사람이지만 링크를 지은 것은 남이다. 모양이 틀린 링크는 무엇이 틀렸는지 한 줄로
-   * 말하고 아무것도 열지 않는다.
+   * App link (M4 E-4) — the OS hands over `centralu://app?url=…`. If the shape is right, open the
+   * import dialog to that source. The dialog reads or downloads nothing until the person presses
+   * Review: the person clicked the link, but someone else made it. A malformed link says in one
+   * line what is wrong and opens nothing.
    */
   useEffect(
     () =>
@@ -63,10 +65,11 @@ export function App({ platform }: { platform: Platform }) {
   )
 
   /*
-   * 전체 글자 크기 (설정 → Appearance, 5단계).
+   * Overall text size (Settings → Appearance, 5 levels).
    *
-   * 루트의 CSS zoom 하나로 적용한다 — 텍스트가 전부 px 고정이라 글꼴만 따로 키울 길이
-   * 없고(스토어의 TEXT_SCALES 주석), zoom은 WKWebView(Tauri)와 브라우저 양쪽에서 산다.
+   * Applied with a single CSS zoom on the root — all text is pinned in px, so there is no way to
+   * grow just the font (see the TEXT_SCALES comment in the store), and zoom works in both
+   * WKWebView (Tauri) and the browser.
    */
   const textScale = useStore((s) => s.textScale)
   useEffect(() => {
@@ -74,22 +77,25 @@ export function App({ platform }: { platform: Platform }) {
     const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
     style.zoom = String(factor)
     /*
-     * vh/vw는 zoom의 영향을 받지 않는다 (실측: 확대하면 100vh 셸이 창을 넘어 입력창이
-     * 잘렸다). 셸은 % 사슬로 바꿨고, 모달들의 vh/vw는 이 변수로 나눠 실제 창 기준으로
-     * 되돌린다 — zoom과 이 변수는 반드시 같은 값이어야 해서 한 자리에서 함께 쓴다.
+     * vh/vw are not affected by zoom (measured: zooming in made the 100vh shell overflow the
+     * window and cut off the composer). The shell was switched to a chain of %, and the vh/vw in
+     * modals are divided by this variable to bring them back to the real window size — zoom and
+     * this variable must always be the same value, so they are set together in one place.
      */
     style.setProperty('--text-zoom', String(factor))
   }, [textScale])
 
   /*
-   * 도는 표식을 멈추는 자리 (사용자 요청 2026-09-13).
+   * Where the spinning indicator gets stopped (user request, 2026-09-13).
    *
-   * 스위치를 **뿌리의 속성**으로 내보내고 실제 정지는 CSS가 한다. 도는 것이 그려지는
-   * 자리가 둘(그리드 칸 테두리·사이드바 아이콘)이고 앞으로 더 늘 수 있는데, 자리마다
-   * 설정을 읽게 하면 새로 도는 것을 만들 때마다 이 설정을 기억해야 한다. 뿌리에 한 번
-   * 적어 두면 잊어도 적용된다.
+   * Export the switch as an attribute on the root, and let CSS do the actual stopping. There are
+   * two places where something spins today (the grid panel border, the sidebar icon) and there
+   * could be more later; if each place read the setting itself, every new spinning element would
+   * have to remember this setting. Writing it once on the root means it applies even if it is
+   * forgotten.
    *
-   * 이 설정이 취향이 아니라 전력인 이유는 store.ts의 `spinGrid` 주석에 실측과 함께 있다.
+   * Why this setting is about battery life rather than taste, with measurements, is in the
+   * `spinGrid` comment in store.ts.
    */
   const spinGrid = useStore((s) => s.spinGrid)
   const spinSessionIcon = useStore((s) => s.spinSessionIcon)
@@ -99,38 +105,42 @@ export function App({ platform }: { platform: Platform }) {
     root.dataset.spinIcon = spinSessionIcon ? 'on' : 'off'
   }, [spinGrid, spinSessionIcon])
 
-  // 알림 정책이 "눈앞에 있으면 알리지 않는다"이므로 포커스 상태를 추적한다
+  // The notification policy is "do not notify while the app is in front of the person", so track
+  // focus state
   /*
-   * 끌어다 놓기는 **창 전체에서 기본이 거부**다 (#116).
+   * Drag-and-drop is denied by default across the whole window (#116).
    *
-   * Tauri가 `dragDropEnabled: false`라 드롭은 웹뷰의 기본 동작으로 간다 — 떨어뜨린
-   * 파일로 **이동해 버린다**. PDF 한 장이 창을 가득 덮고, 돌아오는 길은 브라우저의
-   * 뒤로 가기뿐이다(그런 게 있는 줄 아는 사람에게만).
+   * Tauri has `dragDropEnabled: false`, so a drop falls through to the webview's default
+   * behavior — it navigates to the dropped file. A single PDF fills the entire window, and the
+   * only way back is the browser's back button (and only for someone who knows one exists).
    *
-   * 그래서 바닥을 깐다: 브라우저가 스스로 결정하는 일은 이 창에서 **한 번도** 없다.
-   * 무언가 일어난다면 그건 우리 핸들러가 한 것이다.
+   * So this lays down a floor: the browser never gets to decide anything on its own in this
+   * window. If something happens, our handler did it.
    *
-   * **캡처 단계이고 조건이 없다.** 조건을 하나라도 달면 — 드래그 종류든, 밑에 깔린
-   * 요소든, 받는 핸들러가 있는지든 — 그 조건의 반대편이 곧 이 버그의 다음 판이 된다.
-   * 실제로 지금까지가 정확히 그 모양이었다: 입력창은 자기 자리를 막았고, 나머지
-   * 창 전부가 웹뷰의 것이었다. 캡처인 이유도 같다 — 아래에서 누가 stopPropagation을
-   * 하더라도 바닥은 먼저 깔려 있어야 한다.
+   * This is in the capture phase and has no conditions. Adding even one condition — the kind of
+   * drag, the element underneath, whether there is a handler that accepts it — turns the other
+   * side of that condition into the next round of this bug. That is exactly what happened before:
+   * the composer blocked its own spot, and the rest of the window still belonged to the webview.
+   * It is capture for the same reason — even if something below calls stopPropagation, the floor
+   * has to be laid down first.
    *
-   * 셋 다 막는다. `drop`만으로는 모자란다: `dragover`가 "여기 놓을 수 있다"는 대답이라,
-   * 막지 않으면 브라우저가 판단을 자기 몫으로 가져간다. `dragenter`도 같은 대답을 한다.
+   * All three are blocked. `drop` alone is not enough: `dragover` is the answer to "can something
+   * be dropped here", and without blocking it the browser takes that decision for itself.
+   * `dragenter` answers the same question.
    *
-   * 이건 **바닥일 뿐이다.** 입력창과 세션 칸은 지금도 자기 자리에서 preventDefault를
-   * 한다 — 기능의 옳음이 전역 한 줄에 매달리면, 그 한 줄이 옮겨지는 날 기능이 조용히
-   * 죽는다.
+   * This is only the floor. The composer and the session panels still call preventDefault in
+   * their own places — if a feature's correctness hangs on one global line, the feature dies
+   * quietly the day that line moves.
    */
   useEffect(() => {
     /*
-     * 예외는 하나뿐이고, 좁다: **글자 칸 위로 끌어온 글자.**
+     * There is exactly one exception, and it is narrow: text dragged over a text field.
      *
-     * 그건 브라우저가 앱을 갈아치우는 동작이 아니라 편집 동작이다 — 검색창이나 설정 칸에
-     * 고른 글을 끌어다 놓는 일까지 막으면, 파일 때문에 만든 바닥이 글자까지 쓸어간다.
-     * **파일이 섞인 드래그는 글자 칸 위에서도 막는다.** PDF를 검색창에 떨어뜨리는 것도
-     * 웹뷰가 파일을 여는 길이고, 그 길을 없애는 것이 이 바닥의 목적이다.
+     * That is an editing action, not the browser replacing the app — blocking even dropping
+     * selected text into a search box or a settings field would mean the floor built for files
+     * sweeps away text too. A drag that includes a file is still blocked over a text field.
+     * Dropping a PDF into a search box is also a way for the webview to open a file, and closing
+     * that path is the whole point of this floor.
      */
     const editable = (target: EventTarget | null): boolean => {
       const el = target instanceof Element ? target : null
@@ -153,12 +163,14 @@ export function App({ platform }: { platform: Platform }) {
 
   useEffect(() => {
     /*
-       세 핸들러가 **같은 판정**을 쓴다.
-       예전엔 visibilitychange만 visibility를 봤다 — 다른 앱으로 간 뒤 가림 이벤트가
-       한 번 더 뜨면 창은 여전히 'visible'이라 다시 '눈앞'으로 돌아갔고,
-       그때부터 알림이 조용히 막혔다. 자리를 비운 사람에게 알리는 게 이 앱의 전제인데.
+       All three handlers use the same judgment.
+       Previously only visibilitychange looked at visibility — after switching to another app, if
+       another occlusion event fired, the window was still 'visible' so it went back to being 'in
+       front' again, and from that point notifications were silently suppressed. Notifying the
+       person while they are away is exactly what this app is supposed to do.
      */
-    // blur 시점에 document.hasFocus()가 아직 낡았을 수 있으므로, 아는 값은 직접 넘긴다
+    // document.hasFocus() can still be stale at the moment of blur, so pass the value we already
+    // know directly
     const onFocus = () => setAppFocused(isForeground(true, document.visibilityState))
     const onBlur = () => setAppFocused(false)
     const onVisibility = () => setAppFocused(isForeground(document.hasFocus(), document.visibilityState))
@@ -176,11 +188,12 @@ export function App({ platform }: { platform: Platform }) {
   return (
     <PlatformProvider platform={platform}>
       {/*
-        렌더가 터져도 창은 남는다 (도그푸딩 2026-09-07). 경계가 없으면 React가 트리를
-        통째로 걷어내 하얀 화면만 남는데, 그 화면은 "앱이 죽었다"와 구별되지 않는다.
+        The window survives even if a render throws (dogfooding, 2026-09-07). Without a boundary,
+        React tears down the whole tree and leaves a blank white screen, and that screen is
+        indistinguishable from "the app is dead".
       */}
       <ErrorBoundary>
-        {/* h-screen(100vh)이 아니라 h-full — vh는 zoom을 모르기 때문 (index.css의 --text-zoom 주석) */}
+        {/* h-full, not h-screen (100vh) — vh does not know about zoom (--text-zoom comment in index.css) */}
         <div className="relative flex h-full flex-col bg-void text-chalk">
           <TopBar />
           <Body />
@@ -197,20 +210,22 @@ export function App({ platform }: { platform: Platform }) {
 }
 
 /**
- * 처음인 사람에게는 소개가 **가운데 레인을** 대신한다 (FR-19 → #63).
+ * For a first-time person, the intro takes the place of the center lane (FR-19 → #63).
  *
- * 조건은 "프로젝트 0개"가 아니라 **"아무것도 만든 적 없음"이다** — 세션(오케스트레이터
- * 포함)이 하나라도 있으면 이 사람은 처음이 아니고, 소개를 다시 보여주는 것은 방해다.
+ * The condition is not "zero projects" but "has never created anything" — if there is even
+ * one session (including an orchestrator), this person is not first-time, and showing the intro
+ * again would only get in the way.
  *
- * **사이드바는 함께 선다.** 소개가 화면을 통째로 덮던 동안에는 Add project가 화면에
- * 없어서, 소개를 읽는 사람에게 프로젝트를 만들 길이 막혀 있었다 — 대화를 강요하지
- * 않는다는 이 흐름의 전제를 화면이 어기고 있었던 셈이다 (도그푸딩 지적).
- * 증거 레인만 없다: 볼 프로젝트도 세션도 아직 없다.
+ * The sidebar stands alongside it. While the intro used to cover the whole screen, Add project
+ * was not on screen, so a person reading the intro had no way to create a project — the screen
+ * was breaking this flow's own premise of not forcing a conversation (caught by dogfooding).
+ * Only the evidence lane is missing: there is no project or session yet to look at.
  */
 function Body() {
   const virgin = useStore((s) => Object.keys(s.projects).length === 0 && Object.keys(s.sessions).length === 0)
   const introSeen = useStore((s) => s.introSeen)
-  // 훅은 **이른 return보다 먼저** — 아래 소개 분기 뒤에 두면 렌더마다 훅 수가 달라진다
+  // Hooks come before any early return — placing one after the intro branch below would change
+  // the hook count between renders
   const view = useStore((s) => s.view)
   // The focus lane with a project picked and no session is that project's screen (#203)
   const projectScreen = useStore(projectScreenOf)
@@ -219,15 +234,16 @@ function Body() {
     return (
       <div className="relative flex min-h-0 flex-1">
         {/*
-          **사이드바는 그대로 다 보인다.** 한때 뷰 전환 버튼을 빼고 세웠다 — 소개가
-          가운데를 잡고 있는 동안 눌러도 화면이 안 바뀌니 죽은 클릭이라는 이유였다.
-          그 진단은 맞았는데 처방이 틀렸다: 버튼을 감출 게 아니라 **동작하게** 하면
-          된다. 지금은 오케스트레이터도 그리드도 누르면 소개를 지나 그 화면으로 간다
-          (store의 setView·openOrchestrator가 introSeen을 세운다).
+          The sidebar stays fully visible as-is. It was once built with the view-switch buttons
+          removed — the reasoning was that pressing them while the intro held the center would
+          not change the screen, so the click would be dead. That diagnosis was right but the fix
+          was wrong: instead of hiding the buttons, make them work. Now pressing either the
+          orchestrator or the grid button moves past the intro to that screen (setView and
+          openOrchestrator in the store set introSeen).
 
-          흐름을 강요하지 않는다는 것이 이 온보딩의 전제다. 소개를 안 읽고 바로
-          쓰겠다는 사람의 길을 화면에서 지우면, 대화를 강요하지 않겠다면서 대신
-          '소개 읽기'를 강요하는 셈이 된다.
+          Not forcing a flow is this onboarding's premise. Removing the path for a person who
+          wants to skip the intro and start using the app right away would mean forcing "read the
+          intro" instead of the conversation we said we would not force.
         */}
         <Sidebar />
         <Notices />
@@ -238,7 +254,7 @@ function Body() {
     )
   }
   /*
-    3레인. 좌 = 관찰, 중앙 = 조작, 우 = 증거.
+    Three lanes. Left = observe, center = act, right = evidence.
     The overlay covers the middle lane only — see the note below.
   */
 
@@ -248,14 +264,16 @@ function Body() {
     by our own hand the very thing that got the grid shelved (§5.4).
   */
   /*
-    고정 화면(M4 B-2)에도 증거 레인이 없다. 앱이 그 자리 전체이고, 앱의 기록 패널이 옆에 선다.
-    거기에 레인을 하나 더 세우면 화면이 사이드바만 한 폭으로 줄어든다.
+    Pinned screens (M4 B-2) also have no evidence lane. The app takes up the whole area, and the
+    app's own record panel stands beside it. Adding one more lane there would shrink the screen
+    down to sidebar width.
   */
   const hasEvidenceLane = view !== 'orchestrator' && view !== 'grid' && view !== 'app'
 
   return (
-    // relative: 알림 카드가 이 안에 떠야 한다. 앱 전체에 걸면 상단 바와 승인 배너를
-    // 덮어서, 배너의 버튼을 카드가 가로챈다 (e2e가 클릭이 막히는 것으로 잡아냈다).
+    // relative: the notice cards need to float inside this. Applying it to the whole app would
+    // cover the top bar and the approval banner, so the card would intercept the banner's button
+    // (e2e caught this as a blocked click).
     <div className="relative flex min-h-0 flex-1">
       <Sidebar />
       <Notices />
@@ -276,9 +294,9 @@ function Body() {
         column, and the tree stays where your hand already is.
       */}
       {/*
-        min-w-0이 없으면 이 레인은 내용의 min-content 폭 아래로 줄지 못한다.
-        그러면 패널을 넓혔을 때 레이아웃이 창 밖으로 밀려나 화면이 통째로
-        가로 스크롤된다 (도그푸딩에서 나온 버그의 진짜 원인).
+        Without min-w-0, this lane cannot shrink below the min-content width of its contents.
+        Then widening the panel pushes the layout past the window edge and the whole screen
+        scrolls horizontally (the real cause of a bug found in dogfooding).
       */}
       <div className="relative flex min-h-0 min-w-0 flex-1">
         {view === 'orchestrator' ? (
@@ -291,8 +309,10 @@ function Body() {
           <SessionView />
         )}
         {/*
-          고정 화면(M4 B-2)은 늘 이 자리에서 그려지고, 다른 것을 볼 때는 숨기만 한다. iframe은
-          DOM에서 떼는 순간 문서를 잃는다. 그러면 세션에 갔다 돌아올 때마다 앱이 처음부터 다시 뜬다.
+          Pinned screens (M4 B-2) are always rendered in this spot, and when viewing something
+          else they are only hidden. An iframe loses its document the moment it is detached from
+          the DOM. Detaching it would mean the app comes up from scratch every time the person
+          goes to a session and comes back.
         */}
         <PinnedApps />
         <Overlay />
@@ -303,25 +323,28 @@ function Body() {
 }
 
 /**
- * 상단 바 = 계기판.
+ * Top bar = the dashboard.
  *
- * **숫자는 하나다** (사용자 요청 2026-09-09). FR-12는 승인과 응답대기를 합산하지 말라고
- * 적었고 오래 그렇게 했는데, 도그푸딩에서 그 둘을 가르는 일이 상단 바에서 일어나지
- * 않았다: 어느 쪽이든 답은 "목록을 열어 하나씩 처리한다"였고, 종류는 목록의 줄마다
- * 이미 적혀 있다. 계기판에 둘을 세워 두면 읽는 사람이 매번 합을 자기 머리로 냈다.
+ * There is one number (user request, 2026-09-09). FR-12 said not to sum approvals and
+ * waiting-for-input, and that held for a long time, but dogfooding showed that the decision to
+ * tell the two apart never actually happened at the top bar: either way, the answer was "open the
+ * list and work through it one by one", and the kind is already written on each row of the list.
+ * Keeping the two separate on the dashboard just made the reader do the addition in their head
+ * every time.
  *
- * 대신 **긴급함은 밝기가 나른다**: 승인·오류가 하나라도 있으면 순백(beacon), 응답대기만
- * 있으면 회색. 순백은 나를 **막고 있는 것**의 몫이라는 규칙은 그대로다.
+ * Instead, brightness carries the urgency: pure white (beacon) if there is even one approval or
+ * error, gray if only waiting-for-input. The rule that pure white is reserved for whatever is
+ * blocking me still holds.
  */
-/** 바의 모서리 여백. 오른쪽 `pr-4`와 같은 값이고, 왼쪽 패딩의 바닥이기도 하다 */
+/** The bar's edge margin. Same value as `pr-4` on the right, and also the floor for the left padding */
 const EDGE_PADDING = 16
 
 function TopBar() {
   const counts = useCounts()
   const toggleInbox = useStore((s) => s.toggleInbox)
 
-  // 왼쪽 위를 창 버튼이 차지하면 그만큼 비운다. 타이틀바를 숨겼기 때문에
-  // 이 헤더가 유일한 드래그 손잡이다 —
+  // Leave room in the top-left if the window buttons occupy it. Since the title bar is hidden,
+  // this header is the only drag handle —
   //
   // How much to leave is a platform fact, so we ask instead of assuming. It was
   // `pl-[86px]`, which is right on macOS (the traffic lights sit inside this bar) and
@@ -330,29 +353,31 @@ function TopBar() {
   const controlsInset = useCapability('windowControlsInset')
   const sc = useShortcut()
   /*
-   * 상단 바.
+   * Top bar.
    *
-   * data-tauri-drag-region이 없으면 창을 옮길 수 없다 (도그푸딩에서 지적됨).
+   * Without data-tauri-drag-region, the window cannot be moved (caught in dogfooding).
    *
-   * **신호등과 같은 축에 선다.** 처음엔 바를 타이틀바 높이(28px)로 줄여서 맞췄는데,
-   * 그러니 바가 너무 얇아졌다. 신호등 위치는 tauri.conf.json의
-   * `trafficLightPosition`으로 우리가 정할 수 있으므로, 이제 **바 높이를 먼저 정하고
-   * 버튼을 거기에 맞춘다** — 화면이 요구하는 높이를 창 장식이 정하게 두지 않는다.
+   * Aligned on the same axis as the traffic lights. It was first fitted by shrinking the bar
+   * down to title-bar height (28px), which made the bar too thin. Since we control the traffic
+   * light position ourselves through `trafficLightPosition` in tauri.conf.json, the bar height is
+   * now decided first and the buttons are fit to it — the window decoration does not get to
+   * dictate the height the screen needs.
    *
-   *   바 높이 36px, 버튼 지름 12px → y = (36 - 12) / 2 = 12
+   *   bar height 36px, button diameter 12px → y = (36 - 12) / 2 = 12
    *
-   * 둘은 같이 움직여야 한다. 바 높이를 바꾸면 tauri.conf.json의 y도 함께 고쳐라
-   * (tooling/styles.test.ts가 그 관계를 검사한다).
+   * The two must move together. If the bar height changes, fix the y in tauri.conf.json too
+   * (tooling/styles.test.ts checks that relationship).
    */
   return (
     <DragRegion
       className="flex h-9 shrink-0 items-center gap-4 border-b border-edge bg-pit pr-4"
       /*
-       * 신호등이 없는 곳에서는 inset이 0이다 (웹·목이 그렇게 보고한다 — 비켜설 버튼이
-       * 없으니 맞는 값이다). 그런데 그대로 쓰면 왼쪽 여백이 통째로 사라져서 이름이 창
-       * 모서리에 붙는다. 오른쪽은 pr-4인데 왼쪽만 맨몸이라 바가 기운 것처럼 보였다
-       * (도그푸딩에서 지적됨). 그래서 **바닥을 둔다** — 비켜설 것이 있으면 그만큼
-       * 비키고, 없으면 다른 모서리와 같은 여백을 쓴다.
+       * Inset is 0 wherever there are no traffic lights (web and mock report it that way —
+       * correct, since there is no button to make room for). But using it as-is would remove the
+       * left margin entirely and the name would sit flush against the window corner. The right
+       * side has pr-4 while the left had nothing, so the bar looked lopsided (caught in
+       * dogfooding). So there is a floor: make room for whatever there is to make room for, and
+       * otherwise use the same margin as the other corners.
        */
       style={{ paddingLeft: Math.max(controlsInset, EDGE_PADDING) }}
       testId="app-header"
@@ -375,11 +400,13 @@ function TopBar() {
       </span>
 
       {/*
-        목록은 **이 버튼 바로 아래**로 내려온다 (사용자 요청 2026-09-09). 화면 가운데
-        모달이던 동안에는 누른 자리와 열린 자리가 멀어서, 숫자를 보고 목록을 여는 한
-        동작이 눈을 두 번 움직이게 했다. 누르는 곳과 나타나는 곳은 같아야 한다 (#4의 규칙).
+        The list drops down directly below this button (user request, 2026-09-09). While it was a
+        modal in the center of the screen, the place pressed and the place it opened were far
+        apart, so the one action of seeing the number and opening the list made the eye move
+        twice. Where something is pressed and where it appears must be the same place (the rule
+        from #4).
       */}
-      {/* inline이 아니라 flex — inline span의 상자는 글줄이라 top-full이 버튼 밑이 아니다 */}
+      {/* flex, not inline — an inline span's box is a text line, so top-full lands wrong */}
       <span className="relative flex">
         <button
           className="group flex items-center gap-2.5 rounded px-2 py-0.5 transition-colors hover:bg-graphite/50"
@@ -402,17 +429,18 @@ function TopBar() {
       </span>
 
       {/*
-        단축키 칩(⌘I · ⌘⇧A)은 여기 없다 (이슈 #33).
+        The shortcut chips (⌘I · ⌘⇧A) are not here (issue #33).
 
         They sat beside the count and brightened with it, so at the one moment the bar has
         something to say — something is waiting — two of the three bright things were
         instructions. A shortcut hint is worth reading once and then never again, but a chip
-        on the dashboard charges attention on every glance, forever. 계기판은 상태를 말하는
-        자리다.
+        on the dashboard charges attention on every glance, forever. The dashboard is the place
+        that speaks state.
 
-        **밝아지는 것은 숫자가 계속 맡는다.** 칩이 켜지던 조건은 `waiting > 0` 하나였는데,
-        숫자는 이미 종류별로(승인은 beacon, 응답대기는 ash) 자기 밝기를 갖고 있다 —
-        더 정확한 신호가 이미 그 자리에 있었고, 칩은 거기 편승했을 뿐이다.
+        Brightening stays the number's job. The chip's on-condition was just `waiting > 0`, while
+        the number already has its own brightness by kind (beacon for approvals, ash for
+        waiting-for-input) — a more accurate signal was already there, and the chip was just
+        riding along with it.
 
         Where they went: named with their keys in Settings → Shortcuts, and runnable from
         the command palette (⌘K). Deleting the only visible mention was the failure to avoid,
@@ -420,26 +448,31 @@ function TopBar() {
       */}
       <span className="ml-auto flex items-center gap-3">
         {/*
-          "새 버전이 있습니다" — 있을 때만 나타나는 한 줄 (이슈 #43).
+          "A new version is available" — a line that appears only when there is one (issue #43).
 
-          단축키 칩을 걷어낸 자리(위 주석)에 무언가를 다시 놓는 셈인데, 성질이 반대다:
-          칩은 늘 켜져 있으면서 처음 한 번 뒤로는 아무것도 알려주지 않았고, 이 줄은
-          평소엔 아예 없다가 계기판이 할 말이 생겼을 때만 선다. 그리고 이것도 상태다 —
-          "이 앱은 지금 최신이 아니다"는 계기판이 답할 만한 질문이다.
+          This puts something back in the spot the shortcut chips were removed from (comment
+          above), but with the opposite character: the chip stayed on all the time and stopped
+          telling anything after the first time it was seen, while this line is normally absent
+          entirely and only appears when the dashboard has something to say. And this too is
+          state — "this app is not up to date right now" is a question the dashboard should be
+          able to answer.
         */}
         <UpdateLine />
         {/*
-          사용량은 글자 버튼이 아니라 **도구마다 도넛 하나**다 (사용자 요청 2026-09-09).
-          계기판은 물어보기 전에 답이 있어야 하는 자리고, 상세는 그 도넛 아래로 내려온다.
+          Usage is one donut per tool, not a text button (user request, 2026-09-09). The dashboard
+          is a place where the answer should already be there before anyone asks, and the detail
+          drops down below that donut.
 
-          이 한 자리가 연결 상태도 겸한다: host가 없으면 에이전트에 닿을 방법 자체가 없으므로
-          도넛 대신 'Disconnected'가 선다. 'Connected'는 적지 않는다 — 정상은 조용한 게 맞다.
+          This one spot also doubles as connection status: if there is no host, there is no way
+          to reach the agent at all, so "Disconnected" stands in place of the donut. "Connected"
+          is not written — normal should stay quiet.
         */}
         <UsageDonuts />
         {/*
-          설정에는 입구가 커맨드 팔레트 하나뿐이었다. 그런데 그 안에 **단축키 표**가 들어 있다 —
-          단축키를 이미 아는 사람만 단축키 표를 볼 수 있었던 셈이다. 도그푸딩에서 "설정이
-          안 보이는데?"로 드러났다. 흐름을 강요하지 않는 것과 입구를 감추는 것은 다르다.
+          Settings used to have exactly one entrance: the command palette. But the shortcuts
+          table lives inside it — meaning only someone who already knew the shortcuts could see
+          the shortcuts table. Dogfooding surfaced this as "where are the settings?". Not forcing
+          a flow is different from hiding the entrance.
         */}
         <button
           className="rounded px-2 py-1 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
@@ -450,10 +483,11 @@ function TopBar() {
           Settings
         </button>
         {/*
-          'Add project'는 여기 있었다. 사이드바 맨 아래로 옮겼다 (이슈 #4) —
-          누르는 곳(화면 오른쪽 끝)과 결과가 나타나는 곳(왼쪽 사이드바)이 화면을
-          가로질러 떨어져 있었다. 상단 바는 **계기판**이라, 무언가를 만드는 버튼이
-          숫자들 옆에 서면 읽는 것과 하는 것이 한 줄에 섞인다.
+          "Add project" used to be here. It moved to the bottom of the sidebar (issue #4) — the
+          place pressed (far right of the screen) and the place the result appeared (the sidebar
+          on the left) were apart, across the whole screen. The top bar is a dashboard, and a
+          button that creates something standing next to the numbers mixes reading and doing into
+          one row.
         */}
       </span>
     </DragRegion>
@@ -474,14 +508,15 @@ function Metric({
   return (
     <span className={`flex items-baseline gap-1.5 ${tone}`} data-testid={testId}>
       {/*
-        빛무리는 **숫자의 것**이다 (사용자 지적 2026-09-12: "번져 보인다").
+        The glow belongs to the number (user's observation, 2026-09-12: "it looks smeared").
 
-        `beacon`은 색과 함께 `text-shadow: 0 0 6px rgb(255 255 255 / .45)`를 건다. 색은
-        여기서 text-slate로 덮이지만 **그림자는 상속된다** — 그래서 #5c5c5c 글자가 흰
-        빛무리를 쓰고 있었다. 어두운 글자에 밝은 후광은 빛나 보이는 게 아니라 초점이
-        안 맞아 보인다. 순백 글자 위에서만 빛무리가 빛무리다.
+        `beacon` sets both a color and `text-shadow: 0 0 6px rgb(255 255 255 / .45)`. The color
+        gets overridden here by text-slate, but the shadow is inherited — so the #5c5c5c label
+        text was wearing a white glow. A bright halo on dark text does not look luminous, it looks
+        out of focus. A glow is only a glow on pure white text.
 
-        이름표는 밝기 경쟁에서 빠지는 자리이므로(늘 slate), 상속만 끊는다.
+        Since the label sits out of the brightness competition (always slate), only the
+        inheritance is cut off.
       */}
       <span className="text-[10px] text-slate [text-shadow:none]">{label}</span>
       <span className="readout text-[13px] leading-none">{String(value).padStart(2, '0')}</span>
@@ -489,7 +524,7 @@ function Metric({
   )
 }
 
-/** 관제 루프는 마우스 없이 돌아야 한다 (FR-17) */
+/** The control loop must be operable without a mouse (FR-17) */
 function GlobalKeys() {
   const toggleInbox = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
@@ -499,12 +534,14 @@ function GlobalKeys() {
       const t = e.target as HTMLElement
       const typing = t.tagName === 'TEXTAREA' || t.tagName === 'INPUT'
       /*
-        글자도 숫자와 같은 이유로 뜻을 묻는다 (app/keys.ts). 아래 숫자 주석이 말하는
-        "Shift를 누르면 e.key가 기호가 된다"는 글자에도 그대로 일어난다 — 한글 자판에서는
-        조합키 없이도 k가 ㅏ로 온다. 라틴 글자로 온 것은 그대로 믿고, 아닐 때만 자리를 본다.
+        Letters get their meaning asked for the same reason as digits (app/keys.ts). The digit
+        comment below says "e.key becomes a symbol when Shift is held", and the same thing
+        happens with letters — on a Korean keyboard layout, k comes through as ㅏ even with no
+        modifier key. A letter that arrives as Latin is trusted as-is, and only checked by
+        position otherwise.
       */
       const letter = letterOf(e)
-      // 커맨드 팔레트 ⌘K (FR-17)
+      // Command palette ⌘K (FR-17)
       if ((e.metaKey || e.ctrlKey) && letter === 'k') {
         e.preventDefault()
         useStore.getState().togglePalette()
@@ -515,7 +552,8 @@ function GlobalKeys() {
         toggleInbox()
         return
       }
-      // 다음 대기로 이동: 승인 → 오류 → 응답대기 순 (정렬은 core)
+      // Jump to the next waiting item: approval → error → waiting-for-input, in that order
+      // (sorting lives in core)
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && letter === 'a') {
         e.preventDefault()
         const st = useStore.getState()
@@ -523,16 +561,17 @@ function GlobalKeys() {
         if (next) focusSession(next)
         return
       }
-      // 증거 패널 토글 ⌘B — 탭 전환(⌘⇧1~4)을 대신한다.
-      // 깃·파일은 대화를 대신하는 화면이 아니라 옆에 함께 두는 것이다.
+      // Toggle the evidence panel ⌘B — replaces tab switching (⌘⇧1-4).
+      // Git and files are not a screen that replaces the conversation, they sit alongside it.
       if ((e.metaKey || e.ctrlKey) && letter === 'b') {
         e.preventDefault()
         useStore.getState().togglePanel()
         return
       }
-      // 숫자 단축키는 e.code로 본다 — Shift를 누르면 e.key가 '#' 같은 기호가 된다 (E2E가 잡음)
+      // Digit shortcuts are read from e.code — e.key turns into a symbol like '#' when Shift is
+      // held (caught by e2e)
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
-      // 프로젝트 점프 ⌘1~9 (FR-17)
+      // Jump to project ⌘1-9 (FR-17)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && digit) {
         const st = useStore.getState()
         const project = Object.values(st.projects)[Number(digit) - 1]
@@ -545,7 +584,7 @@ function GlobalKeys() {
       }
       if (!typing && e.key === 'Escape') toggleInbox(false)
     }
-    // 전역 단축키(앱 밖에서 누른 ⌘⇧A)도 같은 동작으로 들어온다
+    // The global shortcut (⌘⇧A pressed outside the app) comes in through the same action
     const onExternalNext = () => {
       const st = useStore.getState()
       const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)

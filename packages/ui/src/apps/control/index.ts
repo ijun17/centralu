@@ -2,7 +2,8 @@ import type { AppModule } from '../contract.js'
 import { ControlRail } from './ControlRail.jsx'
 import { ControlSettings } from './ControlSettings.jsx'
 
-/** 관제 앱 (#80·#81) — 1호 앱. 레일이 전부고, 업무·반장은 다음 단계에 이 앱으로 들어온다 */
+/** The control app (#80/#81) — app #1. The rail is all of it; tasks and the foreman come into
+ * this app in the next stage */
 export const controlApp: AppModule = {
   id: 'control',
   title: 'Control rail',

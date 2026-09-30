@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 
 /**
- * 레인 폭 조절 손잡이.
+ * The lane-width resize handle.
  *
- * 폭은 **손잡이가 붙은 요소의 실제 모서리**를 기준으로 계산한다.
- * 창 가장자리(window.innerWidth)를 기준으로 삼으면, 레이아웃이 한 번 창 밖으로
- * 밀려난 순간부터 기준점이 어긋나 끌수록 더 커지는 되먹임이 생긴다
- * (도그푸딩: "키운 크기보다 더 커져서 화면이 옆으로 스크롤된다").
- * 요소 자신의 rect를 쓰면 밀려난 상태에서도 계산이 스스로 맞춰진다.
+ * Width is calculated relative to the actual edge of the element the handle is attached to.
+ * Using the window's own edge (window.innerWidth) as the reference means the reference point
+ * drifts the instant the layout is pushed past the window, producing a feedback loop where
+ * dragging makes it grow even larger (dogfooding: "it grew larger than what was dragged and the
+ * screen started scrolling sideways"). Using the element's own rect lets the calculation
+ * self-correct even once it has been pushed out of place.
  *
- * 더블클릭하면 기본값으로 돌아온다 — 잘못 끌어놓고 되돌릴 방법이 없으면 안 된다.
+ * Double-clicking resets it to the default — there must be a way back after an accidental drag.
  */
 export function ResizeHandle({
   side,
@@ -21,8 +22,9 @@ export function ResizeHandle({
   onDraggingChange,
 }: {
   /**
-   * 손잡이가 붙는 모서리.
-   * 'left'/'right'는 폭을, 'top'은 높이를 조절한다 — 위아래로 나뉜 두 칸의 경계다.
+   * The edge the handle is attached to.
+   * 'left'/'right' resizes width, 'top' resizes height — the boundary between two panels
+   * stacked vertically.
    */
   side: 'left' | 'right' | 'top'
   onResize: (width: number) => void
@@ -30,7 +32,7 @@ export function ResizeHandle({
   testId: string
   min: number
   max: number
-  /** 끄는 중에는 애니메이션을 꺼야 한다 — 매 프레임 보간하면 손을 따라오지 못한다 */
+  /** Animation must be turned off while dragging — interpolating every frame cannot keep up with the hand */
   onDraggingChange?: (dragging: boolean) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -54,7 +56,7 @@ export function ResizeHandle({
       onDraggingChange?.(false)
     }
 
-    // 끄는 동안 글자가 잡히면 커서가 튄다
+    // If text gets selected while dragging, the cursor jumps
     document.body.style.cursor = side === 'top' ? 'row-resize' : 'col-resize'
     document.body.style.userSelect = 'none'
     window.addEventListener('mousemove', onMove)

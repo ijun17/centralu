@@ -5,9 +5,10 @@ import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 
 /**
- * 파생 상태는 전부 여기서 계산한다 (docs/state-management.md §3) — 저장 금지.
- * 주의: zustand 셀렉터가 매번 새 객체를 만들면 무한 리렌더가 난다.
- * 그래서 스토어에서는 안정된 참조(sessions 맵)만 꺼내고, 계산은 useMemo로 감싼다.
+ * All derived state is computed here (docs/state-management.md §3) — never stored.
+ * Caution: a zustand selector that builds a new object on every call causes an infinite
+ * re-render loop. So only a stable reference (the sessions map) is pulled out of the store, and
+ * the computation itself is wrapped in useMemo.
  */
 
 const toCandidate = (x: SessionSummary) => ({
@@ -82,14 +83,15 @@ export function useFocusedSession(): SessionSummary | undefined {
 }
 
 /**
- * 사이드바에서 **지금 고른 것**.
+ * What is currently selected in the sidebar.
  *
- * 그리드를 보고 있으면 세션도 프로젝트도 고른 것이 아니다 — 고른 것은 그리드다.
- * 예전에는 세션 줄이 `focusedSessionId`만 봐서, 그리드에 들어가도 세션이 계속
- * 골라진 것처럼 밝게 남아 있었다 (도그푸딩). 화면에 밝은 것이 둘이면 어느 쪽을 보고
- * 있는지 화면이 스스로 모순된다.
+ * While looking at the grid, neither a session nor a project is selected — the grid is what is
+ * selected. A session row used to look only at `focusedSessionId`, so entering the grid left the
+ * session row still lit up as if it were selected (dogfooding). With two bright things on
+ * screen at once, the screen contradicts itself about which one is being looked at.
  *
- * 한 곳에서 계산하는 이유: 세션 줄과 프로젝트 줄이 각자 판단하면 언젠가 한쪽만 고쳐진다.
+ * Why this is computed in one place: if the session row and the project row each made their own
+ * judgment, one of them would eventually get fixed while the other did not.
  */
 export function useSelectedSessionId(): string | null {
   return useStore((s) => (s.view === 'focus' ? s.focusedSessionId : null))
@@ -104,7 +106,7 @@ export function useConflicts() {
   return useMemo(() => detectFileConflicts(Object.values(sessions)), [sessions])
 }
 
-/** 훅이 아닌 곳(전역 단축키 핸들러 등)에서 쓰는 순수 계산 */
+/** A pure computation for use outside a hook (e.g. a global shortcut handler) */
 export function computeInbox(state: AppState, now = Date.now()): InboxItem[] {
   return buildInbox(Object.values(state.sessions).map(toCandidate), now)
 }

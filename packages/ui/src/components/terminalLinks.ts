@@ -1,26 +1,27 @@
 import type { ILink, ILinkProvider, Terminal } from '@xterm/xterm'
 
 /**
- * 터미널은 셸·자주 쓰는 명령 로그·명령 전용 터미널 세 곳에서 쓰인다. URL을 각 화면이
- * 따로 찾아 열면 한쪽만 VS Code처럼 되고 나머지는 평문으로 남으므로, 링크 판정과 열기를
- * 이 작은 공통 부품 하나에 둔다.
+ * The terminal is used in three places: the shell, the frequently-used-command log, and a
+ * command-dedicated terminal. If each screen found and opened URLs on its own, one would end up
+ * looking like VS Code and the rest would stay plain text, so link detection and opening live in
+ * this one small shared piece instead.
  *
- * `http(s)`만 받는다. 터미널 출력은 신뢰할 수 없는 문자열이므로 `file:`, `javascript:`
- * 같은 스킴까지 클릭 가능한 UI로 만들면 안 된다. 프로젝트 파일은 이미 대화의 FileLink가
- * 읽기 전용 뷰어로 다루는 별개의 길이다.
+ * Only `http(s)` is accepted. Terminal output is an untrusted string, so a scheme like `file:` or
+ * `javascript:` must not be turned into clickable UI. A project file is already a separate path,
+ * handled by the conversation's FileLink as a read-only viewer.
  */
 const HTTP_URL = /https?:\/\/[^\s<>"'`]+/gi
 const TRAILING_PUNCTUATION = /[),.:;!?\]}]+$/
 
 export type TerminalHttpLink = { text: string; start: number; end: number }
 
-/** 한 줄의 xterm 출력에서 열 수 있는 URL과 그 문자열 인덱스를 찾는다. */
+/** Finds the openable URLs in one line of xterm output, along with their string indexes. */
 export function findTerminalHttpLinks(line: string): TerminalHttpLink[] {
   const links: TerminalHttpLink[] = []
   HTTP_URL.lastIndex = 0
 
   for (let match = HTTP_URL.exec(line); match; match = HTTP_URL.exec(line)) {
-    // 문장 끝의 `https://example.com).`에서 닫는 문장 부호는 URL이 아니다.
+    // In `https://example.com).` at the end of a sentence, the closing punctuation is not part of the URL.
     const text = match[0].replace(TRAILING_PUNCTUATION, '')
     if (!text) continue
     try {
@@ -28,23 +29,24 @@ export function findTerminalHttpLinks(line: string): TerminalHttpLink[] {
       if (url.protocol !== 'http:' && url.protocol !== 'https:') continue
       links.push({ text: url.href, start: match.index, end: match.index + text.length })
     } catch {
-      // 정규식 모양만 URL인 깨진 출력은 평문으로 둔다.
+      // Broken output that only looks like a URL by regex shape is left as plain text.
     }
   }
   return links
 }
 
-/** VS Code terminal과 같이 오동작을 막기 위해 수정 키가 있을 때만 링크를 연다. */
+/** Only opens a link when a modifier key is held, matching VS Code's terminal, to prevent misfires. */
 export function isTerminalLinkActivation(event: Pick<MouseEvent, 'metaKey' | 'ctrlKey'>): boolean {
   return event.metaKey || event.ctrlKey
 }
 
 /**
- * xterm의 한 줄 링크 공급자.
+ * xterm's per-line link provider.
  *
- * xterm buffer 좌표는 1-based이고, 일반 문자열 인덱스는 0-based다. URL은 ASCII라 URL
- * 자체의 code-unit과 터미널 cell 수가 같으며, 범위의 끝도 xterm이 기대하는 inclusive
- * 1-based 좌표(`start + length`)로 바꾼다.
+ * xterm buffer coordinates are 1-based, while ordinary string indexes are 0-based. Since a URL
+ * is ASCII, the number of code units in the URL itself equals the number of terminal cells, and
+ * the end of the range is also converted to the inclusive 1-based coordinate xterm expects
+ * (`start + length`).
  */
 export function registerTerminalHttpLinks(term: Terminal, openUrl: (url: string) => void) {
   const provider: ILinkProvider = {
@@ -61,9 +63,10 @@ export function registerTerminalHttpLinks(term: Terminal, openUrl: (url: string)
           activate(event) {
             if (!isTerminalLinkActivation(event)) return
             event.preventDefault()
-            // URL은 위에서 http(s)로 검증했다. 바깥 브라우저로 열어 앱의 현재 작업을 건드리지 않는다.
-            // window.open을 직접 부르면 데스크톱 웹뷰에서는 아무것도 열리지 않는다 (#159) —
-            // 여는 길은 플랫폼 포트가 안다.
+            // The URL was already validated as http(s) above. Opens in an outside browser so it
+            // does not disturb the app's current work.
+            // Calling window.open directly opens nothing in the desktop webview (#159) — the
+            // platform port knows the way to open it.
             openUrl(found.text)
           },
           hover() {

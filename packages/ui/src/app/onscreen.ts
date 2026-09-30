@@ -1,15 +1,17 @@
 /**
- * 지금 화면에 무엇이 보이는가 — 응답 완료 바람이 불지 말지의 근거.
+ * What is visible on screen right now — the basis for whether the completion gust blows.
  *
- * 파일 이름이 Gust.tsx와 **대소문자만 달라서는 안 된다.** macOS 파일시스템은
- * 대소문자를 구분하지 않아 번들러가 엉뚱한 파일을 문다 — 타입체크는 통과하는데
- * 화면이 통째로 빈 채로 뜬다 (시연하다 실제로 겪었다).
+ * This filename must not differ from Gust.tsx by case alone. The macOS filesystem is
+ * case-insensitive, so the bundler picks up the wrong file — the type check still passes, but the
+ * screen comes up completely blank (actually hit this while demoing).
  *
- * 끝난 세션이 지금 화면에 있을 때만 분다. 안 보이는 세션까지 쓸어버리면,
- * 다른 것을 읽는 동안 관계없는 바람이 계속 지나간다 — 세션이 여럿일수록 심해진다.
- * 화면 밖에서 끝난 것은 이미 뱃지와 알림이 말한다.
+ * It only blows when the finished session is currently on screen. Sweeping across sessions that
+ * are not visible would mean an unrelated gust keeps passing by while reading something else — and
+ * it gets worse the more sessions there are. Something that finished off screen is already spoken
+ * for by the badge and the notification.
  *
- * "지금 보고 있는 것이 끝났다"는 사실 하나만 몸으로 알려주는 게 이 애니메이션의 몫이다.
+ * This animation's whole job is to tell the body, and only the body, the single fact that "what
+ * is being looked at right now has finished".
  */
 export type View = 'focus' | 'grid' | 'orchestrator' | 'app'
 
@@ -17,7 +19,8 @@ export type Onscreen = {
   focusedSessionId: string | null
   orchestratorId: string | null
   gridPanels: readonly string[]
-  /** 보이는 고정 화면(M4 B-2) 옆에 대화가 열린 만드는 세션 (BuilderPane) — 없으면 null */
+  /** The builder session whose conversation is open beside the visible pinned screen (M4 B-2)
+   * (BuilderPane) — null if there is none */
   builderPaneSessionId?: string | null
   /** The sessions the project screen shows (#203), empty when it is not showing (`projectScreenSessions`) */
   projectScreen?: readonly string[]
@@ -32,11 +35,14 @@ export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolea
   if (view === 'focus') return ctx.focusedSessionId ? ctx.focusedSessionId === sessionId : !!ctx.projectScreen?.includes(sessionId)
   if (view === 'orchestrator') return ctx.orchestratorId === sessionId
   /*
-   * 고정 화면(M4 B-2)이 메인 영역을 차지한다 — 보이는 대화는 화면 옆에 연 만드는 세션의 것(BuilderPane) 하나뿐이다. 그것까지 "안
-   * 보인다"로 치던 동안, 앱을 고치는 사람이 옆에서 지켜보는 그 세션의 턴이 끝날 때마다 "Finished" 카드(와 소리)가 떴고, 카드는 고정
-   * 화면 머리의 Builder·Runs·닫기와 Runs의 Refresh 위에 서서 누름을 가로챘다(카드는 걷을 때까지 남는다).
+   * The pinned screen (M4 B-2) occupies the main area — the only visible conversation is the one
+   * builder session opened beside it (BuilderPane). While that one was also counted as "not
+   * visible", a "Finished" card (and sound) popped up every time that session's turn ended, right
+   * while the person fixing the app was watching it beside them, and the card sat on top of the
+   * pinned screen's header (Builder, Runs, close) and the Runs tab's Refresh, intercepting clicks
+   * (the card stays until it is dismissed).
    */
   if (view === 'app') return !!ctx.builderPaneSessionId && ctx.builderPaneSessionId === sessionId
-  // 그리드는 여러 개가 동시에 보인다 — 그중 하나만 끝나도 화면에서 끝난 것이다
+  // The grid shows several at once — even one of them finishing counts as finishing on screen
   return ctx.gridPanels.includes(sessionId)
 }
