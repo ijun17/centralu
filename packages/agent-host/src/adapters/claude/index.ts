@@ -214,7 +214,7 @@ class ClaudeSession implements SessionHandle {
   /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
   private turnOpen = false
   /** Choices waiting on an answer. Unlike approvals, **more than one can be open at once**. */
-  private questions = new Map<string, (r: unknown) => void>()
+  private questions = new Map<string, { resolve: (r: unknown) => void; input: Record<string, unknown> }>()
   private pending = new Map<string, PendingApproval>()
   /** The live query — the channel for asking about slash commands and context. */
   private query: QueryHandle | null = null
@@ -405,16 +405,22 @@ class ClaudeSession implements SessionHandle {
           /*
            * **A choice is a question, not an approval** (FR: AskUserQuestion).
            *
-           * The path here was found by measurement (probe-askuserquestion.mts):
+           * The path here was found by measurement (probe-askuserquestion.mts, 2026-08-18):
            *   arrives via canUseTool    yes — the arguments (question, choices) arrive whole
            *   arrives via onUserDialog  no — never called even once, no matter what kind was declared
-           *   letting it just execute   → "The user did not answer the questions."
+           *   allow with the input unchanged → the CLI tries its own dialog, and the tool ends with
+           *                                    "The user did not answer the questions."
            *
-           * So this intercepts it here, asks the person, and **returns the answer as a deny's
-           * message.** It looks strange, but that message is exactly what goes to the model as
-           * this tool's own result — measured, and the model read it correctly, as in "The user
-           * chose ramen." Answering with allow instead makes the CLI try and fail to show its own
-           * dialog, and it ends with no answer at all.
+           * So this intercepts it here and asks the person. The answer goes back as an **allow whose
+           * `updatedInput.answers` carries it** (see `answerQuestion`). That field is the SDK's own
+           * ("User answers collected by the permission component", sdk-tools.d.ts), and with it filled the
+           * tool finishes normally: measured 2026-09-30, the result came back with `is_error: false` as
+           * `Your questions have been answered: "Pick a color"="Blue"…`, and the model replied "Blue".
+           *
+           * Until then the answer went back as a **deny's message**, the only other way found to hand the
+           * model arbitrary text as this tool's result. The model read it correctly, but the CLI marks a
+           * denied tool's result as an error, so every answered card read "Failed" (2026-09-30, the Mea
+           * session).
            */
           if (toolName === 'AskUserQuestion') {
             const questions = parseQuestions(toolInput)
@@ -423,7 +429,7 @@ class ClaudeSession implements SessionHandle {
             const requestId = `q-${++self.reqCounter}`
             self.emit({ type: 'question_request', sessionId: self.sessionId, requestId, questions })
             return new Promise((resolve) => {
-              self.questions.set(requestId, resolve as (r: unknown) => void)
+              self.questions.set(requestId, { resolve: resolve as (r: unknown) => void, input: toolInput })
             })
           }
           const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
@@ -596,15 +602,16 @@ class ClaudeSession implements SessionHandle {
   /**
    * Answers a choice. The same rule as approval — **returns whether it was reached.**
    *
-   * The answer goes out as a deny's message. That message becomes this tool's own result on its
-   * way to the model (confirmed by measurement). It is named a denial, but what actually gets
-   * delivered is what the person chose.
+   * The answer goes back as an allow with `updatedInput.answers`: the question's text mapped to the chosen labels,
+   * several of them joined with ", " as the SDK describes for multi-select. The tool then finishes as a success and
+   * the model receives the answers in the CLI's own words (see the AskUserQuestion branch of `canUseTool`).
    */
   answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
-    const resolve = this.questions.get(requestId)
-    if (!resolve) return false
+    const open = this.questions.get(requestId)
+    if (!open) return false
     this.questions.delete(requestId)
-    resolve({ behavior: 'deny', message: JSON.stringify({ answers }) })
+    const byQuestion = Object.fromEntries(answers.map((a) => [a.question, a.answers.join(', ')]))
+    open.resolve({ behavior: 'allow', updatedInput: { ...open.input, answers: byQuestion } })
     this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
     return true
   }
@@ -826,8 +833,9 @@ class ClaudeSession implements SessionHandle {
 
   /** Releases a choice that was still waiting on an answer — **never released silently**, for the same reason as approval. */
   private releaseQuestions(why: string): void {
-    for (const [id, resolve] of this.questions) {
-      resolve({ behavior: 'deny', message: why })
+    // Closed without an answer: a deny, so the tool's result reads as the failure it is
+    for (const [id, open] of this.questions) {
+      open.resolve({ behavior: 'deny', message: why })
       this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId: id })
     }
     this.questions.clear()
