@@ -2,60 +2,64 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 
 /**
- * 우리 앱 명령의 권한 (#143, 스파이크 S-2).
+ * Permissions for our app commands (#143, spike S-2).
  *
- * Tauri는 앱 매니페스트가 없으면 **로컬 출처에서 온 앱 명령을 권한 검사 없이 통과시킨다**
- * (tauri 2.11.5 webview/mod.rs `on_message`). 그러면 로컬 출처의 페이지는 어느 창·어느
- * 프레임이든 우리 명령을 모두 부를 수 있고, 막는 것은 실행마다 바뀌는 invoke 키 하나다. 그
- * 키는 틀릴 때마다 Tauri가 표준에러에 그대로 쓴다. 그래서 build.rs가 명령마다 권한을 만들고
- * (`AppManifest::commands`), capabilities/default.json이 그 권한을 창 `main`의 로컬 출처에만
- * 준다. 여기서는 그 셋이 서로, 그리고 화면이 실제로 부르는 명령과 맞는지 본다.
+ * Without an app manifest, Tauri **lets an app command from a local origin through with no
+ * permission check at all** (tauri 2.11.5 webview/mod.rs `on_message`). Under that, a page on
+ * a local origin, from any window or frame, can call any of our commands, and the only thing
+ * standing in the way is the invoke key, which changes on every run. Whenever that key is
+ * wrong, Tauri writes it to stderr verbatim. So build.rs generates a permission for every
+ * command (`AppManifest::commands`), and capabilities/default.json grants those permissions
+ * only to the local origin of window `main`. This checks that the three agree with each other,
+ * and with the commands the screen actually calls.
  *
- * - 매니페스트 = `invoke_handler`. 매니페스트에만 있으면 처리기 없는 권한이 생기고, 처리기에만
- *   있으면 권한 없는 명령이 생긴다. 권한 없는 명령은 메인 창에서도 거절된다.
- * - 준 권한 = 화면이 부르는 명령. 더 주면 앱 화면 프레임이 노릴 표면만 넓어지고, 덜 주면
- *   화면이 깨진다.
- * - `remote`가 없다. `remote` 권한은 그 출처의 페이지에 권한을 준다. 앱 화면은 루프백 http의
- *   프레임이라, 127.0.0.1을 덮는 `remote`가 생기면 앱 화면 프레임이 우리 명령을 부른다.
+ * - The manifest has to equal `invoke_handler`. A command only in the manifest has a
+ *   permission with no handler; a command only in the handler has no permission at all. A
+ *   command with no permission is refused even from the main window.
+ * - What is granted has to equal what the screen calls. Granting more only widens the surface
+ *   an app screen frame could aim at; granting less breaks the screen.
+ * - No `remote` exists. A `remote` permission grants permissions to pages from that origin.
+ *   Since an app screen is a loopback http frame, a `remote` covering 127.0.0.1 would let an
+ *   app screen frame call our commands.
  *
- * 창에서 잰 값은 #143 커밋에 있다. 메인 프레임에서는 12개가 모두 답했다. 루프백 프레임에서는
- * 진짜 키를 쥐어도 `allowed on: [windows: "main", URL: local] … permission: allow-<명령>`으로
- * 거절되었다.
+ * The values measured in the window live in the #143 commit. The main frame got all 12
+ * answered. The loopback frame was refused with `allowed on: [windows: "main", URL: local] …
+ * permission: allow-<command>` even holding the real key.
  */
 
 const TAURI = 'apps/desktop/src-tauri'
 const url = (p: string) => new URL(`../${p}`, import.meta.url)
 const read = (p: string) => readFileSync(url(p), 'utf8')
-/** 디렉터리 아래 모든 파일 (그 디렉터리 기준 상대 경로) */
+/** Every file under a directory (as a path relative to that directory). */
 const files = (dir: string) =>
   (readdirSync(url(dir), { recursive: true }) as string[]).filter((f) => statSync(url(`${dir}/${f}`)).isFile()).sort()
-/** Rust 주석을 지운다 — 주석 안의 이름이나 괄호가 목록으로 읽히지 않게 */
+/** Strips Rust comments — so a name or bracket inside a comment is not read as part of a list. */
 const stripRustComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-/** 명령 이름 → 권한 이름 (tauri-utils 2.9.3 acl/build.rs `autogenerate_command_permissions`) */
+/** Command name → permission name (tauri-utils 2.9.3 acl/build.rs `autogenerate_command_permissions`). */
 const allow = (command: string) => `allow-${command.replaceAll('_', '-')}`
 
-/** lib.rs의 `invoke_handler(tauri::generate_handler![…])`에 적은 명령 */
+/** The commands written in lib.rs's `invoke_handler(tauri::generate_handler![…])`. */
 function registered(): string[] {
   const calls = [...stripRustComments(read(`${TAURI}/src/lib.rs`)).matchAll(/\.invoke_handler\(\s*tauri::generate_handler!\[([^\]]*)\]\s*\)/g)]
-  expect(calls, 'lib.rs에 invoke_handler(tauri::generate_handler![…])가 정확히 한 번').toHaveLength(1)
+  expect(calls, 'exactly one invoke_handler(tauri::generate_handler![…]) in lib.rs').toHaveLength(1)
   return calls[0]![1]!.split(',').map((s) => s.trim()).filter(Boolean)
 }
 
-/** build.rs의 `AppManifest::new().commands(&[…])`에 적은 명령 */
+/** The commands written in build.rs's `AppManifest::new().commands(&[…])`. */
 function manifest(): string[] {
   const code = stripRustComments(read(`${TAURI}/build.rs`))
-  // 목록이 있어도 tauri-build에 넘기지 않으면 매니페스트가 아니다
+  // Even with the list present, it is not a manifest unless it is handed to tauri-build.
   expect(code).toMatch(/tauri_build::try_build\(/)
   expect(code).toMatch(/\.app_manifest\(/)
   expect(code).not.toMatch(/tauri_build::build\(\)/)
   const lists = [...code.matchAll(/AppManifest::new\(\)\s*\.commands\(\s*&\[([^\]]*)\]\s*\)/g)]
-  expect(lists, 'build.rs에 AppManifest::new().commands(&[…])가 정확히 한 번').toHaveLength(1)
+  expect(lists, 'exactly one AppManifest::new().commands(&[…]) in build.rs').toHaveLength(1)
   return [...lists[0]![1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
 }
 
 /**
- * 화면이 부르는 앱 명령. `@tauri-apps/api`에 의존하는 패키지는 이 둘뿐이라(아래 시험이 지킨다)
- * `invoke('…')`가 있을 수 있는 곳도 이 둘뿐이다.
+ * The app commands the screen calls. Only these two packages depend on `@tauri-apps/api`
+ * (enforced by a test below), so these two are also the only places `invoke('…')` could exist.
  */
 const CALLER_DIRS = ['apps/desktop/src', 'packages/platform/src']
 function calledFromUi(): string[] {
@@ -85,49 +89,50 @@ function capabilities(): [string, Capability][] {
   return files(CAP_DIR).map((f) => [f, JSON.parse(read(`${CAP_DIR}/${f}`)) as Capability])
 }
 const idOf = (p: Permission) => (typeof p === 'string' ? p : p.identifier)
-/** 접두사(`플러그인:`)가 없는 권한이 앱 매니페스트의 것이다 (tauri-utils acl/resolved.rs `get_prefix().unwrap_or(APP_ACL_KEY)`) */
+/** A permission with no prefix (`plugin:`) belongs to the app manifest (tauri-utils acl/resolved.rs `get_prefix().unwrap_or(APP_ACL_KEY)`). */
 const isAppPermission = (id: string) => !id.includes(':')
 
-/** a에만 있는 것 — 실패 메시지가 무엇이 어긋났는지 이름으로 말하게 */
+/** What is only in a — so the failure message names what did not match. */
 const minus = (a: string[], b: string[]) => a.filter((x) => !b.includes(x)).sort()
 const repeated = (a: string[]) => a.filter((x, i) => a.indexOf(x) !== i)
 
-describe('앱 명령의 권한 (#143)', () => {
-  it('매니페스트는 invoke_handler에 등록한 명령과 같다', () => {
+describe('app command permissions (#143)', () => {
+  it('the manifest equals the commands registered in invoke_handler', () => {
     const m = manifest()
     const r = registered()
-    expect(repeated(m), '매니페스트에 두 번 적힌 명령').toEqual([])
+    expect(repeated(m), 'a command listed twice in the manifest').toEqual([])
     expect({ handlerWithoutPermission: minus(r, m), permissionWithoutHandler: minus(m, r) }).toEqual({
       handlerWithoutPermission: [],
       permissionWithoutHandler: [],
     })
   })
 
-  it('권한 파일은 매니페스트 명령마다 하나씩이고, 그 밖의 권한 파일은 없다', () => {
-    // build.rs가 빌드마다 다시 쓰는 생성물이지만 커밋한다(Tauri 예제 앱과 같게). 명령을 빼도 옛 파일은
-    // 지워지지 않고, `permissions/` 아래 파일은 모두 앱 권한으로 읽힌다.
+  it('there is exactly one permission file per manifest command, and no others', () => {
+    // build.rs is a build artifact rewritten on every build, but it is committed (matching the
+    // Tauri example app). Removing a command does not delete the old file, and every file
+    // under `permissions/` is read as an app permission.
     const want = manifest().map((c) => `autogenerated/${c}.toml`)
     const have = files(`${TAURI}/permissions`)
     expect({ stray: minus(have, want), missing: minus(want, have) }).toEqual({ stray: [], missing: [] })
   })
 
-  it('화면이 부르는 앱 명령은 모두 등록되어 있다', () => {
+  it('every app command the screen calls is registered', () => {
     const called = calledFromUi()
     expect(called.length).toBeGreaterThan(0)
     expect({ calledButNotRegistered: minus(called, registered()) }).toEqual({ calledButNotRegistered: [] })
   })
 
-  it('준 앱 권한은 화면이 부르는 명령의 allow-<명령>뿐이다', () => {
+  it('the only app permissions granted are allow-<command> for what the screen calls', () => {
     const granted = capabilities().flatMap(([, c]) => c.permissions.map(idOf).filter(isAppPermission))
     const needed = calledFromUi().map(allow)
-    expect(repeated(granted), '두 번 준 앱 권한').toEqual([])
+    expect(repeated(granted), 'an app permission granted twice').toEqual([])
     expect({ grantedButNotCalled: minus(granted, needed), calledButNotGranted: minus(needed, granted) }).toEqual({
       grantedButNotCalled: [],
       calledButNotGranted: [],
     })
   })
 
-  it('앱 권한은 창 main의 로컬 출처에만 준다', () => {
+  it('app permissions are granted only to the local origin of window main', () => {
     const granting = capabilities().filter(([, c]) => c.permissions.map(idOf).some(isAppPermission))
     expect(granting.length).toBeGreaterThan(0)
     for (const [f, c] of granting) {
@@ -135,27 +140,28 @@ describe('앱 명령의 권한 (#143)', () => {
       expect(c.webviews ?? [], f).toEqual([])
       expect(c.local, f).not.toBe(false)
       expect(c.remote, f).toBeUndefined()
-      expect(c.platforms, `${f}: 플랫폼을 좁히면 그 밖의 OS에서 화면이 깨진다`).toBeUndefined()
+      expect(c.platforms, `${f}: narrowing the platforms breaks the screen on every other OS`).toBeUndefined()
     }
   })
 })
 
-describe('창 권한의 경계 (S-2)', () => {
-  it('어느 capability에도 remote가 없다 — 있으면 그 출처의 앱 화면 프레임이 권한을 얻는다', () => {
+describe('window permission boundary (S-2)', () => {
+  it('no capability has remote — if one did, an app screen frame from that origin would gain the permission', () => {
     const caps = capabilities()
     expect(caps.length).toBeGreaterThan(0)
     for (const [f, c] of caps) expect(c.remote, f).toBeUndefined()
   })
 
-  it('창·웹뷰를 와일드카드로 고르지 않는다', () => {
+  it('windows and webviews are never selected with a wildcard', () => {
     for (const [f, c] of capabilities()) {
       expect([...(c.windows ?? []), ...(c.webviews ?? [])].filter((w) => w.includes('*')), f).toEqual([])
     }
   })
 
-  it('이 시험이 못 보는 capability가 없다 — JSON 파일만, 설정 파일 안에는 없다', () => {
-    // tauri-build는 capabilities/ 아래를 재귀로(JSON·JSON5·TOML) 읽고, tauri.conf.json의
-    // app.security.capabilities에 적은 것도 쓴다. 이 시험은 여기 JSON 파일만 읽는다.
+  it('there is no capability this test cannot see — only JSON files, none inside config files', () => {
+    // tauri-build reads under capabilities/ recursively (JSON, JSON5, TOML), and also reads
+    // whatever is written in tauri.conf.json's app.security.capabilities. This test only reads
+    // the JSON files here.
     expect(files(CAP_DIR).filter((f) => !f.endsWith('.json'))).toEqual([])
     for (const conf of ['tauri.conf.json', 'tauri.linux.conf.json']) {
       const c = JSON.parse(read(`${TAURI}/${conf}`)) as { app?: { security?: { capabilities?: unknown } } }
@@ -163,7 +169,7 @@ describe('창 권한의 경계 (S-2)', () => {
     }
   })
 
-  it('@tauri-apps/api에 의존하는 패키지는 apps/desktop과 packages/platform뿐이다 — 화면 호출을 찾는 범위', () => {
+  it('apps/desktop and packages/platform are the only packages depending on @tauri-apps/api — the scope this test searches for screen calls', () => {
     const deps = (dir: string) => {
       const pkg = JSON.parse(read(`${dir}/package.json`)) as Record<string, Record<string, string> | undefined>
       return { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies }
@@ -174,7 +180,7 @@ describe('창 권한의 경계 (S-2)', () => {
         try {
           return '@tauri-apps/api' in deps(dir)
         } catch {
-          return false // package.json이 없는 디렉터리
+          return false // a directory with no package.json
         }
       })
     expect(users.sort()).toEqual(['apps/desktop', 'packages/platform'])
@@ -183,12 +189,15 @@ describe('창 권한의 경계 (S-2)', () => {
 })
 
 /**
- * 플러그인이 여는 권한 (#186, M4 E-4). 앱 명령의 권한은 위에서 화면이 부르는 명령과 맞춰 본다. 플러그인의 권한은 그렇게 맞춰 볼
- * 호출 자리가 없어서(웹뷰의 `@tauri-apps/plugin-*`가 부른다), 준 것을 여기 **이름으로** 적는다. 플러그인을 더하거나 권한을 넓히는
- * 일은 이 목록을 고치는 일이다 — 딥링크 플러그인처럼 웹뷰에 스킴 등록 같은 명령을 여는 것이 조용히 들어오지 않게.
+ * The permissions plugins open (#186, M4 E-4). The tests above check app command permissions
+ * against the commands the screen calls; there is no equivalent call site to check plugin
+ * permissions against (they are called by the webview's `@tauri-apps/plugin-*`), so what is
+ * granted is written here **by name**. Adding a plugin or widening a permission means editing
+ * this list — so something like the deep-link plugin opening a scheme-registration command to
+ * the webview cannot slip in quietly.
  */
-describe('플러그인 권한 (#186)', () => {
-  it('준 플러그인 권한은 이 목록뿐이다', () => {
+describe('plugin permissions (#186)', () => {
+  it('the plugin permissions granted are exactly this list', () => {
     const granted = capabilities()
       .flatMap(([, c]) => c.permissions.map(idOf))
       .filter((id) => !isAppPermission(id))
@@ -212,17 +221,21 @@ describe('플러그인 권한 (#186)', () => {
 })
 
 /**
- * 앱 링크 `centralu://app?url=…` (M4 E-4). 스킴은 Info.plist에 하나 등록하고, 링크는 OS의 열기 이벤트(`RunEvent::Opened`)로
- * 받는다. 딥링크 플러그인을 쓰지 않는다: 같은 이벤트를 받는 데 플러그인은 웹뷰에 명령을 더 연다. 웹뷰에 더한 것은 쌓인 링크를
- * 꺼내는 앱 명령 하나(`take_app_links`)이고, 그 권한은 위의 시험들이 다른 명령과 똑같이 맞춰 본다.
+ * App links, `centralu://app?url=…` (M4 E-4). One scheme is registered in Info.plist, and a
+ * link is received through the OS's open event (`RunEvent::Opened`). The deep-link plugin is
+ * not used: receiving that same event through the plugin would open more commands to the
+ * webview. What is added to the webview is a single app command, `take_app_links`, that pulls
+ * out the queued links, and its permission is checked against the other commands by the same
+ * tests above.
  */
-describe('앱 링크 (M4 E-4)', () => {
-  it('등록한 URL 스킴은 centralu 하나뿐이다', () => {
+describe('app links (M4 E-4)', () => {
+  it('the only registered URL scheme is centralu', () => {
     const plist = read(`${TAURI}/Info.plist`).replace(/<!--[\s\S]*?-->/g, '')
     const lists = [...plist.matchAll(/<key>CFBundleURLSchemes<\/key>\s*<array>([\s\S]*?)<\/array>/g)]
     const schemes = lists.flatMap((m) => [...m[1]!.matchAll(/<string>([^<]*)<\/string>/g)].map((s) => s[1]))
     expect(schemes).toEqual(['centralu'])
-    // 설정 파일에서 따로 plist를 가리키면 이 파일이 아닌 것이 합쳐진다 — 이 시험이 보는 것이 번들에 들어가는 것이어야 한다
+    // If a config file pointed at a separate plist, something other than this file would get
+    // merged in — what this test sees has to be what ends up in the bundle.
     for (const conf of ['tauri.conf.json', 'tauri.linux.conf.json']) {
       const c = JSON.parse(read(`${TAURI}/${conf}`)) as { bundle?: { macOS?: { infoPlist?: unknown } }; plugins?: Record<string, unknown> }
       expect(c.bundle?.macOS?.infoPlist, conf).toBeUndefined()
@@ -230,7 +243,7 @@ describe('앱 링크 (M4 E-4)', () => {
     }
   })
 
-  it('딥링크 플러그인이 없다 — 의존에도, 권한에도', () => {
+  it('there is no deep-link plugin — not in dependencies, not in permissions', () => {
     expect(stripRustComments(read(`${TAURI}/Cargo.toml`).replace(/#[^\n]*/g, ''))).not.toMatch(/tauri-plugin-deep-link/)
     for (const dir of ['apps/desktop', 'packages/platform']) {
       expect(read(`${dir}/package.json`), dir).not.toMatch(/plugin-deep-link/)
@@ -238,7 +251,7 @@ describe('앱 링크 (M4 E-4)', () => {
     for (const [f, c] of capabilities()) expect(c.permissions.map(idOf).filter((id) => id.startsWith('deep-link:')), f).toEqual([])
   })
 
-  it('링크를 꺼내는 명령이 등록되어 있고, 화면이 그것을 부르며, 권한은 창 main에만 있다', () => {
+  it('the command that pulls out links is registered, the screen calls it, and its permission is only on window main', () => {
     expect(registered()).toContain('take_app_links')
     expect(calledFromUi()).toContain('take_app_links')
     const granting = capabilities().filter(([, c]) => c.permissions.map(idOf).includes('allow-take-app-links'))

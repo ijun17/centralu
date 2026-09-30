@@ -7,16 +7,19 @@ import { startPlatform } from './bootstrap.js'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
- * 구현체를 아는 유일한 곳 (docs/platform-abstraction.md §4).
+ * The only place that knows about a concrete implementation (docs/platform-abstraction.md §4).
  *
- * 물음표 뒤에 붙일 수 있는 것은 둘뿐이다:
+ * Only two things can follow the question mark:
  *
- *   ?mock=1            인메모리 구현으로 뜬다. **빈 화면** — Playwright가 쓰는 길이다.
- *   ?demo[=씬]         그 위에 씬을 깐다 (프로젝트·세션·대화·깃·사용량). 말을 걸면 답이 온다.
- *                      씬: focus(기본) · grid · empty · shot(리드미용 영문 한 장)
+ *   ?mock=1            Launches with the in-memory implementation. **A blank screen** — this
+ *                      is the path Playwright uses.
+ *   ?demo[=scene]      Lays a scene on top of that (project, session, conversation, git,
+ *                      usage). Talking to it gets a real answer back.
+ *                      Scenes: focus (default) · grid · empty · shot (one English screen for
+ *                      the README)
  *
- * `demo`는 `mock`을 함의한다 — 씬은 목 위에서만 자란다. 아무것도 안 붙이면 진짜 host에
- * 붙는다 (ws://127.0.0.1:5175).
+ * `demo` implies `mock` — a scene only grows on top of the mock. With nothing appended, it
+ * connects to the real host (ws://127.0.0.1:5175).
  */
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('Root element #root not found')
@@ -24,7 +27,8 @@ if (!rootElement) throw new Error('Root element #root not found')
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')
 const root = createRoot(rootElement)
-/* 실패도 **그려야 하는 화면**이다 — 던지면 빈 페이지가 남는다. 울타리는 bootstrap에 있다 */
+/* A failure is also **a screen that has to be drawn** — throwing it leaves a blank page. The
+   boundary lives in bootstrap. */
 const started = startPlatform<Platform>(location.search, import.meta.env, {
   mock: seedMock,
   host: createWebPlatform,
@@ -50,8 +54,9 @@ if (started.error) {
   )
 } else {
   /*
-   * 씬은 **그리기 전에** 깔린다. 앱은 뜨자마자 목록을 물으므로, 늦게 깔면 빈 화면을 한 번
-   * 그린 뒤에야 내용이 들어온다 — 사람이 보려던 그 화면이 아니다.
+   * The scene is laid down **before drawing anything.** Since the app asks for its lists the
+   * moment it comes up, laying it down late would mean drawing a blank screen once before the
+   * content arrives — not the screen the person came to see.
    */
   if (demo !== null) {
     const { seedDemo, isDemoScene } = await import('@cc/platform/mock/demo')

@@ -1,7 +1,9 @@
 <!--
-  B · 관제 격자 — 네 칸 중 하나만 밝다.
-  앱이 하는 일을 그대로 그린 것이다: 여러 세션 중 **하나가 나를 기다린다**.
-  무채색이라 색 정책과 가장 일관되지만, 격자 아이콘은 흔하다.
+  B · Control grid — only one of four panels is lit.
+  A literal drawing of what the app does: among several sessions, **one of them is waiting for
+  me**.
+  Monochrome, so it is the most consistent with the color policy, but a grid icon is a common
+  shape.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1024" height="1024">
   <rect x="26" y="26" width="460" height="460" rx="112" fill="#0d0d10"/>

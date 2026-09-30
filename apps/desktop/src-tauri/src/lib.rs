@@ -1,7 +1,8 @@
-//! Centralu 데스크톱 셸.
+//! The Centralu desktop shell.
 //!
-//! 여기서 하는 일은 셋뿐이다: 사이드카 감독, OS 통합(알림·뱃지·단축키·IDE 열기), 창 관리.
-//! 대화·상태·화면은 전부 웹뷰 쪽에 있다 (docs/architecture.md §4).
+//! There are only three jobs here: supervising the sidecar, OS integration (notifications,
+//! the badge, shortcuts, opening the IDE) and window management. The conversation, state and
+//! screens all live on the webview side (docs/architecture.md §4).
 
 mod ide;
 mod path_safety;
@@ -12,32 +13,38 @@ use sidecar::{HostInfo, Supervisor};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 /**
- * ⌘Q도 물어보게 만든다 (도그푸딩 2026-09-07: "⌘W는 이제 안 꺼지는데 ⌘Q는 바로 꺼진다").
+ * Make ⌘Q ask too (dogfooding, 2026-09-07: "⌘W no longer quits immediately, but ⌘Q still
+ * does").
  *
- * 아래 run 콜백의 ExitRequested 관문은 **⌘Q를 못 본다.** 근거는 상류 소스다:
- *   - tao의 macOS 앱 델리게이트는 `applicationShouldTerminate:`를 구현하지 않는다.
- *     `applicationWillTerminate:`만 있고, 그건 종료가 이미 결정된 뒤에 오는 통지다
- *     (tao 0.35.3 platform_impl/macos/app_delegate.rs).
- *   - tauri-runtime-wry가 `ExitRequested{code:None}`을 내는 자리는 **마지막 창이
- *     Destroyed된 뒤**뿐이고, `Some(code)`는 `AppHandle::exit`뿐이다 (2.11.4 lib.rs).
+ * The ExitRequested gate in the run callback below **never sees ⌘Q.** The evidence is in the
+ * upstream source:
+ *   - tao's macOS app delegate does not implement `applicationShouldTerminate:`. It only has
+ *     `applicationWillTerminate:`, which is a notification that arrives after termination has
+ *     already been decided (tao 0.35.3 platform_impl/macos/app_delegate.rs).
+ *   - The only place tauri-runtime-wry emits `ExitRequested{code:None}` is **after the last
+ *     window has been Destroyed**; `Some(code)` only comes from `AppHandle::exit` (2.11.4
+ *     lib.rs).
  *
- * 그래서 ⌘Q(=NSApplication terminate)에는 거부권을 걸 자리가 아예 없다. 대신 **거기까지
- * 가지 않게** 한다: 기본 메뉴의 Quit(즉시 terminate하는 predefined 항목)을 우리 항목으로
- * 바꾸고, 눌리면 창 닫기와 **같은 문장**(quit-requested)을 웹뷰에 보낸다.
+ * So there is no place at all to hang a veto on ⌘Q (= NSApplication terminate). Instead we
+ * make sure it never gets that far: the default menu's Quit item (a predefined item that
+ * terminates immediately) is replaced with our own, and pressing it sends the webview the
+ * **same message** as closing the window (quit-requested).
  *
- * 남는 구멍은 정직하게 적어 둔다: 독 아이콘 → Quit, 로그아웃/재시동은 여전히 즉시
- * 종료다. 그 셋은 손이 미끄러져 누르는 자리가 아니고, 막을 방법도(위 이유로) 없다.
+ * The remaining gap is recorded honestly: the dock icon's Quit, and logout/restart, still
+ * terminate immediately. None of those three is a place a hand slips and hits by accident,
+ * and there is no way to intercept them either, for the reasons above.
  */
 #[cfg(target_os = "macos")]
 fn install_quit_menu(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, MenuItemKind};
 
     let menu = Menu::default(app)?;
-    // macOS에서 첫 서브메뉴가 앱 메뉴이고, 그 **마지막 항목이 Quit**이다
-    // (tauri 2.11.5 menu/menu.rs의 Menu::default 구성 그대로).
+    // On macOS the first submenu is the app menu, and its **last item is Quit** (exactly the
+    // shape tauri 2.11.5 menu/menu.rs's `Menu::default` builds).
     if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
         let items = app_menu.items()?;
-        // predefined가 아닌 것을 지우면 남의 항목을 지우는 것이다 — 모양이 다르면 손대지 않는다
+        // Removing something that is not predefined would mean removing someone else's item —
+        // if the shape does not match, leave it alone.
         if let Some(MenuItemKind::Predefined(_)) = items.last() {
             app_menu.remove_at(items.len() - 1)?;
             let quit =
@@ -59,15 +66,17 @@ fn host_error(sup: State<'_, Supervisor>) -> Option<String> {
     sup.last_error()
 }
 
-/// 실패 화면의 Retry (#184). 포기한 수퍼바이저를 다시 돌린다 — 웹뷰만 다시 읽어서는 host가
-/// 다시 뜨지 않는다. 아직 돌고 있으면 아무것도 하지 않는다(곧 답이 온다).
+/// Retry from the failure screen (#184). Restarts a supervisor that has given up — merely
+/// reloading the webview does not bring the host back up. Does nothing if it is still running
+/// (an answer is coming soon anyway).
 #[tauri::command]
 fn restart_host(app: AppHandle, sup: State<'_, Supervisor>) -> bool {
     sup.restart(app)
 }
 
-/// 독 아이콘 뱃지 (FR-12 ④단계 표시 계층).
-/// 0이면 지운다 — 처리할 게 없는데 숫자가 남아 있으면 신호가 아니라 소음이다.
+/// The dock icon badge (FR-12, display layer ④).
+/// Cleared when the count is 0 — a number left over with nothing to act on is noise, not a
+/// signal.
 #[tauri::command]
 fn set_badge(app: AppHandle, count: u32) {
     let Some(window) = app.get_webview_window("main") else { return };
@@ -96,7 +105,7 @@ fn write_badge(window: &tauri::WebviewWindow, count: u32) -> tauri::Result<()> {
     window.set_badge_count(if count == 0 { None } else { Some(i64::from(count)) })
 }
 
-/// 편집기에서 파일을 연다 (FR-4의 왕복 비용 절감).
+/// Opens a file in the editor (cuts the round-trip cost described in FR-4).
 #[tauri::command]
 fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
     let native_path = std::path::Path::new(&path);
@@ -107,7 +116,8 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
     };
     // Only an IDE is allowed here. Falling back to the OS generic opener can execute
     // attacker-authored files instead of editing them; reveal_path is the safe file-manager path.
-    // 이름만 주면 설치본에서는 찾지 못한다 — GUI 앱의 PATH에는 `code`가 없다 (ide.rs, #159)
+    // Passing the bare name fails to find it on an installed build — a GUI app's PATH does
+    // not contain `code` (ide.rs, #159).
     let code = ide::find_code()?;
     std::process::Command::new(&code)
         .arg("-g")
@@ -117,19 +127,22 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", code.display()))
 }
 
-/// 파일 관리자에서 그 파일을 보여준다 (#19의 "Open in Finder").
+/// Shows the file in the file manager (the "Open in Finder" of #19).
 ///
-/// `open`·`xdg-open`을 쓰지 않는다 — 그건 **파일을 여는** 명령이라, 스크립트를 골랐을 때
-/// 그것을 실행해 버릴 수 있다. 플러그인의 `reveal_item_in_dir`은 macOS에서 NSWorkspace,
-/// 리눅스에서 org.freedesktop.FileManager1(없으면 상위 폴더 열기)로 내려가는,
-/// "여는 게 아니라 가리키는" 쪽의 API다.
+/// Does not use `open` or `xdg-open` — those are commands that **open** a file, and if a
+/// script was selected, they could execute it instead of just showing it. The plugin's
+/// `reveal_item_in_dir` goes down to NSWorkspace on macOS and to org.freedesktop.FileManager1
+/// on Linux (falling back to opening the parent folder if that is unavailable), which is the
+/// "point at it, do not open it" kind of API.
 ///
-/// 여기서 플러그인의 **JS 커맨드가 아니라 러스트 함수**를 부르기 때문에
-/// `opener:allow-reveal-item-in-dir` 권한은 필요 없다. 웹뷰가 부르는 것은 이 앱의
-/// 커맨드이고, 그 권한은 `allow-reveal-path` 하나다 (build.rs, capabilities/default.json).
+/// Because this calls the plugin's **Rust function, not its JS command**, the
+/// `opener:allow-reveal-item-in-dir` permission is not needed. What the webview calls is this
+/// app's own command, and the only permission that needs is `allow-reveal-path` (build.rs,
+/// capabilities/default.json).
 ///
-/// 오류는 **이유만** 돌려준다. 무엇을 하려다 실패했는지는 화면 쪽이 이미 알고 있어서
-/// ("Could not show a.ts: …") 여기서 한 번 더 붙이면 같은 말이 두 번 나온다.
+/// The error returns **only the reason**. The screen already knows what it was trying to do
+/// when it failed ("Could not show a.ts: …"), so appending that again here would say the same
+/// thing twice.
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     let native_path = std::path::Path::new(&path);
@@ -137,17 +150,19 @@ fn reveal_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(native_path).map_err(|e| e.to_string())
 }
 
-/// 휴지통으로 보낸다 (#18) — 지우는 게 아니다.
+/// Sends the file to the trash (#18) — this does not delete it.
 ///
-/// 확인 대화상자 대신 휴지통을 고른 이유가 이것이다: 되돌릴 수 있는 시점이 **누른 뒤**로
-/// 옮겨간다. 대화상자는 누르기 전까지만 되돌릴 수 있다.
+/// This is the reason the trash was chosen over a confirmation dialog: the point where the
+/// action can still be undone moves to **after** the click. A dialog can only be undone before
+/// the click.
 ///
-/// macOS 백엔드를 `NsFileManager`로 바꾼다. 크레이트 기본값은 Finder에게 AppleScript로
-/// 시키는 방식인데, 그러면 자동화 권한(TCC)을 물어보고 거절당하면 아무 일도 일어나지
-/// 않는다 — 이 앱은 서명 인증서가 없어서 그 프롬프트가 특히 나쁘게 끝난다.
-/// 대가는 Finder 컨텍스트 메뉴의 "제자리에 돌려놓기"가 일부 macOS에서 안 뜨는 것인데
-/// (macOS 쪽 결함), 파일은 그대로 휴지통에 있고 끌어내면 되므로 되돌릴 수 있다는 약속은
-/// 지켜진다. 권한 프롬프트에 막혀 **삭제 자체가 조용히 실패하는 것**이 더 나쁘다.
+/// Switches the macOS backend to `NsFileManager`. The crate's default asks Finder to do it via
+/// AppleScript, which prompts for automation permission (TCC), and if that is declined nothing
+/// happens at all — this app has no signing certificate, so that prompt ends particularly
+/// badly. The price is that Finder's "Put Back" context-menu item does not show up on some
+/// versions of macOS (a macOS-side defect), but the file is still sitting in the trash and can
+/// be dragged out, so the promise that this can be undone still holds. It is worse for
+/// **deletion itself to fail silently** because a permission prompt got in the way.
 #[tauri::command]
 fn trash_path(path: String) -> Result<(), String> {
     let native_path = std::path::Path::new(&path);
@@ -163,20 +178,21 @@ fn send_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
     ctx.delete(path)
 }
 
-/// 리눅스·윈도우는 기본 백엔드가 곧 OS의 휴지통이다.
-/// 리눅스 쪽은 freedesktop 휴지통 규격 1.0 구현이라 GNOME·KDE·XFCE에서 같은 자리로 간다 —
-/// 다른 마운트 지점의 파일은 규격대로 그 볼륨의 `.Trash-$uid`로 가고, 그럴 수 없는
-/// 파일 시스템(FAT 등)에서는 실패가 그대로 올라온다. 조용히 지우는 것보다 낫다.
+/// On Linux and Windows, the default backend already is the OS's own trash.
+/// The Linux side is an implementation of the freedesktop trash spec 1.0, so GNOME, KDE and
+/// XFCE all land in the same place — per the spec, a file on a different mount point goes to
+/// that volume's own `.Trash-$uid`, and on a filesystem that cannot support that (FAT and the
+/// like) the failure is surfaced as-is. That is better than deleting silently.
 #[cfg(not(target_os = "macos"))]
 fn send_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
     trash::delete(path)
 }
 
-/// 이 데스크톱이 파일 관리자를 뭐라고 부르는가.
+/// What this desktop calls its file manager.
 ///
-/// 자판 표기(`shortcut_keys`)와 같은 거래다: UI는 어느 OS인지 물을 수 없으므로
-/// **이름**을 물어 그대로 찍는다. 리눅스에는 하나의 답이 없어서(Nautilus·Dolphin·Thunar)
-/// 짐작 대신 일반 명사를 준다.
+/// The same trade as the keyboard labels (`shortcut_keys`): the UI cannot ask which OS it is
+/// on, so it asks for a **name** and prints it as-is. Linux has no single answer (Nautilus,
+/// Dolphin, Thunar), so it gets a generic noun instead of a guess.
 #[tauri::command]
 fn file_manager_name() -> &'static str {
     #[cfg(target_os = "macos")]
@@ -249,16 +265,18 @@ fn shortcut_keys() -> ShortcutKeys {
     }
 }
 
-/// 자리를 비운 사람을 부르는 두 가지 — 소리와 독 아이콘.
+/// The two ways to call back a person who has stepped away — sound and the dock icon.
 ///
-/// **배너 대신이 아니라 배너를 대체한다.** macOS에서 `tauri-plugin-notification`은
-/// `NSUserNotification`을 타는데 2018년(10.14)에 deprecated된 API라 지금 OS에서는
-/// 아무것도 뜨지 않는다. 더 나쁜 것은 그 플러그인이 권한 상태를 **상수로** 돌려주고
-/// (`Ok(PermissionState::Granted)`) 전달 실패를 `let _ =`로 버린다는 점이다 — 그래서
-/// 앱은 한 통도 못 나갔다는 사실조차 알 수 없었다. 실측으로 확인한 내용이다.
+/// **This stands in for the banner, not alongside it.** On macOS, `tauri-plugin-notification`
+/// goes through `NSUserNotification`, an API deprecated in 2018 (10.14), so nothing shows up
+/// on a current OS at all. Worse, that plugin returns the permission state as a **constant**
+/// (`Ok(PermissionState::Granted)`) and discards delivery failures with `let _ =` — so the app
+/// could not even tell that not a single notification had gone out. This was confirmed by
+/// measurement.
 ///
-/// 소리와 독은 알림 권한도 코드 서명도 타지 않는다. 이 맥에는 서명 인증서가 0개이므로
-/// (`security find-identity` → 0 valid identities) 지금 사람에게 닿는 길은 여기뿐이다.
+/// Sound and the dock icon go through neither the notification permission nor code signing.
+/// This Mac has zero signing certificates (`security find-identity` → 0 valid identities), so
+/// right now this is the only path that reaches the person.
 ///
 /// On Linux the ranking is the other way round. The banner path there is real — the
 /// notification plugin talks org.freedesktop.Notifications over D-Bus — while the badge
@@ -271,8 +289,10 @@ fn alert(app: AppHandle, kind: String, sound: bool) {
         play_sound(&kind);
     }
     let Some(window) = app.get_webview_window("main") else { return };
-    // 승인·오류는 사람이 와야 풀린다 → 올 때까지 튄다.
-    // 완료는 알려만 주면 되므로 한 번만 튄다 — 끝난 일로 계속 부르면 그건 재촉이다.
+    // An approval or an error is only resolved once the person comes back, so it keeps
+    // bouncing the dock icon until they do.
+    // A completion only needs to be announced, so it bounces once — bouncing forever for
+    // something that is already finished would just be nagging.
     let attention = if kind == "done" || kind == "all_done" {
         tauri::UserAttentionType::Informational
     } else {
@@ -283,23 +303,24 @@ fn alert(app: AppHandle, kind: String, sound: bool) {
     }
 }
 
-/// `/System/Library/Sounds`의 소리 하나를 재생한다.
+/// Plays one sound from `/System/Library/Sounds`.
 ///
-/// `NSSound`가 더 가벼워 보이지만 재생이 비동기라 객체를 살려 둬야 하고, 그러려면
-/// 스레드를 넘나드는 보관소가 필요하다 (`Retained<NSSound>`는 Send가 아니다).
-/// 짧은 소리 하나에 그 무게를 들이는 대신 `afplay`에 맡긴다 — 알림은 드물게 울린다.
+/// `NSSound` looks lighter, but playback is asynchronous and the object has to be kept alive,
+/// which needs storage that can cross threads (`Retained<NSSound>` is not Send). Rather than
+/// pay that weight for one short sound, this hands the job to `afplay` — alerts fire rarely.
 ///
 /// The argument is the alert *kind*, not a sound name. It used to be a macOS sound name
 /// picked by the caller, which meant the caller had to know what macOS calls its sounds
 /// — and there was no honest way for another OS to answer that question.
 #[cfg(target_os = "macos")]
 fn play_sound(kind: &str) {
-    // 소리를 구분하는 것은 취향이 아니라 기능이다 — 옆방에서도 무슨 일인지 알 수 있다.
+    // Distinguishing the sounds is a feature, not a taste — it tells someone in the next room
+    // what happened without looking.
     let name = match kind {
-        "error" => "Basso",    // macOS가 예부터 "잘못됐다"에 쓰는 소리
-        "done" => "Tink",      // 하나 끝났다 — 가볍게
-        "all_done" => "Glass", // 다 끝났다
-        _ => "Submarine",      // 기다리는 중 (승인)
+        "error" => "Basso",    // the sound macOS has long used for "something is wrong"
+        "done" => "Tink",      // one thing finished — light
+        "all_done" => "Glass", // everything is finished
+        _ => "Submarine",      // waiting (an approval)
     };
     let path = format!("/System/Library/Sounds/{name}.aiff");
     if let Err(e) = spawn_and_reap("/usr/bin/afplay", &[&path]) {
@@ -375,7 +396,8 @@ fn warn_once(message: &str) {
     SAID.call_once(|| eprintln!("{message}"));
 }
 
-/// 창을 앞으로 가져온다 (알림 클릭·전역 단축키에서 사용).
+/// Brings the window to the front (used by clicking a notification and by the global
+/// shortcut).
 #[tauri::command]
 fn focus_window(app: AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -386,11 +408,13 @@ fn focus_window(app: AppHandle) {
 }
 
 /**
- * 사람이 모달에서 종료를 확인했다 (도그푸딩 2026-09-04: ⌘Q/⌘W 즉시 종료 방지).
+ * The person confirmed quitting in the modal (dogfooding, 2026-09-04: prevent an immediate
+ * quit from ⌘Q/⌘W).
  *
- * 플래그를 먼저 세우고 exit를 부른다 — 이 exit이 다시 ExitRequested를 낳는데,
- * 그때는 관문(아래 run 콜백)이 열려 있어야 한다. 관문이 코드(Some/None)만 보면
- * 우리가 낸 exit과 시스템 terminate를 못 가르는 플랫폼이 생길 수 있어 플래그가 정본이다.
+ * The flag is set before calling exit — this exit in turn produces another ExitRequested, and
+ * the gate (the run callback below) has to let it through at that point. The flag is the
+ * source of truth because a platform could exist where the gate, looking only at the code
+ * (Some/None), cannot tell our own exit apart from a system terminate.
  */
 #[tauri::command]
 fn quit_app(app: AppHandle, approved: State<QuitApproved>) {
@@ -398,21 +422,28 @@ fn quit_app(app: AppHandle, approved: State<QuitApproved>) {
     app.exit(0);
 }
 
-/** 종료 확인 플래그 — 모달의 "Quit"만이 이것을 세운다 */
+/** The quit-confirmed flag — only the modal's "Quit" sets this. */
 struct QuitApproved(std::sync::Arc<std::sync::atomic::AtomicBool>);
 
 /**
- * 앱 링크 (M4 E-4) — `centralu://app?url=…`.
+ * App links (M4 E-4) — `centralu://app?url=…`.
  *
- * macOS는 등록한 스킴(Info.plist의 CFBundleURLTypes)의 링크를 앱에 Apple Event로 건네고, Tauri는 그것을 `RunEvent::Opened`로
- * 준다. 딥링크 플러그인을 쓰지 않는 이유: 같은 이벤트를 받는 데 플러그인은 웹뷰에 명령을 더 연다(스킴을 실행 중에 등록하는 것까지).
- * 여기 더하는 명령은 쌓인 링크를 꺼내는 것 하나다.
+ * macOS hands a link on a registered scheme (CFBundleURLTypes in Info.plist) to the app as an
+ * Apple Event, and Tauri gives it to us as `RunEvent::Opened`. Why this does not use the
+ * deep-link plugin: to receive the same event, the plugin opens more commands to the webview
+ * (up to and including registering the scheme at runtime). The only command added here is
+ * pulling the queued links back out.
  *
- * 링크는 남이 지은 글이다. 여기서는 모양만 거른다 — 스킴이 `centralu`이고 길이가 상한 안인 것, 많아야 몇 개. 무엇을 열지의 판정은
- * 화면(`parseAppLink`)이, 무엇을 읽고 내려받을지는 host(`classifySource`)가, 그리고 그 전에 사람이 확인 창에서 누른다.
+ * A link is text someone else wrote. This only filters on shape — the scheme has to be
+ * `centralu`, the length has to be under the cap, and there can only be a handful at once.
+ * The decision of what to open belongs to the screen (`parseAppLink`), what to read and
+ * download belongs to the host (`classifySource`), and before either of those, the person has
+ * to click through a confirmation window.
  *
- * 쌓아 두는 이유: 링크로 앱이 처음 켜질 때는 웹뷰가 듣기 전에 링크가 온다. 그래서 이벤트(`app-link`)는 "꺼내 가라"는 초인종일
- * 뿐이고 링크는 `take_app_links`로 꺼낸다 — 한 링크가 이벤트와 꺼내기로 두 번 가지 않는다.
+ * Why the links are queued: when the app is first launched by a link, the link arrives before
+ * the webview is listening. So the event (`app-link`) is only a doorbell saying "come get it",
+ * and the link itself is pulled out with `take_app_links` — one link never travels twice, once
+ * as the event and once as the thing pulled out.
  */
 const APP_LINK_MAX_CHARS: usize = 4096;
 const APP_LINKS_KEPT: usize = 8;
@@ -420,7 +451,8 @@ const APP_LINKS_KEPT: usize = 8;
 #[derive(Default)]
 struct AppLinks(std::sync::Mutex<Vec<String>>);
 
-/** 받을 모양인가 — `centralu:`로 시작하고(대소문자 무시) 상한 안의 길이 */
+/** Is this an acceptable shape — starts with `centralu:` (case-insensitive) and within the
+ * length cap. */
 fn accept_app_link(url: &str) -> Option<String> {
     if url.len() > APP_LINK_MAX_CHARS {
         return None;
@@ -432,14 +464,15 @@ fn accept_app_link(url: &str) -> Option<String> {
     Some(url.to_string())
 }
 
-/** 쌓인 앱 링크를 꺼낸다 — 꺼낸 것은 비운다(한 번만 간다) */
+/** Pulls out the queued app links — clears what it takes (each link goes out only once). */
 #[tauri::command]
 fn take_app_links(links: State<'_, AppLinks>) -> Vec<String> {
     let mut held = links.0.lock().unwrap_or_else(|e| e.into_inner());
     std::mem::take(&mut *held)
 }
 
-/** OS가 건넨 링크를 받는다 — 거르고, 쌓고, 웹뷰를 깨우고, 창을 앞으로 (링크를 누른 사람은 확인 창을 봐야 한다) */
+/** Receives a link the OS handed over — filters it, queues it, wakes the webview, and brings
+ * the window forward (whoever clicked the link has to see the confirmation window). */
 #[cfg(target_os = "macos")]
 fn receive_app_links<'a>(app: &AppHandle, urls: impl Iterator<Item = &'a str>) {
     let mut took = false;
@@ -501,8 +534,9 @@ pub fn run() {
         .manage(supervisor.clone())
         .manage(QuitApproved(quit_approved.clone()))
         .manage(AppLinks::default())
-        // 명령을 더하면 build.rs의 목록과 capabilities/default.json의 `allow-<명령>`도 같이
-        // 더한다. 권한이 없는 명령은 메인 창에서도 거절된다 (#143).
+        // Adding a command means also adding it to the list in build.rs and to the
+        // `allow-<command>` permission in capabilities/default.json. A command with no
+        // permission is refused even from the main window (#143).
         .invoke_handler(tauri::generate_handler![
             host_info,
             host_error,
@@ -520,10 +554,12 @@ pub fn run() {
             take_app_links
         ])
         /*
-         * ⌘W·빨간 단추 = 창 닫기. 창 하나짜리 앱이라 닫기는 곧 종료다 — 즉시 닫는
-         * 대신 웹뷰에 묻는다 (도그푸딩: 작업 중 ⌘W 오타 한 번이 세션 전부를 내렸다).
+         * ⌘W and the red button both mean closing the window. Since this app has only one
+         * window, closing it means quitting — so instead of closing immediately, it asks the
+         * webview (dogfooding: one mistyped ⌘W during work took down an entire session).
          */
-        /* 우리 Quit 항목 — 창 닫기와 같은 문장을 보낸다 (모달은 웹뷰가 띄운다) */
+        /* Our own Quit item — sends the same message as closing the window (the modal is put
+         * up by the webview). */
         .on_menu_event(|app, event| {
             if event.id() == "cc-quit" {
                 let _ = app.emit("quit-requested", ());
@@ -543,7 +579,8 @@ pub fn run() {
                 traffic_lights::install(app.handle());
                 #[cfg(target_os = "macos")]
                 if let Err(e) = install_quit_menu(app.handle()) {
-                    // 메뉴를 못 바꿔도 앱은 뜬다 — 다만 ⌘Q가 예전처럼 즉시 꺼진다
+                    // The app still launches even if the menu could not be changed — ⌘Q just
+                    // quits immediately again, as it used to.
                     eprintln!("[menu] could not install the quit item: {e}");
                 }
                 Ok(())
@@ -552,25 +589,28 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Tauri 앱을 생성하지 못했습니다")
         .run(move |app, event| {
-            // 앱 링크 (M4 E-4) — OS가 건넨 `centralu://` 링크. 앱이 이 링크로 처음 켜진 때도 여기로 온다
+            // App links (M4 E-4) — a `centralu://` link handed over by the OS. This is also
+            // where things land when the app is first launched by such a link.
             #[cfg(target_os = "macos")]
             if let RunEvent::Opened { urls } = &event {
                 receive_app_links(app, urls.iter().map(|u| u.as_str()));
                 return;
             }
             /*
-             * 종료 관문 (도그푸딩 2026-09-04). 사람이 모달에서 확인하기 전에는 종료를
-             * 막고 웹뷰에 묻는다 — quit_app만이 플래그를 세우므로, 그 뒤에 다시 도착하는
-             * ExitRequested는 그대로 지나간다.
+             * The exit gate (dogfooding, 2026-09-04). Until the person confirms in the modal,
+             * exit is blocked and the webview is asked instead — only `quit_app` sets the
+             * flag, so any ExitRequested that arrives after that passes straight through.
              *
-             * **⌘Q는 여기로 오지 않는다** (실측 아님, 상류 소스 확인 2026-09-07):
-             * macOS의 terminate에는 거부권 자리가 없어서 이 이벤트 자체가 안 난다.
-             * 그쪽은 install_quit_menu가 메뉴에서 미리 잡는다 — 이 관문이 맡는 것은
-             * 마지막 창이 닫힌 경우와 우리가 부른 exit이다.
+             * **⌘Q never reaches here** (not measured, confirmed against upstream source on
+             * 2026-09-07): macOS's terminate has no place to hang a veto, so this event
+             * simply never fires for it. That case is caught earlier by `install_quit_menu` in
+             * the menu — what this gate is responsible for is the last-window-closed case and
+             * the exit we call ourselves.
              *
-             * `code`는 문서화된 구분선이다: None = 사용자 상호작용(⌘Q·독 Quit·로그아웃),
-             * Some = 프로그램적 종료(AppHandle::exit/restart — 업데이터의 재시작이
-             * 이 길로 온다). Some까지 막으면 앱이 자기 재시작을 자기가 막는다.
+             * `code` is a documented distinction: `None` means a user interaction (⌘Q, the
+             * dock's Quit, logout), and `Some` means a programmatic exit
+             * (`AppHandle::exit`/restart — the updater's restart travels this path). Blocking
+             * `Some` too would mean the app blocking its own restart.
              */
             if let RunEvent::ExitRequested { api, code, .. } = &event {
                 if code.is_none() && !quit_approved.load(std::sync::atomic::Ordering::SeqCst) {
@@ -579,7 +619,7 @@ pub fn run() {
                     return;
                 }
             }
-            // 앱이 닫힐 때 사이드카를 확실히 죽인다 (좀비 프로세스 금지)
+            // Make sure the sidecar is killed when the app closes (no zombie processes).
             if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
                 supervisor.shutdown();
                 let _ = app.emit("host-status", "shutdown");

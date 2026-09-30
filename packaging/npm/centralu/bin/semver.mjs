@@ -10,8 +10,8 @@
  * Why not `.split('.').map(Number)`: that turns `0.1.0-beta.2` into
  * [0, 1, NaN, 2], and `NaN !== NaN` ends the comparison at the third slot with
  * `NaN > NaN` = false — so no beta ever saw the next beta. That is exactly how
- * `centralu update` on 0.1.0-beta.1 answered "이미 최신입니다" while beta.2 sat
- * on the registry (found the day beta.2 shipped).
+ * `centralu update` on 0.1.0-beta.1 answered "이미 최신입니다" ("already up to date") while
+ * beta.2 sat on the registry (found the day beta.2 shipped).
  */
 export function isNewer(a, b) {
   const [coreA, preA] = split(String(a))
@@ -62,7 +62,7 @@ export function isNewer(a, b) {
  *
  * Lives beside `isNewer` because it ships and is tested for the same reason — a launcher
  * already on someone's machine cannot be corrected later. 0.1.0-beta.1 is still out there
- * answering "이미 최신입니다" and always will be.
+ * answering "이미 최신입니다" ("already up to date") and always will be.
  */
 export function copyDiffers(pkgVersion, copyVersion) {
   return typeof copyVersion === 'string' && copyVersion !== '' && copyVersion !== pkgVersion

@@ -1,15 +1,17 @@
 /**
- * 앱 아이콘을 SVG에서 굽는다.
+ * Renders the app icon from SVG.
  *
- *   pnpm icon            # 지금 고른 것을 다시 굽는다
- *   pnpm icon grid       # 후보를 갈아 끼운다 (orbit · grid · dot)
- *   pnpm icon --preview  # 셋을 실제 Dock 크기로 나란히 그려 비교한다
+ *   pnpm icon            # re-renders whichever one is currently chosen
+ *   pnpm icon grid       # switches to a different candidate (orbit · grid · dot)
+ *   pnpm icon --preview  # draws all three side by side at real dock sizes to compare
  *
- * **SVG를 원본으로 둔다.** PNG만 두면 색 하나 바꾸는 데도 이미지 편집기가 필요하고,
- * diff에는 "바이너리가 바뀌었다"만 남는다. SVG는 읽히고, 고쳐지고, 리뷰된다.
+ * **SVG is kept as the source of truth.** With only a PNG, changing even one color needs an
+ * image editor, and the diff shows only "the binary changed". SVG can be read, edited and
+ * reviewed.
  *
- * 굽는 도구는 Playwright(크로미움)다 — 저장소가 이미 e2e로 쓰고 있어서 새 의존이 아니다.
- * rsvg·ImageMagick을 새로 깔게 하면 기여자가 이 스크립트를 못 돌린다.
+ * Rendering is done with Playwright (Chromium) — the repository already uses it for e2e, so it
+ * is not a new dependency. Requiring rsvg or ImageMagick to be installed separately would keep
+ * contributors from running this script at all.
  */
 import { chromium } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -27,14 +29,14 @@ const preview = args.includes('--preview')
 const pick = args.find((a) => !a.startsWith('--'))
 
 if (pick && !NAMES.includes(pick as (typeof NAMES)[number])) {
-  console.error(`모르는 후보: ${pick}\n고를 수 있는 것: ${NAMES.join(' · ')}`)
+  console.error(`Unknown candidate: ${pick}\nAvailable choices: ${NAMES.join(' · ')}`)
   process.exit(1)
 }
 
 const svg = (name: string) => {
   const p = join(SOURCES, `${name}.svg`)
   if (!existsSync(p)) {
-    console.error(`SVG가 없다: ${p}`)
+    console.error(`No such SVG: ${p}`)
     process.exit(1)
   }
   return readFileSync(p, 'utf8')
@@ -45,9 +47,9 @@ const page = await browser.newPage()
 
 if (preview) {
   /*
-   * **작은 크기에서 살아남는지가 아이콘의 전부다.**
-   * 1024로만 보면 셋 다 좋아 보인다. Dock(128)·목록(32)·메뉴바(16)에서 형태가
-   * 남는지를 나란히 봐야 고를 수 있다.
+   * **Surviving small sizes is the whole job of an icon.**
+   * Looked at only at 1024, all three look good. Choosing between them only works by seeing
+   * side by side whether the shape survives at dock (128), list (32) and menu bar (16) sizes.
    */
   const sizes = [128, 64, 32, 16]
   const cell = (name: string) => `
@@ -67,25 +69,27 @@ if (preview) {
     ${NAMES.map(cell).join('')}`)
   const out = join(ROOT, 'icon-preview.png')
   await page.locator('body').screenshot({ path: out })
-  console.log(`미리보기: ${out}`)
+  console.log(`Preview: ${out}`)
 } else {
   const name = pick ?? readFileSync(join(ICONS, '.chosen'), 'utf8').trim()
   await page.setViewportSize({ width: 1024, height: 1024 })
   await page.setContent(`<!doctype html><meta charset="utf-8">
     <style>html,body{margin:0;background:transparent} svg{display:block;width:1024px;height:1024px}</style>
     ${svg(name)}`)
-  // 투명 배경으로 굽는다 — macOS 아이콘은 스퀘어클 **밖이 비어 있어야** 한다
+  // Rendered with a transparent background — a macOS icon has to be **empty outside** the
+  // squircle.
   await page.screenshot({ path: join(ICONS, 'icon.png'), omitBackground: true })
   writeFileSync(join(ICONS, '.chosen'), `${name}\n`)
 
   /*
-   * PNG 한 장으로는 안 된다. Tauri는 icns를 만들 때 크기를 정해진 슬롯에 매핑하는데,
-   * **1024는 "512@2x"로만 인정돼서** 단일 1024 PNG는 매칭에 실패한다:
+   * A single PNG is not enough. When Tauri builds the icns, it maps sizes onto fixed slots,
+   * and **1024 is only accepted as "512@2x"**, so a lone 1024 PNG fails to match:
    *
    *     failed to bundle project: Failed to create app icon: `No matching IconType`
    *
-   * 게다가 512 한 장으로 만들면 큰 슬롯이 비어 Dock 최대 크기에서 흐려진다.
-   * 그래서 공식 생성기로 **다해상도 icns**를 굽는다 (128·256·512·1024와 @2x).
+   * On top of that, building from a single 512 leaves the largest slot empty and the icon
+   * blurs at the dock's maximum size. So the official generator is used to render a
+   * **multi-resolution icns** (128, 256, 512, 1024 and their @2x variants).
    */
   await browser.close()
   execFileSync('npx', ['tauri', 'icon', join(ICONS, 'icon.png'), '-o', ICONS], {
@@ -94,16 +98,17 @@ if (preview) {
   })
 
   /*
-   * 생성기는 안드로이드·iOS·윈도우 자산까지 만든다. 이 앱은 macOS 전용이라
-   * 저장소에 들일 이유가 없다 — 안 쓰는 파일이 쌓이면 다음 사람이 "이건 왜 있지"를 겪는다.
+   * The generator also produces Android, iOS and Windows assets. This app is macOS-only, so
+   * there is no reason to keep them in the repository — unused files pile up, and the next
+   * person to find them ends up wondering why they exist.
    */
   for (const junk of ['android', 'ios', 'icon.ico', 'StoreLogo.png', '32x32.png', '64x64.png', '128x128.png', '128x128@2x.png']) {
     rmSync(join(ICONS, junk), { recursive: true, force: true })
   }
   for (const f of readdirSync(ICONS)) if (f.startsWith('Square')) rmSync(join(ICONS, f))
 
-  console.log(`아이콘: ${name} → icons/icon.icns (다해상도)`)
-  console.log('앱에 반영하려면 다시 빌드해야 한다: pnpm app')
+  console.log(`Icon: ${name} → icons/icon.icns (multi-resolution)`)
+  console.log('The app has to be rebuilt for this to take effect: pnpm app')
   process.exit(0)
 }
 

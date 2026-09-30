@@ -42,12 +42,13 @@ export type PlatformStartup<T> =
   | { readonly platform: null; readonly error: Error }
 
 /**
- * "런타임을 만들지 못했다"를 던지는 대신 **값으로** 돌려준다.
+ * Returns "could not build the runtime" **as a value** instead of throwing it.
  *
- * 그 실패는 진입 모듈이 화면에 그려야 하므로, 던져서 없어지면 안 된다. 모듈 최상위에서
- * 던지면 콘솔 한 줄만 남고 페이지는 빈 채로 남는데, VITE_HOST_TOKEN이 없을 때 실제로
- * 그랬다. 울타리를 main.tsx가 아니라 여기에 두는 이유는 시험할 수 있어야 하기 때문이다:
- * 진입 모듈은 DOM과 번들러와 살아 있는 host 없이는 import조차 되지 않는다 (#121).
+ * That failure has to be drawn on screen by the entry module, so it cannot disappear by being
+ * thrown. Throwing at the top of a module leaves only one console line and an otherwise blank
+ * page — which is exactly what happened when VITE_HOST_TOKEN was missing. The reason this
+ * boundary lives here rather than in main.tsx is that it has to be testable: the entry module
+ * cannot even be imported without a DOM, a bundler and a live host (#121).
  */
 export function startPlatform<T>(search: string, env: BrowserEnv, create: PlatformFactories<T>): PlatformStartup<T> {
   try {

@@ -1,6 +1,7 @@
 <!--
-  C · 점과 궤도 — 가는 호가 둥근 사각을 감싼다.
-  가장 담백하지만, 작게 줄이면 가는 호가 먼저 사라진다 (16px에서 확인할 것).
+  C · Dot and orbit — a thin arc wraps a rounded square.
+  The plainest of the three, but at small sizes the thin arc is the first thing to disappear
+  (check this at 16px).
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1024" height="1024">
   <defs>

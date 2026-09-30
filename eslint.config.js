@@ -4,11 +4,12 @@ import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 
-/** 레이어 규칙의 원본은 docs/architecture.md §2. 여기가 그 기계 강제판이다. */
+/** The layer rules originate in docs/architecture.md §2. This is the machine-enforced version. */
 export default tseslint.config(
-  // tmp/: 도그푸딩 중 만드는 일회용 프로브·캡처. 저장소에 남지 않으므로 규칙도 걸지 않는다
+  // tmp/: disposable probes and captures made during dogfooding. They never stay in the
+  // repository, so no rule needs to check them either.
   { ignores: ['**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', '**/*.app/**',
-    // 앱 템플릿의 런타임 — 압축된 생성물이다 (scripts/build-app-runtime.mjs)
+    // The app template's runtime — a minified build artifact (scripts/build-app-runtime.mjs).
     'packages/agent-host/app-template/runtime/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -20,20 +21,22 @@ export default tseslint.config(
     },
   },
   /*
-   * 훅 규칙.
+   * The hooks rule.
    *
-   * "이른 return 뒤에 훅"을 **두 번** 저질렀다 (ProjectBlock, Body). 둘 다 조건이
-   * 맞는 순간에만 터지는 런타임 크래시라 타입 검사도 테스트도 잡지 못했고,
-   * 두 번째는 그리드를 열자마자 화면이 하얘졌다.
+   * "A hook after an early return" was committed **twice** (ProjectBlock, Body). Both were
+   * runtime crashes that only fired the moment the condition was met, so neither type checking
+   * nor tests caught them, and the second one turned the screen blank the instant the grid was
+   * opened.
    *
-   * 주석으로 "훅은 먼저"라고 적어 두는 걸로는 세 번째를 막지 못한다.
+   * Writing "hooks go first" in a comment does not stop a third one.
    */
   {
     files: ['packages/ui/**/*.tsx', 'packages/ui/**/*.ts', 'apps/**/*.tsx'],
     plugins: { 'react-hooks': reactHooks },
     rules: {
       'react-hooks/rules-of-hooks': 'error',
-      // 의존성 누락은 "가끔 안 갱신됨"으로 나타나 원인을 찾기 어렵다 — 경고로 남긴다
+      // A missing dependency shows up as "occasionally does not update", which is hard to
+      // trace back to a cause — left as a warning.
       'react-hooks/exhaustive-deps': 'warn',
     },
   },
@@ -69,7 +72,7 @@ export default tseslint.config(
       ],
     },
   },
-  // core: 순수 도메인 — IO·React 금지
+  // core: a pure domain — no IO, no React.
   {
     files: ['packages/core/**/*.ts'],
     rules: {
@@ -77,21 +80,21 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['react', 'react-dom', 'zustand'], message: 'core는 순수 도메인 — UI 라이브러리 금지' },
-            { group: ['node:*', 'fs', 'path', 'ws', 'better-sqlite3'], message: 'core는 IO 금지 (docs/architecture.md §2)' },
+            { group: ['react', 'react-dom', 'zustand'], message: 'core is a pure domain — no UI libraries' },
+            { group: ['node:*', 'fs', 'path', 'ws', 'better-sqlite3'], message: 'core does no IO (docs/architecture.md §2)' },
           ],
         },
       ],
       'no-restricted-globals': [
         'error',
-        { name: 'fetch', message: 'core는 IO 금지' },
-        { name: 'WebSocket', message: 'core는 IO 금지' },
-        { name: 'window', message: 'core는 DOM 금지' },
-        { name: 'document', message: 'core는 DOM 금지' },
+        { name: 'fetch', message: 'core does no IO' },
+        { name: 'WebSocket', message: 'core does no IO' },
+        { name: 'window', message: 'core touches no DOM' },
+        { name: 'document', message: 'core touches no DOM' },
       ],
     },
   },
-  // ui: 포트만 안다 — 구현체·직접 IO 금지 (docs/platform-abstraction.md §6)
+  // ui: knows only ports — no implementations, no direct IO (docs/platform-abstraction.md §6).
   {
     files: ['packages/ui/**/*.{ts,tsx}'],
     rules: {
@@ -99,40 +102,40 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['@tauri-apps/*'], message: 'platform/tauri에서만 사용' },
-            { group: ['@cc/platform/web', '@cc/platform/mock', '**/platform/src/web/**', '**/platform/src/mock/**'], message: 'ui는 ports만 — 구현 주입은 apps 진입점에서' },
-            { group: ['ws', 'node:*'], message: 'ui는 Node API 금지' },
+            { group: ['@tauri-apps/*'], message: 'only used from platform/tauri' },
+            { group: ['@cc/platform/web', '@cc/platform/mock', '**/platform/src/web/**', '**/platform/src/mock/**'], message: 'ui takes only ports — implementations are injected at the apps entry point' },
+            { group: ['ws', 'node:*'], message: 'ui does not use Node APIs' },
           ],
         },
       ],
       'no-restricted-globals': [
         'error',
-        { name: 'fetch', message: 'ui에서 네트워크 직접 호출 금지 — 포트를 거쳐라' },
-        { name: 'WebSocket', message: 'ui에서 WS 직접 사용 금지 — 포트를 거쳐라' },
+        { name: 'fetch', message: 'no direct network calls from ui — go through a port' },
+        { name: 'WebSocket', message: 'no direct WS use from ui — go through a port' },
       ],
       'no-restricted-syntax': [
         'error',
-        { selector: "NewExpression[callee.name='WebSocket']", message: 'ui에서 WS 직접 사용 금지 — 포트를 거쳐라' },
-        { selector: "CallExpression[callee.name='fetch']", message: 'ui에서 fetch 금지 — 포트를 거쳐라' },
-        { selector: "MemberExpression[object.name='window'][property.name='fetch']", message: 'ui에서 fetch 금지 — 포트를 거쳐라' },
+        { selector: "NewExpression[callee.name='WebSocket']", message: 'no direct WS use from ui — go through a port' },
+        { selector: "CallExpression[callee.name='fetch']", message: 'no fetch from ui — go through a port' },
+        { selector: "MemberExpression[object.name='window'][property.name='fetch']", message: 'no fetch from ui — go through a port' },
       ],
     },
   },
-  // Node 프로세스 코드: Node 전역 허용
+  // Node process code: Node globals are allowed.
   {
     files: [
       'packages/agent-host/**/*.{ts,mts,mjs}',
       'tooling/**/*.{ts,js}',
       'e2e/**/*.ts',
       '*.config.{ts,js}',
-      // 배포 도구: npm 실행기와 릴리스 스크립트도 Node 프로세스다
+      // Packaging tools: the npm launcher and release scripts are Node processes too.
       'packaging/**/*.mjs',
       'scripts/**/*.{mts,mjs}',
     ],
     languageOptions: { globals: globals.node },
   },
   { files: ['**/*.mjs'], rules: { 'no-empty': 'off', '@typescript-eslint/no-unused-expressions': 'off' } },
-  // agent-host: protocol만 공유 (core/ui/platform은 프로세스 반대편)
+  // agent-host: shares only protocol (core/ui/platform live on the other side of the process).
   {
     files: ['packages/agent-host/**/*.ts'],
     rules: {
@@ -140,8 +143,8 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['@cc/core', '@cc/ui', '@cc/platform/*'], message: 'agent-host는 protocol만 공유 (docs/architecture.md §2)' },
-            { group: ['react', 'react-dom'], message: 'agent-host는 Node 프로세스 — 브라우저 코드 금지' },
+            { group: ['@cc/core', '@cc/ui', '@cc/platform/*'], message: 'agent-host shares only protocol (docs/architecture.md §2)' },
+            { group: ['react', 'react-dom'], message: 'agent-host is a Node process — no browser code' },
           ],
         },
       ],

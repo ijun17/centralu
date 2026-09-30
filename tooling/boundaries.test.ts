@@ -1,7 +1,8 @@
 /**
- * 경계 규칙이 "실제로 작동한다"는 증거 (M1 플랜 T0-2 완료 기준).
- * 문서에 적힌 규칙(docs/architecture.md §2, platform-abstraction.md §6)을
- * 위반하는 코드가 lint 에러를 내는지 검사한다. 파일을 만들지 않고 가상 경로로 린트한다.
+ * Evidence that the boundary rules "actually work" (the completion criterion for M1 plan
+ * T0-2). Checks that code violating the documented rules (docs/architecture.md §2,
+ * platform-abstraction.md §6) triggers a lint error. Lints a virtual path without creating a
+ * file.
  */
 import { describe, expect, it } from 'vitest'
 import { ESLint } from 'eslint'
@@ -37,16 +38,16 @@ const ruleIds = (msgs: { ruleId?: string | null }[]) => msgs.map((m) => m.ruleId
  * Comments are stripped first: the ones explaining this change name the vendors, and a rule
  * that cannot be explained in the file it governs is a rule that gets deleted.
  */
-describe('protocol은 벤더를 모른다', () => {
+describe('protocol does not know about vendors', () => {
   const sources = readdirSync(PROTOCOL_SRC)
     .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
     .map((f) => ({ file: f, code: stripComments(readFileSync(join(PROTOCOL_SRC, f), 'utf8')) }))
 
-  it('읽을 소스가 있다', () => {
+  it('has source files to read', () => {
     expect(sources.length).toBeGreaterThan(0)
   })
 
-  it('코드에 도구 이름을 적지 않는다', () => {
+  it('does not write a tool name into the code', () => {
     const offenders = sources
       .filter(({ code }) => /\b(claude|codex)\b/i.test(code))
       .map(({ file }) => file)
@@ -85,18 +86,20 @@ function importsOf(code: string): string[] {
  *
  * Comments are stripped first — the prose explaining this names the layers it forbids.
  */
-describe('앱 런타임은 자기가 태우는 것을 모른다', () => {
+describe('the app runtime does not know what carries it', () => {
   const layers = [
     {
       name: 'packages/ui/src/apps',
       dir: join(ROOT, 'packages/ui/src/apps/'),
-      // 인박스 제품의 두 층. 런타임이 이쪽을 부르면 인박스를 지울 수 없다
+      // The two layers of the inbox product. If the runtime called into these, the inbox
+      // could never be deleted.
       forbidden: /(^|\/)(store|features)(\/|$)/,
     },
     {
       name: 'packages/agent-host/src/apps',
       dir: join(ROOT, 'packages/agent-host/src/apps/'),
-      // 오케스트레이터는 런타임의 호출자 중 하나다 — 런타임이 거꾸로 기대면 안 된다
+      // The orchestrator is one caller of the runtime — the runtime must not lean on it the
+      // other way around.
       forbidden: /(^|\/)sessions(\/|$)/,
     },
   ]
@@ -105,11 +108,11 @@ describe('앱 런타임은 자기가 태우는 것을 모른다', () => {
     describe(layer.name, () => {
       const sources = sourcesUnder(layer.dir)
 
-      it('읽을 소스가 있다', () => {
+      it('has source files to read', () => {
         expect(sources.length).toBeGreaterThan(0)
       })
 
-      it('금지된 층을 임포트하지 않는다', () => {
+      it('does not import a forbidden layer', () => {
         const offenders = sources.flatMap(({ file, code }) =>
           importsOf(code)
             .filter((spec) => layer.forbidden.test(spec))
@@ -132,15 +135,15 @@ describe('앱 런타임은 자기가 태우는 것을 모른다', () => {
  * dependency-cruiser enforces the same list (`host-app-runtime-physics-only`); this is the copy
  * that runs with the tests, so a widening has to be made twice, on purpose.
  */
-describe('외부 앱 런타임은 이름을 댄 물리 모듈만 빌린다', () => {
+describe('the external app runtime borrows only the named physics modules', () => {
   const sources = sourcesUnder(join(ROOT, 'packages/agent-host/src/apps/external/'))
   const PHYSICS = /(^|\/)dev-services\/(watch|path-guard|kill-tree)\.js$/
 
-  it('읽을 소스가 있다', () => {
+  it('has source files to read', () => {
     expect(sources.length).toBeGreaterThan(0)
   })
 
-  it('세션·어댑터는 아예, dev-services는 허용 목록만', () => {
+  it('never imports sessions or adapters, and only the allow-listed dev-services', () => {
     const offenders = sources.flatMap(({ file, code }) =>
       importsOf(code)
         .filter(
@@ -154,8 +157,8 @@ describe('외부 앱 런타임은 이름을 댄 물리 모듈만 빌린다', () 
   })
 })
 
-describe('ui 레이어 경계', () => {
-  it('platform 구현체 import를 거부한다', async () => {
+describe('ui layer boundary', () => {
+  it('rejects importing a platform implementation', async () => {
     const msgs = await lint(
       'packages/ui/src/x.tsx',
       `import { createWebPlatform } from '@cc/platform/web'\nexport const a = createWebPlatform`,
@@ -163,22 +166,22 @@ describe('ui 레이어 경계', () => {
     expect(ruleIds(msgs)).toContain('no-restricted-imports')
   })
 
-  it('fetch 직접 호출을 거부한다', async () => {
+  it('rejects calling fetch directly', async () => {
     const msgs = await lint('packages/ui/src/x.tsx', `export const a = () => fetch('http://x')`)
     expect(msgs.length).toBeGreaterThan(0)
   })
 
-  it('WebSocket 직접 생성을 거부한다', async () => {
+  it('rejects constructing a WebSocket directly', async () => {
     const msgs = await lint('packages/ui/src/x.tsx', `export const a = () => new WebSocket('ws://x')`)
     expect(msgs.length).toBeGreaterThan(0)
   })
 
-  it('@tauri-apps import를 거부한다', async () => {
+  it('rejects importing @tauri-apps', async () => {
     const msgs = await lint('packages/ui/src/x.tsx', `import { invoke } from '@tauri-apps/api/core'\nexport const a = invoke`)
     expect(ruleIds(msgs)).toContain('no-restricted-imports')
   })
 
-  it('ports import는 허용한다', async () => {
+  it('allows importing ports', async () => {
     const msgs = await lint(
       'packages/ui/src/x.tsx',
       `import type { Platform } from '@cc/platform/ports'\nexport type A = Platform`,
@@ -187,8 +190,8 @@ describe('ui 레이어 경계', () => {
   })
 })
 
-describe('core 레이어 경계', () => {
-  it('node IO import를 거부한다', async () => {
+describe('core layer boundary', () => {
+  it('rejects importing node IO', async () => {
     const msgs = await lint(
       'packages/core/src/x.ts',
       `import { readFileSync } from 'node:fs'\nexport const a = readFileSync`,
@@ -196,12 +199,12 @@ describe('core 레이어 경계', () => {
     expect(ruleIds(msgs)).toContain('no-restricted-imports')
   })
 
-  it('react import를 거부한다', async () => {
+  it('rejects importing react', async () => {
     const msgs = await lint('packages/core/src/x.ts', `import { useState } from 'react'\nexport const a = useState`)
     expect(ruleIds(msgs)).toContain('no-restricted-imports')
   })
 
-  it('protocol import는 허용한다', async () => {
+  it('allows importing protocol', async () => {
     const msgs = await lint(
       'packages/core/src/x.ts',
       `import type { SessionState } from '@cc/protocol'\nexport type A = SessionState`,
@@ -210,8 +213,8 @@ describe('core 레이어 경계', () => {
   })
 })
 
-describe('agent-host 레이어 경계', () => {
-  it('core import를 거부한다 (protocol만 공유)', async () => {
+describe('agent-host layer boundary', () => {
+  it('rejects importing core (shares only protocol)', async () => {
     const msgs = await lint(
       'packages/agent-host/src/x.ts',
       `import { applyEvent } from '@cc/core'\nexport const a = applyEvent`,

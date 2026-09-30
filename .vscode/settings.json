@@ -6,8 +6,8 @@
   // (Real CSS errors still get caught by the build: `pnpm build`.)
   "css.lint.unknownAtRules": "ignore",
 
-  // 이 저장소의 TypeScript 버전을 쓴다 — VS Code 내장본과 달라지면
-  // 에디터에만 뜨는 유령 오류가 생긴다
+  // Use this repository's TypeScript version — if it differs from the one bundled with
+  // VS Code, phantom errors that only show up in the editor start appearing.
   "typescript.tsdk": "node_modules/typescript/lib",
 
   "editor.formatOnSave": true,
@@ -16,7 +16,7 @@
     "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
 
-  // 산출물은 검색·감시에서 뺀다 (모노레포에서 이게 없으면 검색이 느려진다)
+  // Exclude build output from search and file watching (without this, search is slow in a monorepo).
   "files.watcherExclude": {
     "**/node_modules/**": true,
     "**/target/**": true,

@@ -1,7 +1,8 @@
 <!--
-  A · 궤도 — 앱이 '작업 중'을 뜻할 때 그리는 바로 그 모양.
-  아이콘과 화면이 같은 문법을 쓰면, 앱을 처음 여는 사람도 둘을 한 물건으로 읽는다.
-  고리가 두꺼워 16px 메뉴바에서도 형태가 남는다.
+  A · Orbit — the exact shape the app draws to mean "working".
+  When the icon and the screen use the same visual language, even someone opening the app for
+  the first time reads the two as one thing.
+  The ring is thick enough that the shape survives even in a 16px menu bar.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1024" height="1024">
   <defs>

@@ -7,20 +7,22 @@ import { invoke } from '@tauri-apps/api/core'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
- * 데스크톱 진입점 — 구현체를 아는 두 곳 중 하나 (docs/platform-abstraction.md §4).
- * apps/web과 다른 것은 createTauriPlatform 한 줄뿐이다.
+ * The desktop entry point — one of the two places that knows about a concrete implementation
+ * (docs/platform-abstraction.md §4). The only difference from apps/web is the single
+ * createTauriPlatform line.
  */
 const root = createRoot(document.getElementById('root')!)
 
-// 종료 요청은 **무엇보다 먼저** 듣는다 (#184). host를 기다리는 화면과 기동 실패 화면에는
-// 물을 모달이 없으므로 바로 끄고, 앱 화면이 서면 그 모달이 물음을 넘겨받는다.
+// A quit request is listened for **before anything else** (#184). Neither the screen waiting
+// on the host nor the launch-failure screen has a modal to ask the question, so it just quits
+// right away; once the app screen is up, that modal takes over asking.
 const setQuitAsker = listenForQuit()
 
 boot()
 
 function boot() {
-  // **먼저 무언가를 그린다.** host를 기다리는 동안 아무것도 렌더하지 않으면
-  // 빈 검은 창이 뜨고, 그건 고장으로 보인다 (도그푸딩에서 지적됨).
+  // **Draw something first.** If nothing is rendered while waiting on the host, an empty black
+  // window shows up, and that reads as broken (flagged during dogfooding).
   root.render(<Starting />)
   createTauriPlatform()
     .then(async (platform) => {
@@ -31,8 +33,10 @@ function boot() {
 }
 
 /**
- * 실패 화면의 Retry (#184). 예전에는 `location.reload()`라 웹뷰만 다시 읽었고, 이미 포기한
- * 수퍼바이저는 다시 돌지 않아 30초 뒤 같은 문장이 떴다. 수퍼바이저를 다시 돌리고 처음처럼 기다린다.
+ * Retry on the failure screen (#184). This used to be `location.reload()`, which only
+ * reloaded the webview, and a supervisor that had already given up did not restart, so the
+ * same message reappeared 30 seconds later. This restarts the supervisor and waits again as
+ * if from the start.
  */
 function retry() {
   root.render(<Starting />)
@@ -42,32 +46,38 @@ function retry() {
 }
 
 /**
- * ⌘Q·⌘W 즉시 종료 방지 (도그푸딩 2026-09-04) — 데스크톱만의 관심사라 여기 산다.
+ * Prevents ⌘Q and ⌘W from quitting immediately (dogfooding, 2026-09-04) — lives here because
+ * it is a desktop-only concern.
  *
- * Rust가 종료로 가는 길(메뉴의 Quit·⌘Q·창 닫기)을 붙잡고 `quit-requested`를 쏘면,
- * 이 모달이 묻는다. "Quit"만이 quit_app을 불러 관문을 연다 — 오타 한 번이
- * 도는 세션 전부를 내리는 앱에서 종료는 두 동작이어야 한다.
- * 웹 빌드(apps/web)에는 이 길 자체가 없다: 브라우저 탭 닫기는 브라우저의 일이다.
+ * Rust intercepts every path toward quitting (the menu's Quit, ⌘Q, closing the window) and
+ * fires `quit-requested`, and this modal does the asking. Only "Quit" calls quit_app to open
+ * the gate — in an app where a single typo can take down every running session, quitting has
+ * to be two actions.
+ * The web build (apps/web) has no such path at all: closing a browser tab is the browser's own
+ * business.
  */
 function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platform'] }) {
   const [askQuit, setAskQuit] = useState(false)
   /**
-   * 우리 폴더에서 아직 도는 남은 프로세스 (사용자 요청 2026-09-07).
+   * Leftover processes still running from our project folders (requested by the person,
+   * 2026-09-07).
    *
-   * 에이전트가 bash로 띄운 데브 서버는 종료 절차가 못 잡는다 — 실측하면 그 프로세스는
-   * ppid=1에 자기 프로세스 그룹이라 부모 사슬도 그룹도 우리와 끊겨 있다. 그래서 죽이는
-   * 대신 **여기서 보여준다.** 종료 모달은 이미 "정말 끌 거냐"를 읽는 자리라, 남는 것이
-   * 있다는 사실이 놓일 자리로 이만한 곳이 없다.
+   * A dev server an agent launched via bash is not caught by our shutdown procedure — measured
+   * directly, that process has ppid=1 and is its own process group, so both the parent chain
+   * and the group are disconnected from ours. So instead of killing it, **it is shown here.**
+   * The quit modal is already the place that reads "do you really want to shut down", and
+   * there is no better place for the fact that something is left running to land.
    *
-   * **기본은 끈 채다.** 같은 폴더에서 사람이 직접 띄운 것도 이 목록에 들 수 있고, 앱이
-   * 말없이 죽이면 고아를 없애려다 남의 일을 끊는다. 목록이 눈앞에 있으니 한 번 누르면
-   * 함께 정리된다 — 고르는 쪽이 사람이다.
+   * **Off by default.** Something a person launched directly in the same folder can also end
+   * up in this list, and silently killing it while trying to clean up an orphan would cut off
+   * someone else's work. Since the list is right there, one click cleans it up together — the
+   * person is the one who chooses.
    */
   const [strays, setStrays] = useState<{ pid: number; command: string; cwd: string }[]>([])
   const [alsoStop, setAlsoStop] = useState(false)
   const quit = useCallback(async () => {
     if (alsoStop && strays.length > 0) {
-      // 실패해도 종료를 막지 않는다 — 사람이 누른 것은 '끄기'였다
+      // A failure here does not block quitting — what the person clicked was "quit".
       await platform.processes.stop(strays.map((s) => s.pid)).catch(() => {})
     }
     await invoke('quit_app')
@@ -81,17 +91,20 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
         .strays()
         .then(setStrays)
         .catch(() => setStrays([]))
-      // 최소화된 채 ⌘Q면 모달이 안 보여 "종료가 안 되는 앱"이 된다 — 물을 때는 얼굴을 보인다
+      // ⌘Q while minimized would leave the modal unseen, looking like "an app that will not
+      // quit" — show the window whenever there is a question to ask.
       void focusWindow()
     })
     return () => setQuitAsker(null)
   }, [platform.processes])
 
   /*
-   * 앱이 뜬 뒤에 host가 재시작 한도를 넘겨 포기한 경우 (#184). 예전에는 이 신호를 아무도 받지
-   * 않아 상단 바가 Connecting/Disconnected에 머물고, host가 남긴 이유는 화면 어디에도 없었다.
-   * 기동 실패 화면과 같은 문장과 Retry를 앱 위에 띄운다. 다시 뜨면(ready) 내린다 — 새 주소로
-   * 갈아타는 일은 플랫폼의 onEndpointChange가 이미 한다.
+   * The case where the host gives up after exceeding its restart limit once the app is already
+   * up (#184). This signal used to be received by nobody, so the top bar just stayed on
+   * Connecting/Disconnected, and the reason the host gave was nowhere on screen. This puts the
+   * same message and Retry as the launch-failure screen on top of the app, and clears it once
+   * the host comes back up (ready) — switching to the new address is already handled by the
+   * platform's onEndpointChange.
    */
   const [hostFailure, setHostFailure] = useState<string | null>(null)
   useEffect(() => {
@@ -107,13 +120,15 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
   useEffect(() => {
     if (!askQuit) return
     /*
-     * 뜰 때 포커스를 창으로 옮긴다 (#181). 창은 포커스를 가져가지 않아 포커스가 창 아래 앱에 남았고, Tab은 창 아래의
-     * 요소들을 먼저 지나갔다. 창 안에 가두고, 닫히면 원래 자리로 돌려준다.
+     * Moves focus to the dialog when it opens (#181). The dialog was not taking focus, so
+     * focus stayed on the app underneath, and Tab passed through the elements below it first.
+     * This traps focus inside the dialog and returns it to where it was once the dialog closes.
      */
     const before = document.activeElement as HTMLElement | null
     dialogRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      // 모달이 떠 있는 동안 앱의 다른 단축키를 먹지 않게 캡처 단계에서 끊는다
+      // Intercepted at the capture phase so the app's other shortcuts do not fire while the
+      // modal is open.
       if (e.key === 'Tab') {
         const box = dialogRef.current
         if (!box) return
@@ -127,8 +142,9 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
         return
       }
       /*
-       * Enter = 종료, Esc = 계속 — 단, 조합 중인 키와 단추 위의 Enter는 빼고 (#181, `confirmKeyAction`). 포커스가 어디
-       * 있든 Enter를 종료로 읽던 동안, Tab으로 Cancel에 가서 누른 Enter도 앱을 껐다.
+       * Enter = quit, Esc = keep going — except for an in-progress IME composition and an
+       * Enter pressed on a button (#181, `confirmKeyAction`). While Enter was read as quit
+       * regardless of focus, pressing Enter after tabbing to Cancel also quit the app.
        */
       const onButton = (e.target as HTMLElement | null)?.tagName === 'BUTTON'
       const action = confirmKeyAction({ key: e.key, isComposing: e.isComposing, onButton })
@@ -239,7 +255,8 @@ function Starting() {
   )
 }
 
-/** host가 뜨지 않으면 앱이 빈 화면으로 남지 않게, 무엇이 잘못됐는지 보여준다 */
+/** Shows what went wrong so the app does not sit on a blank screen when the host fails to come
+ * up. */
 function StartupFailure({
   message,
   onRetry,
@@ -252,7 +269,8 @@ function StartupFailure({
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 bg-void px-8 text-center">
       <p className="text-[13px] text-chalk">{title}</p>
-      {/* 사이드카가 준 문장은 여러 줄이다 (무엇이 없는지, 어디를 찾아봤는지) — 줄을 살려서 보여준다 */}
+      {/* The message from the sidecar spans multiple lines (what is missing, where it looked)
+          — preserve the line breaks when showing it. */}
       <p className="max-w-md whitespace-pre-line font-mono text-[11px] leading-relaxed text-ash">{message}</p>
       <p className="max-w-md text-[11px] leading-relaxed text-slate">
         If restarting hits the same problem, check <span className="font-mono">~/.centralu/host.log</span>.
@@ -268,8 +286,8 @@ function StartupFailure({
 }
 
 /**
- * 앱이 백그라운드일 때도 대기 세션을 부를 수 있어야 한다 (FR-17, B-4).
- * 창을 앞으로 가져온 뒤 UI의 "다음 대기로 이동"을 그대로 실행한다.
+ * A waiting session has to be reachable even while the app is in the background (FR-17, B-4).
+ * Brings the window to the front and then runs the UI's own "go to next waiting" as-is.
  */
 async function registerGlobalShortcut() {
   try {
@@ -282,7 +300,8 @@ async function registerGlobalShortcut() {
       window.dispatchEvent(new CustomEvent('cc:next-waiting'))
     })
   } catch (e) {
-    // 단축키가 이미 다른 앱에 잡혀 있어도 앱은 정상 동작해야 한다
+    // The app must keep working normally even if the shortcut is already claimed by another
+    // app.
     console.warn('Could not register the global shortcut', e)
   }
 }

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
-/** Tauri 웹뷰용 — apps/web과 동일한 별칭, 다른 진입점 */
+/** For the Tauri webview — the same aliases as apps/web, a different entry point. */
 export default defineConfig({
   root: r('.'),
   plugins: [react(), tailwind()],

@@ -1,8 +1,9 @@
-//! agent-host 사이드카 수퍼바이저.
+//! The agent-host sidecar supervisor.
 //!
-//! Tauri의 역할은 통신 릴레이가 아니라 **프로세스 감독**이다 (docs/architecture.md §4).
-//! host를 띄우고, ready 줄에서 포트·토큰을 읽어 UI에 넘기고, 죽으면 되살린다.
-//! 통신 자체는 UI가 WS로 직접 한다 — dev와 prod가 같은 경로를 쓰는 이유.
+//! Tauri's role here is not a communication relay but **process supervision**
+//! (docs/architecture.md §4). It launches the host, reads the port and token off its ready
+//! line and hands them to the UI, and brings it back if it dies. The communication itself is
+//! done by the UI directly over WS — the reason dev and prod share the same path.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -25,9 +26,9 @@ pub struct HostInfo {
 pub enum HostStatus {
     Starting,
     Ready(HostInfo),
-    /// 재시작 시도 중 (몇 번째인지)
+    /// A restart is in progress (which attempt number this is).
     Restarting { attempt: u32 },
-    /// 되살리기를 포기했다 — UI가 사용자에게 알려야 한다
+    /// Gave up trying to revive it — the UI has to tell the person.
     Failed { message: String },
 }
 
@@ -37,12 +38,14 @@ struct Inner {
     info: Option<HostInfo>,
     status_text: Option<String>,
     shutting_down: bool,
-    /// 감시 스레드가 돌고 있다. 다시 시작(#184)이 스레드를 둘 띄우지 않게 하는 표시다 —
-    /// 둘이 같은 데이터 폴더로 host를 번갈아 띄우면 서로의 잠금에 막힌다.
+    /// A watcher thread is running. This flag is what stops restart (#184) from launching a
+    /// second thread — if two of them alternate starting a host against the same data folder,
+    /// they end up blocking each other's lock.
     running: bool,
-    /// host가 죽기 전에 남긴 마지막 말들 (도그푸딩: 설치본이 "Starting…"에 영원히
-    /// 멈춰 보였는데, 진짜 이유 — 다른 인스턴스가 데이터를 쥐고 있음 — 는 host가
-    /// stdout에 또박또박 말하고 있었다. 말은 있었는데 화면까지 오지 않았다.)
+    /// The last things the host said before it died (dogfooding: an installed build looked
+    /// stuck on "Starting…" forever, and the real reason — another instance was holding the
+    /// data — was something the host had spelled out plainly on stdout the whole time. The
+    /// words were there; they just never reached the screen.)
     last_output: Vec<String>,
 }
 
@@ -51,13 +54,16 @@ pub struct Supervisor {
     inner: Arc<Mutex<Inner>>,
 }
 
-/// 재시작 백오프 상한. 이 이상 **연속으로** 실패하면 사람이 봐야 하는 문제다.
+/// The cap on restart backoff. Failing **consecutively** this many times is a problem a
+/// person has to look at.
 const MAX_RESTARTS: u32 = 5;
 
-/// 이만큼 살아 있었으면 "기동 실패의 연속"이 아니라 새로운 사건이다.
+/// Once it has stayed up this long, a death is a new incident, not part of "a run of failed
+/// launches".
 ///
-/// 카운터를 영영 안 되돌리면 앱을 며칠 켜두는 동안 드문 크래시가 5번 쌓이는 순간
-/// 수퍼바이저가 완전히 포기한다 — 상한은 연속 실패에만 걸려야 한다.
+/// If the counter were never reset, keeping the app open for days would eventually accumulate
+/// five rare, unrelated crashes and the supervisor would give up entirely — the cap must only
+/// apply to consecutive failures.
 const STABLE_UPTIME: Duration = Duration::from_secs(30);
 
 impl Supervisor {
@@ -73,7 +79,8 @@ impl Supervisor {
         self.inner.lock().ok()?.status_text.clone()
     }
 
-    /// host를 띄우고 감시 스레드를 건다. 실패해도 앱은 계속 뜬다 (UI가 상태를 보여준다).
+    /// Launches the host and starts the watcher thread. The app still comes up even if this
+    /// fails (the UI shows the status).
     pub fn start(&self, app: AppHandle) {
         if self.claim(false) {
             self.watch(app);
@@ -81,14 +88,15 @@ impl Supervisor {
     }
 
     /**
-     * 포기한 뒤에 다시 시작한다 (#184 — 실패 화면의 Retry).
+     * Starts again after giving up (#184 — Retry on the failure screen).
      *
-     * 예전 Retry는 웹뷰만 다시 읽었다. 감시 스레드는 `Failed`를 낸 뒤 끝나 있고 `start`를
-     * 부르는 곳은 setup 하나뿐이라, 사람이 원인을 고친 뒤에도(다른 창을 닫았거나 Node를
-     * 깔았거나) 30초를 기다린 끝에 옛 문장이 다시 떴다. 강제 종료 말고는 풀 길이 없었다.
+     * The old Retry only reloaded the webview. The watcher thread had already ended once it
+     * emitted `Failed`, and `start` was only ever called from setup, so even after the person
+     * fixed the cause (closed another window, installed Node), the old message would show up
+     * again after a 30-second wait. There was no way out short of force-quitting.
      *
-     * 아직 돌고 있으면(백오프 중) 아무것도 하지 않는다 — 그 스레드가 곧 답을 낸다.
-     * 돌기 시작했으면 true.
+     * Does nothing if a watcher is still running (mid-backoff) — that thread will produce an
+     * answer soon. Returns true once one has started.
      */
     pub fn restart(&self, app: AppHandle) -> bool {
         if !self.claim(true) {
@@ -98,8 +106,9 @@ impl Supervisor {
         true
     }
 
-    /// 감시 스레드를 띄울 자격을 얻는다. 이미 돌거나 앱이 끝나는 중이면 false.
-    /// `forget_error`면 옛 실패 문장을 비운다 — 새 시도가 옛 이유로 곧바로 실패해 보이지 않게.
+    /// Claims the right to launch a watcher thread. Returns false if one is already running or
+    /// the app is shutting down. When `forget_error` is set, clears the old failure message so
+    /// a fresh attempt does not look like it failed instantly for the old reason.
     fn claim(&self, forget_error: bool) -> bool {
         let Ok(mut inner) = self.inner.lock() else {
             return false;
@@ -116,13 +125,14 @@ impl Supervisor {
 
     fn watch(&self, app: AppHandle) {
         let me = self.clone();
-        // 배포 빌드에서는 번들된 host가 리소스 디렉토리에 들어 있다 (F-0).
+        // In a release build the bundled host lives in the resource directory (F-0).
         //
-        // **존재 여부만으로 dev/prod를 가르면 안 된다** — `tauri dev`의 resource_dir는
-        // target/debug/이고, 한 번이라도 배포 빌드를 하면 거기에도 번들이 복사돼 남는다.
-        // 그러면 dev가 낡은 번들 host를 CC_DEV 없이 띄워, 소스 수정이 반영되지 않고
-        // 배포 앱의 데이터 폴더까지 같이 잡는다. dev 빌드는 무조건 소스 host를 쓴다
-        // (docs/architecture.md §4 — dev는 tsx로 소스 직접 실행 + CC_DEV=1).
+        // **Do not decide dev vs. prod by existence alone** — `tauri dev`'s resource_dir is
+        // target/debug/, and once a release build has been made even once, a bundle stays
+        // copied there too. If existence alone decided it, dev would launch that stale bundled
+        // host without CC_DEV, so source edits would not take effect and it would grab the
+        // release app's data folder as well. A dev build unconditionally uses the source host
+        // (docs/architecture.md §4 — dev runs the source directly via tsx, plus CC_DEV=1).
         let bundled = if cfg!(debug_assertions) {
             None
         } else {
@@ -133,10 +143,12 @@ impl Supervisor {
                 .filter(|p| p.exists())
         };
         thread::spawn(move || {
-            // 어느 자리로 끝나든 돌던 표시를 내린다 — 그래야 Retry가 다시 띄울 수 있다
+            // Clear the running flag no matter which path this ends on — otherwise Retry could
+            // never launch a new one.
             let _running = Running(me.clone());
-            // Node가 없으면 몇 번을 다시 걸어도 결과가 같다 — 백오프 5회를 돌며
-            // 원인 없는 실패를 쌓는 대신 지금 바로, 무엇이 없는지 말한다.
+            // If Node is missing, retrying gets the same result every time — rather than
+            // burning through five backoff rounds accumulating causeless failures, say right
+            // away what is missing.
             if bundled.is_some() && std::env::var("CC_HOST_CMD").is_err() {
                 if let Err(message) = resolve_node() {
                     me.set_error(&message);
@@ -154,24 +166,26 @@ impl Supervisor {
                 let started = std::time::Instant::now();
                 match me.spawn_once(&app, bundled.as_deref()) {
                     Ok(code) => {
-                        // 정상 종료(앱 종료 요청)면 감시를 끝낸다
+                        // A clean exit (the app itself requested it) ends the watcher.
                         if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
                             return;
                         }
-                        // host가 남긴 마지막 말 — ready 전에 죽었다면 이것이 이유다
+                        // The last things the host said — if it died before ready, this is why.
                         let reason = me.take_last_output();
                         /*
-                         * 다른 인스턴스가 데이터를 쥐고 있으면 다시 띄워봐야 같은 답이다 —
-                         * 백오프 5회(~15초)를 돌며 "Starting…"을 보여주는 대신 지금 바로,
-                         * host가 말한 이유 그대로 사람에게 보여준다 (닫아야 할 것이 뭔지
-                         * 그 문장에 들어 있다).
+                         * If another instance is holding the data, relaunching just gets the
+                         * same answer — instead of cycling through five backoff rounds (about
+                         * 15 seconds) showing "Starting…", show the person right away exactly
+                         * the reason the host gave (what needs to be closed is spelled out in
+                         * that message).
                          */
                         if reason.contains("already using this data") {
                             me.set_error(&reason);
                             emit(&app, HostStatus::Failed { message: reason });
                             return;
                         }
-                        // 충분히 오래 살다 죽었다면 이전 실패 이력은 무관하다 — 처음부터 센다
+                        // If it stayed up long enough before dying, the earlier failure history
+                        // no longer matters — start counting over from zero.
                         if started.elapsed() >= STABLE_UPTIME {
                             attempt = 0;
                         }
@@ -197,36 +211,39 @@ impl Supervisor {
                         }
                     }
                 }
-                // 지수 백오프 (최대 5초)
+                // Exponential backoff (capped at 5 seconds).
                 thread::sleep(Duration::from_millis((200 * 2u64.pow(attempt.min(5))).min(5000)));
             }
         });
     }
 
-    /// host 한 번 실행 → ready 줄 파싱 → 종료까지 대기. 반환값은 종료 코드.
+    /// Runs the host once → parses its ready line → waits for it to exit. The return value is
+    /// the exit code.
     fn spawn_once(&self, app: &AppHandle, bundled: Option<&Path>) -> Result<Option<i32>, String> {
-        // 지난 기동의 유언과 섞이지 않게 비우고 시작한다
+        // Clear this before starting so it does not mix with the previous launch's last words.
         if let Ok(mut inner) = self.inner.lock() {
             inner.last_output.clear();
         }
         let (program, args) = host_command(bundled)?;
         let mut cmd = Command::new(&program);
-        // stdin을 파이프로 열어두는 것이 **고아 방지의 핵심**이다.
-        // 앱이 어떤 이유로 죽든(크래시·SIGKILL 포함) 이 파이프가 닫히고,
-        // host는 EOF를 보고 스스로 종료한다. 종료 훅에만 기대면 강제 종료 때 좀비가 남는다.
+        // Keeping stdin open as a pipe is **the whole trick that prevents orphans.**
+        // Whatever reason the app dies for (including a crash or SIGKILL), this pipe closes,
+        // and the host sees EOF and exits on its own. Relying only on a shutdown hook leaves a
+        // zombie behind when the app is force-quit.
         cmd.args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
 
-        // dev로 띄운 host는 배포 앱과 **다른 데이터 폴더**를 쓴다.
-        // 같은 폴더를 두 host가 붙잡으면 세션 목록이 어긋난다.
+        // A host launched from dev uses a **different data folder** than the release app.
+        // If two hosts held the same folder, the session lists would get out of sync.
         if bundled.is_none() {
             cmd.env("CC_DEV", "1");
         }
 
-        // 자식을 **자기 자신이 리더인 프로세스 그룹**에 넣는다.
-        // node 실행기(tsx)는 다시 자식을 낳으므로, 그룹째 죽이지 않으면 손자가 고아로 남는다.
+        // Puts the child in a **process group where it is its own leader**.
+        // The node launcher (tsx) spawns children of its own, so killing only the direct child
+        // and not the whole group leaves the grandchild orphaned.
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -241,7 +258,8 @@ impl Supervisor {
             inner.child = Some(child);
         }
 
-        // ready 줄을 기다린다. host는 기동 시 {"ready":true,"port":..,"token":".."}를 한 줄 출력한다.
+        // Waits for the ready line. On startup the host prints one line of
+        // {"ready":true,"port":..,"token":".."}.
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             let line = match line {
@@ -262,8 +280,8 @@ impl Supervisor {
                     continue;
                 }
             }
-            // 그 외 줄은 로그로 흘리되, 마지막 몇 줄은 쥐고 있는다 —
-            // ready 전에 죽으면 이 줄들이 유일한 사인(死因)이다
+            // Every other line is streamed to the log, but the last several are also kept —
+            // if it dies before ready, these lines are the only cause of death on record.
             eprintln!("[agent-host] {line}");
             if let Ok(mut inner) = self.inner.lock() {
                 if !line.trim().is_empty() {
@@ -275,9 +293,9 @@ impl Supervisor {
             }
         }
 
-        // stdout이 닫혔다 = 프로세스가 끝났다.
-        // wait()는 블로킹이다 — 락을 쥔 채 기다리면 그동안 IPC(info 조회)와
-        // shutdown이 같이 멈춘다. child를 꺼내고 락을 놓은 뒤에 기다린다.
+        // stdout closing means the process has ended.
+        // wait() blocks — waiting while holding the lock would stall IPC (info queries) and
+        // shutdown at the same time. Take the child out, release the lock, then wait.
         let mut child = {
             let mut guard = self.inner.lock().map_err(|_| "lock 실패")?;
             guard.info = None;
@@ -296,7 +314,8 @@ impl Supervisor {
         }
     }
 
-    /// 죽은 host가 남긴 마지막 말들을 꺼내고 비운다 — 다음 기동의 말과 섞이지 않게
+    /// Takes and clears the last things a dead host said — so they do not mix with the next
+    /// launch's words.
     fn take_last_output(&self) -> String {
         self.inner
             .lock()
@@ -304,10 +323,12 @@ impl Supervisor {
             .unwrap_or_default()
     }
 
-    /// 앱 종료 시 호출. 사이드카를 **그룹째** 죽인다 — 좀비를 남기지 않는다.
+    /// Called when the app quits. Kills the sidecar **as a whole group** — no zombies left
+    /// behind.
     pub fn shutdown(&self) {
-        // 락은 child를 꺼내는 동안만 쥔다. 300ms 잠들기·wait()를 락 안에서 하면
-        // 그동안 감시 스레드와 IPC가 같은 락을 기다리며 종료가 서로를 막는다.
+        // The lock is only held while taking the child out. Sleeping 300ms or calling wait()
+        // inside the lock would leave the watcher thread and IPC waiting on the same lock,
+        // and shutdown would block on them and vice versa.
         let child = match self.inner.lock() {
             Ok(mut inner) => {
                 inner.shutting_down = true;
@@ -318,15 +339,17 @@ impl Supervisor {
         };
         if let Some(mut child) = child {
             /*
-             * 그룹째 TERM으로 시작하면 안 된다 — 실측 (#57): codex app-server는 SIGTERM에
-             * 락 파일(thread-writer-locks/<id>.lock)을 남기고 즉사하지만, stdin EOF에는
-             * 18ms 안에 락을 지우며 스스로 나간다. 그룹 TERM은 host의 disposeAll이
-             * EOF로 닫아줄 기회를 뺏고 codex 자식들을 직접 때린다.
+             * Must not start by sending TERM to the whole group — measured (#57): on SIGTERM,
+             * codex app-server dies instantly and leaves behind its lock file
+             * (thread-writer-locks/<id>.lock), but on stdin EOF it removes the lock and exits
+             * on its own within 18ms. A group-wide TERM takes away the host's disposeAll's
+             * chance to close things via EOF and hits the codex children directly instead.
              *
-             * 그래서 순서를 바꾼다: host에게만 TERM → host의 shutdown()이 세션들을 EOF로
-             * 정리하고 DB를 닫을 때까지 기다린다(최대 3초 — 예전 300ms는 WAL 체크포인트가
-             * 끝나기 전에 확인 사살하는 시간이었다). 그 뒤의 그룹 TERM·kill은 host가
-             * 굳어 있을 때만 실제로 일하는 좀비 방지 담보다.
+             * So the order is reversed: TERM only the host → wait for the host's shutdown() to
+             * clean up its sessions via EOF and close the database (up to 3 seconds — the old
+             * 300ms used to finish off the process before its WAL checkpoint had completed).
+             * The group-wide TERM and kill that follow are only a zombie-prevention backstop
+             * that actually does anything when the host is stuck.
              */
             kill_pid(child.id());
             let mut waited_ms: u64 = 0;
@@ -344,7 +367,8 @@ impl Supervisor {
     }
 }
 
-/// 감시 스레드가 끝날 때 `running`을 내린다. `return`이 네 군데라 Drop에 맡긴다.
+/// Clears `running` when the watcher thread ends. There are four `return` points, so this is
+/// left to Drop.
 struct Running(Supervisor);
 
 impl Drop for Running {
@@ -359,7 +383,8 @@ fn emit(app: &AppHandle, status: HostStatus) {
     let _ = app.emit("host-status", status);
 }
 
-/// host 프로세스 하나에만 SIGTERM — 자식(codex 등)은 host가 EOF로 스스로 정리한다 (#57)
+/// SIGTERM to the single host process only — children (codex, etc.) are cleaned up by the
+/// host itself via EOF (#57).
 #[cfg(unix)]
 fn kill_pid(pid: u32) {
     let _ = Command::new("/bin/kill")
@@ -373,7 +398,7 @@ fn kill_pid(pid: u32) {
 #[cfg(not(unix))]
 fn kill_pid(_pid: u32) {}
 
-/// 프로세스 그룹 전체에 SIGTERM (음수 pid = 그룹)
+/// SIGTERM to the whole process group (a negative pid means the group).
 #[cfg(unix)]
 fn kill_group(pid: u32) {
     let _ = Command::new("/bin/kill")
@@ -387,10 +412,11 @@ fn kill_group(pid: u32) {
 #[cfg(not(unix))]
 fn kill_group(_pid: u32) {}
 
-/// dev에서는 워크스페이스의 tsx로, 배포 빌드에서는 번들된 host를 시스템 Node로 실행한다 (F-0).
+/// In dev, this runs through the workspace's tsx; in a release build it runs the bundled host
+/// through the system Node (F-0).
 ///
-/// **패키지 매니저를 거치지 않는다** — pnpm 래퍼를 통해 띄우면 래퍼만 죽고
-/// 실제 host(손자)가 고아로 남는다 (실측으로 확인된 문제).
+/// **Never goes through a package manager** — launching through the pnpm wrapper only kills
+/// the wrapper, leaving the actual host (a grandchild) orphaned (confirmed by measurement).
 fn host_command(bundled: Option<&Path>) -> Result<(String, Vec<String>), String> {
     if let Ok(cmd) = std::env::var("CC_HOST_CMD") {
         let mut parts = cmd.split_whitespace().map(String::from).collect::<Vec<_>>();
@@ -400,8 +426,9 @@ fn host_command(bundled: Option<&Path>) -> Result<(String, Vec<String>), String>
         }
     }
 
-    // 배포 빌드: 번들된 host를 시스템 Node로 실행한다 (F-0a 결정).
-    // Node SEA는 네이티브 애드온 때문에 비용이 과해 도그푸딩 범위에서 제외했다.
+    // Release build: run the bundled host through the system Node (decision F-0a).
+    // Node SEA was excluded from the dogfooding scope because native addons made it too
+    // costly.
     if let Some(path) = bundled {
         return Ok((
             resolve_node()?,
@@ -414,9 +441,9 @@ fn host_command(bundled: Option<&Path>) -> Result<(String, Vec<String>), String>
         ));
     }
 
-    // dev: 워크스페이스의 tsx로 소스를 직접 실행.
-    // CC_DEV로 표시해 두면 host가 배포 앱과 **다른 데이터 폴더**를 쓴다 —
-    // 둘을 동시에 켜도 세션 목록이 섞이지 않는다.
+    // dev: runs the source directly through the workspace's tsx.
+    // Marking it with CC_DEV makes the host use a **different data folder** than the release
+    // app — the two can be running at once without the session lists getting mixed up.
     let root = workspace_root();
     Ok((
         format!("{root}/node_modules/.bin/tsx"),
@@ -429,11 +456,12 @@ fn host_command(bundled: Option<&Path>) -> Result<(String, Vec<String>), String>
     ))
 }
 
-/// Node를 찾지 못했을 때 사용자에게 그대로 보여줄 안내.
+/// The guidance shown to the person verbatim when Node cannot be found.
 ///
-/// **조용한 실패가 최악이다.** 예전에는 못 찾으면 `"node"`를 그냥 실행해
-/// `No such file or directory`만 남았고, 화면에는 그 원문이 떴다.
-/// Node가 없는 것인지, 있는데 못 찾는 것인지, 버전이 낮은 것인지 갈리지 않았다.
+/// **A silent failure is the worst outcome.** It used to just run `"node"` bare when it
+/// could not find it, which left only `No such file or directory`, and that raw text is
+/// what showed up on screen. There was no way to tell apart Node truly being missing, Node
+/// being present but not found, and the version being too low.
 fn node_missing_message(looked: &[String]) -> String {
     format!(
         "Node.js를 찾지 못했습니다. Centralu는 Node {MIN_NODE_MAJOR} 이상이 필요합니다.\n\
@@ -458,27 +486,30 @@ const UPGRADE_NODE_HINT: &str = "`brew upgrade node`";
 #[cfg(not(target_os = "macos"))]
 const UPGRADE_NODE_HINT: &str = "배포판의 패키지 관리자";
 
-/// host 번들의 esbuild target이 node22다 — 그 아래에서는 문법부터 깨진다.
+/// The host bundle's esbuild target is node22 — below that, even the syntax breaks.
 const MIN_NODE_MAJOR: u32 = 22;
 
-/// Node 탐색은 로그인 셸을 통째로 띄우므로 1초 안팎이 든다. 재시작 루프가 매번 부르므로
-/// 찾은 것은 기억한다. **못 찾은 것은 기억하지 않는다** (#184) — 앱을 켠 뒤 Node를 깔고
-/// Retry를 누른 사람에게 옛 "찾지 못했습니다"를 다시 보여주면 안 된다.
+/// Finding Node takes around one second because it launches the whole login shell. Since the
+/// restart loop calls this every time, a successful find is cached. **A failed find is never
+/// cached** (#184) — someone who installs Node after opening the app and presses Retry must
+/// not be shown the old "not found" again.
 static NODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-/// 배포 빌드가 host를 실행할 Node의 **절대 경로**를 찾는다.
+/// Finds the **absolute path** to the Node the release build will use to run the host.
 ///
-/// **왜 고정 경로로는 안 되는가 (실측):** GUI로 띄운 `.app`은 로그인 셸의 PATH를
-/// 물려받지 못해 `/usr/bin:/bin:/usr/sbin:/sbin`만 들어온다. 예전에는 homebrew
-/// 두 곳과 `/usr/bin`만 봤는데, nvm·mise·volta로 깐 Node는 홈 디렉토리 아래 있어
-/// **Node가 멀쩡히 설치된 맥에서도 앱이 뜨지 않았다.**
-/// claude·codex CLI 탐색에서 이미 같은 문제를 겪고 로그인 셸에게 묻도록 고쳤는데
-/// (`packages/agent-host/src/env-path.ts`), node만 옛 방식으로 남아 있었다.
+/// **Why a fixed path does not work (measured):** a `.app` launched from the GUI does not
+/// inherit the login shell's PATH, and only gets
+/// `/usr/bin:/bin:/usr/sbin:/sbin`. This used to only check the two Homebrew locations and
+/// `/usr/bin`, but Node installed via nvm, mise or volta lives under the home directory, so
+/// **the app would not start even on a Mac where Node was perfectly well installed.** The
+/// claude and codex CLI lookups had already hit the same problem and were fixed to ask the
+/// login shell (`packages/agent-host/src/env-path.ts`); only node was left using the old
+/// approach.
 fn resolve_node() -> Result<String, String> {
     remember_found(&NODE, || pick_node(probe_login_shell(), fallback_node_paths()))
 }
 
-/// 찾은 것만 기억한다. 못 찾았으면 다음에 다시 묻는다.
+/// Only caches a successful find. If it was not found, asks again next time.
 fn remember_found(
     cache: &std::sync::OnceLock<String>,
     probe: impl FnOnce() -> Result<String, String>,
@@ -490,12 +521,14 @@ fn remember_found(
     Ok(cache.get_or_init(|| found).clone())
 }
 
-/// 어느 것을 고를지의 규칙만 따로 뗀 것 — 셸도 파일시스템도 없이 시험할 수 있게.
+/// The selection rule pulled out on its own, so it can be tested with neither a shell nor a
+/// real filesystem.
 ///
-/// 순서: 로그인 셸이 아는 것(사용자가 터미널에서 쓰는 그 node) → 흔한 설치 위치.
-/// **낡았다고 거기서 멈추지 않는다** — nvm 기본이 v18이고 홈브류에 v22가 있는 맥이 흔하다.
-/// 다만 낡은 것을 만났다는 사실은 들고 가서, 끝내 못 찾으면 그 이유를 대신 보여준다
-/// ("없음"보다 "올려야 함"이 사용자가 할 일에 가깝다).
+/// Order: whatever the login shell knows about (the exact node the person already uses in a
+/// terminal), then the common install locations. **Does not stop just because it is old** — a
+/// Mac with nvm defaulting to v18 while Homebrew has v22 is common. But it carries forward the
+/// fact that it hit an old one, and shows that as the reason if nothing newer turns up
+/// ("needs an upgrade" is closer to what the person actually has to do than "not found").
 fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> Result<String, String> {
     let mut looked = vec!["로그인 셸 PATH".to_string()];
     let mut ordered: Vec<String> = from_shell.into_iter().collect();
@@ -520,9 +553,11 @@ fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> Result<Strin
     Err(too_old.unwrap_or_else(|| node_missing_message(&looked)))
 }
 
-/// 로그인 셸에게 node의 위치를 묻는다. 대화형(-i)이어야 .zshrc의 nvm/mise 초기화가 돈다.
+/// Asks the login shell where node is. It has to be interactive (-i) for .zshrc's nvm/mise
+/// initialization to run.
 ///
-/// 셸 설정이 무엇을 출력하든 상관없도록 표식이 붙은 줄만 고른다.
+/// Only the line carrying the marker is picked out, so it does not matter what else the shell
+/// configuration prints.
 fn probe_login_shell() -> Option<String> {
     use std::io::Read;
 
@@ -536,7 +571,7 @@ fn probe_login_shell() -> Option<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        // 셸 초기화 스크립트가 대화형 프롬프트를 띄우지 않도록
+        // So the shell's initialization script does not put up an interactive prompt.
         .env("TERM", "dumb")
         .env("CI", "1");
     #[cfg(unix)]
@@ -549,8 +584,9 @@ fn probe_login_shell() -> Option<String> {
     let pid = child.id();
     let stdout = child.stdout.take()?;
 
-    // **여기서 멈추면 앱이 통째로 기동 실패한다.** 셸 설정이 무한히 기다리는 일이
-    // 실제로 있으므로(예: 프롬프트 입력 대기) 시간을 끊고 그룹째 죽인다.
+    // **Getting stuck here would fail the whole app's launch.** Shell configurations really do
+    // sometimes wait forever (waiting on prompt input, for example), so this cuts it off on a
+    // timer and kills the whole group.
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let mut buf = String::new();
@@ -571,7 +607,7 @@ fn probe_login_shell() -> Option<String> {
     parse_probe_output(&out)
 }
 
-/// 셸이 뱉은 것 중 표식이 붙은 줄에서 경로만 꺼낸다.
+/// Pulls the path out of the marked line among whatever the shell printed.
 fn parse_probe_output(out: &str) -> Option<String> {
     out.lines()
         .find_map(|l| l.trim().strip_prefix("__CC_NODE__:"))
@@ -580,7 +616,8 @@ fn parse_probe_output(out: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// 셸을 못 쓸 때의 폴백. 홈브류뿐 아니라 버전 매니저의 흔한 자리까지 본다.
+/// The fallback for when the shell cannot be used. Checks not just Homebrew but the common
+/// locations of version managers too.
 fn fallback_node_paths() -> Vec<String> {
     node_paths_under(&std::env::var("HOME").unwrap_or_default())
 }
@@ -597,15 +634,16 @@ fn node_paths_under(home: &str) -> Vec<String> {
         paths.push(format!("{home}/.local/share/mise/shims/node"));
         paths.push(format!("{home}/.asdf/shims/node"));
         paths.push(format!("{home}/.local/bin/node"));
-        // nvm은 버전마다 디렉토리가 갈린다 — 가장 높은 버전을 고른다
+        // nvm keeps a separate directory per version — pick the highest one.
         paths.extend(nvm_versions(&format!("{home}/.nvm/versions/node")));
     }
     paths
 }
 
-/// `~/.nvm/versions/node/*/bin/node`를 버전 내림차순으로.
+/// `~/.nvm/versions/node/*/bin/node`, in descending version order.
 ///
-/// 이름이 `v22.3.1` 꼴이라 사전순은 v9 > v22가 되어 틀린다. 숫자로 비교한다.
+/// The names look like `v22.3.1`, so a lexical sort would wrongly put v9 ahead of v22.
+/// Compared as numbers instead.
 fn nvm_versions(root: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
@@ -622,7 +660,7 @@ fn nvm_versions(root: &str) -> Vec<String> {
     versions.into_iter().map(|(_, p)| p).collect()
 }
 
-/// `v22.3.1` → `[22, 3, 1]`. 숫자로 안 읽히면 빈 벡터.
+/// `v22.3.1` → `[22, 3, 1]`. An empty vector if it does not parse as numbers.
 fn version_parts(raw: &str) -> Vec<u32> {
     let trimmed = raw.trim().trim_start_matches('v');
     let parts: Vec<u32> = trimmed.split('.').filter_map(|p| p.parse().ok()).collect();
@@ -633,10 +671,11 @@ fn version_parts(raw: &str) -> Vec<u32> {
     }
 }
 
-/// 찾은 Node가 실제로 쓸 수 있는 버전인지 본다.
+/// Checks whether the Node that was found is actually a usable version.
 ///
-/// **버전이 낮은 것과 없는 것은 사용자가 할 일이 다르다** — 설치가 아니라 업그레이드다.
-/// 그래서 메시지를 갈라 놓는다. 버전을 못 읽으면 통과시킨다(막을 근거가 없다).
+/// **A too-low version and a missing one call for different actions from the person** — an
+/// upgrade, not an install. So the messages are kept separate. If the version cannot be read,
+/// it is let through (there is no basis for blocking it).
 fn check_node_version(path: &str) -> Result<String, String> {
     let Ok(out) = Command::new(path).arg("--version").stdin(Stdio::null()).output() else {
         return Ok(path.to_string());
@@ -656,7 +695,7 @@ fn check_node_version(path: &str) -> Result<String, String> {
 }
 
 fn workspace_root() -> String {
-    // src-tauri/ 기준 두 단계 위가 apps/, 세 단계 위가 워크스페이스 루트
+    // Two levels up from src-tauri/ is apps/, three levels up is the workspace root.
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
@@ -668,14 +707,15 @@ fn workspace_root() -> String {
 mod tests {
     use super::*;
 
-    /// Retry가 포기한 수퍼바이저를 다시 띄울 수 있고, 돌고 있는 것을 겹쳐 띄우지 않는다 (#184)
+    /// Retry can relaunch a supervisor that has given up, and does not launch a second one on
+    /// top of a running one (#184).
     #[test]
     fn a_supervisor_that_gave_up_can_be_claimed_again() {
         let sup = Supervisor::new();
         assert!(sup.claim(false), "처음 시작");
         assert!(!sup.claim(true), "감시 스레드가 도는 동안은 겹쳐 띄우지 않는다");
 
-        // 감시 스레드가 Failed를 내고 끝났다
+        // The watcher thread emitted Failed and ended.
         sup.set_error("agent-host가 종료되었습니다 (code Some(1))");
         drop(Running(sup.clone()));
 
@@ -690,7 +730,8 @@ mod tests {
         assert!(!sup.claim(true));
     }
 
-    /// 앱을 켠 뒤 Node를 깔고 Retry를 누르면 새로 찾아야 한다 (#184)
+    /// Installing Node after the app is open and pressing Retry must trigger a fresh search
+    /// (#184).
     #[test]
     fn a_missing_node_is_not_remembered_but_a_found_one_is() {
         let cache = std::sync::OnceLock::new();
@@ -710,14 +751,15 @@ mod tests {
 
     #[test]
     fn picks_the_marked_line_only() {
-        // 셸 설정이 무엇을 출력하든(배너·경고) 표식이 붙은 줄만 본다
+        // Only the marked line is checked, no matter what the shell configuration prints
+        // (banners, warnings).
         let out = "Welcome to zsh!\n__CC_NODE__:/bin/sh\nsome trailing noise\n";
         assert_eq!(parse_probe_output(out), Some("/bin/sh".to_string()));
     }
 
     #[test]
     fn ignores_a_path_that_is_not_there() {
-        // command -v가 빈 문자열을 주거나(설치 안 됨) 죽은 심링크를 줄 수 있다
+        // `command -v` can return an empty string (not installed) or a dead symlink.
         assert_eq!(parse_probe_output("__CC_NODE__:\n"), None);
         assert_eq!(parse_probe_output("__CC_NODE__:/nope/node\n"), None);
         assert_eq!(parse_probe_output("node not found\n"), None);
@@ -725,14 +767,14 @@ mod tests {
 
     #[test]
     fn compares_versions_as_numbers_not_text() {
-        // 사전순이면 v9 > v22가 되어 낡은 Node를 고른다
+        // A lexical sort would make v9 > v22 and pick the old Node.
         assert!(version_parts("v22.3.1") > version_parts("v9.11.2"));
         assert_eq!(version_parts("v22.3.1"), vec![22, 3, 1]);
         assert_eq!(version_parts("lts/*"), Vec::<u32>::new());
         assert_eq!(version_parts(""), Vec::<u32>::new());
     }
 
-    /// node인 척하며 주어진 버전을 찍는 스크립트를 하나 세운다
+    /// Sets up a script that pretends to be node and prints the given version.
     fn fake_node(version: &str, name: &str) -> String {
         let path = std::env::temp_dir().join(name);
         std::fs::write(&path, format!("#!/bin/sh\necho {version}\n")).unwrap();
@@ -746,7 +788,7 @@ mod tests {
 
     #[test]
     fn rejects_a_node_that_is_too_old() {
-        // 낮은 버전은 "없음"이 아니라 "올려야 함"이다 — 사용자가 할 일이 다르다
+        // A low version is "needs an upgrade", not "missing" — the person has a different task.
         let path = fake_node("v20.11.1", "cc-test-node-old");
         let err = check_node_version(&path).unwrap_err();
         assert!(err.contains("이상이 필요한데"), "{err}");
@@ -761,16 +803,16 @@ mod tests {
 
     #[test]
     fn passes_when_the_version_cannot_be_read() {
-        // 막을 근거가 없으면 막지 않는다 (예상 못 한 출력 형식)
+        // No basis to block it, so it is not blocked (an unexpected output format).
         let path = fake_node("banana", "cc-test-node-weird");
         assert_eq!(check_node_version(&path), Ok(path));
     }
 
-    /// 이 맥의 로그인 셸이 아는 node를 실제로 집어내는지 본다.
+    /// Checks that this Mac's login shell's own node is actually picked out.
     ///
-    /// 단위 테스트로는 "고정 경로가 아니라 셸에게 묻는다"를 확인할 수 없다 —
-    /// 그게 이 수정의 전부이므로 실물로 한 번 건드린다.
-    /// node가 없는 환경에서는 조용히 통과한다(막을 근거가 없다).
+    /// A unit test alone cannot confirm "asks the shell instead of using a fixed path" — since
+    /// that is the entire point of this fix, this touches the real thing once. Passes silently
+    /// in an environment with no node (there is no basis to block it there).
     #[test]
     fn finds_the_node_this_shell_knows() {
         let Ok(shell) = std::env::var("SHELL") else { return };
@@ -790,7 +832,8 @@ mod tests {
 
     #[test]
     fn moves_on_when_the_shell_node_is_too_old() {
-        // nvm 기본이 v18인데 홈브류에 v22가 있는 맥 — 여기서 멈추면 쓸 수 있는데도 못 뜬다
+        // A Mac where nvm defaults to v18 but Homebrew has v22 — stopping here would fail to
+        // launch even though a usable Node exists.
         let old = fake_node("v18.20.4", "cc-test-node-shell-old");
         let new = fake_node("v22.9.0", "cc-test-node-brew-new");
         assert_eq!(pick_node(Some(old), vec![new.clone()]), Ok(new));
@@ -798,7 +841,8 @@ mod tests {
 
     #[test]
     fn explains_the_old_version_when_there_is_nothing_newer() {
-        // 끝내 못 찾았으면 "없음"이 아니라 "낡음"을 말한다 — 할 일이 설치가 아니라 업그레이드다
+        // If nothing newer ever turns up, say "old", not "missing" — the task is an upgrade,
+        // not an install.
         let old = fake_node("v18.20.4", "cc-test-node-only-old");
         let err = pick_node(Some(old), vec!["/nope/node".into()]).unwrap_err();
         assert!(err.contains("v18.20.4"), "{err}");
@@ -807,7 +851,8 @@ mod tests {
 
     #[test]
     fn reports_every_place_it_looked_when_nothing_is_there() {
-        // 아무 데도 없을 때가 사용자가 가장 막막한 순간이다 — 찾아본 곳을 다 적는다
+        // Finding nothing anywhere is the moment the person is most stuck — list every place
+        // that was checked.
         let err = pick_node(None, vec!["/nope/a/node".into(), "/nope/b/node".into()]).unwrap_err();
         assert!(err.contains("로그인 셸 PATH"), "{err}");
         assert!(err.contains("/nope/a/node") && err.contains("/nope/b/node"), "{err}");
@@ -821,7 +866,8 @@ mod tests {
 
     #[test]
     fn looks_where_version_managers_actually_put_node() {
-        // 예전에는 homebrew 두 곳과 /usr/bin뿐이었다 — nvm·mise·volta 사용자가 여기서 막혔다
+        // This used to be only the two Homebrew locations and /usr/bin — nvm, mise and volta
+        // users got stuck here.
         let paths = node_paths_under("/home/tester");
         for expected in [
             "/opt/homebrew/bin/node",

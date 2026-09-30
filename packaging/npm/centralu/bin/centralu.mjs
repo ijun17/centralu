@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 /**
- * Centralu 실행기.
+ * The Centralu launcher.
  *
- * **왜 npm으로 주는가:** macOS는 앱을 검사해서 위험하다고 판정하는 게 아니라,
- * 파일에 붙은 `com.apple.quarantine` 딱지를 보고 개발자 신원을 따진다. 그 딱지는
- * **받아온 프로그램이** 붙인다 — 브라우저는 붙이고 npm은 안 붙인다. 그래서 npm으로
- * 설치하면 서명이 애드혹이어도 경고 없이 그냥 열린다 (docs/plans/beta-release-checklist.md §2).
+ * **Why this ships through npm:** macOS does not inspect the app and decide it is dangerous —
+ * it looks at the `com.apple.quarantine` flag attached to the file and checks the developer's
+ * identity from that. That flag is attached **by the program that downloaded it** — a browser
+ * attaches it, npm does not. So an npm install just opens with no warning even with an ad hoc
+ * signature (docs/plans/beta-release-checklist.md §2).
  *
- * 앱 본체는 아키텍처별 패키지(`centralu-darwin-arm64`)에 들어 있다. 이 패키지는
- * 그것을 찾아 띄우는 얇은 껍데기다 — esbuild·swc가 쓰는 것과 같은 구조.
+ * The app itself lives inside an architecture-specific package (`centralu-darwin-arm64`). This
+ * package is a thin shell that finds it and launches it — the same structure esbuild and swc
+ * use.
  *
  * Linux is served from the same shim (issue #14). The two platforms disagree about what
  * "the app" even is — macOS hands a `.app` directory to LaunchServices, Linux runs a
@@ -52,22 +54,22 @@ const TARGETS = {
 
 const TARGET = TARGETS[`${process.platform}-${process.arch}`]
 
-/** 아키텍처별 패키지 안의 앱. 못 찾으면 null */
+/** The app inside the architecture-specific package. null if it cannot be found. */
 function bundledApp() {
   if (!TARGET) return null
   let root
   try {
     root = dirname(require.resolve(`${TARGET.pkg}/package.json`))
   } catch {
-    return null // 이 아키텍처용 패키지가 안 깔린 것 — 아래에서 이유를 말한다
+    return null // The package for this architecture is not installed — the reason is explained below.
   }
   const app = join(root, TARGET.artifact)
   return existsSync(app) ? app : null
 }
 
 /**
- * 지금 이 기계에서 왜 못 쓰는지를 **구체적으로** 말한다.
- * "설치가 안 됐습니다"만 뜨면 사용자가 할 수 있는 일이 없다.
+ * States **specifically** why this machine cannot run it right now.
+ * If all that shows is "not installed", there is nothing the person can act on.
  */
 function explainMissing() {
   if (!TARGET) {
@@ -102,7 +104,7 @@ function requireApp() {
 }
 
 /**
- * 앱을 띄운다. `/Applications`에 설치돼 있으면 그쪽을 먼저 쓴다.
+ * Launches the app. If it is installed in `/Applications`, that copy is used first.
  *
  * That preference is macOS-only, and not for lack of an equivalent: `centralu install`
  * on Linux writes a launcher that points back at this same package, so there is never a
@@ -111,7 +113,8 @@ function requireApp() {
 function run(args) {
   if (process.platform === 'darwin') {
     const app = existsSync(INSTALLED) ? INSTALLED : requireApp()
-    // `open`은 LaunchServices를 거친다 — Dock 아이콘·단일 인스턴스가 그래야 제대로 산다
+    // `open` goes through LaunchServices — the dock icon and single-instance behavior only
+    // work correctly that way.
     const r = spawn('open', ['-a', app, ...(args.length ? ['--args', ...args] : [])], { stdio: 'inherit' })
     r.on('exit', (code) => process.exit(code ?? 0))
     return
@@ -136,10 +139,11 @@ function run(args) {
 }
 
 /**
- * 앱을 시스템 메뉴에 등록한다.
+ * Registers the app in the system menu.
  *
- * **postinstall로 몰래 하지 않는다.** 남의 `/Applications`에 조용히 쓰는 것은 신뢰를 깎고,
- * pnpm은 postinstall을 기본 차단한다. 사용자가 원할 때 명시적으로 부르게 한다.
+ * **Never done quietly through postinstall.** Writing silently into someone's `/Applications`
+ * erodes trust, and pnpm blocks postinstall by default anyway. This is only run when the
+ * person explicitly asks for it.
  */
 function install() {
   const app = requireApp()
@@ -148,7 +152,8 @@ function install() {
     console.log(`기존 ${INSTALLED}를 새 버전으로 교체합니다.`)
     rmSync(INSTALLED, { recursive: true, force: true })
   }
-  // cp가 아니라 ditto — 번들의 권한·확장속성을 그대로 옮긴다 (서명이 깨지지 않게)
+  // ditto, not cp — carries over the bundle's permissions and extended attributes unchanged
+  // (so the signature does not break).
   execFileSync('/usr/bin/ditto', [app, INSTALLED], { stdio: 'inherit' })
   console.log(`설치했습니다: ${INSTALLED}`)
   console.log('이제 Launchpad·Spotlight에서도 찾을 수 있습니다.')
@@ -201,10 +206,11 @@ function uninstall() {
 }
 
 /**
- * npm 레지스트리가 곧 업데이트 채널이다 — 서버도 서명 키도 따로 필요 없다.
+ * The npm registry itself is the update channel — no separate server or signing key needed.
  *
- * 실패를 뭉뚱그리지 않는다. 못 닿은 것(네트워크)과 없는 것(404)은 **사용자가 할 일이 다르다** —
- * 앞은 연결을 보라는 말이고, 뒤는 봐도 소용없다는 말이다.
+ * Failures are not lumped together. Being unreachable (network) and not existing (404) call
+ * for **different actions from the person** — the first says to check the connection, the
+ * second says checking will not help.
  */
 async function latestVersion(timeoutMs = 2000) {
   try {
@@ -217,7 +223,7 @@ async function latestVersion(timeoutMs = 2000) {
     const version = body?.version
     return typeof version === 'string' ? { ok: true, version } : { ok: false, reason: 'bad-response' }
   } catch {
-    return { ok: false, reason: 'network' } // 네트워크가 없어도 앱은 떠야 한다
+    return { ok: false, reason: 'network' } // The app has to launch even with no network.
   }
 }
 
@@ -238,13 +244,15 @@ async function update() {
   const latest = res.version
   if (!isNewer(latest, pkg.version)) {
     console.log(`이미 최신입니다 (${pkg.version}).`)
-    // 패키지가 최신이어도 사본은 아닐 수 있다 — `npm i -g`로 올린 사람이 정확히 그 상태다
+    // The package can be up to date while the copy is not — that is exactly the state of
+    // someone who upgraded with `npm i -g`.
     notifyIfCopyStale()
     return
   }
   console.log(`${pkg.version} → ${latest} 로 올립니다.`)
   execFileSync('npm', ['i', '-g', `${pkg.name}@${latest}`], { stdio: 'inherit' })
-  // /Applications에 넣어둔 사람은 그쪽도 함께 갱신해야 옛 버전이 남지 않는다.
+  // Someone with a copy in /Applications needs that updated too, or the old version stays
+  // behind.
   // On Linux the menu entry points at the package instead of a copy, so rewriting it is
   // cheap — but it is still worth doing, because the Exec path is what would go stale.
   const installed = process.platform === 'darwin' ? INSTALLED : DESKTOP_ENTRY
@@ -256,11 +264,12 @@ async function update() {
 }
 
 /**
- * /Applications에 넣어둔 사본의 버전. 견줄 것이 없으면 null.
+ * The version of the copy placed in /Applications. null if there is nothing to compare.
  *
- * `defaults`를 쓰는 이유는 Info.plist가 XML이라는 보장이 없어서다 — 오늘 Tauri가 XML로
- * 쓰고 있을 뿐이고, 바이너리 plist로 바뀌면 정규식으로 읽던 쪽이 조용히 못 읽게 된다.
- * `defaults`는 맥에 항상 있고 둘 다 읽는다.
+ * `defaults` is used because there is no guarantee Info.plist stays XML — Tauri just happens
+ * to write it as XML today, and if it ever switches to a binary plist, anything reading it
+ * with a regex would silently stop working. `defaults` is always present on a Mac and reads
+ * both formats.
  */
 function installedCopyVersion() {
   if (process.platform !== 'darwin' || !existsSync(INSTALLED)) return null
@@ -271,20 +280,22 @@ function installedCopyVersion() {
     })
     return out.trim()
   } catch {
-    // 못 읽는 것은 말할 거리가 아니다 — 앱은 이미 떴고, 여기서 할 수 있는 말이 없다
+    // Failing to read this is not worth mentioning — the app has already launched, and there
+    // is nothing useful to say here.
     return null
   }
 }
 
 /**
- * 패키지와 /Applications 사본이 어긋났으면 한 줄.
+ * One line, if the package and the /Applications copy have drifted apart.
  *
- * `npm i -g centralu`는 패키지만 바꾼다. 그래서 런처는 새것인데 Spotlight에서 열리는 앱은
- * 옛것인 상태가 조용히 만들어진다 — 실제로 그렇게 됐고(beta.1이 /Applications에 남아 있는
- * 채로 패키지만 beta.3), 화면 어디에도 그 사실이 없었다.
+ * `npm i -g centralu` only changes the package. So a state quietly forms where the launcher is
+ * new but the app that opens from Spotlight is old — this actually happened (beta.1 stayed in
+ * /Applications while only the package moved to beta.3), and nothing on screen said so.
  *
- * **말하되 대신 하지 않는다.** 앱 안의 업데이트 줄과 같은 규칙이다. 묻지도 않고 남의
- * /Applications를 덮는 일은 이 패키지가 `install`을 따로 둔 이유 그 자체다.
+ * **Says it, does not do it.** The same rule as the in-app update line. Overwriting someone's
+ * /Applications without asking is the exact reason this package keeps `install` as a separate
+ * step.
  */
 function notifyIfCopyStale() {
   const version = installedCopyVersion()
@@ -292,9 +303,10 @@ function notifyIfCopyStale() {
   console.log(`\n/Applications 사본은 ${version}입니다 (이 패키지는 ${pkg.version}).\n  centralu install`)
 }
 
-/** 앱을 띄운 뒤에만 알린다 — 업데이트 확인 때문에 실행이 늦어지면 안 된다 */
+/** Only announced after the app has launched — checking for updates must never delay startup. */
 async function notifyIfOutdated() {
-  // 여기서는 실패를 **전부 삼킨다.** 앱을 띄우러 온 사람에게 레지스트리 사정을 말할 이유가 없다
+  // Every failure here is **swallowed entirely.** Someone who came here to launch the app has
+  // no reason to be told about registry troubles.
   const res = await latestVersion()
   if (res.ok && isNewer(res.version, pkg.version)) {
     console.log(`\n새 버전이 있습니다: ${pkg.version} → ${res.version}\n  centralu update`)

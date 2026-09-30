@@ -14,7 +14,8 @@ export default defineConfig({
       '@cc/core': r('../../packages/core/src/index.ts'),
       '@cc/platform/ports': r('../../packages/platform/src/ports/index.ts'),
       '@cc/platform/web': r('../../packages/platform/src/web/index.ts'),
-      // 별칭은 **접두사로** 걸린다 — 더 긴 것을 먼저 둬야 `mock/demo`가 `mock/index.ts/demo`가 안 된다
+      // Aliases match **by prefix** — the longer one has to come first, or `mock/demo` would
+      // resolve as `mock/index.ts/demo`.
       '@cc/platform/mock/demo': r('../../packages/platform/src/mock/demo.ts'),
       '@cc/platform/mock': r('../../packages/platform/src/mock/index.ts'),
       '@cc/ui': r('../../packages/ui/src/index.ts'),

@@ -28,17 +28,17 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# 삭제는 **휴지통으로 보내는 것**이다 (#18). 임시 폴더로 옮기는 unlink가 아니라 진짜
-# OS 휴지통이라야 하고, 그건 Node 사이드카가 할 수 없어서 여기로 온다.
-# `trash`는 이 생태계의 표준 크레이트다: macOS는 `NSFileManager trashItem`,
-# 리눅스는 freedesktop 휴지통 규격 1.0을 직접 구현한다 (GNOME·KDE·XFCE 공통).
-# `chrono`는 리눅스 쪽에서 휴지통 정보 파일의 삭제 시각을 적는 데 쓰이므로 남긴다 —
-# 그게 없으면 파일 관리자에서 "언제 지웠는지"가 비어 보인다.
+# Delete means **sending to the trash** (#18). It has to be a real OS trash, not an unlink
+# that moves the file to a temp folder, and the Node sidecar cannot do that, so it lands here.
+# `trash` is the standard crate for this ecosystem: on macOS it is `NSFileManager trashItem`,
+# and on Linux it implements the freedesktop trash spec 1.0 directly (common to GNOME, KDE and
+# XFCE). `chrono` is kept because the Linux side uses it to write the deletion time into the
+# trash info file — without it, "when it was deleted" shows up blank in file managers.
 trash = { version = "5", default-features = false, features = ["chrono"] }
 
-# 신호등 버튼 위치를 잡는 데만 쓴다 (macOS 전용).
-# **새 의존이 아니다** — objc2 계열은 tauri·tao·wry가 이미 끌어오고 있고
-# (Cargo.lock에 17개), 여기서는 이미 빌드되는 것을 쓰겠다고 선언할 뿐이다.
+# Used only to position the traffic light buttons (macOS only).
+# **Not a new dependency** — the objc2 family is already pulled in by tauri, tao and wry
+# (17 entries in Cargo.lock); this just declares that we are using what is already built.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = "0.3"

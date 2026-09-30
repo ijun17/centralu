@@ -1,11 +1,13 @@
 /**
- * npm 릴리스 — 빌드된 `.app`을 아키텍처 패키지에 넣고 두 패키지를 발행한다.
+ * The npm release — packs the built `.app` into the architecture package and publishes both
+ * packages.
  *
- * **기본은 리허설이다.** `--publish` 없이 부르면 `npm pack`까지만 하고 멈춘다.
- * 발행은 되돌릴 수 없다(npm은 24시간 뒤 unpublish를 막는다). 그래서 실수하기 어렵게 만든다.
+ * **The default is a rehearsal.** Called without `--publish`, this stops after `npm pack`.
+ * Publishing cannot be undone (npm blocks unpublish after 24 hours), so this is built to make
+ * a mistake hard to make.
  *
- *   pnpm release:npm              # 리허설 — 빌드·복사·검사·pack
- *   pnpm release:npm --publish    # 실제 발행
+ *   pnpm release:npm              # rehearsal — build, copy, check, pack
+ *   pnpm release:npm --publish    # the real publish
  *
  * Platform coverage (#14). The platform package is always the one for the host this
  * runs on, and there is no cross-build switch. That is not laziness: every check
@@ -65,23 +67,27 @@ const shimOnly = process.argv.includes('--shim-only')
 // `fail` is a hoisted function declaration, so it is callable from here.
 if (platformOnly && shimOnly) fail('--platform-only and --shim-only are opposites — pass one or neither.')
 /**
- * 2단계 인증이 켜진 계정은 발행마다 OTP를 묻는다. 그 물음은 **대화형 입력**이라
- * 자동화된 자리(에이전트·CI)에서는 답할 수 없어 그냥 멈춰 버린다.
- * 미리 받아서 넘길 수 있게 열어 둔다: `pnpm release:npm --publish --otp=123456`
+ * An account with two-factor authentication is asked for an OTP on every publish. That prompt
+ * is **interactive input**, so an automated place (an agent, CI) has no way to answer it and
+ * just hangs. This is kept open so one can be supplied ahead of time instead:
+ * `pnpm release:npm --publish --otp=123456`
  */
 const otp = process.argv.find((a) => a.startsWith('--otp='))?.slice('--otp='.length)
 /**
- * 프리릴리스도 `npm i -g centralu`(태그 없는 기본 설치)로 받게 할지.
+ * Whether a prerelease should also be reachable through `npm i -g centralu` (the default
+ * install, with no tag).
  *
- * 아직 정식 릴리스가 하나도 없으면 `latest` 태그가 비어서 그 명령이 **실패한다** —
- * "No matching version found for centralu@latest". 베타만 있는 동안에는 이걸 켠다.
- * 정식이 나온 뒤에는 켜면 안 된다 (베타가 정식을 덮는다).
+ * If there is not a single stable release yet, the `latest` tag is empty and that command
+ * **fails outright** — "No matching version found for centralu@latest". This is turned on
+ * while only betas exist. It must not stay on once a stable release ships (a beta would then
+ * shadow the stable one).
  */
 const alsoLatest = process.argv.includes('--also-latest')
 
 /**
- * 프리릴리스(`0.1.0-beta.1`)는 반드시 태그를 붙여야 한다 — npm이 거부한다.
- * 안 그러면 베타가 `latest`가 되어, 아무 생각 없이 설치한 사람이 베타를 받는다.
+ * A prerelease (`0.1.0-beta.1`) must always carry a tag — npm refuses to publish one
+ * untagged. Otherwise the beta becomes `latest`, and anyone who installs without thinking
+ * about it gets the beta.
  */
 const tag = APP_VERSION.includes('-') ? 'beta' : 'latest'
 
@@ -159,24 +165,27 @@ const TARGETS: Record<string, Target | undefined> = {
     locate: () => join(BUNDLE_ROOT, 'macos', `${APP_NAME}.app`),
     install: (src, dest) => {
       rmSync(dest, { recursive: true, force: true })
-      // cp가 아니라 ditto — 권한·확장속성을 그대로 옮긴다 (서명이 깨지지 않게)
+      // ditto, not cp — carries over permissions and extended attributes unchanged (so the
+      // signature does not break).
       sh('/usr/bin/ditto', [src, dest])
     },
     check: (dest) => {
-      // (a) 서명이 살아 있나 — npm tarball을 왕복해도 살아남는 것은 확인했지만, 넣기 전이 깨져 있으면 소용없다
+      // (a) Is the signature intact — confirmed it survives a round trip through an npm
+      // tarball, but that is pointless if it was already broken before packing.
       sh('/usr/bin/codesign', ['--verify', '--deep', '--strict', dest])
-      console.log('  서명 유효')
+      console.log('  signature valid')
 
-      // (b) 실행 파일에 실행 비트가 있나 — 이게 빠지면 설치는 되는데 안 열린다
+      // (b) Does the executable have the exec bit — without it, the install succeeds but it
+      // never opens.
       const bin = join(dest, 'Contents/MacOS/centralu')
-      if (!existsSync(bin)) fail(`실행 파일이 없다: ${bin}`)
+      if (!existsSync(bin)) fail(`executable is missing: ${bin}`)
       const mode = out('/bin/sh', ['-c', `stat -f '%p' '${bin}'`])
-      if (!/[157][157][157]$/.test(mode.slice(-3))) fail(`실행 비트가 없다 (${mode})`)
-      console.log('  실행 비트 정상')
+      if (!/[157][157][157]$/.test(mode.slice(-3))) fail(`no exec bit (${mode})`)
+      console.log('  exec bit ok')
 
-      // (c) 아키텍처
+      // (c) architecture
       const arch = out('/usr/bin/file', ['-b', bin])
-      if (!arch.includes('arm64')) fail(`arm64가 아니다: ${arch}`)
+      if (!arch.includes('arm64')) fail(`not arm64: ${arch}`)
       console.log(`  ${arch.split(',')[0]}`)
     },
   },
@@ -291,8 +300,8 @@ const TARGETS: Record<string, Target | undefined> = {
   },
 }
 
-// ── 1. 발행해도 되는 상태인가 ──────────────────────────────────────────
-step('발행 전 확인')
+// ── 1. Is this a state it is safe to publish from ──────────────────────
+step('Pre-publish checks')
 
 const HOST = `${process.platform}-${process.arch}`
 // `--shim-only` packages no binary, so it neither has nor needs a target for this host.
@@ -309,33 +318,34 @@ const ARCH_PKG = target && join(ROOT, 'packaging/npm', target.id)
 if (ARCH_PKG && !existsSync(join(ARCH_PKG, 'package.json'))) fail(`platform package is missing: ${ARCH_PKG}/package.json`)
 
 if (out('git', ['status', '--porcelain'])) {
-  // 커밋되지 않은 변경이 섞여 나가면 "발행된 것"과 "저장소의 것"이 달라진다.
-  // host 기동 배너에 박히는 빌드 해시도 `-dirty`가 되어 어느 코드인지 못 가린다.
-  fail('작업 트리가 깨끗하지 않다. 커밋하거나 되돌린 뒤 다시 실행해라.')
+  // If uncommitted changes slip out with the release, "what was published" and "what is in the
+  // repository" no longer agree. The build hash embedded in the host startup banner also
+  // becomes `-dirty`, so there is no way to tell which code it was built from.
+  fail('the working tree is not clean. Commit or revert, then run this again.')
 }
 
 if (publish) {
-  // 빌드까지 다 돌린 뒤에 인증에서 막히면 몇 분을 버린다 — 제일 먼저 확인한다
+  // Getting blocked on auth after running the whole build wastes minutes — checked first.
   try {
-    console.log(`  npm 사용자: ${out('npm', ['whoami'])}`)
+    console.log(`  npm user: ${out('npm', ['whoami'])}`)
   } catch {
-    fail('npm에 로그인돼 있지 않다. `npm login`을 먼저 실행해라 (웹 로그인은 CLI 인증과 별개다).')
+    fail('not logged in to npm. Run `npm login` first (a web login is separate from CLI auth).')
   }
 }
 
 sh('pnpm', ['verify'])
 
 console.log(
-  `  ${target?.id ?? 'centralu (shim only)'} · 버전 ${APP_VERSION} · 태그 ${tag} · 커밋 ${out('git', ['rev-parse', '--short', 'HEAD'])}`,
+  `  ${target?.id ?? 'centralu (shim only)'} · version ${APP_VERSION} · tag ${tag} · commit ${out('git', ['rev-parse', '--short', 'HEAD'])}`,
 )
 
-// ── 2~4. 번들 (--shim-only는 담을 것이 없으므로 통째로 건너뛴다) ───────
+// ── 2-4. The bundle (--shim-only has nothing to bundle, so this whole block is skipped) ──
 if (target && ARCH_PKG) {
-  // ── 2. 빌드 ──────────────────────────────────────────────────────────
+  // ── 2. Build ─────────────────────────────────────────────────────────
   if (skipBuild) {
-    console.log('\n  --skip-build: 이미 빌드된 번들을 쓴다')
+    console.log('\n  --skip-build: using the bundle that is already built')
   } else {
-    step('배포 앱 빌드')
+    step('Building the release app')
     sh('pnpm', [
       '--filter',
       '@cc/desktop',
@@ -346,19 +356,20 @@ if (target && ARCH_PKG) {
     ])
   }
   const built = target.locate()
-  if (!existsSync(built)) fail(`번들이 없다: ${built}`)
+  if (!existsSync(built)) fail(`no bundle found: ${built}`)
 
-  // ── 3. 번들을 아키텍처 패키지로 ──────────────────────────────────────
-  step('번들 복사')
+  // ── 3. Copy the bundle into the architecture package ────────────────
+  step('Copying the bundle')
   const dest = join(ARCH_PKG, target.artifact)
   target.install(built, dest)
 
-  // ── 4. 넣은 것이 실제로 성립하는가 ───────────────────────────────────
-  step('번들 검증')
+  // ── 4. Does what was packed actually hold up ────────────────────────
+  step('Verifying the bundle')
   target.check(dest)
 
-  // `files`가 실제로 넣은 것을 가리키지 않으면 tarball이 **껍데기만** 나간다 — pack 로그를
-  // 눈으로 확인하기 전에는 티가 안 난다. 이름을 한 곳(APP_NAME)에서 받아 쓰는 이상 여기서 막는다.
+  // If `files` does not actually point at what was packed, the tarball ships **empty inside**
+  // — invisible until someone reads the pack log by eye. Since the name is read from one place
+  // (APP_NAME), it is checked here too.
   const archManifest = JSON.parse(readFileSync(join(ARCH_PKG, 'package.json'), 'utf8')) as { files?: string[] }
   if (!archManifest.files?.includes(target.artifact)) {
     fail(`${ARCH_PKG}/package.json "files" does not list ${target.artifact} — the tarball would ship empty`)
@@ -372,15 +383,16 @@ if (target && ARCH_PKG) {
   }
 }
 
-// ── 5. 버전을 한 곳(brand.ts)에서 받아 적는다 ──────────────────────────
-step('패키지 버전 맞추기')
+// ── 5. Read the version from one place (brand.ts) and write it everywhere ──────────────
+step('Aligning package versions')
 for (const pkgDir of ARCH_PKG ? [ARCH_PKG, MAIN_PKG] : [MAIN_PKG]) {
   const file = join(pkgDir, 'package.json')
   const json = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
   json.version = APP_VERSION
   if (json.optionalDependencies) {
-    // 메인 패키지는 **정확한 버전**을 가리켜야 한다. 범위(^)로 두면 아키텍처 패키지만
-    // 새 버전이 깔려 껍데기와 알맹이가 어긋날 수 있다
+    // The main package has to point at the **exact version**. Left as a range (^), only the
+    // architecture package could end up on a newer version, and the shell and the contents
+    // would drift apart.
     json.optionalDependencies = Object.fromEntries(
       Object.keys(json.optionalDependencies as object).map((k) => [k, APP_VERSION]),
     )
@@ -423,25 +435,26 @@ function assertPinnedPlatformsPublished() {
     '  Publish every platform package first — that is what the platform jobs in the release\n' +
     '  workflow do — then re-run with --shim-only to publish the shim last.'
   if (publish) fail(note)
-  console.log(`\n\x1b[33m  경고: ${note}\x1b[0m`)
+  console.log(`\n\x1b[33m  warning: ${note}\x1b[0m`)
 }
 
-// ── 6. pack (그리고 원하면 publish) ────────────────────────────────────
-// 아키텍처 패키지가 **먼저** 발행돼야 한다. 반대로 하면 메인 패키지를 깐 사람이
-// 없는 optional dependency를 바라보는 순간이 생긴다. `--platform-only`는 앞의 것만,
-// `--shim-only`는 뒤의 것만 — 기계가 여럿으로 나뉘어도 이 순서는 유지된다.
+// ── 6. pack (and publish, if asked) ─────────────────────────────────────
+// The architecture package has to be published **first**. Reversed, there is a moment where
+// someone who installed the main package is looking at a missing optional dependency.
+// `--platform-only` publishes only the first, `--shim-only` only the second — this order holds
+// even when the work is split across several machines.
 for (const pkgDir of [...(ARCH_PKG ? [ARCH_PKG] : []), ...(platformOnly ? [] : [MAIN_PKG])]) {
   const name = (JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name: string }).name
   if (pkgDir === MAIN_PKG) assertPinnedPlatformsPublished()
   if (publish) {
-    step(`발행: ${name}`)
+    step(`Publishing: ${name}`)
     sh('npm', ['publish', '--access', 'public', '--tag', tag, ...(otp ? ['--otp', otp] : [])], pkgDir)
     if (alsoLatest && tag !== 'latest') {
-      // 태그를 옮기는 것은 발행과 달리 **되돌릴 수 있다** (dist-tag는 언제든 다시 가리킨다)
+      // Moving a tag, unlike publishing, **can be undone** (a dist-tag can always be repointed).
       sh('npm', ['dist-tag', 'add', `${name}@${APP_VERSION}`, 'latest', ...(otp ? ['--otp', otp] : [])], pkgDir)
     }
   } else {
-    step(`리허설(pack): ${name}`)
+    step(`Rehearsal (pack): ${name}`)
     sh('npm', ['pack', '--dry-run'], pkgDir)
   }
 }
@@ -449,19 +462,19 @@ for (const pkgDir of [...(ARCH_PKG ? [ARCH_PKG] : []), ...(platformOnly ? [] : [
 if (platformOnly) {
   console.log(
     publish
-      ? `\n\x1b[32m${target?.id} 발행 완료 — the centralu shim still has to go out separately\x1b[0m`
-      : `\n리허설이 끝났다 (${target?.id}만). 실제로 올리려면: \x1b[1mpnpm release:npm --publish --platform-only\x1b[0m`,
+      ? `\n\x1b[32m${target?.id} published — the centralu shim still has to go out separately\x1b[0m`
+      : `\n Rehearsal complete (${target?.id} only). To actually publish: \x1b[1mpnpm release:npm --publish --platform-only\x1b[0m`,
   )
 } else if (shimOnly) {
   console.log(
     publish
-      ? `\n\x1b[32m발행 완료 — npm i -g ${tag === 'latest' ? 'centralu' : `centralu@${tag}`}\x1b[0m`
-      : `\n리허설이 끝났다 (shim만). 실제로 올리려면: \x1b[1mpnpm release:npm --publish --shim-only\x1b[0m`,
+      ? `\n\x1b[32mPublished — npm i -g ${tag === 'latest' ? 'centralu' : `centralu@${tag}`}\x1b[0m`
+      : `\n Rehearsal complete (shim only). To actually publish: \x1b[1mpnpm release:npm --publish --shim-only\x1b[0m`,
   )
 } else {
   console.log(
     publish
-      ? `\n\x1b[32m발행 완료 — npm i -g ${tag === 'latest' ? 'centralu' : `centralu@${tag}`}\x1b[0m`
-      : `\n리허설이 끝났다. 실제로 올리려면: \x1b[1mpnpm release:npm --publish\x1b[0m`,
+      ? `\n\x1b[32mPublished — npm i -g ${tag === 'latest' ? 'centralu' : `centralu@${tag}`}\x1b[0m`
+      : `\n Rehearsal complete. To actually publish: \x1b[1mpnpm release:npm --publish\x1b[0m`,
   )
 }

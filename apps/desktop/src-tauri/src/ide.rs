@@ -1,21 +1,26 @@
-//! VS Code의 `code` 명령 찾기 (#159).
+//! Find VS Code's `code` command (#159).
 //!
-//! GUI로 띄운 `.app`은 로그인 셸의 PATH를 물려받지 못해 `/usr/bin:/bin:/usr/sbin:/sbin`만
-//! 받는다 (sidecar.rs의 `resolve_node`가 같은 실측을 적어 두었다). `code`는 그 네 곳 어디에도
-//! 없어서, 이름만 주고 실행하던 예전의 "Open in IDE"는 VS Code가 깔린 맥에서도 설치본에서는
-//! 언제나 `No such file or directory`로 끝났다. `tauri dev`는 터미널의 PATH를 물려받으므로
-//! 개발 중에는 보이지 않았다. npm 런처도 `open -a`로 띄우니 같은 PATH를 받는다.
+//! A `.app` launched from the GUI does not inherit the login shell's PATH, and gets only
+//! `/usr/bin:/bin:/usr/sbin:/sbin` (sidecar.rs's `resolve_node` records the same measurement).
+//! `code` lives in none of those four directories, so the old "Open in IDE", which just ran
+//! the command by name, always ended in `No such file or directory` on the installed app, even
+//! on a Mac with VS Code installed. `tauri dev` inherits the terminal's PATH, so this never
+//! showed up during development. The npm launcher also launches with `open -a`, so it gets
+//! the same PATH.
 //!
-//! 로그인 셸에게 묻지 않고 자리를 차례로 본다. 셸을 띄우면 누를 때마다 1초 안팎이 들고,
-//! `code`가 사는 자리는 몇 곳으로 정해져 있다.
+//! This checks the known locations in order instead of asking the login shell. Spawning a
+//! shell costs around one second every time the button is pressed, and the places `code` can
+//! live are a short, fixed list.
 
 use std::path::{Path, PathBuf};
 
-/// 찾아볼 자리들, 순서대로.
+/// The places to look, in order.
 ///
-/// 지금 PATH가 먼저다 — 개발 중이거나 터미널에서 띄운 앱이면 사람이 쓰는 바로 그 `code`다.
-/// 그다음 VS Code의 "Install 'code' command in PATH"가 링크를 두는 자리와 홈브류, 마지막으로
-/// 앱 번들 안의 원본(링크를 한 번도 깔지 않은 사람도 VS Code는 있다).
+/// The current PATH comes first — during development, or when the app was launched from a
+/// terminal, that is the exact `code` the person already uses. Next come the locations where
+/// VS Code's "Install 'code' command in PATH" places the link, and Homebrew, and finally the
+/// original inside the app bundle (someone can have VS Code installed without ever having
+/// installed the link).
 pub fn code_candidates(path_var: Option<&str>, home: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = path_var
         .map(|p| {
@@ -48,9 +53,11 @@ pub fn code_candidates(path_var: Option<&str>, home: &str) -> Vec<PathBuf> {
     out
 }
 
-/// 처음 있는 것을 고른다. `exists`를 받는 것은 파일시스템 없이 시험하기 위해서다.
+/// Pick the first one that exists. `exists` is passed in so this can be tested without a real
+/// filesystem.
 ///
-/// 못 찾으면 **어디를 봤는지** 말한다 — "없다"만으로는 사람이 무엇을 고칠지 모른다.
+/// If nothing is found, say **where it looked** — "not found" alone does not tell the person
+/// what to fix.
 pub fn pick_code(
     candidates: &[PathBuf],
     exists: impl Fn(&Path) -> bool,
@@ -66,7 +73,7 @@ pub fn pick_code(
     ))
 }
 
-/// 이 프로세스의 PATH와 홈으로 `code`를 찾는다.
+/// Find `code` using this process's PATH and home directory.
 pub fn find_code() -> Result<PathBuf, String> {
     let path_var = std::env::var("PATH").ok();
     let home = std::env::var("HOME").unwrap_or_default();
@@ -79,7 +86,7 @@ pub fn find_code() -> Result<PathBuf, String> {
 mod tests {
     use super::*;
 
-    /// GUI로 띄운 앱이 실제로 받는 PATH (sidecar.rs의 실측)
+    /// The PATH a GUI-launched app actually gets (measured in sidecar.rs).
     const GUI_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
     #[test]
@@ -94,7 +101,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn gui_path_still_finds_homebrew_code() {
-        // 이 맥의 모양: /usr/local/bin/code는 없고 홈브류에 있다
+        // The shape of this particular Mac: no /usr/local/bin/code, but Homebrew has it.
         let found = pick_code(&code_candidates(Some(GUI_PATH), "/Users/me"), |p| {
             p == Path::new("/opt/homebrew/bin/code")
         });

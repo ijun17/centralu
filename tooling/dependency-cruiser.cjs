@@ -1,10 +1,10 @@
-/** 순환 의존 금지 + 레이어 규칙 이중 방어 (docs/architecture.md §6) */
+/** Forbids circular dependencies, plus a second line of defense for the layer rules (docs/architecture.md §6). */
 module.exports = {
   forbidden: [
     { name: 'no-circular', severity: 'error', from: {}, to: { circular: true } },
     {
       name: 'no-orphans',
-      comment: '아무도 안 쓰는 파일은 지운다. 예외는 "임포트가 아닌 방식으로 쓰이는 것"뿐이다',
+      comment: 'A file nobody uses gets deleted. The only exception is something used in a way other than an import.',
       severity: 'warn',
       from: {
         orphan: true,
@@ -12,62 +12,72 @@ module.exports = {
           '\\.d\\.ts$',
           'index\\.ts$',
           'main\\.tsx?$',
-          // codex가 `node <경로>`로 **직접 띄우는** 다리다. 임포트가 없는 것이 정상이고,
-          // 경로는 bridge-path.ts가 런타임에 찾고 bundle.mjs가 번들에 복사한다
+          // The bridge codex launches **directly** with `node <path>`. Having no import is
+          // normal — the path is found at runtime by bridge-path.ts and copied into the bundle
+          // by bundle.mjs.
           'adapters/codex/orchestrator-bridge\\.mjs$',
-          // 앱 런타임의 화면 쪽 입구 — esbuild가 묶어 앱 템플릿의 runtime/mcp-app.js로 낸다 (build-app-runtime.mjs)
+          // The screen-side entry point of the app runtime — esbuild bundles it out to the app
+          // template's runtime/mcp-app.js (build-app-runtime.mjs).
           'agent-host/app-runtime/src/view\\.mjs$',
-          // 앱 템플릿의 파일은 **앱 폴더로 복사되어** 쓰인다 (scaffold.ts). 템플릿 안에서는 아무도 임포트하지 않는다
+          // Files in the app template are used **by being copied into an app folder**
+          // (scaffold.ts). Nothing imports them from inside the template itself.
           'agent-host/app-template/',
         ],
       },
       to: {},
     },
     /*
-     * 앱 계층 (#81): 격리는 "완전"이 아니라 **단방향 + 소유권**이고, 그 단방향을
-     * 관례가 아니라 여기서 강제한다. 앱은 통행증(api/contract)으로만 코어를 만지고,
-     * 코어가 앱을 아는 것은 registry(와 계약 타입) 한 줄뿐이다 — 그래야 앱을
-     * 뜯어내도 코어에 흉터가 없다.
+     * The app layer (#81): isolation here means not "complete" but **one-directional plus
+     * ownership**, and that direction is enforced here rather than left to convention. An app
+     * only touches the core through its pass (api/contract), and the only thing the core knows
+     * about apps is a single line in the registry (and the contract types) — so that ripping an
+     * app out leaves no scar on the core.
      */
     {
       name: 'ui-app-guest-pass',
-      comment: 'UI 앱 런타임은 이 제품의 층을 아예 모른다 (#81 통행증, #97 방향)',
+      comment: 'The UI app runtime does not know this product\'s layers at all (#81 pass, #97 direction).',
       severity: 'error',
-      // 예전엔 api.ts만 예외로 스토어를 임포트했다 — 그 한 줄이 "인박스를 지우면 런타임이
-      // 안 돈다"였다. 이제 통행증은 host.ts가 선언한 표면으로 위임하므로 예외가 없다
+      // api.ts used to be the one exception that imported the store — that single line was
+      // "the runtime does not run if the inbox is deleted". Now the pass delegates to the
+      // surface host.ts declares, so there is no exception left.
       from: { path: '^packages/ui/src/apps/' },
       to: { path: '^packages/ui/src/(store|features|app)/' },
     },
     {
       name: 'ui-core-blind-to-apps',
-      comment: 'UI 코어가 앱에서 가져올 수 있는 것은 registry·contract·host뿐 (#81, #97)',
+      comment: 'All the UI core can take from apps is registry, contract and host (#81, #97).',
       severity: 'error',
       from: { path: '^packages/ui/src', pathNot: ['^packages/ui/src/apps/'] },
       to: { path: '^packages/ui/src/apps/', pathNot: ['^packages/ui/src/apps/(registry|contract|host)\\.tsx?$'] },
     },
     {
       name: 'host-app-guest-pass',
-      comment: 'host 앱 내부는 contract가 주는 것 밖의 코어에 손대지 않는다 (#81)',
+      comment: 'Inside a host app, nothing touches the core beyond what contract provides (#81).',
       severity: 'error',
-      // contract.ts가 오케스트레이터에서 타입을 빌려 오던 예외는 #97에서 사라졌다 —
-      // 그 타입들은 이제 contract.ts가 정의하고 오케스트레이터가 가져다 쓴다
+      // The exception where contract.ts borrowed types from the orchestrator disappeared in
+      // #97 — those types are now defined by contract.ts, and the orchestrator takes them from
+      // there instead.
       from: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/external/'] },
       to: { path: '^packages/agent-host/src/(sessions|dev-services|adapters)/' },
     },
     /*
-     * 외부 앱 런타임 (M4 A)은 손님이 아니라 **손님을 태우는 층**이라 규칙이 하나 다르다.
-     * 외부 앱은 폴더와 프로세스라서, 런타임은 터미널·명령 실행기가 이미 지키는 OS의 약속
-     * 몇 가지를 똑같이 지켜야 한다: 폴더 감시(watch), 뿌리 밖으로 새지 않는 경로(path-guard),
-     * 자손까지 끝내는 종료(kill-tree).
-     * 그것들을 두 벌 만들면 "트리를 어떻게 죽이나"가 두 벌이 되는 사고가 되풀이된다.
+     * The external app runtime (M4 A) is not a guest but **the layer that carries guests**, so
+     * one rule differs. Since external apps are folders and processes, the runtime has to keep
+     * a few of the same OS promises the terminal and the command runner already keep: watching
+     * a folder (watch), a path that never leaks outside its root (path-guard), and a shutdown
+     * that finishes off descendants too (kill-tree).
+     * Building two copies of those would repeat the same accident as having two versions of
+     * "how do we kill a tree".
      *
-     * 그래서 허용은 **이름으로 좁힌다** — 제품의 뜻이 없는 물리 모듈만. 세션·어댑터는 여전히
-     * 금지다(세션은 런타임의 호출자 중 하나다, #97). 저장소(store)도 금지다: 런타임은 필요한
-     * 것을 `ExternalAppsDeps`로 선언하고 host가 채운다. 내장 앱(control)은 이 예외를 받지 않는다.
+     * So what is allowed is **narrowed by name** — only physical modules with no product
+     * meaning. Sessions and adapters are still forbidden (a session is one caller of the
+     * runtime, #97). The store is forbidden too: the runtime declares what it needs as
+     * `ExternalAppsDeps` and the host fills it in. The built-in app (control) does not get this
+     * exception.
      */
     {
       name: 'host-app-runtime-physics-only',
-      comment: '외부 앱 런타임이 코어에서 가져올 수 있는 것은 이름을 댄 물리 모듈뿐 (M4 A)',
+      comment: 'All the external app runtime can take from the core is the named physical modules (M4 A).',
       severity: 'error',
       from: { path: '^packages/agent-host/src/apps/external/' },
       to: {
@@ -77,11 +87,12 @@ module.exports = {
     },
     {
       name: 'host-core-blind-to-apps',
-      comment: 'host 코어가 앱에서 가져올 수 있는 것은 registry·contract와 외부 앱 런타임의 문뿐 (#81, M4 A)',
+      comment: 'All the host core can take from apps is registry, contract, and the external app runtime\'s door (#81, M4 A).',
       severity: 'error',
       from: { path: '^packages/agent-host/src', pathNot: ['^packages/agent-host/src/apps/'] },
-      // external/runtime.ts는 외부 앱 런타임이 코어에 여는 **단 하나의 문**이다 — 그 뒤의
-      // 발견·프로세스·중개는 코어가 모른다. registry가 내장 앱의 한 줄인 것과 같은 자리다
+      // external/runtime.ts is the **one and only door** the external app runtime opens into
+      // the core — discovery, processes and brokering behind it are unknown to the core. The
+      // same spot registry occupies as the built-in app's single line.
       to: {
         path: '^packages/agent-host/src/apps/',
         pathNot: ['^packages/agent-host/src/apps/(registry|contract)\\.ts$', '^packages/agent-host/src/apps/external/runtime\\.ts$'],
@@ -89,28 +100,28 @@ module.exports = {
     },
     {
       name: 'core-no-io',
-      comment: 'core는 순수 도메인 — IO 금지',
+      comment: 'core is a pure domain — no IO.',
       severity: 'error',
       from: { path: '^packages/core/src' },
       to: { path: '^(packages/(agent-host|ui|platform)/src|node_modules/(ws|better-sqlite3|react))' },
     },
     {
       name: 'ui-no-platform-impl',
-      comment: 'ui는 ports만 — 구현체 금지',
+      comment: 'ui takes only ports — no implementations.',
       severity: 'error',
       from: { path: '^packages/ui/src' },
       to: { path: '^packages/platform/src/(web|tauri|mock)' },
     },
     {
       name: 'host-no-frontend',
-      comment: 'agent-host는 protocol만 공유',
+      comment: 'agent-host shares only protocol.',
       severity: 'error',
       from: { path: '^packages/agent-host/src' },
       to: { path: '^packages/(ui|core|platform)/src' },
     },
     {
       name: 'protocol-is-leaf',
-      comment: 'protocol은 의존 0 (zod 제외)',
+      comment: 'protocol has zero dependencies (except zod).',
       severity: 'error',
       from: { path: '^packages/protocol/src' },
       to: { path: '^packages/(?!protocol)' },
@@ -118,16 +129,19 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: 'node_modules' },
-    // src-tauri/target·resources는 Rust·번들 산출물이라 파싱 대상이 아니다 (M2에서 생김)
+    // src-tauri/target and resources are Rust and bundle build output, so they are not parsed
+    // (introduced in M2).
     exclude: {
-      // app-template/runtime: 압축된 생성물이라 읽을 것이 없다 (scripts/build-app-runtime.mjs)
+      // app-template/runtime: a minified build artifact with nothing worth reading
+      // (scripts/build-app-runtime.mjs).
       path: '(spike|dist|node_modules|src-tauri/(target|gen|resources)|adapters/codex/generated|app-template/runtime|\\.test\\.tsx?$)',
     },
     tsConfig: { fileName: 'tsconfig.json' },
     /*
-     * 타입 전용 임포트(`import type`)도 의존으로 센다.
-     * 이게 없으면 타입만 내보내는 파일(adapters/contract.ts)이 "아무도 안 쓰는 파일"로
-     * 잡힌다 — 실제로는 여섯 곳이 쓰고 있다. 가짜 경고가 섞이면 경고를 안 보게 된다.
+     * A type-only import (`import type`) counts as a dependency too.
+     * Without this, a file that only exports types (adapters/contract.ts) gets flagged as "a
+     * file nobody uses" — when in reality six places use it. Once false warnings mix in, the
+     * warnings stop being read.
      */
     tsPreCompilationDeps: true,
     enhancedResolveOptions: { exportsFields: ['exports'], conditionNames: ['import', 'require', 'node', 'default'] },

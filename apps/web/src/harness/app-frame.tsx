@@ -6,17 +6,20 @@ import type { AppViewFrame } from '@cc/platform/ports'
 import '../../../../packages/ui/src/styles/index.css'
 
 /**
- * AppFrame 시험대 (M4 B-3c, e2e/app-frame.spec.ts 전용).
+ * A test rig for AppFrame (M4 B-3c, exclusively for e2e/app-frame.spec.ts).
  *
- * 앱 화면을 대화 카드 아래에 붙이는 일(B-1)은 아직 없다. 그래서 컴포넌트를 목 플랫폼 위에
- * 홀로 세운다. 화면 주소만은 진짜 host 코드가 만든다. 시험이 Node 쪽에 HostServer와 ViewHost를
- * 띄우고, `window.__viewFrame`으로 그 `frame()`을 꽂는다. 그래서 프록시·CSP·비밀 경로는 모두
- * 실물이다.
+ * Attaching an app screen underneath a conversation card (B-1) does not exist yet. So this
+ * stands the component up alone on top of a mock platform. Only the screen address is produced
+ * by real host code: the test launches a HostServer and a ViewHost on the Node side, and plugs
+ * that `frame()` in through `window.__viewFrame`. That means the proxy, the CSP and the secret
+ * path are all the real thing.
  *
- * 스토어는 앱과 같은 길(`attach`)로 목의 이벤트 흐름에 붙는다. 그래서 host의 방송(목의
- * `emit`)이 스토어를 지나 AppFrame에 닿는 배선도 실물이다.
+ * The store attaches to the mock's event flow the same way (`attach`) the app does. So the
+ * wiring that carries the host's broadcast (the mock's `emit`) through the store to AppFrame is
+ * also the real thing.
  *
- * 개발 서버에서만 뜬다. `vite build`의 입력은 index.html 하나라 배포물에 들어가지 않는다.
+ * This only comes up on the dev server. `vite build`'s only input is index.html, so it never
+ * ends up in a release build.
  */
 
 type Mounted = { key: string; props: AppFrameProps; ref: RefObject<AppFrameHandle | null> }
@@ -27,9 +30,10 @@ declare global {
     __appFrame?: {
       mount(key: string, props: AppFrameProps): void
       update(key: string, patch: Partial<AppFrameProps>): void
-      /** 부모가 해야 할 순서: teardown을 먼저 부르고, 답을 받은 뒤 내린다 */
+      /** The order the parent has to follow: call teardown first, then take it down once the
+       * answer comes back. */
       close(key: string): Promise<string>
-      /** teardown 없이 곧바로 내린다 */
+      /** Takes it down immediately, without teardown. */
       drop(key: string): void
       events: { kind: string; key: string; value: unknown }[]
     }
