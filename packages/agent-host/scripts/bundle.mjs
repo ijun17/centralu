@@ -101,7 +101,7 @@ for (const entry of ['package.json', 'lib']) {
 const prebuild = `${process.platform}-${process.arch}.node`
 const prebuildSrc = join(src, 'prebuilds', prebuild)
 if (!existsSync(prebuildSrc)) {
-  throw new Error(`이 플랫폼용 prebuild가 없습니다: ${prebuild} — 소스 빌드가 필요합니다`)
+  throw new Error(`no prebuild for this platform: ${prebuild} — a source build is required`)
 }
 mkdirSync(join(dest, 'prebuilds'), { recursive: true })
 cpSync(prebuildSrc, join(dest, 'prebuilds', prebuild))
@@ -146,9 +146,9 @@ const ptyNativeDir = [join('prebuilds', ptyPlatform), join('build', 'Release')].
 )
 if (!ptyNativeDir) {
   throw new Error(
-    `node-pty 네이티브 모듈을 찾지 못했습니다 (${ptyPlatform}).\n` +
-      `찾아본 곳: prebuilds/${ptyPlatform}/pty.node, build/Release/pty.node\n` +
-      '소스 빌드가 돌지 않았을 수 있습니다 — pnpm-workspace.yaml의 allowBuilds에 node-pty가 있는지 확인하세요.',
+    `could not find the node-pty native module (${ptyPlatform}).\n` +
+      `looked in: prebuilds/${ptyPlatform}/pty.node, build/Release/pty.node\n` +
+      'the source build may not have run — check whether node-pty is listed in allowBuilds in pnpm-workspace.yaml.',
   )
 }
 mkdirSync(join(ptyDest, ptyNativeDir), { recursive: true })
@@ -178,7 +178,7 @@ if (existsSync(helper)) {
   // symptom does not point at the cause.
   const mode = statSync(helper).mode
   if (!(mode & 0o111)) {
-    throw new Error(`spawn-helper에 실행 권한이 없습니다: ${helper} — 터미널이 뜨지 않습니다`)
+    throw new Error(`spawn-helper has no execute permission: ${helper} — the terminal will not come up`)
   }
 }
 

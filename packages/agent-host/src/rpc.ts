@@ -665,7 +665,7 @@ export function createRpcHandler(
         .slice(0, 3)
         .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
         .join(' / ')
-      throw Object.assign(new Error(`${method}의 응답이 선언과 다릅니다 — ${where}`), { code: 'internal' })
+      throw Object.assign(new Error(`${method}'s response does not match its declaration — ${where}`), { code: 'internal' })
     }
     return checked.data
   }

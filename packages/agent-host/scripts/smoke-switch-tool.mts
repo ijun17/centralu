@@ -35,7 +35,7 @@ async function answers(h: { send: (t: string) => void }, tag: string, sink: Norm
     if (sink.some((e) => e.type === 'error')) return false
     await new Promise((r) => setTimeout(r, 300))
   }
-  console.log(`  [${tag}] 60초 안에 아무 결말도 없음`)
+  console.log(`  [${tag}] no outcome within 60 seconds`)
   return false
 }
 
@@ -46,14 +46,14 @@ const a = await claude.createSession(
   { sessionId: 'probe', cwd, model: 'sonnet', permissionPreset: 'auto' },
   (e) => { aEvents.push(e); log('claude')(e) },
 )
-console.log('claude 첫 턴:', (await answers(a, 'claude', aEvents)) ? '답함' : '실패')
+console.log('claude first turn:', (await answers(a, 'claude', aEvents)) ? 'answered' : 'failed')
 const externalId = a.externalId
 console.log('claude externalId:', externalId)
 await a.dispose()
 
 // ── 2. Reproduces switchTool as it was before the fix: only the tool changes, and model is carried
 //    over. (This is the spot this probe originally caught. If it regresses, a 400 shows up here again.)
-console.log('\n── [고치기 전 재현] codex로 바꾸며 model="sonnet"을 들고 가면 ──')
+console.log('\n── [reproducing pre-fix] switching to codex while carrying model="sonnet" ──')
 const codex = new CodexAdapter()
 const bEvents: NormalizedEvent[] = []
 try {
@@ -61,25 +61,25 @@ try {
     { sessionId: 'probe', cwd, model: 'sonnet', permissionPreset: 'auto' },
     (e) => { bEvents.push(e); log('codex')(e) },
   )
-  console.log('codex 세션 생성: 성공')
-  console.log('codex 첫 턴:', (await answers(b, 'codex', bEvents)) ? '답함' : '실패')
+  console.log('codex session created: success')
+  console.log('codex first turn:', (await answers(b, 'codex', bEvents)) ? 'answered' : 'failed')
   await b.dispose()
 } catch (e) {
-  console.log('codex 세션 생성: 실패 —', (e as Error).message)
+  console.log('codex session created: failed —', (e as Error).message)
 }
 
-// ── 3. 지금 코드가 하는 일: 모델을 놓고 넘어간다 (manager.switchTool)
-console.log('\n── [고친 뒤] model을 놓고 codex로 ──')
+// ── 3. What the current code does: drops the model when it switches (manager.switchTool)
+console.log('\n── [after the fix] to codex, dropping the model ──')
 const cEvents: NormalizedEvent[] = []
 try {
   const c = await codex.createSession(
     { sessionId: 'probe2', cwd, permissionPreset: 'auto' },
     (e) => { cEvents.push(e); log('codex-plain')(e) },
   )
-  console.log('codex(모델 없음) 첫 턴:', (await answers(c, 'codex-plain', cEvents)) ? '답함' : '실패')
+  console.log('codex (no model) first turn:', (await answers(c, 'codex-plain', cEvents)) ? 'answered' : 'failed')
   await c.dispose()
 } catch (e) {
-  console.log('codex(모델 없음) 생성 실패 —', (e as Error).message)
+  console.log('codex (no model) creation failed —', (e as Error).message)
 }
 
 process.exit(0)

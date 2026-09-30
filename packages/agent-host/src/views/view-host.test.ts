@@ -266,7 +266,7 @@ describe('ViewHost — an open view holds the app open', () => {
     const source: ViewSource = {
       readResource: async (_a, uri) => ({ contents: [{ uri, mimeType: VIEW_MIME_TYPE, text: 'x' }] }),
       retain(app) {
-        if (app.appId === 'ghost') throw new Error('그런 앱이 없습니다')
+        if (app.appId === 'ghost') throw new Error('no such app')
         bump(app, 1)
         return () => void bump(app, -1)
       },
@@ -290,7 +290,7 @@ describe('ViewHost — an open view holds the app open', () => {
   it('a nonexistent app neither opens nor creates an instance', async () => {
     const { source } = holdingSource()
     const { views: v } = await start(source)
-    expect(() => v.open({ projectId: 'p1', appId: 'ghost' }, 'ui://ghost/main')).toThrow(/그런 앱이 없습니다/)
+    expect(() => v.open({ projectId: 'p1', appId: 'ghost' }, 'ui://ghost/main')).toThrow(/no such app/)
     expect((v as unknown as { instances: Map<string, unknown> }).instances.size).toBe(0)
   })
 

@@ -44,7 +44,7 @@ async function run(preset: PermissionPreset) {
   await h.dispose().catch(() => {})
   rmSync(cwd, { recursive: true, force: true })
   console.log(
-    `[${preset}] 승인요청 ${asked} · 도구호출 ${tools} · 파일 ${wrote ? 'O' : 'X'} · 오류 ${errors.length}` +
+    `[${preset}] approval-requests ${asked} · tool-calls ${tools} · file ${wrote ? 'O' : 'X'} · errors ${errors.length}` +
       (errors.length ? ` (${errors[0]!.error.message.slice(0, 80)})` : ''),
   )
   return { asked, wrote, tools, errors: errors.length }
@@ -52,8 +52,8 @@ async function run(preset: PermissionPreset) {
 
 const auto = await run('auto')
 const normal = await run('normal')
-console.log('\n판정:')
-console.log('  auto가 살아서 일했는가:', auto.tools > 0 && auto.errors === 0 ? 'O' : 'X (죽었을 수 있음)')
-console.log('  auto가 안 묻는가:', auto.asked === 0 ? 'O' : `X (${auto.asked}건 물음)`)
-console.log('  normal은 묻는가:', normal.asked > 0 ? 'O' : 'X (안 물음 — 전역 bypass가 새고 있음)')
+console.log('\nVerdict:')
+console.log('  did auto stay alive and work:', auto.tools > 0 && auto.errors === 0 ? 'O' : 'X (it may have died)')
+console.log('  does auto avoid asking:', auto.asked === 0 ? 'O' : `X (asked ${auto.asked} time(s))`)
+console.log('  does normal ask:', normal.asked > 0 ? 'O' : 'X (did not ask — the global bypass is leaking in)')
 process.exit(0)

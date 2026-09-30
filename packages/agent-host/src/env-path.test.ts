@@ -75,6 +75,6 @@ describe('CLI search path augmentation', () => {
   })
 
   it('a nonexistent tool is null (so the caller can decide the guidance text)', () => {
-    expect(whichTool('이런도구는없다')).toBeNull()
+    expect(whichTool('this-tool-does-not-exist')).toBeNull()
   })
 })

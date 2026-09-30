@@ -1,44 +1,44 @@
-# 스크립트 — 자동 테스트가 못 보는 것을 본다
+# Scripts — seeing what automated tests do not
 
-여기 있는 것은 **실물을 상대로 하는 검증**이다. 단위 테스트는 우리가 만든 가짜를 상대하지만,
-이 프로젝트에서 나온 결함의 상당수는 진짜 CLI·진짜 PTY·진짜 배포 앱에서만 드러났다.
+What is here is **verification against the real thing**. Unit tests face the fakes we built,
+but a good share of this project's defects only showed up against a real CLI, a real PTY, a real packaged app.
 
-`claude`·`codex`를 실제로 호출하는 것들은 **소액이 과금된다.** 그래서 CI에 걸지 않고,
-관련된 곳을 고쳤을 때 손으로 돌린다.
+The ones that actually call `claude` and `codex` **cost a small amount of money.** So they are
+not wired into CI, and are run by hand when the related area changes.
 
-## 빌드에 걸려 있는 것 (자동)
+## Wired into the build (automatic)
 
-| 스크립트 | 언제 도나 |
+| Script | When it runs |
 |---|---|
-| `fix-pty-permissions.mjs` | `postinstall` — node-pty의 spawn-helper에 실행 권한을 세운다 |
-| `bundle.mjs` | `pnpm bundle:host` — 배포용 host 번들 (esbuild, target node22) |
-| `codex-bindings.mjs` | `pnpm codex:bindings` — codex 프로토콜 타입 생성·의존 계약 갱신 |
+| `fix-pty-permissions.mjs` | `postinstall` — sets the execute permission on node-pty's spawn-helper |
+| `bundle.mjs` | `pnpm bundle:host` — builds the host bundle for distribution (esbuild, target node22) |
+| `codex-bindings.mjs` | `pnpm codex:bindings` — generates codex protocol types and refreshes the dependent contract |
 
-## npm 스크립트로 걸린 검증
+## Verification wired through npm scripts
 
 ```bash
-pnpm smoke               # 실 Claude 세션으로 host 관통
-pnpm smoke:resume        # 재개(resume)가 실제로 이어지는가
-pnpm smoke:codex         # Codex 어댑터 관통
-pnpm smoke:orchestrator  # 오케스트레이터 + MCP 도구
-pnpm smoke:schemas       # 프로토콜 스키마가 실물과 맞는가
-pnpm smoke:question      # AskUserQuestion 왕복
-pnpm smoke:perm          # 권한 프리셋이 세션에 실리는가
-pnpm smoke:usage         # 사용량이 두 도구에서 같은 모양인가
-pnpm smoke:context       # 컨텍스트 게이지가 말이 되는 값인가
-pnpm smoke:models        # 두 도구가 모델 목록을 주는가
-pnpm smoke:terminal      # 진짜 PTY로 터미널 관통
-pnpm smoke:orphan        # 도구 쪽에서 세션이 사라졌을 때의 처신
-pnpm perf:idle           # 유휴 성능 (host 프로세스만, §7.1 목표 대비)
+pnpm smoke               # exercises the host end-to-end with a real Claude session
+pnpm smoke:resume        # does resume actually continue
+pnpm smoke:codex         # exercises the Codex adapter end-to-end
+pnpm smoke:orchestrator  # orchestrator + MCP tools
+pnpm smoke:schemas       # does the protocol schema match the real thing
+pnpm smoke:question      # AskUserQuestion round trip
+pnpm smoke:perm          # does the permission preset actually load onto the session
+pnpm smoke:usage         # does usage have the same shape across both tools
+pnpm smoke:context       # does the context gauge produce a sensible value
+pnpm smoke:models        # do both tools give a model list
+pnpm smoke:terminal      # exercises the terminal with a real PTY
+pnpm smoke:orphan        # behavior when the session disappears on the tool's side
+pnpm perf:idle           # idle performance (host process only, against the §7.1 target)
 ```
 
-## 프로브 — 결정의 근거로 남은 것
+## Probes — kept as the basis for a decision
 
-한 번 쓰고 버리는 스크립트가 아니라, **코드 주석이 근거로 가리키는 기록**이다.
-"왜 이렇게 짰나"를 되물을 때 다시 돌려보라고 남겨 둔다.
+These are not throwaway scripts; they are **the record that code comments point to as their basis**.
+They are kept so that whoever asks "why was it built this way" can run them again.
 
-| 스크립트 | 무엇을 재서 무엇을 정했나 |
+| Script | What it measured, and what it decided |
 |---|---|
-| `probe-askuserquestion.mts` | AskUserQuestion을 실제로 어떻게 받아 답하는가 → `adapters/claude/index.ts`가 이 결과를 따른다 |
-| `probe-permission-mode.mts` | 권한 모드가 전역 설정을 세션 단위로 덮어쓸 수 있는가 (M0의 최우선 전제) |
-| `probe-subagent-stream.mts` | 서브에이전트의 메시지가 부모 스트림에 어떻게 섞여 오는가 (#98) → `adapters/claude/normalize.ts`가 parent_tool_use_id로 가르고, 백그라운드 에이전트 카드를 task_notification으로 닫는다 |
+| `probe-askuserquestion.mts` | how AskUserQuestion is actually received and answered → `adapters/claude/index.ts` follows this result |
+| `probe-permission-mode.mts` | can the permission mode override the global setting on a per-session basis (M0's top-priority premise) |
+| `probe-subagent-stream.mts` | how a subagent's messages get mixed into the parent stream (#98) → `adapters/claude/normalize.ts` splits them by parent_tool_use_id, and closes the background agent card on task_notification |

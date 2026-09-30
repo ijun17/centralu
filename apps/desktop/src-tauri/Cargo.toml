@@ -1,7 +1,7 @@
 [package]
 name = "centralu"
 version = "0.1.0-beta.6"
-description = "에이전트 관제탑"
+description = "Agent control tower"
 edition = "2021"
 # Raised from 1.77 by the `trash` dependency below, which declares 1.85. CI builds on
 # `stable`, so this is a statement of what the tree actually needs, not a new constraint.

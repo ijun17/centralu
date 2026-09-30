@@ -11,7 +11,7 @@ const host = spawn('node', ['--import', 'tsx', 'packages/agent-host/src/main.ts'
   stdio: ['ignore', 'pipe', 'inherit'],
 })
 await new Promise((r) => host.stdout.on('data', (d) => String(d).includes('"ready"') && r()))
-console.log('host pid', host.pid, '— 10초 유휴 관측')
+console.log('host pid', host.pid, '— observing 10 seconds idle')
 
 const sample = async () => {
   const { stdout } = await exec('ps', ['-o', '%cpu=,rss=', '-p', String(host.pid)])
@@ -26,7 +26,7 @@ for (let i = 0; i < 5; i++) {
 }
 const avgCpu = samples.reduce((a, s) => a + s.cpu, 0) / samples.length
 const maxRss = Math.max(...samples.map((s) => s.rssMb))
-console.log('유휴 CPU 평균: ' + avgCpu.toFixed(2) + '% (목표 <1%)')
-console.log('host RSS 최대: ' + maxRss + 'MB')
-console.log(avgCpu < 1 ? '✅ 유휴 CPU 목표 충족' : '❌ 유휴 CPU 목표 미달')
+console.log('idle CPU average: ' + avgCpu.toFixed(2) + '% (target <1%)')
+console.log('host RSS max: ' + maxRss + 'MB')
+console.log(avgCpu < 1 ? '✅ idle CPU target met' : '❌ idle CPU target missed')
 host.kill()

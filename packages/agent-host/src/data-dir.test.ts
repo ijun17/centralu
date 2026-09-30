@@ -24,29 +24,29 @@ describe('data folder move', () => {
   it('moves everything whole (content unchanged) when only the old folder exists', () => {
     const from = join(root, '.control-center') // legacy-name
     const to = join(root, '.centralu')
-    seed(from, '진짜 대화 기록')
-    writeFileSync(join(from, 'store.db-wal'), 'WAL도 함께')
+    seed(from, 'real conversation history')
+    writeFileSync(join(from, 'store.db-wal'), 'the WAL too')
 
     expect(migrateLegacyDataDir(from, to)).toBe(true)
 
     expect(existsSync(from)).toBe(false)
-    expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('진짜 대화 기록')
+    expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('real conversation history')
     // Leaving the WAL behind would lose tens of megabytes of recent conversation — the reason the
     // whole folder is moved
-    expect(readFileSync(join(to, 'store.db-wal'), 'utf8')).toBe('WAL도 함께')
+    expect(readFileSync(join(to, 'store.db-wal'), 'utf8')).toBe('the WAL too')
   })
 
   it('does **nothing** when the new folder already exists', () => {
     const from = join(root, '.control-center') // legacy-name
     const to = join(root, '.centralu')
-    seed(from, '옛 기록')
-    seed(to, '새 기록')
+    seed(from, 'old record')
+    seed(to, 'new record')
 
     expect(migrateLegacyDataDir(from, to)).toBe(false)
 
     // Merging the two is not ours to decide — we do not know which one is the real one. Both are left in place
-    expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('새 기록')
-    expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('옛 기록')
+    expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('new record')
+    expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('old record')
   })
 
   it('silently does nothing when the old folder does not exist (a fresh install)', () => {
@@ -56,7 +56,7 @@ describe('data folder move', () => {
 
   it('does not damage the old folder when the move fails', () => {
     const from = join(root, '.control-center') // legacy-name
-    seed(from, '지켜야 할 기록')
+    seed(from, 'record that must survive')
     // A destination that cannot be moved to (the parent is a file, so the directory cannot be created)
     const blocker = join(root, 'blocker')
     writeFileSync(blocker, 'x')
@@ -64,6 +64,6 @@ describe('data folder move', () => {
     expect(migrateLegacyDataDir(from, join(blocker, 'nested', '.centralu'))).toBe(false)
 
     // If it failed, the original must be left untouched — no state is created where only half of it remains
-    expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('지켜야 할 기록')
+    expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('record that must survive')
   })
 })

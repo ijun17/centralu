@@ -33,11 +33,11 @@ for (const [i, text] of turns.entries()) {
     | Extract<NormalizedEvent, { type: 'context_update' }>
     | undefined
   if (!last) {
-    console.log(`턴 ${i + 1}: context_update 없음`)
+    console.log(`turn ${i + 1}: no context_update`)
     continue
   }
   const pct = Math.round((last.used / last.window) * 100)
-  console.log(`턴 ${i + 1}: ${last.used.toLocaleString()} / ${last.window.toLocaleString()} = ${pct}%`)
+  console.log(`turn ${i + 1}: ${last.used.toLocaleString()} / ${last.window.toLocaleString()} = ${pct}%`)
 }
 
 const updates = events.filter((e) => e.type === 'context_update') as Extract<
@@ -48,8 +48,8 @@ const worst = Math.max(...updates.map((u) => (u.used / u.window) * 100))
 await h.dispose().catch(() => {})
 rmSync(cwd, { recursive: true, force: true })
 
-console.log('\n판정:')
-console.log('  보고 횟수:', updates.length)
-console.log('  최대 비율이 100% 이하인가:', worst <= 100 ? 'O' : `X (${worst.toFixed(0)}%)`)
-console.log('  턴이 쌓여도 폭주하지 않는가:', worst < 50 ? 'O' : '확인 필요')
+console.log('\nVerdict:')
+console.log('  report count:', updates.length)
+console.log('  is the max percentage 100 or under:', worst <= 100 ? 'O' : `X (${worst.toFixed(0)}%)`)
+console.log('  does it stay in check as turns pile up:', worst < 50 ? 'O' : 'needs a look')
 process.exit(updates.length > 0 && worst <= 100 ? 0 : 1)

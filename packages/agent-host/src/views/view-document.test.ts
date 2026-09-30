@@ -23,6 +23,8 @@ describe('viewDocumentFromResource', () => {
   })
 
   it('also reads a base64 blob body, and is lenient about whitespace and case in the MIME parameter', () => {
+    // '한글' (multi-byte UTF-8) is kept on purpose: it exercises the base64 round trip across a
+    // multi-byte character boundary, not just single-byte ASCII.
     const doc = viewDocumentFromResource(
       { contents: [{ uri: URI, mimeType: 'Text/HTML; profile=mcp-app', blob: Buffer.from('<b>한글</b>').toString('base64') }] },
       URI,

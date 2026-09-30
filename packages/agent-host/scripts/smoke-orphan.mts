@@ -30,14 +30,14 @@ a.send('Remember this word: PINEAPPLE. Reply with exactly: OK')
 await wait(15_000)
 const externalId = a.externalId
 await a.dispose().catch(() => {})
-console.log('만든 세션:', externalId)
+console.log('created session:', externalId)
 
 // 2) Delete it on the tool's side (simulating the user deleting it in Claude Code)
-await sdk.deleteSession(externalId, { dir: cwd }).catch((e: Error) => console.log('삭제 실패:', e.message))
+await sdk.deleteSession(externalId, { dir: cwd }).catch((e: Error) => console.log('delete failed:', e.message))
 const stillListed = (await sdk.listSessions({ dir: cwd, includeProgrammatic: true })).some(
   (r: { sessionId: string }) => r.sessionId === externalId,
 )
-console.log('도구 목록에 아직 있나:', stillListed ? 'O' : 'X (지워짐)')
+console.log('still in the tool listing:', stillListed ? 'O' : 'X (deleted)')
 
 // 3) What happens if we try to resume that session?
 const ev2: NormalizedEvent[] = []
@@ -63,15 +63,15 @@ const errors = ev2.filter((e): e is Extract<NormalizedEvent, { type: 'error' }> 
 await handle?.dispose().catch(() => {})
 rmSync(cwd, { recursive: true, force: true })
 
-console.log('\n결과:')
-console.log('  createSession이 던졌나:', threw ? `O — ${threw.slice(0, 90)}` : 'X (성공했다)')
-console.log('  오류 이벤트:', errors.length, errors[0]?.error.message.slice(0, 70) ?? '')
-console.log('  모델 응답:', JSON.stringify(reply.trim().slice(0, 80)))
-console.log('\n판정:')
+console.log('\nResult:')
+console.log('  did createSession throw:', threw ? `O — ${threw.slice(0, 90)}` : 'X (it succeeded)')
+console.log('  error events:', errors.length, errors[0]?.error.message.slice(0, 70) ?? '')
+console.log('  model response:', JSON.stringify(reply.trim().slice(0, 80)))
+console.log('\nVerdict:')
 const remembered = /PINEAPPLE/i.test(reply)
-console.log('  앞 대화를 기억하나:', remembered ? 'O (진짜로 이어짐)' : 'X (맥락 없음)')
+console.log('  does it remember the earlier conversation:', remembered ? 'O (actually continued)' : 'X (no context)')
 console.log(
-  '  조용한 실패인가:',
-  !threw && errors.length === 0 && !remembered ? 'O ← 위험: 이어진 줄 알지만 아니다' : 'X',
+  '  is this a silent failure:',
+  !threw && errors.length === 0 && !remembered ? 'O ← danger: looks continued but is not' : 'X',
 )
 process.exit(0)

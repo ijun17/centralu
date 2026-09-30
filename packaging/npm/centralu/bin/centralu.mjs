@@ -77,20 +77,20 @@ function explainMissing() {
     // Intel Macs, and here is the reason" send the user to different places.
     if (process.platform === 'darwin') {
       return (
-        `${APP_NAME}는 아직 Apple Silicon 전용입니다 (지금 아키텍처: ${process.arch}).\n` +
-        'Intel 맥 지원은 네이티브 애드온까지 함께 묶어야 해서 별도 작업으로 잡혀 있습니다.'
+        `${APP_NAME} is Apple Silicon only for now (current architecture: ${process.arch}).\n` +
+        'Intel Mac support needs native addons bundled in as well, and is tracked as separate work.'
       )
     }
     const supported = Object.keys(TARGETS).join(', ')
     return (
-      `${APP_NAME}는 아직 ${process.platform}/${process.arch}를 지원하지 않습니다.\n` +
-      `지금 지원하는 조합: ${supported}\n` +
-      'https://github.com/ijun17/centralu/issues/14 에 진행 상황이 있습니다.'
+      `${APP_NAME} does not support ${process.platform}/${process.arch} yet.\n` +
+      `Currently supported combinations: ${supported}\n` +
+      'Progress is tracked at https://github.com/ijun17/centralu/issues/14.'
     )
   }
   return (
-    `앱 본체 패키지(${TARGET.pkg})를 찾지 못했습니다.\n` +
-    '설치가 중간에 끊겼을 수 있습니다 — `npm i -g centralu`로 다시 설치해 주세요.'
+    `Could not find the app package (${TARGET.pkg}).\n` +
+    'The install may have been interrupted — please reinstall with `npm i -g centralu`.'
   )
 }
 
@@ -129,10 +129,10 @@ function run(args) {
   const app = requireApp()
   const r = spawn(app, args, { stdio: 'inherit' })
   r.on('error', (e) => {
-    console.error(`${app}를 실행하지 못했습니다: ${e.message}`)
+    console.error(`Failed to run ${app}: ${e.message}`)
     // EACCES here means the executable bit did not survive the trip through npm, which
     // is invisible from the message alone.
-    if (e.code === 'EACCES') console.error(`실행 권한이 없습니다 — \`chmod +x "${app}"\` 뒤에 다시 시도해 주세요.`)
+    if (e.code === 'EACCES') console.error(`No execute permission — run \`chmod +x "${app}"\` then try again.`)
     process.exit(1)
   })
   r.on('exit', (code) => process.exit(code ?? 0))
@@ -149,14 +149,14 @@ function install() {
   const app = requireApp()
   if (process.platform !== 'darwin') return installDesktopEntry(app)
   if (existsSync(INSTALLED)) {
-    console.log(`기존 ${INSTALLED}를 새 버전으로 교체합니다.`)
+    console.log(`Replacing the existing ${INSTALLED} with the new version.`)
     rmSync(INSTALLED, { recursive: true, force: true })
   }
   // ditto, not cp — carries over the bundle's permissions and extended attributes unchanged
   // (so the signature does not break).
   execFileSync('/usr/bin/ditto', [app, INSTALLED], { stdio: 'inherit' })
-  console.log(`설치했습니다: ${INSTALLED}`)
-  console.log('이제 Launchpad·Spotlight에서도 찾을 수 있습니다.')
+  console.log(`Installed: ${INSTALLED}`)
+  console.log('It can now be found in Launchpad and Spotlight too.')
 }
 
 /**
@@ -189,20 +189,20 @@ function installDesktopEntry(app) {
   mkdirSync(dirname(DESKTOP_ENTRY), { recursive: true })
   writeFileSync(DESKTOP_ENTRY, entry)
   chmodSync(DESKTOP_ENTRY, 0o755)
-  console.log(`등록했습니다: ${DESKTOP_ENTRY}`)
-  console.log('이제 앱 목록에서도 찾을 수 있습니다 (데스크톱에 따라 다시 로그인해야 보일 수 있습니다).')
+  console.log(`Registered: ${DESKTOP_ENTRY}`)
+  console.log('It can now be found in the app list too (some desktops require logging back in before it shows up).')
 }
 
 function uninstall() {
   const installed = process.platform === 'darwin' ? INSTALLED : DESKTOP_ENTRY
   if (!existsSync(installed)) {
-    console.log(`${installed}가 없습니다 — 지울 것이 없습니다.`)
+    console.log(`${installed} does not exist — nothing to remove.`)
     return
   }
   rmSync(installed, { recursive: true, force: true })
-  console.log(`지웠습니다: ${installed}`)
-  console.log('패키지 자체를 지우려면: npm uninstall -g centralu')
-  console.log(`대화 기록은 그대로 남아 있습니다 (~/.centralu). 지우려면 직접 지우세요.`)
+  console.log(`Removed: ${installed}`)
+  console.log('To remove the package itself: npm uninstall -g centralu')
+  console.log(`Conversation history is left in place (~/.centralu). Remove it yourself if you want to.`)
 }
 
 /**
@@ -232,24 +232,24 @@ async function update() {
   const res = await latestVersion(8000)
   if (!res.ok) {
     if (res.reason === 'missing') {
-      console.error(`레지스트리에 ${pkg.name}가 없습니다. 이름이 바뀌었거나 아직 발행 전입니다.`)
-      console.error('https://github.com/ijun17/centralu/releases 를 확인해 주세요.')
+      console.error(`${pkg.name} is not on the registry. The name may have changed, or it has not been published yet.`)
+      console.error('Please check https://github.com/ijun17/centralu/releases.')
     } else if (res.reason === 'network') {
-      console.error('레지스트리에 닿지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.')
+      console.error('Could not reach the registry. Please check your network and try again.')
     } else {
-      console.error(`레지스트리가 예상 밖의 응답을 했습니다 (${res.reason}).`)
+      console.error(`The registry gave an unexpected response (${res.reason}).`)
     }
     process.exit(1)
   }
   const latest = res.version
   if (!isNewer(latest, pkg.version)) {
-    console.log(`이미 최신입니다 (${pkg.version}).`)
+    console.log(`Already up to date (${pkg.version}).`)
     // The package can be up to date while the copy is not — that is exactly the state of
     // someone who upgraded with `npm i -g`.
     notifyIfCopyStale()
     return
   }
-  console.log(`${pkg.version} → ${latest} 로 올립니다.`)
+  console.log(`Upgrading ${pkg.version} → ${latest}.`)
   execFileSync('npm', ['i', '-g', `${pkg.name}@${latest}`], { stdio: 'inherit' })
   // Someone with a copy in /Applications needs that updated too, or the old version stays
   // behind.
@@ -257,10 +257,10 @@ async function update() {
   // cheap — but it is still worth doing, because the Exec path is what would go stale.
   const installed = process.platform === 'darwin' ? INSTALLED : DESKTOP_ENTRY
   if (existsSync(installed)) {
-    console.log(`${installed}도 갱신합니다.`)
+    console.log(`Updating ${installed} too.`)
     execFileSync(process.argv[1], ['install'], { stdio: 'inherit' })
   }
-  console.log('끝났습니다. 앱이 떠 있다면 다시 시작해 주세요.')
+  console.log('Done. If the app is open, please restart it.')
 }
 
 /**
@@ -300,7 +300,7 @@ function installedCopyVersion() {
 function notifyIfCopyStale() {
   const version = installedCopyVersion()
   if (!copyDiffers(pkg.version, version)) return
-  console.log(`\n/Applications 사본은 ${version}입니다 (이 패키지는 ${pkg.version}).\n  centralu install`)
+  console.log(`\nThe /Applications copy is ${version} (this package is ${pkg.version}).\n  centralu install`)
 }
 
 /** Only announced after the app has launched — checking for updates must never delay startup. */
@@ -309,19 +309,19 @@ async function notifyIfOutdated() {
   // no reason to be told about registry troubles.
   const res = await latestVersion()
   if (res.ok && isNewer(res.version, pkg.version)) {
-    console.log(`\n새 버전이 있습니다: ${pkg.version} → ${res.version}\n  centralu update`)
+    console.log(`\nA new version is available: ${pkg.version} → ${res.version}\n  centralu update`)
   }
 }
 
 const HELP = `${APP_NAME} ${pkg.version}
 
-  centralu              앱을 실행합니다
-  centralu install      앱 목록에 등록합니다 (macOS는 /Applications, Linux는 메뉴 항목)
-  centralu uninstall    그 등록을 지웁니다 (대화 기록은 남습니다)
-  centralu update       새 버전이 있으면 올립니다
-  centralu --version    버전을 출력합니다
+  centralu              Launches the app
+  centralu install      Registers it in the app list (macOS: /Applications, Linux: a menu entry)
+  centralu uninstall    Removes that registration (conversation history is kept)
+  centralu update       Upgrades if a new version is available
+  centralu --version    Prints the version
 
-필요한 것: Node 22+, 그리고 claude 또는 codex CLI (앱 첫 화면이 상태를 알려줍니다)`
+Requires: Node 22+, and the claude or codex CLI (the app's first screen reports the status)`
 
 const [cmd, ...rest] = process.argv.slice(2)
 switch (cmd) {

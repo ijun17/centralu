@@ -14,9 +14,9 @@ async function tryClaude() {
   const a = new ClaudeAdapter()
   console.log('\n── claude ──')
   try {
-    console.log('세션 없이:', (await a.listModels()).length, '개')
+    console.log('without a session:', (await a.listModels()).length, 'item(s)')
   } catch (e) {
-    console.log('세션 없이: 실패 —', (e as Error).message)
+    console.log('without a session: failed —', (e as Error).message)
   }
   // Start a session and try again
   const h = await a.createSession(
@@ -26,10 +26,10 @@ async function tryClaude() {
   await new Promise((r) => setTimeout(r, 1500))
   try {
     const models = await a.listModels()
-    console.log('세션 뜬 뒤:', models.length, '개')
-    for (const m of models) console.log('  ', m.id, '|', m.label, '| efforts:', m.efforts.join(',') || '없음')
+    console.log('after the session comes up:', models.length, 'item(s)')
+    for (const m of models) console.log('  ', m.id, '|', m.label, '| efforts:', m.efforts.join(',') || 'none')
   } catch (e) {
-    console.log('세션 뜬 뒤: 실패 —', (e as Error).message)
+    console.log('after the session comes up: failed —', (e as Error).message)
   }
   await h.dispose()
 }
@@ -39,10 +39,10 @@ async function tryCodex() {
   console.log('\n── codex ──')
   try {
     const models = await a.listModels()
-    console.log(models.length, '개')
-    for (const m of models) console.log('  ', m.id, '|', m.label, '| efforts:', m.efforts.join(',') || '없음')
+    console.log(models.length, 'item(s)')
+    for (const m of models) console.log('  ', m.id, '|', m.label, '| efforts:', m.efforts.join(',') || 'none')
   } catch (e) {
-    console.log('실패 —', (e as Error).message)
+    console.log('failed —', (e as Error).message)
   }
 }
 

@@ -4,7 +4,7 @@ import { copyDiffers, isNewer } from '../packaging/npm/centralu/bin/semver.mjs'
 import { isNewerVersion } from '../packages/protocol/src/semver.js'
 
 /**
- * Regression: `centralu update` on 0.1.0-beta.1 said "이미 최신입니다" while
+ * Regression: `centralu update` on 0.1.0-beta.1 said "Already up to date" while
  * 0.1.0-beta.2 sat on the registry. The old compare did `.split('.').map(Number)`,
  * so `0-beta` became NaN and the comparison died at the third slot. Every beta
  * was "already latest" to every other beta — found the day beta.2 shipped.
@@ -79,8 +79,8 @@ describe('the app-side mirror and the launcher agree', () => {
 })
 
 /**
- * Dogfooding, 2026-08-24: `centralu update` on the shipped 0.1.0-beta.1 said "이미
- * 최신입니다" (that is #42, above). Going around it with `npm i -g centralu` then worked —
+ * Dogfooding, 2026-08-24: `centralu update` on the shipped 0.1.0-beta.1 said "Already
+ * up to date" (that is #42, above). Going around it with `npm i -g centralu` then worked —
  * the package became 0.1.0-beta.3 — but the copy in /Applications, the one Spotlight
  * opens, stayed 0.1.0-beta.1. Two versions on one machine, and nothing said so anywhere.
  *

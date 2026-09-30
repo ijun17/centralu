@@ -47,7 +47,7 @@ if (KINDS) {
   ]
   opts.onUserDialog = async (req: { dialogKind: string; payload: Record<string, unknown> }) => {
     dialogs.push({ kind: req.dialogKind, payload: req.payload })
-    console.log('\n>>> onUserDialog 호출됨! kind =', req.dialogKind)
+    console.log('\n>>> onUserDialog called! kind =', req.dialogKind)
     console.log('    payload =', JSON.stringify(req.payload).slice(0, 600))
     return { behavior: 'cancelled' as const }
   }
@@ -55,7 +55,7 @@ if (KINDS) {
 
 const q = query({
   prompt:
-    'AskUserQuestion 도구를 지금 한 번 써서 나에게 물어봐: "점심 뭐 먹을까?" 선택지는 "김밥"과 "라면" 두 개. 다른 말은 하지 말고 도구만 호출해.',
+    'Use the AskUserQuestion tool right now to ask me: "What should I eat for lunch?" Two options: "Sushi" and "Ramen." Do not say anything else, just call the tool.',
   options: opts as never,
 })
 
@@ -81,11 +81,11 @@ for await (const msg of q) {
   if (m.type === 'result') break
 }
 
-console.log('\n──────── 결과 ────────')
-console.log('모드:', KINDS ? 'supportedDialogKinds 선언함' : '선언 안 함(현재 앱과 같음)')
-console.log('canUseTool이 본 도구:', seenTools.join(', ') || '(없음)')
-console.log('AskUserQuestion이 canUseTool로 왔나:', seenTools.includes('AskUserQuestion') ? '✅ 왔다' : '❌ 안 왔다')
-console.log('onUserDialog 호출 수:', dialogs.length, dialogs.map((d) => d.kind).join(', '))
-console.log('도구가 받은 인자:', JSON.stringify(toolInput)?.slice(0, 300) ?? '(못 봄)')
-console.log('도구 결과:', toolResult || '(없음)')
+console.log('\n──────── Result ────────')
+console.log('mode:', KINDS ? 'supportedDialogKinds declared' : 'not declared (same as the current app)')
+console.log('tools canUseTool saw:', seenTools.join(', ') || '(none)')
+console.log('did AskUserQuestion come through canUseTool:', seenTools.includes('AskUserQuestion') ? '✅ yes' : '❌ no')
+console.log('onUserDialog call count:', dialogs.length, dialogs.map((d) => d.kind).join(', '))
+console.log('args the tool received:', JSON.stringify(toolInput)?.slice(0, 300) ?? '(not seen)')
+console.log('tool result:', toolResult || '(none)')
 process.exit(0)

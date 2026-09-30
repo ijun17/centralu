@@ -28,7 +28,7 @@ const host = spawn(
 )
 
 const port: number = await new Promise((resolve, reject) => {
-  const t = setTimeout(() => reject(new Error('host 기동 타임아웃')), 20000)
+  const t = setTimeout(() => reject(new Error('host startup timeout')), 20000)
   host.stdout!.on('data', (d) => {
     for (const line of String(d).split('\n')) {
       if (!line.trim()) continue
@@ -66,7 +66,7 @@ const rpc = (method: string, params: unknown): Promise<unknown> => {
   ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
   return new Promise((res, rej) => {
     pending.set(id, { res, rej })
-    setTimeout(() => pending.has(id) && (pending.delete(id), rej(new Error(method + ' 타임아웃'))), 30000)
+    setTimeout(() => pending.has(id) && (pending.delete(id), rej(new Error(method + ' timeout'))), 30000)
   })
 }
 
@@ -93,7 +93,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'projects.list': {},
   'projects.add': { path: cwd },
   'projects.reorder': { orderedIds: [P] },
-  'projects.setCommands': { projectId: P, commands: ['echo 대조용'] },
+  'projects.setCommands': { projectId: P, commands: ['echo for the check'] },
   'projects.gitStatus': { projectId: P },
   'sessions.list': {},
   'sessions.reorder': { projectId: P, orderedIds: [S] },
@@ -106,7 +106,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.listExternalSessions': { projectId: P, tool: 'claude', limit: 3 },
   'agents.switchTool': { sessionId: S, tool: 'codex' },
   'agents.updateSettings': { sessionId: S, model: null, effort: null, permissionPreset: 'normal' },
-  'sessions.rename': { sessionId: S, name: '대조용' },
+  'sessions.rename': { sessionId: S, name: 'for the check' },
   'sessions.markRead': { sessionId: S, seq: 0 },
   'agents.interrupt': { sessionId: S },
   'agents.archiveSession': { sessionId: S, archived: false },
@@ -134,7 +134,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'terminal.restart': { terminalId: T, cols: 80, rows: 24 },
   'agents.createSession': { projectId: P, cwd, tool: 'claude', permissionPreset: 'normal' },
   // A disposable temp repository — actually committing and checking out loses nothing
-  'git.commit': { projectId: P, message: '대조용 커밋' },
+  'git.commit': { projectId: P, message: 'commit for the check' },
   'git.checkout': { projectId: P, branch: 'main', dryRun: true },
   // Fails because there is no remote. **Whether that failure response matches the schema** is what is being checked
   'git.push': { projectId: P },
@@ -158,40 +158,40 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
 
 /** What cannot be called, and why — leaving it out silently would read as "everything was checked" */
 const SKIP: Record<string, string> = {
-  'agents.respondApproval': '승인 요청이 떠 있어야 함 (smoke.mjs가 관통)',
-  'agents.answerQuestion': '질문 요청이 떠 있어야 함 (승인과 같은 이유)',
-  'agents.forkConversation': '잠긴 codex 대화가 있어야 함 — 헤드리스로 만들 수 없다',
-  'agents.restartSession': '프로세스를 실제로 갈아 끼움 — 뒤 대조를 흔든다',
-  'agents.deleteSession': '파괴적 — 맨 끝에서 따로 부른다',
+  'agents.respondApproval': 'needs a pending approval request (covered by smoke.mjs)',
+  'agents.answerQuestion': 'needs a pending question request (same reason as the approval one)',
+  'agents.forkConversation': 'needs a locked codex conversation — cannot be created headlessly',
+  'agents.restartSession': 'actually swaps out the process — would shake up the checks that follow',
+  'agents.deleteSession': 'destructive — called separately at the very end',
   // The trash (#204) needs a session in it — the end of the script puts one there and walks the ways out
   'trash.read': 'needs a session in the trash — called at the end',
   'trash.restore': 'needs a session in the trash — called at the end',
   'trash.purge': 'needs a session in the trash — called at the end',
   'trash.empty': 'deletes everything in the trash for good — called at the end',
-  'git.commitDetail': '커밋 sha가 필요 — git.log 결과로 채운다',
-  'terminal.create': '위에서 이미 불러 대조함',
-  'terminal.close': '맨 끝에서 따로 부른다',
-  'commands.run': '슬래시 명령 실행 — 부작용',
-  'apps.sessionTools': 'Codex 다리 전용 — 외부 앱이 붙은 살아 있는 세션이 필요 (adapters/codex/apps.test.ts가 다리째 관통)',
-  'apps.sessionCall': 'Codex 다리 전용 — apps.sessionTools와 같은 이유',
-  'apps.remove': '파괴적 — 사용자 폴더 앱을 옮겨 버린다 (sessions/mcp-apps.test.ts가 관통)',
-  'apps.openView': '신뢰한 프로젝트에 home이 있는 외부 앱이 필요 (app-home-view.test.ts가 진짜 앱으로 관통)',
-  'apps.closeView': 'apps.openView가 연 인스턴스가 필요 — 같은 시험이 관통',
-  'apps.create': '앱 폴더와 만드는 세션(진짜 에이전트)을 만든다 (sessions/create-app.test.ts·app-builder.test.ts가 관통)',
-  'apps.createBuilder': '만드는 세션(진짜 에이전트)을 띄운다 — apps.create와 같은 이유',
-  'apps.check': '앱을 실제로 띄운다 — 템플릿 앱이 필요 (apps/external/check.test.ts가 관통)',
-  'apps.viewMessage': '세션이 부른 화면 달린 앱 도구의 열린 대화 안 화면이 필요 (inline-views.test.ts가 진짜 앱으로 관통)',
-  'apps.inlineReopen': '접힌 대화 안 화면이 필요 — 같은 시험이 관통(상한과 다시 열기)',
-  'apps.askBuilder': '앱의 만드는 세션(진짜 에이전트)에 말을 넣는다 (builder-requests.test.ts·platform.contract.test.ts가 관통)',
-  'apps.sendError': '앱의 오류 묶음과 만드는 세션(진짜 에이전트)이 필요 — builder-requests.test.ts가 관통',
-  'apps.answerQuestion': '화면에서 시작된 사슬의 능력 물음이 떠 있어야 함 (sessions/app-capabilities.test.ts가 진짜 앱으로 관통)',
-  'apps.setSecret': '비밀을 선언한 앱이 필요 — 비밀 값을 이 기계에 쓴다 (app-secrets.test.ts가 진짜 앱으로 관통)',
-  'apps.importPrepare': '가져올 폴더나 zip이 필요 — 데이터 폴더의 대기실에 쓴다 (apps/external/imports.test.ts·platform.contract.test.ts가 관통)',
-  'apps.importCommit': '준비한 가져오기의 토큰이 필요 — 사용자 폴더에 앱을 들인다 (같은 시험이 관통)',
-  'apps.review': '가져온 앱이 필요 (같은 시험이 관통)',
-  'apps.enable': '가져온 앱과 그 확인 창의 열쇠가 필요 (같은 시험이 관통)',
-  'apps.versions': '외부 앱이 필요 — 사용자 폴더 앱은 스냅샷, 프로젝트 앱은 git (app-versions.test.ts가 진짜 저장소로 관통)',
-  'apps.restoreVersion': '떠 둔 판이 있는 사용자 폴더 앱이 필요 — 앱 폴더를 되쓴다 (apps/external/versions.test.ts가 관통)',
+  'git.commitDetail': 'needs a commit sha — filled in from the git.log result',
+  'terminal.create': 'already called and checked above',
+  'terminal.close': 'called separately at the very end',
+  'commands.run': 'runs a slash command — has side effects',
+  'apps.sessionTools': 'Codex-bridge only — needs a live session with an external app attached (covered end-to-end by adapters/codex/apps.test.ts)',
+  'apps.sessionCall': 'Codex-bridge only — same reason as apps.sessionTools',
+  'apps.remove': 'destructive — moves a user-folder app away (covered by sessions/mcp-apps.test.ts)',
+  'apps.openView': 'needs an external app with a home view in a trusted project (covered by app-home-view.test.ts with a real app)',
+  'apps.closeView': 'needs an instance opened by apps.openView — covered by the same test',
+  'apps.create': 'creates an app folder and its builder session (a real agent) (covered by sessions/create-app.test.ts and app-builder.test.ts)',
+  'apps.createBuilder': 'launches a builder session (a real agent) — same reason as apps.create',
+  'apps.check': 'actually launches the app — needs a template app (covered by apps/external/check.test.ts)',
+  'apps.viewMessage': 'needs an open inline view from an app tool with a view that the session called (covered by inline-views.test.ts with a real app)',
+  'apps.inlineReopen': 'needs a collapsed inline view — covered by the same test (the cap and reopening)',
+  'apps.askBuilder': "feeds a message into the app's builder session (a real agent) (covered by builder-requests.test.ts and platform.contract.test.ts)",
+  'apps.sendError': "needs the app's error bundle and its builder session (a real agent) — covered by builder-requests.test.ts",
+  'apps.answerQuestion': 'needs a pending capability question from a chain that started in a view (covered by sessions/app-capabilities.test.ts with a real app)',
+  'apps.setSecret': 'needs an app that declares a secret — writes the secret value onto this machine (covered by app-secrets.test.ts with a real app)',
+  'apps.importPrepare': "needs a folder or zip to import — writes into the data folder's staging area (covered by apps/external/imports.test.ts and platform.contract.test.ts)",
+  'apps.importCommit': 'needs the token from a prepared import — brings the app into the user folder (covered by the same test)',
+  'apps.review': 'needs an imported app (covered by the same test)',
+  'apps.enable': 'needs an imported app and the key from its confirmation dialog (covered by the same test)',
+  'apps.versions': 'needs an external app — user-folder apps use a snapshot, project apps use git (covered by app-versions.test.ts with a real repository)',
+  'apps.restoreVersion': 'needs a user-folder app with a saved version — overwrites the app folder (covered by apps/external/versions.test.ts)',
 }
 
 const ok: string[] = []
@@ -203,7 +203,7 @@ try {
   const orc = (await rpc('orchestrator.get', {})) as { id: string }
   CASES['orchestrator.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
 } catch {
-  SKIP['orchestrator.tool'] = '오케스트레이터를 못 만듦'
+  SKIP['orchestrator.tool'] = 'could not create the orchestrator'
 }
 
 // git.commitDetail fills in a sha once one is obtained
@@ -220,7 +220,7 @@ try {
 for (const m of Object.keys(RpcMethods) as RpcMethodName[]) {
   if (m in SKIP) continue
   if (!(m in CASES)) {
-    failed.push({ m, why: '대조 케이스 없음 (이 스크립트의 구멍)' })
+    failed.push({ m, why: 'no check case (a hole in this script)' })
     continue
   }
   try {
@@ -255,21 +255,21 @@ for (const [m, params] of [
 }
 
 const total = Object.keys(RpcMethods).length
-console.log(`\n대조 결과 (전체 ${total}개)`)
-console.log(`  스키마 일치      ${ok.length}`)
-console.log(`  스키마 불일치    ${bad.length}`)
-console.log(`  호출 실패        ${failed.length}`)
-console.log(`  대조 못 함       ${Object.keys(SKIP).length}`)
+console.log(`\nCheck results (${total} total)`)
+console.log(`  schema matched     ${ok.length}`)
+console.log(`  schema mismatched  ${bad.length}`)
+console.log(`  call failed        ${failed.length}`)
+console.log(`  not checked        ${Object.keys(SKIP).length}`)
 
 if (bad.length) {
-  console.log('\n── 불일치 (검증을 켜면 여기서 죽는다) ──')
+  console.log('\n── Mismatches (this is where it dies once validation is turned on) ──')
   for (const b of bad) console.log(`  ${b.m}\n     ${b.issues}`)
 }
 if (failed.length) {
-  console.log('\n── 호출 실패 ──')
+  console.log('\n── Call failures ──')
   for (const f of failed) console.log(`  ${f.m}: ${f.why}`)
 }
-console.log('\n── 대조하지 못한 것과 이유 ──')
+console.log('\n── Not checked, and why ──')
 for (const [m, why] of Object.entries(SKIP)) console.log(`  ${m}: ${why}`)
 
 ws.close()

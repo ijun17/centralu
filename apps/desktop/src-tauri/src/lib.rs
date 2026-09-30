@@ -299,7 +299,7 @@ fn alert(app: AppHandle, kind: String, sound: bool) {
         tauri::UserAttentionType::Critical
     };
     if let Err(e) = window.request_user_attention(Some(attention)) {
-        eprintln!("[alert] 독 아이콘: {e}");
+        eprintln!("[alert] dock icon: {e}");
     }
 }
 
@@ -324,7 +324,7 @@ fn play_sound(kind: &str) {
     };
     let path = format!("/System/Library/Sounds/{name}.aiff");
     if let Err(e) = spawn_and_reap("/usr/bin/afplay", &[&path]) {
-        eprintln!("[alert] 소리를 내지 못했습니다 ({path}): {e}");
+        eprintln!("[alert] failed to play sound ({path}): {e}");
     }
 }
 
@@ -587,7 +587,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("Tauri 앱을 생성하지 못했습니다")
+        .expect("failed to build the Tauri app")
         .run(move |app, event| {
             // App links (M4 E-4) — a `centralu://` link handed over by the OS. This is also
             // where things land when the app is first launched by such a link.

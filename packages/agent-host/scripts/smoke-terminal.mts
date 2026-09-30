@@ -18,7 +18,7 @@ const svc = new TerminalService(() => {})
 // attach(cwd) was split into list/create (several terminals per directory).
 // "reattaching" now means finding the existing one with list() — this verifies that meaning as is.
 const h = svc.create(cwd, 80, 24)
-console.log(`터미널 생성: ${h.id} · alive=${h.alive}`)
+console.log(`terminal created: ${h.id} · alive=${h.alive}`)
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 await wait(900)
@@ -40,13 +40,13 @@ const keptHistory = again?.history().includes('MARKER.txt') ?? false
 const other = mkdtempSync(join(tmpdir(), 'cc-term-other-'))
 const b = svc.create(other, 80, 24)
 
-console.log('\n판정:')
-console.log('  셸이 실제로 떴는가:', h.alive ? 'O' : 'X')
-console.log('  명령이 실행됐는가 (ls):', sawMarker ? 'O' : 'X')
-console.log('  cwd가 맞는가 (pwd):', sawCwd ? 'O' : 'X')
-console.log('  다시 붙으면 같은 터미널:', sameId ? 'O' : 'X')
-console.log('  기록이 남는가:', keptHistory ? 'O' : 'X')
-console.log('  다른 디렉토리는 다른 터미널:', b.id !== h.id ? 'O' : 'X')
+console.log('\nVerdict:')
+console.log('  did a shell actually come up:', h.alive ? 'O' : 'X')
+console.log('  did the command run (ls):', sawMarker ? 'O' : 'X')
+console.log('  is cwd correct (pwd):', sawCwd ? 'O' : 'X')
+console.log('  reattaching gives the same terminal:', sameId ? 'O' : 'X')
+console.log('  history is kept:', keptHistory ? 'O' : 'X')
+console.log('  a different directory gets a different terminal:', b.id !== h.id ? 'O' : 'X')
 
 svc.disposeAll()
 rmSync(cwd, { recursive: true, force: true })

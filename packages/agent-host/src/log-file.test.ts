@@ -43,13 +43,13 @@ describe('the host log file', () => {
     }) as typeof process.stderr.write
     const stop = teeStderrToFile(path)
     try {
-      process.stderr.write('보이는가\n')
+      process.stderr.write('is this visible\n')
     } finally {
       stop()
       process.stderr.write = real
     }
-    expect(seen.join('')).toContain('보이는가')
-    expect(readFileSync(path, 'utf8')).toContain('보이는가')
+    expect(seen.join('')).toContain('is this visible')
+    expect(readFileSync(path, 'utf8')).toContain('is this visible')
   })
 
   it('rolls over and keeps only one prior generation once it overflows (does not silently eat up the folder)', () => {

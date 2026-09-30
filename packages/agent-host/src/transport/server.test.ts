@@ -333,7 +333,7 @@ describe('RPC round trip', () => {
 
   it('converts a handler error into a ProtocolError', async () => {
     const { port } = await start(async () => {
-      throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      throw Object.assign(new Error('session not found'), { code: 'session_not_found' })
     })
     const c = connect(port)
     await c.open()
@@ -342,7 +342,7 @@ describe('RPC round trip', () => {
     await c.wait(() => c.frames.some((f) => f.kind === 'res'))
     expect(c.frames.find((f) => f.kind === 'res')).toMatchObject({
       ok: false,
-      error: { code: 'session_not_found', message: '세션 없음' },
+      error: { code: 'session_not_found', message: 'session not found' },
     })
     c.ws.close()
   })

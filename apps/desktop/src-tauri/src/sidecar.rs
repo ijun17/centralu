@@ -191,9 +191,9 @@ impl Supervisor {
                         }
                         attempt += 1;
                         let msg = if reason.is_empty() {
-                            format!("agent-host가 종료되었습니다 (code {code:?})")
+                            format!("agent-host exited (code {code:?})")
                         } else {
-                            format!("agent-host가 종료되었습니다 (code {code:?})\n{reason}")
+                            format!("agent-host exited (code {code:?})\n{reason}")
                         };
                         if attempt > MAX_RESTARTS {
                             me.set_error(&msg);
@@ -203,7 +203,7 @@ impl Supervisor {
                     }
                     Err(e) => {
                         attempt += 1;
-                        let msg = format!("agent-host를 시작하지 못했습니다: {e}");
+                        let msg = format!("failed to start agent-host: {e}");
                         if attempt > MAX_RESTARTS {
                             me.set_error(&msg);
                             emit(&app, HostStatus::Failed { message: msg });
@@ -250,9 +250,9 @@ impl Supervisor {
             cmd.process_group(0);
         }
 
-        let mut child = cmd.spawn().map_err(|e| format!("{program} 실행 실패: {e}"))?;
+        let mut child = cmd.spawn().map_err(|e| format!("failed to run {program}: {e}"))?;
 
-        let stdout = child.stdout.take().ok_or("stdout을 열 수 없습니다")?;
+        let stdout = child.stdout.take().ok_or("could not open stdout")?;
 
         if let Ok(mut inner) = self.inner.lock() {
             inner.child = Some(child);
@@ -297,7 +297,7 @@ impl Supervisor {
         // wait() blocks — waiting while holding the lock would stall IPC (info queries) and
         // shutdown at the same time. Take the child out, release the lock, then wait.
         let mut child = {
-            let mut guard = self.inner.lock().map_err(|_| "lock 실패")?;
+            let mut guard = self.inner.lock().map_err(|_| "lock failed")?;
             guard.info = None;
             guard.child.take()
         };
@@ -464,10 +464,10 @@ fn host_command(bundled: Option<&Path>) -> Result<(String, Vec<String>), String>
 /// being present but not found, and the version being too low.
 fn node_missing_message(looked: &[String]) -> String {
     format!(
-        "Node.js를 찾지 못했습니다. Centralu는 Node {MIN_NODE_MAJOR} 이상이 필요합니다.\n\
-         터미널에서 `node --version`으로 확인하고, 없으면 {INSTALL_NODE_HINT} 또는 \
-         https://nodejs.org 에서 설치한 뒤 앱을 다시 시작하세요.\n\
-         찾아본 곳: {}",
+        "Could not find Node.js. Centralu requires Node {MIN_NODE_MAJOR} or newer.\n\
+         Check with `node --version` in a terminal, and if it is missing, install it with \
+         {INSTALL_NODE_HINT} or from https://nodejs.org, then restart the app.\n\
+         Looked in: {}",
         looked.join(", ")
     )
 }
@@ -479,12 +479,12 @@ fn node_missing_message(looked: &[String]) -> String {
 #[cfg(target_os = "macos")]
 const INSTALL_NODE_HINT: &str = "`brew install node`";
 #[cfg(not(target_os = "macos"))]
-const INSTALL_NODE_HINT: &str = "배포판의 패키지 관리자(예: `apt install nodejs`)";
+const INSTALL_NODE_HINT: &str = "your distribution's package manager (for example, `apt install nodejs`)";
 
 #[cfg(target_os = "macos")]
 const UPGRADE_NODE_HINT: &str = "`brew upgrade node`";
 #[cfg(not(target_os = "macos"))]
-const UPGRADE_NODE_HINT: &str = "배포판의 패키지 관리자";
+const UPGRADE_NODE_HINT: &str = "your distribution's package manager";
 
 /// The host bundle's esbuild target is node22 — below that, even the syntax breaks.
 const MIN_NODE_MAJOR: u32 = 22;
@@ -530,7 +530,7 @@ fn remember_found(
 /// fact that it hit an old one, and shows that as the reason if nothing newer turns up
 /// ("needs an upgrade" is closer to what the person actually has to do than "not found").
 fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> Result<String, String> {
-    let mut looked = vec!["로그인 셸 PATH".to_string()];
+    let mut looked = vec!["login shell PATH".to_string()];
     let mut ordered: Vec<String> = from_shell.into_iter().collect();
 
     for candidate in fallbacks {
@@ -686,8 +686,8 @@ fn check_node_version(path: &str) -> Result<String, String> {
     };
     if major < MIN_NODE_MAJOR {
         return Err(format!(
-            "Node {MIN_NODE_MAJOR} 이상이 필요한데 {path}는 {}입니다.\n\
-             {UPGRADE_NODE_HINT} 또는 nvm·mise로 {MIN_NODE_MAJOR} 이상을 켠 뒤 앱을 다시 시작하세요.",
+            "Node {MIN_NODE_MAJOR} or newer is required, but {path} is {}.\n\
+             {UPGRADE_NODE_HINT}, or switch to {MIN_NODE_MAJOR} or newer with nvm or mise, then restart the app.",
             raw.trim()
         ));
     }
@@ -712,15 +712,15 @@ mod tests {
     #[test]
     fn a_supervisor_that_gave_up_can_be_claimed_again() {
         let sup = Supervisor::new();
-        assert!(sup.claim(false), "처음 시작");
-        assert!(!sup.claim(true), "감시 스레드가 도는 동안은 겹쳐 띄우지 않는다");
+        assert!(sup.claim(false), "starts for the first time");
+        assert!(!sup.claim(true), "does not launch a second one while the watcher thread is running");
 
         // The watcher thread emitted Failed and ended.
-        sup.set_error("agent-host가 종료되었습니다 (code Some(1))");
+        sup.set_error("agent-host exited (code Some(1))");
         drop(Running(sup.clone()));
 
-        assert!(sup.claim(true), "끝난 뒤에는 다시 띄운다");
-        assert_eq!(sup.last_error(), None, "새 시도가 옛 이유로 곧바로 실패해 보이면 안 된다");
+        assert!(sup.claim(true), "launches again once it has ended");
+        assert_eq!(sup.last_error(), None, "a fresh attempt must not look like it failed instantly for the old reason");
     }
 
     #[test]
@@ -736,15 +736,15 @@ mod tests {
     fn a_missing_node_is_not_remembered_but_a_found_one_is() {
         let cache = std::sync::OnceLock::new();
         assert_eq!(
-            remember_found(&cache, || Err("Node.js를 찾지 못했습니다".into())),
-            Err("Node.js를 찾지 못했습니다".to_string())
+            remember_found(&cache, || Err("could not find Node.js".into())),
+            Err("could not find Node.js".to_string())
         );
         assert_eq!(
             remember_found(&cache, || Ok("/opt/homebrew/bin/node".into())),
             Ok("/opt/homebrew/bin/node".to_string())
         );
         assert_eq!(
-            remember_found(&cache, || panic!("찾은 것은 다시 묻지 않는다")),
+            remember_found(&cache, || panic!("a successful find is not asked for again")),
             Ok("/opt/homebrew/bin/node".to_string())
         );
     }
@@ -791,7 +791,7 @@ mod tests {
         // A low version is "needs an upgrade", not "missing" — the person has a different task.
         let path = fake_node("v20.11.1", "cc-test-node-old");
         let err = check_node_version(&path).unwrap_err();
-        assert!(err.contains("이상이 필요한데"), "{err}");
+        assert!(err.contains("or newer is required"), "{err}");
         assert!(err.contains("v20.11.1"), "{err}");
     }
 
@@ -846,7 +846,7 @@ mod tests {
         let old = fake_node("v18.20.4", "cc-test-node-only-old");
         let err = pick_node(Some(old), vec!["/nope/node".into()]).unwrap_err();
         assert!(err.contains("v18.20.4"), "{err}");
-        assert!(!err.contains("찾지 못했습니다"), "{err}");
+        assert!(!err.contains("Could not find"), "{err}");
     }
 
     #[test]
@@ -854,7 +854,7 @@ mod tests {
         // Finding nothing anywhere is the moment the person is most stuck — list every place
         // that was checked.
         let err = pick_node(None, vec!["/nope/a/node".into(), "/nope/b/node".into()]).unwrap_err();
-        assert!(err.contains("로그인 셸 PATH"), "{err}");
+        assert!(err.contains("login shell PATH"), "{err}");
         assert!(err.contains("/nope/a/node") && err.contains("/nope/b/node"), "{err}");
     }
 
@@ -875,14 +875,14 @@ mod tests {
             "/home/tester/.local/share/mise/shims/node",
             "/home/tester/.asdf/shims/node",
         ] {
-            assert!(paths.iter().any(|p| p == expected), "{expected} 가 후보에 없다: {paths:?}");
+            assert!(paths.iter().any(|p| p == expected), "{expected} is not among the candidates: {paths:?}");
         }
     }
 
     #[test]
     fn says_where_it_looked_when_there_is_no_node() {
-        let msg = node_missing_message(&["로그인 셸 PATH".into(), "/opt/homebrew/bin/node".into()]);
-        assert!(msg.contains("로그인 셸 PATH"));
+        let msg = node_missing_message(&["login shell PATH".into(), "/opt/homebrew/bin/node".into()]);
+        assert!(msg.contains("login shell PATH"));
         assert!(msg.contains("/opt/homebrew/bin/node"));
         assert!(msg.contains("22"));
     }

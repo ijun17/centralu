@@ -31,11 +31,11 @@ const h = await adapter.createSession({ sessionId: 'int-x', cwd, permissionPrese
   if (e.type === 'error') console.log('[codex] error:', e.error.message)
 })
 
-h.send('세 번에 나눠서 bash로 `sleep 5`를 실행하고, 각각 끝나면 한 줄씩 말해줘.')
+h.send('Run bash `sleep 5` three separate times, and say one line each time one finishes.')
 // Wait until the tool actually starts running (stopping only makes sense once it has started)
 for (let i = 0; i < 40 && !events.some((e) => e.type === 'tool_call'); i++) await wait(500)
 const started = events.some((e) => e.type === 'tool_call')
-console.log('[codex] 도구 실행 시작:', started ? 'O' : 'X (모델이 안 움직였다 — 다시 돌려보세요)')
+console.log('[codex] tool execution started:', started ? 'O' : 'X (the model did not move — try running it again)')
 
 h.interrupt()
 const mark = events.length
@@ -44,9 +44,9 @@ const mark = events.length
 await wait(20_000)
 const after = events.slice(mark)
 const kept = after.filter((e) => e.type === 'message_delta' || e.type === 'tool_call')
-console.log(`[codex] 스톱 뒤 20초: 새 이벤트 ${after.length}건, 그중 모델이 계속 일한 흔적 ${kept.length}건`)
-console.log('[codex] 스톱:', kept.length === 0 ? 'O (조용해졌다)' : `X (${kept.length}건 더 일했다)`)
-console.log('[codex] 에러 없이 멈췄나:', after.some((e) => e.type === 'error') ? 'X' : 'O')
+console.log(`[codex] 20 seconds after stop: ${after.length} new event(s), of which ${kept.length} show the model still working`)
+console.log('[codex] stop:', kept.length === 0 ? 'O (went quiet)' : `X (kept working ${kept.length} more time(s))`)
+console.log('[codex] stopped without an error:', after.some((e) => e.type === 'error') ? 'X' : 'O')
 
 await h.dispose().catch(() => {})
 rmSync(cwd, { recursive: true, force: true })

@@ -32,7 +32,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'codex-bindings-'))
 try {
   execFileSync('codex', ['app-server', 'generate-ts', '--out', tmp], { stdio: 'pipe' })
 } catch (e) {
-  console.error('[codex] 타입 생성 실패 — codex CLI가 설치돼 있는지 확인하세요:', e.message)
+  console.error('[codex] type generation failed — check whether the codex CLI is installed:', e.message)
   process.exit(1)
 }
 
@@ -55,13 +55,13 @@ function literalsIn(dir) {
 const literals = literalsIn(tmp)
 
 const groups = [
-  ['clientRequests', '클라이언트 요청'],
-  ['clientNotifications', '클라이언트 알림'],
-  ['serverNotifications', '서버 알림'],
-  ['serverRequests', '서버 요청(승인)'],
-  ['approvalDecisions', '승인 결정값'],
-  ['approvalPolicies', '승인 정책값'],
-  ['mcpToolApprovalModes', 'MCP 도구 승인 방식'],
+  ['clientRequests', 'client request'],
+  ['clientNotifications', 'client notification'],
+  ['serverNotifications', 'server notification'],
+  ['serverRequests', 'server request (approval)'],
+  ['approvalDecisions', 'approval decision value'],
+  ['approvalPolicies', 'approval policy value'],
+  ['mcpToolApprovalModes', 'MCP tool approval mode'],
 ]
 
 const missing = []
@@ -119,29 +119,29 @@ collect(tmp)
 for (const [method, spec] of Object.entries(contract.requestParams ?? {})) {
   const src = sources.get(spec.type)
   if (!src) {
-    missing.push(`요청 인자 타입: ${spec.type} (${method})`)
+    missing.push(`request param type: ${spec.type} (${method})`)
     continue
   }
   const fields = paramFields(src)
   if (!fields) {
-    missing.push(`요청 인자 타입을 읽지 못함: ${spec.type} (${method})`)
+    missing.push(`could not read the request param type: ${spec.type} (${method})`)
     continue
   }
   const sent = new Set(spec.send)
   for (const f of fields) {
-    if (f.required && !sent.has(f.name)) missing.push(`${method}: 필수 인자 '${f.name}'을 안 보냅니다`)
+    if (f.required && !sent.has(f.name)) missing.push(`${method}: does not send the required param '${f.name}'`)
   }
   const known = new Set(fields.map((f) => f.name))
   for (const name of sent) {
-    if (!known.has(name)) missing.push(`${method}: '${name}'은 ${spec.type}에 없습니다 (이름이 바뀌었나?)`)
+    if (!known.has(name)) missing.push(`${method}: '${name}' is not in ${spec.type} (did the name change?)`)
   }
 }
 
 if (missing.length > 0) {
   console.error(
-    `[codex] 프로토콜이 바뀌었습니다 (${version}). 우리가 의존하는 항목 ${missing.length}개가 사라졌습니다:\n  ` +
+    `[codex] the protocol has changed (${version}). ${missing.length} item(s) we depend on have disappeared:\n  ` +
       missing.join('\n  ') +
-      '\n→ adapters/codex를 새 프로토콜에 맞추고 protocol-contract.json을 갱신하세요.',
+      '\n→ update adapters/codex to match the new protocol, and refresh protocol-contract.json.',
   )
   rmSync(tmp, { recursive: true, force: true })
   process.exit(1)
@@ -153,11 +153,11 @@ if (KEEP) {
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(dest, { recursive: true })
   cpSync(tmp, dest, { recursive: true })
-  console.log(`[codex] 계약 확인 (${version}) · 참고용 타입을 generated/ 에 두었습니다 (커밋 대상 아님)`)
+  console.log(`[codex] contract verified (${version}) · left the reference types in generated/ (not for commit)`)
 } else {
   console.log(
-    `[codex] 계약 확인 (${version}) — 의존 항목 ${groups.reduce((n, [k]) => n + contract[k].length, 0)}개 + ` +
-      `요청 인자 ${Object.keys(contract.requestParams ?? {}).length}건 모두 일치`,
+    `[codex] contract verified (${version}) — all ${groups.reduce((n, [k]) => n + contract[k].length, 0)} dependent item(s) + ` +
+      `${Object.keys(contract.requestParams ?? {}).length} request param set(s) match`,
   )
 }
 

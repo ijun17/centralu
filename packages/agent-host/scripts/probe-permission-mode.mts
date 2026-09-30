@@ -7,7 +7,7 @@ async function run(label: string, mode: string | undefined) {
   const asked: string[] = []
   let used = false, ran = false
   const q = query({
-    prompt: 'Bash 도구로 `mkdir -p /tmp/cc-probe-7731 && echo done` 을 실행해줘. 설명 없이 실행만.',
+    prompt: 'Use the Bash tool to run `mkdir -p /tmp/cc-probe-7731 && echo done`. Just run it, no explanation.',
     options: { cwd, ...(mode === 'RESOLVE' ? { resolvePermissionModeInCli: true } : mode ? { permissionMode: mode } : {}),
       canUseTool: async (n: string, i: Record<string, unknown>) => { asked.push(n); return { behavior: 'allow' as const, updatedInput: i } },
     } as never,
@@ -20,16 +20,16 @@ async function run(label: string, mode: string | undefined) {
       const b = c as Record<string, unknown>; if (b.type === 'tool_result' && JSON.stringify(b.content).includes('done')) ran = true }
     if (m.type === 'result') break
   }
-  console.log(`  ${label.padEnd(34)} Bash호출=${used?'O':'X'} 실행=${ran?'O':'X'} 우리콜백=${asked.length?'불림':'안불림'}`)
+  console.log(`  ${label.padEnd(34)} Bash called=${used?'O':'X'} ran=${ran?'O':'X'} our callback=${asked.length?'called':'not called'}`)
   return { used, gated: asked.length > 0 }
 }
-console.log('\n사용자 실제 설정(defaultMode=bypassPermissions) 그대로, 변이 명령으로 비교\n')
+console.log('\nKeeping the user\'s actual setting (defaultMode=bypassPermissions), compared against a mutating command\n')
 const a = await run("permissionMode='default'", 'default')
 const b = await run("permissionMode='bypassPermissions'", 'bypassPermissions')
-const c = await run('안 보냄', undefined)
-const d = await run('안 보냄 + resolvePermissionModeInCli', 'RESOLVE')
-console.log('\n판정:')
-console.log(a.used && b.used ? `  'default'와 bypass가 다르게 동작하나: ${a.gated !== b.gated ? '✅ 다르다 → 우리 값이 실제로 먹는다' : '❌ 같다 → 우리 값이 안 먹거나 설정이 이긴다'}` : '  ⚠️ 판정 불가 (Bash 미호출)')
-console.log(`  안 보냈을 때: ${c.gated ? '물음 (설정 무시)' : '안 물음'}`)
-console.log(`  resolvePermissionModeInCli: ${d.used ? (d.gated ? '물음 → 설정 여전히 무시' : '✅ 안 물음 → 사용자 설정(bypass)이 살아났다') : '⚠️ 판정 불가'}`)
+const c = await run('not sent', undefined)
+const d = await run('not sent + resolvePermissionModeInCli', 'RESOLVE')
+console.log('\nVerdict:')
+console.log(a.used && b.used ? `  does 'default' behave differently from bypass: ${a.gated !== b.gated ? '✅ yes → our value actually takes effect' : '❌ no → either our value has no effect, or the setting wins'}` : '  ⚠️ cannot judge (Bash was not called)')
+console.log(`  when not sent: ${c.gated ? 'asks (setting ignored)' : 'does not ask'}`)
+console.log(`  resolvePermissionModeInCli: ${d.used ? (d.gated ? 'asks → setting still ignored' : '✅ does not ask → the user setting (bypass) took effect') : '⚠️ cannot judge'}`)
 process.exit(0)

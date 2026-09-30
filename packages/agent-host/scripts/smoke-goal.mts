@@ -38,14 +38,14 @@ async function codexSmoke() {
   const adapter = new CodexAdapter()
   const h = await adapter.createSession({ sessionId: 'goal-x', cwd, permissionPreset: 'auto' }, (e) => {
     events.push(e)
-    if (e.type === 'goal') console.log('[codex] goal 이벤트:', JSON.stringify(e.goal))
-    if (e.type === 'message_delta') console.log('[codex] 채팅 줄:', e.text)
+    if (e.type === 'goal') console.log('[codex] goal event:', JSON.stringify(e.goal))
+    if (e.type === 'message_delta') console.log('[codex] chat line:', e.text)
     if (e.type === 'error') console.log('[codex] error:', e.error.message)
   })
 
-  h.send('/goal 빌드를 초록으로 유지')
+  h.send('/goal keep the build green')
   const set = await waitFor(events, (e) => e.type === 'goal' && e.goal !== null, 15_000)
-  console.log('[codex] set 후 goal 이벤트:', set ? 'O' : 'X (안 옴)')
+  console.log('[codex] goal event after set:', set ? 'O' : 'X (did not arrive)')
 
   h.send('/goal')
   await waitFor(events, (e) => e.type === 'message_delta' && /Goal|goal/.test(e.text ?? ''), 10_000)
@@ -57,7 +57,7 @@ async function codexSmoke() {
     (e, i = events.indexOf(e)) => i >= before && e.type === 'goal' && e.goal === null,
     15_000,
   )
-  console.log('[codex] clear 후 goal:null 이벤트:', cleared ? 'O' : 'X (안 옴)')
+  console.log('[codex] goal:null event after clear:', cleared ? 'O' : 'X (did not arrive)')
 
   await h.dispose().catch(() => {})
   rmSync(cwd, { recursive: true, force: true })
@@ -80,8 +80,8 @@ async function claudeSmoke() {
     { sessionId: 'goal-c', cwd, permissionPreset: 'auto', model: 'haiku' },
     (e) => {
       events.push(e)
-      if (e.type === 'goal') console.log('[claude] goal 이벤트:', JSON.stringify(e.goal))
-      if (e.type === 'message_delta') console.log('[claude] 채팅 줄:', (e.text ?? '').slice(0, 120))
+      if (e.type === 'goal') console.log('[claude] goal event:', JSON.stringify(e.goal))
+      if (e.type === 'message_delta') console.log('[claude] chat line:', (e.text ?? '').slice(0, 120))
     },
   )
 
@@ -91,20 +91,20 @@ async function claudeSmoke() {
     (e) => e.type === 'message_delta' && /interactive Claude CLI/.test(e.text ?? ''),
     5_000,
   )
-  console.log('[claude] 정직한 거절 한 줄:', notice ? 'O' : 'X (안 옴)')
+  console.log('[claude] one honest refusal line:', notice ? 'O' : 'X (did not arrive)')
 
   await h.dispose().catch(() => {})
   rmSync(cwd, { recursive: true, force: true })
   return { any: !!notice }
 }
 
-console.log('=== 골 스모크 ===')
+console.log('=== goal smoke ===')
 if (only !== 'claude') {
   const x = await codexSmoke()
-  console.log(`[codex] 판정: set=${x.set ? 'O' : 'X'} clear=${x.cleared ? 'O' : 'X'}`)
+  console.log(`[codex] verdict: set=${x.set ? 'O' : 'X'} clear=${x.cleared ? 'O' : 'X'}`)
 }
 if (only !== 'codex') {
   const c = await claudeSmoke()
-  console.log(`[claude] 판정: /goal 정직 거절=${c.any ? 'O' : 'X'} (SDK에 골 API 없음 — 실측)`)
+  console.log(`[claude] verdict: /goal honest refusal=${c.any ? 'O' : 'X'} (SDK has no goal API — measured)`)
 }
 process.exit(0)

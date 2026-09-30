@@ -82,13 +82,13 @@ const t0 = Date.now()
 const ms = () => String(Date.now() - t0).padStart(6)
 let deltaRun: { parent: string; n: number; chars: number } | null = null
 const flushDeltas = () => {
-  if (deltaRun) console.log(`${ms()} stream_event text_delta ×${deltaRun.n} (${deltaRun.chars}자) parent=${deltaRun.parent}`)
+  if (deltaRun) console.log(`${ms()} stream_event text_delta ×${deltaRun.n} (${deltaRun.chars} chars) parent=${deltaRun.parent}`)
   deltaRun = null
 }
 let results = 0
 let notified = false
 const timer = setTimeout(() => {
-  console.log('!! 시간 초과')
+  console.log('!! timed out')
   open = false
   wake()
   process.exit(1)
@@ -96,7 +96,7 @@ const timer = setTimeout(() => {
 
 for await (const msg of q) {
   const m = msg as Record<string, unknown>
-  const parent = m.parent_tool_use_id === undefined ? '(없음)' : String(m.parent_tool_use_id)
+  const parent = m.parent_tool_use_id === undefined ? '(none)' : String(m.parent_tool_use_id)
   if (m.type === 'stream_event') {
     const e = m.event as Record<string, unknown>
     const d = e.delta as Record<string, unknown> | undefined
@@ -115,7 +115,7 @@ for await (const msg of q) {
   if (m.type === 'assistant') {
     const content = ((m.message as Record<string, unknown>).content ?? []) as Record<string, unknown>[]
     const blocks = content.map((b) =>
-      b.type === 'text' ? `text(${String(b.text).length}자: ${JSON.stringify(String(b.text).slice(0, 60))})`
+      b.type === 'text' ? `text(${String(b.text).length} chars: ${JSON.stringify(String(b.text).slice(0, 60))})`
       : b.type === 'tool_use' ? `tool_use(${String(b.name)} ${String(b.id)} ${JSON.stringify(b.input).slice(0, 120)})`
       : String(b.type),
     )
@@ -149,5 +149,5 @@ for await (const msg of q) {
 clearTimeout(timer)
 open = false
 wake()
-console.log(`\nresult ${results}개 · cwd ${cwd}`)
+console.log(`\nresult ${results} item(s) · cwd ${cwd}`)
 process.exit(0)

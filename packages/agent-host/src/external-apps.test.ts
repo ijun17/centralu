@@ -103,12 +103,12 @@ describe('external app RPC — apps.invoke is the same door for built-in and ext
   })
 
   it("a built-in app id with no projectId is the old path as is — the built-in app's tool runs", async () => {
-    const out = (await rpc('apps.invoke', { appId: 'control', name: 'control_notify', args: { text: '사람이 봐야 할 일' } })) as {
+    const out = (await rpc('apps.invoke', { appId: 'control', name: 'control_notify', args: { text: 'something a person needs to see' } })) as {
       text: string
       isError?: boolean
     }
     expect(out.isError).toBeFalsy()
     const state = (await rpc('apps.state', { appId: 'control' })) as { doc: { notifies?: { text: string }[] } }
-    expect(state.doc.notifies?.map((n) => n.text)).toContain('사람이 봐야 할 일')
+    expect(state.doc.notifies?.map((n) => n.text)).toContain('something a person needs to see')
   })
 })

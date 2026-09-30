@@ -19,7 +19,7 @@ try {
   const helper = join(root, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper')
   if (existsSync(helper)) {
     chmodSync(helper, 0o755)
-    console.log(`[node-pty] spawn-helper 실행 권한 확인: ${helper}`)
+    console.log(`[node-pty] spawn-helper execute permission confirmed: ${helper}`)
   }
 } catch {
   // Silently skip in environments without node-pty (a web-only CI, for example)

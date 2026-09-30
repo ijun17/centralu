@@ -27,7 +27,7 @@ function startHost() {
     { stdio: ['ignore', 'pipe', 'inherit'] },
   )
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('host 기동 타임아웃')), 20000)
+    const t = setTimeout(() => reject(new Error('host startup timeout')), 20000)
     host.stdout.on('data', (d) => {
       for (const line of String(d).split('\n')) {
         if (!line.trim()) continue
@@ -55,7 +55,7 @@ function connect(port) {
     if (m.kind === 'res') {
       const p = pending.get(m.id)
       pending.delete(m.id)
-      m.ok ? p.resolve(m.result) : p.reject(new Error(m.error?.message ?? 'rpc 실패'))
+      m.ok ? p.resolve(m.result) : p.reject(new Error(m.error?.message ?? 'rpc failure'))
     } else if (m.kind === 'event') {
       events.push(m.event)
     } else if (m.kind === 'hello_ok') {
@@ -72,7 +72,7 @@ function connect(port) {
       const rid = String(++id)
       pending.set(rid, { resolve, reject })
       ws.send(JSON.stringify({ kind: 'rpc', id: rid, method, params }))
-      setTimeout(() => pending.has(rid) && reject(new Error(`${method} 타임아웃`)), 120000)
+      setTimeout(() => pending.has(rid) && reject(new Error(`${method} timeout`)), 120000)
     })
   return { ws, call, events, ready }
 }
@@ -89,7 +89,7 @@ const waitFor = (events, pred, ms = 120000) =>
         resolve()
       } else if (Date.now() - started > ms) {
         clearInterval(t)
-        reject(new Error('이벤트 대기 타임아웃'))
+        reject(new Error('event wait timeout'))
       }
     }, 200)
   })
@@ -110,19 +110,19 @@ const session = await c1.call('agents.createSession', {
   initialPrompt: 'Remember this codeword: PLUM. Reply with only: OK',
 })
 await waitFor(c1.events, (e) => e.type === 'turn_complete')
-log('1차 응답:', JSON.stringify(textOf(c1.events).trim().slice(0, 60)))
+log('first response:', JSON.stringify(textOf(c1.events).trim().slice(0, 60)))
 
 // The SDK tells us the session id only in the first init event — it may not exist yet at the moment
 // of the create response. What matters is that it is guaranteed to be saved once the first turn
 // ends (otherwise resuming is impossible).
 const afterFirstTurn = (await c1.call('sessions.list', {})).find((s) => s.id === session.id)
-check(!!afterFirstTurn?.externalId, '첫 턴 후 재개 식별자가 저장된다', afterFirstTurn?.externalId ?? '없음')
+check(!!afterFirstTurn?.externalId, 'the resume identifier is saved after the first turn', afterFirstTurn?.externalId ?? 'none')
 
 // ── Shut down the host (simulating the user quitting and reopening the app) ─────────────────────────
 c1.ws.close()
 first.host.kill('SIGTERM')
 await new Promise((r) => first.host.once('exit', r))
-log('host 종료됨 — 프로세스는 사라지고 기록만 남았다')
+log('host shut down — the process is gone, only the record remains')
 
 // ── Second host run: start again against the same store and resume ─────────────────
 const second = await startHost()
@@ -131,26 +131,26 @@ await c2.ready
 
 const restored = await c2.call('sessions.list', {})
 const target = restored.find((s) => s.id === session.id)
-check(!!target, '재시작 후에도 세션이 목록에 남는다')
-check(target?.live === false, '프로세스가 없으므로 live=false로 표시된다', `live=${target?.live}`)
+check(!!target, 'the session remains in the list even after a restart')
+check(target?.live === false, 'shown as live=false since there is no process', `live=${target?.live}`)
 
 // S6 first: does an unresumable situation avoid dying silently
 const broken = await c2.call('agents.resumeSession', { sessionId: 'no-such-session' }).catch((e) => e)
-check(broken instanceof Error, 'S6 없는 세션 재개는 오류로 알린다', broken?.message?.slice(0, 40))
+check(broken instanceof Error, 'S6 resuming a nonexistent session reports an error', broken?.message?.slice(0, 40))
 
 // S5: the actual resume
 const res = await c2.call('agents.resumeSession', { sessionId: session.id })
-check(res.resumed === true, 'S5 재개 성공', res.reason ?? '')
+check(res.resumed === true, 'S5 resume succeeded', res.reason ?? '')
 
 if (res.resumed) {
   await c2.call('agents.send', { sessionId: session.id, text: 'What was the codeword? Reply with only that word.' })
   await waitFor(c2.events, (e) => e.type === 'turn_complete')
   const answer = textOf(c2.events).trim()
-  log('2차 응답:', JSON.stringify(answer.slice(0, 60)))
-  check(/PLUM/i.test(answer), 'S5 재개된 세션이 이전 맥락을 기억한다', answer.slice(0, 40))
+  log('second response:', JSON.stringify(answer.slice(0, 60)))
+  check(/PLUM/i.test(answer), 'S5 resumed session remembers earlier context', answer.slice(0, 40))
 }
 
 c2.ws.close()
 second.host.kill('SIGTERM')
-log(failures === 0 ? '전부 통과' : `${failures}건 실패`)
+log(failures === 0 ? 'all passed' : `${failures} failed`)
 process.exit(failures === 0 ? 0 : 1)

@@ -16,12 +16,12 @@ ensureToolPath()
 const show = (name: string, s: UsageSnapshot) => {
   console.log(`\n[${name}] plan=${s.plan ?? '?'}`)
   for (const w of s.windows) {
-    const left = w.resetsAt ? `${Math.round((new Date(w.resetsAt).getTime() - Date.now()) / 3600_000)}시간 후` : '?'
-    console.log(`  ${w.label.padEnd(14)} ${String(w.percent).padStart(3)}%  초기화 ${left}${w.scope ? ` · ${w.scope}` : ''}`)
+    const left = w.resetsAt ? `${Math.round((new Date(w.resetsAt).getTime() - Date.now()) / 3600_000)} hours from now` : '?'
+    console.log(`  ${w.label.padEnd(14)} ${String(w.percent).padStart(3)}%  resets ${left}${w.scope ? ` · ${w.scope}` : ''}`)
   }
-  console.log(`  일별 ${s.daily.length}일치` + (s.daily.length ? ` (마지막 ${s.daily.at(-1)!.date}: ${s.daily.at(-1)!.tokens.toLocaleString()})` : ''))
+  console.log(`  daily ${s.daily.length} day(s)` + (s.daily.length ? ` (last ${s.daily.at(-1)!.date}: ${s.daily.at(-1)!.tokens.toLocaleString()})` : ''))
   const leaked = JSON.stringify(s).toLowerCase()
-  console.log('  크레딧 정보 안 섞였나:', !leaked.includes('credit') ? 'O' : 'X')
+  console.log('  no credit info leaked in:', !leaked.includes('credit') ? 'O' : 'X')
 }
 
 // claude can only be queried while a live session exists
@@ -32,7 +32,7 @@ await new Promise((r) => setTimeout(r, 7000))
 try {
   show('claude', await ca.listUsage())
 } catch (e) {
-  console.log('\n[claude] 실패:', (e as Error).message.slice(0, 120))
+  console.log('\n[claude] failed:', (e as Error).message.slice(0, 120))
 }
 await h.dispose().catch(() => {})
 rmSync(cwd, { recursive: true, force: true })
@@ -40,6 +40,6 @@ rmSync(cwd, { recursive: true, force: true })
 try {
   show('codex', await new CodexAdapter().listUsage())
 } catch (e) {
-  console.log('\n[codex] 실패:', (e as Error).message.slice(0, 120))
+  console.log('\n[codex] failed:', (e as Error).message.slice(0, 120))
 }
 process.exit(0)
