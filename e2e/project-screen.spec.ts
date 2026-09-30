@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { appPanelTests, dragPanel, newSession, panels, setup, sidebarDropTests } from './fixtures/project-screen.js'
+import { columnsThrough } from './fixtures/columns.js'
 
 /**
  * The project screen (#203): clicking a project's name shows everything the project has — its sessions and its
@@ -126,6 +127,26 @@ test('a session that finishes on the project screen gets no card — the person 
   await page.getByTestId(`project-hide-session:${a}`).click()
   await page.evaluate((id) => (window as any).__mock.emit({ type: 'turn_complete', sessionId: id }), a)
   await expect(page.getByTestId('notice')).toHaveCount(1)
+})
+
+/*
+ * The column count is decided in real pixels (grid/real-size.ts). Two panels stand one above the other at 1280×720 at
+ * the default text size and at the largest; a width measured at one size and multiplied by the other stood them
+ * side by side in between, and an app's view laid over its panel went there and back.
+ */
+test('changing the text size leaves the panels in the columns they stand in, never a count neither size lays out', async ({
+  page,
+}) => {
+  await setup(page, ['/tmp/alpha'])
+  const a = await newSession(page, 'alpha')
+  const b = await newSession(page, 'alpha')
+  await page.getByTestId('project-header-alpha').click()
+  expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
+
+  const counts = await columnsThrough(page, '[data-testid="project-grid"] > div', () =>
+    page.evaluate(() => (window as any).__store.getState().setTextScale(4)),
+  )
+  expect(counts).toEqual([1])
 })
 
 test('a project with nothing in it says so and offers a session', async ({ page }) => {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { columnsThrough } from './fixtures/columns.js'
 
 /**
  * The right-hand panel and the usage modal — "what does the screen show when several things are
@@ -1181,6 +1182,27 @@ test('the grid panel border and the sidebar marker spin at the same angle — ev
   expect(phases).toHaveLength(2)
   // The same angle. Within one frame (16.7ms), it looks the same to the eye
   expect(Math.abs(phases[0]! - phases[1]!)).toBeLessThan(17)
+})
+
+/*
+ * The grid counts its columns in real pixels (grid/real-size.ts). Three panels stand in two columns at 1280×720 at
+ * the default text size and at the largest; a width measured at one size and multiplied by the other stood them in
+ * three for a frame in between.
+ */
+test('changing the text size leaves the grid in the columns it stands in, never a count neither size lays out', async ({
+  page,
+}) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'first')
+  const b = await newSession(page, 'alpha', 'claude', 'second')
+  const c = await newSession(page, 'alpha', 'claude', 'third')
+  await openGrid(page, [a, b, c])
+  await expect(page.getByTestId(`grid-panel-${c}`)).toBeVisible()
+
+  const counts = await columnsThrough(page, '[data-testid="grid"] > div', () =>
+    page.evaluate(() => (window as never as { __store: any }).__store.getState().setTextScale(4)),
+  )
+  expect(counts).toEqual([2])
 })
 
 /*

@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { columnsFor, rowsFor, visiblePanels } from '@cc/core'
-import { useStore, useTextZoom } from '../../store/store.js'
+import { useStore } from '../../store/store.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { GRID_GAP, wholePixelTracks } from './tracks.js'
+import { useRealSize } from './real-size.js'
 
 /**
  * Grid — several sessions on one screen.
@@ -39,9 +40,12 @@ export function GridView() {
   const focusSession = useStore((s) => s.focusSession)
   const setGridPanels = useStore((s) => s.setGridPanels)
   const ref = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(1200)
-  /** Only a guard — it splits a row off a screen tall enough to make a panel absurd (MAX_PANEL_H) */
-  const [height, setHeight] = useState(800)
+  /*
+   * In real pixels, measured again whenever the size changes, since the column count derives from it
+   * (real-size.ts). The height is only a guard — it splits a row off a screen tall enough to make a
+   * panel absurd (MAX_PANEL_H)
+   */
+  const { width, height } = useRealSize(ref)
   /** Which side of which panel the pointer is on — the preview order derives from this */
   const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
   /** The panel currently being dragged. The original is dimmed to show "this is what is moving" */
@@ -99,37 +103,10 @@ export function GridView() {
     }
   }
 
-  // Since the column count derives from the screen size, remeasure whenever the size changes.
-  // Kept as two numbers rather than one object so an observer firing with an unchanged
-  // dimension does not re-render the whole grid
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ro = new ResizeObserver(([e]) => {
-      if (!e) return
-      setWidth(e.contentRect.width)
-      setHeight(e.contentRect.height)
-    })
-    ro.observe(el)
-    const box = el.getBoundingClientRect()
-    setWidth(box.width)
-    setHeight(box.height)
-    return () => ro.disconnect()
-  }, [])
-
   // Do not draw a deleted session even if it is still in the layout (leave the stored value as is)
   const known = new Set(Object.keys(sessions))
   const visible = visiblePanels(panels, known)
-  /*
-   * Convert to real pixels before passing this on. ResizeObserver's measurement is in zoom
-   * coordinates, so raising the text zoom measures the same window as narrower and shrinks the
-   * column count — a grid that was one row at zoom level 3 became two rows at level 4
-   * (dogfooding). A panel's minimum width (MIN_PANEL_W) follows the same rule as the sidebar and
-   * panel minimums: it is **fixed in real pixels**, because zoom is meant to enlarge the text,
-   * not narrow the panel.
-   */
-  const zoom = useTextZoom()
-  const cols = columnsFor(width * zoom, height * zoom, visible.length)
+  const cols = columnsFor(width, height, visible.length)
   const rows = rowsFor(visible.length, cols)
 
   /*

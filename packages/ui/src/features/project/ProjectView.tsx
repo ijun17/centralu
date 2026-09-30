@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { appPanelId, arrangePanels, columnsFor, parsePanelId, rowsFor, sessionPanelId, withHidden, withOrder } from '@cc/core'
-import { externalAppKey, useStore, useTextZoom } from '../../store/store.js'
+import { externalAppKey, useStore } from '../../store/store.js'
 import { useSessionsOf } from '../../store/selectors.js'
 import { useProjectApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
@@ -10,6 +10,7 @@ import { DragRegion } from '../../components/DragRegion.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { PANEL_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { GRID_GAP, wholePixelTracks } from '../grid/tracks.js'
+import { useRealSize } from '../grid/real-size.js'
 import { placeSlots, registerSlot } from '../pinned-app/slots.js'
 import { dragVerdict, droppedArrangement, droppedPanelId } from './drop.js'
 
@@ -51,8 +52,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const openNewSession = useStore((s) => s.openNewSession)
   const foldComposer = useStore((s) => s.foldComposer)
   const ref = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(1200)
-  const [height, setHeight] = useState(800)
+  // Real pixels, as in GridView: the text scale enlarges letters, not the minimum panel (real-size.ts)
+  const { width, height } = useRealSize(ref)
   /** Which side of which panel the pointer is on — the preview order derives from this (GridView, #53) */
   const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
@@ -117,21 +118,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
   // Leaving the screen lets the frames take the pointer again, whatever a drag left behind
   useEffect(() => () => placeSlots(projectId, null), [projectId])
 
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ro = new ResizeObserver(([e]) => {
-      if (!e) return
-      setWidth(e.contentRect.width)
-      setHeight(e.contentRect.height)
-    })
-    ro.observe(el)
-    const box = el.getBoundingClientRect()
-    setWidth(box.width)
-    setHeight(box.height)
-    return () => ro.disconnect()
-  }, [])
-
   /*
    * Every app panel shows the app's pinned view, so every app on the screen has one. Opening it is
    * the pinned view's own business (it calls `home` when the app can run), so an untrusted or
@@ -146,9 +132,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     for (const appId of appKeysKey ? appKeysKey.split('\n') : []) ensurePinned(projectId, appId)
   }, [appKeysKey, projectId, ensurePinned])
 
-  const zoom = useTextZoom()
-  // Real pixels, as in GridView: the text scale enlarges letters, not the minimum panel
-  const cols = columnsFor(width * zoom, height * zoom, visible.length)
+  const cols = columnsFor(width, height, visible.length)
   const rows = rowsFor(visible.length, cols)
   const preview = dragging && over ? reorderIds(visible, dragging, over.id, over.before) : null
   const order = preview ?? visible
