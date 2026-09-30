@@ -38,7 +38,7 @@ import {
   type ProjectArrangement,
   type SessionSummary,
 } from '@cc/core'
-import type { AppCreated, AppToolResult, ConnectionState, NewAppSpec, Platform } from '@cc/platform/ports'
+import type { AppCreated, AppToolResult, ConnectionState, NewAppSpec, Platform, WorkspaceSnapshot } from '@cc/platform/ports'
 import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
 
@@ -2152,6 +2152,87 @@ export function usageTools(s: AppState): ToolName[] {
  */
 let restoringWorkspace = false
 
+/**
+ * The latest workspace snapshot the host has not confirmed storing, and the one writer that sends it.
+ *
+ * A save used to be sent once and a failure swallowed (`.catch(() => {})`). On 2026-09-30 the machine
+ * froze for hours; the person folded every project during that time, every save timed out (an RPC gives
+ * up after 30 s), and after a restart the folds were gone because the stored snapshot never got them.
+ * Now a failed save stays pending and goes out again: when the connection comes back, and after a short
+ * backoff while connected.
+ *
+ * Only the **latest** snapshot is ever sent, and only one save is in flight at a time. A newer save
+ * replaces the pending one instead of queueing behind it, so a retry can never write an older
+ * arrangement over a newer one, and while a save is in flight the next one waits for it rather than
+ * racing it.
+ */
+const workspaceSave = {
+  pending: null as WorkspaceSnapshot | null,
+  inFlight: false,
+  retryTimer: null as ReturnType<typeof setTimeout> | null,
+  /** Which step of `WORKSPACE_RETRY_MS` the next retry waits for. Reset by a stored save or a reconnect */
+  attempt: 0,
+  /** Bumped by a reset, so a save still settling from before it cannot touch the state after it */
+  epoch: 0,
+}
+
+/**
+ * The waits before retrying a failed save while connected. Past the last step it stops, and the
+ * pending snapshot waits for the next reconnect or the next save: a host that fails every save is
+ * not helped by being asked every 30 s forever.
+ */
+const WORKSPACE_RETRY_MS = [1_000, 5_000, 30_000] as const
+
+function clearWorkspaceRetry(): void {
+  if (workspaceSave.retryTimer) clearTimeout(workspaceSave.retryTimer)
+  workspaceSave.retryTimer = null
+}
+
+/** Forgets any pending save. A new platform starts from its own stored snapshot, not the last one's leftovers */
+function resetWorkspaceSave(): void {
+  clearWorkspaceRetry()
+  workspaceSave.pending = null
+  workspaceSave.inFlight = false
+  workspaceSave.attempt = 0
+  workspaceSave.epoch++
+}
+
+/** Sends the pending snapshot unless one is already on its way (that one sends the newer when it settles) */
+function flushWorkspace(get: () => AppState): void {
+  if (restoringWorkspace || workspaceSave.inFlight) return
+  const platform = get().platform
+  const snap = workspaceSave.pending
+  if (!platform || !snap) return
+  clearWorkspaceRetry()
+  workspaceSave.inFlight = true
+  const epoch = workspaceSave.epoch
+  platform.workspace.save(snap).then(
+    () => {
+      if (workspaceSave.epoch !== epoch) return // attach started over; this save belongs to before it
+      workspaceSave.inFlight = false
+      if (workspaceSave.pending === snap) {
+        workspaceSave.pending = null
+        workspaceSave.attempt = 0
+      } else flushWorkspace(get) // A newer save came in meanwhile
+    },
+    () => {
+      if (workspaceSave.epoch !== epoch) return
+      workspaceSave.inFlight = false
+      // A newer save came in meanwhile: it supersedes this one and goes now
+      if (workspaceSave.pending !== snap) return flushWorkspace(get)
+      // Disconnected: the reconnect sends it. Out of steps: the next reconnect or save does
+      if (get().connection !== 'connected') return
+      const wait = WORKSPACE_RETRY_MS[workspaceSave.attempt]
+      if (wait === undefined) return
+      workspaceSave.attempt++
+      workspaceSave.retryTimer = setTimeout(() => {
+        workspaceSave.retryTimer = null
+        flushWorkspace(get)
+      }, wait)
+    },
+  )
+}
+
 export const useStore = create<AppState>((set, get) => ({
   platform: null,
   connection: 'connecting',
@@ -2246,6 +2327,7 @@ export const useStore = create<AppState>((set, get) => ({
      * time lands in the same state (idempotent).
      */
     detachAll()
+    resetWorkspaceSave()
     set({ platform })
     subscriptions.push(
       platform.agents.subscribe((e) => get().dispatchEvent(e)),
@@ -2268,7 +2350,12 @@ export const useStore = create<AppState>((set, get) => ({
         }
         set({ connection })
         // Disconnected and came back — revive sessions that were running
-        if (connection === 'connected' && was !== 'connected') void get().recoverAfterReconnect()
+        if (connection === 'connected' && was !== 'connected') {
+          // A save that failed while the host was away goes out now, with a fresh set of retries
+          workspaceSave.attempt = 0
+          flushWorkspace(get)
+          void get().recoverAfterReconnect()
+        }
       }),
       /*
        * A command run's outcome (#60) — `runId` rides in the `terminalId` slot. A shell terminal's
@@ -2555,37 +2642,40 @@ export const useStore = create<AppState>((set, get) => ({
    * actually happened, when `setNotifyPolicy` saved separately with its own list, and the notify
    * policy and history height were quietly reset by the other save. A new field has to be
    * added **to this function**.
+   *
+   * The snapshot is not sent from here directly: it becomes the pending one and `flushWorkspace` sends
+   * it, so a save that fails is sent again rather than dropped (see `workspaceSave`).
    */
   saveWorkspace() {
     // Nothing is saved while the snapshot is being restored: see `restoringWorkspace`
     if (restoringWorkspace) return
     const s = get()
-    void s.platform?.workspace
-      .save({
-        focusedSessionId: s.focusedSessionId,
-        view: s.view,
-        focusedApp: s.focusedApp,
-        panelOpen: s.panelOpen,
-        // The single-tab field predates the arrangement (#20). It keeps carrying the
-        // top group's active tab so an older build reading this snapshot still lands
-        // on the tab that was showing.
-        panelTab: s.panelLayout[0]?.active,
-        panelLayout: s.panelLayout,
-        panelSplit: s.panelSplit,
-        panelWidth: s.panelWidth,
-        sidebarWidth: s.sidebarWidth,
-        foldedProjects: s.foldedProjects,
-        projectPanels: s.projectPanels,
-        railWidth: s.railWidth,
-        notifyPolicy: s.notifyPolicy,
-        showIgnored: s.showIgnored,
-        textScale: s.textScale,
-        foldComposer: s.foldComposer,
-        spinGrid: s.spinGrid,
-        spinSessionIcon: s.spinSessionIcon,
-        introSeen: s.introSeen,
-      } as never)
-      .catch(() => {})
+    if (!s.platform) return
+    workspaceSave.pending = {
+      focusedSessionId: s.focusedSessionId,
+      view: s.view,
+      focusedApp: s.focusedApp,
+      panelOpen: s.panelOpen,
+      // The single-tab field predates the arrangement (#20). It keeps carrying the
+      // top group's active tab so an older build reading this snapshot still lands
+      // on the tab that was showing.
+      panelTab: s.panelLayout[0]?.active,
+      panelLayout: s.panelLayout,
+      panelSplit: s.panelSplit,
+      panelWidth: s.panelWidth,
+      sidebarWidth: s.sidebarWidth,
+      foldedProjects: s.foldedProjects,
+      projectPanels: s.projectPanels,
+      railWidth: s.railWidth,
+      notifyPolicy: s.notifyPolicy,
+      showIgnored: s.showIgnored,
+      textScale: s.textScale,
+      foldComposer: s.foldComposer,
+      spinGrid: s.spinGrid,
+      spinSessionIcon: s.spinSessionIcon,
+      introSeen: s.introSeen,
+    } as never
+    flushWorkspace(get)
   },
 
   setBuilderPane(sessionId) {

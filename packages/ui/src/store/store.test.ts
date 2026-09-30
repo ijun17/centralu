@@ -3247,3 +3247,139 @@ describe('restoring the workspace saves nothing until it is done', () => {
     expect(mock.workspaceSnapshot).toMatchObject({ spinGrid: true, spinSessionIcon: false })
   })
 })
+
+/*
+ * A failed save is retried, not dropped (`workspaceSave` in store.ts). On 2026-09-30 the machine froze for hours,
+ * the person folded every project during that time, every save timed out, and after a restart the folds were gone:
+ * the stored snapshot never received them.
+ */
+describe('a workspace save that fails is sent again', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const storedFolds = (mock: MockPlatform) =>
+    (mock.workspaceSnapshot as { foldedProjects?: string[] } | null)?.foldedProjects
+  const timedOut = () => Object.assign(new Error('RPC timed out: workspace.save'), { code: 'timeout', retryable: true })
+
+  /** Makes `workspace.save` fail `times` times, then store as usual. Returns the fold list of every save that was stored */
+  function failSaves(mock: MockPlatform, times: number): { written: string[][]; calls: () => number } {
+    const save = mock.workspace.save
+    const written: string[][] = []
+    let calls = 0
+    mock.workspace.save = async (snap) => {
+      calls++
+      if (calls <= times) throw timedOut()
+      written.push([...((snap as { foldedProjects?: string[] }).foldedProjects ?? [])])
+      return save(snap)
+    }
+    return { written, calls: () => calls }
+  }
+
+  async function attached(): Promise<MockPlatform> {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    await tick()
+    return mock
+  }
+
+  it('a fold saved while the host is away is stored when the connection comes back', async () => {
+    const mock = await attached()
+    failSaves(mock, 1)
+
+    mock.setConnectionState('disconnected')
+    useStore.getState().toggleProjectFold('retry-p1')
+    await tick()
+    expect(storedFolds(mock) ?? []).toEqual([])
+
+    mock.setConnectionState('connected')
+    await tick()
+    expect(storedFolds(mock)).toEqual(['retry-p1'])
+  })
+
+  it('a save that fails while connected is retried after a short wait', async () => {
+    const mock = await attached()
+    failSaves(mock, 1)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      useStore.getState().toggleProjectFold('retry-p2')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(storedFolds(mock) ?? []).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(storedFolds(mock)).toEqual(['retry-p2'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a newer save made while an older one is failing is the one stored, and the older never follows it', async () => {
+    const mock = await attached()
+    const save = mock.workspace.save
+    const written: string[][] = []
+    let failFirst!: () => void
+    let calls = 0
+    mock.workspace.save = (snap) => {
+      // The first save hangs the way a frozen host does, and then times out
+      if (++calls === 1) return new Promise((_, reject) => (failFirst = () => reject(timedOut())))
+      written.push([...((snap as { foldedProjects?: string[] }).foldedProjects ?? [])])
+      return save(snap)
+    }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      useStore.getState().toggleProjectFold('retry-a') // on its way, and stuck
+      useStore.getState().toggleProjectFold('retry-b') // newer: supersedes it
+      failFirst()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(storedFolds(mock)).toEqual(['retry-a', 'retry-b'])
+
+      // Nothing older arrives later — not from a backoff, not from a reconnect
+      await vi.advanceTimersByTimeAsync(60_000)
+      mock.setConnectionState('disconnected')
+      mock.setConnectionState('connected')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(written).toEqual([['retry-a', 'retry-b']])
+      expect(storedFolds(mock)).toEqual(['retry-a', 'retry-b'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a retry waiting on its backoff never sends its older snapshot over a newer one', async () => {
+    const mock = await attached()
+    const { written } = failSaves(mock, 1)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      useStore.getState().toggleProjectFold('retry-c') // fails; a retry is armed
+      await vi.advanceTimersByTimeAsync(0)
+      useStore.getState().toggleProjectFold('retry-d') // newer, and stored at once
+      await vi.advanceTimersByTimeAsync(0)
+      expect(storedFolds(mock)).toEqual(['retry-c', 'retry-d'])
+
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(written).toEqual([['retry-c', 'retry-d']])
+      expect(storedFolds(mock)).toEqual(['retry-c', 'retry-d'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('while connected it stops after a few retries, and the next save or reconnect sends it again', async () => {
+    const mock = await attached()
+    const { calls } = failSaves(mock, Infinity)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      useStore.getState().toggleProjectFold('retry-e')
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(calls()).toBe(4) // the save, then 1 s, 5 s and 30 s later
+
+      useStore.getState().toggleProjectFold('retry-f')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(calls()).toBe(5)
+
+      mock.setConnectionState('disconnected')
+      mock.setConnectionState('connected')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(calls()).toBe(6)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
