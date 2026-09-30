@@ -317,6 +317,83 @@ describe('the parent body\'s duplicate-prevention flag belongs to the parent (#9
   })
 })
 
+/*
+ * Replayed from rows the store held twice (found 2026-09-30). Five assistant text rows read X+X, written on
+ * 2026-09-16 and 2026-09-25 by hosts built before the fix above. The order and the message shapes come from the
+ * parent's and the agents' transcripts at those times. The text is replaced, except the CLI's own limit notice.
+ */
+describe('replayed from the replies stored twice (#98)', () => {
+  it('a background agent thinking while the parent streams its answer does not make the parent say it again', async () => {
+    // 2026-09-25 13:35:01: the parent thought, streamed a paragraph, and called Bash; an agent's thinking-only
+    // message arrived 0.25s before the parent's own body (the same on 2026-09-16 16:22:35, 0.4s before)
+    const events = await run([
+      ...backgroundRun.slice(0, 4), // init, the Agent call, task_started, the launch result
+      result,
+      { type: 'system', subtype: 'init', session_id: 'ext-1' },
+      delta('The screen groundwork is done too (five commits). '),
+      delta('It was built on main from before the runtime merged, so first, how large the conflict is.'),
+      sub([{ type: 'thinking', thinking: '' }]),
+      parentText(
+        'The screen groundwork is done too (five commits). It was built on main from before the runtime merged, so first, how large the conflict is.',
+      ),
+      {
+        type: 'assistant',
+        parent_tool_use_id: null,
+        message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_parentGitStatus', name: 'Bash', input: { command: 'git status --short' } }] },
+      },
+    ])
+    expect(texts(events)).toBe(
+      'The screen groundwork is done too (five commits). It was built on main from before the runtime merged, so first, how large the conflict is.',
+    )
+  })
+
+  /*
+   * 2026-09-25 19:44:50, 19:45:04 and 19:45:46: three background agents hit the session limit one after another.
+   * Each agent's turn ended in the CLI's own notice (a synthetic assistant message, `error: 'rate_limit'`, no
+   * deltas). Its task notification then woke the parent, and the parent's turn hit the same limit and got the
+   * same notice. Both went out whole into one open row, once per agent.
+   */
+  it('the parent says the session limit once when its background agent hit it first', async () => {
+    const LIMIT = "You've hit your session limit · resets 7:50pm"
+    const notice = (parent: string | null) => ({
+      type: 'assistant',
+      parent_tool_use_id: parent,
+      error: 'rate_limit',
+      message: {
+        model: '<synthetic>',
+        role: 'assistant',
+        type: 'message',
+        stop_reason: 'stop_sequence',
+        stop_sequence: '',
+        content: [{ type: 'text', text: LIMIT }],
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+    })
+    const events = await run([
+      ...backgroundRun.slice(0, 4), // init, the Agent call, task_started, the launch result
+      result,
+      notice(AGENT),
+      {
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'a19ec1fdf94e35cfc',
+        tool_use_id: AGENT,
+        status: 'failed',
+        output_file: '/private/tmp/claude-501/x/tasks/a19ec1fdf94e35cfc.output',
+        summary: `Agent "Research the build" failed: Agent terminated early due to an API error: ${LIMIT} (error type rate_limit, HTTP 429)`,
+        usage: { total_tokens: 91_204, tool_uses: 57, duration_ms: 1_734_000 },
+      },
+      { type: 'system', subtype: 'init', session_id: 'ext-1' },
+      notice(null),
+      { type: 'result', subtype: 'success', is_error: true, result: LIMIT, modelUsage: {} },
+    ])
+    expect(texts(events)).toBe(LIMIT)
+    // The agent's card closes as failed, and the parent's turn ends on the limit
+    expect(events.filter((e) => e.type === 'tool_result' && e.callId === AGENT)).toMatchObject([{ ok: false }])
+    expect(events.filter((e) => e.type === 'error')).toMatchObject([{ error: { message: LIMIT } }])
+  })
+})
+
 describe('a foreground agent\'s result (#98)', () => {
   /*
    * In the foreground case, the Agent call's tool_result is itself the completion. Its body
