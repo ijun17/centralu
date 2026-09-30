@@ -198,7 +198,7 @@ export async function startPublicAppsHost(
         .reverse()
         .slice(0, limit)
         .map((r) => ({ ...r, tokens: null, failure: null })),
-    // 이 시험의 앱은 에이전트를 부탁하지 않는다
+    // The apps in this test never ask the agent for anything
     agentUse: () => ({ runs: 0, durationMs: 0, tokens: null }),
     prune: () => 0,
     settleUnfinished: () => 0,

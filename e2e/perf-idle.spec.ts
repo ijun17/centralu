@@ -2,22 +2,23 @@ import { execSync } from 'node:child_process'
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * 상시 렌더 부하 실측 (도그푸딩: "배터리가 쭉쭉 단다").
+ * Measured steady-state render load (dogfooding finding: "the battery drains fast").
  *
- * 스트리밍이 아니라 **아무것도 안 할 때**를 잰다. 응답이 흐르는 동안 비싼 것은
- * 일이 비싼 것이지만, 가만히 있는데 비싸면 그건 전부 낭비다 — 노트북에서는
- * 그 낭비가 배터리로 청구된다.
+ * This measures not streaming but **doing nothing at all**. Cost while a response is streaming is
+ * the cost of real work, but cost while sitting idle is pure waste — and on a laptop that waste
+ * gets billed to the battery.
  *
- * 세 개를 함께 본다:
- *  - React 커밋 수: 상태가 조용한데 커밋이 돈다면 어딘가 타이머가 있다
- *  - 구동 중 애니메이션 수: CSS 무한 애니메이션은 커밋 없이도 화면을 계속 그린다
- *  - 브라우저 프로세스 CPU 합: 위 둘이 실제로 얼마를 청구하는가 (top 실측)
+ * Three things are watched together:
+ *  - React commit count: if commits keep running while state is quiet, a timer is hiding somewhere
+ *  - Running animation count: an infinite CSS animation keeps repainting the screen with no commit at all
+ *  - Total browser-process CPU: what the two above actually cost in practice (measured with top)
  *
- * WebKit으로 잰다 — 실물은 WKWebView다. 특히 cc-orbit은 등록된 CSS 변수로
- * conic-gradient 각도를 돌리는데, 이는 컴포지터로 못 빠지고 매 프레임 메인
- * 스레드 리페인트를 일으킨다는 혐의가 있다. 여기 숫자가 그 판결문이다.
+ * Measured on WebKit — the real app is WKWebView. In particular, cc-orbit rotates a
+ * conic-gradient angle through a registered CSS variable, and this is suspected of being unable
+ * to offload to the compositor, forcing a main-thread repaint every frame. The numbers here are
+ * the verdict on that suspicion.
  *
- * 문턱은 세우지 않는다 (perf-grid와 같은 이유) — 여기서 나오는 건 **숫자**다.
+ * No threshold is set (same reason as perf-grid) — what comes out of this is **a number**.
  *   pnpm perf
  */
 
@@ -25,10 +26,10 @@ test.use({ browserName: 'webkit' })
 test.describe.configure({ mode: 'serial' })
 
 test.beforeEach(() => {
-  test.skip(!process.env.PERF, 'PERF=1 일 때만 — `pnpm perf`')
+  test.skip(!process.env.PERF, 'Only when PERF=1 — `pnpm perf`')
 })
 
-/** ms-playwright의 WebKit 프로세스 일체 (UIProcess·WebContent·GPU·Networking) */
+/** Every WebKit process under ms-playwright (UIProcess, WebContent, GPU, Networking) */
 function webkitPids(): number[] {
   const out = execSync('ps -Ao pid,command').toString()
   return out
@@ -39,14 +40,15 @@ function webkitPids(): number[] {
 }
 
 /**
- * top으로 구간 CPU를 잰다. 첫 샘플은 부팅 이후 누적이라 버린다.
- * ps의 %cpu는 감쇠 평균이라 시나리오 전환을 못 따라간다 — top의 구간 값을 쓴다.
+ * Measures interval CPU with top. The first sample is dropped, since it is a cumulative figure
+ * since boot. ps's %cpu is a decaying average and cannot keep up with scenario changes, so top's
+ * interval value is used instead.
  */
 function cpuOver(seconds: number, pids: number[]): number {
   const out = execSync(`top -l ${seconds + 1} -s 1 -stats pid,cpu,command`, {
     maxBuffer: 32 * 1024 * 1024,
   }).toString()
-  const blocks = out.split(/Processes:/).slice(2) // 첫 블록(누적)을 버린다
+  const blocks = out.split(/Processes:/).slice(2) // drops the first block (cumulative)
   const wanted = new Set(pids)
   let total = 0
   for (const block of blocks) {
@@ -60,13 +62,13 @@ function cpuOver(seconds: number, pids: number[]): number {
 
 type Sample = { commits: number; perSec: number; animations: number; cpu: number }
 
-/** 구간 동안 커밋을 세고, 같은 구간의 CPU를 밖에서 잰다 */
+/** Counts commits over the interval, and measures CPU for that same interval from outside */
 async function measure(page: Page, seconds: number): Promise<Sample> {
   const pids = webkitPids()
   await page.evaluate(() => {
     ;(window as never as { __commits: number }).__commits = 0
   })
-  // CPU 측정(동기)이 도는 동안 페이지는 제 할 일을 한다
+  // While the (synchronous) CPU measurement runs, the page keeps doing whatever it does
   const cpu = cpuOver(seconds, pids)
   const { commits, animations } = await page.evaluate(() => ({
     commits: (window as never as { __commits: number }).__commits,
@@ -81,7 +83,7 @@ const show = (label: string, s: Sample) =>
   )
 
 async function boot(page: Page, count: number): Promise<string[]> {
-  // React보다 먼저 갈고리를 걸어야 커밋이 보인다
+  // The hook has to attach before React does, or commits go unseen
   await page.addInitScript(() => {
     const w = window as never as { __commits: number; __REACT_DEVTOOLS_GLOBAL_HOOK__: unknown }
     w.__commits = 0
@@ -114,7 +116,8 @@ async function boot(page: Page, count: number): Promise<string[]> {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
   })
   await page.getByTestId('orchestrator-pick-folder').click()
-  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+  // Registering a project the first time leads straight into creating a session — this test
+  // only needs the project, so close it
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('project-alpha')).toBeVisible()
@@ -125,7 +128,7 @@ async function boot(page: Page, count: number): Promise<string[]> {
     await page.getByTestId('new-session-alpha').click()
     await page.getByTestId('create-session-confirm').click()
     await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-    // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+    // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
     await page.getByTestId('prompt-input').fill(`session ${i}`)
     await page.getByTestId('prompt-input').press('Enter')
     ids.push(await page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId))
@@ -133,7 +136,7 @@ async function boot(page: Page, count: number): Promise<string[]> {
   return ids
 }
 
-/** 상태 전환은 실제 경로(이벤트)로 — 화면이 실제로 겪는 것과 같은 흐름이다 */
+/** State changes go through the real path (events) — the same flow the app actually goes through */
 async function setStates(page: Page, ids: string[], state: 'idle' | 'working') {
   await page.evaluate(
     ({ list, s }: { list: string[]; s: string }) => {
@@ -144,31 +147,31 @@ async function setStates(page: Page, ids: string[], state: 'idle' | 'working') {
   )
 }
 
-test('가만히 있을 때 화면은 얼마를 쓰는가', async ({ page }) => {
+test('how much does the app spend while sitting idle', async ({ page }) => {
   test.setTimeout(120000)
   const ids = await boot(page, 4)
 
-  // 만들자마자 working이 된다(초기 프롬프트) — 조용한 기준선부터
+  // Sessions become working the moment they are created (the initial prompt) — start from a quiet baseline
   await setStates(page, ids, 'idle')
   await page.waitForTimeout(500)
-  show('포커스 뷰 · 4개 전부 쉼', await measure(page, 8))
+  show('Focus view · all 4 idle', await measure(page, 8))
 
   await setStates(page, ids, 'working')
   await page.waitForTimeout(500)
-  show('포커스 뷰 · 4개 전부 작업 중', await measure(page, 8))
+  show('Focus view · all 4 working', await measure(page, 8))
 
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[3]}`)).toBeVisible()
   await page.waitForTimeout(500)
-  show('그리드 4칸 · 4개 전부 작업 중', await measure(page, 8))
+  show('Grid, 4 panels · all 4 working', await measure(page, 8))
 
-  // 애니메이션만 끄면 얼마가 남는가 — 남는 것이 타이머·리렌더의 몫이다
+  // What remains once only animations are turned off — the remainder is what timers and re-renders account for
   await page.addStyleTag({ content: '*, *::before, *::after { animation: none !important }' })
   await page.waitForTimeout(500)
-  show('그리드 4칸 · 작업 중 · 애니메이션 끔', await measure(page, 8))
+  show('Grid, 4 panels · working · animations off', await measure(page, 8))
 
   await setStates(page, ids, 'idle')
   await page.waitForTimeout(500)
-  show('그리드 4칸 · 4개 전부 쉼', await measure(page, 8))
+  show('Grid, 4 panels · all 4 idle', await measure(page, 8))
 })

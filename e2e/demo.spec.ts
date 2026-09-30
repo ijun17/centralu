@@ -1,25 +1,26 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * 손으로 보는 화면 (`?demo`) — 사용자 요청 2026-09-10.
+ * The screen for looking at by hand (`?demo`) — user request, 2026-09-10.
  *
- * 이 씬은 UI를 고치는 사람이 **열자마자 볼 것이 있게** 하려고 깐다. 개발용이라 아무도
- * 안 보는 사이 조용히 썩기 쉬운 자리다 (목의 포트가 하나 바뀌면 씨앗이 그 자리에서 터진다).
- * 그래서 최소한 이것만은 지킨다: 열면 내용이 있고, 말을 걸면 답이 온다.
+ * This scene exists so that a person fixing the UI **has something to see the moment they open
+ * it**. Being dev-only, it is an easy spot to rot quietly while nobody is watching (one changed
+ * port on the mock and the seed breaks right there). So at minimum this much is guaranteed:
+ * opening it shows content, and sending a message gets a reply.
  */
-test('?demo — 열자마자 볼 것이 있다', async ({ page }) => {
+test('?demo has something to see the moment it opens', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.goto('/?demo')
 
-  // 프로젝트와 세션이 이미 서 있다 — 소개 화면이 아니라 일하던 화면이다
+  // A project and a session already exist — this is a screen mid-work, not an intro screen
   await expect(page.getByTestId('project-centralu')).toBeVisible()
   await expect(page.getByTestId('project-landing-site')).toBeVisible()
   await expect(page.getByTestId('session-name')).toBeVisible()
-  // 지난 대화도 있다 (툴 카드까지)
+  // A past conversation exists too (including a tool card)
   await expect(page.getByTestId('chat-stream')).toContainText('무지개 링')
   await expect(page.getByTestId('tool-card').first()).toBeVisible()
-  // 계기판의 도넛과 증거 패널의 깃 변경도 채워져 있다
+  // The dashboard's donut and the evidence panel's git changes are also filled in
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
   await expect(
     page.getByTestId('evidence-file-packages/ui/src/features/session/SessionView.tsx'),
@@ -28,26 +29,26 @@ test('?demo — 열자마자 볼 것이 있다', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
-test('?demo — 말을 걸면 답이 온다', async ({ page }) => {
+test('?demo replies when sent a message', async ({ page }) => {
   await page.goto('/?demo')
   await page.getByTestId('prompt-input').fill('답 오나 보자')
   await page.getByTestId('prompt-input').press('Enter')
 
-  // 각본: 도구 하나 → 답 몇 조각 → 끝. 끝나면 '입력 대기'로 선다
+  // Script: one tool call, a few reply chunks, then done. Once done, it settles into 'awaiting input'.
   await expect(page.getByTestId('chat-stream')).toContainText('답 오나 보자', { timeout: 10_000 })
   await expect(page.getByTestId('chat-stream')).toContainText('데모 목이라', { timeout: 10_000 })
 })
 
-test('?demo=grid — 그리드로 뜨고 칸이 넷이다', async ({ page }) => {
+test('?demo=grid comes up as a grid with four panels', async ({ page }) => {
   await page.goto('/?demo=grid')
   await expect(page.getByTestId('grid')).toBeVisible()
   await expect(page.locator('[data-testid^="grid-panel-"]')).toHaveCount(4)
-  // 응답 중인 칸이 하나 — 무지개 링이 도는 자리다
+  // One panel is mid-response — where the rainbow ring spins
   await expect(page.locator('.cc-orbit-ring-layer')).toHaveCount(1)
 })
 
-/** `?mock=1`은 지금까지 그대로다 — E2E가 쓰는 문이라 씬이 새어 들어오면 안 된다 */
-test('?mock=1은 비어 있다 — 씬은 demo에만 있다', async ({ page }) => {
+/** `?mock=1` stays as it was — it is the door e2e uses, and the demo scene must not leak into it */
+test('?mock=1 is empty — the scene lives only under demo', async ({ page }) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
 })

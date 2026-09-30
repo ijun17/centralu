@@ -23,7 +23,8 @@ async function setup(page: Page) {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
   })
   await page.getByTestId('orchestrator-pick-folder').click()
-  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+  // Registering a project the first time leads straight into creating a session — this test
+  // only needs the project, so close it
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('project-alpha')).toBeVisible()
@@ -35,7 +36,7 @@ async function newSession(page: Page, prompt: string) {
   await page.getByTestId('tool-option-claude').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
 }

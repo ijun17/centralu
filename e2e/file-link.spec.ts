@@ -18,7 +18,8 @@ async function setup(page: Page, path = '/tmp/alpha') {
     ;(window as any).__mock.nextPickedDirectory = p
   }, path)
   await page.getByTestId('orchestrator-pick-folder').click()
-  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+  // Registering a project the first time leads straight into creating a session — this test
+  // only needs the project, so close it
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
@@ -36,7 +37,7 @@ async function newSession(page: Page, projectName: string, prompt: string) {
   await page.getByTestId(`new-session-${projectName}`).click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
 }
@@ -180,15 +181,16 @@ test('a path that is not there says so, in the viewer and on top of it', async (
 })
 
 /**
- * 에이전트가 적는 경로는 자기가 보던 자리 기준일 때가 많다 (사용자 지적 2026-09-07).
- * 루트에 없다고 죽은 링크로 두지 않고, 프로젝트 안에서 그 꼬리를 가진 파일을 찾아 연다.
+ * The path an agent writes is often relative to wherever it happened to be looking (user
+ * finding, 2026-09-07). Rather than leaving a dead link because it is not at the root, the
+ * project is searched for a file with that tail and that file is opened instead.
  */
 test('a path written from a subdirectory still opens (#39)', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'work')
   await page.evaluate(() => {
     const m = (window as any).__mock
-    // 루트 기준으로는 없는 파일 — 진짜는 한 단 아래에 있다
+    // A file that does not exist relative to the root — the real one is one level down
     m.fs.readFile = async (_p: string, path: string) => {
       if (path !== 'Cli/Media/ImageSearch.cs') throw new Error('ENOENT: no such file or directory')
       return { text: 'found me', truncated: false, binary: false, bytes: 8 }
@@ -198,13 +200,15 @@ test('a path written from a subdirectory still opens (#39)', async ({ page }) =>
   await agentSays(page, 'Look at `Media/ImageSearch.cs:2`.')
 
   await page.getByTestId('file-link').click()
-  // 화면이 말하는 경로는 **진짜 있는 자리**다 — IDE로 여는 것도 이 경로다
+  // The path the viewer reports is **where the file actually lives** — opening in the IDE
+  // uses this same path
   await expect(page.getByTestId('viewer-path')).toHaveText('Cli/Media/ImageSearch.cs')
   await expect(page.getByTestId('viewer-error')).toBeHidden()
 })
 
 /**
- * 꼬리가 같은 파일이 여럿이면 하나를 골라 주지 않는다 — 그건 사실인 척하는 추측이다.
+ * When several files share the same tail, none is picked automatically — that would be a
+ * guess dressed up as a fact.
  */
 test('when several files share the tail the viewer asks which one', async ({ page }) => {
   await setup(page)
@@ -242,7 +246,7 @@ test('a markdown link to a project file opens the viewer', async ({ page }) => {
   await newSession(page, 'alpha', 'work')
   await agentSays(page, 'I changed [the manager](src/a.ts) and left [the docs](https://example.com) alone.')
 
-  // 파일이 아닌 진짜 웹 링크는 그대로 앵커다
+  // A real web link that is not a file stays a plain anchor
   await expect(page.getByTestId('markdown').locator('a')).toHaveText('the docs')
   const link = page.getByTestId('file-link')
   await expect(link).toHaveText('the manager')
@@ -250,7 +254,7 @@ test('a markdown link to a project file opens the viewer', async ({ page }) => {
   await expect(page.getByTestId('viewer-path')).toHaveText('src/a.ts')
 })
 
-/** 우클릭은 Finder다 — 뷰어가 아니라 실물 파일이 필요할 때의 문 */
+/** Right-click means Finder — the door for when the actual file is needed, not the viewer */
 test('right-clicking a file link reveals it in Finder', async ({ page }) => {
   await setup(page)
   await seedFiles(page, { 'src/a.ts': 'first line' })
@@ -258,7 +262,7 @@ test('right-clicking a file link reveals it in Finder', async ({ page }) => {
   await agentSays(page, 'See `src/a.ts`.')
 
   await page.getByTestId('file-link').click({ button: 'right' })
-  // 뷰어는 열리지 않고 (우클릭은 열기가 아니다), reveal 포트로 그 경로가 간다
+  // The viewer does not open (right-click is not opening it), and the path goes to the reveal port
   await expect(page.getByTestId('overlay')).toHaveCount(0)
   expect(await page.evaluate(() => (window as any).__mock.revealed)).toEqual(['src/a.ts'])
 })
@@ -294,7 +298,7 @@ test('the same path links in a project session and stays text in the orchestrato
   await expect(page.getByTestId('file-link')).toHaveText('src/a.ts')
 
   await page.getByTestId('orchestrator-button').click()
-  // 세션은 첫 마디에서 태어난다 (#63)
+  // A session is born on its first message (#63)
   await page.getByTestId('orchestrator-input').fill('hello')
   await page.getByTestId('orchestrator-input').press('Enter')
   await expect(page.getByTestId('session-view')).toBeVisible()

@@ -1,24 +1,27 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * 그리드 성능 실측 (계획 7단계).
+ * Measured grid performance (plan step 7).
  *
- * 사양서 §5.4: "포커스 뷰 구조는 성능에도 유리 — 화면에 세션 하나만 렌더링하면 되므로
- * 그리드 대비 상시 렌더 부하가 낮다." 그 말이 맞는지, 맞다면 얼마나인지 잰다.
+ * Spec §5.4: "The focus-view structure also helps performance — rendering only one session on
+ * screen keeps the steady-state render load lower than a grid's." This measures whether that
+ * claim holds, and if so, by how much.
  *
- * 재는 것은 **프레임**이다. 총 소요 시간은 사람이 못 느끼지만 프레임이 밀리면 바로 느낀다.
- * 응답이 흐르는 동안 화면이 매끄러운가, 그리고 그때 글을 칠 수 있는가.
+ * What is measured is **frames**. A person cannot feel total elapsed time, but a dropped frame is
+ * felt immediately. Is the screen smooth while a response streams, and can the person type while
+ * it does.
  */
 
 test.describe.configure({ mode: 'serial' })
 
 /*
- * 기본 e2e에는 끼지 않는다. 재는 값이 기계 상태를 타므로 문턱을 세우면 언젠가
- * 애먼 곳에서 빨개진다 — 여기서 나오는 건 판정이 아니라 **숫자**다.
+ * Not part of the default e2e suite. The measured values depend on machine state, so setting a
+ * threshold would eventually turn red for the wrong reason — what comes out of this is not a
+ * pass/fail but **a number**.
  *   pnpm perf
  */
 test.beforeEach(() => {
-  test.skip(!process.env.PERF, 'PERF=1 일 때만 — `pnpm perf`')
+  test.skip(!process.env.PERF, 'Only when PERF=1 — `pnpm perf`')
 })
 
 type Result = {
@@ -28,9 +31,9 @@ type Result = {
   max: number
   janky: number
   heapMB: number | null
-  /** 실제로 화면에 그려졌는가 — 이게 false면 위 숫자는 전부 무의미하다 */
+  /** Whether it actually got painted to the screen — if this is false, every number above is meaningless */
   painted: boolean
-  /** 마지막 항목이 얼마나 길어졌나 (글자) */
+  /** How much longer the last item grew (characters) */
   grew: number
 }
 
@@ -39,12 +42,13 @@ async function boot(page: Page, count: number): Promise<string[]> {
   await expect(page.getByTestId('intro')).toBeVisible()
   await page.getByTestId('intro-card-claude').click()
   await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  // 첫 프로젝트는 빈 오케스트레이터 화면의 탈출구로 등록한다 (#63)
+  // The first project is registered as the way out of the empty orchestrator screen (#63)
   await page.evaluate(() => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
   })
   await page.getByTestId('orchestrator-pick-folder').click()
-  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+  // Registering a project the first time leads straight into creating a session — this test
+  // only needs the project, so close it
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('project-alpha')).toBeVisible()
@@ -55,13 +59,13 @@ async function boot(page: Page, count: number): Promise<string[]> {
     await page.getByTestId('new-session-alpha').click()
     await page.getByTestId('create-session-confirm').click()
     await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-    // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+    // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
     await page.getByTestId('prompt-input').fill(`session ${i}`)
     await page.getByTestId('prompt-input').press('Enter')
     ids.push(await page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId))
   }
 
-  // 빈 세션은 현실이 아니다 — 각 세션에 200줄짜리 대화를 깔아둔다
+  // An empty session is not realistic — seed each session with a 200-line conversation
   await page.evaluate((list: string[]) => {
     const store = (window as never as { __store: any }).__store
     const chat: Record<string, unknown[]> = {}
@@ -79,8 +83,9 @@ async function boot(page: Page, count: number): Promise<string[]> {
 }
 
 /**
- * `streaming` 세션들에 매 프레임 델타를 흘리면서 프레임 간격을 잰다.
- * 실제 스트리밍과 같은 리듬 — 한 번에 몰아 넣으면 React가 배치해버려 측정이 거짓말이 된다.
+ * Streams a delta to each of the `streaming` sessions every frame while measuring the gap between
+ * frames. The rhythm matches real streaming — dumping everything in at once would let React batch
+ * it, and the measurement would become a lie.
  */
 async function streamAndMeasure(page: Page, streaming: string[], frames: number): Promise<Result> {
   return page.evaluate(
@@ -106,9 +111,9 @@ async function streamAndMeasure(page: Page, streaming: string[], frames: number)
       })
 
       /*
-       * 측정이 거짓말이 아닌지 확인한다.
-       * 화면이 실제로 안 바뀌었다면 프레임은 당연히 매끄럽다 —
-       * 마지막 토큰이 DOM에 있는지 봐야 "그리면서도 매끄러웠다"가 된다.
+       * Checks that the measurement is not a lie.
+       * If the screen never actually changed, frames are smooth by definition —
+       * only checking that the last token is in the DOM turns this into "smooth while actually painting."
        */
       const painted = document.body.innerText.includes(`토큰${n - 1}`)
       const store = (window as never as { __store: any }).__store
@@ -122,7 +127,7 @@ async function streamAndMeasure(page: Page, streaming: string[], frames: number)
         p50: Math.round(at(0.5) * 10) / 10,
         p95: Math.round(at(0.95) * 10) / 10,
         max: Math.round(Math.max(...gaps) * 10) / 10,
-        // 32ms를 넘으면 60fps 기준으로 프레임을 한 번 이상 건너뛴 것이다
+        // Above 32ms means at least one dropped frame at a 60fps baseline
         janky: gaps.filter((g) => g > 32).length,
         heapMB: mem ? Math.round(mem.usedJSHeapSize / 1048576) : null,
         painted,
@@ -138,13 +143,13 @@ const show = (label: string, r: Result) =>
     `${label.padEnd(34)} p50=${String(r.p50).padStart(5)}ms  p95=${String(r.p95).padStart(6)}ms  max=${String(r.max).padStart(6)}ms  건너뜀=${String(r.janky).padStart(3)}/${r.frames}  heap=${r.heapMB}MB  그려짐=${r.painted}  +${r.grew}자`,
   )
 
-test('포커스 뷰 1개 (기준선)', async ({ page }) => {
+test('1 focus view (baseline)', async ({ page }) => {
   const ids = await boot(page, 1)
   await page.getByTestId(`session-row-${ids[0]}`).click()
   show('포커스 뷰 · 1개 스트리밍', await streamAndMeasure(page, ids, 120))
 })
 
-test('그리드 4칸 전부 스트리밍', async ({ page }) => {
+test('grid, 4 panels, all streaming', async ({ page }) => {
   const ids = await boot(page, 4)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
@@ -152,7 +157,7 @@ test('그리드 4칸 전부 스트리밍', async ({ page }) => {
   show('그리드 4칸 · 4개 스트리밍', await streamAndMeasure(page, ids, 120))
 })
 
-test('그리드 9칸 전부 스트리밍', async ({ page }) => {
+test('grid, 9 panels, all streaming', async ({ page }) => {
   const ids = await boot(page, 9)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
@@ -160,7 +165,7 @@ test('그리드 9칸 전부 스트리밍', async ({ page }) => {
   show('그리드 9칸 · 9개 스트리밍', await streamAndMeasure(page, ids, 120))
 })
 
-test('그리드 9칸인데 1개만 스트리밍 (§5.4의 상시 부하)', async ({ page }) => {
+test('grid, 9 panels, only 1 streaming (the steady-state load from §5.4)', async ({ page }) => {
   const ids = await boot(page, 9)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
@@ -168,13 +173,13 @@ test('그리드 9칸인데 1개만 스트리밍 (§5.4의 상시 부하)', async
   show('그리드 9칸 · 1개만 스트리밍', await streamAndMeasure(page, [ids[0]!], 120))
 })
 
-test('9칸이 흐르는 동안 글을 칠 수 있는가', async ({ page }) => {
+test('can the person type while 9 panels are streaming', async ({ page }) => {
   const ids = await boot(page, 9)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
 
-  // 배경에서 9개가 계속 흐르게 둔다
+  // Let all 9 keep streaming in the background
   await page.evaluate((l: string[]) => {
     const mock = (window as never as { __mock: any }).__mock
     const w = window as never as { __stop?: () => void }
@@ -202,15 +207,15 @@ test('9칸이 흐르는 동안 글을 칠 수 있는가', async ({ page }) => {
 })
 
 /**
- * 칸을 처음 여는 순간.
+ * The moment panels are first opened.
  *
- * 칸마다 스스로 기록을 불러오게 만들었으므로, 9칸을 한 번에 열면 로드도 9번이다.
- * 그 순간이 얼마나 걸리는지 — 여기가 이번 변경으로 판돈이 커진 자리다.
+ * Each panel was made to load its own transcript, so opening 9 panels at once means 9 loads. How
+ * long that moment takes — this is where this change raised the stakes.
  */
-test('9칸을 처음 여는 데 걸리는 시간', async ({ page }) => {
+test('time to first open 9 panels', async ({ page }) => {
   const ids = await boot(page, 9)
 
-  // 저장소에는 기록이 있고 화면에는 아무것도 안 올라온 상태 (앱을 막 켠 직후)
+  // Storage has the transcript and nothing is loaded on screen yet (right after the app starts)
   await page.evaluate((list: string[]) => {
     const mock = (window as never as { __mock: any }).__mock
     for (const id of list) {
@@ -241,11 +246,12 @@ test('9칸을 처음 여는 데 걸리는 시간', async ({ page }) => {
 })
 
 /**
- * 대화가 길어지면 느려지는가 — "위쪽을 UI에서 지우면 좋아지나"에 대한 답.
+ * Does it slow down as a conversation grows longer — the answer to "would trimming the top off
+ * in the UI help."
  *
- * 이미 세 겹으로 자르고 있다: 비포커스 세션은 50개로 잘리고(WINDOW_SIZE),
- * 기록은 200개씩 창으로 읽고, 가상 스크롤이 보이는 줄만 그린다.
- * 그래도 **목록 길이 자체가** 부담인지는 재봐야 안다.
+ * It already trims in three layers: an unfocused session is capped at 50 items (WINDOW_SIZE), the
+ * transcript is read in windows of 200, and virtual scroll only renders the visible rows. Even so,
+ * whether **list length itself** is a cost can only be known by measuring it.
  */
 /**
  * Dragging a panel now reflows the whole grid on every dragover (#53) — every hover is a
@@ -258,7 +264,7 @@ test('9칸을 처음 여는 데 걸리는 시간', async ({ page }) => {
  * if it stays 0 the grid never moved and the frame numbers next to it are meaningless.
  */
 for (const n of [4, 6, 9]) {
-  test(`드래그 리플로우 ${n}칸`, async ({ page }) => {
+  test(`drag reflow with ${n} panels`, async ({ page }) => {
     const ids = await boot(page, n)
     await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
     await page.getByTestId('grid-button').click()
@@ -324,7 +330,7 @@ for (const n of [4, 6, 9]) {
 }
 
 for (const n of [200, 5000]) {
-  test(`대화 ${n}줄에서 스트리밍`, async ({ page }) => {
+  test(`streaming with a ${n}-line conversation`, async ({ page }) => {
     const ids = await boot(page, 1)
     await page.evaluate(
       ({ sid, count }: { sid: string; count: number }) => {

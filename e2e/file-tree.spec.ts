@@ -1,15 +1,17 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * 파일 트리가 파일을 **바꾸는** 쪽 (#18, #19).
+ * The side of the file tree that **changes** files (#18, #19).
  *
- * 지금까지 트리는 보여주기만 했다. 여기서 묻는 것은 네 가지가 실제로 일어나는가와,
- * 그보다 중요한 **일어나지 않아야 할 때 안 일어나는가**이다: 자리가 차 있으면 덮지 않는가,
- * 지운 것이 되돌릴 수 있는 곳으로 갔다고 말해 주는가, 그리고 원래 있던 드래그(경로를
- * 입력창에 넣기)가 새 드래그에 밀려나지 않았는가.
+ * Up to now the tree only displayed things. What is asked here is whether four things actually
+ * happen, and more importantly, whether they do **not** happen when they should not: does it
+ * refuse to overwrite an occupied spot, does it say where a deleted file went so it can be
+ * recovered, and did the drag that already existed (dropping a path into the composer) get
+ * pushed aside by the new drag.
  *
- * 별도 파일인 이유도 그것이다. control-loop는 관제 루프 한 바퀴를 보고, panel은 여럿이
- * 떠 있을 때 화면이 무엇을 고르는지를 본다. 여기는 **파일이 움직이는가**만 본다.
+ * That is also why this is its own file. control-loop watches one lap of the control loop, and
+ * panel watches what the screen picks when several are open. This one watches only **whether
+ * files move**.
  */
 
 async function setup(page: Page, path = '/tmp/alpha') {
@@ -21,13 +23,14 @@ async function setup(page: Page, path = '/tmp/alpha') {
     ;(window as any).__mock.nextPickedDirectory = p
   }, path)
   await page.getByTestId('orchestrator-pick-folder').click()
-  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+  // Registering a project the first time leads straight into creating a session — this test
+  // only needs the project, so close it
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
 }
 
-/** 목의 파일 트리를 그린다. `entries`는 "부모 경로 → 그 안의 항목들" */
+/** Draws the mock's file tree. `entries` is "parent path → the items inside it" */
 async function seedTree(page: Page, entries: Record<string, { name: string; isDir?: boolean; ignored?: boolean }[]>) {
   await page.evaluate((e: Record<string, { name: string; isDir?: boolean; ignored?: boolean }[]>) => {
     const m = (window as any).__mock
@@ -48,7 +51,7 @@ async function openTree(page: Page, prompt = 'work') {
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
   await page.getByTestId('evidence-tab-files').click()
@@ -56,16 +59,16 @@ async function openTree(page: Page, prompt = 'work') {
 }
 
 /*
- * ── 오른쪽 클릭이 여는 것 ────────────────────────────────────────────
+ * ── What right-click opens ────────────────────────────────────────────
  */
 
 /**
- * 지우기는 **되돌릴 수 있는 곳으로 보내는 것**이다 (#18).
+ * Deleting means **sending it somewhere it can be recovered from** (#18).
  *
- * 확인 대화상자가 없는 것이 빠뜨린 것이 아니라 결정이라서, 토스트가 어디로 갔는지 말해야
- * 한다 — 줄이 사라지는 것만으로는 "사라졌다"까지밖에 전해지지 않는다.
+ * There being no confirmation dialog is a decision, not an oversight, so the toast has to say
+ * where the file went — a row simply vanishing communicates only "it is gone," nothing more.
  */
-test('오른쪽 클릭 → 휴지통: 줄이 사라지고, 어디로 갔는지 말해 준다', async ({ page }) => {
+test('right-click → Trash: the row disappears, and it says where it went', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: 'a.ts' }, { name: 'keep.ts' }] })
   await openTree(page)
@@ -76,16 +79,16 @@ test('오른쪽 클릭 → 휴지통: 줄이 사라지고, 어디로 갔는지 �
   await page.getByTestId('file-menu-trash').click()
 
   await expect(page.getByTestId('file-a.ts')).toBeHidden()
-  // 옆줄은 그대로여야 한다 — 목록이 통째로 날아간 것과 한 줄이 없어진 것은 다르다
+  // The neighboring row must stay put — the whole list vanishing is not the same as one row going away
   await expect(page.getByTestId('file-keep.ts')).toBeVisible()
   await expect(page.getByTestId('toast')).toContainText('Trash')
 
-  // 진짜 OS 휴지통으로 갔는가 (지우기가 아니라) — 포트가 받은 것을 본다
+  // Did it go to the real OS trash (not a hard delete) — check what the port received
   expect(await page.evaluate(() => (window as any).__mock.trashed)).toEqual(['a.ts'])
 })
 
-/** 이름은 이 데스크톱이 부르는 대로 나온다 — UI는 어느 OS인지 묻지 않는다 (#32와 같은 규칙) */
-test('오른쪽 클릭 → 파일 관리자에서 보기', async ({ page }) => {
+/** The label reads however this desktop names it — the UI never asks which OS it is (same rule as #32) */
+test('right-click → reveal in file manager', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)
@@ -98,8 +101,8 @@ test('오른쪽 클릭 → 파일 관리자에서 보기', async ({ page }) => {
   expect(await page.evaluate(() => (window as any).__mock.revealed)).toEqual(['a.ts'])
 })
 
-/** 무시된 파일도 그냥 파일이다 (#17) — 보이는 이상 다룰 수도 있어야 한다 */
-test('.gitignore에 걸린 파일도 휴지통으로 보낼 수 있다', async ({ page }) => {
+/** An ignored file is still just a file (#17) — if it is visible, it must be actionable too */
+test('a file caught by .gitignore can still be sent to Trash', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: '.env.local', ignored: true }] })
   await openTree(page)
@@ -111,10 +114,10 @@ test('.gitignore에 걸린 파일도 휴지통으로 보낼 수 있다', async (
 })
 
 /*
- * ── 끌어다 놓기: 같은 손짓이 놓는 곳에 따라 달라진다 ──────────────────
+ * ── Drag and drop: the same gesture means different things depending on where it lands ──────────
  */
 
-test('폴더 위에 놓으면 파일이 그리로 옮겨간다', async ({ page }) => {
+test('dropping onto a folder moves the file into it', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: 'src', isDir: true }, { name: 'a.ts' }], src: [] })
   await openTree(page)
@@ -127,10 +130,10 @@ test('폴더 위에 놓으면 파일이 그리로 옮겨간다', async ({ page }
 })
 
 /**
- * **덮어쓰기는 없다** — 그 자리의 파일이 에이전트가 지금 고치고 있는 것일 수 있고,
- * 조용히 갈아치우는 것은 되돌릴 방법이 하나도 없는 유일한 결과다.
+ * **There is no overwriting** — the file sitting there could be the very one the agent is
+ * currently editing, and a silent swap is the one outcome that has no way back at all.
  */
-test('자리가 차 있으면 옮기지 않고 무엇과 부딪혔는지 말한다', async ({ page }) => {
+test('when the spot is occupied, nothing moves and it says what it collided with', async ({ page }) => {
   await setup(page)
   await seedTree(page, {
     '': [{ name: 'src', isDir: true }, { name: 'a.ts' }],
@@ -141,14 +144,14 @@ test('자리가 차 있으면 옮기지 않고 무엇과 부딪혔는지 말한�
   await page.getByTestId('file-a.ts').dragTo(page.getByTestId('dir-src'))
 
   await expect(page.getByTestId('toast')).toContainText('src/a.ts already exists')
-  // 원본은 제자리에 남는다 — 반쯤 옮겨진 상태가 가장 나쁘다
+  // The original stays put — a half-moved state is the worst outcome
   await expect(page.getByTestId('file-a.ts')).toBeVisible()
   await page.getByTestId('dir-src').click()
   await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
 })
 
-/** 폴더 안의 것을 다시 밖으로 — 루트는 자기 줄이 없어서 빈 공간이 그 자리를 맡는다 */
-test('트리의 빈 공간에 놓으면 프로젝트 루트로 나온다', async ({ page }) => {
+/** Moving something out of a folder again — the root has no row of its own, so empty space stands in for it */
+test('dropping into the tree\'s empty space moves the file to the project root', async ({ page }) => {
   await setup(page)
   await seedTree(page, {
     '': [{ name: 'src', isDir: true }],
@@ -159,7 +162,7 @@ test('트리의 빈 공간에 놓으면 프로젝트 루트로 나온다', async
   await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
 
   await page.getByTestId('file-src/a.ts').dragTo(page.getByTestId('file-drop-root'), {
-    // 폴더 줄 위가 아니라 목록 아래의 빈 공간에 떨어뜨린다
+    // Drop into the empty space below the list, not onto a folder row
     targetPosition: { x: 40, y: 120 },
   })
 
@@ -168,13 +171,14 @@ test('트리의 빈 공간에 놓으면 프로젝트 루트로 나온다', async
 })
 
 /**
- * 밖에서 끌어온 파일 (#19의 둘째).
+ * A file dragged in from outside (the second half of #19).
  *
- * OS 드롭은 사람 손으로만 만들 수 있어서 여기서는 이벤트를 직접 만들어 던진다 —
- * 확인하려는 것은 브라우저의 드래그 구현이 아니라 **`Files`가 실린 드롭을 우리가 어떻게
- * 가르는가**이다. 트리에서 온 것과 달리 우리 MIME이 없고, 그것이 유일한 구분이다.
+ * An OS drop can only be produced by a human hand, so the event is constructed and dispatched
+ * directly here — what is being checked is not the browser's drag implementation but **how the
+ * app tells apart a drop that carries `Files`**. Unlike a drop from the tree, it has no MIME of
+ * ours, and that is the only distinction.
  */
-test('핀더에서 끌어온 파일은 놓은 폴더에 들어온다', async ({ page }) => {
+test('a file dragged in from Finder lands in the folder it was dropped on', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: 'src', isDir: true }], src: [] })
   await openTree(page)
@@ -192,14 +196,15 @@ test('핀더에서 끌어온 파일은 놓은 폴더에 들어온다', async ({ 
 })
 
 /**
- * 원래 있던 드래그가 살아 있는가 (#19가 명시적으로 걱정한 것).
+ * Whether the drag that already existed still works (what #19 explicitly worried about).
  *
- * 같은 줄을 끄는 손짓 하나가 이제 두 가지를 뜻한다. 가르는 것은 **떨어뜨린 곳**이다:
- * 입력창은 경로를 문장에 넣고, 트리는 파일을 옮긴다. 옮기기를 붙이면서 끌기 자체의
- * 성질(`effectAllowed`)을 건드렸기 때문에, 이쪽이 조용히 죽지 않았는지 확인해야 한다 —
- * 죽는 모양이 정확히 '아무 일도 안 일어남'이라 눈으로는 못 잡는다.
+ * One gesture, dragging the same row, now means two different things. What tells them apart is
+ * **where it is dropped**: the composer inserts the path into the sentence, and the tree moves
+ * the file. Adding move support touched the drag's own property (`effectAllowed`), so this checks
+ * that the composer side did not die quietly — and a quiet death looks exactly like "nothing
+ * happens," which the eye alone cannot catch.
  */
-test('입력창에 놓으면 예전처럼 경로가 문장에 들어간다', async ({ page }) => {
+test('dropping onto the composer still inserts the path into the sentence, as before', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)
@@ -207,15 +212,16 @@ test('입력창에 놓으면 예전처럼 경로가 문장에 들어간다', asy
   await page.getByTestId('file-a.ts').dragTo(page.getByTestId('input-dropzone'))
 
   await expect(page.getByTestId('input-dropzone').locator('textarea')).toHaveValue('@a.ts ')
-  // 옮긴 것이 아니라 가리킨 것이다 — 파일은 그대로 있어야 한다
+  // It was referenced, not moved — the file must still be there
   await expect(page.getByTestId('file-a.ts')).toBeVisible()
 })
 
 /**
- * "Edited by agent" 표시는 이 프로젝트의 세션이 만진 파일에만 붙는다 (#185). 경로는 프로젝트 기준이라,
- * 모든 프로젝트의 세션을 한 집합에 모으면 다른 프로젝트의 같은 이름 경로에도 붙었다.
+ * The "Edited by agent" indicator attaches only to files a session of this project touched
+ * (#185). Paths are relative to the project, so pooling sessions from every project into one set
+ * made it attach to a path of the same name in a different project too.
  */
-test('만진 파일 표시는 이 프로젝트의 세션이 만진 것에만 붙는다 (#185)', async ({ page }) => {
+test('the touched-file indicator attaches only to files touched by a session of this project (#185)', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: 'a.ts' }, { name: 'b.ts' }] })
   await openTree(page)
@@ -224,7 +230,7 @@ test('만진 파일 표시는 이 프로젝트의 세션이 만진 것에만 붙
     const st = w.__store.getState()
     const sid = st.focusedSessionId
     w.__mock.emit({ type: 'files_touched', sessionId: sid, paths: ['b.ts'] })
-    // 다른 프로젝트의 세션이 같은 이름의 경로를 만졌다
+    // A session in a different project touched a path with the same name
     const other = { ...st.sessions[sid], id: 'other-project-session', projectId: 'other-project', touchedPaths: ['a.ts'] }
     w.__store.setState({ sessions: { ...w.__store.getState().sessions, [other.id]: other } })
   })
@@ -234,11 +240,12 @@ test('만진 파일 표시는 이 프로젝트의 세션이 만진 것에만 붙
 })
 
 /**
- * 글자를 키워도 메뉴는 누른 자리에 뜨고 창 안에 있다 (#183). 클릭 좌표는 확대가 곱해진 화면 px인데
- * fixed 길이에는 확대가 또 곱해져서, 확대 1.25에서 메뉴가 오른쪽 아래로 밀렸고 창 오른쪽 끝에서는
- * 통째로 창 밖에 놓였다.
+ * Even with text scaled up, the menu appears where it was clicked and stays inside the window
+ * (#183). Click coordinates are screen px already multiplied by the zoom, but a fixed length gets
+ * the zoom multiplied into it a second time, so at 1.25x zoom the menu was pushed down and to the
+ * right, and at the window's right edge it landed entirely outside the window.
  */
-test('확대한 글자에서도 우클릭 메뉴가 누른 자리에, 창 안에 뜬다 (#183)', async ({ page }) => {
+test('with text zoomed in, the right-click menu still appears where clicked and stays inside the window (#183)', async ({ page }) => {
   await setup(page)
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)

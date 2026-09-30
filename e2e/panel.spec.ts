@@ -1,15 +1,18 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * 우측 패널과 사용량 모달 — "화면에 여럿이 떠 있을 때 무엇을 보여주나".
+ * The right-hand panel and the usage modal — "what does the screen show when several things are
+ * up at once."
  *
- * control-loop.spec.ts와 나누는 이유는 주제다. 저기는 관제 루프 한 바퀴가 도는지를 보고,
- * 여기는 **여러 개가 동시에 있을 때 화면이 무엇을 고르는가**를 본다 (#26, #21).
+ * This is split from control-loop.spec.ts by subject. That file watches whether one lap of the
+ * control loop runs; this one watches **what the screen picks when several things exist at the
+ * same time** (#26, #21).
  */
 
 /**
- * 움직임이 멈춘 뒤의 자리. 떠오르는 카드·내려오는 메뉴는 전환 중에 재면 **도중의 자리**를
- * 사실로 적게 된다 — 같은 값이 두 번 나올 때까지 기다린다.
+ * The position after movement has settled. A rising card or a dropping menu, if measured mid
+ * transition, would record a **position in transit** as fact — this waits until the same value
+ * appears twice in a row.
  */
 async function settled(loc: ReturnType<Page['getByTestId']>): Promise<{ x: number; y: number; width: number; height: number }> {
   let last: { x: number; y: number; width: number; height: number } | null = null
@@ -22,7 +25,7 @@ async function settled(loc: ReturnType<Page['getByTestId']>): Promise<{ x: numbe
   return last!
 }
 
-/** 접힌 입력창을 띄우는 띠의 높이 (SessionView의 COMPOSER_REACH와 같은 값) */
+/** The height of the strip that raises a collapsed composer (the same value as SessionView's COMPOSER_REACH) */
 const COMPOSER_REACH = 54
 
 async function setup(page: Page, path = '/tmp/alpha') {
@@ -30,18 +33,19 @@ async function setup(page: Page, path = '/tmp/alpha') {
   await expect(page.getByTestId('intro')).toBeVisible()
   await page.getByTestId('intro-card-claude').click()
   await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  // 프로젝트가 0개면 사이드바가 없다 — 첫 프로젝트는 시작 안내에서 등록한다
+  // With zero projects there is no sidebar — the first project is registered from the startup guide
   await page.evaluate((p: string) => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
   }, path)
   await page.getByTestId('orchestrator-pick-folder').click()
-  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+  // Registering a project the first time leads straight into creating a session — this test
+  // only needs the project, so close it
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
 }
 
-/** 세션 하나를 만들고 그 id를 돌려준다 */
+/** Creates a session and returns its id */
 async function newSession(
   page: Page,
   project: string,
@@ -53,7 +57,7 @@ async function newSession(
   await page.getByTestId(`tool-option-${tool}`).click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
   return page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId)
@@ -67,7 +71,7 @@ async function openGrid(page: Page, ids: string[]) {
   await page.getByTestId('grid-button').click()
 }
 
-/** 기본 목은 창이 비어 있어 'usage-unavailable'만 그린다 — 도넛이 나오는 상태를 만든다 */
+/** The default mock has empty windows and only renders 'usage-unavailable' — this sets up the state where the donut shows */
 async function stubUsage(page: Page, windows?: unknown[]) {
   await page.evaluate((ws: unknown[] | undefined) => {
     ;(window as never as { __mock: any }).__mock.usageState = {
@@ -82,18 +86,19 @@ async function stubUsage(page: Page, windows?: unknown[]) {
 }
 
 /**
- * 그리드의 접힌 입력창 (사용자 요청 2026-09-10).
+ * The collapsed composer in the grid (user request, 2026-09-10).
  *
- * 두 줄짜리 그리드에서 읽는 자리가 좁았다 — 칸 370px 중 입력 영역이 95px인데 정작
- * 글자 칸은 22px이었다. 접으면 둥근 카드가 윗머리만 내밀고 있다가, 아래에 손이 오면
- * 대화 **위로 떠오른다.** 미는 게 아니라 덮으므로 읽던 줄은 움직이지 않는다.
+ * Reading space was tight in a two-row grid — out of a 370px panel, the input area took 95px,
+ * while the actual text field was only 22px. Collapsed, the rounded card shows only its top edge,
+ * and when a cursor arrives at the bottom, it **rises over the conversation.** It covers rather
+ * than pushes, so the line being read does not move.
  */
-test('그리드에서 입력창은 접혀 있다가 아래에 손이 오면 떠오른다', async ({ page }) => {
+test('in the grid, the composer is collapsed and rises when the cursor reaches the bottom', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '하나')
   const b = await newSession(page, 'alpha', 'claude', '둘')
   await openGrid(page, [a, b])
-  // 새로 만든 칸의 입력칸이 잡혀 있으면 접힘을 못 본다 — 손을 뗀다
+  // If a newly created panel's input field is focused, the collapse cannot be observed — blur it
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
   const panel = page.getByTestId(`grid-panel-${a}`)
@@ -102,20 +107,20 @@ test('그리드에서 입력창은 접혀 있다가 아래에 손이 오면 떠�
   await expect(shell).not.toHaveAttribute('data-up', 'true')
   const resting = (await chat.boundingBox())!.height
 
-  // 칸의 아래쪽에 손을 올린다
+  // Move the cursor to the bottom of the panel
   const box = (await panel.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20)
   await expect(shell).toHaveAttribute('data-up', 'true')
 
-  // **덮는다** — 대화의 높이는 그대로다 (읽던 줄이 밀리면 안 된다)
+  // **It covers** — the conversation's height stays the same (the line being read must not shift)
   expect(Math.round((await chat.boundingBox())!.height)).toBe(Math.round(resting))
 
-  // 대화 한복판으로 손을 옮기면 다시 내려간다
+  // Moving the cursor to the middle of the conversation lowers it again
   await page.mouse.move(box.x + box.width / 2, box.y + 80)
   await expect(shell).not.toHaveAttribute('data-up', 'true')
 
-  // 입력칸을 잡으면 손이 떠나도 안 내려간다 — 쓰는 도중에 발밑이 꺼지면 안 된다.
-  // (잡으려면 먼저 떠올라야 한다 — 내려가 있는 입력칸은 칸 밖이라 애초에 눌리지 않는다)
+  // Once the field is focused, it does not lower even after the cursor leaves — the ground must not disappear mid-typing.
+  // (It has to rise before it can be focused — a lowered field is outside the panel, so it cannot be clicked in the first place)
   await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20)
   await panel.getByTestId('prompt-input').click()
   await page.mouse.move(box.x + box.width / 2, box.y + 80)
@@ -123,12 +128,13 @@ test('그리드에서 입력창은 접혀 있다가 아래에 손이 오면 떠�
 })
 
 /**
- * 떠오른 카드 위에 손이 있으면 내려가지 않는다 (사용자 지적 2026-09-10).
+ * A raised card does not lower while the cursor is over it (user finding, 2026-09-10).
  *
- * 떠오르게 하는 띠는 칸 **아래쪽**에 있다. 카드는 그 띠보다 위로 올라오므로, 입력칸을
- * 누르러 손을 올리는 순간 띠를 벗어나 카드가 도로 내려갔다 — 누를 수가 없었다.
+ * The strip that triggers the rise sits at the **bottom** of the panel. Since the card rises
+ * above that strip, the moment the cursor moved up to click the input field, it left the strip and
+ * the card dropped back down — it could not be clicked at all.
  */
-test('떠오른 입력창 위에 손이 있으면 내려가지 않는다 — 그래서 누를 수 있다', async ({ page }) => {
+test('a raised composer does not lower while the cursor is over it — so it can be clicked', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '하나')
   const b = await newSession(page, 'alpha', 'claude', '둘')
@@ -139,31 +145,33 @@ test('떠오른 입력창 위에 손이 있으면 내려가지 않는다 — 그
   const shell = panel.getByTestId('composer-shell')
   const box = (await panel.boundingBox())!
 
-  // 칸 아래쪽에 손을 올려 띄운다
+  // Move the cursor to the bottom of the panel to raise it
   await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20)
   await expect(shell).toHaveAttribute('data-up', 'true')
 
-  // 떠오른 카드의 윗부분(입력칸 줄)으로 손을 옮긴다 — 여기는 이미 띠 밖이다.
-  // 카드는 이어서 떠오르므로(300ms) **멈춘 뒤에** 잰다 — 도중의 자리는 아직 사실이 아니다
+  // Move the cursor to the top of the raised card (the input row) — this is already outside the strip.
+  // The card keeps rising (300ms), so this measures **after it settles** — a position in transit is not yet fact
   const up = await settled(shell)
   expect(up.y + 12).toBeLessThan(box.y + box.height - COMPOSER_REACH)
   await page.mouse.move(up.x + up.width / 2, up.y + 12)
   await expect(shell).toHaveAttribute('data-up', 'true')
 
-  // 그리고 눌린다
+  // And it can be clicked
   await panel.getByTestId('prompt-input').click()
   await expect(panel.getByTestId('prompt-input')).toBeFocused()
 })
 
 /**
- * 떠오르는 동안 **중간 자리들이 있어야 한다** (사용자 요청 2026-09-10: "부드럽게 올라오게").
+ * While rising, **there must be intermediate positions** (user request, 2026-09-10: "make it rise
+ * smoothly").
  *
- * 처음엔 `transition-[transform,…]`이라 적었는데 한 프레임 만에 튀어 올랐다 — Tailwind v4의
- * `translate-y-*`는 `transform`이 아니라 **`translate` 속성**에 값을 싣는다. 전환이 걸린
- * 속성과 실제로 바뀌는 속성이 달라 아무것도 이어지지 않은 것이다. 그래서 여기서 재는 것은
- * "어떤 속성에 걸었나"가 아니라 **눈에 보이는 사실**이다: 도중에 여러 자리를 지나는가.
+ * The transition was first written as `transition-[transform,…]`, but it snapped up in a single
+ * frame — Tailwind v4's `translate-y-*` sets its value on the **`translate` property**, not
+ * `transform`. The property the transition was attached to and the property actually changing
+ * were different, so nothing animated. So what is measured here is not "which property was it
+ * attached to" but the **visible fact**: does it pass through several positions along the way.
  */
-test('입력창은 튀어 오르지 않고 이어서 떠오른다', async ({ page }) => {
+test('the composer rises smoothly rather than snapping up', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '하나')
   await openGrid(page, [a])
@@ -171,7 +179,7 @@ test('입력창은 튀어 오르지 않고 이어서 떠오른다', async ({ pag
   const panel = page.getByTestId(`grid-panel-${a}`)
   await expect(panel.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
 
-  // 매 프레임 카드의 자리를 적는 기록기를 먼저 걸어 둔다
+  // First attach a recorder that logs the card's position every frame
   await page.evaluate(() => {
     const shell = document.querySelector('[data-testid="composer-shell"]')!
     const seen: number[] = []
@@ -188,21 +196,22 @@ test('입력창은 튀어 오르지 않고 이어서 떠오른다', async ({ pag
   await page.waitForTimeout(700)
 
   const tops = await page.evaluate(() => (window as never as { __tops: number[] }).__tops)
-  // 한 프레임에 튀면 자리는 둘뿐이다 (접힌 자리, 떠오른 자리)
+  // If it snaps in one frame, there are only two positions (collapsed, risen)
   expect(new Set(tops).size).toBeGreaterThan(5)
 })
 
 /**
- * 떠오른 입력창은 **대화를 덮지 않고, 밀지도 않는다** (사용자 지적 2026-09-13).
+ * A raised composer **neither covers nor pushes the conversation** (user finding, 2026-09-13).
  *
- * 원래 규칙은 "밀지 않고 덮는다"였다 — 읽으려고 손을 내리면 읽을 것이 카드 밑으로
- * 들어갔다. 반대로 떠오를 때 밀어 올리게 하면 답변 버튼이 손 앞에서 달아난다: 카드를
- * 부르는 손짓과 버튼을 누르는 손짓이 같기 때문이다. 그래서 빈 자리를 처음부터 비워 둔다.
+ * The original rule was "push nothing, cover it" — but lowering the cursor to read something sent
+ * the thing being read under the card. Conversely, pushing content up as the card rises makes a
+ * response's button run away right in front of the cursor: the gesture that summons the card and
+ * the gesture that clicks the button are the same. So the empty space is reserved from the start.
  */
-test('떠오른 입력창은 마지막 줄을 덮지도, 밀지도 않는다', async ({ page }) => {
+test('a raised composer neither covers nor pushes the last line', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '하나')
-  // 바닥에 붙을 만큼 길어야 한다 — 짧은 대화는 애초에 카드에 닿지 않는다
+  // Has to be long enough to reach the bottom — a short conversation never touches the card in the first place
   await page.evaluate((sid: string) => {
     const m = (window as never as { __mock: any }).__mock
     for (let i = 0; i < 40; i++) {
@@ -225,19 +234,19 @@ test('떠오른 입력창은 마지막 줄을 덮지도, 밀지도 않는다', a
         cardTop: Math.round(shell.getBoundingClientRect().top),
         cardHeight: Math.round(shell.getBoundingClientRect().height),
         atBottom: sc.scrollHeight - sc.scrollTop - sc.clientHeight < 2,
-        // 마지막 내용의 화면상 아래끝 (여백은 내용이 아니므로 뺀다)
+        // The on-screen bottom edge of the last content (the padding is not content, so it is subtracted)
         lastBottom: Math.round(sc.getBoundingClientRect().top - sc.scrollTop + (sc.scrollHeight - pad)),
       }
     })
 
-  // 최신 줄을 읽는 상태를 만든다 — 불편하다고 한 그 자리다
+  // Sets up the state of reading the newest line — the exact spot that was called uncomfortable
   await panel.evaluate((el) => {
     const sc = el.querySelector('[data-testid="chat-stream"]') as HTMLElement
     sc.scrollTop = sc.scrollHeight
     sc.dispatchEvent(new Event('scroll'))
   })
   await expect.poll(async () => (await read()).atBottom).toBe(true)
-  // 여백은 300ms에 걸쳐 자리를 잡는다 — 전환 중에 재면 도중의 값을 사실로 적는다
+  // The padding settles into place over 300ms — measuring mid-transition records a value in transit as fact
   await expect.poll(async () => {
     const m = await read()
     return m.pad === m.cardHeight
@@ -247,35 +256,37 @@ test('떠오른 입력창은 마지막 줄을 덮지도, 밀지도 않는다', a
   const box = (await panel.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20)
   await expect(panel.getByTestId('composer-shell')).toHaveAttribute('data-up', 'true')
-  // 전환이 끝날 때까지 기다린다 — 전환 중에 재면 도중의 자리를 사실로 적는다
+  // Wait for the transition to finish — measuring mid-transition records a position in transit as fact
   await page.waitForTimeout(700)
 
   const up = await read()
-  // 여백은 접혀 있을 때부터 카드만큼이었고, 떠올라도 그대로다
+  // The padding has been the card's height since it was collapsed, and stays that way once risen
   expect(down.pad).toBe(up.cardHeight)
   expect(up.pad).toBe(up.cardHeight)
-  // 마지막 줄은 카드 위에 있다 — 덮이지 않는다
+  // The last line sits above the card — it is not covered
   expect(up.atBottom).toBe(true)
   expect(up.lastBottom).toBeLessThanOrEqual(up.cardTop)
   /*
-   * 그리고 **한 픽셀도 안 움직였다.** 이 단언이 움직이는 과녁을 막는다 — 카드를 부르는
-   * 손짓이 곧 답변 버튼을 누르러 가는 손짓이라, 여기서 밀리면 버튼이 손 앞에서 달아난다.
+   * And **it did not move a single pixel.** This assertion blocks a moving target — the gesture
+   * that summons the card is the same gesture as reaching for the response's button, so any shift
+   * here would make the button run away in front of the cursor.
    */
   expect(up.lastBottom).toBe(down.lastBottom)
 })
 
 /**
- * 응답 중인 칸을 두르는 무지개 링은 **칸의 테두리**다. 칸 안에 무엇이 떠 있든 끊기면
- * 안 되는데, 접힌 입력창이 아랫변을 덮고 있었다 (사용자 지적 2026-09-10).
+ * The rainbow ring around a panel mid-response is the **panel's border**. It must not break no
+ * matter what is floating inside the panel, but the collapsed composer was covering its bottom
+ * edge (user finding, 2026-09-10).
  */
-test('접힌 입력창은 응답 중 링을 덮지 않는다 — 링이 위에 선다', async ({ page }) => {
+test('the collapsed composer does not cover the response ring — the ring sits above it', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '하나')
   await openGrid(page, [a])
   const panel = page.getByTestId(`grid-panel-${a}`)
   await expect(panel.locator('.cc-orbit-ring-layer')).toBeVisible()
 
-  // 같은 쌓임 맥락의 두 층이다 — 링이 더 위에 있어야 아랫변이 살아남는다
+  // Two layers in the same stacking context — the ring has to be higher for the bottom edge to survive
   const z = await panel.evaluate((el) => {
     const ring = el.querySelector('.cc-orbit-ring-layer')!
     const shell = el.querySelector('[data-testid="composer-shell"]')!
@@ -285,15 +296,16 @@ test('접힌 입력창은 응답 중 링을 덮지 않는다 — 링이 위에 �
 })
 
 /**
- * 접힌 입력창은 **칸을 밀어 올리지 않는다** (도그푸딩 2026-09-10: 머리글이 사라지고
- * 명령어 버튼이 첫 클릭을 먹었다).
+ * A collapsed composer **does not scroll the panel up** (dogfooding, 2026-09-10: the header
+ * vanished and a command button ate its first click).
  *
- * 접힌 입력칸은 칸 밖에 있고, 세션을 갓 만들면 거기에 포커스가 잡혀 있다. 칸이 스크롤
- * 컨테이너면 브라우저가 그 입력칸을 보여주려고 칸을 통째로 밀어 올린다 — 머리글이 위로
- * 사라지고, 그 사이에 눌린 버튼은 mousedown과 mouseup이 서로 다른 곳에서 나 클릭이
- * 통째로 없어진다. 스크롤 위치는 0이어야 한다.
+ * The collapsed input field sits outside the visible panel, and a freshly created session leaves
+ * it focused. If the panel is a scroll container, the browser scrolls the whole panel to bring
+ * that field into view — the header vanishes upward, and a button clicked in the meantime has its
+ * mousedown and mouseup land in different places, dropping the click entirely. Scroll position
+ * must be 0.
  */
-test('접힌 입력창은 칸을 스크롤로 밀어 올리지 않는다 — 머리글의 버튼이 한 번에 눌린다', async ({
+test('a collapsed composer does not scroll the panel up — a header button gets clicked on the first try', async ({
   page,
 }) => {
   await setup(page)
@@ -301,7 +313,7 @@ test('접힌 입력창은 칸을 스크롤로 밀어 올리지 않는다 — 머
   const b = await newSession(page, 'alpha', 'claude', '둘')
   await openGrid(page, [a, b])
 
-  // 접혀 있는 칸(a): 밀어 올릴 자리 자체가 없어야 한다 — 밀어 보고 확인한다
+  // The collapsed panel (a): there must be no room to scroll up at all — try scrolling and check
   expect(
     await page.getByTestId(`grid-panel-${a}`).evaluate((el) => {
       el.scrollTop = 500
@@ -309,8 +321,8 @@ test('접힌 입력창은 칸을 스크롤로 밀어 올리지 않는다 — 머
     }),
   ).toBe(0)
 
-  // 그리고 방금 만들어 입력칸을 잡고 있는 칸(b)에서도 머리글 버튼이 **첫 클릭에** 열린다
-  // (누르는 순간 손이 떠나 입력창이 내려가는데, 그때 칸이 밀리면 mouseup이 딴 데서 난다)
+  // And in the panel (b) just created, whose field is still focused, the header button also opens **on the first click**
+  // (focus leaves the field the moment it is clicked and the composer lowers, and if the panel scrolls then, mouseup lands elsewhere)
   const panel = page.getByTestId(`grid-panel-${b}`)
   await expect(panel.getByTestId('prompt-input')).toBeFocused()
   await panel.getByTestId('run-open').click()
@@ -318,10 +330,11 @@ test('접힌 입력창은 칸을 스크롤로 밀어 올리지 않는다 — 머
 })
 
 /**
- * 설정이 꺼져 있으면 예전 그대로 — 접기는 **선택**이다.
- * 그리고 접기는 그리드의 사정이라 포커스 뷰는 처음부터 이 문제가 없다.
+ * With the setting off, it behaves as before — collapsing is **optional**.
+ * And since collapsing is a concern specific to the grid, the focus view never has this problem
+ * to begin with.
  */
-test('접기를 끄면 입력창이 늘 펼쳐져 있고, 포커스 뷰는 애초에 안 접힌다', async ({ page }) => {
+test('turning collapsing off keeps the composer always expanded, and the focus view never collapses it in the first place', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '하나')
   await openGrid(page, [a])
@@ -332,11 +345,11 @@ test('접기를 끄면 입력창이 늘 펼쳐져 있고, 포커스 뷰는 애�
 
   await page.evaluate(() => (window as never as { __store: any }).__store.getState().setFoldComposer(false))
   await expect(panel.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
-  // 접기를 끄면 입력창이 자리를 도로 차지한다 — 그만큼 대화가 짧아진다
+  // Turning collapsing off makes the composer take its space back — the conversation shrinks by that much
   const open = (await panel.getByTestId('chat-stream').boundingBox())!.height
   expect(open).toBeLessThan(folded)
 
-  // 포커스 뷰: 설정과 무관하게 접히지 않는다
+  // Focus view: never collapses, regardless of the setting
   await page.evaluate(() => (window as never as { __store: any }).__store.getState().setFoldComposer(true))
   await page.evaluate((id: string) => (window as never as { __store: any }).__store.getState().focusSession(id), a)
   await expect(page.getByTestId('session-view').getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
@@ -344,20 +357,21 @@ test('접기를 끄면 입력창이 늘 펼쳐져 있고, 포커스 뷰는 애�
 })
 
 /*
- * ── 사용량 (#26 → 2026-09-09) ────────────────────────────────────────
+ * ── Usage (#26 → 2026-09-09) ────────────────────────────────────────
  *
- * 사용량은 **계정** 단위인데 도구마다 다르다. 오래 그 답을 화면에서 추론했다(그리드에 뜬
- * 도구들). 이제 추론하지 않는다: **도구마다 도넛 하나**가 계기판에 상주하고, 어느 한도를
- * 볼지는 사람이 고른다. 그래서 여기서 볼 것은 "짐작이 맞나"가 아니라 "각 도넛이 자기
- * 도구를 말하나"다.
+ * Usage is per **account**, but differs by tool. For a long time, that answer was inferred from
+ * whatever was on screen (the tools showing in the grid). It is no longer inferred: **one donut
+ * per tool** lives permanently on the dashboard, and the person chooses which limit to look at.
+ * So what is checked here is not "is the guess correct" but "does each donut speak for its own
+ * tool."
  */
 
-test('사용량은 도구마다 도넛 하나 — 화면이 어느 도구인지 짐작하지 않는다', async ({ page }) => {
+test('usage gets one donut per tool — the screen never guesses which tool is meant', async ({ page }) => {
   await setup(page)
   await stubUsage(page)
   await newSession(page, 'alpha', 'claude', '클로드 작업')
 
-  // 클로드 세션만 보고 있어도 코덱스 도넛은 자기 자리에 있다
+  // Even while looking only at a Claude session, the Codex donut stays in its own spot
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
   await expect(page.getByTestId('usage-donut-codex')).toBeVisible()
 
@@ -366,19 +380,19 @@ test('사용량은 도구마다 도넛 하나 — 화면이 어느 도구인지 
   await expect(page.getByTestId('usage-drop')).not.toContainText('Claude Code')
   await expect(page.getByTestId('usage-panel')).toHaveCount(1)
 
-  // 다른 도넛을 누르면 그 도구의 한도로 갈아탄다 (같은 자리, 다른 답)
+  // Clicking a different donut switches to that tool's limit (same spot, different answer)
   await page.getByTestId('usage-donut-claude').click()
   await expect(page.getByTestId('usage-drop')).toContainText('Claude Code')
 })
 
 /**
- * 연결된 에이전트만 도넛을 갖는다 (사용자 요청 2026-09-09).
+ * Only a connected agent gets a donut (user request, 2026-09-09).
  *
- * 안 쓰는 도구의 빈 고리는 아무것도 말하지 않으면서 계기판의 자리를 쓴다. 판정은
- * 설치+로그인 — 세션 만들기 창이 쓰는 것과 **같은 판정**이라, 화면 두 곳이 "이 도구를
- * 쓸 수 있나"에 다르게 답하지 않는다.
+ * An empty ring for an unused tool would say nothing while still taking up space on the
+ * dashboard. The test is installed-plus-logged-in — the **same test** the new-session dialog
+ * uses, so the two places on screen never give different answers to "can this tool be used."
  */
-test('로그인 안 된 도구는 도넛이 없다', async ({ page }) => {
+test('a tool that is not logged in gets no donut', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -391,58 +405,60 @@ test('로그인 안 된 도구는 도넛이 없다', async ({ page }) => {
   await expect(page.getByTestId('intro')).toBeVisible()
   await page.getByTestId('intro-card-claude').click()
 
-  // 상세를 여는 것이 곧 다시 묻는 것이다 (방금 로그아웃했을 수도 있으니 — 세션 창과 같은 규칙)
+  // Opening the details is itself asking again (the person may have just logged out — the same rule as the session dialog)
   await page.getByTestId('usage-donut-claude').click()
 
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
   await expect(page.getByTestId('usage-donut-codex')).toHaveCount(0)
 
   /*
-   * 하나도 못 쓰면 빈 자리로 두지 않는다 — "볼 게 없다"가 아니라 **할 일이 있다**
-   * (설치·로그인). 끊김을 적는 것과 같은 규칙이다.
+   * If nothing at all can be used, the space is not left empty — the message is not "nothing to
+   * see" but **"there is something to do"** (install, log in). The same rule that logs a
+   * disconnection.
    */
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
     const claude = m.detected.find((t: any) => t.name === 'claude')
     m.detected = [{ ...claude, installed: true, loggedIn: false, detail: 'not logged in' }]
   })
-  // 닫고(첫 클릭) 다시 열면(둘째) 그때 다시 묻는다 — 닫기는 아무것도 안 물어본다
+  // Closing (first click) then reopening (second) asks again at that point — closing asks nothing
   await page.getByTestId('usage-donut-claude').click()
   await page.getByTestId('usage-donut-claude').click()
   await expect(page.getByTestId('usage-no-agent')).toBeVisible()
 })
 
 /**
- * 모르는 것을 0%로 그리지 않는다.
+ * The unknown is not drawn as 0%.
  *
- * 꽉 찬 회색 고리는 "하나도 안 썼다"로 읽힌다 — 못 읽었다는 사실이 화면에서 사라지는
- * 실패다(#26이 'claude로 조용히 떨어지던' 것과 같은 종류). 모를 때는 점선이고, 이유는
- * 눌러서 여는 상세가 말한다.
+ * A ring drawn fully gray reads as "nothing used at all" — a failure where the fact that it could
+ * not be read disappears from the screen (the same kind of failure as #26 "silently falling back
+ * to claude"). When unknown, it is dotted, and the details opened by clicking it state the reason.
  */
-test('주간 한도를 모르면 도넛이 모른다고 말한다', async ({ page }) => {
+test('if the weekly limit is unknown, the donut says so', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
-  // 기본 목은 창이 없다 — 주간을 못 고른다
+  // The default mock has no windows — weekly cannot be selected
   const donut = page.getByTestId('usage-donut-claude')
   await expect(donut).toHaveAttribute('data-percent', '')
 
   await stubUsage(page, [{ id: 'weekly_all', label: 'Weekly', percent: 93, resetsAt: null, scope: null }])
   await donut.click()
   await expect(page.getByTestId('usage-drop')).toBeVisible()
-  // 값이 오면 도넛이 그 숫자를 든다
+  // Once a value arrives, the donut carries that number
   await expect.poll(async () => donut.getAttribute('data-percent')).toBe('93')
 })
 
 
 /*
- * ── 기록 탭 (#21) ────────────────────────────────────────────────────
+ * ── History tab (#21) ────────────────────────────────────────────────────
  *
- * 깃 탭 안의 기록 띠는 커밋을 만드는 동안 곁눈질하는 맥락이라 일곱 줄에 갇혀 있다.
- * 기록을 **읽으러** 오는 것은 다른 용무라 세로 한 칸을 통째로 쓴다.
+ * The history strip inside the git tab is a context glanced at while making a commit, so it is
+ * capped at seven rows. Coming **to read** the history is a different purpose and uses a whole
+ * vertical panel.
  */
 
-/** `when`을 하루씩 뒤로 물려 커밋 목록을 만든다 (상대 날짜가 줄마다 달라지도록) */
+/** Builds a commit list, pushing `when` back one day at a time (so the relative date differs per row) */
 async function seedCommits(
   page: Page,
   list: { sha: string; subject: string; author: string; daysAgo: number }[],
@@ -459,7 +475,7 @@ async function seedCommits(
   }, list)
 }
 
-test('기록은 깃 옆의 탭이고, 짧은 해시와 얼마나 됐나를 함께 적는다', async ({ page }) => {
+test('history is a tab next to git, showing the short hash together with how long ago', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [
     { sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 },
@@ -473,12 +489,12 @@ test('기록은 깃 옆의 탭이고, 짧은 해시와 얼마나 됐나를 함�
   await expect(page.getByTestId('history-commit-aaa1111')).toContainText('aaa1111')
   await expect(page.getByTestId('history-commit-bbb2222')).toContainText('3d ago')
 
-  // 고른 탭은 다음에 열 때를 위해 스냅샷에 실린다
+  // The selected tab is carried in the snapshot, for the next time it opens
   const snap = await page.evaluate(() => (window as never as { __mock: any }).__mock.workspaceSnapshot)
   expect(snap?.panelTab).toBe('history')
 })
 
-test('혼자 쓰는 저장소면 이름을 반복하지 않고, 여럿이면 적는다', async ({ page }) => {
+test('a single-author repository does not repeat the name, but shows it once there are several authors', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [
     { sha: 'aaa1111', subject: '혼자 한 일', author: '나', daysAgo: 1 },
@@ -487,10 +503,10 @@ test('혼자 쓰는 저장소면 이름을 반복하지 않고, 여럿이면 적
   await newSession(page, 'alpha', 'claude', '작업')
   await page.getByTestId('evidence-tab-history').click()
   await expect(page.getByTestId('history-commit-aaa1111')).toContainText('1d ago')
-  // 340px에서 매 줄 같은 이름은 정보가 아니라 소음이다
+  // At 340px, the same name on every row is noise, not information
   await expect(page.getByTestId('history-commit-aaa1111')).not.toContainText('나')
 
-  // 구별할 사람이 생기면 그때 자리를 내준다
+  // Once there is someone to distinguish, it makes room at that point
   await seedCommits(page, [
     { sha: 'aaa1111', subject: '내가 한 일', author: '나', daysAgo: 1 },
     { sha: 'bbb2222', subject: '네가 한 일', author: '너', daysAgo: 2 },
@@ -500,7 +516,7 @@ test('혼자 쓰는 저장소면 이름을 반복하지 않고, 여럿이면 적
   await expect(page.getByTestId('history-commit-bbb2222')).toContainText('너')
 })
 
-test('커밋을 누르면 넓은 곳에서 diff가 펼쳐진다', async ({ page }) => {
+test('clicking a commit opens its diff in the wide view', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [{ sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 }])
   await page.evaluate(() => {
@@ -514,8 +530,8 @@ test('커밋을 누르면 넓은 곳에서 diff가 펼쳐진다', async ({ page 
   await expect(page.getByTestId('diff-view')).toContainText('새 줄')
 })
 
-/** 조용히 끊긴 목록은 "더 오래된 커밋이 없다"고 거짓말하는 목록이다 */
-test('100개에서 끊기고, 끊겼다고 화면에 적는다', async ({ page }) => {
+/** A list that is silently cut off is a list that lies by implying "there are no older commits" */
+test('the list cuts off at 100, and the screen says so', async ({ page }) => {
   await setup(page)
   await seedCommits(
     page,
@@ -533,7 +549,7 @@ test('100개에서 끊기고, 끊겼다고 화면에 적는다', async ({ page }
   await expect(page.getByTestId('evidence-history-cap')).toContainText('Newest 100 commits')
 })
 
-test('상한에 못 미치면 끊겼다는 말도 하지 않는다', async ({ page }) => {
+test('below the cap, it does not mention being cut off at all', async ({ page }) => {
   await setup(page)
   await seedCommits(
     page,
@@ -552,7 +568,7 @@ test('상한에 못 미치면 끊겼다는 말도 하지 않는다', async ({ pa
 })
 
 /*
- * ── 변경 목록 → diff ─────────────────────────────────────────────────
+ * ── Change list → diff ─────────────────────────────────────────────────
  *
  * The right-hand list stays visible while the wide view is open (#15), and that was the
  * point of leaving it there: it is where the next file comes from. So a click on it has to
@@ -560,11 +576,11 @@ test('상한에 못 미치면 끊겼다는 말도 하지 않는다', async ({ pa
  */
 
 /**
- * 줄 앞 글자는 **무슨 일이 있었나**를 말한다 (사용자 요청 2026-09-10).
- * git이 새 파일에 쓰는 `?`는 화면에서 "모른다"로 읽히지만, 실은 아는 사실이다 —
- * 새로 생긴 파일이니 A(added)다. D(삭제)·M(수정)은 git의 글자를 그대로 쓴다.
+ * The letter in front of each row says **what happened** (user request, 2026-09-10). The `?` git
+ * writes for a new file reads on screen as "unknown," but it is actually a known fact — a newly
+ * created file, so it is A (added). D (deleted) and M (modified) use git's own letters as-is.
  */
-test('새 파일은 A로, 지운 파일은 D로 선다', async ({ page }) => {
+test('a new file shows A and a deleted file shows D', async ({ page }) => {
   await setup(page)
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -583,7 +599,7 @@ test('새 파일은 A로, 지운 파일은 D로 선다', async ({ page }) => {
   expect(await mark('src/old.ts')).toBe('M')
 })
 
-test('두 번째 파일을 눌러도 diff가 따라온다 — 목록은 덮이지 않으니 계속 눌린다', async ({ page }) => {
+test('the diff follows even a second file click — the list is not covered, so it stays clickable', async ({ page }) => {
   await setup(page)
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -599,13 +615,13 @@ test('두 번째 파일을 눌러도 diff가 따라온다 — 목록은 덮이�
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
 
-  // 여기가 무너져 있었다: 이름은 src/b.ts로 바뀌는데 아래는 여전히 첫째 파일의 diff였다
+  // This was broken here: the name changed to src/b.ts but the content below was still the first file's diff
   await page.getByTestId('evidence-file-src/b.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
   await expect(page.getByTestId('diff-view')).not.toContainText('첫째 파일의 줄')
 })
 
-test('넓은 목록에서 고른 파일을 목록 갱신이 되돌리지 않는다', async ({ page }) => {
+test('a file picked from the wide list is not reverted by a list refresh', async ({ page }) => {
   await setup(page)
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -621,16 +637,16 @@ test('넓은 목록에서 고른 파일을 목록 갱신이 되돌리지 않는�
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
 
-  // 다음 파일도 사이드바에서 고른다 — 넓은 화면 안에 목록은 없다 (2026-09-07 좌측 열 제거)
+  // The next file is also picked from the sidebar — there is no list inside the wide view (the left column was removed on 2026-09-07)
   await page.getByTestId('evidence-file-src/b.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
   await page.getByTestId('evidence-stage-all').click()
   await expect(page.getByTestId('evidence-unstage-all')).toBeVisible()
-  // 스테이징으로 목록이 갈려도 보던 diff가 처음 경로로 끌려가면 안 된다
+  // Even if staging changes the list, the diff being viewed must not be dragged back to the first path
   await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
 })
 
-test('같은 파일을 다시 눌러도 열린다 — 다른 탭에 가 있어도 돌아온다', async ({ page }) => {
+test('clicking the same file again still opens it — even after switching to a different tab', async ({ page }) => {
   await setup(page)
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -642,22 +658,23 @@ test('같은 파일을 다시 눌러도 열린다 — 다른 탭에 가 있어�
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
 
-  // 사이드바에서 브랜치 화면으로 갈아탄 뒤 (오버레이 안 탭은 없다 — 진입점은 사이드바뿐, 2026-09-07)
+  // After switching to the branch view from the sidebar (there is no tab inside the overlay — the only entry point is the sidebar, since 2026-09-07)
   await page.getByTestId('evidence-branch').click()
   await expect(page.getByTestId('git-branches')).toBeVisible()
 
-  // 같은 파일을 다시 누른다 — 경로가 같다고 해서 "아무 일도 없었다"가 되면 안 된다
+  // Click the same file again — a matching path must not mean "nothing happened"
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
   await expect(page.getByTestId('git-branches')).toBeHidden()
 })
 
 /*
- * 커밋 diff는 여러 파일이 한 텍스트다 — 파일 경계마다 sticky 밴드가 선다
- * (사용자 선택 2026-09-07: 칩 나열은 파일이 많으면 UI가 무너진다). 표시만 밴드고
- * data-line은 그대로라 복사는 여전히 원문 `diff --git` 줄을 낸다 (#36).
+ * A commit diff is several files in one text — a sticky band appears at every file boundary
+ * (user's choice, 2026-09-07: a row of chips breaks the UI once there are many files). Only the
+ * display gets a band; data-line stays untouched, so copying still produces the original
+ * `diff --git` line (#36).
  */
-test('커밋 diff의 파일 경계마다 파일명 밴드가 선다', async ({ page }) => {
+test('a file-name band appears at every file boundary of a commit diff', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [{ sha: 'aaa1111', subject: '두 파일 커밋', author: '나', daysAgo: 0 }])
   await page.evaluate(() => {
@@ -687,7 +704,7 @@ test('커밋 diff의 파일 경계마다 파일명 밴드가 선다', async ({ p
   await expect(bands.nth(1)).toHaveText('src/b.ts')
 })
 
-test('커밋도 두 번째부터 열린다 — 목록이 남아 있으니 계속 눌린다', async ({ page }) => {
+test('a commit also opens from the second click onward — the list stays, so it stays clickable', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [
     { sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 },
@@ -709,8 +726,8 @@ test('커밋도 두 번째부터 열린다 — 목록이 남아 있으니 계속
   await expect(page.getByTestId('diff-view')).not.toContainText('첫 커밋의 줄')
 })
 
-/** 저장소에 묻는 질문이므로 깃 탭과 같은 취급을 받는다 */
-test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', async ({ page }) => {
+/** Since this is a question asked of the repository, it is treated the same as the git tab */
+test('when there is no git repository, the history tab is disabled just like the git tab', async ({ page }) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
   await page.getByTestId('intro-card-claude').click()
@@ -738,14 +755,14 @@ test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', a
 })
 
 /*
- * ── 자주 쓰는 명령어 (#44 → #60에서 창으로) ──────────────────────────
+ * ── Frequently used commands (#44 → moved into a dialog in #60) ──────────────────────────
  *
- * 등록·실행·삭제·로그가 한 창 안에 있다. 터미널 탭과는 별개의 실행 경로다:
- * 명령별 프로세스 하나, 마지막 실행 로그 하나. 여기서 보는 것은 **명령이 어느
- * 프로젝트로 가는가**와 **로그가 약속대로 남는가**다.
+ * Registering, running, deleting, and the log all live in one dialog. This is a run path separate
+ * from the terminal tab: one process per command, one log of the last run. What is checked here is
+ * **which project a command goes to** and **whether the log persists as promised**.
  */
 
-/** 목의 실행 장부 — 어느 프로젝트의 어떤 명령이 돌(았)는지 */
+/** The mock's run ledger — which command of which project ran, or is running */
 async function commandRuns(page: Page): Promise<{ key: string; running: boolean; history: string }[]> {
   return page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -757,7 +774,7 @@ async function commandRuns(page: Page): Promise<{ key: string; running: boolean;
   })
 }
 
-test('명령어 창: 등록 → 선택 → 실행이면 로그가 흐르고, 끝나면 종료 코드가 남는다', async ({ page }) => {
+test('the run dialog: register → select → run streams the log, and finishing leaves the exit code', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -766,12 +783,12 @@ test('명령어 창: 등록 → 선택 → 실행이면 로그가 흐르고, 끝
   await page.getByTestId('run-add').click()
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm test')
 
-  // 선택은 실행이 아니다 — 실행 버튼이 따로 있다 (#60 설계)
+  // Selecting is not running — there is a separate run button (#60 design)
   await page.getByTestId('run-command-0').click()
   expect(await commandRuns(page)).toEqual([])
   await page.getByTestId('run-exec').click()
 
-  // 돌고 있다는 표시 + 로그 스트림
+  // A running indicator + the log stream
   await expect(page.getByTestId('run-running-0')).toBeVisible()
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __store: any }
@@ -780,7 +797,7 @@ test('명령어 창: 등록 → 선택 → 실행이면 로그가 흐르고, 끝
   })
   await expect(page.getByTestId('run-log')).toContainText('테스트 3개 통과')
 
-  // 단발성의 결말: 끝나면 종료 코드가 뱃지로 남는다
+  // The ending of a one-off run: finishing leaves the exit code as a badge
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __store: any }
     const pid = Object.keys(w.__store.getState().projects)[0]
@@ -788,20 +805,20 @@ test('명령어 창: 등록 → 선택 → 실행이면 로그가 흐르고, 끝
   })
   await expect(page.getByTestId('run-exit-0')).toContainText('exit 0')
 
-  // 로그는 창을 닫았다 열어도 남는다 — 같은 명령을 다시 실행하기 전까지 (사용자 결정)
+  // The log survives closing and reopening the dialog — until the same command is run again (user decision)
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('run-menu')).toBeHidden()
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-command-0').click()
   await expect(page.getByTestId('run-log')).toContainText('테스트 3개 통과')
 
-  // 재실행은 로그를 교체한다 — 옛 로그가 새 실행 앞에 섞이면 안 된다
+  // Rerunning replaces the log — the old log must not mix in ahead of the new run
   await page.getByTestId('run-exec').click()
   await expect(page.getByTestId('run-log')).not.toContainText('테스트 3개 통과')
   await expect(page.getByTestId('run-running-0')).toBeVisible()
 })
 
-test('명령어 창: 데브 서버는 Stop으로 끄고, 로그는 남는다', async ({ page }) => {
+test('the run dialog: a dev server is stopped with Stop, and its log is kept', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -818,17 +835,17 @@ test('명령어 창: 데브 서버는 Stop으로 끄고, 로그는 남는다', a
   await expect(page.getByTestId('run-log')).toContainText('5173')
 
   await page.getByTestId('run-stop').click()
-  // 멈추면 실행 중 표시가 내려가고, 로그는 그대로다 — 종료도 결과다
+  // Stopping clears the running indicator, and the log stays — stopping is a result too
   await expect(page.getByTestId('run-exit-0')).toBeVisible()
   await expect(page.getByTestId('run-log')).toContainText('5173')
 })
 
-test('명령어가 도는 동안 여는 버튼이 흰색으로 선다', async ({ page }) => {
+test('the open button turns white while a command is running', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
   const open = page.getByTestId('run-open')
-  // `hover:text-chalk`가 늘 붙어 있으므로 경계를 물린다 — 느슨하면 항상 통과하는 검사가 된다
+  // `hover:text-chalk` is always attached, so the check anchors on a word boundary — loose matching would always pass
   const lit = /(^|\s)text-chalk(\s|$)/
   const dim = /(^|\s)text-slate(\s|$)/
   await expect(open).toHaveClass(dim)
@@ -839,7 +856,7 @@ test('명령어가 도는 동안 여는 버튼이 흰색으로 선다', async ({
   await page.getByTestId('run-command-0').click()
   await page.getByTestId('run-exec').click()
 
-  // 창을 닫아도 "돌고 있다"는 사실은 헤더에 남는다 — 문이 표시등을 겸한다
+  // Closing the dialog leaves the fact that "it is running" showing in the header — the door doubles as an indicator light
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('run-menu')).toBeHidden()
   await expect(open).toHaveClass(lit)
@@ -850,12 +867,12 @@ test('명령어가 도는 동안 여는 버튼이 흰색으로 선다', async ({
     const pid = Object.keys(w.__store.getState().projects)[0]
     w.__mock.exitCommand(pid, 'pnpm dev', 0)
   })
-  // 끝나면 도로 회색 — 다 끝난 명령까지 켜 두면 표시등이 아니라 장식이 된다
+  // Turns gray again once finished — leaving a finished command lit turns the indicator into decoration
   await expect(open).toHaveClass(dim)
   await expect(open).not.toHaveAttribute('aria-label', /running/)
 })
 
-test('명령어 창: 등록한 명령은 창을 닫았다 열어도 그대로 있다', async ({ page }) => {
+test('the run dialog: a registered command survives closing and reopening the dialog', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -869,7 +886,7 @@ test('명령어 창: 등록한 명령은 창을 닫았다 열어도 그대로 �
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm lint')
 })
 
-test('명령어 창: 지우기는 실행과 다른 과녁이다 — 지웠는데 돌면 되돌릴 수 없다', async ({ page }) => {
+test('the run dialog: deleting targets something different from running — a running command that gets deleted cannot be undone', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -882,21 +899,23 @@ test('명령어 창: 지우기는 실행과 다른 과녁이다 — 지웠는데
 
   await page.getByTestId('run-delete-0').click()
 
-  // 남은 것이 위로 올라온다 — 지운 자리가 빈 줄로 남으면 안 된다
+  // What remains moves up — the deleted spot must not stay as an empty row
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm lint')
   await expect(page.getByTestId('run-command-1')).toBeHidden()
-  // 그리고 아무것도 돌지 않았다
+  // And nothing was running
   expect(await commandRuns(page)).toEqual([])
 })
 
 /**
- * 그리드 칸의 파일 링크가 **그 칸의 프로젝트**에서 여는가 (#182).
+ * Does a grid panel's file link open from **that panel's project** (#182).
  *
- * WKWebView는 버튼 클릭에 포커스를 주지 않아서, 옆 칸의 링크를 눌러도 포커스는 원래 칸에 남는다.
- * 뷰어가 포커스된 세션에서 프로젝트를 고르면 같은 상대 경로의 **다른** 파일이 조용히 열렸다.
- * Chromium은 클릭에 포커스를 주므로(칸의 onFocusCapture가 먼저 돈다) 클릭은 이벤트로만 보낸다.
+ * WKWebView does not give focus on a button click, so clicking a link in another panel leaves
+ * focus on the originally focused panel. If the viewer picked the project from the focused
+ * session, a **different** file at the same relative path opened silently. Chromium does give
+ * focus on click (the panel's onFocusCapture runs first there), so the click is dispatched only as
+ * an event.
  */
-test('그리드: 파일 링크는 누른 칸의 프로젝트에서 열린다 — 포커스된 칸이 아니라 (#182)', async ({ page }) => {
+test('grid: a file link opens from the project of the panel it was clicked in — not the focused panel (#182)', async ({ page }) => {
   await setup(page)
   await page.evaluate(async () => {
     await (window as never as { __store: any }).__store.getState().addProject('/tmp/beta')
@@ -934,12 +953,13 @@ test('그리드: 파일 링크는 누른 칸의 프로젝트에서 열린다 —
 })
 
 /**
- * 그리드 칸의 실행 버튼이 **그 칸의 프로젝트**로 보내는가.
+ * Does a grid panel's run button send its command to **that panel's project**.
  *
- * 화면에 보이는 터미널을 기준으로 삼았다면 여기서 갈린다: 그리드에는 증거 레인이 아예
- * 없고, 직전까지 보던 프로젝트는 알파다. 명령은 누른 칸의 세션이 사는 곳으로 가야 한다.
+ * If it were keyed off whichever terminal happened to be on screen, this is where it would
+ * diverge: the grid has no evidence rail at all, and the project last looked at is alpha. A
+ * command must go to wherever the clicked panel's session lives.
  */
-test('명령어 창: 명령은 누른 칸의 프로젝트로 간다 — 직전에 보던 프로젝트가 아니라', async ({ page }) => {
+test('the run dialog: a command goes to the clicked panel\'s project — not whichever project was viewed last', async ({ page }) => {
   await setup(page)
   await page.evaluate(async () => {
     await (window as never as { __store: any }).__store.getState().addProject('/tmp/beta')
@@ -947,13 +967,13 @@ test('명령어 창: 명령은 누른 칸의 프로젝트로 간다 — 직전�
   const alpha = await newSession(page, 'alpha', 'claude', '알파 작업')
   const beta = await newSession(page, 'beta', 'claude', '베타 작업')
 
-  // 베타 세션에 명령을 등록해 두고
+  // Register a command on the beta session
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm build')
   await page.getByTestId('run-add').click()
   await page.keyboard.press('Escape')
 
-  // 화면은 알파를 보고 있게 만든 다음 그리드로 간다
+  // Set the screen to be looking at alpha, then go to the grid
   await page.evaluate(
     (id: string) => (window as never as { __store: any }).__store.getState().focusSession(id),
     alpha,
@@ -965,7 +985,7 @@ test('명령어 창: 명령은 누른 칸의 프로젝트로 간다 — 직전�
   await page.getByTestId('run-command-0').click()
   await page.getByTestId('run-exec').click()
 
-  // 베타의 것으로 기록됐다 — 로그도 그 칸 안에서 보이므로 화면을 옮길 필요가 없다 (#60)
+  // It was recorded as beta's — the log is also visible inside that panel, so there is no need to switch screens (#60)
   const runs = await commandRuns(page)
   expect(runs).toHaveLength(1)
   const betaProjectId = await page.evaluate(() => {
@@ -976,32 +996,33 @@ test('명령어 창: 명령은 누른 칸의 프로젝트로 간다 — 직전�
   expect(runs[0]!.key.startsWith(betaProjectId)).toBe(true)
 })
 
-test('명령어 창: 오케스트레이터에는 없다 — 프로젝트가 없으니 돌릴 디렉토리도 없다', async ({ page }) => {
+test('the run dialog: absent from the orchestrator — with no project there is no directory to run in', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
   await expect(page.getByTestId('run-open')).toBeVisible()
-  // 상태 점은 헤더에서 걷고, 응답 중이라는 사실은 그리드 테두리·사이드바가 맡는다.
+  // The status dot is retired from the header, and the fact that it is responding is carried by the grid border and sidebar instead.
   await expect(page.getByTestId('dot-idle')).toHaveCount(0)
 
   await page.evaluate(async () => {
     const st = (window as never as { __store: any }).__store.getState()
-    await st.openOrchestrator() // 화면만 연다 — 세션은 만들지 않는다 (#63)
-    await st.askOrchestrator('hello') // 첫 질문이 세션을 만든다
+    await st.openOrchestrator() // Opens only the screen — no session is created (#63)
+    await st.askOrchestrator('hello') // The first question creates the session
   })
   await expect(page.getByTestId('session-name')).toContainText('Orchestrator')
   await expect(page.getByTestId('session-header-crown')).toBeVisible()
-  // 열어도 아무것도 들어갈 수 없는 메뉴는 빈 메뉴보다 없는 편이 정직하다
+  // A menu that opens to nothing that can go into it is more honest absent than empty
   await expect(page.getByTestId('run-open')).toBeHidden()
 })
 
 /**
- * 오케스트레이터도 살아 있는 세션이 된 뒤에는 Grid의 한 칸으로 볼 수 있다.
+ * Once the orchestrator becomes a live session too, it can be viewed as a panel in the grid.
  *
- * 전에는 GridView가 그 ID를 그릴 수는 있어도, 사이드바에 끌 손잡이가 없었고 칸을
- * 누르는 순간 focusSession이 전용 화면으로 빼앗아 갔다. 이 검사는 두 규칙 모두를
- * 묶는다: 첫 대화 뒤에만 끌 수 있고, Grid 안에서 고르면 Grid에 남는다.
+ * Before, GridView could render that ID, but the sidebar had no drag handle, and clicking the
+ * panel had focusSession snatch it away to the dedicated screen. This check ties both rules
+ * together: it can only be dragged after the first message, and picking it from inside the grid
+ * keeps it in the grid.
  */
-test('오케스트레이터 세션도 그리드에 올려 나란히 본다', async ({ page }) => {
+test('an orchestrator session can also be placed in the grid to view side by side', async ({ page }) => {
   await setup(page)
   await page.evaluate(async () => {
     const st = (window as never as { __store: any }).__store.getState()
@@ -1021,7 +1042,7 @@ test('오케스트레이터 세션도 그리드에 올려 나란히 본다', asy
   expect(await page.evaluate(() => (window as never as { __store: any }).__store.getState().view)).toBe('grid')
 })
 
-test('명령 별칭: 이름이 앞서고 명령이 받친다 — 목록·실행 줄·터미널 패널 모두 (2026-09-06)', async ({ page }) => {
+test('command aliases: the name leads and the command backs it up — in the list, the selected-run row, and the terminal panel (2026-09-06)', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -1029,7 +1050,7 @@ test('명령 별칭: 이름이 앞서고 명령이 받친다 — 목록·실행 
   await page.getByTestId('run-add-input').fill('pnpm dev')
   await page.getByTestId('run-add-name').fill('데브 서버')
   await page.getByTestId('run-add').click()
-  // 이름을 보여주는 자리는 명령도 같이 보여준다 — 이름이 몰래 딴 명령을 뜻하게 되는 표류 방지
+  // Wherever the name is shown, the command shows alongside it — this prevents the name from silently drifting to mean a different command
   await expect(page.getByTestId('run-command-0')).toContainText('데브 서버')
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm dev')
 
@@ -1038,12 +1059,12 @@ test('명령 별칭: 이름이 앞서고 명령이 받친다 — 목록·실행 
   await expect(page.getByTestId('run-selected')).toContainText('데브 서버 · pnpm dev')
   await page.keyboard.press('Escape')
 
-  // 터미널 패널의 명령 터미널에도 둘 다
+  // Both show in the command terminal of the terminal panel too
   await page.getByTestId('evidence-tab-terminal').click()
   await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('데브 서버')
   await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('pnpm dev')
 
-  // 별칭 고치기 — hover에 나오는 버튼으로, Enter로 저장
+  // Editing the alias — using the button that appears on hover, saved with Enter
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-command-0').hover()
   await page.getByTestId('run-rename-0').click()
@@ -1054,18 +1075,19 @@ test('명령 별칭: 이름이 앞서고 명령이 받친다 — 목록·실행 
 })
 
 /*
- * ── 실행 중 명령의 터미널 패널 투영 (#60 최종 형태, 사용자 결정 2026-09-06) ──
+ * ── The terminal panel projection of a running command (#60's final form, user decision 2026-09-06) ──
  *
- * 창을 닫아도 — 그리드에서 칸을 내려도 — 돌고 있는 명령은 터미널 패널에 터미널
- * 하나로 서 있어야 한다. 그리고 어떤 이유로든 끝나면(정상·크래시·Stop) 그 터미널은
- * **내려간다**: 여기는 "지금 돌고 있는 것"의 자리고, 지난 로그의 정본은 실행 창이다.
+ * Closing the dialog — or taking a panel down from the grid — must still leave a running command
+ * standing as one terminal in the terminal panel. And once it finishes for any reason (a clean
+ * exit, a crash, or Stop), that terminal **goes down**: this is the place for "what is running
+ * right now," and the run dialog is the source of truth for past logs.
  */
 
-test('돌고 있는 명령은 터미널 패널에 터미널로 선다 — 끝나면 어떤 이유로든 내려간다', async ({ page }) => {
+test('a running command shows as a terminal in the terminal panel — and goes down for any reason it finishes', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
-  // 실행 창에서 데브 서버를 켜고 창을 닫는다
+  // Start a dev server from the run dialog and close the dialog
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
   await page.getByTestId('run-add').click()
@@ -1074,7 +1096,7 @@ test('돌고 있는 명령은 터미널 패널에 터미널로 선다 — 끝나
   await expect(page.getByTestId('run-running-0')).toBeVisible()
   await page.keyboard.press('Escape')
 
-  // 터미널 탭: 셸 옆에 명령 터미널이 서 있고, 로그가 흐르고, 탭에 점이 남는다
+  // Terminal tab: a command terminal stands next to the shell, the log streams, and a dot stays on the tab
   await page.getByTestId('evidence-tab-terminal').click()
   await expect(page.getByTestId('cmd-term-pnpm dev')).toBeVisible()
   await expect(page.getByTestId('terminal-tab-running')).toBeVisible()
@@ -1085,13 +1107,13 @@ test('돌고 있는 명령은 터미널 패널에 터미널로 선다 — 끝나
   })
   await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('5173')
 
-  // 패널을 접어도 "돌고 있다"는 접히지 않는다 — 점을 누르면 다시 열린다
+  // Collapsing the panel does not collapse "it is running" — clicking the dot reopens it
   await page.getByTestId('evidence-close').click()
   await expect(page.getByTestId('evidence-rail-running')).toBeVisible()
   await page.getByTestId('evidence-rail-running').click()
   await expect(page.getByTestId('cmd-term-pnpm dev')).toBeVisible()
 
-  // 크래시 — 터미널이 내려가고 뱃지도 꺼진다. 로그는 실행 창에 남는다
+  // A crash — the terminal goes down and the badge clears too. The log survives in the run dialog
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __store: any }
     const pid = Object.keys(w.__store.getState().projects)[0]
@@ -1106,7 +1128,7 @@ test('돌고 있는 명령은 터미널 패널에 터미널로 선다 — 끝나
   await expect(page.getByTestId('run-log')).toContainText('5173')
 })
 
-test('명령 터미널의 ×는 정지다 — Stop의 결말(exit)로 터미널이 내려가고 셸은 산다', async ({ page }) => {
+test('the × on a command terminal means stop — the resulting exit takes the terminal down and the shell survives', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -1122,29 +1144,30 @@ test('명령 터미널의 ×는 정지다 — Stop의 결말(exit)로 터미널�
   await page.getByTestId('cmd-term-stop-pnpm dev').click()
   await expect(page.getByTestId('cmd-term-pnpm dev')).toBeHidden()
 
-  // 내려간 것은 명령 칸뿐이다 — 셸 터미널은 그대로 산다
+  // Only the command panel goes down — the shell terminal survives untouched
   const shells = page.getByTestId('terminal-stack').locator('[data-testid^="terminal-mock-term-"]')
   await expect(shells.first()).toBeVisible()
 })
 
 /*
- * ── 도는 것들은 한 시계를 본다 ──────────────────────────────────────
+ * ── Things that spin watch one clock ──────────────────────────────────────
  *
- * 사이드바 표식과 그리드 칸 테두리는 같은 궤도를 같은 1.4초로 돈다. 그런데 CSS
- * 애니메이션은 **요소가 생긴 순간**부터 세므로, 도는 중인 세션을 뒤늦게 그리드로
- * 데려오면 칸의 궤도만 거기서 0부터 시작한다. 실측 758ms — 거의 정반대였다.
- * 주기가 같아도 위상이 다르면 눈에는 그냥 따로 노는 두 개다.
+ * The sidebar marker and the grid panel border spin the same orbit at the same 1.4 seconds. But a
+ * CSS animation counts from **the moment the element is created**, so bringing a spinning session
+ * into the grid late means the panel's orbit alone starts over from 0. Measured at 758ms out of
+ * phase — nearly the exact opposite. Even with the same period, a different phase looks to the eye
+ * like two things spinning independently.
  */
-test('그리드 칸 테두리와 사이드바 표식은 같은 각도로 돈다 — 늦게 합류해도', async ({ page }) => {
+test('the grid panel border and the sidebar marker spin at the same angle — even joining late', async ({ page }) => {
   await setup(page)
   const id = await newSession(page, 'alpha', 'claude', '작업')
 
-  // 먼저 포커스 뷰에서 돌기 시작한다 — 사이드바 표식의 궤도는 여기서 태어난다
+  // Start spinning first in the focus view — this is where the sidebar marker's orbit is born
   await page.getByTestId('prompt-input').fill('오래 걸리는 일')
   await page.getByTestId('send').click()
   await expect(page.getByTestId('tool-mark-claude')).toHaveClass(/cc-orbit/)
 
-  // ...칸은 한참 뒤에 생긴다. 고치기 전에는 이 간격이 그대로 각도 차이였다
+  // ...the panel is created much later. Before the fix, this gap was exactly the angle difference
   await page.waitForTimeout(700)
   await openGrid(page, [id])
   await expect(page.getByTestId(`grid-panel-${id}`)).toHaveClass(/cc-orbit-ring/)
@@ -1156,36 +1179,37 @@ test('그리드 칸 테두리와 사이드바 표식은 같은 각도로 돈다 
       .map((a) => Math.round(Number(a.currentTime))),
   )
   expect(phases).toHaveLength(2)
-  // 같은 각도다. 프레임 하나(16.7ms) 안쪽이면 눈에는 같은 것이다
+  // The same angle. Within one frame (16.7ms), it looks the same to the eye
   expect(Math.abs(phases[0]! - phases[1]!)).toBeLessThan(17)
 })
 
 /*
- * ── 고른 세션은 손을 따라간다 ──────────────────────────────────────
+ * ── The picked session follows the cursor ──────────────────────────────────────
  *
- * 그리드 안에서는 아무도 focusedSessionId를 바꾸지 않았다 — 앱을 켤 때 복원된
- * 세션에 며칠이고 박제됐다 (도그푸딩). 다른 칸의 입력창에 손을 얹으면 고른 것도
- * 따라와야 한다: markRead와 "마지막 보던 세션"(다음 실행의 예열 대상)이 이 값에서
- * 나온다. 뷰는 그리드에 남아야 한다. (테두리로 그리지는 않는다 — 같은 도그푸딩에서
- * 표시 자체를 걷어냈다. 커서가 이미 말하는 것을 테두리가 반복할 이유가 없다.)
+ * Inside the grid, nothing ever changed focusedSessionId — it stayed frozen for days on whatever
+ * session was restored when the app started (dogfooding). Placing the cursor on a different
+ * panel's composer must move the pick along with it: markRead and "the last session looked at"
+ * (the target warmed up for the next run) come from this value. The view must stay in the grid.
+ * (This is not drawn as a border — the same dogfooding case removed that indicator entirely.
+ * There is no reason for a border to repeat what the cursor already says.)
  */
-test('그리드에서 다른 칸의 입력창을 누르면 고른 세션이 따라온다 — 뷰는 그리드 그대로', async ({ page }) => {
+test('clicking a different panel\'s composer in the grid moves the picked session — the view stays the grid', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '첫째')
   const b = await newSession(page, 'alpha', 'claude', '둘째')
   await openGrid(page, [a, b])
 
-  // 마지막으로 고른 세션(b)에서 시작한다
+  // Start from the last-picked session (b)
   await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-focused', 'true')
 
-  // 접힌 입력창은 아래쪽에 손이 와야 떠오른다 (사람이 하는 것과 같은 순서)
+  // A collapsed composer only rises once the cursor reaches the bottom (the same order a person follows)
   const boxA = (await page.getByTestId(`grid-panel-${a}`).boundingBox())!
   await page.mouse.move(boxA.x + boxA.width / 2, boxA.y + boxA.height - 20)
   await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').click()
 
   await expect(page.getByTestId(`grid-panel-${a}`)).toHaveAttribute('data-focused', 'true')
   await expect(page.getByTestId(`grid-panel-${b}`)).not.toHaveAttribute('data-focused', 'true')
-  // 고른 것이 바뀌었다고 포커스 뷰로 끌려가면 안 된다 (preferGrid)
+  // Changing the pick must not pull the view into the focus view (preferGrid)
   await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
 })
 
@@ -1354,8 +1378,9 @@ async function dropOnBodyBottom(page: Page) {
 }
 
 /**
- * 탭 띠 한 줄이 두 가지를 진다 (사용자 요청 2026-09-07): 왼쪽은 어디로 갈지, 오른쪽은
- * **지금 탭의 제어 버튼**. 예전엔 탭마다 머리띠를 하나 더 그려서 띠가 두 줄이었다.
+ * One tab-strip row carries two things (user request, 2026-09-07): the left side for where to go,
+ * the right side for **the current tab's controls**. It used to draw an extra header per tab,
+ * making the strip two rows.
  */
 test('the active tab\'s controls live in the tab strip, not in a second header', async ({ page }) => {
   await setup(page)
@@ -1365,15 +1390,16 @@ test('the active tab\'s controls live in the tab strip, not in a second header',
   await page.getByTestId('evidence-tab-terminal').click()
   await expect(actions.getByTestId('terminal-add')).toBeVisible()
 
-  // 탭을 바꾸면 버튼도 그 탭의 것으로 바뀐다 — 남의 버튼은 남지 않는다
+  // Switching tabs also switches the buttons to that tab's own — no leftover button from another tab
   await page.getByTestId('evidence-tab-files').click()
   await expect(actions.getByTestId('toggle-ignored')).toBeVisible()
   await expect(actions.getByTestId('terminal-add')).toHaveCount(0)
 })
 
 /**
- * 좁아지면 양보하는 쪽은 탭이다 — 제어 버튼은 보고 있는 것에 대한 행동이라 안 접힌다.
- * 접힌 탭은 사라진 게 아니라 `…` 뒤에서 이름으로 고를 수 있다.
+ * When space runs short, tabs are the side that yields — control buttons act on what is being
+ * viewed, so they never fold. A folded tab has not disappeared; it can still be picked by name
+ * behind the `…`.
  */
 test('when the strip runs out of room the extra tabs fold into a … menu', async ({ page }) => {
   await setup(page)
@@ -1381,18 +1407,18 @@ test('when the strip runs out of room the extra tabs fold into a … menu', asyn
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('evidence-tab-terminal')).toBeVisible()
 
-  // 'Show ignored'가 오른쪽을 차지하는 폭이면 마지막 탭이 밀려난다
+  // At a width where 'Show ignored' takes up the right side, the last tab gets pushed out
   await page.evaluate(() => (window as never as { __store: any }).__store.getState().setPanelWidth(280))
 
   const more = page.getByTestId('evidence-tabs-more')
   await expect(more).toBeVisible()
   await expect(page.getByTestId('evidence-tab-terminal')).toHaveCount(0)
-  // 고르고 있던 탭은 접히지 않는다 — 지금 어디에 있는지가 화면에서 사라지면 안 된다
+  // The tab currently selected does not fold — the screen must never lose track of where the person currently is
   await expect(page.getByTestId('evidence-tab-files')).toBeVisible()
 
   await more.click()
   await page.getByTestId('evidence-overflow-tab-terminal').click()
-  // 고른 탭은 자리를 얻는다 (자리를 내주는 건 그 대신 접히는 다른 탭이다)
+  // The picked tab gets a slot (a different tab folds instead to make room)
   await expect(page.getByTestId('evidence-tab-terminal')).toBeVisible()
   await expect(page.getByTestId('evidence-actions').getByTestId('terminal-add')).toBeVisible()
 })
@@ -1414,7 +1440,7 @@ test('tab order is dragged, and survives a relaunch — one arrangement for the 
    * again (the mock's projects are in-memory), and the arrangement must already be back.
    */
   await page.goto('/?mock=1')
-  // 소개 화면은 다시 나오지 않는다 — introSeen이 스냅샷(localStorage)에 남았다 (#63)
+  // The intro screen does not appear again — introSeen was saved in the snapshot (localStorage) (#63)
   await expect(page.getByTestId('add-project')).toBeVisible()
   await page.evaluate((p: string) => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
@@ -1445,11 +1471,12 @@ test('dragging a tab to the bottom half splits the panel — two tabs visible at
 })
 
 /*
- * 나눈 비율 조절 (도그푸딩 요청). 반반 고정은 "터미널은 좁아도 되고 diff는 넓어야
- * 한다"를 못 담았다. 경계(아래 몸통의 윗변)를 끌면 몫이 바뀌고, 스냅샷에 실려
- * 재실행에도 남으며, 더블클릭이면 반반으로 돌아온다.
+ * Adjusting the split ratio (dogfooding request). A fixed 50/50 split could not express "the
+ * terminal can be narrow but the diff needs to be wide." Dragging the boundary (the top edge of
+ * the bottom body) changes the ratio, which is carried in the snapshot and survives a relaunch,
+ * and a double-click resets it to 50/50.
  */
-test('나뉜 두 칸의 경계는 끌어서 옮긴다 — 재실행에도 남고, 더블클릭이면 반반', async ({ page }) => {
+test('the boundary between two split panels is dragged to move it — it survives a relaunch, and a double-click resets it to 50/50', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
   await startTabDrag(page, 'files')
@@ -1460,7 +1487,7 @@ test('나뉜 두 칸의 경계는 끌어서 옮긴다 — 재실행에도 남고
     page.getByTestId('evidence-body-0').evaluate((el) => el.getBoundingClientRect().height)
   const before = await topHeight()
 
-  // 경계를 아래로 120px — 위 몸통이 커진다
+  // The boundary moves down 120px — the top body grows
   const handle = page.getByTestId('panel-split-handle')
   const hb = (await handle.boundingBox())!
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
@@ -1471,12 +1498,12 @@ test('나뉜 두 칸의 경계는 끌어서 옮긴다 — 재실행에도 남고
   const saved = await page.evaluate(() => (window as any).__store.getState().panelSplit)
   expect(saved).toBeGreaterThan(0.6)
 
-  // 재실행 — 배치가 돌아오는 자리에서 비율도 같이 돌아온다
+  // A relaunch — the ratio comes back right where the layout comes back
   await page.goto('/?mock=1')
   await expect(page.getByTestId('add-project')).toBeVisible()
   expect(await page.evaluate(() => (window as any).__store.getState().panelSplit)).toBeCloseTo(saved, 5)
 
-  // 되돌리기: 프로젝트를 다시 붙여 패널을 띄우고 더블클릭 — 반반
+  // Resetting: re-add the project to bring the panel up, then double-click — back to 50/50
   await page.evaluate((p: string) => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
   }, '/tmp/alpha')
@@ -1562,7 +1589,7 @@ test('⌘⇧1–4 keeps working after a reorder — the digit follows the tab, n
   await expect(page.getByTestId('evidence-git')).toBeVisible()
 })
 
-test('끄는 동안 격자가 미리 재배열된다 — 칸 크기는 그대로, 저장은 아직', async ({ page }) => {
+test('the grid previews the rearrangement while dragging — panel sizes stay put, nothing is saved yet', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '첫째')
   const b = await newSession(page, 'alpha', 'claude', '둘째')
@@ -1593,7 +1620,7 @@ test('끄는 동안 격자가 미리 재배열된다 — 칸 크기는 그대로
   expect(await storedPanels(page)).toEqual([a, b, c])
 })
 
-test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 이동한다 (스크롤이 산다)', async ({ page }) => {
+test('dropping leaves it exactly as previewed — panels move as the same node (scroll survives)', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '첫째')
   const b = await newSession(page, 'alpha', 'claude', '둘째')
@@ -1685,20 +1712,21 @@ test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 �
 })
 
 /**
- * 알림에서 오는 길은 **그리드를 우선한다** (도그푸딩 요청).
+ * The path in from a notification **prefers the grid** (dogfooding request).
  *
- * 칸에 올려 둔 것은 보려고 올린 것이다. 그 세션이 응답을 마쳤다고 해서 그리드를 걷고
- * 큰 화면 하나로 갈아치우면, 알림 하나가 나머지 칸을 전부 화면에서 치우는 셈이 된다.
- * 대신 그 칸이 밝아지고 그 칸의 입력창에 손이 얹힌다 — 온 이유가 답하러 온 것이라서다.
+ * A session placed in a panel was placed there to be watched. If that session finishing its
+ * response tore down the grid and swapped in one big screen, a single notification would end up
+ * clearing every other panel off the screen. Instead, that panel lights up and its composer gets
+ * focus — because the reason for coming here was to reply.
  */
-test('알림에서 누른 세션이 그리드에 있으면 그리드의 그 칸으로 간다', async ({ page }) => {
+test('a session clicked from a notification that is in the grid goes to that panel in the grid', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '첫째')
   const b = await newSession(page, 'alpha', 'claude', '둘째')
   await openGrid(page, [a, b])
   await expect(page.getByTestId('grid')).toBeVisible()
 
-  // 그리드를 보고 있는 중에 b가 응답을 마친다 — 보고 있지 않은 세션이라 카드가 뜬다
+  // b finishes its response while the grid is being watched — since it is not the session being watched, a card shows up
   await page.evaluate((id: string) => (window as any).__store.getState().focusSession(id), a)
 
   await page.evaluate((id: string) => {
@@ -1709,14 +1737,14 @@ test('알림에서 누른 세션이 그리드에 있으면 그리드의 그 칸�
 
   await page.getByTestId('notice-open').click()
 
-  // 그리드에 남아 있고, 온 이유인 칸이 밝다
+  // Stays in the grid, and the panel that caused the notification is lit
   expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('grid')
   await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-focused', 'true')
   await expect(page.getByTestId(`grid-panel-${a}`)).not.toHaveAttribute('data-focused', 'true')
 })
 
-/** 그리드에 없는 세션이면 예전 그대로 — 큰 화면으로 간다 */
-test('그리드에 없는 세션은 알림에서 눌러도 포커스 뷰로 간다', async ({ page }) => {
+/** A session not in the grid behaves as before — it goes to the big screen */
+test('a session that is not in the grid still goes to the focus view when clicked from a notification', async ({ page }) => {
   await setup(page)
   const onGrid = await newSession(page, 'alpha', 'claude', '칸 안')
   const outside = await newSession(page, 'alpha', 'claude', '칸 밖의 세션')

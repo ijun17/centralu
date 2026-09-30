@@ -1,32 +1,33 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * 입력 지연 실측 (도그푸딩: "입력창이 좀 버벅거린다").
+ * Measured input latency (dogfooding finding: "the composer feels a bit laggy").
  *
- * 재는 것은 **글자 하나에 드는 일**이다: input 이벤트를 넣은 순간부터 React가
- * 렌더·커밋·레이아웃을 끝내고 dispatch가 돌아올 때까지.
+ * What is measured is **the cost of a single keystroke**: from the moment an input event is
+ * dispatched to the moment React finishes render, commit and layout and dispatch returns.
  *
- * 대화 길이를 바꿔가며 잰다. 초안(draft)이 전역 스토어에 있어서 한 글자마다 세션
- * 화면 전체가 다시 그려진다면, 이 숫자는 **대화가 길어질수록 커진다** — 입력창의
- * 비용이 대화의 크기에 비례할 이유는 없으므로, 그 기울기 자체가 증거다.
+ * Measured across varying conversation lengths. If the draft lives in the global store such that
+ * the whole session view re-renders on every keystroke, this number **grows as the conversation
+ * grows** — there is no reason the composer's cost should scale with the size of the conversation,
+ * so that slope is itself the evidence.
  *
- * 이 하네스가 처음 답한 것은 시간이 아니라 **누가 다시 그려지는가**였다. 임시로
- * 렌더 계수기를 심어 재니 글자 하나마다:
- *   before  pane=1.0  stream=1.0  row=2.0   (답변 흐르는 중 pane=2.0 row=4.5)
- *   after   composer=1.0, 나머지 0           (답변 흐르는 중에도 composer=1.0)
- * 시간(p50 1~2ms)은 이 화면 크기·이 마크다운 양에서 잰 값이라 상한이 아니다 —
- * 줄인 것은 "대화가 커지면 같이 커지던 비용"이다.
+ * What this harness first answered was not timing but **who re-renders**. Planting a temporary
+ * render counter and measuring per keystroke:
+ *   before  pane=1.0  stream=1.0  row=2.0   (pane=2.0 row=4.5 while a response streams)
+ *   after   composer=1.0, everything else 0  (composer=1.0 even while a response streams)
+ * The timing (p50 1–2ms) is measured at this screen size and this amount of markdown, so it is
+ * not a ceiling — what was cut down is "the cost that used to grow along with the conversation."
  *
- * 문턱은 세우지 않는다 (perf-idle과 같은 이유) — 여기서 나오는 건 숫자다.
+ * No threshold is set (same reason as perf-idle) — what comes out of this is a number.
  *   PERF=1 pnpm e2e perf-typing --workers=1
  *
- * WebKit으로 잰다 — 실물은 WKWebView다.
+ * Measured on WebKit — the real app is WKWebView.
  */
 test.use({ browserName: 'webkit' })
 test.describe.configure({ mode: 'serial' })
 
 test.beforeEach(() => {
-  test.skip(!process.env.PERF, 'PERF=1 일 때만')
+  test.skip(!process.env.PERF, 'Only when PERF=1')
 })
 
 type Sample = { p50: number; p95: number; max: number; commits: number; keys: number }
@@ -37,7 +38,7 @@ const show = (label: string, s: Sample) =>
   )
 
 async function boot(page: Page): Promise<string> {
-  // React보다 먼저 갈고리를 걸어야 커밋이 보인다 (perf-idle과 같은 방식)
+  // The hook has to attach before React does, or commits go unseen (same approach as perf-idle)
   await page.addInitScript(() => {
     const w = window as never as { __commits: number; __REACT_DEVTOOLS_GLOBAL_HOOK__: unknown }
     w.__commits = 0
@@ -85,11 +86,12 @@ async function boot(page: Page): Promise<string> {
 }
 
 /**
- * 대화를 채운다.
+ * Fills the conversation.
  *
- * 한 턴을 **실제 답변만 한 크기**로 만든다 (~1.5KB, 코드 블록 포함). 짧은 한 줄로
- * 채우면 화면에 보이는 줄이 몇 개든 마크다운 파싱이 거의 공짜라, 재렌더가 진짜
- * 얼마인지가 안 보인다 — 사람이 겪는 건 긴 답변 몇 개가 화면을 채운 상태다.
+ * Makes each turn **the size of an actual response** (~1.5KB, including a code block). Filling it
+ * with short one-liners would make markdown parsing nearly free no matter how many lines are on
+ * screen, hiding the true cost of a re-render — what a person actually experiences is a screen
+ * filled with a few long responses.
  */
 async function fill(page: Page, id: string, turns: number) {
   await page.evaluate(
@@ -119,11 +121,12 @@ async function fill(page: Page, id: string, turns: number) {
 }
 
 /**
- * 글자를 하나씩 넣고 **그 프레임이 그려질 때까지**를 잰다.
+ * Enters characters one at a time and measures **until that frame is painted**.
  *
- * Playwright의 타이핑 대신 in-page에서 재는 이유: keyboard.type은 CDP 왕복이 섞여
- * 재려는 구간(React 렌더 + 레이아웃 + 페인트)보다 잡음이 크다. React가 듣는 것은
- * 결국 네이티브 setter + input 이벤트라, 실제 타이핑과 같은 경로를 탄다.
+ * Why this measures in-page instead of using Playwright's typing: keyboard.type mixes in CDP
+ * round trips whose noise is larger than the interval being measured (React render + layout +
+ * paint). What React actually listens for is a native setter plus an input event, so this takes
+ * the same path as real typing.
  */
 async function typeAndMeasure(page: Page, keys: number): Promise<Sample> {
   await page.getByTestId('prompt-input').click()
@@ -137,10 +140,11 @@ async function typeAndMeasure(page: Page, keys: number): Promise<Sample> {
       const t0 = performance.now()
       setter.call(el, el.value + 'a')
       /*
-       * 여기서 끝나는 구간을 잰다: React는 input 같은 discrete 이벤트를 **동기로**
-       * 흘려보내므로, dispatch가 돌아온 시점이면 렌더·커밋과 useLayoutEffect(높이 재기)가
-       * 모두 끝나 있다. rAF까지 기다리면 숫자가 화면 주사율(16.7ms)에 눌려 붙어버려
-       * 정작 우리가 줄이려는 일의 크기가 안 보인다.
+       * The interval measured ends right here: React flushes a discrete event like input
+       * **synchronously**, so by the time dispatch returns, render, commit, and
+       * useLayoutEffect (measuring height) are all finished. Waiting for rAF instead would
+       * flatten the number against the screen's refresh rate (16.7ms) and hide the very size
+       * of the work being cut down.
        */
       el.dispatchEvent(new Event('input', { bubbles: true }))
       times.push(performance.now() - t0)
@@ -153,10 +157,11 @@ async function typeAndMeasure(page: Page, keys: number): Promise<Sample> {
 }
 
 /**
- * 답변이 흐르는 동안 친다 — 실제로 버벅인다고 느끼는 순간이 여기다.
+ * Types while a response is streaming — this is the moment that actually feels laggy.
  *
- * 에이전트가 말하는 중에 다음 지시를 치는 것은 이 앱의 일상적인 조작이고, 그때
- * 화면은 스트리밍 때문에 이미 계속 다시 그려지고 있다. 타이핑의 비용은 그 위에 얹힌다.
+ * Typing the next instruction while the agent is still talking is routine for this app, and at
+ * that moment the screen is already re-rendering continuously because of the streaming. The cost
+ * of typing sits on top of that.
  */
 async function stream(page: Page, id: string, on: boolean) {
   await page.evaluate(
@@ -176,7 +181,7 @@ async function stream(page: Page, id: string, on: boolean) {
   )
 }
 
-test('한 글자를 치면 얼마가 드는가', async ({ page }) => {
+test('what does typing one character cost', async ({ page }) => {
   test.setTimeout(180000)
   const id = await boot(page)
 

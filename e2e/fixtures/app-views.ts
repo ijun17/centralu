@@ -6,17 +6,19 @@ import { OriginPorts } from '../../packages/agent-host/src/views/origin-ports.js
 import { VIEW_MIME_TYPE } from '../../packages/agent-host/src/views/view-document.js'
 
 /**
- * 앱 화면 e2e의 host 쪽 (M4 B-3).
+ * The host side of the app-view e2e (M4 B-3).
  *
- * 문서를 읽는 쪽(`ViewSource`)만 대역이고(앱 프로세스를 띄우지 않으려고. 런타임과의 이음새는
- * agent-host의 app-views.test.ts가 진짜 앱으로 본다), 나머지는 진짜 host 코드다. 같은 비밀 게이트의 HostServer, 같은 ViewHost(프록시 페이지, CSP, 앱별
- * 출처 포트)를 쓴다. 화면 HTML은 공식 ext-apps 2.x의 `App`을 쓰는 작은 앱이다. 번들을 그대로
- * 안에 싣는다. 규격의 기본 CSP는 바깥 스크립트를 막으므로 실제 앱도 이렇게 한 파일로 온다(S-6).
+ * Only the document-reading side (`ViewSource`) is a stand-in, so as to avoid starting an app
+ * process (the seam with the runtime is covered with a real app by agent-host's
+ * app-views.test.ts); everything else is real host code. It uses the same secret-gated
+ * HostServer, the same ViewHost (proxy page, CSP, per-app origin ports). The view HTML is a small
+ * app that uses `App` from the official ext-apps 2.x, with the bundle inlined as-is. The spec's
+ * default CSP blocks outside scripts, so real apps ship the same way, as a single file (S-6).
  */
 
 const uiRequire = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
 
-/** `app-with-deps.js`의 마지막 `export{…}`를 풀어 `App`을 지역 이름으로 꺼낸다 */
+/** Unpacks `app-with-deps.js`'s trailing `export{…}` to pull out `App` under its local name */
 function extAppsInline(): string {
   const src = readFileSync(uiRequire.resolve('@modelcontextprotocol/ext-apps/app-with-deps'), 'utf8')
   const m = /export\{([^}]*)\};?\s*$/.exec(src)
@@ -33,9 +35,10 @@ function extAppsInline(): string {
 let bundle: string | null = null
 
 /**
- * 시험용 앱 화면. 받은 것은 모두 `#log`에 한 줄씩 적는다(시험이 프레임 안을 읽는다).
- * 단추는 화면이 host에 부탁할 수 있는 것을 하나씩 해 본다. `marker`는 이 HTML이 어느 판인지 화면에 적는다 —
- * 앱이 새 코드로 다시 뜬 뒤 화면이 새 HTML을 읽었는지를 시험이 본다(M4 C-4).
+ * The test app view. Everything it receives is written to `#log` one line at a time (the test
+ * reads inside the frame). Each button exercises one thing the view can ask the host to do.
+ * `marker` writes which build of this HTML is loaded onto the screen — the test uses it to check
+ * whether the view picked up the new HTML after the app restarted with new code (M4 C-4).
  */
 export function fixtureViewHtml(opts: { hangTeardown?: boolean; ignoreNotifications?: boolean; marker?: string } = {}): string {
   bundle ??= extAppsInline()
@@ -69,26 +72,31 @@ app.ontoolinput = (p) => log('tool-input', p.arguments)
 app.ontoolresult = (p) => log('tool-result', p.structuredContent ?? p.content)
 app.ontoolcancelled = (p) => log('tool-cancelled', p.reason ?? null)
 app.onhostcontextchanged = (p) => log('host-context-changed', p)
-// 실제 앱이 teardown에서 하는 일: 저장하고 답한다. 저장이 목에 닿으면 화면이 요청을 받은 것이다
+// What a real app does in teardown: save, then respond. Once the save reaches the host, the
+// view has received the request.
 app.onteardown = ${opts.hangTeardown ? '() => new Promise(() => {})' : "async () => { await app.callServerTool({ name: 'save-on-teardown', arguments: {} }); log('teardown', {}); return {} }"}
-// 우리 템플릿이 하는 일: 모르는 알림을 받아 본다. 다른 호스트용 앱은 이 줄이 없다(ignoreNotifications)
+// What our template does: listen for unknown notifications. Apps built for other hosts do not
+// have this line (ignoreNotifications).
 ${opts.ignoreNotifications ? '' : "app.fallbackNotificationHandler = async (n) => log('notification', { method: n.method, params: n.params })"}
 const on = (id, fn) => document.getElementById(id).addEventListener('click', () => fn().catch((e) => log(id + '-error', String(e && e.message || e))))
 on('call', async () => log('call-result', (await app.callServerTool({ name: 'increment', arguments: { by: 2 } })).structuredContent))
-// 메시지 안에 다른 앱을 적어 본다 — params와 _meta 양쪽에
+// Try claiming a different app inside the message — in both params and _meta
 on('spoof', async () => log('spoof-result', (await app.callServerTool({ name: 'increment', arguments: { by: 1 }, appId: 'victim', projectId: 'p-victim', _meta: { appId: 'victim', projectId: 'p-victim', instanceId: 'stolen' } })).structuredContent))
-// SDK를 거치지 않은 날 JSON-RPC — 규격 밖의 칸을 마음대로 붙여 보낸다
+// Raw JSON-RPC that bypasses the SDK — attach arbitrary fields the spec does not define
 on('raw', async () => { window.parent.postMessage({ jsonrpc: '2.0', id: 900001, method: 'tools/call', params: { name: 'increment', arguments: { raw: true }, appId: 'victim', app: 'victim', projectId: 'p-victim' } }, '*'); log('raw-sent', {}) })
-// 프록시를 건너뛰고 최상위 창에 곧바로
+// Skip the proxy and go straight to the top-level window
 on('direct', async () => { window.top.postMessage({ jsonrpc: '2.0', id: 900002, method: 'tools/call', params: { name: 'increment', arguments: { direct: true } } }, '*'); log('direct-sent', {}) })
 on('link', async () => log('link-result', await app.openLink({ url: 'https://example.test/docs?from=view' })))
 on('bad-link', async () => log('bad-link-result', await app.openLink({ url: 'javascript:alert(1)' })))
 on('msg', async () => log('msg-result', await app.sendMessage({ role: 'user', content: [{ type: 'text', text: 'hello from the view' }] })))
 on('read', async () => log('read-result', (await app.readServerResource({ uri: 'ui://fixture/data' })).contents))
 on('grow', async () => { document.getElementById('spacer').style.height = '600px' })
-// 선에 온 진행 알림 전부 — SDK는 끝난 요청의 알림을 처리기에 넘기지 않는다. 호스트가 멈췄는지는 선에서 센다
+// Every progress notification that arrives on the wire — the SDK does not forward notifications
+// for a request that already finished to its handler, so whether the host has stopped is counted
+// on the wire instead
 window.addEventListener('message', (e) => { if (e.data && e.data.method === 'notifications/progress') log('progress-wire', e.data.params) })
-// 오래 걸리는 도구 — ext-apps가 켜 둔 대로 진행 알림에 시계를 다시 센다(onprogress만 우리 것으로 갈아 적는다)
+// A slow tool — resets the clock on progress notifications the way ext-apps has it wired,
+// swapping in only our own onprogress
 on('slow', async () => log('slow-result', (await app.callServerTool({ name: 'slow', arguments: {} }, { onprogress: (p) => log('progress', p) })).structuredContent))
 await app.connect()
 log('connected', { origin: self.origin, href: location.href, referrer: document.referrer, hostContext: app.getHostContext(), hostCapabilities: app.getHostCapabilities() })
@@ -100,13 +108,14 @@ type Served = { html: string }
 export type FixtureHost = {
   views: ViewHost
   port: number
-  /** 화면 인스턴스를 연다 — 도구 결과가 `_meta.ui.resourceUri`를 실었을 때 런타임이 하는 일 */
+  /** Opens a view instance — what the runtime does when a tool result carries `_meta.ui.resourceUri` */
   open(app: AppRef, uri: string): string
   close(): Promise<void>
 }
 
 /**
- * 진짜 HostServer + ViewHost. 앱별 출처 방식은 appId가 `-port`로 끝나는 앱에만 연다(대역의 규칙).
+ * A real HostServer + ViewHost. The per-app origin mode is turned on only for apps whose appId
+ * ends in `-port` (a rule of this stand-in).
  */
 export async function startFixtureHost(docs: Record<string, Served>): Promise<FixtureHost> {
   const secret = `e2e-${Math.random().toString(36).slice(2)}-${'x'.repeat(40)}`.replace(/[^A-Za-z0-9_-]/g, 'x')

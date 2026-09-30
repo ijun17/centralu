@@ -2,11 +2,14 @@ import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
 
 /**
- * 만들기 루프의 화면 쪽 (M4 C) — 목 플랫폼 위의 진짜 UI, 진짜 ViewHost, 공식 ext-apps `App`으로 만든 시험용 화면.
+ * The UI side of the build loop (M4 C) — real UI on a mock platform, a real ViewHost, and a test
+ * view built with the official ext-apps `App`.
  *
- * host가 하는 일(템플릿 펼치기, 만드는 세션 세우기, 머리말 짓기, 오류 묶음, 다시 띄우기)은 agent-host의 시험들이 진짜
- * 앱으로 본다. 여기서는 그 문을 부르는 화면이 무엇을 하는지를 본다. 목은 host의 판정과 말을 그대로 흉내 낸다 —
- * 거절의 말은 host의 말 그대로이고, 머리말은 host가 쓰는 같은 함수(protocol)로 짓는다.
+ * What the host does (scaffolding the template, raising the builder session, composing the
+ * preamble, bundling errors, relaunching) is covered with a real app by agent-host's tests. Here
+ * what is checked is what the UI does when it calls that door. The mock mirrors the host's exact
+ * decisions and wording — a refusal reads the host's exact words, and the preamble is composed
+ * with the same function (protocol) the host uses.
  */
 
 type AppInfo = {
@@ -44,7 +47,7 @@ function app(appId: string, projectId: string | null, over: Partial<AppInfo> = {
 const setApps = (page: Page, list: AppInfo[]) => page.evaluate((l) => (window as any).__mock.setExternalApps(l), list)
 const trustCalls = (page: Page) => page.evaluate(() => (window as any).__mock.trustCalls as { projectId: string; trusted: boolean }[])
 
-/** 폴더를 골라 프로젝트를 등록하고, 목이 붙인 id를 돌려준다. `trust`면 묻는 자리에서 곧바로 신뢰한다 */
+/** Picks a folder and registers a project, returning the id the mock assigned. If `trust`, it trusts the project right from the ask */
 async function addProject(page: Page, path: string, trust = true): Promise<string> {
   await page.evaluate((p) => ((window as any).__mock.nextPickedDirectory = p), path)
   await page.getByTestId('add-project').click()
@@ -59,7 +62,7 @@ async function addProject(page: Page, path: string, trust = true): Promise<strin
   return pid
 }
 
-/** 앱의 HTML이 도는 안쪽 프레임 (바깥은 프록시) */
+/** The inner frame the app's HTML runs in (the outer one is the proxy) */
 const viewOf = (page: Page, key: string): FrameLocator =>
   page.getByTestId(`pinned-app-${key}`).getByTestId('app-frame-iframe').contentFrame().locator('iframe').contentFrame()
 
@@ -74,8 +77,9 @@ const sessionsOfApp = (page: Page, appId: string) =>
   )
 
 /**
- * 진짜 ViewHost 한 벌 — 목의 `openView`(고정 화면)와 `viewFrame`(화면 주소)에 꽂는다. 새로 만든 앱의 화면도 여기서
- * 뜬다: host가 home을 부르고 인스턴스를 연 것처럼, 결과에는 어느 앱의 home인지를 싣는다.
+ * One real ViewHost — plugged into the mock's `openView` (pinned view) and `viewFrame` (view
+ * address). A newly created app's view also opens here: as if the host called home and opened the
+ * instance, the result carries which app's home this is.
  */
 let fx: FixtureHost
 const docs: Record<string, { html: string }> = {}
@@ -114,8 +118,8 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test.describe('C-1: 새 앱', () => {
-  test('프로젝트 메뉴의 New app: 이름에서 id를 짓고, 고른 에이전트로 만들면 앱이 서고, 화면이 열리고, 만드는 세션이 선다', async ({ page }) => {
+test.describe('C-1: new app', () => {
+  test('New app in the project menu: the id is derived from the name, and creating it with the chosen agent raises the app, opens the view, and creates the builder session', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await page.getByTestId('project-menu-alpha').click()
     await page.getByTestId('new-app-alpha').click()
@@ -123,38 +127,38 @@ test.describe('C-1: 새 앱', () => {
     await expect(dialog).toContainText('New app · alpha')
 
     await dialog.getByTestId('new-app-name').fill('Team Notes')
-    // 이름에서 지은 id — 사람이 고치지 않으면 이름을 따라간다
+    // The id derived from the name — it follows the name unless the person edits it
     await expect(dialog.getByTestId('new-app-id')).toHaveValue('team-notes')
     await expect(dialog.getByTestId('new-app-id-problem')).toHaveCount(0)
-    // 기본은 프로젝트의 기본 도구다 — 여기서는 다른 쪽을 고른다
+    // The default is the project's default tool — here the other one is picked
     await expect(dialog.getByTestId('new-app-tool-claude')).toHaveAttribute('aria-pressed', 'true')
     await dialog.getByTestId('new-app-tool-codex').click()
     await dialog.getByTestId('new-app-create').click()
     await expect(dialog).toHaveCount(0)
 
-    // host에 간 것: 이 프로젝트, 지은 id, 적은 이름, 고른 도구
+    // What reached the host: this project, the derived id, the entered name, the chosen tool
     expect(await createdApps(page)).toEqual([{ projectId: pid, id: 'team-notes', name: 'Team Notes', tool: 'codex' }])
-    // 앱이 그 프로젝트 아래에 서고, 고정 화면이 열려 home의 결과를 받는다
+    // The app shows under that project, and the pinned view opens and receives home's result
     const row = page.getByTestId('project-alpha').getByTestId(`app-row-${pid}/team-notes`)
     await expect(row).toHaveText('Team Notes')
     await expect(row).toHaveAttribute('aria-current', 'page')
     const pinned = page.getByTestId(`pinned-app-${pid}/team-notes`)
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     await expect(viewOf(page, `${pid}/team-notes`).locator('li[data-k="tool-result"]')).toHaveText('tool-result {"home":"team-notes"}')
-    // 만드는 세션: 그 앱의 것, 고른 도구, 사람이 정한 이름 — 사이드바의 그 프로젝트 아래에 줄로 선다
+    // The builder session: belongs to that app, uses the chosen tool, gets the name the person set — shown as a row under that project in the sidebar
     const builders = await sessionsOfApp(page, 'team-notes')
     expect(builders).toEqual([{ id: expect.any(String), name: 'Team Notes · builder', tool: 'codex', projectId: pid }])
     await expect(page.getByTestId('project-alpha').getByTestId(`session-row-${builders[0]!.id}`)).toContainText('Team Notes · builder')
   })
 
-  test('host가 거절하면 그 말을 그대로 보이고 창은 남는다 — 모양이 틀린 id는 보내지도 않는다', async ({ page }) => {
+  test('when the host refuses, its exact words show and the dialog stays open — a malformed id is not even sent', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await setApps(page, [app('notes', pid, { dir: '/tmp/alpha/.centralu/apps/notes' })])
     await page.getByTestId('project-menu-alpha').click()
     await page.getByTestId('new-app-alpha').click()
     const dialog = page.getByTestId('new-app-dialog')
 
-    // 모양은 창이 host와 같은 판정으로 먼저 막는다 — 보내지 않는다
+    // Shape is blocked first, by the dialog running the same check as the host — nothing is sent
     await dialog.getByTestId('new-app-name').fill('Store')
     await dialog.getByTestId('new-app-id').fill('app-store')
     await expect(dialog.getByTestId('new-app-id-problem')).toHaveText('Ids starting with "app-" are how apps attach to sessions. Pick another.')
@@ -163,7 +167,7 @@ test.describe('C-1: 새 앱', () => {
     await expect(dialog.getByTestId('new-app-id-problem')).toHaveText('Give the app an id: lowercase letters, digits and hyphens.')
     expect(await createdApps(page)).toEqual([])
 
-    // 이미 있는 id는 host가 안다 — 거절의 말을 그대로 보인다
+    // An id that already exists is known only to the host — its refusal shows verbatim
     await dialog.getByTestId('new-app-id').fill('notes')
     await dialog.getByTestId('new-app-create').click()
     await expect(dialog.getByTestId('new-app-error')).toHaveText('An app "notes" already exists (/tmp/alpha/.centralu/apps/notes) — use another id')
@@ -173,7 +177,7 @@ test.describe('C-1: 새 앱', () => {
     await expect(page.getByTestId(`pinned-app-${pid}/notes`)).toHaveCount(0)
   })
 
-  test('신뢰하지 않은 프로젝트: 창이 까닭을 말하고 그 자리에서 신뢰하게 한다 — 그 전에는 만들지 않는다', async ({ page }) => {
+  test('an untrusted project: the dialog states the reason and lets it be trusted right there — nothing is created before that', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha', false)
     await page.getByTestId('project-menu-alpha').click()
     await page.getByTestId('new-app-alpha').click()
@@ -189,9 +193,9 @@ test.describe('C-1: 새 앱', () => {
     await expect(page.getByTestId(`pinned-app-${pid}/daily-log`).getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
   })
 
-  test('사용자 폴더의 New app: 앱이 없어도 무리가 서고, 못 쓰는 에이전트는 까닭을 말하며, 만들면 그 무리에 선다', async ({ page }) => {
+  test('New app in the user folder: the group shows even with no apps, an unusable agent states the reason, and creating one places it in that group', async ({ page }) => {
     await addProject(page, '/tmp/alpha')
-    // Codex는 로그인 전이다
+    // Codex is not logged in
     await page.evaluate(() => {
       const m = (window as any).__mock
       m.detected = m.detected.map((t: { name: string }) => (t.name === 'codex' ? { ...t, loggedIn: false } : t))
@@ -217,7 +221,7 @@ test.describe('C-1: 새 앱', () => {
   })
 })
 
-/** 만드는 세션이 선 앱 하나를 host가 만든 것처럼 — 목의 `apps.create`가 목록 방송과 session_created를 낸다 */
+/** As if the host created one app with its builder session in place — the mock's `apps.create` emits the list broadcast and session_created */
 async function madeApp(page: Page, pid: string | null, id: string, name: string): Promise<string> {
   const made = await page.evaluate(
     ({ p, i, n }) => (window as any).__mock.apps.create({ projectId: p, id: i, name: n, tool: 'claude' }),
@@ -226,7 +230,7 @@ async function madeApp(page: Page, pid: string | null, id: string, name: string)
   return made.builder.id as string
 }
 
-/** 사람이 스크린샷을 붙여 넣는다 — 진짜 클립보드 대신 붙여넣기 이벤트에 파일을 싣는다 */
+/** A person pastes a screenshot — a file is attached to the paste event instead of a real clipboard */
 const pasteShot = (page: Page, testId: string, name = 'shot.png') =>
   page.getByTestId(testId).evaluate((el, n) => {
     const data = new DataTransfer()
@@ -234,11 +238,11 @@ const pasteShot = (page: Page, testId: string, name = 'shot.png') =>
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
   }, name)
 
-test.describe('C-5: 여기를 고쳐 줘', () => {
-  test('앱 아래 입력줄의 말이 스크린샷과 함께 만드는 세션에 머리말을 달고 가고, 사람은 앱을 떠나지 않는다', async ({ page }) => {
+test.describe('C-5: fix this', () => {
+  test('a message from the field below the app is sent to the builder session, with the screenshot, wrapped in a preamble, and the person does not leave the app', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     const builderId = await madeApp(page, pid, 'notes', 'Team notes')
-    // 마지막 실행이 실패했다 — 머리말이 그 사실을 싣는다
+    // The last run failed — the preamble carries that fact
     await page.evaluate(
       ({ key, p }) =>
         (window as any).__mock.appRuns.set(key, [
@@ -261,7 +265,7 @@ test.describe('C-5: 여기를 고쳐 줘', () => {
     await input.fill('The reset button does nothing')
     await input.press('Enter')
 
-    // host에 간 것: 이 앱, 사람이 쓴 그대로, 붙인 스크린샷(저장된 경로), 보던 화면의 인스턴스
+    // What reached the host: this app, the person's words verbatim, the attached screenshot (its saved path), the instance of the view being viewed
     const asks = await page.evaluate(() => (window as any).__mock.builderAsks)
     expect(asks).toEqual([
       {
@@ -275,12 +279,12 @@ test.describe('C-5: 여기를 고쳐 줘', () => {
     await expect(input).toHaveValue('')
     await expect(pinned.getByTestId('fix-bar-attachments')).toHaveCount(0)
     await expect(pinned.getByTestId('fix-bar-sent')).toContainText('Sent to Team notes · builder.')
-    // 사람은 앱을 떠나지 않았다 — 같은 화면, 같은 인스턴스
+    // The person did not leave the app — the same view, the same instance
     expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('app')
     await expect(pinned).toBeVisible()
     expect(await page.evaluate(() => (window as any).__store.getState().pinnedViews[0].instanceId)).toBe(instanceId)
 
-    // 만드는 세션의 대화를 옆에 연다 — 머리말을 단 사람의 말과 스크린샷이 거기 있다
+    // Opens the builder session's conversation alongside — the person's message with the preamble, and the screenshot, are right there
     await pinned.getByTestId('fix-bar-show-builder').click()
     const pane = pinned.getByTestId('builder-pane')
     await expect(pinned.getByTestId('pinned-builder-toggle')).toHaveAttribute('aria-pressed', 'true')
@@ -292,13 +296,13 @@ test.describe('C-5: 여기를 고쳐 줘', () => {
     )
     await expect(said.getByTestId('msg-user-attachment')).toContainText('shot.png')
     expect(await page.evaluate((id) => (window as any).__store.getState().sessions[id].state, builderId)).toBe('working')
-    // 판은 닫을 수 있고, 닫아도 화면은 그대로다
+    // The pane can be closed, and closing it leaves the view untouched
     await pinned.getByTestId('pinned-builder-toggle').click()
     await expect(pane).toHaveCount(0)
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
   })
 
-  test('만드는 세션이 없는 앱은 입력줄 대신 그 사실과 세우는 단추를 두고, 세우면 입력줄이 선다', async ({ page }) => {
+  test('an app with no builder session shows that fact and a button to raise one instead of the input field, and raising it shows the field', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid, { name: 'Slider' })])
     await page.getByTestId(`app-row-${pid}/slider`).click()
@@ -315,7 +319,7 @@ test.describe('C-5: 여기를 고쳐 줘', () => {
   })
 })
 
-/** host가 들고 있는 오류 묶음 하나 — 시험이 목에 심는다(최근 것부터) */
+/** One error bundle as the host would hold it — the test plants it in the mock (most recent first) */
 function bundle(over: Record<string, unknown> = {}) {
   const stderr = Array.from({ length: 12 }, (_, i) => `stderr line ${i + 1}`)
   return {
@@ -343,10 +347,12 @@ const builderSaid = (page: Page, id: string) =>
   )
 
 /*
- * 끝난 턴의 카드 (M4 C-5) — 카드는 오른쪽 위에 서서 걷을 때까지 남고, 고정 화면에서는 머리의 Builder·Runs·닫기와 Runs의 Refresh를
- * 가려 누름을 가로챘다. 앱을 고치는 동안 떠 있던 카드 대부분은 옆에 열어 둔 만드는 세션의 것이었다 — 사람이 보고 있는 대화다.
+ * A card for a finished turn (M4 C-5) — the card stands at the top right and stays until
+ * dismissed, and on the pinned view it covered the header's Builder, Runs, and close buttons plus
+ * Runs' Refresh, hijacking clicks. Most cards that stayed up while fixing an app belonged to the
+ * builder session opened alongside — a conversation the person was already watching.
  */
-test('고정 화면 옆에 대화를 연 만드는 세션의 턴 끝은 카드가 아니라 바람이다 — 닫혀 있으면 카드다', async ({ page }) => {
+test('a turn ending in a builder session whose conversation is open beside the pinned view gets a breeze, not a card — closed, it gets a card', async ({ page }) => {
   const pid = await addProject(page, '/tmp/alpha')
   const builderId = await madeApp(page, pid, 'notes', 'Team notes')
   await page.evaluate(() => (window as any).__store.getState().setAppFocused(true))
@@ -366,14 +372,14 @@ test('고정 화면 옆에 대화를 연 만드는 세션의 턴 끝은 카드�
   await expect.poll(() => page.evaluate(() => (window as any).__store.getState().completion?.sessionId)).toBe(builderId)
   await expect(page.getByTestId('notice')).toHaveCount(0)
 
-  // 대화를 닫았다 — 이제 보이지 않는 세션이다
+  // The conversation was closed — it is now a session that is not being watched
   await pinned.getByTestId('pinned-builder-toggle').click()
   await finish()
   await expect(page.getByTestId('notice')).toHaveCount(1)
 })
 
-test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
-  test('앱이 죽으면 묶음의 끝이 화면 아래에 서고, 저절로는 아무것도 가지 않으며, Send to builder는 한 번 보낸다', async ({ page }) => {
+test.describe('C-6: errors reach the builder', () => {
+  test('when an app dies, the tail of the bundle shows below the view, nothing is sent on its own, and Send to builder sends once', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     const builderId = await madeApp(page, pid, 'notes', 'Team notes')
     await page.getByTestId(`app-row-${pid}/notes`).click()
@@ -381,17 +387,17 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     await expect(pinned.getByTestId('error-tail')).toHaveCount(0)
 
-    // 떠 있던 앱이 죽었다 — host가 묶음을 들고, 목록이 이유와 함께 바뀐다
+    // A running app died — the host holds the bundle, and the list changes along with the reason
     const crash = bundle()
     await setErrors(page, `${pid}/notes`, [crash])
     await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'crashed', error: 'exited (code 7)' })])
     const tail = pinned.getByTestId('error-tail')
     await expect(tail.getByTestId('error-tail-title')).toHaveText('The app stopped')
     await expect(tail.getByTestId('error-tail-message')).toHaveText('exited (code 7)')
-    // 끝부분만 — 마지막 여덟 줄
+    // Only the tail — the last eight lines
     await expect(tail.getByTestId('error-tail-stderr')).toHaveText(Array.from({ length: 8 }, (_, i) => `stderr line ${i + 5}`).join('\n'))
 
-    // 저절로는 가지 않는다 — 다시 읽어도(앱의 상태가 또 바뀌었다)
+    // Nothing goes out on its own — not even on a re-read (the app's status changed again)
     const reads = await page.evaluate(() => (window as any).__mock.errorReads as number)
     await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'failed', error: 'exited (code 7)' })])
     await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(reads)
@@ -399,7 +405,7 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
     expect(await errorSends(page)).toEqual([])
     expect(await builderSaid(page, builderId)).toEqual([])
 
-    // 보내는 동안 한 번 더 눌러도 한 번이다 — host의 답을 붙들어 두고, 두 번째 누름을 곧바로 쏜다
+    // Clicking again while it is sending still sends only once — the host's answer is held back, and the second click is fired right away
     await page.evaluate(() => {
       const w = window as any
       w.__mock.sendErrorGate = new Promise<void>((r) => (w.__releaseSend = r))
@@ -411,14 +417,14 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
     await expect(tail.getByTestId('error-tail-sent')).toContainText('Sent to the builder.')
     await expect(tail.getByTestId('error-tail-send')).toHaveCount(0)
     expect(await errorSends(page)).toEqual([{ appId: 'notes', projectId: pid, at: crash.at }])
-    // 에이전트에게는 앱의 출력이 인용 안에 갇힌 채로 간다
+    // The app's output reaches the agent enclosed in a quote
     const said = await builderSaid(page, builderId)
     expect(said).toHaveLength(1)
     expect(said[0]).toContain('[Centralu] The person sent you this error report from the app "Team notes" (app-notes) that you build.')
     expect(said[0]).toContain('\n> 이유: exited (code 7)\n')
     expect(said[0]).toContain('\n> stderr line 12')
 
-    // 다시 읽어도 다시 가지 않는다 — 보냈다는 것은 host가 든다(sentAt)
+    // A re-read does not send it again — the host holds the fact that it was sent (sentAt)
     const after = await page.evaluate(() => (window as any).__mock.errorReads as number)
     await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'crashed', error: 'exited (code 7)' })])
     await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(after)
@@ -427,10 +433,10 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
     expect(await builderSaid(page, builderId)).toHaveLength(1)
   })
 
-  test('도는 앱에서는 이 화면을 연 뒤의 도구 실패만 선다 — 걷으면 그 묶음은 다시 서지 않는다', async ({ page }) => {
+  test('for a running app, only a tool failure that happened after this view was opened shows — dismissing it means that bundle never shows again', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await madeApp(page, pid, 'notes', 'Team notes')
-    // 어제의 실패 — 앱은 지금 멀쩡하다
+    // Yesterday's failure — the app is fine right now
     await setErrors(page, `${pid}/notes`, [bundle({ kind: 'tool', tool: 'save', message: 'old failure', at: Date.now() - 86_400_000 })])
     await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'running' })])
     await page.getByTestId(`app-row-${pid}/notes`).click()
@@ -439,7 +445,7 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
     await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(0)
     await expect(pinned.getByTestId('error-tail')).toHaveCount(0)
 
-    // 화면에서 누른 읽기 전용 도구가 던졌다 — 그 호출은 "바뀌었다"를 내지 않는다. host가 묶음을 들면 목록의 lastErrorAt이 바뀐다
+    // A read-only tool clicked from the view threw — that call does not emit "it changed." Once the host holds the bundle, the list's lastErrorAt changes
     await page.evaluate(
       ({ p, b }) => (window as any).__mock.recordAppError('notes', p, b),
       { p: pid, b: bundle({ kind: 'tool', tool: 'get_interval', message: 'TypeError: seconds is undefined', at: Date.now() }) },
@@ -450,7 +456,7 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
 
     await tail.getByTestId('error-tail-dismiss').click()
     await expect(tail).toHaveCount(0)
-    // 다시 읽어도 걷은 묶음은 다시 서지 않는다
+    // A dismissed bundle does not show again even on a re-read
     const reads = await page.evaluate(() => (window as any).__mock.errorReads as number)
     await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'stopped' })])
     await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(reads)
@@ -459,10 +465,12 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
   })
 
   /*
-   * 사람이 거절한 능력 때문에 멈춘 호출 (M4 D-4) — 실측: 사람이 Deny를 누른 능력 때문에 멈춘 도구가 스택과 "Send to builder"를 단 앱의
-   * 오류로 섰다. host는 그 묶음에 사람의 결정을 싣는다(`denied`). 화면은 그 결정으로 말하고, 되돌리는 자리를 가리킨다.
+   * A call stalled by a capability the person denied (M4 D-4) — measured: a tool stalled by a
+   * capability the person clicked Deny on used to show as an app error, complete with a stack
+   * trace and a "Send to builder." The host attaches the person's decision to that bundle
+   * (`denied`). The view instead speaks that decision, and points to where to reverse it.
    */
-  test('사람이 거절한 능력 때문에 멈춘 도구는 오류가 아니라 그 결정으로 선다 — Send to builder 없이 Runs의 Forget을 가리킨다', async ({ page }) => {
+  test('a tool stalled by a capability the person denied shows that decision, not an error — no Send to builder, pointing instead to Forget in Runs', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await madeApp(page, pid, 'notes', 'Team notes')
     await page.getByTestId(`app-row-${pid}/notes`).click()
@@ -487,10 +495,10 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
       'You did not allow Team notes to run an agent (Claude Code) in a new session. This is your decision, not a bug in the app. ' +
         'To change it, open Runs, find it under Permissions and choose Forget. Centralu asks again the next time.',
     )
-    // 앱의 버그가 아니다 — 스택도, 만드는 세션에 보내기도 없다
+    // Not a bug in the app — no stack, and no sending to the builder session
     await expect(tail.getByTestId('error-tail-stderr')).toHaveCount(0)
     await expect(tail.getByTestId('error-tail-send')).toHaveCount(0)
-    // 되돌리는 자리를 연다
+    // Opens the place to reverse it
     await expect(pinned.getByTestId('runs-panel')).toHaveCount(0)
     await tail.getByTestId('error-tail-open-runs').click()
     await expect(pinned.getByTestId('runs-panel')).toBeVisible()
@@ -505,7 +513,7 @@ const toolCall = (sid: string, callId: string, tool: string) => ({
   callId,
   summary: { tool, title: callId, readOnly: false, paths: [] },
 })
-/** 그 카드가 선 대화의 줄 — 카드와 화면은 한 줄에 산다 */
+/** The conversation row that card is on — the card and the view live on the same row */
 const rowOf = (page: Page, callId: string) => page.locator('[data-index]').filter({ has: page.getByTestId('tool-card').filter({ hasText: callId }) })
 const viewIn = (scope: ReturnType<Page['getByTestId']>): FrameLocator =>
   scope.getByTestId('app-frame-iframe').contentFrame().locator('iframe').contentFrame()
@@ -518,21 +526,21 @@ const openedViews = (page: Page) => page.evaluate(() => ((window as any).__mock.
 const reopenedViews = (page: Page) => page.evaluate(() => (window as any).__mock.reopenedViews as { sessionId: string; callId: string }[])
 const closedViews = (page: Page) => page.evaluate(() => (window as any).__mock.closedViews as string[])
 const pinnedInstance = (page: Page) => page.evaluate(() => (window as any).__store.getState().pinnedViews[0]?.instanceId as string | null)
-/** 그 인스턴스의 화면이 teardown을 받은 횟수 — 시험 앱은 받으면 저장 도구를 부르고 답한다 */
+/** How many times that instance's view received teardown — the test app calls the save tool and answers when it does */
 const teardownsOf = (page: Page, instanceId: string) =>
   page.evaluate(
     (id) => ((window as any).__mock.appToolCalls as { tool: string; from: { instanceId?: string } }[]).filter((c) => c.tool === 'save-on-teardown' && c.from.instanceId === id).length,
     instanceId,
   )
 
-test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로', () => {
+test.describe('C-4: when an app relaunches with new code, its open views refresh too', () => {
   const DOC = 'reloader ui://reloader/main'
   const version = (page: Page, pid: string, v: string, status: AppInfo['status'] = 'running') => {
     docs[DOC] = { html: fixtureViewHtml({ marker: v }) }
     return setApps(page, [app('reloader', pid, { name: 'Reloader', status, codeStamp: `code-${v}` })])
   }
 
-  /** 세션 하나와 그 대화 안의 화면 하나 — 입력과 결과를 host처럼 들고 있다 */
+  /** One session and one view inline in its conversation — holding the input and result the way the host would */
   async function inlineView(page: Page, pid: string): Promise<{ sid: string; first: string }> {
     await page.getByTestId('project-menu-alpha').click()
     await page.getByTestId('new-session-alpha').click()
@@ -549,7 +557,7 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     return { sid, first }
   }
 
-  test('고정 화면은 제자리에서 새 HTML로, 대화 안 화면은 들고 있던 입력과 결과로 다시 열리고, "Updated"가 잠깐 선다', async ({ page }) => {
+  test('the pinned view refreshes in place with new HTML, the inline view reopens with the input and result it was holding, and "Updated" shows briefly', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await version(page, pid, 'v1')
     const { sid, first: firstInline } = await inlineView(page, pid)
@@ -559,10 +567,10 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     const firstPinned = (await pinnedInstance(page))!
     await expect(pinned.getByTestId('pinned-updated')).toHaveCount(0)
 
-    // 만드는 세션의 턴이 끝났다 — 앱이 새 코드로 다시 떴다
+    // The builder session's turn ended — the app relaunched with new code
     await version(page, pid, 'v2')
 
-    // 고정 화면: 같은 자리(같은 앱을 보고 있다), 새 인스턴스, 새 HTML — 옛 화면은 teardown을 받고 놓였다
+    // Pinned view: same spot (still viewing the same app), a new instance, new HTML — the old view received teardown and was released
     await expect(viewOf(page, `${pid}/reloader`).locator('#marker')).toHaveText('v2')
     await expect(pinned.getByTestId('pinned-updated')).toHaveText('Updated')
     expect(await pinnedInstance(page)).not.toBe(firstPinned)
@@ -571,7 +579,7 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     expect(await page.evaluate(() => (window as any).__store.getState().focusedApp)).toEqual({ projectId: pid, appId: 'reloader' })
     expect(await openedViews(page)).toBe(2)
 
-    // 대화 안 화면: 가려져 있던 동안에도 다시 열렸다 — 도구를 다시 부르지 않고, 들고 있던 입력과 결과로
+    // Inline view: reopened even while hidden — without calling the tool again, using the input and result it was holding
     await expect.poll(() => reopenedViews(page)).toEqual([{ sessionId: sid, callId: 'toolu_r' }])
     expect(await closedViews(page)).toContain(firstInline)
     await page.getByTestId(`session-row-${sid}`).click()
@@ -582,7 +590,7 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     await expect(again.getByTestId('inline-view-updated')).toHaveText('Updated')
   })
 
-  test('같은 코드로 다시 뜬 앱과 "바뀌었다" 알림에는 다시 열지 않고, 새 코드로 너무 자주 뜨면 세 번 뒤에 멈추고 사람에게 맡긴다', async ({ page }) => {
+  test('an app that relaunches with the same code, or a mere "it changed" notification, does not reopen anything, but relaunching with new code too often stops after three times and leaves it to the person', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await version(page, pid, 'v1')
     const { sid } = await inlineView(page, pid)
@@ -591,7 +599,7 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     const marker = viewOf(page, `${pid}/reloader`).locator('#marker')
     await expect(marker).toHaveText('v1')
 
-    // 죽었다가 같은 코드로 살아났다, 그리고 앱 안의 값이 바뀌었다는 알림 — 다시 열 까닭이 아니다
+    // Died and came back with the same code, plus a notification that a value inside the app changed — neither is a reason to reopen
     await version(page, pid, 'v1', 'crashed')
     await version(page, pid, 'v1', 'running')
     for (let i = 0; i < 3; i++) await emit(page, { type: 'external_app_state_changed', appId: 'reloader', projectId: pid })
@@ -599,14 +607,14 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     expect(await openedViews(page)).toBe(1)
     expect(await reopenedViews(page)).toEqual([])
 
-    // 새 코드로 세 번 — 세 번 다 다시 연다
+    // Three times with new code — reopens all three times
     for (const [i, v] of ['v2', 'v3', 'v4'].entries()) {
       await version(page, pid, v)
       await expect(marker).toHaveText(v)
       expect(await openedViews(page)).toBe(i + 2)
       await expect.poll(async () => (await reopenedViews(page)).length).toBe(i + 1)
     }
-    // 1분 안의 넷째 — 저절로 열지 않는다. 바뀌었다는 표시와 다시 여는 단추만
+    // A fourth time within a minute — it does not open on its own. Only a changed indicator and a reopen button
     await version(page, pid, 'v5')
     await expect(pinned.getByTestId('pinned-stale')).toHaveText('Changed · Reload')
     await expect
@@ -617,7 +625,7 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     expect(await reopenedViews(page)).toHaveLength(3)
     await expect(marker).toHaveText('v4')
 
-    // 사람이 누르면 연다 — 한 번, 그리고 그 뒤로 조용하다
+    // Clicking it opens it — once, and it is quiet after that
     await pinned.getByTestId('pinned-stale').click()
     await expect(marker).toHaveText('v5')
     await expect(pinned.getByTestId('pinned-stale')).toHaveCount(0)
@@ -626,8 +634,8 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
   })
 })
 
-test.describe('B-4: 고정 화면의 ui/message', () => {
-  test('고른 세션에 앱이 보낸 말로 선다 — 대화 안 화면과 같은 길로 가서 host가 앱의 글로 감싼다', async ({ page }) => {
+test.describe('B-4: a pinned view\'s ui/message', () => {
+  test('shows in the picked session as a message sent by the app — going through the same path as an inline view, wrapped by the host as the app\'s words', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid, { name: 'Slider', status: 'running' })])
     await page.getByTestId('project-menu-alpha').click()
@@ -640,10 +648,10 @@ test.describe('B-4: 고정 화면의 ui/message', () => {
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     const instanceId = await pinnedInstance(page)
     await viewOf(page, `${pid}/slider`).locator('#msg').click()
-    // 어느 세션으로 보낼지는 여전히 사람이 고른다
+    // The person still chooses which session to send to
     await pinned.getByTestId(`pinned-message-to-${sid}`).click()
 
-    // 대화 안 화면과 같은 문(apps.viewMessage) — 인스턴스로 앱을 가리고, 고른 세션으로 간다
+    // The same door as an inline view (apps.viewMessage) — the app is identified by instance, and it goes to the picked session
     await expect
       .poll(() => page.evaluate(() => (window as any).__mock.viewMessages))
       .toEqual([{ sessionId: sid, instanceId, text: 'hello from the view' }])
@@ -653,15 +661,15 @@ test.describe('B-4: 고정 화면의 ui/message', () => {
       sid,
     )
     expect(stored).toEqual([expect.objectContaining({ text: 'hello from the view', fromApp: { appId: 'slider', projectId: pid, name: 'Slider' } })])
-    // 대화에는 사람의 말풍선이 아니라 앱이 보낸 말로 선다
+    // It shows in the conversation as sent by the app — not as a human speech bubble
     await page.getByTestId(`session-row-${sid}`).click()
     const said = page.getByTestId('msg-user').filter({ hasText: 'hello from the view' })
     await expect(said.getByTestId('msg-user-from-app')).toHaveText('Slider app ⤷')
   })
 })
 
-test.describe('오래 걸리는 화면의 호출 — 진행 알림으로 살려 둔다', () => {
-  test('70초 걸리는 도구가 화면에서 끝난다 — 20초마다 진행 알림이 가 화면의 60초 시계를 다시 세고, 끝나면 멈춘다', async ({ page }) => {
+test.describe('a long view call — kept alive with progress notifications', () => {
+  test('a tool that takes 70 seconds finishes in the view — a progress notification every 20 seconds resets the view\'s 60-second clock, and it stops once done', async ({ page }) => {
     test.setTimeout(60_000)
     await page.clock.install()
     await page.goto('/?mock=1')
@@ -669,7 +677,7 @@ test.describe('오래 걸리는 화면의 호출 — 진행 알림으로 살려 
       const w = window as any
       w.__mock.viewFrameProvider = (a: string, i: string, o: unknown) => w.__viewFrame(a, i, o)
       w.__mock.openViewProvider = (a: string, p: string | null) => w.__openView(a, p)
-      // 오래 걸리는 도구 — host가 앱을 기다리는 동안(승인, 느린 일) 화면은 답을 기다린다
+      // A slow tool — while the host is waiting on the app (approval, slow work), the view waits for its answer
       w.__mock.appToolHandler = (_a: string, tool: string) =>
         tool === 'slow'
           ? new Promise((r) => setTimeout(() => r({ content: [{ type: 'text', text: 'done' }], structuredContent: { done: true } }), 70_000))
@@ -682,13 +690,13 @@ test.describe('오래 걸리는 화면의 호출 — 진행 알림으로 살려 
     await expect(v.locator('li[data-k="connected"]')).toHaveCount(1)
 
     await v.locator('#slow').click()
-    // 시계를 5초씩 민다 — 사이마다 프레임 사이의 메시지가 오간다
+    // Advance the clock 5 seconds at a time — messages between frames go through in between
     for (let t = 0; t < 75_000; t += 5_000) await page.clock.runFor(5_000)
     await expect(v.locator('li[data-k="slow-result"]')).toHaveText('slow-result {"done":true}')
     await expect(v.locator('li[data-k="slow-error"]')).toHaveCount(0)
     await expect(v.locator('li[data-k="progress"]')).toHaveCount(3)
     await expect(v.locator('li[data-k="progress-wire"]')).toHaveCount(3)
-    // 끝난 호출에는 더 보내지 않는다 — 선에서 센다(끝난 요청의 알림은 화면의 처리기에 닿지 않으니)
+    // Nothing more is sent to a call that has finished — counted on the wire (a finished request's notifications never reach the view's handler)
     for (let t = 0; t < 45_000; t += 5_000) await page.clock.runFor(5_000)
     await expect(v.locator('li[data-k="progress-wire"]')).toHaveCount(3)
   })

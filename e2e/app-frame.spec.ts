@@ -2,16 +2,18 @@ import { expect, test, type Frame, type FrameLocator, type Page } from '@playwri
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
 
 /**
- * 앱 화면 한 장 (M4 B-3c) — AppFrame + 진짜 host의 샌드박스 프록시 + 공식 ext-apps 2.x `App`.
+ * A single app view (M4 B-3c) — AppFrame + the real host's sandbox proxy + the official ext-apps
+ * 2.x `App`.
  *
- * 목 플랫폼 위의 시험대 페이지(`/app-frame.html`)에 AppFrame을 세운다. 주소는 이 워커가 띄운
- * 진짜 HostServer·ViewHost가 만든다(비밀 경로, CSP, 앱별 출처 포트 모두 실물). 화면이 부르는
- * 도구와 리소스는 목의 `AppsPort`에 닿는다. 그래서 "무엇이 어느 앱 이름으로 나갔나"를 목이
- * 적어 둔다.
+ * An AppFrame is mounted on a test-bed page (`/app-frame.html`) on a mock platform. The address is
+ * produced by a real HostServer and ViewHost started by this worker (secret path, CSP, and
+ * per-app origin ports are all the real thing). The tools and resources the view calls reach the
+ * mock's `AppsPort`, so the mock records what went out under which app's name.
  *
- * Tauri IPC 차단(S-2)의 실측은 여기서 할 수 없다. 이 브라우저에는 Tauri가 없다. 여기서는
- * 브라우저만으로 잴 수 있는 것(부모·최상위 창 접근, 저장소, 팝업, host로의 네트워크, 최상위
- * 이동)을 잰다. 진짜 창의 IPC는 도그푸딩에서 확인한다.
+ * Measuring the Tauri IPC block (S-2) cannot be done here — this browser has no Tauri. What is
+ * measured here is only what a browser alone can measure (access to the parent/top window,
+ * storage, popups, network to the host, top-level navigation). The real window's IPC is confirmed
+ * through dogfooding.
  */
 
 let fx: FixtureHost
@@ -32,7 +34,7 @@ test.afterAll(async () => {
 })
 
 test.beforeEach(async ({ page }) => {
-  // 시험대의 목이 화면 주소를 물으면 진짜 ViewHost가 답한다
+  // When the test-bed's mock asks for the view address, the real ViewHost answers
   await page.exposeFunction(
     '__viewFrame',
     (appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) =>
@@ -49,12 +51,12 @@ async function mount(page: Page, key: string, props: Props) {
   await expect(page.getByTestId(`frame-${key}`).getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
 }
 
-/** 앱의 HTML이 도는 안쪽 프레임 (바깥은 프록시) */
+/** The inner frame the app's HTML runs in (the outer one is the proxy) */
 function view(page: Page, key: string): FrameLocator {
   return page.getByTestId(`frame-${key}`).getByTestId('app-frame-iframe').contentFrame().locator('iframe').contentFrame()
 }
 
-/** 화면이 적은 줄 하나를 JSON으로 */
+/** One line the view logged, as JSON */
 async function entry(v: FrameLocator, k: string, nth = 0): Promise<unknown> {
   const li = v.locator(`li[data-k="${k}"]`).nth(nth)
   await expect(li).toBeVisible()
@@ -66,7 +68,7 @@ async function calls(page: Page) {
   return page.evaluate(() => (window as any).__mock.appToolCalls as { appId: string; tool: string; args: Record<string, unknown>; from: Record<string, unknown> }[])
 }
 
-/** 이름으로 안쪽 프레임을 찾는다 — evaluate가 필요할 때 (FrameLocator로는 못 한다) */
+/** Finds the inner frame by name — for when evaluate is needed (FrameLocator cannot do this) */
 async function innerFrame(page: Page, key: string): Promise<Frame> {
   const outer = await page.getByTestId(`frame-${key}`).getByTestId('app-frame-iframe').elementHandle()
   const proxy = await outer!.contentFrame()
@@ -75,7 +77,7 @@ async function innerFrame(page: Page, key: string): Promise<Frame> {
   return inner!
 }
 
-test('화면이 초기화되고, 입력·결과를 받고, 단추가 목의 callTool에 닿아 결과가 화면에 보인다', async ({ page }) => {
+test('the view initializes, receives input and a result, and a button reaches the mock\'s callTool with the result showing in the view', async ({ page }) => {
   const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
   await page.evaluate(() => {
     ;(window as any).__mock.appResources.set('fixture ui://fixture/data', {
@@ -91,60 +93,61 @@ test('화면이 초기화되고, 입력·결과를 받고, 단추가 목의 call
   })
   const v = view(page, 'a')
 
-  // 규격의 수명 메시지: 초기화 → tool-input → tool-result
+  // The spec's lifecycle messages: init → tool-input → tool-result
   expect(await entry(v, 'tool-input')).toEqual({ q: 'weather' })
   expect(await entry(v, 'tool-result')).toEqual({ answer: 42 })
 
-  // 화면의 단추 → AppBridge.oncalltool → AppsPort.callTool (목) → 결과가 화면으로
+  // The view's button → AppBridge.oncalltool → AppsPort.callTool (mock) → the result reaches the view
   await v.locator('#call').click()
   expect(await entry(v, 'call-result')).toEqual({ appId: 'fixture', tool: 'increment', args: { by: 2 } })
   expect(await calls(page)).toEqual([{ appId: 'fixture', tool: 'increment', args: { by: 2 }, from: { projectId: 'p1', instanceId: id } }])
 
-  // onreadresource → AppsPort.readResource (목)
+  // onreadresource → AppsPort.readResource (mock)
   await v.locator('#read').click()
   expect(await entry(v, 'read-result')).toEqual([{ uri: 'ui://fixture/data', mimeType: 'application/json', text: '{"n":1}' }])
   expect(await page.evaluate(() => (window as any).__mock.appResourceReads)).toEqual([
     { appId: 'fixture', uri: 'ui://fixture/data', from: { projectId: 'p1', instanceId: id } },
   ])
 
-  // size-changed → 높이
+  // size-changed → height
   const before = (await page.getByTestId('frame-a').getByTestId('app-frame-iframe').boundingBox())!.height
   await v.locator('#grow').click()
   await expect.poll(async () => (await page.getByTestId('frame-a').getByTestId('app-frame-iframe').boundingBox())!.height).toBeGreaterThan(before + 500)
 })
 
-test('불투명 방식: 안쪽 프레임의 출처는 "null"이고, 프록시의 비밀 주소를 읽지 못한다', async ({ page }) => {
+test('opaque mode: the inner frame\'s origin is "null", and it cannot read the proxy\'s secret address', async ({ page }) => {
   const id = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
   await mount(page, 'a', { appId: 'fixture', projectId: null, instanceId: id })
   const connected = (await entry(view(page, 'a'), 'connected')) as Record<string, unknown>
   expect(connected).toMatchObject({ origin: 'null', href: 'about:srcdoc', referrer: '' })
 
-  // 프록시는 host 포트의 다른 출처에서 온다 (우리 화면의 출처가 아니다)
+  // The proxy comes from a different origin on the host port (not our view's origin)
   const proxy = page.frames().find((f) => f.url().includes('/views/'))!
   expect(new URL(proxy.url()).origin).toBe(`http://127.0.0.1:${fx.port}`)
   expect(new URL(proxy.url()).origin).not.toBe(new URL(page.url()).origin)
 })
 
-test('다른 앱을 적은 메시지는 호출의 앱을 바꾸지 못한다', async ({ page }) => {
+test('a message that claims a different app cannot change which app the call is attributed to', async ({ page }) => {
   const idA = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
   const idB = fx.open({ projectId: 'p2', appId: 'other' }, 'ui://other/main')
   await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: idA })
   await mount(page, 'b', { appId: 'other', projectId: 'p2', instanceId: idB })
   const a = view(page, 'a')
 
-  // SDK로: params와 _meta에 남의 앱을 적는다
+  // Through the SDK: claims a different app in params and _meta
   await a.locator('#spoof').click()
   await entry(a, 'spoof-result')
-  // 날 JSON-RPC로: 규격 밖 칸(appId, app, projectId)을 붙인다
+  // Raw JSON-RPC: attaches fields outside the spec (appId, app, projectId)
   await a.locator('#raw').click()
   await expect.poll(async () => (await calls(page)).length).toBe(2)
-  // 프록시를 건너뛰고 최상위 창에 곧바로 — 받아서는 안 된다. 뒤이은 정상 호출이 도착하면
-  // 그보다 먼저 부친 이 메시지는 이미 버려진 것이다 (postMessage는 순서를 지킨다)
+  // Skipping the proxy straight to the top window — this must not be received. Once the
+  // following legitimate call arrives, this message sent before it has already been dropped
+  // (postMessage preserves order)
   await a.locator('#direct').click()
   await entry(a, 'direct-sent')
   await a.locator('#call').click()
   await entry(a, 'call-result')
-  // 다른 앱의 화면은 자기 앱 이름으로만 부른다
+  // The other app's view can only call under its own app name
   await view(page, 'b').locator('#call').click()
   expect(await entry(view(page, 'b'), 'call-result')).toMatchObject({ appId: 'other' })
 
@@ -160,11 +163,13 @@ test('다른 앱을 적은 메시지는 호출의 앱을 바꾸지 못한다', a
 })
 
 /*
- * 링크는 플랫폼의 바깥 열기(system.openUrl)로 간다 (#159). 예전에는 AppFrame이 window.open을 직접 불렀고,
- * 여기(Chromium)서는 새 페이지가 떠서 초록이었지만 데스크톱 웹뷰(WKWebView)에서는 아무것도 열리지 않았다.
- * 그래서 새 페이지가 뜨는지가 아니라 **포트에 닿았는지**를 보고, 웹뷰가 스스로 창을 띄우지 않았는지도 본다.
+ * A link goes out through the platform's external-open port (system.openUrl) (#159). AppFrame
+ * used to call window.open directly, and here on Chromium that passed because a new page opened,
+ * but nothing opened at all on the desktop webview (WKWebView). So what is checked is not whether
+ * a new page opens but **whether the port was reached**, and also that the webview did not open a
+ * window on its own.
  */
-test('링크는 사람이 확인한 뒤 플랫폼의 바깥 열기로 열고, http(s)·mailto가 아니면 묻지도 않고 거절한다', async ({ page, context }) => {
+test('a link opens through the platform\'s external-open port after the person confirms it, and anything that is not http(s) or mailto is refused without even asking', async ({ page, context }) => {
   const popups: string[] = []
   context.on('page', (p) => popups.push(p.url()))
   const openedUrls = () => page.evaluate(() => (window as any).__mock.openedUrls as string[])
@@ -189,7 +194,7 @@ test('링크는 사람이 확인한 뒤 플랫폼의 바깥 열기로 열고, ht
   expect(popups).toEqual([])
 })
 
-test('ui/message는 부모가 준 콜백으로 간다', async ({ page }) => {
+test('ui/message goes to the callback the parent supplied', async ({ page }) => {
   const id = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
   await mount(page, 'a', { appId: 'fixture', projectId: null, instanceId: id })
   await view(page, 'a').locator('#msg').click()
@@ -199,20 +204,20 @@ test('ui/message는 부모가 준 콜백으로 간다', async ({ page }) => {
   ])
 })
 
-test('테마와 글자 크기가 host context로 가고, 글자 크기를 바꾸면 바뀐 칸만 host-context-changed로 간다', async ({ page }) => {
+test('theme and font size go out in the host context, and changing font size sends only the changed field through host-context-changed', async ({ page }) => {
   const id = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
   await mount(page, 'a', { appId: 'fixture', projectId: null, instanceId: id })
   const v = view(page, 'a')
   const connected = (await entry(v, 'connected')) as { hostContext: Record<string, any> }
   expect(connected.hostContext).toMatchObject({ theme: 'dark', displayMode: 'inline', centralu: { fontScale: 1 } })
-  // 색은 화면이 놓인 자리의 우리 토큰에서 읽는다
+  // Color is read from our own token for wherever the view is placed
   expect(connected.hostContext.styles.variables['--color-text-primary']).toBe('#e9e9e9')
 
   await page.evaluate(() => (window as any).__store.setState({ textScale: 4 }))
   expect(await entry(v, 'host-context-changed')).toEqual({ centralu: { fontScale: 1.25 } })
 })
 
-test('내리기 전에 teardown을 보내고 답을 받는다 — 답하지 않는 화면은 잠깐만 기다린다', async ({ page }) => {
+test('teardown is sent before taking a view down, and its answer is awaited — a view that does not answer is waited on only briefly', async ({ page }) => {
   const id = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
   const hang = fx.open({ projectId: null, appId: 'hang' }, 'ui://hang/main')
   await mount(page, 'a', { appId: 'fixture', projectId: null, instanceId: id })
@@ -221,7 +226,7 @@ test('내리기 전에 teardown을 보내고 답을 받는다 — 답하지 않�
   expect(await calls(page)).toEqual([])
   expect(await page.evaluate(() => (window as any).__appFrame.close('a'))).toBe('answered')
   await expect(page.getByTestId('frame-a')).toHaveCount(0)
-  // 화면은 요청을 받았고, 내려가기 전에 저장까지 마쳤다 (그 호출이 목에 닿았다)
+  // The view received the request and finished saving before it was taken down (the call reached the mock)
   expect((await calls(page)).map((c) => [c.appId, c.tool])).toEqual([['fixture', 'save-on-teardown']])
 
   const t0 = Date.now()
@@ -232,10 +237,11 @@ test('내리기 전에 teardown을 보내고 답을 받는다 — 답하지 않�
 })
 
 /**
- * S-2 중 브라우저만으로 잴 수 있는 것. 안쪽 프레임에서 직접 시도한다(Playwright의 evaluate는
- * 그 프레임의 스크립트로 돈다 — 네트워크는 그 프레임의 CSP를 그대로 받는다).
+ * The part of S-2 that a browser alone can measure. The attempt is made directly from the inner
+ * frame (Playwright's evaluate runs as that frame's script — network requests are subject to that
+ * frame's CSP as-is).
  */
-test('S-2 (브라우저 부분): 앱 프레임은 부모·최상위·저장소·팝업·host 네트워크에 닿지 못한다', async ({ page, context }) => {
+test('S-2 (browser part): an app frame cannot reach the parent, the top window, storage, popups, or the host network', async ({ page, context }) => {
   const leaked: string[] = []
   await context.route('https://example.test/**', (r) => {
     leaked.push(r.request().url())
@@ -308,7 +314,7 @@ test('S-2 (브라우저 부분): 앱 프레임은 부모·최상위·저장소·
     sessionStorage: 'SecurityError',
     'document.cookie': 'SecurityError',
     'indexedDB.open': 'SecurityError',
-    // 팝업은 sandbox가 막는다 (null을 돌려준다)
+    // A popup is blocked by the sandbox (returns null)
     'window.open': 'ok:null',
     'top.location': 'SecurityError',
     'fetch host port': 'TypeError',
@@ -318,7 +324,7 @@ test('S-2 (브라우저 부분): 앱 프레임은 부모·최상위·저장소·
   })
   expect(page.url()).toBe(topUrl)
 
-  // 제 프레임을 바깥으로 보내 값을 흘리는 길 — 프록시의 frame-src가 막는다
+  // A way to leak a value by navigating its own frame outward — the proxy's frame-src blocks this
   await inner.evaluate(() => {
     location.href = 'https://example.test/leak?secret=1'
   }).catch(() => {})
@@ -326,7 +332,7 @@ test('S-2 (브라우저 부분): 앱 프레임은 부모·최상위·저장소·
   expect(leaked).toEqual([])
 })
 
-test('앱별 출처 방식: 자기 포트의 진짜 출처를 받고, 저장소는 앱마다 나뉘며, 다시 열어도 같은 출처다', async ({ page }) => {
+test('per-app origin mode: gets a real origin on its own port, storage is separated per app, and reopening gets the same origin', async ({ page }) => {
   const idA = fx.open({ projectId: 'p1', appId: 'fixture-port' }, 'ui://fixture-port/main')
   const idB = fx.open({ projectId: 'p1', appId: 'other-port' }, 'ui://other-port/main')
   await mount(page, 'a', { appId: 'fixture-port', projectId: 'p1', instanceId: idA })
@@ -339,19 +345,19 @@ test('앱별 출처 방식: 자기 포트의 진짜 출처를 받고, 저장소�
   expect(portA).toBeGreaterThanOrEqual(20000)
   expect(portA).toBeLessThanOrEqual(32767)
   expect(b.origin).not.toBe(a.origin)
-  // 부모(프록시)의 주소는 referrer로 새지 않는다. 자기 주소의 비밀은 host 비밀이 아니다
+  // The parent's (proxy's) address does not leak through referrer. The secret in its own address is not the host secret
   expect(a.referrer).toBe('')
   const proxySecret = new URL(page.frames().find((f) => f.url().includes('/views/') && f.url().includes(`:${fx.port}/`))!.url()).pathname.split('/')[1]!
   expect(a.href).not.toContain(proxySecret)
 
-  // 이 방식의 목적: 저장소가 되고, 앱끼리는 나뉜다
+  // The point of this mode: storage works, and it is separated between apps
   const innerA = await innerFrame(page, 'a')
   const innerB = await innerFrame(page, 'b')
   await innerA.evaluate(() => localStorage.setItem('who', 'fixture-port'))
   expect(await innerA.evaluate(() => localStorage.getItem('who'))).toBe('fixture-port')
   expect(await innerB.evaluate(() => localStorage.getItem('who'))).toBeNull()
 
-  // 새 인스턴스로 다시 열면 같은 출처, 같은 저장소
+  // Reopening as a new instance gets the same origin and the same storage
   expect(await page.evaluate(() => (window as any).__appFrame.close('a'))).toBe('answered')
   const idA2 = fx.open({ projectId: 'p1', appId: 'fixture-port' }, 'ui://fixture-port/main')
   await mount(page, 'a2', { appId: 'fixture-port', projectId: 'p1', instanceId: idA2 })
@@ -360,51 +366,54 @@ test('앱별 출처 방식: 자기 포트의 진짜 출처를 받고, 저장소�
 })
 
 /**
- * 열린 화면이 같은 값을 보는 법 (M4 B-3d, 플랜 "열린 화면이 같은 값을 보는 법"). 앱의 도구
- * 호출이 끝날 때마다 host가 "바뀌었다"를 알린다. 여기서는 부모가 `changeSignal`을 직접 넘겨
- * 알림의 규칙만 본다(신호의 출처는 아래 시험). 표준 밖의 확장이라, 받지 않는 화면에는 아무 일도
- * 없어야 한다.
+ * How open views see the same value (M4 B-3d, plan item "how open views see the same value"). The
+ * host announces "it changed" every time one of an app's tool calls finishes. Here the parent
+ * passes `changeSignal` directly, so only the notification rule itself is checked (the signal's
+ * origin is covered by the test below). This is an extension outside the spec, so a view that does
+ * not support it must see nothing happen.
  */
-test('상태가 바뀌었다는 신호는 초기화 뒤 값이 바뀔 때마다 한 번씩 centralu/notifications/changed로 간다', async ({ page }) => {
+test('a "state changed" signal goes out over centralu/notifications/changed once per change in value after init', async ({ page }) => {
   const idA = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
   const idB = fx.open({ projectId: null, appId: 'other' }, 'ui://other/main')
   await mount(page, 'a', { appId: 'fixture', projectId: null, instanceId: idA, changeSignal: 5 })
   await mount(page, 'b', { appId: 'other', projectId: null, instanceId: idB, changeSignal: 1 })
   const a = view(page, 'a')
   const b = view(page, 'b')
-  // 화면은 이 확장을 쓸 수 있다는 것을 host 능력에서 안다
+  // The view learns from the host capabilities that it can use this extension
   expect(((await entry(a, 'connected')) as { hostCapabilities: { experimental: object } }).hostCapabilities.experimental).toEqual({
     'centralu/notifications/changed': {},
   })
 
-  // 연 순간의 값은 알리지 않는다 — 화면은 초기화하면서 이미 새로 읽는다. 왕복 하나를 기준점으로
-  // 삼는다: 그 전에 부친 알림이 있었다면 결과보다 먼저 도착했을 것이다
+  // The value at the moment it was opened is not announced — the view already reads it fresh
+  // during init. One round trip is used as a checkpoint: any notification sent before it would
+  // have arrived before this result
   await a.locator('#call').click()
   await entry(a, 'call-result')
   await expect(a.locator('li[data-k="notification"]')).toHaveCount(0)
 
   await page.evaluate(() => (window as any).__appFrame.update('a', { changeSignal: 6 }))
   expect(await entry(a, 'notification')).toEqual({ method: 'centralu/notifications/changed', params: {} })
-  // 같은 값은 다시 알리지 않고, 새 값은 한 번 더
+  // The same value is not announced again, and a new value is announced once more
   await page.evaluate(() => (window as any).__appFrame.update('a', { changeSignal: 6 }))
   await page.evaluate(() => (window as any).__appFrame.update('a', { changeSignal: 7 }))
   await expect(a.locator('li[data-k="notification"]')).toHaveCount(2)
-  // 다른 앱의 화면에는 가지 않는다
+  // It does not reach a view of a different app
   await b.locator('#call').click()
   await entry(b, 'call-result')
   await expect(b.locator('li[data-k="notification"]')).toHaveCount(0)
 })
 
 /**
- * 위 신호의 출처 (B-5): host의 방송 `external_app_state_changed { appId, projectId }` → 스토어가
- * (프로젝트, 앱)마다 센다 → `changeSignal`을 받지 않은 AppFrame이 그 수를 쓴다. 부모 배선이 없는
- * 화면도 갱신을 받는다. 앱은 (프로젝트, id)로 하나라 다른 프로젝트의 같은 이름 앱은 남이다.
+ * The origin of the signal above (B-5): the host's broadcast `external_app_state_changed { appId,
+ * projectId }` → the store counts it per (project, app) → an AppFrame that receives no
+ * `changeSignal` uses that count. Even a view with no parent wiring receives the update. An app is
+ * identified by (project, id), so an app of the same name in a different project is unrelated.
  */
-test('host의 external_app_state_changed가 스토어를 지나 그 앱의 열린 화면에만 알림으로 간다', async ({ page }) => {
+test('the host\'s external_app_state_changed passes through the store and reaches only the open views of that app as a notification', async ({ page }) => {
   const idA = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
   const idB = fx.open({ projectId: 'p2', appId: 'fixture' }, 'ui://fixture/main')
   const idC = fx.open({ projectId: 'p1', appId: 'other' }, 'ui://other/main')
-  // changeSignal을 주지 않는다
+  // No changeSignal is given
   await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: idA })
   await mount(page, 'b', { appId: 'fixture', projectId: 'p2', instanceId: idB })
   await mount(page, 'c', { appId: 'other', projectId: 'p1', instanceId: idC })
@@ -415,10 +424,10 @@ test('host의 external_app_state_changed가 스토어를 지나 그 앱의 열�
   expect(await entry(view(page, 'a'), 'notification')).toEqual({ method: 'centralu/notifications/changed', params: {} })
   await hostSays('fixture', 'p1')
   await expect(view(page, 'a').locator('li[data-k="notification"]')).toHaveCount(2)
-  // 사용자 폴더의 fixture도 남이다
+  // The user-folder fixture is unrelated too
   await hostSays('fixture', null)
 
-  // 왕복 하나를 기준점으로 삼는다: 그 전에 부친 알림이 있었다면 결과보다 먼저 도착했을 것이다
+  // One round trip is used as a checkpoint: any notification sent before it would have arrived before this result
   for (const key of ['b', 'c']) {
     const v = view(page, key)
     await v.locator('#call').click()
@@ -429,11 +438,14 @@ test('host의 external_app_state_changed가 스토어를 지나 그 앱의 열�
 })
 
 /**
- * 화면은 자기가 낸 바뀜을 다시 듣지 않는다 (B-5). host는 그 바뀜을 낸 호출의 주인(`cause`)을 싣고, 스토어가
- * 카운터 곁에 둔다. 실측(65acb43): 이것이 없을 때 템플릿 화면 하나가 초당 약 700번 `show`를 불렀다 — 알림마다
- * 다시 읽고, 그 읽기가 또 알림을 냈다. 같은 앱의 다른 화면은 그 바뀜을 받아야 한다(그것이 알림의 쓸모다).
+ * A view does not hear its own change played back (B-5). The host attaches the owner (`cause`) of
+ * the call that produced the change, and the store keeps it alongside the counter. Measured
+ * (65acb43): without this, one template view called `show` roughly 700 times a second — each
+ * notification triggered a re-read, and that re-read produced another notification. A different
+ * view of the same app must still receive that change (that is the whole point of the
+ * notification).
  */
-test('화면은 자기 인스턴스가 낸 바뀜을 알림으로 받지 않고, 같은 앱의 다른 화면은 받는다 — 몰려 온 남의 바뀜도 잃지 않는다', async ({ page }) => {
+test('a view does not receive its own instance\'s change as a notification, but a different view of the same app does — and a burst of someone else\'s changes is not lost either', async ({ page }) => {
   const idA = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
   const idB = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
   await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: idA })
@@ -444,50 +456,50 @@ test('화면은 자기 인스턴스가 낸 바뀜을 알림으로 받지 않고,
   const change = (cause?: Record<string, unknown>) => ({ type: 'external_app_state_changed', appId: 'fixture', projectId: 'p1', ...(cause ? { cause } : {}) })
   const hostSays = (...events: Record<string, unknown>[]) =>
     page.evaluate((es) => es.forEach((e) => (window as any).__mock.emit(e)), events)
-  /** 왕복 하나를 기준점으로 삼는다: 그 전에 부친 알림이 있었다면 결과보다 먼저 도착했을 것이다 */
+  /** One round trip is used as a checkpoint: any notification sent before it would have arrived before this result */
   const roundTrip = async (v: FrameLocator, nth: number) => {
     await v.locator('#call').click()
     await entry(v, 'call-result', nth)
   }
 
-  // a가 낸 바뀜 — b만 듣는다
+  // A change caused by a — only b hears it
   await hostSays(change({ kind: 'view', instanceId: idA }))
   await expect(heard(b)).toHaveCount(1)
   await roundTrip(a, 0)
   await expect(heard(a)).toHaveCount(0)
-  // b가 낸 바뀜 — a만 듣는다
+  // A change caused by b — only a hears it
   await hostSays(change({ kind: 'view', instanceId: idB }))
   await expect(heard(a)).toHaveCount(1)
   await roundTrip(b, 0)
   await expect(heard(b)).toHaveCount(1)
-  // 세션이 낸 바뀜, 주인이 없는 바뀜(host가 섞인 것을 모았다) — 둘 다 듣는다
+  // A change caused by a session, and one with no owner (the host lumped mixed sources together) — both hear it
   await hostSays(change({ kind: 'session', sessionId: 's1' }))
   await expect(heard(a)).toHaveCount(2)
   await expect(heard(b)).toHaveCount(2)
   await hostSays(change())
   await expect(heard(a)).toHaveCount(3)
   await expect(heard(b)).toHaveCount(3)
-  // 한 번에 몰려 온 둘 — b의 것 다음에 a의 것. 마지막 주인이 a여도 a는 b의 바뀜을 들어야 한다
+  // Two arriving in a burst — b's then a's. Even though the last owner is a, a must still hear b's change
   await hostSays(change({ kind: 'view', instanceId: idB }), change({ kind: 'view', instanceId: idA }))
   await expect(heard(a)).toHaveCount(4)
   await expect(heard(b)).toHaveCount(4)
 })
 
-test('확장 알림을 모르는 화면은 그냥 지나간다', async ({ page }) => {
+test('a view that does not know this extension notification simply ignores it', async ({ page }) => {
   const id = fx.open({ projectId: null, appId: 'plain' }, 'ui://plain/main')
   await mount(page, 'p', { appId: 'plain', projectId: null, instanceId: id, changeSignal: 1 })
   const v = view(page, 'p')
   await entry(v, 'connected')
   await page.evaluate(() => (window as any).__appFrame.update('p', { changeSignal: 2 }))
   await page.evaluate(() => (window as any).__appFrame.update('p', { changeSignal: 3 }))
-  // 알림 뒤에도 화면은 멀쩡히 호출하고 답을 받는다
+  // Even after the notification, the view calls fine and gets its result
   await v.locator('#call').click()
   expect(await entry(v, 'call-result')).toMatchObject({ appId: 'plain' })
   await expect(v.locator('li[data-k="notification"]')).toHaveCount(0)
   await expect(v.locator('li[data-k$="-error"]')).toHaveCount(0)
 })
 
-test('열리지 않은 화면은 이유와 함께 실패한다', async ({ page }) => {
+test('a view that is not open fails with a reason', async ({ page }) => {
   await page.evaluate(() => (window as any).__appFrame.mount('x', { appId: 'fixture', projectId: null, instanceId: 'A'.repeat(22) }))
   await expect(page.getByTestId('app-frame-error')).toContainText('This app view is not open')
 })
