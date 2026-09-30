@@ -15,26 +15,31 @@ const NO_COMMANDS: SavedCommand[] = []
 const NO_RUNS: Record<string, never> = {}
 
 /**
- * 자주 쓰는 명령어 (#60) — 터미널 탭과 별개의 실행 창.
+ * Frequently used commands (#60) — a run window separate from the terminal tab.
  *
- * 예전에는 헤더의 작은 팝오버에서 고르면 **터미널 탭의 PTY에 타이핑**해 넣었다.
- * 그러면 단발성 빌드도 데브 서버도 전부 터미널 탭에 눌러앉았고, 좁은 팝오버로는
- * 로그를 볼 자리도 없었다. 한동안 칸을 통째로 덮는 창이었는데, 목록 몇 줄에
- * 화면 전부는 과했다(사용자 지적 2026-09-06) — 지금은 가운데 뜨는 작은 창이고,
- * 로그는 명령을 골랐을 때만 아래로 열린다.
+ * It used to be that picking one from the small popover in the header would **type it into the
+ * terminal tab's PTY**. That meant one-off builds and dev servers alike all settled into the
+ * terminal tab, and the narrow popover had no room to show logs either. For a while this was a
+ * window covering the whole pane, but a full screen for a handful of list rows was too much
+ * (reported by a user on 2026-09-06) — now it is a small window centered on screen, and the log
+ * only opens below once a command is picked.
  *
- * 별칭(label)은 같은 날의 요청이다: `pnpm dev`보다 "데브 서버"가 한눈에 읽힌다.
- * 단, 이름이 몰래 딴 명령을 뜻하게 되는 표류를 막는 규칙 하나 — **별칭을 보여주는
- * 모든 자리는 명령도 같이 보여준다.** 정체성은 어디까지나 명령 문자열이다.
+ * The alias (label) was requested the same day: "dev server" reads at a glance better than
+ * `pnpm dev`. There is one rule to stop the name from drifting into quietly meaning a different
+ * command, though — **every place that shows the alias shows the command too.** Identity always
+ * belongs to the command string.
  *
- * 단발/상주를 **구분하지 않는다** — 안 끝나면 로그가 계속 흐르고, 끝나면 종료
- * 코드와 함께 로그가 남는 것뿐이다. 데브 서버는 그냥 안 끝나는 명령이다.
- * 로그는 명령별 마지막 실행 하나가 host에 남는다(앱 수명 동안) — 창을 닫았다
- * 열어도, 같은 명령을 **다시 실행하기 전까지** 그대로다 (사용자 결정 2026-08-26).
+ * One-off and long-running commands are **not distinguished** — if it does not end, the log
+ * just keeps streaming, and if it does, the log is left behind along with the exit code. A dev
+ * server is simply a command that does not end. Only the single most recent run's log per
+ * command is kept on the host (for the app's lifetime) — closing and reopening the window
+ * leaves it unchanged **until the same command is run again** (decided by a user on 2026-08-26).
  *
- * 실행 상태는 이 창의 것이 아니라 스토어 장부(commandRuns)의 것이다 — 창을 닫아도
- * **돌고 있는 명령은 터미널 패널에 터미널로 서 있고**, 종료는 어디서 났든 장부를
- * 거쳐 양쪽에 같이 비친다. 창은 등록·실행·지난 로그의 정본이고, 패널은 사는 곳이다.
+ * Run state belongs not to this window but to the store's record (commandRuns) — even with the
+ * window closed, **a running command still stands as a terminal in the terminal panel**, and an
+ * exit, wherever it came from, goes through the record and shows up in both places together.
+ * The window is the source of truth for registering, running and past logs; the panel is where
+ * it lives.
  */
 export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const commands = useStore((s) => s.projects[projectId]?.commands ?? NO_COMMANDS)
@@ -42,28 +47,32 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
   const runCommand = useStore((s) => s.runCommand)
   const stopCommand = useStore((s) => s.stopCommand)
   const [selected, setSelected] = useState<string | null>(null)
-  /** 명령 → 마지막 실행 상태 (뱃지용). 로그 본문은 LogView가 따로 든다 */
+  /** Command → last run state (for the badge). LogView holds the log body separately */
   const runs = useStore((s) => s.commandRuns[projectId] ?? NO_RUNS)
   const [draft, setDraft] = useState('')
   const [draftName, setDraftName] = useState('')
-  /** 별칭을 고치는 중인 명령 (명령 문자열이 키다) */
+  /** The command whose alias is being edited (the command string is the key) */
   const [renaming, setRenaming] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
-  /** 닫힘 애니메이션 중 — 내려온 길로 도로 올라간 뒤에야 onClose로 unmount한다 */
+  /** Mid closing-animation — only unmounts via onClose after sliding back up the way it came down */
   const [leaving, setLeaving] = useState(false)
   const leave = useCallback(() => setLeaving(true), [])
-  // 칸을 덮는 층이다 — 떠 있는 동안 그 아래 승인 카드가 y/n/a를 받지 않는다 (#158)
+  // A layer that covers the pane — while it is open, the approval card underneath does not
+  // receive y/n/a (#158)
   useOpenLayer()
 
-  // reduced-motion이면 animationend가 안 온다 — 타이머가 unmount를 보증한다 (설정 메뉴와 같은 규칙)
+  // With reduced-motion, animationend never fires — a timer guarantees the unmount (the same
+  // rule as the settings menu)
   useEffect(() => {
     if (!leaving) return
     const t = window.setTimeout(onClose, 200)
     return () => window.clearTimeout(t)
   }, [leaving, onClose])
 
-  // 열 때 host의 실행 장부를 읽는다 — 창을 닫아도 실행은 계속되므로 다시 열면 이어 보인다.
-  // (그리드에는 증거 패널이 없어서 여기서도 읽어야 한다 — UI 리로드 직후의 그리드 경로)
+  // Reads the host's run record on open — a run keeps going even if the window is closed, so
+  // reopening it picks up where it left off.
+  // (The grid has no evidence panel, so this also has to be read here — the grid path right
+  // after a UI reload)
   useEffect(() => {
     void useStore.getState().loadCommandRuns(projectId)
   }, [projectId])
@@ -72,7 +81,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       e.stopPropagation()
-      // 별칭 입력 중이면 Esc는 입력 취소다 — 창까지 닫으면 두 단계가 한 번에 무너진다
+      // While editing an alias, Esc cancels the edit — closing the window too would collapse
+      // both steps at once
       if (renaming !== null) setRenaming(null)
       else leave()
     }
@@ -80,7 +90,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
     return () => window.removeEventListener('keydown', onKey, true)
   }, [leave, renaming])
 
-  // 실행·정지는 스토어 장부를 거친다 — 터미널 패널·탭 뱃지가 같은 사실을 본다 (실패 토스트도 거기서)
+  // Running and stopping both go through the store's record — the terminal panel and tab badge
+  // see the same fact (the failure toast comes from there too)
   const run = (command: string) => void runCommand(projectId, command)
   const stop = (command: string) => void stopCommand(projectId, command)
 
@@ -107,7 +118,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
   const currentRun = current ? runs[current] : undefined
 
   return (
-    /* 바깥 여백을 누르면 닫힌다 — 창 자체(mousedown이 안쪽에서 시작)는 무시 */
+    /* Clicking the outer margin closes it — ignored if the window itself started the mousedown */
     <div
       ref={rootRef}
       className="absolute inset-0 z-40 flex items-start justify-end bg-void/40 px-2 pb-4 pt-8"
@@ -117,9 +128,10 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
       }}
     >
       {/*
-        헤더의 ▶ 아래에 드롭다운으로 붙는다 (사용자 요청 2026-09-06 — 가운데 모달은
-        목록 몇 줄에 과한 무게였다). 위에서 내려오는 cc-drop이 출처를 말해 준다.
-        창은 내용만큼만 서고, 로그를 열면 아래로 자란다.
+        Attaches as a dropdown below the header's ▶ (requested by a user on 2026-09-06 — a
+        centered modal felt too heavy for a handful of list rows). The cc-drop animation
+        sliding down from above tells where it came from. The window is only as tall as its
+        content, and grows downward once the log is opened.
       */}
       <div
         onAnimationEnd={() => leaving && onClose()}
@@ -137,16 +149,18 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
         </div>
 
         {/*
-          명령 목록.
+          The command list.
 
-          줄마다 테두리를 두르지 않는다. 예전엔 줄이 `border-edge bg-void` 상자였는데,
-          바로 아래 등록 칸의 입력이 똑같은 껍데기라 **목록이 빈 입력 칸처럼 보였다**
-          (사용자 지적 2026-09-07). 그렇다고 아무 바탕도 안 주면 이번엔 창 바탕과 붙어
-          목록이 어디서 시작하는지 안 보인다 (같은 날 두 번째 지적).
+          Rows do not each get a border. They used to be `border-edge bg-void` boxes, and
+          since the input just below in the registration area had the exact same shell,
+          **the list looked like a row of empty input fields** (reported by a user on
+          2026-09-07). But giving rows no background at all makes the list blend into the
+          window background and hides where it starts (a second issue reported the same day).
 
-          그래서 **줄이 아니라 목록 전체가 한 칸**이다: 창보다 한 단 어두운 바닥(bg-void)
-          위에 머리카락 선으로 줄을 가른다. 테두리 있는 상자는 여전히 글자를 넣는 곳뿐이고,
-          목록은 눌러앉은 판이라 입력과 헷갈릴 여지가 없다.
+          So **the whole list is one panel, not individual rows**: hairline rules separate the
+          rows on top of a floor (bg-void) one shade darker than the window. A bordered box is
+          still reserved for places that take text input, and the list is a settled slab, so
+          there is no room to confuse it with an input.
         */}
         <div className="max-h-64 shrink-0 overflow-y-auto border-b border-edge bg-void">
           {commands.length === 0 && (
@@ -178,10 +192,11 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                       className="w-full rounded border border-edge bg-panel px-1 py-0.5 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
-                        // 조합을 끝내는 Enter는 저장이 아니다 (#181) — 한글 별칭의 마지막 음절이 빠졌다
+                        // An Enter that ends a composition does not save (#181) — the last
+                        // syllable of a Korean-language alias was dropped
                         if (isPlainEnter({ key: e.key, isComposing: e.nativeEvent.isComposing }))
                           rename(c.command, (e.target as HTMLInputElement).value)
-                        // Esc는 위의 창 리스너가 renaming만 걷는다
+                        // Esc is only cleared from `renaming` by the window listener above
                       }}
                       onBlur={(e) => renaming === c.command && rename(c.command, e.target.value)}
                     />
@@ -196,7 +211,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                     </span>
                   )}
                 </button>
-                {/* 상태는 목록에서도 보인다 — 창을 열자마자 "어느 게 돌고 있나"가 읽혀야 한다 */}
+                {/* Status shows in the list too — the moment the window opens, "which one is
+                running" must be readable */}
                 {r?.running && (
                   <span
                     className="mr-1 size-1.5 shrink-0 animate-pulse rounded-full bg-chalk"
@@ -209,7 +225,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                     exit {r.exitCode ?? '?'}
                   </span>
                 )}
-                {/* 별칭 달기/고치기 — hover에만 (매 줄의 상설 버튼 셋은 목록을 시끄럽게 한다) */}
+                {/* Adding/editing an alias — hover only (a permanent button set on every row
+                would make the list noisy) */}
                 <button
                   type="button"
                   data-testid={`run-rename-${i}`}
@@ -219,7 +236,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                 >
                   {c.label ? 'Rename' : 'Name'}
                 </button>
-                {/* 지우기는 실행과 다른 과녁 — 잘못 눌러 되돌릴 수 없는 쪽에 간격을 준다 */}
+                {/* Delete is a different target from run — extra spacing on the side where a
+                wrong click cannot be undone */}
                 <button
                   type="button"
                   data-testid={`run-delete-${i}`}
@@ -237,7 +255,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
           })}
         </div>
 
-        {/* 등록 — 목록의 마지막 줄이 아니라 바닥의 한 칸이다. 판이 끝나는 자리가 곧 경계다 */}
+        {/* Registration — a panel at the bottom, not the list's last row. Where the slab ends
+        is the boundary */}
         <div className="shrink-0 p-2">
           <div className="flex items-center gap-1">
             <input
@@ -271,7 +290,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
           </div>
         </div>
 
-        {/* 실행·정지·로그 — 명령을 골랐을 때만. 안 골랐으면 창은 목록만큼만 작다 */}
+        {/* Run, stop, log — only once a command is picked. Until then the window stays as
+        small as the list */}
         {current && (
           <>
             <div className="flex items-center gap-2 border-y border-edge px-3 py-1.5">
@@ -298,7 +318,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               </span>
             </div>
 
-            {/* 선택한 명령의 로그 — runId가 바뀌면(재실행) 처음부터 다시 그린다 */}
+            {/* The selected command's log — re-renders from scratch when runId changes (re-run) */}
             <div className="h-64 min-h-0 shrink" data-testid="run-log">
               {currentRun ? (
                 <LogView key={currentRun.runId} projectId={projectId} command={current} runId={currentRun.runId} />
@@ -314,9 +334,10 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
 }
 
 /**
- * 로그 하나 (읽기 전용 xterm — 색을 살리는 가장 싼 길이 터미널 에뮬레이터다).
- * 화면 복원은 host의 로그 버퍼가 한다: 붙는 순간 지금까지의 출력을 통째로 받고,
- * 그 뒤는 터미널과 같은 스트림(runId가 terminalId 자리)을 듣는다.
+ * A single log (read-only xterm — the cheapest way to keep color is a terminal emulator).
+ * Restoring the screen is the host's log buffer's job: the moment it attaches, it receives all
+ * output so far in one shot, and from then on listens to the same stream as a terminal (runId
+ * standing in for terminalId).
  */
 function LogView({ projectId, command, runId }: { projectId: string; command: string; runId: string }) {
   const platform = usePlatform()
@@ -348,7 +369,7 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
       try {
         fit.fit()
       } catch {
-        // 아직 레이아웃이 없을 때가 있다 — 다음 기회에 맞춘다
+        // There are moments when there is no layout yet — this gets fitted next time around
       }
       const { cols, rows } = term
       if (cols < 2 || rows < 2) return
@@ -359,7 +380,8 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
     }
     syncSize()
 
-    // 지금까지의 로그를 통째로 — 그 뒤의 조각과 순서가 어긋나지 않게 스트림 구독을 먼저 건다
+    // All the log so far, in one shot — the stream subscription is set up first so it does not
+    // fall out of order with the chunks that follow
     const pendingChunks: string[] = []
     let replayed = false
     const offOutput = platform.terminal.onOutput((e) => {
@@ -374,7 +396,8 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
     void platform.commands
       .log(projectId, command)
       .then((run) => {
-        // 재실행으로 다른 runId가 됐다면 이 뷰는 곧 교체된다 — 옛 로그를 그리지 않는다
+        // If a re-run gave it a different runId, this view is about to be replaced anyway — do
+        // not render the stale log
         if (!run || run.runId !== runId) return
         term.write(run.history)
         for (const chunk of pendingChunks.splice(0)) term.write(chunk)

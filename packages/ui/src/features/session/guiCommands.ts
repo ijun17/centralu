@@ -1,16 +1,18 @@
 import { useStore } from '../../store/store.js'
 
 /**
- * GUI 슬래시 커맨드 (사용자 요청 2026-09-07).
+ * GUI slash commands (requested by a user on 2026-09-07).
  *
- * `/usage`는 CLI에선 클라이언트 내장 명령이라 SDK 프로토콜에 응답이 없다 — 세션에
- * 보내도 에이전트가 할 수 있는 일이 없다. 그래서 여기 있는 이름들은 입력창에서
- * 엔터를 치면 **메시지가 나가는 대신 앱 화면이 열린다.** 자동완성에는 세션
- * 커맨드와 나란히 서되, 힌트가 출처를 말한다 (opens in app).
+ * `/usage` is a client-side built-in command in the CLI, so there is no response for it in the
+ * SDK protocol — sending it to a session leaves the agent nothing it can do. So for the names
+ * listed here, pressing Enter in the composer **opens an app screen instead of sending the
+ * message.** They stand alongside session commands in autocomplete, but the hint says where
+ * they come from (opens in app).
  *
- * **정확히 이름만 쳤을 때만 가로챈다.** `/usage 어쩌고`처럼 뒤에 무언가 있으면
- * 세션에게 말하고 싶다는 뜻일 수 있으므로 보통 메시지로 나간다 — 가로채기가
- * 넓어질수록 "보냈는데 안 갔다"는 놀람의 표면적도 넓어진다.
+ * **Only intercepted when exactly the name is typed, nothing more.** If there is anything after
+ * it, like `/usage whatever`, that may mean the person wants to say something to the session, so
+ * it goes out as a normal message — the wider the interception net, the wider the surface for
+ * the surprise of "I sent it and nothing happened".
  */
 export type GuiCommand = {
   name: string
@@ -27,7 +29,7 @@ export const GUI_COMMANDS: GuiCommand[] = [
   {
     name: 'model',
     description: 'Model, effort, permissions — this session',
-    // CLI의 /model에 해당하는 화면은 이미 있다 — 입력창 아래 설정 메뉴가 그것이다
+    // A screen equivalent to the CLI's /model already exists — the settings menu below the composer
     run: ({ sessionId }) => useStore.getState().requestSettingsMenu(sessionId),
   },
   {
@@ -37,7 +39,10 @@ export const GUI_COMMANDS: GuiCommand[] = [
   },
 ]
 
-/** 보내려는 글이 GUI 커맨드 그 자체인가 — `/usage`(양끝 공백 허용)만 참 */
+/**
+ * Whether the text to send is a GUI command itself — true only for `/usage` (leading/trailing
+ * whitespace allowed)
+ */
 export function guiCommandFor(text: string): GuiCommand | null {
   const m = /^\/([a-z][a-z-]*)$/.exec(text.trim())
   return m ? (GUI_COMMANDS.find((c) => c.name === m[1]) ?? null) : null

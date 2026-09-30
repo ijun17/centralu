@@ -1,40 +1,43 @@
 /**
- * 입력창에서 Enter를 어떻게 읽을 것인가 — 판단만 떼어낸다.
+ * How to read Enter in the composer — only the judgment is pulled out here.
  *
- * DOM도 store도 모른다. 조합(Shift·⌘/Ctrl)과 IME 상태와 설정이 만나는 자리라 경우의
- * 수가 여덟 가지인데, 그중 하나만 틀려도 결과가 "쓰던 글이 반쯤 나갔다"다 —
- * 브라우저를 띄우지 않고 여덟 가지를 다 짚을 수 있어야 한다 (caret.ts와 같은 이유).
+ * Knows neither the DOM nor the store. Because it sits where modifiers (Shift, Cmd/Ctrl), IME
+ * state and settings meet, there are eight possible cases, and getting even one of them wrong
+ * means the result is "what the person was typing went out half-written" — all eight have to be
+ * checkable without opening a browser (the same reason as caret.ts).
  */
 
-/** 판단에 필요한 것만. KeyboardEvent 전체가 아니라 이 다섯 개다 */
+/** Only what the judgment needs. Not the whole KeyboardEvent, just these five fields */
 export type ComposerKey = {
   key: string
   shiftKey: boolean
   metaKey: boolean
   ctrlKey: boolean
   /**
-   * IME가 글자를 만드는 중인가.
+   * Whether the IME is currently composing a character.
    *
-   * **부르는 쪽이 판정해서 넘긴다.** 이 값을 여기서 계산하지 않는 이유는 그 판정이
-   * 네이티브 이벤트(`isComposing`)를 읽어야만 나오는 것이라서다 — 그 한 줄은
-   * 입력창에 남고, 여기는 "조합 중이면 아무것도 하지 않는다"만 안다.
+   * **The caller decides this and passes it in.** It is not computed here because that
+   * judgment can only come from reading the native event (`isComposing`) — that one line
+   * stays in the composer, and this file only needs to know "do nothing while composing".
    */
   composing: boolean
 }
 
 /**
- * 이 키가 **보내기**인가.
+ * Is this key **the send key**?
  *
- * `sendWithModifierEnter`가 꺼져 있으면 예전 그대로다: 맨 Enter는 보내고 Shift+Enter는
- * 줄을 바꾼다. 켜면 둘이 뒤집히는 것이 아니라 **Enter가 전부 줄바꿈이 되고** 보내기가
- * ⌘/Ctrl+Enter로 옮겨 간다.
+ * With `sendWithModifierEnter` off, behavior is unchanged: plain Enter sends and Shift+Enter
+ * breaks the line. Turning it on does not just swap the two — **Enter always breaks the line**
+ * and sending moves to Cmd/Ctrl+Enter.
  *
- * 조합키는 `metaKey || ctrlKey` 둘 다 받는다. 맥의 ⌘와 나머지 자판의 Ctrl을 한 판정으로
- * 덮으려는 것이고, 그래서 이 파일은 자기가 어느 OS에 있는지 물어볼 일이 없다
- * (화면에 찍는 이름만 포트가 답한다 — `useShortcut`).
+ * The modifier check accepts either `metaKey || ctrlKey`. This is meant to cover the Mac's Cmd
+ * and other keyboards' Ctrl with a single check, so this file never needs to ask which OS it is
+ * on (only the label shown on screen is answered by the port — `useShortcut`).
  *
- * 조합 중(IME)에는 무엇이 눌렸든 보내지 않는다. 설정을 켠 사람도 마찬가지다: ⌘+Enter가
- * 한글을 만드는 중에 먹히면, 켜서 얻으려던 것(반쯤 쓴 글이 안 나가는 것)을 그대로 잃는다.
+ * While composing (IME), nothing sends, no matter what is pressed. This holds even for someone
+ * who turned the setting on: if Cmd+Enter is caught while Hangul is still being composed, it
+ * takes away exactly what turning the setting on was supposed to give (not having a half-typed
+ * message go out).
  */
 export function isComposerSendKey(e: ComposerKey, sendWithModifierEnter: boolean): boolean {
   if (e.composing || e.key !== 'Enter') return false
@@ -43,15 +46,21 @@ export function isComposerSendKey(e: ComposerKey, sendWithModifierEnter: boolean
 }
 
 /**
- * 이 키가 IME 조합에 속하는가 (#181) — 엔진에 따라 `isComposing`으로 알리기도 하고 `key: 'Process'`로만 알리기도 한다.
- * 조합을 끝내는 Enter를 제출로 읽으면 마지막 음절이 빠진 채 저장되거나 조합 중인 음절이 칸에 남는다. Enter를 받는
- * 입력칸은 모두 이 판정을 지난다 — 세션 입력창만 알고 명령 창은 모르던 동안 한 앱 안에서 규칙이 둘이었다.
+ * Does this key belong to an IME composition (#181)? Depending on the engine, this is signaled
+ * either through `isComposing` or only through `key: 'Process'`. Reading the Enter that ends a
+ * composition as a submit either saves the text with the last syllable missing or leaves the
+ * syllable being composed sitting in the field. Every input field that receives Enter goes
+ * through this check — for a while only the session composer knew this and the command palette
+ * did not, so the same app had two different rules.
  */
 export function composingKey(e: { key: string; isComposing: boolean }): boolean {
   return e.isComposing || e.key === 'Process'
 }
 
-/** 조합이 아닌 맨 Enter인가 (#181) — 한 줄 입력칸의 "적은 것을 저장한다" */
+/**
+ * Is this a plain Enter, not part of a composition (#181) — "save what was typed" for a
+ * single-line field
+ */
 export function isPlainEnter(e: { key: string; isComposing: boolean }): boolean {
   return e.key === 'Enter' && !composingKey(e)
 }

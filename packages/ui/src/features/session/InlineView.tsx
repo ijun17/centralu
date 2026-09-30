@@ -7,33 +7,43 @@ import { UpdatedCue } from '../pinned-app/UpdatedCue.jsx'
 import { AppIcon } from '../../components/icons.jsx'
 
 /**
- * 대화 안 앱 화면 (M4 B-1) — 에이전트가 화면이 달린 앱 도구를 부르면, 그 호출 카드 아래에 선다.
+ * An in-conversation app view (M4 B-1) — when the agent calls an app tool that has a view, this
+ * stands below that call's card.
  *
- * 화면의 수명은 host가 정한다(`app_view`: 열림 → 결과·취소 → 닫힘). 이 부품은 그것을 그리기만 한다:
- * 열려 있으면 AppFrame을 띄우고 규격대로 tool-input을 한 번, 그다음 tool-result(또는 tool-cancelled)를
- * 한 번 보낸다(AppFrame이 순서를 지킨다). host가 닫으면 **teardown을 먼저 보내고** 자리표시로 접는다.
+ * The view's lifetime is decided by the host (`app_view`: open → result/cancel → closed). This
+ * component only renders it: while open, it mounts AppFrame and, per the spec, sends tool-input
+ * once and then tool-result (or tool-cancelled) once (AppFrame enforces the order). When the
+ * host closes it, **teardown is sent first**, then it collapses into the placeholder.
  *
- * 화면의 `ui/message`는 **이 대화로** 간다(B-4: 대화 안 화면은 보낼 곳이 정해져 있다). 그래도 묻는다 —
- * 화면은 앱의 코드라서 아무도 누르지 않아도 말을 보낼 수 있다. 사람이 보낼 글을 읽고 "Send"를 누르기
- * 전에는 아무것도 가지 않는다. 보낸 말은 대화에 앱이 보낸 말로 남고, 에이전트는 host가 앱의 글로 감싼
- * 모양을 받는다(#120과 같은 규칙).
+ * The view's `ui/message` always goes **to this conversation** (B-4: an in-conversation view has
+ * a fixed destination for messages). It still asks first, though — the view is the app's own
+ * code, so it can send a message without anyone clicking anything. Nothing goes out until the
+ * person reads the text to be sent and presses "Send". A sent message is recorded in the
+ * conversation as something the app said, and the agent receives it wrapped by the host as the
+ * app's text (the same rule as #120).
  *
- * "Pin"은 그 앱의 고정 화면(B-2)을 연다 — 같은 앱을 대화 밖에서 계속 쓰는 길이다.
+ * "Pin" opens that app's pinned view (B-2) — the way to keep using the same app outside the
+ * conversation.
  *
- * **가상 스크롤** (플랜: 벗어나기 전에 teardown을 보내고 정지 이미지를 남긴다). 대화 목록은 화면 밖으로 멀리
- * 나간 줄을 DOM에서 뗀다 — 떼는 순간 iframe의 창도 사라져, 그 뒤에 보낸 teardown은 닿지 않는다. 그래서
- * 프레임이 그려진 줄은 목록이 떼지 않고 붙들어 두고(`registerInlineFrame`), 뗄 때가 된 줄에는 `leaving`을
- * 준다. 화면은 그때 teardown을 보내고 자리표시로 접힌다 — 그다음에야 줄이 떨어진다. 자리표시의
- * "Reopen"은 도구를 다시 부르지 않고 host가 들고 있던 입력과 결과로 새 화면을 연다.
+ * **Virtual scrolling** (the plan: send teardown and leave a still image before a row leaves the
+ * viewport). The conversation list detaches rows from the DOM once they scroll far enough out of
+ * view — the moment a row is detached, its iframe's window disappears too, so any teardown sent
+ * after that never arrives. So a row with a mounted frame is held onto by the list instead of
+ * being detached (`registerInlineFrame`), and a row about to be detached is given `leaving`. At
+ * that point the view sends teardown and collapses into the placeholder — only then does the row
+ * actually get detached. The placeholder's "Reopen" opens a new view with the input and result
+ * the host still holds, without calling the tool again.
  *
- * 대화 자체가 바뀌거나 가려질 때(다른 세션, 고정 화면으로 이동)는 목록이 통째로 내려가 붙들 수 없다 —
- * 그때는 AppFrame의 마지막 시도(내려가며 teardown을 부친다)가 전부이고, 화면은 살아 있는 채로 남아 돌아오면
- * 다시 그려진다(같은 인스턴스, 입력과 결과를 다시 받는다).
+ * When the conversation itself changes or is hidden (switching sessions, moving to a pinned
+ * view), the whole list unmounts and there is nothing to hold onto — in that case AppFrame's last
+ * attempt (firing off teardown on unmount) is all there is, and the view stays alive and
+ * re-renders when it comes back (the same instance, receiving the input and result again).
  */
 export function InlineViewSlot({ sessionId, callId, leaving = false }: { sessionId: string; callId: string; leaving?: boolean }) {
   const view = useStore((s) => s.inlineViews[sessionId]?.[callId])
   if (!view) return null
-  // 세션이 바뀌면 같은 줄이 다른 대화의 카드를 그릴 수 있다 — 화면의 상태를 섞지 않게 열쇠로 가른다
+  // If the session changes, the same row can end up rendering a different conversation's card —
+  // a key keeps view states from bleeding into each other
   return <InlineViewBody key={`${sessionId}:${callId}`} sessionId={sessionId} view={view} leaving={leaving} />
 }
 
@@ -52,8 +62,9 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
 
   const showFrame = (view.state === 'live' || view.state === 'closing') && view.instanceId !== null
   /*
-   * 프레임이 그려진 동안 스토어에 손잡이를 올린다 — 누가 접든(스크롤, 상한, host의 닫힘) teardown이 이 손잡이로
-   * 먼저 간다. 목록은 손잡이가 있는 줄을 떼지 않는다.
+   * A handle is registered in the store while the frame is mounted — no matter what collapses
+   * it (scrolling, a limit, the host closing it), teardown goes through this handle first. The
+   * list does not detach a row that has a handle.
    */
   useEffect(() => {
     if (!showFrame) return
@@ -62,14 +73,16 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
     })
   }, [showFrame, sessionId, callId])
 
-  // 목록이 이 줄을 뗄 때가 됐다 — teardown을 보내고 접는다. 접히면 손잡이가 내려가고 그때 줄이 떨어진다
+  // The list is about to detach this row — send teardown and collapse. Once collapsed the
+  // handle is unregistered, and only then does the row actually get detached
   useEffect(() => {
     if (leaving && view.state === 'live' && showFrame) void close(sessionId, callId, 'Closed when it scrolled out of view')
   }, [leaving, view.state, showFrame, close, sessionId, callId])
 
   /*
-   * 프레임을 띄우지 못했다 — 인스턴스가 이미 닫혔거나(host가 다시 떴다) 문서를 못 읽었다. 깨진 프레임을 두지
-   * 않고 자리표시로 접는다. host가 들고 있으면 "Reopen"이 새 인스턴스로 다시 연다.
+   * The frame failed to mount — either the instance was already closed (the host restarted it)
+   * or the document could not be read. Rather than leaving a broken frame, this collapses into
+   * the placeholder. If the host still holds it, "Reopen" opens it again as a new instance.
    */
   const onFailed = useCallback(
     (message: string) => void close(sessionId, callId, `This view could not be shown: ${message}`),
@@ -77,8 +90,9 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
   )
 
   /*
-   * 화면의 `ui/message`. 먼저 온 물음이 남아 있으면 그것은 거절로 닫는다(고정 화면·링크 확인과 같은 규칙).
-   * 글이 한 조각도 없으면 묻지 않고 거절한다 — 보낼 것이 없다.
+   * The view's `ui/message`. If an earlier question is still pending, that one is closed as
+   * declined (the same rule as pinned views and link confirmation). If there is no text at all,
+   * this declines without asking — there is nothing to send.
    */
   const [ask, setAsk] = useState<Ask | null>(null)
   const askRef = useRef<Ask | null>(null)
@@ -108,7 +122,8 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
     if (!send || !view.instanceId) return a.resolve(false)
     a.resolve(await sendViewMessage(sessionId, view.instanceId, a.text))
   }
-  // 화면이 내려가면 묻던 것도 거절로 닫는다 — 답할 화면이 없다
+  // Once the view goes away, any pending question is closed as declined — there is no view
+  // left to answer
   useEffect(() => {
     if (view.state !== 'live') settleAsk(false)
   }, [view.state, settleAsk])
@@ -128,7 +143,8 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
         <span className="truncate text-ash" data-testid="inline-view-title">
           {title}
         </span>
-        {/* 새 코드로 다시 열었다 (M4 C-4) — 고정 화면과 같은 한 마디. 너무 자주 바뀌었으면 사람이 누른다 */}
+        {/* Reopened with new code (M4 C-4) — the same one-line cue as a pinned view. If it
+        changed too often, the person clicks through */}
         {view.state === 'live' && view.updatedAt && <UpdatedCue key={view.updatedAt} at={view.updatedAt} testId="inline-view-updated" />}
         {view.state === 'live' && view.stale && (
           <button
@@ -217,9 +233,11 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
 }
 
 /**
- * 화면이 없는 자리 (플랜: 벗어난 화면은 정지 이미지를 남긴다). 불투명 출처의 화면은 찍을 수 없어서
- * 그림 대신 한 줄이다 — 어느 앱의 화면이었고 왜 접혔는지, 그리고 할 수 있는 일: host가 이 호출을 들고
- * 있으면 "Reopen"(도구를 다시 부르지 않는다), 앱에 홈 화면이 있으면 "Open app"(고정 화면).
+ * A slot with no view (the plan: a view that leaves the viewport should leave a still image).
+ * A view whose contents are opaque cannot be captured as an image, so this is a line of text
+ * instead — which app's view it was and why it collapsed, plus what can be done: "Reopen" if the
+ * host still holds this call (does not call the tool again), "Open app" if the app has a home
+ * view (pinned view).
  */
 function Placeholder({
   view,

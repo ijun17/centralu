@@ -2,31 +2,32 @@ import { describe, expect, it } from 'vitest'
 import { rowsFromMetrics } from './caret.js'
 
 /**
- * 잰 값 → "첫 줄인가 / 마지막 줄인가". 거울을 그리는 쪽은 브라우저에서만 시험할 수 있어
- * (jsdom에는 레이아웃이 없다) 여기서는 판단만 본다. 실제 화살표 동작은 e2e에 있다.
+ * Measured values → "is it the first row, or the last?" The side that draws the mirror can only
+ * be tested in a real browser (jsdom has no layout), so this only checks the judgment. The
+ * actual arrow-key behavior is covered by e2e.
  */
 describe('rowsFromMetrics', () => {
   const LH = 20
 
-  it('한 줄짜리는 첫 줄이자 마지막 줄이다 — 위아래로 계속 넘길 수 있어야 한다', () => {
+  it('a single line is both the first row and the last — it must keep scrolling up and down', () => {
     expect(rowsFromMetrics(0, 20, LH)).toEqual({ first: true, last: true })
   })
 
-  it('세 줄로 접힌 글의 가운데 줄은 첫 줄도 마지막 줄도 아니다', () => {
+  it('the middle row of text wrapped to three lines is neither the first row nor the last', () => {
     expect(rowsFromMetrics(20, 60, LH)).toEqual({ first: false, last: false })
   })
 
-  it('마지막 줄은 마지막 줄이다', () => {
+  it('the last row is the last row', () => {
     expect(rowsFromMetrics(40, 60, LH)).toEqual({ first: false, last: true })
   })
 
-  it('소수점 높이(16.5px 같은)가 줄 수를 어긋나게 만들지 않는다', () => {
-    // 두 줄, 줄 높이 16.5 → 커서는 둘째 줄 시작(16.5), 전체 33
+  it('a fractional height (like 16.5px) does not throw off the row count', () => {
+    // Two lines, line height 16.5 → the caret starts the second line (16.5), total 33
     expect(rowsFromMetrics(16.5, 33, 16.5)).toEqual({ first: false, last: true })
     expect(rowsFromMetrics(0, 33, 16.5)).toEqual({ first: true, last: false })
   })
 
-  it('잴 수 없으면 null — 부르는 쪽이 예전 판단(개행 세기)으로 내려앉는다', () => {
+  it('returns null when it cannot be measured — the caller falls back to the old judgment (counting newlines)', () => {
     expect(rowsFromMetrics(0, 0, 0)).toBeNull()
     expect(rowsFromMetrics(0, 20, Number.NaN)).toBeNull()
   })

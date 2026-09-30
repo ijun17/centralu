@@ -5,24 +5,26 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
- * 입력창 아래 설정 메뉴 — 모델·추론 강도·권한·에이전트 (FR-7).
- * 대화를 시작한 뒤에도 바꿀 수 있다 — 시작 전에 정하는 것보다 이쪽이 실제로 쓸모 있다.
+ * The settings menu below the composer — model, reasoning effort, permissions, agent (FR-7).
+ * Can be changed even after a conversation has started — that turns out to be more useful than
+ * deciding it all up front.
  *
- * **셀렉터 네 개를 나란히 세우지 않는다.** 예전엔 `<select>`가 줄지어 서 있었는데,
- * 넷 다 평소엔 볼 일이 없는 것들이라 입력창 아래 한 줄을 늘 차지하기만 했고,
- * 그리드처럼 폭이 좁은 칸에서는 넷이 서로를 밀어내 글자가 잘렸다.
- * 지금 값은 버튼 한 줄로 읽히고, 바꿀 때만 메뉴가 열린다 (Claude Code와 같은 방식).
+ * **The four selectors are not lined up side by side.** They used to be a row of `<select>`
+ * elements, but all four are things nobody looks at most of the time, so they permanently took
+ * up a whole row below the composer, and in a narrow pane like the grid the four pushed against
+ * each other and cut off the text. Now the current values read as a single button, and the menu
+ * only opens to change them (the same approach as Claude Code).
  *
- * **모델 목록을 우리가 적지 않는다.** 도구의 공식 API가 알려주는 것을 그대로 보여준다
- * (Claude `supportedModels()` · Codex `model/list`).
- * 예전엔 여기에 하드코딩했는데, 그래서 Fable이 나왔을 때 고를 방법이 없었다 —
- * 도구가 올라가는데 이 앱만 제자리인 그 상황을 다시 만들지 않는다.
+ * **The model list is never hardcoded here.** It shows exactly what the tool's official API
+ * reports (Claude's `supportedModels()`, Codex's `model/list`).
+ * This used to be hardcoded, which is why there was no way to pick Fable when it launched — this
+ * avoids repeating the situation where the tool has moved on and only this app is stuck.
  */
 
 /*
- * 힌트는 짧아야 한다. 'Asks only for risky actions'(27자)는 w-56 메뉴에서 라벨
- * 공간을 다 먹어 **Normal이라는 글자 자체가 안 보였다** (도그푸딩) — 설명이
- * 이름을 지우면 그 줄은 고를 수 없는 줄이다.
+ * Hints have to be short. 'Asks only for risky actions' (27 characters) used up all the label
+ * space in the w-56 menu, so **the word "Normal" itself disappeared** (found in dogfooding) —
+ * once the description erases the name, that row cannot be picked.
  */
 const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'safe', label: 'Safe', hint: 'Asks for everything' },
@@ -31,37 +33,42 @@ const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
 ]
 
 /**
- * 도구별 모델 목록. 셀렉터를 열 때마다 도구를 띄우면 그 클릭이 느려지므로
- * host가 캐시하고, 여기서는 도구가 바뀔 때만 한 번 묻는다.
+ * The model list per tool. Spawning the tool every time the selector opens would make that
+ * click slow, so the host caches it, and this only asks once, when the tool changes.
  */
 export function useModels(tool: ToolName, live: boolean): { models: ModelOption[]; reason?: string } {
   const platform = usePlatform()
   const [state, setState] = useState<{ models: ModelOption[]; reason?: string }>({ models: [] })
 
   /*
-   * `live`가 의존성에 있는 이유:
+   * Why `live` is a dependency:
    *
-   * Claude SDK는 모델 목록을 Query에만 둔다. 그래서 **실행 중인 세션이 없으면 못 읽는다**.
-   * 앱을 켜고 잠든 세션을 고르면 그 순간엔 질의가 없어서 목록이 비고, 한 번 비면
-   * 다시 묻지 않아 셀렉터에 "기본"만 남았다 (도그푸딩 지적).
-   * 세션이 깨어나는 순간 다시 묻는다.
+   * The Claude SDK only exposes the model list through a Query. So **it cannot be read without
+   * a running session**. If the app is opened and a sleeping session is selected, there is no
+   * query at that moment, so the list comes back empty, and since an empty result was never
+   * re-fetched, the selector was permanently left with only "Default" (found in dogfooding).
+   * This re-fetches the moment the session wakes up.
    */
   useEffect(() => {
     let alive = true
     /*
-     * **먼저 비운다** (도그푸딩 2026-09-09: "클로드 세션인데 코덱스 모델이 떠 있다").
+     * **Clears the list first** (dogfooding on 2026-09-09: "this is a Claude session, but Codex
+     * models are showing").
      *
-     * 목록은 도구의 어휘다 — 'sonnet'과 'gpt-5.6-sol'은 서로의 사전에 없는 낱말이라,
-     * 다른 도구의 목록을 잠깐이라도 보여주면 화면이 고를 수 없는 것을 권한다. 예전에는
-     * 새 응답이 올 때까지 **옛 도구의 목록이 그대로 남아 있었다**: 코덱스 세션을 보다가
-     * 클로드 세션의 메뉴를 열면 그 사이 코덱스 모델이 서 있었고, claude는 살아 있는
-     * 세션이 있어야 목록을 주므로(깨우는 동안) 그 창이 초 단위로 벌어졌다.
+     * The list is the tool's own vocabulary — 'sonnet' and 'gpt-5.6-sol' are words in each
+     * other's dictionary that do not exist, so showing another tool's list even briefly offers
+     * something the screen cannot actually pick. This used to leave **the previous tool's list
+     * sitting there** until a new response came back: switching from viewing a Codex session to
+     * opening a Claude session's menu could still show Codex models for a moment, and because
+     * Claude only returns its list once a session is alive (while it is waking up), that window
+     * could stretch for whole seconds.
      */
     setState({ models: [] })
     void platform.agents
       .models(tool)
       .then((r) => alive && setState({ models: r.models, reason: r.supported ? undefined : r.reason }))
-      // 목록을 못 읽어도 세션은 계속 쓸 수 있어야 한다 — 이유만 남기고 기본값으로 돈다
+      // The session must stay usable even if the list cannot be read — this falls back to the
+      // default and only keeps the reason
       .catch((e: Error) => alive && setState({ models: [], reason: e.message }))
     return () => {
       alive = false
@@ -72,11 +79,13 @@ export function useModels(tool: ToolName, live: boolean): { models: ModelOption[
 }
 
 /**
- * 이 도구의 응답 길이 단계 (#54). 비어 있으면 그 도구에는 노브가 없어서 행 자체가 안 뜬다.
+ * The response-length levels for this tool (#54). If empty, the tool has no such knob, so the
+ * row itself does not appear.
  *
- * 도구 이름으로 갈리지 않는다 — 어댑터 능력 선언(verbosities)을 읽는다.
- * codex에만 있는 노브지만 "codex면 보여줘"라고 적는 순간, Claude가 같은 노브를
- * 얻는 날 이 파일을 아는 사람만 고칠 수 있는 코드가 된다.
+ * This does not branch on the tool's name — it reads the adapter's declared capabilities
+ * (verbosities). It is a knob only Codex has today, but writing "show this if codex" would turn
+ * it into code that only someone who remembers this file could fix the day Claude gets the same
+ * knob.
  */
 export function useVerbosities(tool: ToolName): string[] {
   const platform = usePlatform()
@@ -86,7 +95,7 @@ export function useVerbosities(tool: ToolName): string[] {
     void platform.agents
       .capabilities(tool)
       .then((c) => alive && setLevels(c.verbosities))
-      // 능력을 못 읽어도 메뉴는 떠야 한다 — 행 하나가 빠질 뿐이다
+      // The menu must still render even if capabilities cannot be read — it just loses one row
       .catch(() => alive && setLevels([]))
     return () => {
       alive = false
@@ -96,11 +105,12 @@ export function useVerbosities(tool: ToolName): string[] {
 }
 
 /**
- * 메뉴 한 줄.
+ * A single menu row.
  *
- * 고른 것은 **왼쪽 한 칸**에만 표식을 넣어 말한다. 오른쪽에 붙이면 줄마다 표식의
- * 가로 위치가 달라져서, 무엇이 골라져 있는지 눈이 목록을 훑어야 알 수 있다.
- * 빈 칸을 늘 남겨두면 표식이 있든 없든 글자의 시작이 한 줄로 선다.
+ * The selected mark only ever goes in **one column on the left**. Putting it on the right would
+ * shift its horizontal position from row to row depending on label length, so the eye would
+ * have to scan the whole list to see what is selected. Always reserving that empty column keeps
+ * the start of the text aligned in one line, whether the mark is there or not.
  */
 function MenuRow({
   label,
@@ -133,10 +143,11 @@ function MenuRow({
         {selected ? '✓' : ''}
       </span>
       {/*
-        라벨이 이긴다. 전에는 힌트가 shrink-0이라 좁아지면 **라벨이 0까지 줄었다** —
-        설명은 남고 이름이 사라지는 줄이 됐다 (Normal 실종 사건). shrink 가중치를
-        낮춰 라벨이 마지막까지 버티게 하되, 모델 이름처럼 라벨 자신이 길 때는
-        여전히 말줄임이 된다 (min-w-0 truncate는 그대로다).
+        The label wins. The hint used to be shrink-0, so as space ran out **the label shrank
+        all the way to zero** — the description stayed and the name vanished (the Normal
+        disappearance incident). Lowering the label's shrink weight lets it hold out the
+        longest, but when the label itself is long, like a model name, it still gets truncated
+        (min-w-0 truncate is unchanged).
       */}
       <span className="min-w-0 shrink-[0.2] truncate text-[12px]">{label}</span>
       {hint && <span className="readout ml-auto min-w-0 truncate text-[10px] text-slate">{hint}</span>}
@@ -148,7 +159,8 @@ function MenuSection({ label, note, children }: { label: string; note?: string; 
   return (
     <div className="border-t border-edge py-1 first:border-t-0">
       <p className="readout px-2.5 py-0.5 text-[10px] uppercase text-slate">{label}</p>
-      {/* 왜 이 묶음이 다른지는 묶음 머리에 적는다 — 줄마다 반복하면 목록이 안 읽힌다 */}
+      {/* Why this group is different is written at the top of the group — repeating it on
+      every row would make the list unreadable */}
       {note && <p className="px-2.5 pb-1 text-[10px] leading-relaxed text-slate">{note}</p>}
       {children}
     </div>
@@ -170,18 +182,19 @@ export function SessionSettings({
   tool: ToolName
   model: string | null
   effort: string | null
-  /** 응답 길이 (#54). null이면 도구 기본값 */
+  /** Response length (#54). null means the tool's default */
   verbosity: string | null
-  /** 응답 속도 (codex의 service_tier). null이면 도구 기본값 */
+  /** Response speed (Codex's service_tier). null means the tool's default */
   serviceTier: string | null
   preset: PermissionPreset
-  /** 프로세스가 살아 있는가 — Claude는 살아 있어야 모델 목록을 준다 */
+  /** Whether the process is alive — Claude only returns a model list once a session is alive */
   live: boolean
   /**
-   * 메뉴가 열리고 닫히는 것을 밖에 알린다 (그리드의 접힌 입력창).
+   * Tells the outside when the menu opens and closes (for the grid's collapsed composer).
    *
-   * 접힌 입력창은 손이 떠나면 내려가는데, 이 메뉴는 그 입력창 **위에** 뜬다 —
-   * 고르는 동안 발밑이 꺼지면 안 되므로 열려 있는 동안은 붙잡아 둔다.
+   * A collapsed composer folds back down once the hand leaves it, and this menu opens **on top
+   * of** that composer — the ground must not disappear from under it while a choice is being
+   * made, so it is held open for as long as the menu is open.
    */
   onOpenChange?: (open: boolean) => void
 }) {
@@ -189,9 +202,9 @@ export function SessionSettings({
   const { models, reason } = useModels(tool, live)
   const verbosities = useVerbosities(tool)
   const [open, setOpen] = useState(false)
-  /** 닫힘 애니메이션이 도는 중 — 다 내려앉은 뒤에 unmount한다 (cc-hang-out) */
+  /** Mid closing-animation — unmounts only after it has fully settled (cc-hang-out) */
   const [closing, setClosing] = useState(false)
-  // 열림/닫힘을 밖에 알린다 (접힌 입력창이 그동안 안 내려가야 한다)
+  // Tells the outside when it opens/closes (the collapsed composer must not fold away meanwhile)
   useEffect(() => {
     onOpenChange?.(open)
   }, [open, onOpenChange])
@@ -202,15 +215,17 @@ export function SessionSettings({
   const rootRef = useRef<HTMLSpanElement>(null)
 
   const current = models.find((m) => m.id === model)
-  // 목록에 없는 모델(직접 설정했거나 목록을 못 읽은 경우)도 유실되지 않게 남긴다
+  // A model not in the list (set directly, or fetched while the list could not be read) is kept
+  // so it is not lost
   const options = model && !current ? [...models, { id: model, label: model, efforts: [], defaultEffort: null, tiers: [] }] : models
 
   /*
-   * 바깥을 누르거나 Esc를 누르면 닫는다.
+   * Closes on an outside click or Esc.
    *
-   * 메뉴는 `<select>`와 달리 브라우저가 닫아주지 않는다. 한 번 열리면 남아 있는
-   * 메뉴는 입력창을 가리는 벽이 되므로, 닫는 길을 여기서 한 번에 챙긴다.
-   * (확인 창이 뜰 때는 먼저 닫으므로 Esc를 두 곳이 함께 먹는 일은 없다.)
+   * Unlike a `<select>`, the browser does not close this menu on its own. Once it is open, a
+   * menu left sitting there becomes a wall blocking the composer, so every way to close it is
+   * handled here in one place. (When a confirmation dialog opens, this closes first, so Esc is
+   * never consumed by two places at once.)
    */
   useEffect(() => {
     if (!open) return
@@ -219,7 +234,7 @@ export function SessionSettings({
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      // 인박스·모달까지 같이 닫히면 안 된다 — 열려 있는 것 중 가장 안쪽만 닫는다
+      // The inbox and modals must not close along with it — only the innermost open thing closes
       e.stopPropagation()
       close()
     }
@@ -231,14 +246,15 @@ export function SessionSettings({
     }
   }, [open, close])
 
-  // reduced-motion이면 animationend가 안 온다 — 타이머가 마무리를 보증한다
+  // With reduced-motion, animationend never fires — a timer guarantees it finishes
   useEffect(() => {
     if (!closing) return
     const t = window.setTimeout(() => setClosing(false), 200)
     return () => window.clearTimeout(t)
   }, [closing])
 
-  // `/model` GUI 커맨드 (2026-09-07) — 입력창에서 이 세션의 메뉴를 열라는 신호
+  // The `/model` GUI command (2026-09-07) — a signal from the composer to open this session's
+  // menu
   const menuRequest = useStore((s) => s.settingsMenuRequest)
   useEffect(() => {
     if (menuRequest?.sessionId !== sessionId) return
@@ -247,19 +263,23 @@ export function SessionSettings({
   }, [menuRequest, sessionId])
 
   /*
-   * **골라도 닫지 않는다** (사용자 요청 2026-09-06). 처음엔 "고르면 닫되 모델만
-   * 예외"였는데, 강도를 고르면 내려가고 모델은 남는 비대칭이 오히려 예측을 깼다.
-   * 이 메뉴는 노브 여럿을 연달아 만지는 자리다 — 닫는 길은 바깥 클릭·Esc·토글
-   * 셋이고, 입력창을 누르는 첫 클릭이 곧 바깥 클릭이라 벽이 되지도 않는다.
+   * **Picking an option does not close the menu** (requested by a user on 2026-09-06). It
+   * started out as "close on pick, except for model", but the asymmetry of effort closing the
+   * menu while model kept it open actually broke expectations more. This menu is a place for
+   * touching several knobs in a row — there are three ways to close it (outside click, Esc,
+   * the toggle button), and the first click on the composer already counts as an outside click,
+   * so it never becomes a wall in the way.
    */
   const choose = (patch: Parameters<typeof update>[1]) => void update(sessionId, patch)
 
   const modelLabel = current?.label ?? model ?? 'Default'
-  // 지금 값은 열지 않아도 읽혀야 한다 — 메뉴로 감춘 대가를 여기서 갚는다.
-  // verbosity는 effort와 단계 이름이 겹쳐서(low/medium/high) 맨몸으로 놓으면 어느 쪽인지 알 수 없다 — 이름을 붙인다
+  // The current values must be readable without opening the menu — this pays back the cost of
+  // hiding them inside one.
+  // verbosity shares level names with effort (low/medium/high), so shown bare it would be
+  // ambiguous which is which — this labels it
   const summary = [
     modelLabel, effort, verbosity && `${verbosity} verbosity`,
-    // 티어 id(priority)가 아니라 이름(Fast)을 보여준다 — 사람이 고른 글자 그대로
+    // Shows the tier's name (Fast), not its id (priority) — exactly the word the person picked
     serviceTier && (current?.tiers.find((t) => t.id === serviceTier)?.name ?? serviceTier),
     PRESETS.find((p) => p.value === preset)?.label,
   ]
@@ -287,9 +307,10 @@ export function SessionSettings({
 
       {(open || closing) && (
         /*
-          위로 편다. 이 줄은 창(또는 그리드 칸)의 맨 아래라 아래로 펴면 곧바로 잘린다 —
-          자동완성 메뉴가 같은 이유로 같은 방향을 쓴다.
-          올라올 때 cc-hang, 내려갈 때 cc-hang-out — 닫히는 동안은 과녁이 아니다.
+          Opens upward. This row sits at the bottom of the window (or the grid pane), so opening
+          downward would get clipped immediately — the autocomplete menu uses the same direction
+          for the same reason.
+          cc-hang on the way up, cc-hang-out on the way down — not a target while it is closing.
         */
         <div
           role="menu"
@@ -303,8 +324,9 @@ export function SessionSettings({
         >
           <MenuSection label="Model">
             {/*
-              도구가 자기 '기본' 항목을 주면(Claude의 `default`) 우리 것을 또 넣지 않는다 —
-              같은 뜻의 줄이 둘이면 어느 쪽을 골라야 하는지 알 수 없다.
+              If the tool already supplies its own 'default' entry (Claude's `default`), this
+              does not add a second one — two rows meaning the same thing leaves no way to know
+              which one to pick.
             */}
             {!models.some((m) => m.id === 'default') && (
               <MenuRow
@@ -321,14 +343,16 @@ export function SessionSettings({
                 label={m.label}
                 title={m.description}
                 selected={m.id === model}
-                // 모델이 바뀌면 강도·속도는 초기화한다 — 모델마다 지원이 달라서
-                // 옛 값을 들고 가면 지원하지 않는 조합이 조용히 남는다
+                // Effort and speed are reset when the model changes — support differs from
+                // model to model, so carrying the old value over would silently leave an
+                // unsupported combination in place
                 onPick={() => choose({ model: m.id, effort: null, serviceTier: null })}
               />
             ))}
           </MenuSection>
 
-          {/* 강도는 지원하는 모델에서만 보인다 — 아무 효과 없는 항목을 띄우면 거짓말이 된다 */}
+          {/* Effort only shows for a model that supports it — showing an option that does
+          nothing would be a lie */}
           {current && current.efforts.length > 0 && (
             <MenuSection label="Effort">
               <MenuRow
@@ -349,7 +373,8 @@ export function SessionSettings({
             </MenuSection>
           )}
 
-          {/* 응답 길이 (#54) — 도구가 이 노브를 줄 때만 보인다. 실측: low 82단어 · high 269단어 (같은 질문) */}
+          {/* Response length (#54) — only shows when the tool offers this knob. Measured: 82
+          words for low, 269 for high (same question) */}
           {verbosities.length > 0 && (
             <MenuSection label="Verbosity" note="How long answers run — shorter arrives sooner.">
               <MenuRow
@@ -370,7 +395,8 @@ export function SessionSettings({
             </MenuSection>
           )}
 
-          {/* 응답 속도 — 모델이 티어를 줄 때만 보인다 (실측: gpt-5.4+에 Fast 하나, mini엔 없음) */}
+          {/* Response speed — only shows when the model offers tiers (measured: gpt-5.4+ has
+          one, Fast; mini has none) */}
           {current && current.tiers.length > 0 && (
             <MenuSection label="Speed" note="Faster answers spend more of your usage.">
               <MenuRow
@@ -393,10 +419,12 @@ export function SessionSettings({
           )}
 
           {/*
-            **역할 묶음은 여기 없다** (2026-09-01 폐기). 세션을 "프로젝트 오케스트레이터"로
-            승격하는 줄이 있었는데, 프로젝트 안에서 세션을 지휘하는 자리가 워크트리
-            매니저(#69)와 둘이 되면서 만든 사람조차 둘을 헷갈렸고 승격은 한 번도 쓰이지
-            않았다. 지휘석은 관계에서 나온다(자식이 있으면 매니저다) — 고르는 것이 아니다.
+            **There is no role group here** (removed on 2026-09-01). There used to be a row
+            that promoted a session to "project orchestrator", but once the seat that directs
+            sessions within a project also became the worktree manager (#69), even the person
+            who built it confused the two, and the promotion was never actually used. The
+            director's seat comes from the relationship (having children makes it a manager) —
+            it is not something to pick.
           */}
 
           <MenuSection label="Permissions">
@@ -413,16 +441,18 @@ export function SessionSettings({
           </MenuSection>
 
           {/*
-            **에이전트 바꾸기는 여기 없다** (도그푸딩 판정).
+            **There is no switching agents here** (decided in dogfooding).
 
-            대화가 이어지지 않으므로 이 메뉴에서 도구를 바꾸는 것은 "바꾸기"가 아니라
-            "새 대화 시작하기"였다 — 그건 세션 만들기가 이미, 더 정직하게 하는 일이다.
-            같은 일을 하는 두 번째 문이면서 이름만 다른 셈이라, 무엇이 남고 무엇이
-            사라지는지 확인 창으로 매번 설명해야 했다. 절반짜리 기능은 걷어낸다.
+            The conversation does not carry over, so changing the tool from this menu was never
+            "switching" — it was "starting a new conversation", and creating a new session
+            already does that, more honestly. It amounted to a second door doing the same thing
+            under a different name, and every time, a confirmation dialog had to explain what
+            would be kept and what would be lost. A half feature gets removed.
 
-            남은 예외는 오케스트레이터 하나이고, 그건 앱 설정(⌘,)의 Orchestrator에
-            있다 — 앱에 하나뿐이라 "다른 도구로 새로 만든다"가 성립하지 않는
-            유일한 세션이기 때문이다. 설치본 단위의 값이니 자리도 앱 설정이 맞다.
+            The one remaining exception is the orchestrator, and that lives in app settings
+            (Cmd+,) under Orchestrator — because it is the only session that exists exactly once
+            per app, so "create a new one with a different tool" does not make sense for it.
+            It is a value scoped to the install, so app settings is the right place for it too.
           */}
         </div>
       )}

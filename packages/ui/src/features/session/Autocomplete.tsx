@@ -5,31 +5,38 @@ import { useStore } from '../../store/store.js'
 import { GUI_COMMANDS } from './guiCommands.js'
 
 /**
- * 입력창 자동완성 — `/`는 스킬, `@`는 파일.
+ * Composer autocomplete — `/` for skills, `@` for files.
  *
- * 목록의 출처가 다르다는 걸 UI는 몰라도 된다:
- *   스킬은 각 도구의 공식 API(Claude supportedCommands · Codex skills/list),
- *   파일은 host가 프로젝트 색인에서 찾는다.
+ * The UI does not need to know the lists come from different places:
+ *   skills come from each tool's official API (Claude's supportedCommands, Codex's
+ *   skills/list), files are found by the host in the project index.
  *
- * 두 가지를 지킨다:
- *  1. **입력을 막지 않는다.** 목록을 못 가져와도 타이핑과 전송은 그대로 된다.
- *  2. **'없음'과 '아직'을 구분한다.** 세션을 막 만들면 도구가 뜨는 중이라
- *     스킬을 물어볼 수 없는데, 그때 빈 목록을 보여주면 스킬이 없는 것처럼 보인다.
+ * Two things are held to:
+ *  1. **Never block typing.** Even if the list cannot be fetched, typing and sending still work.
+ *  2. **Distinguish "none" from "not yet".** Right after a session is created, the tool is still
+ *     starting up and cannot be asked for skills — showing an empty list at that moment makes
+ *     it look as though there are no skills.
  */
 
 export type Suggestion = { value: string; label: string; hint: string }
 
-/** 구독하지 않을 때 돌려줄 **고정된** 빈 지도 — 매번 새 객체면 memo도 selector도 소용없다 */
+/**
+ * A **fixed** empty map to return when not subscribed — a fresh object every time would defeat
+ * both memo and the selector
+ */
 const EMPTY_MAP: Record<string, never> = {}
 
 /**
- * 슬래시 명령 점수. 높을수록 위. null이면 목록에서 뺀다.
+ * Score for a slash command. Higher ranks first. null drops it from the list.
  *
- * 규칙은 사람이 치는 방식에서 나온다:
- *  - `usage`를 다 쳤으면 찾는 건 `usage`이지 `usage-credit`이 아니다 → **정확히 일치가 최상위**
- *  - 앞글자를 치는 건 이름의 **시작**을 떠올린 것이다 → 앞에서 시작하는 쪽이 위
- *  - 한두 글자만 쳤을 때 이름 중간에 그 글자가 있다고 끼어들면 목록이 쓸모없어진다
- *    (`u` 하나에 `docs-lookup`이 뜨는 식) → 짧은 질의는 시작·경계 매치만 받는다
+ * The rules come from how people actually type:
+ *  - Having typed `usage` in full means the person is looking for `usage`, not
+ *    `usage-credit` → **an exact match ranks highest**
+ *  - Typing the leading letters means recalling the **start** of the name → matches starting
+ *    from the front rank above others
+ *  - With only one or two letters typed, letting a match in the middle of a name interrupt
+ *    makes the list useless (e.g. typing `u` alone surfacing `docs-lookup`) → short queries
+ *    only get start or word-boundary matches
  */
 export function scoreCommand(name: string, query: string): number | null {
   const n = name.toLowerCase()
@@ -39,27 +46,29 @@ export function scoreCommand(name: string, query: string): number | null {
   if (n === q) return 1000
   if (n.startsWith(q)) return 800 - Math.min(n.length - q.length, 60)
 
-  // `-`·`:`·`_` 뒤도 이름의 시작으로 친다 (usage-credit에서 credit)
+  // What follows a `-`, `:` or `_` also counts as the start of a name (credit in usage-credit)
   const boundary = n.split(/[-:_/]/).some((part) => part.startsWith(q))
   if (boundary) return 500 - Math.min(n.length, 60)
 
-  // 짧은 질의에서 중간 매치는 소음이다
+  // A mid-word match on a short query is just noise
   if (q.length <= 2) return null
   return n.includes(q) ? 200 - Math.min(n.length, 60) : null
 }
 
-/** 커서 앞의 글자에서 자동완성 대상을 알아낸다 */
+/** Works out the autocomplete target from the text before the caret */
 export function detectTrigger(
   text: string,
   caret: number,
 ): { kind: 'command' | 'file'; query: string; start: number } | null {
   const before = text.slice(0, caret)
 
-  // 슬래시 명령은 **맨 앞에서만** 시작한다 — 문장 중간의 경로(`src/a.ts`)를 명령으로 보면 안 된다
+  // A slash command can **only start at the very beginning** — a path in the middle of a
+  // sentence (`src/a.ts`) must not be read as a command
   const slash = /^\/([\w:-]*)$/.exec(before)
   if (slash) return { kind: 'command', query: slash[1] ?? '', start: 0 }
 
-  // @는 어디서든. 단 공백 뒤(또는 맨 앞)에서 시작한 것만 — 이메일 주소를 잡지 않는다
+  // @ can start anywhere, but only right after whitespace (or at the very start) — this avoids
+  // matching email addresses
   const at = /(^|\s)@([^\s]*)$/.exec(before)
   if (at) return { kind: 'file', query: at[2] ?? '', start: caret - (at[2] ?? '').length - 1 }
 
@@ -80,11 +89,11 @@ export function useAutocomplete({
   caret: number
   enabled: boolean
   /**
-   * `@`가 무엇을 가리키나.
+   * What `@` points to.
    *
-   * 오케스트레이터에게 파일은 의미가 없다 — 손이 없어서 파일을 만지지 않는다.
-   * 대신 `@`는 **세션**을 집는다: 말로 지목하면 이름을 잘못 짚을 수 있고,
-   * 엉뚱한 세션에 일이 가면 그 프로젝트가 실제로 바뀐다.
+   * Files mean nothing to the orchestrator — it has no hands, so it does not touch files.
+   * Instead `@` picks a **session**: naming one by voice can point at the wrong name, and if
+   * work goes to the wrong session, that project is actually changed.
    */
   atSource?: 'files' | 'sessions'
 }) {
@@ -99,12 +108,14 @@ export function useAutocomplete({
   const trigger = useMemo(() => (enabled ? detectTrigger(text, caret) : null), [enabled, text, caret])
 
   /*
-   * 세션 목록은 이미 스토어에 있다 — 오케스트레이터의 `@`는 여기서 고른다.
+   * The session list already lives in the store — the orchestrator's `@` picks from it here.
    *
-   * **`@`를 치고 있을 때만 구독한다.** `s.sessions`는 세션 하나가 숨만 쉬어도 통째로
-   * 새 객체가 되는 지도라, 그냥 구독해 두면 답변이 흐르는 동안 델타마다 이 훅이
-   * 다시 돌고 그걸 쓰는 입력창까지 같이 다시 그려졌다 (실측: 답변 중 2.0 렌더/글자).
-   * 정작 이 값이 필요한 순간은 메뉴가 열려 있는 몇 초뿐이다.
+   * **Only subscribed while `@` is being typed.** `s.sessions` is a map that becomes an
+   * entirely new object even if a single session so much as breathes, so subscribing to it
+   * unconditionally made this hook re-run on every delta while a response streamed, and the
+   * composer using it re-rendered right along with it (measured: 2.0 renders per character
+   * while streaming). The one moment this value is actually needed is the few seconds the menu
+   * is open.
    */
   const wantSessions = atSource === 'sessions' && trigger?.kind === 'file'
   const sessionMap = useStore((s) => (wantSessions ? s.sessions : EMPTY_MAP))
@@ -144,13 +155,14 @@ export function useAutocomplete({
     }
   }, [trigger?.kind, commands.ready, live, platform, sessionId])
 
-  // 포커스 뷰의 SessionPane은 key 없이 세션만 갈아끼운다 — 이전 세션의 목록을 들고 있으면 안 된다
+  // The focus view's SessionPane swaps sessions without a key change — must not keep the
+  // previous session's list
   useEffect(() => {
     fetchedLive.current = false
     setCommands({ ready: false, commands: [] })
   }, [sessionId])
 
-  // 파일은 칠 때마다 찾는다 (host가 색인을 들고 있어 빠르다)
+  // Files are searched on every keystroke (fast, since the host holds the index)
   useEffect(() => {
     if (trigger?.kind !== 'file' || atSource !== 'files') return
     let alive = true
@@ -167,15 +179,17 @@ export function useAutocomplete({
     if (!trigger) return []
     if (trigger.kind === 'command') {
       /*
-       * 자르지 않는다. 한때 상위 20개만 남겼는데, 빈 질의 정렬이 짧은 이름 우선이라
-       * 이름이 긴 플러그인 스킬(openai-templates:* 스물한 개)이 **통째로** 잘렸다 —
-       * 화면에는 그냥 "없는 것"으로 보였고, 실제로 그렇게 보고됐다. 목록은 이미
-       * 스크롤(max-h-56)이라 길어서 잃는 것이 없고, 실측 최대 102개는 가상 스크롤이
-       * 필요한 크기가 아니다.
+       * Never truncated. This used to keep only the top 20, but since the empty-query sort
+       * ranks short names first, a plugin's longer-named skills (all twenty-one of
+       * openai-templates:*) were **entirely** cut off — on screen that just looked like they
+       * did not exist, and it was reported exactly that way. The list already scrolls
+       * (max-h-56), so nothing is lost by being long, and the measured maximum of 102 entries
+       * is not a size that needs virtual scrolling.
        */
       /*
-       * GUI 커맨드(usage 등)도 같은 목록에 선다 — 고르면 메시지 대신 앱 화면이
-       * 열린다 (guiCommands.ts). 세션 목록이 아직 로딩 중이어도 이쪽은 바로 뜬다.
+       * GUI commands (usage, etc.) stand in the same list — picking one opens an app screen
+       * instead of sending a message (guiCommands.ts). These show up immediately even while
+       * the session command list is still loading.
        */
       const scored: { name: string; s: number; item: Suggestion }[] = [
         ...GUI_COMMANDS.map((g) => ({
@@ -207,7 +221,8 @@ export function useAutocomplete({
       ]
       return (
         scored
-          // 점수가 같으면 짧은 이름이 위 — 대개 그쪽이 원래 찾던 것이다
+          // On a tied score, the shorter name ranks first — that is usually the one being
+          // looked for
           .sort((a, b) => (b.s === a.s ? a.name.length - b.name.length : b.s - a.s))
           .map((x) => x.item)
       )
@@ -222,7 +237,8 @@ export function useAutocomplete({
     return files.map((f) => ({ value: `@${f.path} `, label: f.name, hint: f.path }))
   }, [trigger, commands, files, atSource, sessions, projectNames])
 
-  // 목록이 바뀌면 첫 항목으로 되돌린다 — 커서가 엉뚱한 곳에 남아 있으면 잘못 고른다
+  // Reset to the first item whenever the list changes — a stale cursor position picks the
+  // wrong one
   useEffect(() => {
     setIndex(0)
   }, [trigger?.kind, trigger?.query])
@@ -265,7 +281,7 @@ export function AutocompleteMenu({
 }) {
   const listRef = useRef<HTMLUListElement>(null)
 
-  // 키보드로 내려가면 화면 밖으로 나가지 않게 따라간다
+  // Follows along when moving with the keyboard, so the selection never scrolls off screen
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-idx="${index}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [index])
@@ -276,7 +292,8 @@ export function AutocompleteMenu({
       data-testid="autocomplete"
     >
       {loading && items.length === 0 ? (
-        // '없음'이 아니라 '아직'이다 — 세션이 막 떴을 때 스킬이 없는 것처럼 보이면 안 된다
+        // This is "not yet", not "none" — right after a session starts, it must not look as
+        // though it has no skills
         <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="autocomplete-loading">
           {kind === 'command' ? 'Loading skills…' : 'Searching…'}
         </p>
@@ -289,7 +306,7 @@ export function AutocompleteMenu({
                 data-idx={i}
                 data-testid={`autocomplete-item-${i}`}
                 aria-selected={i === index}
-                // 마우스로 누를 때 입력창이 포커스를 잃으면 커서 위치가 사라진다
+                // If the composer loses focus on a mouse press, the caret position is lost
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onPick(item)}
                 className={`flex w-full items-baseline gap-2 px-2.5 py-1 text-left transition-colors ${
@@ -303,7 +320,8 @@ export function AutocompleteMenu({
               </button>
             </li>
           ))}
-          {/* GUI 커맨드는 먼저 서고 스킬은 아직일 수 있다 — '아직'은 목록 아래에서도 말한다 */}
+          {/* GUI commands can already be listed while skills are still not yet — "not yet"
+          speaks up below the list too */}
           {loading && (
             <li>
               <p

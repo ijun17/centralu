@@ -25,42 +25,48 @@ import { composingKey, isComposerSendKey } from './composerKeys.js'
 import { appendPath, isFileDrag, readDragPath } from '../files/dragPath.js'
 import { anchorAt, decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
 
-/** 입력창이 커질 수 있는 최대 높이. CSS의 max-h-40과 같은 값이어야 한다 */
+/** The maximum height the composer can grow to. Must match CSS's max-h-40 */
 const COMPOSER_MAX_H = 160
 
 /**
- * 접힌 입력창이 떠오르는 감지 범위 (칸 아래에서부터, px).
- * 내민 카드 머리(14px) + 손이 겨누는 여유 40px — 대화 한복판에서는 안 뜬다.
+ * The detection zone (in px, measured up from the bottom of the pane) that makes a collapsed
+ * composer rise up. The exposed card's header (14px) plus 40px of slack for the hand to aim at
+ * — it does not rise while the hand is in the middle of the conversation.
  */
 const COMPOSER_REACH = 54
 
 /**
- * 입력창이 밖에서 받은 드롭을 대신 처리해 주는 손잡이 (#116).
+ * A handle that lets the composer take over handling a drop received from outside it (#116).
  *
- * 돌려주는 값은 "무언가 정말 들어갔나"다 — 파일이 너무 크거나 저장이 실패하면 아무것도
- * 안 들어간다. 그때까지 접힌 입력창을 펴면 빈 칸이 올라와 된 것처럼 보인다.
+ * What it returns is "did something actually go in" — if a file is too large or saving fails,
+ * nothing goes in. Expanding a collapsed composer before that check would bring up an empty
+ * field that looks as if something had happened.
  */
 type ComposerDrop = { accept: (dt: DataTransfer) => Promise<boolean> }
 
-/** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
+/**
+ * A selector that creates a new array every time destabilizes the zustand snapshot and causes
+ * infinite re-renders
+ */
 const EMPTY_CHAT: ChatItem[] = []
 const EMPTY_QUESTIONS: SessionSummary['pendingQuestions'] = []
 
 /**
- * 대화창이 열리자마자 바닥에 자리 잡는 데 쓸 프레임 수 (#31).
+ * The number of frames spent settling at the bottom right after the conversation opens (#31).
  *
- * 가상 스크롤은 줄을 재면서 총 높이를 몇 프레임에 걸쳐 늘린다. 그동안 계속 바닥을
- * 다시 짚어야 한다 — 한 번만 짚으면 재기 전 높이에 멈춰 선다. 30프레임은 넉넉한
- * 상한선일 뿐이고, 사람이 손을 대면 그 즉시 끝난다.
+ * The virtual scroller stretches the total height over several frames as it measures rows.
+ * Landing on the bottom has to be redone throughout that — doing it only once leaves it stuck
+ * at the pre-measurement height. 30 frames is just a generous ceiling, and it stops immediately
+ * the moment the person touches anything.
  */
 const LANDING_FRAMES = 30
 
 /**
- * 포커스 뷰 — 고른 세션 하나를 전체 폭으로.
+ * The focus view — one chosen session at full width.
  *
- * 세션 화면 자체는 SessionPane이 그린다. 그리드의 격자 칸도 **같은 부품**을 쓴다:
- * 복사본을 두면 모델·권한을 한쪽에서 바꿨을 때 다른 쪽이 옛 값을 들고 있게 된다.
- * 여기서는 "무엇을 보여줄지"만 고르고, 그리는 일은 넘긴다.
+ * The session screen itself is drawn by SessionPane. Grid cells use **the same component**: a
+ * copy would leave the other side holding a stale value whenever a model or permission changed
+ * on one side. This only decides what to show and hands off the actual rendering.
  */
 export function SessionView() {
   const session = useFocusedSession()
@@ -84,13 +90,15 @@ export function SessionView() {
 }
 
 /**
- * 세션 하나의 화면 — 머리글·대화·입력창.
+ * A single session's screen — header, conversation, composer.
  *
- * **포커스 뷰와 그리드가 이걸 같이 쓴다.** 그래서 그리드 칸에서 모델을 바꾸면
- * 사이드바와 포커스 뷰가 곧바로 따라온다: 상태를 복사하지 않고 store 하나만 보기 때문이다.
+ * **Both the focus view and the grid use this.** That is why changing the model in a grid cell
+ * is immediately reflected in the sidebar and the focus view: they all read a single store
+ * instead of each holding a copy of the state.
  *
- * 쓰다 만 글은 이 부품이 아니라 **세션**이 들고 있다. 그래서 화면을 바꿔도 남고,
- * 세션을 바꾸면 따라오지 않는다 — 부품이 들고 있던 시절엔 둘 다 반대였다.
+ * An unsent draft is held by the **session**, not by this component. That is why it survives
+ * switching screens but does not follow when switching sessions — back when the component held
+ * it, both of those behaved the opposite way.
  */
 export function SessionPane({
   sessionId,
@@ -100,27 +108,30 @@ export function SessionPane({
 }: {
   sessionId: string
   /**
-   * 머리글 오른쪽에 덧붙일 버튼 (그리드의 '치우기').
+   * A button added to the right of the header (the grid's "dismiss").
    *
-   * 슬롯으로 받는 이유: 그리드가 자기 버튼을 칸 위에 절대좌표로 얹었더니
-   * 크기도 높이도 헤더의 버튼들과 따로 놀았다. 같은 줄에 넣으면 정렬을 맞출
-   * 필요가 없다 — 애초에 어긋날 수가 없다.
+   * Taken as a slot because the grid once tried laying its own button over the cell with
+   * absolute positioning, and its size and vertical alignment ended up out of step with the
+   * header's own buttons. Putting it in the same row means alignment never needs fixing — it
+   * cannot drift apart in the first place.
    */
   headerExtra?: ReactNode
   /**
-   * 입력창을 접어 둘까 (그리드, 사용자 요청 2026-09-10).
+   * Whether to keep the composer collapsed (the grid, requested by a user on 2026-09-10).
    *
-   * 두 줄짜리 그리드에서 읽는 자리가 좁다는 데서 나왔다 — 칸 370px 중 입력 영역이 95px,
-   * 그중 글자를 넣는 칸은 22px뿐이었다. 접으면 **둥근 카드의 윗머리만** 남고, 아래에
-   * 손이 오면 대화 위로 떠오른다. 밀지 않고 덮으므로 읽던 줄은 안 움직인다.
+   * This came from a two-row grid leaving too little room to read — of a 370px cell, the input
+   * area took up 95px, and only 22px of that was the actual text field. Collapsed, **only the
+   * rounded card's top edge** remains, and it rises above the conversation once a hand comes
+   * near the bottom. It overlays rather than pushing, so the row being read does not move.
    */
   fold?: boolean
   /**
-   * 머리글을 **칸을 옮기는 손잡이**로 쓴다 (그리드).
+   * Uses the header as **the handle that moves the pane** (the grid).
    *
-   * 주면 이 머리글은 더 이상 창을 끄는 손잡이가 아니다. 포커스 뷰에서는 머리글이
-   * 곧 타이틀바지만 그리드에서는 아니기 때문이다 — 같은 부품이라도 어디에 놓였는지에
-   * 따라 머리글의 뜻이 달라진다. 그 차이를 부품이 혼자 짐작하게 두지 않는다.
+   * When supplied, this header is no longer the handle that closes the window. That is because
+   * in the focus view the header is the title bar, but in the grid it is not — the same
+   * component's header means something different depending on where it sits. This does not
+   * leave the component to guess at that difference on its own.
    */
   headerDrag?: (e: DragEvent<HTMLElement>) => void
 }) {
@@ -140,7 +151,8 @@ export function SessionPane({
     return (pid && s.projects[pid]?.path) || null
   })
   const restart = useStore((s) => s.restartSession)
-  // 프로세스를 갈아 끼우는 중인가 (wake·fork와 같은 자물쇠) — 버튼이 돌고 잠기는 근거
+  // Whether the process is being swapped out (the same lock as wake/fork) — the basis for the
+  // button spinning and locking
   const restarting = useStore((s) => !!s.resuming[sessionId])
   const markRead = useStore((s) => s.markRead)
 
@@ -155,38 +167,47 @@ export function SessionPane({
   const [runOpen, setRunOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   /**
-   * 접힌 입력창이 떠 있나 (fold일 때만 뜻이 있다).
+   * Whether the collapsed composer is raised (only meaningful when `fold` is set).
    *
-   * 방아쇠 넷을 **OR로** 묶는다: 아래쪽에 손이 왔거나(hover), **떠오른 카드 위에 손이
-   * 있거나**, 입력칸에 포커스가 있거나, 그 줄의 메뉴(모델·권한)가 열려 있거나. 마우스가
-   * 떠나도 포커스·메뉴가 살아 있으면 내려가지 않는다 — 쓰는 도중에 발밑이 꺼지면 안 된다.
+   * Four triggers are **OR'd together**: a hand near the bottom (hover), **a hand over the
+   * raised card**, focus in the input field, or that row's menu (model, permissions) being
+   * open. Even after the mouse leaves, it stays up while focus or the menu is still alive — the
+   * ground must not disappear while someone is in the middle of typing.
    *
-   * 카드 위 hover가 따로 있어야 하는 이유 (사용자 지적 2026-09-10): 띠(아래 COMPOSER_REACH)는
-   * **접혀 있을 때 떠오르게 하는** 자리다. 떠오른 카드는 그 띠보다 위로 올라오므로, 입력칸을
-   * 누르러 손을 올리는 순간 띠를 벗어나 카드가 다시 내려갔다 — **누를 수가 없었다.**
+   * Why hover over the card needs its own trigger (reported by a user on 2026-09-10): the strip
+   * (COMPOSER_REACH, below) is what **raises** the composer while it is collapsed. A raised card
+   * extends above that strip, so the moment a hand moved up to click the input field, it left
+   * the strip and the card dropped back down — **it could not be clicked.**
    */
   const [nearComposer, setNearComposer] = useState(false)
   const [overComposer, setOverComposer] = useState(false)
   const [composerFocused, setComposerFocused] = useState(false)
   const [composerMenu, setComposerMenu] = useState(false)
   /**
-   * 칸에 떨어뜨린 것이 첨부로 들어가 **그래서 떠 있는** 상태 (#116).
+   * Whether something dropped on the pane became an attachment, **and is therefore raised**
+   * (#116).
    *
-   * 접힌 입력창은 화면 밖에 있다. 거기로 파일이 들어가면 붙은 것을 볼 자리가 없어
-   * 아무 일도 안 일어난 것과 구별되지 않는다 — 방아쇠 넷에 하나를 더 다는 이유다.
-   * 내려가는 때는 손이 칸을 아예 떠날 때(아래 onMouseLeave), hover와 같은 규칙이다.
+   * A collapsed composer sits off-screen. If a file lands there, there is no room to see it get
+   * attached, and it becomes indistinguishable from nothing happening — hence a fifth trigger
+   * alongside the other four. It drops back down when the hand leaves the pane entirely (see
+   * onMouseLeave below), the same rule as hover.
    */
   const [droppedIn, setDroppedIn] = useState(false)
-  /** 받을 수 있는 것이 칸 위에 떠 있나 — 입력창의 테두리와 같은 말을 칸의 크기로 한다 */
+  /**
+   * Whether something droppable is hovering over the pane — the same signal as the composer's
+   * border, but sized to the whole pane
+   */
   const [dragOver, setDragOver] = useState(false)
   const composerDrop = useRef<ComposerDrop>(null)
   const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu || droppedIn
 
   /*
-   * 떠오른 카드가 차지하는 높이 — **재서 안다** (사용자 지적 2026-09-13).
+   * The height the raised card takes up — **found by measuring it** (reported by a user on
+   * 2026-09-13).
    *
-   * 상수로 적을 수 없다: 첨부가 붙으면 줄이 하나 생기고, 입력칸은 다섯 줄까지 자란다.
-   * 이 값이 곧 대화 아래 여백이 되므로, 어긋나면 그만큼 마지막 줄이 카드 밑에 깔린다.
+   * It cannot be a constant: an attachment adds a row, and the input field grows up to five
+   * lines. This value becomes the margin below the conversation, so any mismatch leaves that
+   * much of the last line hidden under the card.
    */
   const composerRef = useRef<HTMLDivElement>(null)
   const [composerH, setComposerH] = useState(0)
@@ -202,8 +223,10 @@ export function SessionPane({
 
   const loadHistory = useStore((s) => s.loadHistory)
   /*
-   * 읽었다 = 기록 커서가 있다 (#79). 대화 줄이 있다는 것으로 보던 동안, 이벤트가 먼저 와서 줄이 생긴 세션을
-   * 그리드 칸에서만 보면 기록을 한 번도 읽지 않았다 — 커서가 없으니 'Load earlier messages'도 서지 않았다.
+   * "Loaded" means having a history cursor (#79). While this was judged by whether there were
+   * conversation rows, a session whose rows came from an event arriving first, and that was
+   * only ever seen in a grid cell, had never actually loaded history — with no cursor, "Load
+   * earlier messages" never appeared either.
    */
   const loaded = useStore((s) => !!s.history[sessionId])
   useEffect(() => {
@@ -211,11 +234,15 @@ export function SessionPane({
   }, [sessionId, loaded, loadHistory])
 
   /*
-   * 읽음 처리: 스크롤 최신 도달 ∥ 포커스 3초 (판정은 core).
+   * Marking read: reaching the latest point by scroll, or 3 seconds of focus (the judgment
+   * itself lives in core).
    *
-   * **앱이 앞에 있을 때만 센다** (#161). 예전에는 `focused: true`를 늘 넘겨, 다른 창 뒤에서 끝난 턴도 3초 뒤 읽음이
-   * 되었다 — 사람은 결과를 보지 않았는데 안읽음이 꺼지고 인박스 순서에서도 밀렸다. "본다"는 `turn_complete`의 알림과
-   * `Notices`가 쓰는 기준(`appFocused` && 화면에 있음)과 같아야 한다. 앱으로 돌아오면 `appFocused`가 바뀌어 3초를 다시 센다.
+   * **Only counts while the app is in front** (#161). This used to always pass `focused: true`,
+   * so a turn that finished behind another window still counted as read 3 seconds later — the
+   * person never saw the result, yet the unread mark cleared and it dropped down the inbox
+   * order too. "Seen" has to match the criterion used by `turn_complete`'s notification and by
+   * `Notices` (`appFocused` and actually on screen). Coming back to the app flips `appFocused`
+   * and restarts the 3-second count.
    */
   const appFocused = useStore((s) => s.appFocused)
   useEffect(() => {
@@ -228,25 +255,27 @@ export function SessionPane({
     return () => clearTimeout(t)
   }, [session, chat.length, markRead, appFocused])
 
-  // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다
+  // Avoid rendering even at the moment the session disappears (deleted, archived)
   if (!session) return null
 
   /*
-   * 머리글 높이는 여백이 아니라 **높이로** 적는다 (2026-09-13).
+   * The header's height is written as **an explicit height**, not padding (2026-09-13).
    *
-   * 값은 원래대로 40px이다 — 32·36px도 써 봤지만 되돌렸다. 바뀐 것은 적는 방식이다:
-   * py-2로 적으면 높이가 안에 든 것 중 가장 큰 것(도구 단추 줄 23px)에 딸려 정해지고,
-   * 옆에 선 증거 패널 머리글은 그 안에 든 것이 24px이라 41px로 **1px 어긋나 있었다.**
-   * 나란히 선 두 줄은 1px만 달라도 경계가 두 겹으로 보인다. 둘 다 h-10이면 그 차이는
-   * 애초에 생기지 않는다.
+   * The value is back to 40px — 32px and 36px were both tried and reverted. What changed is how
+   * it is written: writing it as py-2 lets the height be dictated by the tallest thing inside it
+   * (the tool button row at 23px), and the evidence panel header standing next to it had 24px
+   * inside it, coming out to 41px — **a 1px mismatch.** Two rows standing side by side show a
+   * doubled edge from even a 1px difference. With both at h-10, that gap never has a chance to
+   * appear.
    */
   const HEADER = 'flex h-10 items-center gap-2.5 border-b border-edge px-4'
   const header = (
     <>
       {/*
-        상태 점은 사이드바의 도구 표식과 그리드의 응답 중 테두리가 이미 말한다. 작은
-        점 하나는 잘 보이지도 않으면서 같은 사실을 세 번째로 말하므로 머리글에서는 뺀다.
-        오케스트레이터만 상태가 아닌 **역할**을 말하는 왕관을 제목 왼쪽에 둔다.
+        A status dot is already told by the sidebar's tool marker and the grid's
+        while-responding border. A tiny dot is barely visible while saying the same thing a
+        third time, so it is left out of the header. Only the orchestrator gets a crown to the
+        left of its title, marking not status but a **role**.
       */}
       {session.kind === 'orchestrator' && (
         <span className="flex shrink-0 text-ash" data-testid="session-header-crown">
@@ -267,9 +296,11 @@ export function SessionPane({
       )}
 
       {/*
-        걸려 있는 골 (2026-09-07 — claude /goal · codex thread/goal/*). 골이 도는
-        세션의 관심사는 "언제 끝나나"라, 조건 전문이 아니라 사실 요약(바퀴 수·상태)을
-        달고 전문·미달 사유는 호버에 둔다. 걷히면(달성 포함) 사라진다.
+        A goal that is set (2026-09-07 — Claude's /goal, Codex's thread/goal/*). What a session
+        running a goal cares about is "when does this end", so this carries a factual summary
+        (iteration count, status) rather than the full condition text, and leaves the full text
+        and the reason it fell short to the hover. It disappears once cleared, including on
+        success.
       */}
       {session.goal && (
         <span
@@ -284,8 +315,9 @@ export function SessionPane({
       )}
 
       {/*
-        중지는 여기 두지 않는다 — 대화 맨 아래 '응답 기다리는 중' 옆에 이미 있다.
-        같은 일을 하는 버튼이 화면 양 끝에 하나씩 있으면 어느 쪽이 무엇인지 매번 확인하게 된다.
+        Stop is not placed here — it already sits next to "waiting for a response" at the
+        bottom of the conversation. Having a button that does the same thing at each end of the
+        screen would mean checking every time which one is which.
       */}
       <span className="ml-auto flex shrink-0 items-center gap-2">
         {/*
@@ -297,13 +329,15 @@ export function SessionPane({
           an entry that could never have anything in it is a worse answer than no entry.
         */}
         {session.projectId && <RunMenu projectId={session.projectId} open={runOpen} onOpenChange={setRunOpen} />}
-        {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
+        {/* Creating a new session when the tool locks up would cut off context — this swaps
+        only the process */}
         {/*
-          누르는 동안 **아이콘이 돌고 버튼이 잠긴다.**
-          몇 초 걸리는 일인데 화면이 조용하면 한 번 더 누르게 되고, 그 두 번째
-          누름은 방금 뜬 프로세스를 다시 죽인다 — 고치려던 버튼이 고장을 만든다.
-          잠금은 스토어에 있다(resuming): 그리드↔포커스로 화면이 갈려도 도는 중이라는
-          사실은 세션의 것이지 이 부품의 것이 아니다.
+          **The icon spins and the button locks** while this is pressed.
+          It takes a few seconds, and a quiet screen would invite a second press, which
+          would kill the process that just started — the button meant to fix things would
+          cause the failure. The lock lives in the store (resuming): whether it is still
+          running belongs to the session, not to this component, even as the screen switches
+          between the grid and the focus view.
         */}
         <IconButton
           label={restarting ? 'Restarting the agent…' : 'Restart agent (chat history is kept)'}
@@ -326,27 +360,32 @@ export function SessionPane({
 
   return (
     /*
-      min-h-0이 없으면 안 된다.
-      flex 자식의 min-height 기본값은 auto라 **내용보다 작아지지 못한다.**
-      그래서 대화가 길어지면 이 칸이 통째로 늘어나 입력창을 밖으로 밀어냈다
-      (그리드에서 칸 높이가 정해져 있으니 곧바로 드러났다 — 입력창이 아예 안 보였다).
+      min-h-0 is not optional.
+      A flex child's min-height defaults to auto, so it **cannot shrink smaller than its
+      content.** That meant a long conversation stretched this pane and pushed the composer
+      off-screen entirely (this showed up immediately in the grid, where cell height is
+      fixed — the composer just was not visible at all).
     */
     <section
       /*
-       * fold면 **clip이다 (hidden이 아니라).**
+       * With `fold`, this is **clip, not hidden.**
        *
-       * 접힌 입력창은 칸 밖으로 내려가 있다 — 그건 스크롤 가능한 넘침이다. `overflow:hidden`은
-       * 그림만 자를 뿐 상자는 여전히 스크롤 컨테이너라, 브라우저가 밖에 있는 입력칸에 포커스를
-       * 주는 순간 **칸을 통째로 밀어 올려** 보여주려 한다 (실측: 칸이 85px 스크롤되어 머리글이
-       * 위로 사라지고, 그 사이 눌린 버튼은 mouseup을 못 받아 클릭이 통째로 사라졌다).
-       * `clip`은 스크롤 컨테이너를 만들지 않으므로 밀어 올릴 자리가 아예 없다.
+       * The collapsed composer sits below the pane — that is scrollable overflow.
+       * `overflow:hidden` only clips the picture; the box is still a scroll container, so the
+       * moment the browser gives focus to the off-screen input field, it tries to **scroll the
+       * whole pane up** to show it (measured: the pane scrolled 85px, the header disappeared
+       * upward, and the button that had just been pressed never received its mouseup, so the
+       * click vanished entirely). `clip` never creates a scroll container, so there is nowhere
+       * for it to scroll up to in the first place.
        */
       className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-void ${fold ? 'overflow-clip' : ''}`}
       data-testid="session-view"
       /*
-       * 손이 아래쪽에 오면 입력창이 뜬다. 감지는 **가짜 요소가 아니라 좌표로** 한다 —
-       * 투명한 감지판을 깔면 그만큼 대화의 글자를 못 고르고 링크도 못 누른다.
-       * 띠(14px) 위로 40px까지가 범위다: 겨누기 쉬우면서, 대화 한복판을 지날 땐 안 뜬다.
+       * The composer rises when a hand comes near the bottom. Detection uses **coordinates, not
+       * a fake element** — laying down a transparent detection plate would take that much area
+       * away from selecting conversation text or clicking links. The zone reaches 40px above
+       * the strip (14px): easy to aim for, while not triggering while passing through the
+       * middle of the conversation.
        */
       onMouseMove={
         fold
@@ -365,28 +404,33 @@ export function SessionPane({
           : undefined
       }
       /*
-       * 칸 전체가 드롭 자리다 (#116) — 입력창만이 아니라.
+       * The whole pane is a drop target (#116) — not just the composer.
        *
-       * 입력창은 기본으로 접혀 있으므로(store의 foldComposer), 받을 수 있는 유일한 자리가
-       * 대개 화면에 없었다. 파일을 들고 온 사람에게 겨눌 과녁이 없는 셈이다.
+       * Since the composer is collapsed by default (the store's foldComposer), the only place
+       * that could actually accept a drop was usually off-screen. Someone carrying a file over
+       * had nothing to aim at.
        *
-       * 여기서 처리하면 세 화면이 한 번에 고쳐진다: 포커스 뷰·그리드 칸·오케스트레이터가
-       * 전부 이 부품이다. 그리드에서는 **떨어뜨린 그 칸의 세션**에 붙는다는 뜻이기도 하다 —
-       * 포커스된 세션이 아니라. 같은 이유로 칸마다 자기 입력창을 부른다.
+       * Handling it here fixes all three screens at once: the focus view, a grid cell, and the
+       * orchestrator are all this same component. In the grid it also means it attaches to
+       * **the session of the cell it was dropped on** — not the focused session. Each cell
+       * calls its own composer for the same reason.
        */
       onDragOver={(e) => {
-        // 순서 바꾸기(세션·프로젝트)는 그 자리의 주인이 따로 있다 — 건드리지 않고 지나보낸다
+        // Reordering (sessions, projects) has its own owner for that spot — this passes it
+        // through untouched
         if (!isFileDrag(e.dataTransfer.types)) return
         /*
-         * 입력창 위에 있으면 표시는 그쪽 것이다 (입력창은 테두리를 ash로 밝힌다). 둘이
-         * 같이 밝아지면 어디에 놓는지가 아니라 몇 군데가 받는지를 말하게 된다.
+         * If it is over the composer, the highlight belongs to it (the composer lights up its
+         * border in ash). If both light up at once, it says how many places would accept the
+         * drop instead of where it would actually land.
          *
-         * 끄는 것까지 여기서 한다: 칸 바탕에서 입력창으로 넘어간 것은 칸을 떠난 것이
-         * 아니라 아래 dragleave가 안 온다.
+         * Turning it off happens here too: moving from the pane's background onto the composer
+         * is not leaving the pane, so the dragleave below never fires for it.
          *
-         * 판정을 `defaultPrevented`로 하지 않는 이유 — 창의 바닥 guard(App.tsx)가 캡처
-         * 단계에서 모든 드래그를 이미 막아 두므로, 여기 닿을 때 그 값은 늘 true다.
-         * 물어야 하는 것은 "막혔나"가 아니라 "누구 자리인가"다.
+         * Why this is not judged with `defaultPrevented` — the window's floor guard (App.tsx)
+         * has already blocked every drag during the capture phase, so by the time this runs
+         * that value is always true. What needs asking is not "was it blocked" but "whose spot
+         * is this".
          */
         if (composerRef.current?.contains(e.target as Node)) {
           setDragOver(false)
@@ -396,13 +440,14 @@ export function SessionPane({
         setDragOver(true)
       }}
       onDragLeave={(e) => {
-        // 자식으로 들어갈 때도 leave가 오므로 실제로 밖으로 나간 것만 본다
+        // A leave event also fires when moving into a child, so this only reacts to actually leaving
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
       }}
       onDrop={(e) => {
         if (!isFileDrag(e.dataTransfer.types)) return
         setDragOver(false)
-        // 입력창 위에 정확히 떨어진 것은 이미 입력창이 받았다 — 여기서 또 받으면 두 번 붙는다
+        // Something dropped exactly on the composer was already accepted by it — accepting it
+        // again here would attach it twice
         if (composerRef.current?.contains(e.target as Node)) return
         e.preventDefault()
         void composerDrop.current?.accept(e.dataTransfer).then((landed) => {
@@ -411,9 +456,10 @@ export function SessionPane({
       }}
     >
       {/*
-        떨어뜨릴 수 있다는 말 (#116). 입력창이 테두리를 ash로 밝히는 것과 **같은 말을**
-        칸의 크기로 한다 — 새 색을 들이지 않고, 순서 바꾸기에는 아예 켜지지 않는다.
-        입력창(z-20)보다 아래에 깔아 떠오른 카드와 그 그림자를 덮지 않는다.
+        A way of saying this can accept a drop (#116). **The same signal** as the composer
+        lighting up its border in ash, sized to the whole pane instead — no new color, and it
+        never lights up for reordering at all. Placed below the composer (z-20) so it does not
+        cover a raised card and its shadow.
       */}
       {dragOver && (
         <div
@@ -441,15 +487,18 @@ export function SessionPane({
       <ChatStream
         bottomPeek={fold}
         /*
-         * **늘** 카드만큼 벌려 둔다 — 떠오를 때 벌리지 않는다 (사용자 지적 2026-09-13).
+         * The card's full height is reserved **always** — it is never resized on rise
+         * (reported by a user on 2026-09-13).
          *
-         * 처음엔 떠 있을 때만 벌렸다(쉴 때 24px). 자리를 아끼는 쪽이 맞아 보였지만, 그건
-         * 카드가 떠오르는 순간 **대화가 위로 움직인다**는 뜻이다. 그리고 카드를 떠오르게
-         * 하는 손짓은 아래쪽으로 손을 내리는 것 — 즉 질문 카드의 답변 버튼을 누르러 가는
-         * 그 동작이다. 누르려고 다가가면 버튼이 위로 달아났다.
+         * At first this only reserved it while raised (24px at rest). Saving space looked like
+         * the right call, but that meant the card rising **moved the conversation upward**. And
+         * the gesture that raises it is lowering a hand toward the bottom — exactly the motion
+         * of reaching for a question card's answer button. Reaching to press it made the button
+         * run away upward.
          *
-         * 움직이는 과녁을 만들지 않는 것이 아끼는 자리보다 비싸다. 그래서 빈 자리는 처음부터
-         * 거기 있고, 카드는 그 위에 얹혔다 내려갈 뿐이다 — 대화는 한 픽셀도 안 움직인다.
+         * Not creating a moving target is worth more than the space it costs. So the empty
+         * space is there from the start, and the card only settles onto it or drops away — the
+         * conversation never moves by even one pixel.
          */
         bottomPad={fold ? composerH : undefined}
         scrollRef={scrollRef}
@@ -463,80 +512,97 @@ export function SessionPane({
       />
 
       {/*
-        프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
-        말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
+        A session with no process (after the host restarts). The transcript still exists, so it
+        can be read. This tells the person it can be continued before they say anything to it —
+        better than reporting failure after they have already sent something (FR-10).
       */}
       {!session.live && <DormantNote sessionId={session.id} />}
 
       {/*
-        접힘 (사용자 요청 2026-09-10): 둥근 카드가 아래에서 윗머리만 내밀고 있다가 떠오른다.
-        **글자로 안내하지 않는다** — 둥근 모서리가 위로 올라올 수 있는 카드라고 말한다.
+        Collapsed (requested by a user on 2026-09-10): a rounded card shows only its top edge
+        from below, then rises. **Not explained in words** — the rounded corners themselves say
+        this is a card that can rise.
 
-        절대 배치인 것은 그대로다(대화의 레이아웃 높이를 안 건드린다). 다만 **덮지는
-        않는다**: 대화 아래에 카드 높이만큼의 빈 자리가 늘 비워져 있고, 카드는 그 자리에
-        얹혔다 내려간다 (사용자 지적 2026-09-13). 원래는 "밀지 않고 덮는다"가 미덕이었는데,
-        그 미덕의 값이 마지막 몇 줄을 못 읽는 것이었다 — 읽으려고 손을 내린 사람에게 읽을
-        것을 가리는 셈이었다. 그렇다고 떠오를 때 밀어 올리는 것도 답이 아니었다: 카드를
-        부르는 손짓이 곧 답변 버튼을 누르러 가는 손짓이라, 누르려는 버튼이 달아났다.
+        Still absolutely positioned (does not touch the conversation's layout height). But it
+        **does not overlay** it: empty space the height of the card is always reserved below the
+        conversation, and the card only settles onto that space or drops away (reported by a
+        user on 2026-09-13). The original virtue was "overlay instead of pushing", but the cost
+        of that virtue was not being able to read the last few lines — it hid exactly what a
+        hand reaching down to read was reaching for. Pushing the content up on rise was not the
+        answer either: the gesture that summons the card is the same gesture as reaching for a
+        question card's answer button, so the button being reached for ran away.
       */}
       <div
         className={
           fold
             ? /*
-               * 아래 모서리도 둥글다 — 칸과 **같은 반지름**으로 (사용자 지적 2026-09-10).
-               * 칸은 rounded-lg로 잘리는데 카드 아래가 각지면 그 곡선에 잘려 테두리가
-               * 뾰족하게 끊긴다. 같은 곡선을 그리면 잘릴 것이 없다.
+               * The bottom corners are rounded too — at **the same radius** as the pane
+               * (reported by a user on 2026-09-10). The pane is clipped with rounded-lg, and a
+               * square card bottom gets cut by that curve into a sharp, broken-looking corner.
+               * Drawing the same curve leaves nothing for it to be cut by.
                */
               `absolute inset-x-0 bottom-0 z-20 rounded-t-xl rounded-b-[7px] border border-edge bg-void px-1 pt-1 transition-[translate,box-shadow] duration-300 ease-out motion-reduce:transition-none ${
                 composerUp
                   ? /*
-                     * 그림자의 일은 **덮고 있는 글과 카드를 떼어 놓는 것**이다. 떠 있을 때
-                     * 가장 많이 덮으므로 더 멀리 드리운다 — 짙기는 접힘과 같게 두고
-                     * (실측: 칸 바닥 #1d1d1d 위에서 둘 다 최저 12), 번지는 거리만 늘린다.
-                     * 여기가 25px, 접힘이 18px이다.
+                     * The shadow's job is **to separate the card from the text it covers.**
+                     * It covers the most while raised, so it is cast further — the darkness is
+                     * kept the same as when collapsed (measured: both bottom out at 12, over
+                     * the pane's floor color #1d1d1d), only the spread distance is increased.
+                     * 25px here, 18px when collapsed.
                      */
                     'translate-y-0 shadow-[0_-19px_40px_-15px_rgb(0_0_0/0.58)]'
                   : /*
-                     * 쉴 때는 **머리만 남긴다** (사용자 지적 2026-09-11: "인풋이 안 보이게").
+                     * At rest, **only the top edge remains** (reported by a user on 2026-09-11:
+                     * "the input is not visible").
                      *
-                     * 26px을 내놓던 자리다. 실측하면 그 높이는 입력칸의 윗단 9px까지 같이
-                     * 보여 준다 — 쉬는 카드가 "비어 있는 입력칸"으로 읽혔다. 아무 일도 없는
-                     * 면이 화면에서 가장 말이 많았던 셈이다.
+                     * This used to show 26px. Measured, that height also revealed the top 9px
+                     * of the input field itself — a resting card read as "an empty input field".
+                     * The surface with nothing happening on it was saying the most on screen.
                      *
-                     * 지금 내놓는 16px은 **카드 머리에서 입력칸까지의 여백 전부**이고, 딱
-                     * 거기까지다 (사용자 지정 2026-09-11): 카드 pt-1 4px + 폼 py-3 12px.
-                     * 그 다음 줄이 곧 입력칸의 윗 테두리이므로 이 값은 **입력칸을 숨기면서
-                     * 내놓을 수 있는 최댓값**이다 — 1px만 더 올리면 그 테두리가 문턱 위로
-                     * 올라온다(실측). 여백 둘 중 하나가 바뀌면 이 숫자도 같이 바뀌어야 한다.
+                     * The 16px shown now is **the entire margin from the card's top edge to the
+                     * input field**, and exactly that much (specified by a user on 2026-09-11):
+                     * the card's pt-1 (4px) plus the form's py-3 (12px). The very next line is
+                     * the input field's top border, so this value is **the maximum that can be
+                     * shown while still hiding the input field** — raising it by even 1px brings
+                     * that border above the threshold (measured). If either margin changes,
+                     * this number has to change along with it.
                      *
-                     * 입력칸에 bg-panel을 되돌릴 수 있게 된 것도 이 높이 덕이다 — 삐져나와
-                     * 칸 바닥에 구멍처럼 보이던 밝은 띠가 이제 없다.
+                     * This height is also why bg-panel could be restored on the input field —
+                     * the bright strip that used to peek out and look like a hole in the pane's
+                     * floor is gone now.
                      *
-                     * 이 높이가 손에 안 잡히는 것은 아니다 — 떠오르는 방아쇠는 카드가 아니라
-                     * 칸 아랫단의 54px 띠(COMPOSER_REACH)라서, 내놓는 선이 얇아져도 손은 같은
-                     * 자리에서 카드를 부른다.
+                     * This does not make the height hard to reach — what triggers the rise is
+                     * not the card but the pane's 54px bottom strip (COMPOSER_REACH), so even as
+                     * the visible sliver gets thinner, a hand summons the card from the same
+                     * spot as before.
                      *
-                     * 바탕은 여전히 칸 바닥과 같은 색이고 테두리도 카드 쪽이 어둡다(edge <
-                     * 칸의 graphite). 카드가 거기 있다는 말은 밝기가 아니라 **모양**이 한다.
-                     * 그림자는 여기서도 진다 (사용자 지적 2026-09-11). 짧게 드리우되 옅지는
-                     * 않다 — 내놓는 선이 16px뿐이라 밝기로는 말할 수 없고, 카드가 칸 위에
-                     * **얹혀 있다**는 말은 이 그림자가 혼자 한다.
+                     * The background is still the same color as the pane's floor, and the
+                     * card's border is darker too (edge is darker than the pane's graphite). It
+                     * is shape, not brightness, that says the card is there. A shadow is still
+                     * cast here too (reported by a user on 2026-09-11). Cast short, but not
+                     * faint — with only a 16px sliver showing, brightness alone cannot say it,
+                     * so this shadow alone is what says the card is **resting on** the pane.
                      *
-                     * 짙기는 눈이 아니라 자로 맞췄다: 칸 바닥이 #1d1d1d라 화면에서 검정은
-                     * 거의 움직이지 않는다 — 눈금이 열 칸도 안 되는 자다. 픽셀로 재면 바닥
-                     * 18 위에서 이 그림자의 가장 어두운 줄이 **12**다. 다섯 번 재서 얻은
-                     * 값이다: 12 → 6(너무 짙다) → 9("절반") → 10("살짝만 약하게") → 12
-                     * ("진하기를 줄여줘", 사용자 지정 2026-09-12). 한 눈금이 곧 한 번의
-                     * 지적이었고, 길어진 뒤에 다시 처음 값으로 돌아왔다 — 짙기의 문제가
-                     * 아니라 **짧아서** 눈에 안 찼던 것이다.
+                     * The darkness was tuned with a ruler, not by eye: the pane's floor is
+                     * #1d1d1d, so on screen, black barely moves at all — a ruler with fewer than
+                     * ten marks on it. Measured in pixels, over a floor of 18, this shadow's
+                     * darkest line comes out to **12**. That value came from five rounds of
+                     * measuring: 12 → 6 (too dark) → 9 ("halfway") → 10 ("just a touch
+                     * lighter") → 12 ("bring the darkness back down", specified by a user on
+                     * 2026-09-12). Each notch was one round of feedback, and after it got
+                     * longer, it landed back on the original value — the problem was never the
+                     * darkness, it just was not noticeable because it was **too short**.
                      *
-                     * 짙기와 **길이는 따로 논다**. "길게, 진하기는 그대로"(사용자 지정
-                     * 2026-09-12)는 흐림을 키우면서 알파를 같이 내려야 지켜진다 — 흐림만
-                     * 키우면 같은 먹이 넓게 퍼져 최저값이 함께 옅어지고, 알파만 올리면 짙어진다.
-                     * 길이도 같은 식으로 재서 좁혔다: 13px(짧다) → 25px(길다) → **18px**
-                     * (둘의 중간, 사용자 지정 2026-09-12). 떠 있을 때는 18 → 32 → 25px.
-                     * 최저값은 12로 고정한 채 길이만 움직였다 — 흐림을 줄이면 먹이 좁은
-                     * 자리에 몰려 최저값이 짙어지므로, 매번 알파를 같이 내려 12에 되맞춘다.
+                     * Darkness and **length move independently**. "Longer, same darkness"
+                     * (specified by a user on 2026-09-12) can only hold if increasing the blur
+                     * is paired with lowering the alpha — increasing blur alone spreads the same
+                     * ink thinner and lightens the darkest point along with it, and raising
+                     * alpha alone darkens it. Length was narrowed down the same way, by
+                     * measuring: 13px (too short) → 25px (too long) → **18px** (the midpoint,
+                     * specified by a user on 2026-09-12). While raised: 18 → 32 → 25px. The
+                     * darkest point was held fixed at 12 while only the length moved — reducing
+                     * blur concentrates the same ink into a narrower band and darkens that
+                     * point, so the alpha is lowered every time to bring it back to 12.
                      */
                     'translate-y-[calc(100%_-_16px)] shadow-[0_-14px_32px_-12px_rgb(0_0_0/0.6)]'
               }`
@@ -551,7 +617,7 @@ export function SessionPane({
         onBlurCapture={
           fold
             ? (e) => {
-                // 같은 상자 안으로 옮겨간 포커스는 떠난 것이 아니다 (첨부 버튼 ↔ 입력칸)
+                // Focus moving within the same box has not actually left it (attach button ↔ input field)
                 if (!e.currentTarget.contains(e.relatedTarget as Node)) setComposerFocused(false)
               }
             : undefined
@@ -565,7 +631,8 @@ export function SessionPane({
         />
       </div>
 
-      {/* 자주 쓰는 명령어 창 (#60) — 칸 안에 뜬다. 그리드 칸이면 그 칸 크기의 창이다 */}
+      {/* The frequently used commands window (#60) — opens inside the pane. In a grid cell,
+      the window is that cell's size */}
       {runOpen && session.projectId && (
         <CommandRunnerOverlay projectId={session.projectId} onClose={() => setRunOpen(false)} />
       )}
@@ -574,20 +641,23 @@ export function SessionPane({
 }
 
 /**
- * 입력창 (FR-7).
+ * The composer (FR-7).
  *
- * **따로 선 부품인 이유는 오직 하나, 초안이 전역 스토어에 있기 때문이다.**
- * 쓰다 만 글은 세션의 것이라 스토어에 있어야 하고(아래 draft 주석), 그러면 한 글자마다
- * 스토어가 바뀐다. 이 코드가 SessionPane 안에 있던 동안에는
- * 그 한 글자가 **머리글·대화 스트림·화면에 보이는 모든 말풍선**을 다시 그렸다
- * (실측: pane=1.0 stream=1.0 row=2.0 렌더/글자, 답변이 흐르는 중에는 두 배).
- * 대화의 크기에 비례하는 비용을 타이핑이 낼 이유가 없다.
+ * **There is exactly one reason this is a separate component: the draft lives in the global
+ * store.** An unsent draft belongs to the session, so it has to live in the store (see the
+ * `draft` comment below), which means the store changes on every keystroke. While this code
+ * lived inside SessionPane, that one keystroke re-rendered **the header, the chat stream, and
+ * every message bubble on screen** (measured: 1.0 renders per character for the pane, 1.0 for
+ * the stream, 2.0 for each row — doubled while a response was streaming). Typing has no reason
+ * to cost something proportional to the size of the conversation.
  *
- * 그래서 초안을 읽는 자리를 여기 하나로 좁혔다. 위에서는 이제 `sessionId`만 내려온다.
+ * So the place that reads the draft has been narrowed down to just this one. Everything above
+ * it now passes down only `sessionId`.
  *
- * 대화(chat)를 구독하지 않는 것도 같은 이유다 — 필요한 곳은 화살표 되불러오기
- * 한 곳뿐이고, 거기서는 누른 그 순간에 getState()로 훑는다. 구독했다면 스트리밍
- * 델타마다 입력창이 다시 그려져 방금 옮긴 비용이 그대로 돌아온다.
+ * Not subscribing to the conversation (`chat`) either, for the same reason — the only place
+ * that needs it is recalling with the arrow keys, and that reads it with `getState()` at the
+ * moment of the keypress. Subscribing to it would re-render the composer on every streaming
+ * delta, undoing exactly the cost that was just moved out of it.
  */
 const Composer = memo(function Composer({
   sessionId,
@@ -596,67 +666,77 @@ const Composer = memo(function Composer({
   framed = true,
 }: {
   sessionId: string
-  /** 아래 줄의 메뉴가 열렸나 — 접힌 입력창이 그동안 안 내려가야 한다 (fold) */
+  /** Whether the row's menu below is open — a collapsed composer must not fold away while it is (fold) */
   onMenuOpenChange?: (open: boolean) => void
-  /** 칸 아무 데나 떨어진 것을 이 입력창의 처리로 넘기는 손잡이 (#116) */
+  /** A handle that hands off anything dropped anywhere on the pane to this composer's own handling (#116) */
   dropRef?: Ref<ComposerDrop>
   /**
-   * 자기 윗선을 그을 것인가.
+   * Whether to draw its own top border.
    *
-   * 대화 바로 아래에 붙어 있을 때는 그 선이 **대화와 입력창의 경계**다. 하지만 접힌
-   * 카드 안에서는 카드의 둥근 테두리가 이미 경계고, 그 바로 아래에 직선이 하나 더 그이면
-   * 모서리가 두 번 끝나는 것처럼 보인다 (사용자 지적 2026-09-10).
+   * When it sits directly below the conversation, that line is **the boundary between the
+   * conversation and the composer.** But inside a collapsed card, the card's rounded border is
+   * already the boundary, and a straight line drawn right below it looks like the corner ending
+   * twice (reported by a user on 2026-09-10).
    */
   framed?: boolean
 }) {
   /**
-   * 입력창의 글이 열린 질문에 무엇이 되는가 (#125, #174).
+   * What the composer's text becomes for an open question (#125, #174).
    *
-   * 문자열로 좁혀서 구독한다 — 질문 배열을 그대로 구독하면 매번 새 참조가 와서, 이
-   * 부품이 굳이 피하려고 만든 재렌더를 도로 부른다. 판정은 스토어의 send가 쓰는 것 그대로다(`composerTarget`):
-   * 첨부를 보지 않던 동안, 파일을 붙이면 "답을 쓰라"는 안내 아래에서 글이 새 턴으로 가 질문이 버려졌다.
+   * This subscribes to a narrowed-down string rather than the full array — subscribing to the
+   * questions array directly would deliver a new reference every time, undoing exactly the
+   * re-render this component was built to avoid. The judgment is the same one the store's send
+   * uses (`composerTarget`): back when attachments were not looked at, attaching a file under
+   * the "write an answer" prompt sent the text as a new turn instead, and the question was
+   * dropped.
    */
   const target = useStore((s) =>
     composerTarget(s.sessions[sessionId]?.pendingQuestions ?? EMPTY_QUESTIONS, (s.drafts[sessionId]?.attachments.length ?? 0) > 0),
   )
 
   /*
-   * 세션에서 **여기 정말로 필요한 것만** 집는다.
+   * Picks up **only what this actually needs** from the session.
    *
-   * 세션 객체를 통째로 구독하면 답변이 흐르는 동안 델타마다 입력창 전체(첨부 목록·
-   * 자동완성 메뉴까지)가 다시 그려진다 — 정작 이 부품이 세션에서 읽는 것은 셋뿐이고,
-   * 셋 다 대화 중에 바뀌지 않는 값이다. 모델·권한·컨텍스트처럼 실제로 변하는 것들은
-   * 아래 ComposerFooter가 따로 구독한다.
+   * Subscribing to the whole session object would re-render the entire composer (the attachment
+   * list, even the autocomplete menu) on every delta while a response streams — yet this
+   * component only reads three things from the session, and none of the three ever changes
+   * mid-conversation. Values that actually change, like model, permissions, and context, are
+   * subscribed to separately by ComposerFooter below.
    */
   const alive = useStore((s) => !!s.sessions[sessionId])
   const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? '')
   const isOrchestrator = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator')
   const send = useStore((s) => s.send)
   const wake = useStore((s) => s.wake)
-  // 설정 하나만 꺼낸다 — 기록 전체를 구독하면 설정이 늘 때마다 입력창이 같이 다시 그려진다
+  // Pulls out just this one setting — subscribing to the whole preferences record would
+  // re-render the composer whenever any setting changes
   const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
   const sc = useShortcut()
   /*
-   * 쓰다 만 글은 **세션의 것**이다. 이 부품의 것이 아니다.
+   * An unsent draft belongs to **the session**, not to this component.
    *
-   * useState로 들고 있었더니 글이 화면의 그 자리에 붙었다. 포커스 뷰에서 세션을
-   * 바꿔도 같은 부품이 재사용되므로 A에 쓰던 글이 B의 입력창에 그대로 앉았고,
-   * 그대로 보내면 엉뚱한 세션에 갔다. 반대로 그리드는 화면을 갈아 끼우니
-   * 부품이 사라지며 글도 같이 사라졌다 — 같은 원인의 양쪽 증상이다.
+   * Holding it with useState left the text stuck to that spot on screen. Since the focus view
+   * reuses the same component when the session changes, whatever was being typed for session A
+   * stayed sitting in session B's composer, and sending it went to the wrong session. In the
+   * grid it was the opposite problem: switching screens unmounts the component, so the text
+   * disappeared along with it — two symptoms of the same underlying cause.
    */
   const draft = useStore((s) => s.drafts[sessionId] ?? EMPTY_DRAFT)
   const setDraft = useStore((s) => s.setDraft)
 
   /*
-   * 화살표로 되불러온 옛 메시지 (#38). `at`은 기록에서의 자리, `text`는 지금 보이는 글.
+   * An older message recalled with the arrow keys (#38). `at` is its position in history,
+   * `text` is what is currently shown.
    *
-   * **쓰다 만 글 위에 덮어쓰지 않는다.** 되불러오는 동안 입력창은 이 값을 보여주고,
-   * 세션의 초안은 손대지 않은 채 그대로 남는다. 그래서 가장 최근 것에서 한 번 더
-   * 내려오면 쓰던 글이 그대로 돌아온다 — 초안의 사본을 따로 떠두는 방식이었다면
-   * 그 사본과 초안이 어긋나는 날(세션 전환·전송 실패)이 반드시 온다.
+   * **This never overwrites the unsent draft.** While browsing history, the composer shows this
+   * value instead, and the session's draft is left untouched underneath. So stepping down once
+   * more past the most recent entry brings the unsent draft right back — if this had instead
+   * kept a separate copy of the draft, there would inevitably come a day (switching sessions,
+   * a failed send) when that copy and the real draft fell out of sync.
    *
-   * 부품의 상태인 게 맞다: "기록의 몇 번째를 보고 있나"는 지금 이 순간의 조작이지
-   * 세션의 사실이 아니다. 세션이 바뀌면 아래에서 비운다.
+   * It is correctly component state: "which entry in history is being viewed" is a decision
+   * made in this exact moment, not a fact about the session. It is cleared below whenever the
+   * session changes.
    */
   const [recall, setRecall] = useState<{ at: number; text: string } | null>(null)
   const text = recall ? recall.text : draft.text
@@ -670,7 +750,7 @@ const Composer = memo(function Composer({
   )
   const setText = useCallback(
     (next: string | ((prev: string) => string)) => {
-      // 되불러온 글을 고치는 중이면 그 글을 고친다 — 초안은 여전히 건드리지 않는다
+      // While editing a recalled message, edit that message — the draft is still left untouched
       if (recall) {
         setRecall({ ...recall, text: typeof next === 'function' ? next(recall.text) : next })
         return
@@ -713,20 +793,25 @@ const Composer = memo(function Composer({
   const fileRef = useRef<HTMLInputElement>(null)
   const attachFile = useStore((s) => s.attachFile)
   /*
-   * 올라가는 중인 첨부 (#180). 칩은 host에 저장이 끝나야 초안에 들어온다 — 그 전에 보내면 글만 나가고, 늦게 끝난 칩이
-   * 비워진 다음 초안에 붙어 다음 말에 실렸다. 올라가는 동안은 보내지 않고, 무엇을 기다리는지 목록에 보인다.
+   * Attachments still uploading (#180). A chip only enters the draft once the host has finished
+   * storing it — sending before that only sent the text, and a chip that finished late got
+   * attached to the draft afterward and rode along on the *next* message instead. While
+   * something is uploading, nothing sends, and the list shows what it is waiting on.
    */
   const uploading = useStore((s) => s.uploading[sessionId] ?? 0)
   /*
-   * 입력창 높이는 **값에서** 나온다.
+   * The composer's height comes **from the value.**
    *
-   * 예전엔 onChange에서 직접 style.height를 만졌는데, 그러면 타이핑으로 값이 바뀔 때만
-   * 높이가 맞는다. 보내고 나면 setText('')로 값만 비고 높이는 남아서, 빈 입력창이
-   * 커진 채로 서 있었다 — 아무것도 안 썼는데 높고, 뭐라도 치면 돌아오는 그 증상이다
-   * (도그푸딩 지적). 자동완성으로 긴 경로를 넣을 때는 반대로 안 커졌다.
+   * This used to touch `style.height` directly in onChange, which only kept the height correct
+   * when the value changed through typing. After sending, `setText('')` cleared the value but
+   * left the height standing, so an empty composer sat there tall — tall with nothing written
+   * in it, and back to normal the moment anything was typed (found in dogfooding). Inserting a
+   * long path through autocomplete had the opposite problem: it did not grow at all.
    *
-   * 값이 바뀌는 경로는 앞으로도 늘어난다(붙여넣기·복원·세션 전환…). 경로마다 높이를
-   * 다시 맞추는 대신 값 하나만 보게 한다. 페인트 전에 재는 useLayoutEffect라 깜빡이지 않는다.
+   * The number of paths that change the value will only keep growing (paste, restoring a draft,
+   * switching sessions...). Instead of re-fitting the height on every one of those paths, this
+   * only ever watches the single value. It is a useLayoutEffect that measures before paint, so
+   * there is no flicker.
    */
   useLayoutEffect(() => {
     const el = inputRef.current
@@ -736,17 +821,18 @@ const Composer = memo(function Composer({
   }, [text])
 
   /*
-   * 세션이 바뀌면 되불러오기는 없던 일이 된다 (#38).
+   * A switch to a different session undoes any recall in progress (#38).
    *
-   * 포커스 뷰는 세션을 바꿔도 이 부품을 그대로 쓴다. 안 비우면 A의 기록에서 꺼낸
-   * 글이 B의 입력창에 앉아 있게 되는데, 그건 쓰다 만 글을 세션으로 옮긴 이유
-   * 그대로다 — 그대로 보내면 엉뚱한 세션에 간다.
+   * The focus view reuses this same component when the session changes. Without clearing it,
+   * text recalled from A's history would still be sitting in B's composer, and that is exactly
+   * the situation an unsent draft was moved to the session to prevent — sending it as-is would
+   * go to the wrong session.
    *
-   * 그리기 전에 비운다(layout). effect였다면 한 프레임 동안 남의 말이 보인다.
+   * Cleared before render (layout). As an effect, someone else's text would flash for one frame.
    */
   useLayoutEffect(() => setRecall(null), [sessionId])
 
-  // 자동완성: `/`는 스킬, `@`는 파일
+  // Autocomplete: `/` for skills, `@` for files
   const ac = useAutocomplete({
     sessionId,
     projectId,
@@ -755,18 +841,20 @@ const Composer = memo(function Composer({
     // Not while composing (#12) — a half-formed syllable is not a query. Closing the menu also
     // hands the arrow keys back: the branch below that spends them on the list is behind `open`.
     enabled: alive && caret >= 0 && !composing,
-    // 오케스트레이터의 `@`는 세션을 집는다 — 지시의 대상이 파일이 아니라 세션이다.
-    // 판정은 명시적 표식(kind)으로 한다: 오케스트레이터에게는 고를 파일 트리가 없다
+    // The orchestrator's `@` picks a session — what it targets is a session, not a file.
+    // Judged by an explicit marker (kind): the orchestrator has no file tree to pick from
     atSource: isOrchestrator ? 'sessions' : 'files',
   })
 
   const pick = (item: Suggestion) => {
     /*
-     * GUI 커맨드 (2026-09-07): 목록에서 고르는 순간이 곧 실행이다 — '/usage'를
-     * 입력창에 채워 넣고 엔터를 한 번 더 요구하면, "엔터 치면 화면이 뜬다"는
-     * 약속이 두 번의 엔터가 된다. 글은 지우고 화면을 연다.
+     * A GUI command (2026-09-07): the moment it is picked from the list is the execution
+     * itself — filling '/usage' into the composer and then requiring another Enter would turn
+     * the promise "pressing Enter opens the screen" into two presses of Enter. This clears the
+     * text and opens the screen instead.
      */
-    // 세션 커맨드 값은 뒤에 공백이 붙는다 — 같은 이름의 진짜 스킬을 골랐을 땐 가로채지 않는다
+    // A session command's value has a trailing space — this does not intercept it when a real
+    // skill of the same name is picked
     const gui = item.value.endsWith(' ') ? null : guiCommandFor(item.value)
     if (gui) {
       setRecall(null)
@@ -777,7 +865,7 @@ const Composer = memo(function Composer({
     const next = ac.apply(item)
     setText(next.text)
     setCaret(next.caret)
-    // 값이 반영된 뒤에 커서를 옮겨야 한다 (React가 값을 그린 다음)
+    // The caret has to move after the value is applied (once React has rendered it)
     requestAnimationFrame(() => {
       const el = inputRef.current
       if (!el) return
@@ -787,23 +875,29 @@ const Composer = memo(function Composer({
   }
 
   /**
-   * 화살표로 보낸 말을 되불러온다 (#38). 기록이 나섰으면 true — 그러면 커서는 안 움직인다.
+   * Recalls a sent message with the arrow keys (#38). Returns true when history took over —
+   * in that case the caret does not move.
    *
-   * 판단은 history.ts가, 커서 규칙은 여기서. 셋 다 만족해야 기록이 나선다:
-   *  - 자동완성이 닫혀 있다 (열려 있으면 화살표는 목록의 것이다 — 부르는 쪽이 이미 걸렀다)
-   *  - 고른 글자가 없다 (선택이 있는 화살표는 선택을 푸는 키다)
-   *  - 커서가 위 화살표면 첫 줄, 아래 화살표면 마지막 줄에 있다 — **접힌 줄까지 세어서**
+   * The judgment lives in history.ts; the caret rule lives here. History only takes over when
+   * all three hold:
+   *  - autocomplete is closed (if it is open, the arrow key belongs to the list — the caller
+   *    has already filtered that out)
+   *  - no text is selected (an arrow key with a selection is a key that clears the selection)
+   *  - the caret is on the first line for the up arrow, or the last line for the down arrow —
+   *    **counting wrapped lines too**
    *
-   * 기록은 그때그때 대화에서 훑는다. 미리 만들어 두면 스트리밍 델타마다 수천 줄을
-   * 다시 훑게 되는데, 정작 쓰이는 건 화살표를 누른 순간뿐이다.
+   * History is scanned from the conversation fresh each time. Precomputing it would mean
+   * rescanning thousands of rows on every streaming delta, when it is only ever actually used
+   * at the moment an arrow key is pressed.
    */
   const recallHistory = (el: HTMLTextAreaElement, dir: -1 | 1): boolean => {
     if (el.selectionStart !== el.selectionEnd) return false
     const caret = el.selectionStart
     /*
-     * 개행으로 먼저 걸러 낸다(값 비교, 공짜). 거기서 걸리지 않은 것만 거울로 잰다 —
-     * 긴 한 줄이 접혀 있으면 개행은 없어도 눈에는 여러 줄이고, 그 가운데에서 누른
-     * 화살표는 기록이 아니라 커서의 것이다 (사용자 지적 2026-09-07).
+     * Newlines are checked first (a value comparison, free). Only what passes that gets
+     * measured with the mirror — a long line that has wrapped has no newline, yet looks like
+     * several lines, and an arrow key pressed in the middle of it belongs to the caret, not to
+     * history (reported by a user on 2026-09-07).
      */
     const onEdge =
       dir === -1
@@ -821,9 +915,10 @@ const Composer = memo(function Composer({
     const next = step.kind === 'draft' ? draft.text : step.text
     setRecall(step.kind === 'draft' ? null : { at: step.at, text: step.text })
     /*
-     * 커서는 끝으로. 셸이 그렇게 하고, 한 줄짜리 기록에서는 그 자리가 첫 줄이자
-     * 마지막 줄이라 위아래로 계속 넘길 수 있다. 여러 줄짜리를 꺼내면 거기서 멈추는데,
-     * 그건 맞는 동작이다 — 그 글을 읽고 고치려고 꺼낸 것이다.
+     * The caret goes to the end. A shell does the same, and for a single-line history entry,
+     * that spot is both the first line and the last, so it can still keep scrolling up and
+     * down. Recalling a multi-line entry stops there, and that is the right behavior — it was
+     * pulled up to be read and edited.
      */
     setCaret(next.length)
     requestAnimationFrame(() => {
@@ -833,9 +928,10 @@ const Composer = memo(function Composer({
     return true
   }
 
-  // 스크린샷을 붙여넣는 흐름이 가장 흔하다 (FR-13)
-  // 돌려주는 값은 "하나라도 붙었나" — 접힌 입력창을 펴는 쪽이 이걸 보고 판단한다 (#116).
-  // 붙은 게 없는데 펴면 빈 칸이 올라와 무언가 된 것처럼 거짓말을 한다.
+  // Pasting a screenshot is the most common flow here (FR-13)
+  // Returns "did at least one thing get attached" — the side that expands a collapsed composer
+  // decides based on this (#116).
+  // Expanding it when nothing was attached would bring up an empty field, lying that something happened.
   const takeFiles = async (files: FileList | File[] | null) => {
     if (!files || !alive) return false
     let added = false
@@ -850,21 +946,22 @@ const Composer = memo(function Composer({
   }
 
   /*
-   * 떨어뜨린 것을 받는 일 전부 (#116).
+   * All the handling for accepting a drop (#116).
    *
-   * 이 칸의 입력창이 아니라 **칸 아무 데나** 떨어뜨려도 같은 일이 일어나야 하는데,
-   * 그 판정과 처리가 두 벌이 되면 한쪽만 고쳐지는 날이 온다 — 트리에서 끌어온 경로가
-   * 입력창에서는 문장에 들어가고 칸에서는 조용히 사라지는 식으로. 그래서 처리는 여기
-   * 하나뿐이고, 칸은 손잡이(dropRef)로 이걸 부른다.
+   * Dropping **anywhere on the pane**, not just this composer, needs to do the same thing, and
+   * having two separate copies of that judgment and handling would eventually mean only one of
+   * them getting fixed — a path dragged from the tree ending up in the sentence when dropped on
+   * the composer, but silently disappearing when dropped elsewhere on the pane. So there is
+   * exactly one place that handles it, and the pane calls into it through a handle (dropRef).
    */
   const acceptDrop = async (dt: DataTransfer) => {
-    // 트리에서 끌어온 경로는 첨부가 아니라 문장에 넣는다.
-    // 구분하지 않으면 files가 비어 있어 아무 일도 안 일어난다.
+    // A path dragged from the tree goes into the sentence, not into an attachment.
+    // Without telling them apart, `files` would be empty and nothing would happen.
     const path = readDragPath(dt)
     if (path) {
       setText((prev) => {
         const next = appendPath(prev, path)
-        // 커서를 끝으로 옮겨야 이어서 칠 수 있다
+        // The caret has to move to the end so typing can continue from there
         requestAnimationFrame(() => {
           const el = inputRef.current
           if (!el) return
@@ -878,19 +975,22 @@ const Composer = memo(function Composer({
     }
     return takeFiles(dt.files)
   }
-  // deps를 주지 않는다 — 위 클로저가 매 렌더의 초안·상태를 봐야 하므로 손잡이도 같이 새것이어야 한다
+  // No deps here — the closure above needs to see each render's draft and state, so the handle
+  // must be recreated every render too
   useImperativeHandle(dropRef, () => ({ accept: acceptDrop }))
 
   /*
-   * 이 칸이 그릴 대화를 이 칸이 챙긴다.
+   * The pane rendering a conversation is what fetches it.
    *
-   * 예전엔 focusSession만 기록을 불러왔다. 포커스 뷰에서는 고르는 것과 보는 것이
-   * 같은 동작이라 티가 안 났는데, 그리드는 **고르지 않고 보는** 화면이다 —
-   * 사이드바에서 한 번도 들어가 본 적 없는 세션을 올리면 빈 칸이 떴다 (도그푸딩).
-   * 세션 하나를 그리는 부품이 그 대화를 챙기는 게 맞다.
+   * This used to be loaded only by focusSession. In the focus view, selecting and viewing were
+   * the same action, so this never showed — but the grid is a screen that **views without
+   * selecting**. Putting a session that had never once been opened from the sidebar into a grid
+   * cell rendered an empty pane (found in dogfooding). It is right for the component rendering
+   * a single session to be the one that fetches its conversation.
    */
 
-  // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다 — 훅이 모두 돈 뒤에 판단한다
+  // Avoid rendering even at the moment the session disappears (deleted, archived) — this is
+  // decided after every hook has run
   if (!alive) return null
 
   return (
@@ -902,9 +1002,10 @@ const Composer = memo(function Composer({
         if (!t && attachments.length === 0) return
         if (uploading > 0) return
         /*
-          GUI 커맨드 (2026-09-07): `/usage` 같은 이름은 세션에 보낼 응답이 프로토콜에
-          없다 — 엔터가 메시지 대신 앱 화면을 연다. 첨부가 있으면 가로채지 않는다:
-          무언가를 붙였다는 것은 세션에게 말하는 중이라는 뜻이다.
+          A GUI command (2026-09-07): a name like `/usage` has no response in the protocol to
+          send to the session — Enter opens an app screen instead of a message. This does not
+          intercept it if there is an attachment: attaching something means the person is
+          talking to the session.
         */
         const gui = attachments.length === 0 ? guiCommandFor(t) : null
         if (gui) {
@@ -914,10 +1015,11 @@ const Composer = memo(function Composer({
           return
         }
         /*
-            보내고 나면 입력창은 정말로 빈다 (#38).
-            되불러오기와 초안을 **둘 다** 비워야 한다 — 하나만 비우면 방금 보낸 자리에
-            아까 쓰다 만 글이 되살아난다. 방금 보낸 말은 이제 기록의 맨 위에 있으니
-            화살표 한 번이면 다시 꺼낼 수 있다.
+            After sending, the composer really does go empty (#38).
+            **Both** the recall state and the draft have to be cleared — clearing only one
+            would bring the earlier unsent text back to life right where the message was just
+            sent. The message just sent is now at the top of history, so one press of the
+            arrow key brings it back if needed.
           */
         setRecall(null)
         setDraft(sessionId, EMPTY_DRAFT)
@@ -940,8 +1042,9 @@ const Composer = memo(function Composer({
               className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
             >
               {/*
-                  이모지를 쓰지 않는다 — OS·폰트마다 생김새가 다르고 대부분 유채색이라
-                  "색은 diff 본문에만"이라는 규칙을 곧바로 깬다. 한 글자 기호면 둘 다 없다.
+                  No emoji here — they look different across OS and font, and most are in color,
+                  which immediately breaks the rule "color belongs only to the diff body". A
+                  short text label has neither problem.
                 */}
               <span className="readout text-[9px] text-slate" title={a.kind === 'image' ? 'Image' : 'File'}>
                 {a.kind === 'image' ? 'IMG' : 'DOC'}
@@ -961,15 +1064,17 @@ const Composer = memo(function Composer({
       )}
       <div
         /*
-         * 입력칸은 다시 **채워진다** (사용자 지적 2026-09-11).
+         * The input field is filled in **again** (reported by a user on 2026-09-11).
          *
-         * 09-10에 비웠던 이유는 "가만히 있는 입력칸이 대화보다 밝다"였다. 그 진단은 카드가
-         * 접힐 때 panel 한 줄이 칸 바닥 위로 삐져나와 구멍처럼 보이던 것과 겹쳐 있었는데,
-         * 접힘 높이를 낮춰 입력칸 자체가 숨는 지금은 그 부작용이 없다. 남는 것은 원래의
-         * 쓸모뿐이다: 글을 치는 면은 글을 읽는 면과 **다른 면**이어야 한다.
+         * It was cleared on 09-10 because "a resting input field is brighter than the
+         * conversation". That diagnosis overlapped with a separate issue, where one row of
+         * panel peeked out above the pane's floor as the card collapsed and looked like a hole
+         * — now that the collapsed height has been lowered enough to hide the input field
+         * itself, that side effect is gone. What remains is only the original purpose: the
+         * surface for typing has to be **a different surface** from the one for reading.
          *
-         * 밝아지는 것이 지금 일어나는 일이라는 규칙은 테두리가 계속 지킨다 — 포커스면
-         * graphite, 파일을 끌어오면 ash.
+         * The rule that brightness marks something currently happening is still kept by the
+         * border — graphite on focus, ash when a file is dragged over it.
          */
         className={`relative flex items-end gap-2 rounded border bg-panel px-3 py-2 transition-colors focus-within:border-graphite ${
           dragging ? 'border-ash' : 'border-edge'
@@ -980,7 +1085,7 @@ const Composer = memo(function Composer({
         }}
         onDragOver={(e) => e.preventDefault()}
         onDragLeave={(e) => {
-          // 자식으로 들어갈 때도 leave가 오므로 실제로 밖으로 나간 것만 본다
+          // A leave event also fires when moving into a child, so this only reacts to actually leaving
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
         }}
         onDrop={(e) => {
@@ -1023,7 +1128,7 @@ const Composer = memo(function Composer({
             setCaret(e.target.selectionStart)
           }}
           onKeyDown={(e) => {
-            // 자동완성이 열려 있으면 방향키·Enter·Tab은 목록의 것이다
+            // While autocomplete is open, the arrow keys, Enter and Tab belong to the list
             if (ac.open) {
               if (e.key === 'ArrowDown') return (e.preventDefault(), ac.move(1))
               if (e.key === 'ArrowUp') return (e.preventDefault(), ac.move(-1))
@@ -1061,12 +1166,14 @@ const Composer = memo(function Composer({
               }
             }
             /*
-                무엇이 보내기인가는 설정이 정한다 (composerKeys.ts). 여기서 직접 따지지
-                않는 이유는 위 조합 판정(composing)과 엮인 경우의 수가 브라우저 없이
-                시험할 수 있는 자리에 있어야 해서다.
+                What counts as sending is decided by the setting (composerKeys.ts). This does
+                not judge it directly here because the combination of cases it is tangled up
+                with, together with the composition check (composing) above, needs to live
+                somewhere testable without a browser.
 
-                켠 사람에게 맨 Enter는 여기서 아무 일도 하지 않는다 — 가로채지 않으므로
-                textarea가 평소대로 줄을 바꾼다. 그것이 이 설정의 전부다.
+                For someone who has turned the setting on, a plain Enter does nothing here — it
+                is not intercepted, so the textarea just breaks the line as usual. That is the
+                entire effect of the setting.
               */
             const sendKey = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
             if (isComposerSendKey(sendKey, sendWithModifierEnter)) {
@@ -1082,9 +1189,10 @@ const Composer = memo(function Composer({
             }
           }}
           /*
-           * 질문이 열려 있으면 **여기 친 글이 그 질문의 답으로 간다** (#125). 그 사실을
-           * 누르기 전에 알려야 한다 — 예전에는 아무 말 없이 질문을 버렸고, 사람은 자기가
-           * 무엇을 없앴는지조차 몰랐다.
+           * With a question open, **whatever is typed here goes as the answer to that
+           * question** (#125). That fact needs to be known before pressing send — this used to
+           * silently drop the question, and the person did not even know what they had just
+           * gotten rid of.
            */
           placeholder={
             target === 'answer'
@@ -1096,10 +1204,11 @@ const Composer = memo(function Composer({
           data-testid="prompt-input"
         />
         {/*
-            첨부도 보내기와 **같은 부품**을 쓴다. 예전엔 label로 따로 만들어서
-            안쪽 여백(6px vs 4px)과 아이콘 크기(16 vs 15)가 달랐고, 나란히 선 두 버튼의
-            크기와 높이가 어긋나 보였다 (도그푸딩 지적).
-            파일 선택기는 숨긴 input을 눌러 연다 — label 없이도 같은 일을 한다.
+            The attach button uses **the same component** as send. It used to be a separate one
+            built from a label, with different inner padding (6px vs 4px) and icon size (16 vs
+            15), so the two buttons standing side by side looked mismatched in size and height
+            (found in dogfooding). The file picker is opened by clicking a hidden input — it
+            does the same job without a label.
           */}
         <input
           ref={fileRef}
@@ -1109,9 +1218,11 @@ const Composer = memo(function Composer({
           data-testid="attach-input"
           onChange={(e) => {
             /*
-             * 고른 파일을 먼저 떠 두고 칸을 비운다 (#180). 값이 남아 있으면 같은 파일을 다시 골랐을 때 브라우저가
-             * `change`를 보내지 않아, 칩을 지우고(또는 보낸 뒤) 같은 파일을 다시 붙일 수 없었다. `files`는 살아 있는
-             * 목록이라 값을 비우면 함께 비워지므로 배열로 옮긴 뒤에 비운다.
+             * The chosen files are copied out before the field is cleared (#180). If the value
+             * were left as-is, the browser would not fire `change` again for picking the same
+             * file a second time, so removing the chip (or sending it) meant the same file could
+             * never be attached again. `files` is a live list, so clearing the value clears it
+             * too — this copies it into an array first, then clears.
              */
             const files = Array.from(e.currentTarget.files ?? [])
             e.currentTarget.value = ''
@@ -1130,9 +1241,10 @@ const Composer = memo(function Composer({
         <IconButton
           type="submit"
           /*
-            보내는 키가 설정에 따라 달라지므로 라벨도 따라간다. 여기가 앱에서
-            **그 키를 이름으로 말하는 유일한 자리**라, 틀리면 켠 사람이 처음에
-            무엇을 눌러야 하는지 알 길이 없다. `⌘`인지 `Ctrl`인지는 자판이 답한다.
+            The label follows the setting, since the send key itself changes with it. This is
+            **the only place in the app that names that key**, so getting it wrong leaves
+            someone who turned the setting on with no way to know what to press the first time.
+            Whether it reads `⌘` or `Ctrl` is answered by the keyboard.
           */
           label={`Send (${sendWithModifierEnter ? sc('mod', 'Enter') : 'Enter'})`}
           disabled={(!text.trim() && attachments.length === 0) || uploading > 0}
@@ -1145,14 +1257,16 @@ const Composer = memo(function Composer({
         </IconButton>
       </div>
       {/*
-          모델·강도·권한은 **보내기 직전에** 정하는 것들이라 입력창 아래에 둔다.
-          헤더에 있을 때는 화면 반대쪽 끝이라, 무엇을 어떤 설정으로 보내는지
-          한눈에 같이 보이지 않았다. 여기 있으면 손과 눈이 같은 자리에 머문다.
+          Model, effort and permissions are decided **right before sending**, so they sit below
+          the composer. In the header they were at the opposite end of the screen, so what was
+          being sent and under which settings never showed together at a glance. Here, the hand
+          and the eye stay in the same spot.
         */}
       {/*
-          단축키 안내는 뺐다. Enter로 보내고 ⇧Enter로 줄을 바꾸는 건 채팅 입력창의
-          기본값이라 한 번 배우면 끝인데, 안내는 매번 자리를 차지한다 —
-          한 번 읽고 나면 그때부터는 노이즈다 (도그푸딩: "당연한 것들이라").
+          The shortcut hint was removed. Sending with Enter and breaking the line with
+          Shift+Enter is the default for a chat composer — learned once and done — but a hint
+          takes up space every single time. Once read, it is noise from then on (dogfooding:
+          "because these are obvious").
         */}
       <ComposerFooter sessionId={sessionId} onMenuOpenChange={onMenuOpenChange} />
     </form>
@@ -1160,14 +1274,16 @@ const Composer = memo(function Composer({
 })
 
 /**
- * 입력창 아래 줄 — 모델·강도·권한, 워크트리, 컨텍스트.
+ * The row below the composer — model, effort, permissions, worktree, context.
  *
- * 입력창과 **따로 구독하는 이유**: 여기 있는 값들은 대화 중에 계속 바뀌고(컨텍스트는
- * 턴마다, live는 재시작마다), 입력창은 그 변화와 아무 상관이 없다. 한 부품이었을 때는
- * 답변이 흐르는 동안 델타마다 textarea까지 통째로 다시 그려졌다.
+ * **Why this subscribes separately** from the composer: the values here keep changing during
+ * the conversation (context on every turn, live on every restart), and the composer has nothing
+ * to do with any of that. Back when this was one component, the textarea itself was re-rendered
+ * whole on every delta while a response streamed.
  *
- * 자리가 여기인 것은 그대로다 — 모델·권한은 **보내기 직전에** 정하는 것들이라
- * 헤더(화면 반대쪽 끝)가 아니라 손과 눈이 머무는 이 자리에 있어야 한다.
+ * The placement is unchanged — model and permissions are decided **right before sending**, so
+ * they belong here, where the hand and eye already are, rather than in the header at the
+ * opposite end of the screen.
  */
 const ComposerFooter = memo(function ComposerFooter({
   sessionId,
@@ -1183,7 +1299,7 @@ const ComposerFooter = memo(function ComposerFooter({
     <div className="mt-1.5 flex items-center gap-2">
       <SessionSettings
         sessionId={session.id}
-        // 프로젝트 기본값이 아니라 **이 세션의** 도구다 (섞어 쓸 수 있다)
+        // Not the project's default — **this session's** tool (tools can be mixed)
         tool={session.tool}
         model={session.model}
         effort={session.effort}
@@ -1194,9 +1310,9 @@ const ComposerFooter = memo(function ComposerFooter({
         onOpenChange={onMenuOpenChange}
       />
       {/*
-          워크트리 세션은 **다른 디렉토리에서 돈다.** 그 사실이 안 보이면 사용자는
-          프로젝트 폴더를 열어보고 "왜 파일이 안 바뀌었지"를 겪는다 — 설정 옆에 붙여
-          무엇을 어디에 보내는지 한자리에서 읽히게 한다.
+          A worktree session **runs in a different directory.** If that fact is not visible,
+          people open the project folder and run into "why has nothing changed" — placing it
+          next to the settings makes what is running where readable in one spot.
         */}
       {session.worktree && (
         <span
@@ -1208,16 +1324,17 @@ const ComposerFooter = memo(function ComposerFooter({
         </span>
       )}
       {/*
-          컨텍스트도 **쓰는 자리 옆**에 둔다. 대화 머리글에 있을 때는 화면 반대쪽
-          끝이라, 길게 쓰는 동안 정작 얼마나 남았는지가 눈에 안 들어왔다 (도그푸딩).
+          Context is placed **next to where it is used**, too. In the conversation header it sat
+          at the opposite end of the screen, so during a long write-up, how much was actually
+          left never registered (found in dogfooding).
 
-          **모름과 0%를 구별한다.** 한 번도 턴을 끝낸 적 없는 세션에는 값이 없다.
-          그때 0%처럼 보이면 "아직 하나도 안 썼다"는 거짓말이 된다 — 흐린 `—`는
-          모른다는 뜻이다.
+          **Unknown and 0% are told apart.** A session that has never finished a turn has no
+          value. Showing 0% at that point would be a lie that says "nothing has been used yet" —
+          a dim `—` means it is unknown.
 
-          (#48 전에는 재시작한 세션도 여기 걸렸다. `context`가 DB에 없어서 앱을
-          껐다 켜면 값이 사라졌기 때문이다. 지금은 저장되므로 빈칸은 정말로
-          "아직 한 번도 보고된 적 없음"만 뜻한다.)
+          (Before #48, a restarted session also fell into this. `context` was not in the
+          database, so quitting and reopening the app made the value disappear. It is persisted
+          now, so a blank truly only ever means "never reported at all".)
         */}
       <span
         className={`readout ml-auto shrink-0 text-[11px] ${
@@ -1237,12 +1354,14 @@ const ComposerFooter = memo(function ComposerFooter({
 })
 
 /**
- * 대화 스트림 — 가상 스크롤 (D-1).
+ * The conversation stream — virtual scrolling (D-1).
  *
- * 세션 하나가 수백 턴이 되면 전부 렌더하는 구조는 버틴다고 해도 스크롤이 끊긴다.
- * 화면에 보이는 것만 그리되, 두 가지를 지킨다:
- *   1. 스트리밍 중 자동으로 바닥에 붙되, **사용자가 위로 올려 읽는 중이면 방해하지 않는다**
- *   2. 승인 카드는 언제나 마지막 항목 — 대기 중인 것을 스크롤로 찾게 하지 않는다
+ * Once a single session reaches hundreds of turns, rendering everything might hold up, but
+ * scrolling breaks down. This renders only what is on screen, while keeping two guarantees:
+ *   1. It sticks to the bottom automatically while streaming, but **never interrupts a person
+ *      who has scrolled up to read**
+ *   2. The approval card is always the last item — nothing pending should have to be found by
+ *      scrolling
  */
 function ChatStream({
   scrollRef,
@@ -1264,20 +1383,26 @@ function ChatStream({
   projectRoot: string | null
   working: boolean
   activity: SessionSummary['activity']
-  /** 접힌 입력창이 아래를 조금 가린다 — 마지막 줄이 그 밑에 영영 깔리지 않게 여백을 준다 */
+  /**
+   * A collapsed composer covers a bit of the bottom — this reserves margin so the last line is
+   * never permanently hidden under it
+   */
   bottomPeek?: boolean
   /**
-   * 떠오른 입력 카드의 높이 (px). 주면 아래 여백이 **그 카드만큼** 벌어진다.
+   * The height (px) of the raised input card. When set, the margin below grows by **exactly
+   * that card's height**.
    *
-   * 접힘은 원래 "밀지 않고 덮는다"였다 — 떠오를 때 읽던 줄이 안 움직이는 게 미덕이라고
-   * 봤기 때문이다. 실제로 써 보니 그 미덕의 값이 **마지막 몇 줄을 못 읽는 것**이었다
-   * (사용자 지적 2026-09-13: "올라올 때 대화를 가려서 불편하다"). 그래서 덮는 대신
-   * 밀어 올린다. 값이 카드 높이와 같아야 하므로 상수가 아니라 실측치를 받는다 — 첨부가
-   * 붙거나 입력칸이 여러 줄이 되면 카드가 자란다.
+   * Collapsed originally meant "overlay instead of pushing" — the row being read not moving on
+   * rise looked like the right virtue. In practice, the cost of that virtue turned out to be
+   * **not being able to read the last few lines** (reported by a user on 2026-09-13: "it
+   * covers the conversation as it rises, which is annoying"). So instead of overlaying, this
+   * pushes the content up. The value has to match the card's actual height, so it takes a
+   * measured number rather than a constant — the card grows when an attachment is added or the
+   * input field wraps to more than one line.
    */
   bottomPad?: number
 }) {
-  // 파일 링크가 이 칸의 프로젝트에서 열리게 (#182) — 포커스된 세션의 것이 아니라
+  // File links should open in this pane's project (#182) — not the focused session's
   const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? null)
   /*
    * "Was I at the bottom" is the session's fact, not this component's (issue #31).
@@ -1285,18 +1410,22 @@ function ChatStream({
    * It stays a ref here because the follow logic reads it from a scroll handler and from
    * effects — re-rendering on it would mean re-rendering on every scroll — but the ref is
    * only a copy. The session holds the original, so a panel that is torn down and built
-   * again does not get to decide for itself where you were.
+   * again does not get to decide for itself where the person was.
    */
   const stickToBottom = useRef(true)
   const setStickToBottom = useStore((s) => s.setStickToBottom)
-  // 바닥이 아닌 자리는 줄(seq)로 남는다 (#61) — 픽셀이 아니라 줄이라야 측정을 넘어 살아남는다
+  // A position other than the bottom is remembered as a row (seq) (#61) — it has to be a row,
+  // not a pixel, to survive re-measurement
   const setScrollAnchor = useStore((s) => s.setScrollAnchor)
 
   /*
-   * 대화 안 앱 화면이 그려진 줄은 떼지 않는다 (M4 B-1). 가상 스크롤은 멀리 벗어난 줄을 DOM에서 떼는데,
-   * 그 줄에 앱 화면(iframe)이 있으면 떼는 순간 창이 사라져 teardown이 닿지 않는다. 그래서 그런 줄은
-   * 원래 범위 밖으로 나가도 붙들어 두고(아래 rangeExtractor), 그 줄에 `leaving`을 준다 — 화면이
-   * teardown을 보내고 자리표시로 접히면 손잡이가 내려가고(inlineFramesVersion), 그때 줄이 떨어진다.
+   * A row rendering an in-conversation app view is never detached (M4 B-1). The virtual
+   * scroller detaches rows that scroll far out of view from the DOM, and if that row has an app
+   * view (an iframe), its window disappears the moment it is detached, so any teardown sent
+   * after that never arrives. So a row like that is held onto (rangeExtractor, below) even once
+   * it falls outside its natural range, and is given `leaving` — once the view sends teardown
+   * and collapses into the placeholder, the handle is unregistered (inlineFramesVersion), and
+   * only then does the row actually get detached.
    */
   const inlineFramesVersion = useStore((s) => s.inlineFramesVersion)
   const rangeExtractor = useCallback(
@@ -1320,31 +1449,37 @@ function ChatStream({
     overscan: CHAT_OVERSCAN,
     rangeExtractor,
     /*
-     * 높이 측정을 다음 프레임으로 미룬다.
+     * Defers height measurement to the next frame.
      *
-     * 기본값(false)이면 ResizeObserver 콜백에서 곧바로 flushSync를 부르는데,
-     * React 19가 렌더 도중에 그걸 만나면 경고를 쏟는다
-     * (dev 로그에 "flushSync was called from inside a lifecycle method" 8줄).
-     * 진짜 오류를 그 소음에 묻히게 두면 안 된다.
+     * With the default (false), the ResizeObserver callback calls flushSync immediately, and
+     * React 19 dumps a warning when it encounters that mid-render (8 lines in the dev log
+     * reading "flushSync was called from inside a lifecycle method"). Real errors must not be
+     * allowed to get buried under that noise.
      */
     useAnimationFrameWithResizeObserver: true,
     getItemKey: (i) => chat[i]?.seq ?? i,
   })
 
   /*
-   * 지금 화면 위로 지나간 **가장 최근 내 메시지**.
+   * The **most recent message I sent** that has now scrolled past the top of the screen.
    *
-   * position:sticky는 못 쓴다 — 가상 스크롤의 줄들은 absolute로 얹혀 있어서
-   * sticky가 걸리지 않는다. 대신 스크롤 위치로 "어느 턴을 보고 있나"를 계산해
-   * 목록 위에 한 줄로 띄운다.
+   * `position: sticky` cannot be used — virtual scrolling's rows are placed with absolute
+   * positioning, so sticky never takes hold. Instead, this computes "which turn is being
+   * viewed" from the scroll position and floats it as a single row above the list.
    *
-   * 렌더된 줄만 보면 화면 밖으로 멀리 밀린 메시지를 놓친다. measurementsCache는
-   * 이미 잰 모든 줄의 위치를 갖고 있으므로 그걸 쓴다.
+   * Looking only at rendered rows would miss a message pushed far off screen. `measurementsCache`
+   * holds the position of every row already measured, so this uses that instead.
    */
   const [stickyIndex, setStickyIndex] = useState<number | null>(null)
-  /** 실제 카드의 사각형 — 다음 사용자 말과 겹치는지를 DOM 좌표로 재기 위해 든다. */
+  /**
+   * The actual card's rectangle — held so its overlap with the next user message can be
+   * measured in DOM coordinates.
+   */
   const stickyRef = useRef<HTMLDivElement>(null)
-  /** 스크롤 핸들러는 먼저 돌고 카드는 그 뒤 렌더된다. 최신 DOM에서 재는 함수를 뒤에 꽂는다. */
+  /**
+   * The scroll handler runs first, and the card is rendered after it. The function that
+   * measures against the latest DOM is plugged in afterward.
+   */
   const scheduleStickyOverlap = useRef<() => void>(() => {})
 
   const syncSticky = useCallback(() => {
@@ -1353,49 +1488,54 @@ function ChatStream({
     const top = el.scrollTop
     let found: number | null = null
     for (const m of virtualizer.measurementsCache) {
-      // 기준은 시작이 아니라 **끝**이다. 줄이 아직 반쯤 보이는데 위에 또 띄우면
-      // 같은 말이 두 번 나온다 — 완전히 지나갔을 때만 붙인다.
-      if (m.end > top) break // 여기서부터는 아직 화면 안이거나 아래다
+      // The criterion is the row's **end**, not its start. Floating another copy above a row
+      // that is still half visible would show the same message twice — this only attaches once
+      // a row has fully passed.
+      if (m.end > top) break // From here on, rows are still on screen or below it
       if (chat[m.index]?.kind === 'user') found = m.index
     }
     setStickyIndex(found)
-    // scrollRef는 이 컴포넌트가 **받은 prop**이다 — 안에서 만든 ref와 달리 바뀔 수 있다
+    // scrollRef is a **prop received** by this component — unlike a ref created inside it, it can change
   }, [chat, virtualizer, scrollRef])
 
   /**
-   * 우리가 마지막으로 알고 있는 스크롤 위치.
+   * The last scroll position this component is aware of.
    *
-   * "사람이 올렸는가"를 플래그가 아니라 **위치 변화**로 판정하기 위한 기준이다:
-   * 내용이 늘어나도 scrollTop은 그대로지만, 사람이 올리면 줄어든다.
+   * The reference used to judge "did the person scroll up" by **a change in position** rather
+   * than a flag: scrollTop stays put even as content grows, but drops when the person scrolls up.
    */
   const lastTop = useRef(0)
 
   /**
-   * 지금 화면 맨 위에 걸친 줄 (#61) — **떠날 때가 아니라 움직일 때마다** 갱신한다.
+   * The row currently touching the top of the screen (#61) — updated **on every move, not on
+   * leaving**.
    *
-   * 떠나는 순간에 계산하려다 실패했다: 포커스 뷰는 컴포넌트를 그대로 두고 sessionId만
-   * 갈아 끼우는데, React는 **새 세션으로 렌더한 뒤에** 정리 함수를 돌린다. 그 시점에
-   * 손에 잡히는 대화와 측정값은 이미 다음 세션의 것이라, 떠나는 세션의 자리를 물을
-   * 상대가 없다 (e2e가 3,959px 어긋남으로 잡았다).
+   * Computing it at the moment of leaving was tried and failed: the focus view keeps the
+   * component and only swaps `sessionId`, but React runs the cleanup function **after**
+   * rendering with the new session. By that point, the conversation and measurements at hand
+   * already belong to the next session, leaving nothing to ask about the leaving session's
+   * position (e2e caught this as a 3,959px jump).
    *
-   * 그래서 사실을 미리 손에 들고 있는다. ref라 다시 그리지 않고, 스크롤 핸들러는
-   * 어차피 syncSticky로 이미 한 바퀴 돌고 있으므로 이진 탐색 하나가 더해질 뿐이다.
+   * So the fact is kept ready ahead of time. Being a ref, it costs no re-render, and since the
+   * scroll handler already runs a pass through syncSticky anyway, this only adds one more
+   * binary search on top of it.
    */
   const anchor = useRef<{ seq: number; offset: number } | null>(null)
 
   /**
-   * 스크롤이 실제로 일어난 순간에 잰 "바닥이었나" (#61).
+   * "Was it at the bottom", measured at the moment a scroll actually happened (#61).
    *
-   * `stickToBottom`과 갈라놓는 이유가 둘이다. 하나는 위 anchor와 같다 — 정리 함수가
-   * 도는 시점의 요소는 이미 다음 세션의 것이라 거기서 재면 안 된다. 다른 하나는
-   * 원래 주석이 "따라가기 플래그 말고 위치를 봐라"라고 한 그 이유다: 아래 follow
-   * 효과의 release는 줄이 재어지며 내용이 밀릴 때도 플래그를 내리는데, 그건 한
-   * 프레임에 대한 판단이지 사람이 어디를 보고 있었나에 대한 답이 아니다.
-   * 그래서 **여기서만** 쓰이고, 스크롤 이벤트에서만 적힌다.
+   * There are two reasons this is kept separate from `stickToBottom`. One is the same as
+   * `anchor` above — the element at the moment the cleanup function runs already belongs to the
+   * next session, so it must not be measured there. The other is the reason the original
+   * comment gave for "look at position, not the follow flag": the follow effect's release,
+   * below, also drops the flag when content shifts as a row is measured, but that is a judgment
+   * about a single frame, not an answer to where the person was actually looking. So this is
+   * used **only here**, and is only ever written from a scroll event.
    */
   const wasAtBottom = useRef(true)
 
-  // 사용자가 위로 올렸는지 추적 — 올려둔 동안에는 끌어내리지 않는다
+  // Tracks whether the person scrolled up — does not pull them back down while they have
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
@@ -1403,8 +1543,9 @@ function ChatStream({
     wasAtBottom.current = stickToBottom.current
     lastTop.current = el.scrollTop
     /*
-     * 착지 중에는 기억하지 않는다. 그 스크롤은 사람이 아니라 우리가 낸 것이고,
-     * 중간 프레임의 자리를 "읽던 자리"로 적어두면 다음 도착이 거기로 간다.
+     * Not remembered while landing. That scroll was produced by this code, not by the person,
+     * and recording an intermediate frame's position as "where they were reading" would send
+     * the next arrival straight back to it.
      */
     if (!stillLanding.current) anchor.current = anchorAt(el.scrollTop, virtualizer.measurementsCache, chat)
     syncSticky()
@@ -1425,12 +1566,14 @@ function ChatStream({
   const stillLanding = useRef(false)
 
   /*
-   * 정리 함수는 **떠나는 순간의** 대화와 측정값을 봐야 한다 (#61).
+   * The cleanup function has to see the conversation and measurements **from the moment of
+   * leaving** (#61).
    *
-   * 효과는 sessionId가 바뀔 때만 도는데, 그 클로저가 잡은 chat은 마운트 시점의
-   * 것이다 — 그걸로 앵커를 계산하면 그동안 자란 대화가 통째로 빠진 채 엉뚱한 줄을
-   * 가리킨다. 의존성에 chat을 넣는 방법은 더 나쁘다: 대화가 자랄 때마다 효과가
-   * 다시 돌면서 착지가 매번 처음부터 시작한다. 그래서 값이 아니라 창구를 넘긴다.
+   * The effect only runs when `sessionId` changes, and the `chat` its closure captured is from
+   * the moment it mounted — computing the anchor from that would point at the wrong row, with
+   * everything the conversation grew by in between missing entirely. Adding `chat` as a
+   * dependency is worse: the effect would re-run every time the conversation grows, restarting
+   * landing from scratch every time. So this passes a window onto the value, not the value itself.
    */
   const chatRef = useRef(chat)
   chatRef.current = chat
@@ -1451,19 +1594,21 @@ function ChatStream({
   }
 
   /**
-   * 자리를 잡는 동안에는 **보여주지 않는다** (#61).
+   * **Nothing is shown** while settling into position (#61).
    *
-   * 착지도 복원도 한 프레임에 끝나지 않는다 — 줄을 재는 동안 목표가 움직여서
-   * 프레임마다 다시 겨눠야 한다. 그 중간 위치들이 그대로 그려진 것이 "맨 아래에
-   * 붙어 있어도 조금 위에서 시작해 아래로 미끄러진다"는 증상이었다. 고칠 것은
-   * 겨누는 횟수가 아니라 **중간 과정을 보여주는 것** 자체다.
+   * Neither landing nor restoring finishes in one frame — the target keeps moving as rows are
+   * measured, so it has to be re-aimed at on every frame. Rendering those intermediate
+   * positions as-is was the symptom of "even when stuck to the bottom, it starts a bit higher
+   * and slides down". What needed fixing was not how many times it re-aims, but **showing the
+   * in-between steps at all**.
    *
-   * `visibility: hidden`이어야 한다 (display:none이 아니라). 가상 스크롤은 그리는
-   * 동안 줄을 재는데, 레이아웃 박스가 사라지면 잴 것이 없어져서 영원히 자리를
-   * 못 잡는다. 숨긴 채로도 재고 있다가, 자리가 정해지면 그때 나타난다.
+   * This has to be `visibility: hidden` (not display:none). The virtual scroller measures rows
+   * while it renders, and if the layout box disappears, there is nothing left to measure, so it
+   * can never settle into position at all. It keeps measuring while hidden, and only appears
+   * once its position is settled.
    *
-   * 목표에 닿는 순간 바로 보여준다 — 루프는 그 뒤로도 몇 프레임 더 붙잡고 있지만,
-   * 이미 제자리이므로 더 움직이는 것은 눈에 보이지 않는다.
+   * It is shown the instant it reaches the target — the loop still holds on for a few more
+   * frames after that, but since it is already in place, any further movement is invisible.
    */
   const [settling, setSettling] = useState(false)
 
@@ -1475,28 +1620,32 @@ function ChatStream({
     wasAtBottom.current = stickToBottom.current
     lastTop.current = el?.scrollTop ?? 0
     landed.current = false
-    // 앞 세션에서 들고 있던 자리는 여기서 놓는다 — 안 놓으면 다음 이탈이 남의 줄을 적는다
+    // The position held for the previous session is released here — without this, the next
+    // departure would record it for the wrong session
     anchor.current = null
     return () => {
       cancelAnimationFrame(landing.current)
       /*
-       * 떠나면서 **보고 있던 줄**을 남긴다 (#61).
+       * **The row being viewed** is left behind on the way out (#61).
        *
-       * 여기서 남기는 것이 없던 시절, 바닥이 아닌 자리는 통째로 잊혔다 — 돌아오면
-       * 착지 루프는 (바닥이 아니므로) 아무것도 하지 않고, 브라우저는 새 요소를
-       * scrollTop 0에서 시작하니 결과가 "맨 위로 튐"이었다. 위치를 안 쓴다는 결정은
-       * 픽셀에 대한 것이었는데, 그게 "줄도 안 쓴다"로 넘어가 있었다.
+       * Before anything was left behind here, a non-bottom position was forgotten entirely —
+       * coming back, the landing loop did nothing (since it was not at the bottom), and the
+       * browser started the fresh element at scrollTop 0, so the result was a jump to the top.
+       * The decision not to reuse a raw position was about pixels, but it had drifted into
+       * meaning "do not reuse a row" either.
        *
-       * 착지 중이면 남기지 않는다 — 아래 setStickToBottom과 같은 이유다. 아직
-       * 사람이 가질 수 있었던 자리가 아니다.
+       * Nothing is left behind while still landing — the same reason as `setStickToBottom`
+       * below. It is not yet a position the person could actually have held.
        */
       /*
-       * 손에 들고 있던 자리를 그대로 넘긴다 — 여기서 새로 계산하지 않는다 (위 anchor 주석).
+       * The position already held is passed on as-is — this does not recompute it here (see
+       * the `anchor` comment above).
        *
-       * 바닥이었는지도 el이 아니라 ref로 판정한다. 같은 이유다: 세션 전환에서 이
-       * 정리 함수가 도는 시점의 el은 **다음 세션의 대화를 담은** 같은 요소라,
-       * 거기서 잰 "바닥인가"는 떠나는 세션에 대한 답이 아니다. 두 ref 모두 스크롤이
-       * 실제로 일어난 순간에 적힌 값이다.
+       * Whether it was at the bottom is also judged from a ref, not from `el`. The same reason
+       * applies: at the point this cleanup runs during a session switch, `el` is the same
+       * element **now holding the next session's conversation**, so "was it at the bottom"
+       * measured there is not an answer about the session that is leaving. Both refs hold
+       * values written at the moment a scroll actually happened.
        */
       if (el && !stillLanding.current) {
         setScrollAnchor(sessionId, wasAtBottom.current ? null : anchor.current)
@@ -1508,7 +1657,7 @@ function ChatStream({
        * rows measure, and each correction fires an event from somewhere that is not yet
        * the bottom. Letting those speak meant a panel could record "was not at the bottom"
        * about a landing still in progress and then honour that on the way back, which
-       * reads as the app losing your place at random (it did, under load).
+       * reads as the app losing the reader's place at random (it did, under load).
        *
        * Leaving mid-landing says nothing at all, for the same reason: we never got as far
        * as a position the reader could have held. Whatever the session already believed
@@ -1524,8 +1673,9 @@ function ChatStream({
       if (el && !stillLanding.current) setStickToBottom(sessionId, wasAtBottom.current)
       stillLanding.current = false
     }
-    // chat/virtualizer는 ref로 읽는다 (위 chatRef 주석) — 의존성에 넣으면 대화가
-    // 자랄 때마다 이 효과가 다시 돌면서 착지가 매번 처음부터 시작한다
+    // chat and virtualizer are read through refs (see the chatRef comment above) — adding them
+    // as dependencies would re-run this effect on every growth of the conversation and restart
+    // landing from scratch every time
   }, [sessionId, scrollRef, setStickToBottom, setScrollAnchor])
 
   /*
@@ -1552,8 +1702,9 @@ function ChatStream({
    *
    * If the session was **not** at the bottom we do nothing at all. #31 deliberately does
    * not promise the offset back: restoring one into an unmeasured virtualiser is what put
-   * you *near* your place rather than at it. Not moving is the honest version of that —
-   * you keep looking at the old messages instead of being dragged to the newest.
+   * the reader *near* their place rather than at it. Not moving is the honest version of
+   * that — the reader keeps looking at the old messages instead of being dragged to the
+   * newest.
    *
    * It ends early two ways: the reader touches the conversation (`endLanding` on the
    * scroller below), or something drags the view up and away from the end. Both are needed.
@@ -1565,12 +1716,13 @@ function ChatStream({
     landed.current = true
 
     /*
-     * 바닥이 아니었다면 **남겨둔 줄로 돌아간다** (#61).
+     * If it was not at the bottom, **it returns to the row that was left behind** (#61).
      *
-     * 예전엔 여기서 그냥 return이었고, 그게 "돌아오면 맨 위" 버그의 전부였다.
-     * 착지와 같은 문제를 풀지만 과녁이 다르다: 바닥은 재지 않아도 닿지만, 줄은
-     * 그 위의 모든 줄을 재야 자리가 정해진다. 그래서 같은 방식으로 프레임마다
-     * 다시 겨눈다 — 위쪽 줄들이 측정될 때마다 목표가 움직이므로.
+     * This used to just be a `return` here, and that was the entirety of the "back at the top
+     * on return" bug. It solves the same problem as landing, but the target is different: the
+     * bottom is reachable without measuring anything, but a row's position is only settled once
+     * every row above it has been measured. So it re-aims at the target on every frame the same
+     * way — the target keeps moving every time a row above it is measured.
      */
     if (!stickToBottom.current) {
       const anchor = useStore.getState().scrollAnchor[sessionId]
@@ -1583,8 +1735,8 @@ function ChatStream({
         const el = scrollRef.current
         if (!el) return
         const index = chatRef.current.findIndex((c) => c.seq === anchor.seq)
-        // 그 줄이 사라졌다면(기록을 다시 불러왔다든지) 되돌릴 자리가 없다 —
-        // 억지로 비슷한 데 떨어뜨리느니 지금 보이는 것을 그대로 둔다
+        // If that row is gone (history was reloaded, say), there is nowhere to return to —
+        // rather than force a drop somewhere approximate, this leaves what is currently shown
         if (index < 0) {
           stillLanding.current = false
           setSettling(false)
@@ -1595,7 +1747,7 @@ function ChatStream({
           const target = m.start + anchor.offset
           el.scrollTop = target
           lastTop.current = el.scrollTop
-          // 목표가 멈췄다 = 위쪽 줄들이 다 재어졌다. 더 기다릴 이유가 없다
+          // The target has stopped moving = every row above it has been measured. No reason to wait any longer
           if (Math.abs(target - prev) <= 1) setSettling(false)
           prev = target
         }
@@ -1632,7 +1784,7 @@ function ChatStream({
       el.scrollTop = el.scrollHeight
       mine = el.scrollTop
       lastTop.current = mine
-      // 바닥에 닿았으면 이미 제자리다 — 루프는 계속 붙잡고 있되 화면은 지금 보여준다
+      // Once it reaches the bottom it is already in place — the loop keeps holding on, but the view shows now
       if (isAtBottom(el)) setSettling(false)
       if (++frames < LANDING_FRAMES) landing.current = requestAnimationFrame(step)
       else {
@@ -1647,12 +1799,14 @@ function ChatStream({
     // it actually stops being wanted: when the session changes or the panel goes.
   }, [sessionId, chat.length, scrollRef])
 
-  // 내용이 늘어나면 스크롤 없이도 기준이 달라진다
+  // When content grows, the reference point changes even without a scroll
   useEffect(syncSticky, [syncSticky, chat.length])
 
   const pinned = stickyIndex !== null ? chat[stickyIndex] : undefined
-  // 시켜서 들어온 지시도 "지금 하는 일"이므로 고정하되, 출처를 앞에 붙여 사람 말로 위장하지 않게 한다 (FR-11)
-  // 이미지만 보낸 말은 text가 비어 있다 — 배너에는 첨부 이름이 그 말을 대신한다
+  // A directive that came from delegation is still "what is being worked on right now", so it
+  // is pinned too, but its source is prefixed so it is never disguised as the person's own
+  // words (FR-11)
+  // A message that sent only an image has empty text — the banner shows the attachment name in its place
   const pinnedText =
     pinned?.kind === 'user' ? pinned.text || (pinned.attachments?.map((a) => a.name).join(', ') ?? '') : null
   const stickyText =
@@ -1664,10 +1818,10 @@ function ChatStream({
           : pinnedText
       : null
 
-  // 접힘이 기본 — 다른 턴으로 넘어가면 펼침 상태를 끌고 가지 않는다
+  // Collapsed by default — moving to a different turn does not carry the expanded state along
   const [stickyOpen, setStickyOpen] = useState(false)
   const [stickyObscured, setStickyObscured] = useState(false)
-  /** 다음 사용자 말에서 돌아올 때는 기존의 아래→위 진입이 아니라 위→아래로 되돌아온다. */
+  /** Returning from the next user message animates top-to-bottom instead of the usual bottom-to-top entry. */
   const [stickyReturning, setStickyReturning] = useState(false)
   const wasStickyObscured = useRef(false)
   useEffect(() => {
@@ -1678,17 +1832,19 @@ function ChatStream({
   }, [stickyIndex])
 
   /*
-   * 다음 사용자 메시지가 고정 배너 아래로 들어오면 둘 중 하나는 사라져야 한다.
+   * If the next user message comes in under the pinned banner, one of the two has to disappear.
    *
-   * 원래는 "완전히 지나간 가장 최근 사용자 말"만 고정했고, 그 다음 사용자 말이
-   * 배너와 만나도 배너를 계속 그렸다. 그래서 다음 턴의 원문이 카드 밑에서 잘려,
-   * 질문을 읽으려는 바로 그 순간에 못 읽는 상태가 됐다. 가상 목록의 measurement만
-   * 쓰면 카드의 실제 줄바꿈 높이·열린 상태를 놓치므로, 화면에 렌더된 다음 사용자
-   * 행의 사각형과 배너의 사각형을 직접 비교한다.
+   * This originally only pinned "the most recent user message that has fully passed", and kept
+   * drawing the banner even once the next user message met it. That clipped the next turn's
+   * actual text under the card, unreadable at the exact moment someone was trying to read the
+   * question. Using only the virtual list's measurements would miss the card's actual wrapped
+   * height and open/closed state, so this directly compares the rendered rectangle of the next
+   * user row on screen against the banner's rectangle.
    *
-   * `requestAnimationFrame`은 scroll 이벤트가 만든 stickyIndex 렌더 뒤에 잰다는
-   * 보증이다. 이벤트 순간에는 아직 옛 배너가 DOM에 남아 있어 그 사각형으로 판정하면
-   * 한 프레임 늦게 바뀌거나 반대로 숨는 일이 생긴다.
+   * `requestAnimationFrame` guarantees this measures after the render that the scroll event's
+   * `stickyIndex` update produced. At the instant of the event, the old banner is still sitting
+   * in the DOM, and judging from its rectangle would either update a frame late or hide
+   * incorrectly.
    */
   const overlapFrame = useRef(0)
   const syncStickyOverlap = useCallback(() => {
@@ -1708,7 +1864,8 @@ function ChatStream({
       return
     }
     const nextRect = nextUser.getBoundingClientRect()
-    // 4px 먼저 비킨다 — 경계가 맞닿은 한 프레임도 "글자가 카드 밑에 있다"로 읽히기 때문이다.
+    // Steps aside 4px early — even a single frame with the edges just touching reads as "the
+    // text is under the card"
     const covered = nextRect.top < bannerRect.bottom + 4 && nextRect.bottom > bannerRect.top
     setStickyObscured(covered)
   }, [chat, scrollRef, stickyIndex, stickyText])
@@ -1732,7 +1889,8 @@ function ChatStream({
       setStickyReturning(false)
       return
     }
-    // 숨은 상태에서만 되돌아오는 방향을 바꾼다. 첫 진입은 원래 cc-hang의 아래→위다.
+    // The return direction only changes when coming back from being hidden. First entry is
+    // still cc-hang's usual bottom-to-top.
     if (wasStickyObscured.current) {
       wasStickyObscured.current = false
       setStickyReturning(true)
@@ -1740,17 +1898,17 @@ function ChatStream({
   }, [stickyObscured])
 
   /*
-   * 바닥에 붙어 있으면 계속 따라간다.
+   * Keeps following while stuck to the bottom.
    *
-   * 기준이 chat.length였는데, 스트리밍 응답은 **항목 수가 안 늘고 마지막 항목이
-   * 길어진다.** 그래서 답이 길어지는 동안 화면이 그 자리에 멈춰 있었다
-   * (도그푸딩: "맨 아래인데 새 대화가 생겨도 안 따라간다").
+   * The reference used to be `chat.length`, but a streaming response **does not add an item —
+   * it grows the last one.** So the view stayed frozen in place while the answer got longer
+   * (dogfooding: "at the bottom, but it does not follow when new content appears").
    *
-   * 가상 스크롤의 총 높이를 보면 두 경우가 한 기준으로 묶인다 — 항목이 늘어도,
-   * 있던 항목이 길어져도 총 높이는 바뀐다.
+   * Watching the virtual scroller's total height folds both cases into one reference — the
+   * total height changes whether an item is added or an existing one grows.
    *
-   * 한 번 더 맞추는 이유: 새 줄은 다음 프레임에 측정되므로, 그 전에 잰
-   * scrollHeight로 내리면 몇 픽셀 모자란다.
+   * Why this corrects once more: a new row is only measured on the next frame, so scrolling
+   * down using the `scrollHeight` measured before that falls a few pixels short.
    */
   const totalSize = virtualizer.getTotalSize()
   useEffect(() => {
@@ -1768,7 +1926,7 @@ function ChatStream({
      */
     if (stillLanding.current) return
 
-    // 무엇을 할지는 scroll.ts가 정한다 — 여기서는 DOM만 만진다
+    // What to do is decided by scroll.ts — this only ever touches the DOM
     const decision = decideFollow({
       sticking: stickToBottom.current,
       scrollTop: el.scrollTop,
@@ -1784,55 +1942,61 @@ function ChatStream({
     lastTop.current = el.scrollTop
     const id = requestAnimationFrame(() => {
       const later = scrollRef.current
-      // 예약할 때의 판단이 아니라 **지금 위치**로 다시 정한다
+      // Decided again from **the current position**, not the judgment made when this was scheduled
       if (!later || !shouldFollowAgain(later)) return
       later.scrollTop = later.scrollHeight
       lastTop.current = later.scrollTop
     })
     return () => cancelAnimationFrame(id)
-    // bottomPad: 카드가 자라면(첨부·여러 줄) 여백도 자란다 — 바닥에 붙어 있었으면 따라간다
+    // bottomPad: the margin grows too when the card grows (an attachment, more lines) — this
+    // follows along if it was stuck to the bottom
   }, [totalSize, pending, working, bottomPad, scrollRef])
 
   return (
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      /* 사람이 대화에 손을 대면 '바닥으로 자리 잡기'는 거기서 끝난다 (#31) */
+      /* The moment a person touches the conversation, "settling at the bottom" ends right there (#31) */
       onWheel={endLanding}
       onPointerDown={endLanding}
       onKeyDown={endLanding}
-      /* min-h-0: overflow-y-auto가 걸려 있어도 줄어들지 못하면 스스로 늘어난다 */
+      /* min-h-0: even with overflow-y-auto set, this would stretch itself if it could not shrink */
       /*
-       * invisible(= visibility:hidden)은 자리를 잡는 동안만이다 (#61 위 주석).
-       * 재는 일은 계속되어야 하므로 레이아웃은 남기고 그림만 감춘다.
+       * invisible (visibility:hidden) is only for while it settles into position (see the
+       * comment above #61). Measuring has to keep happening, so this hides only the picture,
+       * not the layout.
        */
       className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-[13px] leading-relaxed ${
         bottomPeek ? 'pb-14' : 'pb-4'
       } ${settling ? 'invisible' : ''}`}
-      /* 카드가 앉을 빈 자리. 상태가 아니라 크기를 따르므로 전환도 애니메이션도 없다 */
+      /* The empty space the card will settle onto. Follows size, not state, so there is no
+      transition or animation */
       style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
       data-testid="chat-stream"
       data-settling={settling || undefined}
     >
       {/*
-        지금 보고 있는 턴이 어느 질문에 대한 답인지 — 긴 응답을 읽는 동안
-        위로 되돌아가 확인하지 않아도 되게 한 줄로 남긴다.
+        Which question the turn being viewed answers — left as a single line so reading a long
+        response never requires scrolling back up to check.
       */}
       {stickyText !== null && (
         /*
-          `top-0`이 아니라 음수 offset이다.
-          이 스크롤 칸은 `py-4`를 두르고 있고, sticky는 **자기 컨테이닝 블록(부모의
-          content box) 밖으로 못 나간다** — 그래서 `top-0`은 천장이 아니라 패딩 아래
-          16px에 붙었다 (실측: gap 16px). 음수 offset이 그 16px을 되돌려 진짜 천장에
-          닿게 한다. 패딩 자체는 남겨둔다: 맨 위로 올렸을 때 대화가 숨 쉴 자리다.
+          A negative offset, not `top-0`.
+          This scroll container has `py-4` around it, and sticky **cannot leave its own
+          containing block (the parent's content box)** — so `top-0` sat 16px below the padding
+          rather than at the ceiling (measured: a 16px gap). A negative offset gives that 16px
+          back, reaching the actual ceiling. The padding itself is kept: it is the room the
+          conversation gets to breathe in once scrolled all the way up.
 
-          16이 아니라 **10**인 이유: 6px 일부러 떨어뜨린다. 천장에 딱 붙이는 시도를
-          두 번 했다 — 1px 겹침, 3px 겹침 + 불투명화. 트렁크 WebKit 실측으로는 틈 0
-          이었는데 실제 WKWebView(구형 시스템 엔진)에서는 끝내 실금이 남았다
-          (도그푸딩 세 번 지적 후 결론: 엔진의 합성 반올림은 우리가 못 이긴다).
-          붙일 수 없다면 **일부러 떨어뜨린다** — 6px 간격은 실금(±1px)을 오차가 아니라
-          디자인 안에 삼키고, 배너는 매달린 띠가 아니라 떠 있는 카드가 된다
-          (그래서 아래 버튼은 말풍선과 같은 네 모서리 둥글림과 온전한 테두리를 입는다).
+          Why **10**, not 16: 6px is deliberate slack. Sticking it flush to the ceiling was
+          tried twice — a 1px overlap, then a 3px overlap plus opacity. Trunk WebKit measured a
+          0 gap, but the real WKWebView (an older system engine) always left a hairline gap in
+          the end (found in dogfooding three times before the conclusion: an engine's
+          compositing rounding cannot be beaten). If it cannot be flush, **it is deliberately
+          set apart instead** — a 6px gap absorbs that hairline (±1px) into the design instead
+          of reading as an error, and the banner reads as a floating card rather than a strip
+          hanging off the edge (which is also why the button below gets the same rounded
+          corners on all four sides and a complete border, like a message bubble).
         */
         <div
           className={`sticky -top-[10px] z-10 -mx-4 mb-1 flex justify-end px-4 ${
@@ -1841,24 +2005,30 @@ function ChatStream({
           data-testid="sticky-user"
         >
           {/*
-            말풍선과 **같은 옷, 같은 자리, 같은 폭**을 갖는다. 이 줄은 위로 사라진
-            사용자 메시지의 연장이라, 하나라도 다르면 다른 종류의 것으로 읽힌다.
+            Gets **the same skin, position and width** as a message bubble. This row is an
+            extension of the user message that scrolled off the top, and differing in even one
+            of those reads as something else entirely.
 
-            폭을 전체로 두었을 때가 그랬다: 오른쪽에 붙은 75% 말풍선이 갑자기 좌우
-            끝까지 뻗은 띠가 되니, 내 말이 아니라 **머리말 아래 떠 있는 도구 띠**로
-            보였다 (도그푸딩: "위에 딱 안 붙었다"). 실측으로는 이미 붙어 있었다 —
-            스크롤 칸 천장과의 간격 0px, 확대 0.9·1.0·1.1·1.15·1.2 전부 0px.
-            떨어져 보이게 한 것은 위치가 아니라 모양이었다. 그래서 말풍선과 똑같이
-            오른쪽 정렬에 `max-w-[75%]`로 두고, 폭은 글자 길이를 따라간다(w-fit).
+            That is exactly what happened when the width was left full: a 75%-wide bubble
+            anchored to the right suddenly became a strip stretching edge to edge, and it read
+            not as something the person said but as **a toolbar floating below the header**
+            (dogfooding: "it is not flush against the top"). Measured, it was already flush —
+            0px from the scroll container's ceiling, at zoom levels 0.9, 1.0, 1.1, 1.15 and 1.2,
+            all 0px. What made it look detached was shape, not position. So this is given the
+            same right alignment and `max-w-[75%]` as a message bubble, with its width following
+            the text length (w-fit).
 
-            천장에서 6px 떠 있는 **카드**라서 말풍선과 같은 네 모서리 둥글림과 온전한
-            테두리를 입는다 (붙이기를 접은 경위는 위 -top 주석에). 나타날 때 몇 px
-            아래에서 올라와 멎는다(cc-hang) — 그 움직임이 "여기 떠 있다"를 말한다.
-            (반투명+블러였던 시절이 있다 — "덮었다"를 보이려는 것이었는데, 비치는
-            대화가 계속 "헤더와의 틈"으로 읽혀서 접었다.)
+            Being a **card** floating 6px off the ceiling is why it gets the same rounded
+            corners on all four sides and a complete border as a message bubble (how the flush
+            attempt was abandoned is in the -top comment above). It rises a few pixels from
+            below and settles as it appears (cc-hang) — that motion is what says "this is
+            floating here". (There was a translucent-plus-blur version — meant to show
+            "covering", not "hiding" — but the conversation showing through it kept reading as
+            "a gap against the header", so it was dropped.)
 
-            누르면 펼쳐진다 — 한 줄로 부족한 질문을 위로 되돌아가지 않고 다시 읽는 용도.
-            아주 긴 질문이 화면을 다 덮지 않게 높이만 자르고 안에서 스크롤한다.
+            Clicking expands it — for reading a question too long for one line again, without
+            scrolling back up. A very long question has its height clipped and scrolls inside
+            instead of covering the whole screen.
           */}
           <div
             ref={stickyRef}
@@ -1868,13 +2038,15 @@ function ChatStream({
             data-obscured={stickyObscured ? 'true' : undefined}
           >
             {/*
-              **불투명이다** (도그푸딩 세 번째 지적 끝의 결론). 반투명+블러는 "가린 게
-              아니라 덮었다"를 말하려는 것이었는데, 실측으로 기하학적 틈이 0인데도
-              (헤더바닥=스크롤천장, WebKit 실측) 뒤로 비치는 대화가 계속 "헤더와의 틈"
-              으로 읽혔다 — WKWebView는 스크롤 칸 안 sticky의 backdrop-filter가
-              불안정해서 비침이 블러 없이 그대로 보이기도 한다. 말하려던 뉘앙스보다
-              세 번 반복된 오독이 크다. 색은 graphite/55가 void 위에서 만들던 합성색을
-              panel 토큰으로 대신한다 — 보이는 밝기는 그대로다.
+              **Opaque** (the conclusion after the third round of dogfooding feedback on this).
+              Translucent-plus-blur was meant to say "covering, not hiding", but even with a
+              measured geometric gap of zero (header bottom equals scroll ceiling, measured in
+              WebKit), the conversation showing through it kept reading as "a gap against the
+              header" — WKWebView's backdrop-filter on a sticky element inside a scroll
+              container is unreliable, and the content behind it sometimes showed through with
+              no blur at all. Three repeated misreadings outweigh the nuance this was meant to
+              convey. The color replaces the composited color that graphite/55 used to produce
+              over void with a panel token instead — the visible brightness is unchanged.
             */}
             <button
               type="button"
@@ -1885,9 +2057,10 @@ function ChatStream({
               {stickyText}
             </button>
             {/*
-              펼침은 flow가 아니라 **덮개**다. 배너가 흐름에서 키를 키우면 아래 가상
-              스크롤의 좌표가 통째로 밀린다 — 접힌 한 줄이 자리를 지키고, 전문은 그
-              위에 겹쳐서 보여준다. 아주 긴 질문은 높이를 자르고 안에서 스크롤한다.
+              Expanding is a **cover**, not flow. If the banner grew taller in the document
+              flow, every coordinate in the virtual scroller below it would shift — instead, the
+              collapsed single line holds its place, and the full text is overlaid on top of it.
+              A very long question has its height clipped and scrolls inside.
             */}
             {stickyOpen && (
               <button
@@ -1895,9 +2068,10 @@ function ChatStream({
                 onClick={() => setStickyOpen(false)}
                 data-testid="sticky-user-expanded"
                 /*
-                  접힌 띠와 같은 모양이되 **여기는 덜 투명하다.** 접힌 줄의 투명함은
-                  "가린 게 아니라 덮었다"를 보이려는 것이고, 펼친 이유는 읽으려는 것이다 —
-                  긴 질문 위로 대화가 비치면 그 목적이 곧바로 깨진다.
+                  The same shape as the collapsed strip, but **less transparent here.** The
+                  collapsed row's transparency is meant to show "covering, not hiding", but the
+                  reason to expand it is to read it — the conversation showing through a long
+                  question would immediately defeat that purpose.
                 */
                 className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-slate/40 bg-graphite px-3 py-2 text-left text-[13px] text-chalk shadow-[0_8px_24px_-8px_rgb(0_0_0/0.8)]"
               >
@@ -1917,15 +2091,19 @@ function ChatStream({
             ref={virtualizer.measureElement}
             data-index={v.index}
             /*
-              턴 경계에 여백을 더 준다. 모든 줄이 같은 간격이면 내 말과 모델의 답이
-              한 덩어리로 붙어 보여서, 긴 응답 뒤에 어디서 내 차례가 시작됐는지 못 찾는다.
-              내 말 앞은 넓게 띄우고(= 이전 턴과 분리), 뒤는 조금만 띄운다(= 답과 한 묶음).
+              More margin is added at turn boundaries. If every row had the same spacing, my
+              message and the model's answer would look like a single block, making it
+              impossible to find where my turn started after a long response. There is generous
+              space before my message (separating it from the previous turn) and only a little
+              after it (grouping it with the answer that follows).
             */
             /*
-              배너가 흐름에 자리를 차지하며 리스트를 제 높이만큼 밀어내므로, "완전히
-              지나갔다"고 판정된 원본이 배너 밑으로 되밀려 내려와 같은 말이 두 번
-              보인다. 배너가 그 메시지를 대신 말하는 동안 원본은 숨긴다 — visibility라
-              자리와 크기는 그대로여서 가상 스크롤의 측정은 흔들리지 않는다.
+              Since the banner takes up space in the flow and pushes the rest of the list down
+              by its own height, the original message that was judged to have "fully passed"
+              gets pushed back down below the banner, and the same text shows up twice. The
+              original is hidden while the banner speaks for that message instead — this uses
+              visibility, so its position and size stay the same and the virtual scroller's
+              measurements are undisturbed.
             */
             className={`absolute left-0 top-0 w-full min-w-0 ${
               chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : 'pb-3'
@@ -1941,7 +2119,8 @@ function ChatStream({
         <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
       )}
 
-      {/* 선택지는 여러 장이 겹칠 수 있다 — 하나만 그리면 나머지는 답할 길이 없다 */}
+      {/* Several question cards can stack up — rendering only one leaves the rest with no way
+      to be answered */}
       {questions.map((q) => (
         <QuestionCard
           key={q.requestId}
@@ -1957,17 +2136,20 @@ function ChatStream({
 }
 
 /**
- * 답을 기다리는 중이라는 표시.
+ * The indicator that says a response is being waited for.
  *
- * 첫 글자가 나오기까지 수십 초가 걸리는 일이 흔한데, 그동안 화면이 완전히 조용하면
- * **일하는 중인지 멈춘 건지 구분할 방법이 없다** (도그푸딩에서 지적됨).
+ * It is common for the first character to take tens of seconds to arrive, and if the screen is
+ * completely quiet the whole time, **there is no way to tell whether it is working or has
+ * stopped** (found in dogfooding).
  *
- * 그래서 두 가지를 같이 보여준다:
- *   - 움직이는 점: "살아 있다". 정지 화면과 구분되는 건 결국 움직임뿐이다.
- *   - 경과 시간: "얼마나 됐나". 3초와 3분은 같은 '대기'가 아니다 —
- *     숫자가 올라가는 걸 보면 멈춘 게 아니라는 것도 같이 알 수 있다.
+ * So two things are shown together:
+ *   - A moving dot: "it is alive". In the end, movement is the only thing that sets it apart
+ *     from a frozen screen.
+ *   - Elapsed time: "how long has this been going". 3 seconds and 3 minutes are not the same
+ *     kind of "waiting" — watching the number climb also confirms it has not stopped.
  *
- * 중지 버튼을 여기에 둔다. 상단에도 있지만, 기다리는 사람의 눈은 대화 맨 아래에 있다.
+ * The stop button lives here too. It is also at the top, but the eyes of someone waiting are at
+ * the bottom of the conversation.
  *
  * **The count is derived; only the tick lives here** (issue #23). This used to read
  * `Date.now()` on mount and treat that as the start of the turn, which held right up until
@@ -1984,9 +2166,11 @@ function ChatStream({
 function ActivityRow({ sessionId, activity }: { sessionId: string; activity: SessionSummary['activity'] }) {
   const interrupt = useStore((s) => s.interrupt)
   const startedAt = useStore((s) => s.workingSince[sessionId])
-  // 생각의 양 (#58) — claude는 thinking 본문이 암호화라 이 추정치가 보여줄 수 있는 전부다
+  // The amount of thinking (#58) — Claude's thinking body is encrypted, so this estimate is all
+  // there is to show
   const thinkingTokens = useStore((s) => s.sessions[sessionId]?.thinkingTokens ?? null)
-  // 계획 스냅샷 (#58, codex) — activity와 같은 수명이라 여기(working 동안만 사는 줄)가 제자리다
+  // A plan snapshot (#58, Codex) — it has the same lifetime as activity, so this row (which
+  // only lives while working) is the right home for it
   const plan = useStore((s) => s.sessions[sessionId]?.plan ?? null)
   const [now, setNow] = useState(() => Date.now())
 
@@ -2002,9 +2186,9 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
   return (
     <div className="py-2" data-testid="activity-row">
       {/*
-        계획 체크리스트 (#58, codex turn/plan/updated). 진행 표시라 여기(working 동안만
-        보이는 자리)에 산다 — 턴이 끝나면 activity와 함께 사라진다. 상태는 색이 아니라
-        글리프로 가른다 (팔레트 규칙: 모양으로 구분한다).
+        The plan checklist (#58, Codex's turn/plan/updated). Being progress display, it lives
+        here (visible only while working) — it disappears along with activity once the turn
+        ends. Status is told apart by glyph, not color (the palette rule: distinguish by shape).
       */}
       {plan && plan.length > 0 && (
         <ul className="mb-1.5 flex flex-col gap-0.5" data-testid="activity-plan">
@@ -2028,8 +2212,9 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
       <div className="flex items-center gap-2">
         <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
         {/*
-        같은 '대기'가 아니다. 압축은 실측 39초까지 걸렸는데 문구가 같으면
-        기다리는 사람은 멈춘 건지 오래 걸리는 건지 판단할 근거가 없다.
+        Not the same kind of "waiting". Compacting has been measured to take up to 39 seconds,
+        and with the same wording, someone waiting has no way to tell whether it has stopped or
+        is just taking a while.
       */}
         <span className="text-[12px] text-ash" data-testid="activity-label">
           {activity === 'compacting'
@@ -2040,7 +2225,7 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
                 ? `Thinking · ~${thinkingTokens >= 1000 ? `${(thinkingTokens / 1000).toFixed(1)}k` : thinkingTokens} tokens`
                 : 'Waiting for response'}
         </span>
-        {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
+        {/* Showing a number for a one-second wait would just be noise */}
         {seconds >= 2 && (
           <span className="readout text-[11px] text-slate" data-testid="activity-elapsed">
             {formatElapsed(seconds)}
@@ -2067,16 +2252,17 @@ export function formatElapsed(seconds: number): string {
 }
 
 /**
- * 압축된 옛 대화로 거슬러 올라가는 길.
+ * The path back up into older, compacted conversation.
  *
- * 도구가 컨텍스트를 압축해도 **우리 기록은 접히지 않는다** — 모든 메시지는 저장소에 남는다.
- * 접힌 것은 모델의 기억이지 사람의 기록이 아니다.
+ * Even when the tool compacts context, **our transcript is never folded** — every message
+ * stays in storage. What got folded is the model's memory, not the person's record.
  *
- * 버튼이 아니라 **위로 스크롤하면 알아서 이어붙인다.** 위로 올리는 행동 자체가
- * 이미 "더 보고 싶다"는 뜻인데, 거기서 버튼을 한 번 더 누르게 할 이유가 없다.
+ * Not a button — **scrolling up loads more on its own.** The act of scrolling up already means
+ * "I want to see more", so there is no reason to make someone press a button on top of that.
  *
- * 이어붙일 때 **스크롤 위치를 보정한다.** 앞에 내용이 들어가면 보고 있던 줄이
- * 아래로 밀려 내려가는데, 그러면 읽던 자리를 잃고 위로 또 끌어야 한다.
+ * **The scroll position is corrected** when older content is prepended. Prepending content
+ * pushes the row being viewed further down, and without correcting for that, the reading
+ * position would be lost and have to be scrolled back up to again.
  */
 function OlderSentinel({
   sessionId,
@@ -2097,8 +2283,8 @@ function OlderSentinel({
     if (!el || !scroller || !more) return
 
     /*
-     * 불러오기 한 번 = fire 한 번 (재진입 방지는 지역에서). loadOlder 자체도
-     * loading/more를 지키므로 여분의 호출은 조용히 눕는다.
+     * One load per fire (re-entrancy guarded locally). loadOlder itself also respects
+     * loading/more, so any extra call quietly does nothing.
      */
     let firing = false
     const fire = () => {
@@ -2106,7 +2292,7 @@ function OlderSentinel({
       firing = true
       const before = scroller.scrollHeight
       void loadOlder(sessionId).then(() => {
-        // 늘어난 만큼 내려서 읽던 자리를 지킨다
+        // Scrolls down by exactly the amount grown, to hold the reading position in place
         requestAnimationFrame(() => {
           const grew = scroller.scrollHeight - before
           if (grew > 0) scroller.scrollTop += grew
@@ -2119,14 +2305,15 @@ function OlderSentinel({
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) fire()
       },
-      // 꼭대기에 닿기 조금 전에 미리 채운다 — 멈칫하는 순간이 안 보이게
+      // Fills in a little before the top is actually reached — so the stall is never visible
       { root: scroller, rootMargin: '200px 0px 0px 0px' },
     )
     io.observe(el)
     /*
-     * IO에만 걸지 않는다 (도그푸딩 2026-09-04: 실물 WKWebView에서 위 스크롤이
-     * 옛 대화를 안 실었다 — Chromium 재현은 전부 통과). 관찰자가 안 깨어나는
-     * 환경이 있어도 스크롤 위치는 거짓말하지 않는다 — 같은 fire라 이중 발화는 없다.
+     * This does not rely on IntersectionObserver alone (found in dogfooding on 2026-09-04:
+     * scrolling up on a real WKWebView failed to load older content — every reproduction in
+     * Chromium passed). Even in an environment where the observer never fires, the scroll
+     * position does not lie — since it calls the same `fire`, there is no double-firing.
      */
     const onScroll = () => {
       if (scroller.scrollTop < 300) fire()
@@ -2140,10 +2327,12 @@ function OlderSentinel({
 
   if (!more) return null
   /*
-   * 클릭으로도 불러온다 (도그푸딩 2026-09-04: 메아·리소스 업로드에서 위 스크롤로
-   * 옛 대화가 안 실렸다 — Chromium/목 재현은 전부 통과라 WKWebView의 IO/스크롤
-   * 앵커링 차이가 유력하다). 관찰자가 어떤 이유로든 안 깨어나도 사람 손이 남고,
-   * 실패하면 loadOlder의 토스트가 이유를 말한다 — 조용한 벽이 최악이다.
+   * Also loadable with a click (found in dogfooding on 2026-09-04: in the Mea session, on a
+   * resource upload, scrolling up failed to load older content — every Chromium/mock
+   * reproduction passed, which points to a difference in WKWebView's IntersectionObserver or
+   * scroll anchoring). Whatever the reason the observer fails to fire, a hand-operated fallback
+   * remains, and if that fails too, loadOlder's toast explains why — a silent wall is the worst
+   * outcome.
    */
   return (
     <div ref={ref} className="flex justify-center py-2" data-testid="load-older">
@@ -2160,12 +2349,12 @@ function OlderSentinel({
 }
 
 /**
- * 프로세스가 없는 세션.
+ * A session with no process.
  *
- * 예전에는 "이 세션은 실행 중이 아닙니다"라고 막고 [이어가기]를 누르게 했다.
- * 그건 기계 사정을 사람에게 떠넘기는 것이다 — 사람은 이어서 말하고 싶을 뿐이고,
- * 이어갈 수단은 우리가 갖고 있다. 이제 말을 걸면 host가 알아서 되살린다.
- * 여기서는 그 사실만 조용히 알린다 (놀라지 않도록).
+ * This used to block with "This session is not running" and require pressing [Continue]. That
+ * pushes a machine-level concern onto the person — all they want is to keep talking, and the
+ * means to continue is already something this app has. Now sending a message lets the host
+ * resume it on its own. This just quietly says so (so it comes as no surprise).
  */
 function DormantNote({ sessionId }: { sessionId: string }) {
   const waking = useStore((s) => !!s.resuming[sessionId])
@@ -2174,7 +2363,8 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   const wake = useStore((s) => s.wake)
   const fork = useStore((s) => s.forkConversation)
 
-  // 못 깨운 이유가 있으면 그걸 먼저 말한다 — "보내면 이어집니다"는 사실이 아니게 된다
+  // If there is a reason it could not be resumed, that is said first — "sending resumes it"
+  // would no longer be true
   if (error && !waking) {
     return (
       <p
@@ -2183,9 +2373,10 @@ function DormantNote({ sessionId }: { sessionId: string }) {
       >
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
         {/*
-         * 다른 쪽이 쥐고 있을 때는 **재시도만으로는 영영 안 열린다** — 사람이 다른 앱을
-         * 닫으러 가는 것 말고는 길이 없었다. 갈라서 이어가는 길을 그 자리에 함께 둔다.
-         * 원본을 건드리지 않는다는 사실까지 적어야 누르는 것이 무섭지 않다.
+         * When something else is holding the lock, **retrying alone never opens it** — the
+         * only way forward used to be going and closing the other app. A way to fork and
+         * continue is placed right there alongside it. The fact that it leaves the original
+         * untouched has to be spelled out too, or pressing it feels risky.
          */}
         {locked && (
           <button
@@ -2216,20 +2407,22 @@ function DormantNote({ sessionId }: { sessionId: string }) {
 }
 
 /**
- * 말풍선 한 줄.
+ * A single message bubble row.
  *
- * **memo인 이유는 스트리밍이다.** 답변이 흐르는 동안 델타 하나가 바꾸는 것은 마지막
- * 한 줄뿐인데(store의 message_delta는 나머지 항목의 정체성을 그대로 둔다), memo가
- * 없으면 조각 하나마다 화면에 보이는 말풍선이 **전부** 다시 그려졌다 — 긴 답변이
- * 화면을 채운 상태에서 그건 마크다운 재파싱 여러 번이다 (실측: 2.7 렌더/글자).
- * Markdown 자체는 이미 memo지만, 그 위의 껍데기가 매번 새로 도는 것은 못 막는다.
+ * **The reason for memo is streaming.** While a response streams, each delta only changes the
+ * last row (the store's message_delta leaves every other item's identity untouched), and
+ * without memo, every visible bubble on screen was re-rendered **entirely** on each chunk — with
+ * a long answer filling the screen, that means re-parsing markdown many times over (measured:
+ * 2.7 renders per character). Markdown itself is already memoized, but that alone cannot stop
+ * the shell above it from running fresh every time.
  */
-/** 대화 목록이 화면 밖에 미리 그려 두는 줄 수 (양쪽) */
+/** The number of rows the conversation list pre-renders off screen (on both sides) */
 const CHAT_OVERSCAN = 12
 
 /**
- * 이 줄이 원래 범위(보이는 줄 + 미리 그리는 줄) 밖인가 — 앱 화면이 있어 붙들어 둔 줄만 이렇게 그려진다.
- * 그 화면은 teardown을 보내고 접힌다(M4 B-1, 위 rangeExtractor).
+ * Whether this row is outside its natural range (the visible rows plus the pre-rendered ones) —
+ * only a row held onto because it has an app view is ever rendered like this. That view sends
+ * teardown and collapses (M4 B-1, see rangeExtractor above).
  */
 function isLeaving(range: { startIndex: number; endIndex: number } | null, index: number): boolean {
   if (!range) return false
@@ -2245,19 +2438,23 @@ const ChatRow = memo(function ChatRow({
 }: {
   item: ChatItem
   projectRoot: string | null
-  /** projectRoot의 주인 — 파일 링크가 이 칸의 프로젝트에서 열리게 (#182) */
+  /** The owner of projectRoot — so file links open in this pane's project (#182) */
   projectId?: string | null
   sessionId: string
-  /** 목록이 떼려는 줄이다 — 앱 화면이 있으면 teardown을 보내고 접는다 (M4 B-1) */
+  /**
+   * This is a row the list is about to detach — if it has an app view, sends teardown and
+   * collapses it (M4 B-1)
+   */
   leaving?: boolean
 }) {
   if (item.kind === 'user') {
     return (
       <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
         {/*
-          시켜서 들어온 말 (FR-11). 사람 말과 같은 자리(오른쪽)에 두되 — 세션 입장에선
-          똑같이 "받은 지시"다 — 출처 이름을 위에 달고 테두리를 점선으로 바꾼다.
-          색은 쓰지 않는다(팔레트 규칙): 구분은 밝기가 아니라 모양이 말하게 한다.
+          A message that came in through delegation (FR-11). Placed in the same spot (right) as
+          the person's own messages — to the session it is equally "a directive received" —
+          but with a source name above it and the border switched to dashed. No color is used
+          (the palette rule): the distinction is made by shape, not brightness.
         */}
         {item.from && (
           <div className="text-[11px] text-ash" data-testid="msg-user-from">
@@ -2265,8 +2462,9 @@ const ChatRow = memo(function ChatRow({
           </div>
         )}
         {/*
-          대화 안 앱 화면이 보낸 말 (M4 B-1). 사람이 보내기로 골랐지만 쓴 것은 앱이다 — 시켜서 들어온 말과
-          같은 모양(점선 테두리, 출처 한 줄)으로, 출처가 세션이 아니라 앱이라고 적는다.
+          A message sent by an in-conversation app view (M4 B-1). A person chose to send it, but
+          the app wrote it — shown in the same shape as a delegated message (dashed border, a
+          one-line source), noting that the source is an app rather than a session.
         */}
         {item.fromApp && (
           <div className="text-[11px] text-ash" data-testid="msg-user-from-app">
@@ -2274,20 +2472,22 @@ const ChatRow = memo(function ChatRow({
           </div>
         )}
         {/*
-          긴 URL·경로처럼 공백 없는 문자열은 기본 규칙으로는 안 끊긴다.
-          그러면 말풍선이 가로로 삐져나가 대화창 전체에 가로 스크롤이 생긴다
-          (도그푸딩 지적). whitespace-pre-wrap으로 사용자가 친 줄바꿈은 살리고,
-          break-words로 못 끊는 긴 덩어리도 끊는다.
+          A string with no whitespace, like a long URL or path, does not wrap under the default
+          rule. That makes the bubble spill sideways and puts a horizontal scrollbar on the
+          whole conversation (found in dogfooding). whitespace-pre-wrap keeps line breaks the
+          person typed, and break-words breaks even a long chunk that otherwise could not wrap.
         */}
         {/*
-          바탕(void #141414)과 대비가 서야 "내가 한 말"이 보인다.
-          panel(#1d1d1d)+edge(#292929)로는 두 단계 차이뿐이라 어두운 화면에서 사실상 안 보였다
-          (도그푸딩 지적). 호버 배경과 같은 graphite로 올리고 테두리는 한 단계 더 밝게 준다.
+          Contrast against the background (void, #141414) is what makes "something I said"
+          visible. panel (#1d1d1d) plus edge (#292929) is only two steps apart, and was
+          effectively invisible in a dark room (found in dogfooding). This lifts it to graphite,
+          the same as the hover background, and gives the border one step more brightness.
         */}
         {/*
-          첨부는 본문 위에 실물로 선다 — 이미지는 썸네일(누르면 확대), 파일은 이름 칩.
-          예전엔 text에 "📎 이름"을 섞어 그렸는데, 그건 그림이 아니라 목록이었고
-          보낸 원문과 그린 텍스트가 달라지는 부작용(#75)까지 낳았다.
+          Attachments stand as real objects above the body text — an image as a thumbnail
+          (click to zoom), a file as a named chip. This used to render "📎 name" mixed into the
+          text, which was a list, not a picture, and it even caused the side effect (#75) of the
+          sent text differing from the rendered text.
         */}
         {item.attachments && item.attachments.length > 0 && (
           <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5">
@@ -2296,7 +2496,7 @@ const ChatRow = memo(function ChatRow({
             ))}
           </div>
         )}
-        {/* 이미지만 보낸 말이면 빈 말풍선을 세우지 않는다 */}
+        {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
             className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-graphite px-3 py-2 text-chalk ${
@@ -2318,9 +2518,10 @@ const ChatRow = memo(function ChatRow({
   }
   if (item.kind === 'reasoning') {
     /*
-     * 추론 요약 (#58). 본문이 아니라 본문에 이르는 길이므로 ash로 한 단계 가라앉힌다 —
-     * 밝기가 곧 중요도라는 잉크 규칙 그대로. codex 요약은 **굵은 제목** 마크다운으로
-     * 오므로 Markdown으로 그리되 바탕색 없이 조용히 둔다.
+     * A reasoning summary (#58). It is the path to the body, not the body itself, so it is
+     * dimmed one step to ash — following the ink rule exactly, where brightness signals
+     * importance. Codex's summary arrives as **bold heading** markdown, so this is still
+     * rendered through Markdown, just left quiet with no background color.
      */
     return (
       <div className="min-w-0 text-[13px] text-ash [&_strong]:text-ash" data-testid="msg-reasoning">
@@ -2329,7 +2530,8 @@ const ChatRow = memo(function ChatRow({
     )
   }
   if (item.kind === 'approval') {
-    // 대기 중인 승인은 바로 아래 카드가 보여주므로 로그 줄은 결정 후에만 남긴다
+    // A pending approval is already shown by the card right below it, so this row only appears
+    // once a decision has been made
     if (!item.decision) return null
     return (
       <p className="readout text-[11px] text-slate" data-testid="msg-approval-log">
@@ -2339,16 +2541,19 @@ const ChatRow = memo(function ChatRow({
   }
   if (item.kind === 'mark') {
     /*
-     * 라벨이 **줄어들고 접힌다.**
+     * The label **shrinks and wraps.**
      *
-     * 이 줄은 "여기서 대화가 압축됨" 같은 **짧은 구분선 라벨**을 위해 만들어졌고, 그래서
-     * `shrink-0`이 맞는 값이었다. 그런데 실패한 턴을 화면에 올리면서(#107) 오류 문장이
-     * 같은 자리에 실렸다 — "Your access token could not be refreshed because your refresh
-     * token was revoked…" 한 줄이 칸을 밀어내 **대화 전체에 가로 스크롤이 생겼다**
-     * (도그푸딩 지적). 사람이 읽어야 할 문장이 화면 밖으로 나가 있으면 띄운 의미가 없다.
+     * This row was built for **short divider labels** like "conversation compacted here", so
+     * `shrink-0` was the right value at the time. But once a failed turn started being shown on
+     * screen (#107), error sentences ended up in the same spot — a single line like "Your
+     * access token could not be refreshed because your refresh token was revoked…" pushed the
+     * row wide and **put a horizontal scrollbar on the whole conversation** (found in
+     * dogfooding). A sentence the person needs to read being pushed off screen defeats the
+     * point of showing it at all.
      *
-     * 양옆 선은 `flex-1`이라 라벨이 차지하고 남은 만큼만 그려진다 — 라벨이 여러 줄이 돼도
-     * 가운데 정렬이 유지되고, 짧은 라벨의 모양은 예전 그대로다.
+     * The lines on either side are `flex-1`, so they only ever draw whatever space the label
+     * leaves over — center alignment holds even when the label wraps to several lines, and a
+     * short label still looks exactly as it did before.
      */
     return (
       <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
@@ -2360,9 +2565,9 @@ const ChatRow = memo(function ChatRow({
   }
   if (item.kind === 'image') {
     /*
-     * 에이전트가 내놓은 이미지 (#40). 표시 전용이라 저장되지 않는다 — 재시작하면
-     * 터미널 스크롤백처럼 사라진다. data가 없으면 조용한 공백 대신 이유를 말한다
-     * (실패는 보이게 — 앱 규칙).
+     * An image produced by the agent (#40). Display-only, so it is never stored — it disappears
+     * on restart, like terminal scrollback. When there is no `data`, this states the reason
+     * instead of a silent blank (failures stay visible — an app-wide rule).
      */
     if (!item.data) {
       return (
@@ -2377,25 +2582,29 @@ const ChatRow = memo(function ChatRow({
     }
     return <ImageMessage mime={item.mime} data={item.data} path={item.path} />
   }
-  // 오케스트레이터의 프로젝트 제안 (#63) — 도구 카드가 아니라 사이드바를 가리키는 한 줄
+  // The orchestrator's project proposal (#63) — a single line pointing at the sidebar rather
+  // than a tool card
   if (/propose_project$/.test(item.tool)) return <ProjectProposalRow item={item} />
-  // 매니저의 워크트리 제안 (#69) — 같은 원칙: 가리키고, 값(브랜치 이름)은 창에 미리 채워진다
+  // A manager's worktree proposal (#69) — the same principle: point at it, and the value
+  // (branch name) is pre-filled into the window
   if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
   return (
     <>
       <ToolCard item={item} />
-      {/* 이 호출이 연 앱 화면 (M4 B-1) — 카드의 id로 제 화면을 찾는다. 없으면 아무것도 그리지 않는다 */}
+      {/* The app view this call opened (M4 B-1) — its own view is looked up by the card's id.
+      Nothing is rendered if there is none */}
       {item.callId && <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />}
     </>
   )
 })
 
 /**
- * 대화 속 이미지 (#40 → #62 확대).
+ * An image inside the conversation (#40, extended to zoom in #62).
  *
- * 본문에서는 max-h-80으로 잘려 있어 스크린샷의 글자가 안 읽힌다 — 누르면 모달로
- * 크게 본다. Modal 컴포넌트를 그대로 쓰는 이유: 포털이라 그리드 칸의 overflow에
- * 갇히지 않고(#62에서 지적한 함정), esc·바깥 클릭 닫기를 다시 만들지 않는다.
+ * In the body it is clipped at max-h-80, so text in a screenshot cannot be read — clicking it
+ * opens a larger view in a modal. Why the Modal component is reused as-is: being a portal, it
+ * is never trapped by a grid cell's overflow (the pitfall called out in #62), and closing via
+ * Esc or an outside click does not have to be rebuilt.
  */
 function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?: string }) {
   return (
@@ -2403,14 +2612,14 @@ function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?
       <ZoomableImage
         src={`data:${mime};base64,${data}`}
         alt={path ?? 'agent image'}
-        /* 세로로 화면을 다 덮지 않게 자른다 — 원본 비율은 유지 */
+        /* Clipped so it never covers the whole screen vertically — the original aspect ratio is kept */
         thumbClassName="max-h-80 max-w-full rounded-lg border border-edge"
       />
     </div>
   )
 }
 
-/** 썸네일 + 확대 한 쌍 — 에이전트 이미지(#40)와 사용자 첨부가 같은 확대를 쓴다 */
+/** A thumbnail-plus-zoom pair — an agent image (#40) and a user attachment use the same zoom */
 function ZoomableImage({
   src,
   alt,
@@ -2430,7 +2639,8 @@ function ZoomableImage({
       </button>
       {zoom && (
         <Modal onClose={() => setZoom(false)} testId="image-lightbox">
-          {/* vh/vw는 zoom을 모른다 — 다른 모달들과 같은 보정 (index.css --text-zoom) */}
+          {/* vh/vw know nothing about zoom — the same correction as every other modal
+          (index.css --text-zoom) */}
           <img
             src={src}
             alt={alt}
@@ -2443,11 +2653,12 @@ function ZoomableImage({
 }
 
 /**
- * 사용자가 실어 보낸 첨부 하나.
+ * A single attachment the person sent along with a message.
  *
- * 이미지면 실물 썸네일로 서고, 파일이거나 바이트가 없으면(재시작 후 500MB 상한 정리,
- * 깨진 데이터) 입력창의 칩과 같은 문법(IMG/DOC + 이름)으로 눕는다 — 무엇을 보냈는지는
- * 바이트가 사라져도 남아야 한다.
+ * An image stands as a real thumbnail; a file, or an image with no bytes left (cleaned up past
+ * the 500MB cap after a restart, or corrupted data), falls back to the same notation as the
+ * composer's chip (IMG/DOC plus a name) — what was sent has to remain visible even once the
+ * bytes are gone.
  */
 function UserAttachment({ att }: { att: ChatAttachment }) {
   const [broken, setBroken] = useState(false)
@@ -2468,7 +2679,7 @@ function UserAttachment({ att }: { att: ChatAttachment }) {
       <ZoomableImage
         src={`data:${att.mime};base64,${att.data}`}
         alt={att.name}
-        /* 말풍선 옆에 서는 것이라 에이전트 이미지보다 낮게 잡는다 */
+        /* Sits next to a message bubble, so its cap is set lower than an agent image's */
         thumbClassName="max-h-48 max-w-full rounded-lg border border-slate/40"
         onError={() => setBroken(true)}
       />
@@ -2477,24 +2688,28 @@ function UserAttachment({ att }: { att: ChatAttachment }) {
 }
 
 /**
- * 프로젝트 제안 (#63) — **버튼이 아니라 손가락이다.**
+ * A project proposal (#63) — **a pointing finger, not a button.**
  *
- * 처음엔 여기에 폴더 피커 버튼을 달았다. 도그푸딩에서 그게 틀렸음이 드러났다:
- * 사이드바의 Add project와 똑같은 일을 하는 문이 둘이 되고, 처음 보는 사람은
- * "프로젝트는 오케스트레이터에게 시키는 것"으로 배운다 — 정확히 반대여야 한다.
- * 폴더를 고르는 방법은 앱에 하나뿐이라는 규칙(사이드바 Add project)도 그 순간 깨진다.
+ * This originally had a folder picker button attached to it here. Dogfooding showed that was
+ * wrong: it created a second door doing exactly what the sidebar's Add project already does,
+ * and someone seeing this for the first time would learn that "a project is something the
+ * orchestrator is asked to do" — exactly the opposite of how it should work. It also broke, right at
+ * that moment, the rule that there is exactly one way to pick a folder in this app (the
+ * sidebar's Add project).
  *
- * 그래서 이 줄은 아무것도 하지 않는다. 대신 **사이드바의 그 버튼에 불이 켜진다**
- * (store의 addProjectHint). 오케스트레이터가 하는 일은 문을 대신 여는 것이 아니라
- * 문이 어디 있는지 알려주는 것이고, 한 번 배운 자리는 다음부터 혼자 찾아간다.
+ * So this row does nothing at all. Instead, **the sidebar's button lights up**
+ * (the store's addProjectHint). What the orchestrator does is not open the door on someone's
+ * behalf, but point at where the door is — and a place learned once is found unaided the next
+ * time.
  */
 function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
-  // 어댑터가 이유를 제목에 실어 보낸다 (normalize의 propose_project 특례) —
-  // 이유가 없으면 도구 이름이 그대로 오므로 그때는 기본 문장을 쓴다
+  // The adapter sends the reason riding on the title (a special case for propose_project in
+  // normalize) — with no reason, the tool name comes through as-is, so this falls back to a
+  // default sentence in that case
   const reason = item.title && !/propose_project$/.test(item.title) ? item.title : null
   return (
     <p className="flex items-baseline gap-2 text-[12px] text-ash" data-testid="project-proposal">
-      {/* 왼쪽 아래를 가리킨다 — 불이 켜진 버튼이 실제로 있는 방향이다 */}
+      {/* Points down and to the left — the actual direction of the lit-up button */}
       <span className="shrink-0 text-slate" aria-hidden>
         ↙
       </span>
@@ -2507,9 +2722,10 @@ function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }
 }
 
 /**
- * 워크트리 제안 (#69) — propose_project와 같은 원칙(문은 하나, 여기는 손가락)에
- * 값이 하나 실린다: 브랜치 이름. 사이드바의 + 버튼이 밝아지고, 그 문을 열면
- * 워크트리가 켜지고 이름이 채워진 창이 뜬다. 만드는 것은 끝까지 사람이다.
+ * A worktree proposal (#69) — the same principle as propose_project (one door, this is only a
+ * finger pointing at it), with one value riding along: the branch name. The sidebar's + button
+ * lights up, and opening that door brings up a dialog with the worktree toggle already on and
+ * the name pre-filled. Creating it is, to the very end, the person's own act.
  */
 function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const branch = item.title && !/propose_worktree_session$/.test(item.title) ? item.title : null
@@ -2534,48 +2750,57 @@ function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' 
   )
 }
 
-/** 접었을 때 맛보기로 보여줄 줄 수 — 무슨 명령이 뭘 뱉었는지 알아볼 만큼만 */
+/**
+ * The number of lines shown as a preview while collapsed — just enough to recognize what
+ * command produced what
+ */
 const PREVIEW_LINES = 3
 
 /**
- * 맛보기의 **높이 상한** (사용자 지적 2026-09-12).
+ * The preview's **height cap** (reported by a user on 2026-09-12).
  *
- * PREVIEW_LINES는 `\n`으로 센 줄이다. 그런데 한 줄이 한 줄로 보이리라는 보장이 없다:
- * 리소스 업로드 응답처럼 개행 없는 JSON 한 덩어리가 오면 논리적으로는 1줄이라 맛보기
- * 자르기가 아무것도 안 자르고, 화면에서는 수십 줄로 접혀 카드가 대화를 통째로 덮는다.
- * "접혀 있는데 다 보인다"는 말이 이 뜻이었다.
+ * `PREVIEW_LINES` counts lines split by `\n`. But there is no guarantee one logical line renders
+ * as one visual line: something like a resource-upload response, one blob of JSON with no
+ * newlines, is logically one line, so the preview truncation cuts nothing at all, and on screen
+ * it wraps into dozens of lines, with the card covering the entire conversation. That is what
+ * "collapsed, but everything is showing" meant.
  *
- * 그래서 상한을 하나 더 둔다 — **보이는 줄**로 센 높이. `lh`는 그 요소의 line-height
- * 한 줄이므로 3lh는 글자 크기나 leading을 바꿔도 늘 정확히 세 줄이다(px로 적으면
- * leading-relaxed × 11px = 17.875px 같은 값을 손으로 반올림하게 되고, 그 반올림이
- * 네 번째 줄의 머리를 한 픽셀 보여준다).
+ * So one more cap is added — a height counted in **visible lines**. `lh` is one line-height unit
+ * of that element, so `3lh` is always exactly three lines regardless of font size or leading
+ * changes (writing it in px would mean hand-rounding a value like
+ * leading-relaxed × 11px = 17.875px, and that rounding would show one pixel of a fourth line's
+ * top edge).
  */
 const PREVIEW_CLAMP = 'max-h-[3lh] overflow-hidden'
 
 /**
- * 도구 카드.
+ * The tool card.
  *
- * **안쪽에 스크롤을 두지 않는다.** 대화창 안의 작은 스크롤 영역은 휠을 가로채서,
- * 대화를 넘기려다 카드 안이 굴러가고 대화는 멈춘다 (도그푸딩에서 "불편하다"로 지적됨).
- * 스크롤은 대화창 하나만 갖는다 — 접으면 맛보기, 펴면 전부. 길이는 사람이 정한다.
+ * **No scrolling inside it.** A small scroll area inside the conversation intercepts the wheel,
+ * so trying to scroll the conversation instead scrolls inside the card while the conversation
+ * stays put (called out as "annoying" in dogfooding). Scrolling belongs to exactly one thing,
+ * the conversation itself — collapsed shows a preview, expanded shows everything. Length is
+ * decided by the person.
  *
- * **기본은 접힘이다.**
+ * **Collapsed by default.**
  *
- * 예전엔 조회성만 접고 변경(Bash·Edit·MCP)은 펼쳤다. 변경은 봐야 한다는 생각이었는데,
- * 실제로 써 보니 도구를 몇 번만 써도 대화가 출력으로 뒤덮여 정작 답을 못 읽는다
- * (도그푸딩). 무엇을 했는지는 제목 줄이 이미 말한다 — 명령이든 경로든.
+ * This used to collapse only read-only tools and expand changes (Bash, Edit, MCP). The thinking
+ * was that changes need to be seen, but in practice, using a tool even a few times buried the
+ * conversation in output, making the actual answer unreadable (found in dogfooding). What was
+ * done is already said by the title row — whether that is a command or a path.
  *
- * 접어도 놓치지 않는 것 둘: 실패는 제목 줄에 'Failed'로 남고,
- * 출력은 맛보기 몇 줄이 그대로 보인다.
+ * Two things are never lost even while collapsed: a failure stays visible as 'Failed' in the
+ * title row, and a few lines of output preview are shown as-is.
  */
 function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(false)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   const hidden = Math.max(0, lines.length - PREVIEW_LINES)
   /*
-   * 높이 상한에 **걸렸는지**는 세어서 알 수 없다 — 접히는 자리는 칸 너비가 정한다.
-   * 재서 안다. 이게 없으면 개행 없는 한 덩어리(hidden === 0)가 소리 없이 잘린다:
-   * 펼칠 것이 있다는 말을 아무도 안 하는 상태가 제일 나쁘다.
+   * Whether the height cap **actually kicked in** cannot be known by counting — where wrapping
+   * happens is decided by the card's width. This has to be measured instead. Without it, one
+   * blob with no newlines (hidden === 0) gets clipped silently: the worst state is one where
+   * nothing tells anyone there is more to expand.
    */
   const outRef = useRef<HTMLPreElement>(null)
   const [clamped, setClamped] = useState(false)
@@ -2587,15 +2812,17 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
     }
     const measure = () => setClamped(el.scrollHeight - el.clientHeight > 1)
     measure()
-    // 칸 너비가 바뀌면 접히는 줄 수도 바뀐다 (그리드에서 칸은 늘 움직인다)
+    // A change in card width changes how many lines wrap into it (a pane's width keeps moving in the grid)
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
   }, [open, item.result])
   /*
-   * 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오기 전까지만 —
-   * 맛보기와 달리 **끝쪽**을 보여준다: 돌아가는 명령에서 궁금한 건 처음이 아니라 지금이다.
-   * (조각의 합은 전체가 아니다 — 실측에서 첫 조각이 빠졌다. 전체는 result가 가져온다.)
+   * The tail of output while the tool is still running (#58, Codex's outputDelta). Only shown
+   * until `result` arrives — unlike the preview, this shows **the end**: for a command still
+   * running, what matters is now, not the start.
+   * (The sum of chunks is not the whole thing — the first chunk has been observed missing in
+   * practice. The full output is what `result` delivers.)
    */
   const liveTail =
     item.result === undefined && item.live
@@ -2610,7 +2837,7 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
         aria-expanded={open}
         data-testid="tool-card-toggle"
       >
-        {/* 펼침 표시는 앱 전체에서 하나여야 한다 — 파일 트리와 같은 셰브런 */}
+        {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
         <span className="shrink-0 text-slate">
           <ChevronIcon open={open} />
         </span>
@@ -2647,7 +2874,8 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
               onClick={() => setOpen(true)}
               data-testid="tool-card-more"
             >
-              {/* 줄 수를 셀 수 있을 때만 센다 — 개행 없는 덩어리는 "몇 줄"이 거짓말이다 */}
+              {/* Only counted when lines can actually be counted — "N more lines" would be a
+              lie for a blob with no newlines */}
               {hidden > 0 ? `${hidden} more lines` : 'Show all'}
             </button>
           )}

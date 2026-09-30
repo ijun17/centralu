@@ -6,15 +6,17 @@ import { requestViewerJump } from '../viewer/jump.js'
 import { parseFileRef, type FileRef } from './filePath.js'
 
 /**
- * 에이전트 응답 렌더링.
+ * Rendering the agent's response.
  *
- * 스트리밍 중에는 마크다운이 **미완성 상태로 들어온다** (열린 코드펜스, 잘린 링크).
- * react-markdown은 그런 입력도 던지지 않고 부분 렌더하므로 그대로 쓴다.
+ * While streaming, the markdown **arrives incomplete** (an open code fence, a truncated link).
+ * react-markdown does not throw on that kind of input and just renders the partial result, so
+ * this uses it as-is.
  *
- * 스타일은 무채색 규칙을 따른다 — 코드·인용은 색이 아니라 배경 밝기와 여백으로 구분한다.
+ * Styling follows the grayscale rule — code and quotes are set apart by background brightness
+ * and spacing, not color.
  *
  * `projectRoot` is the session's project directory, or null when it has none (the
- * orchestrator). It is what decides whether a backticked path is a file you can open —
+ * orchestrator). It is what decides whether a backticked path is a file the person can open —
  * see `parseFileRef`.
  */
 export const Markdown = memo(function Markdown({
@@ -24,7 +26,7 @@ export const Markdown = memo(function Markdown({
 }: {
   text: string
   projectRoot: string | null
-  /** 링크가 여는 파일의 프로젝트 — projectRoot의 주인이다 (#182) */
+  /** The project of the file the link opens — the owner of projectRoot (#182) */
   projectId?: string | null
 }) {
   return (
@@ -33,13 +35,16 @@ export const Markdown = memo(function Markdown({
         remarkPlugins={[remarkGfm]}
         components={{
           /*
-           * 링크 셋 갈래 (#39 확장):
-           *  - href가 이 프로젝트의 파일이면 백틱 경로와 같은 파일 링크다 — 에이전트는
-           *    `[manager.ts](packages/.../manager.ts)`처럼도 쓰고, 그게 죽은 링크였다.
-           *  - http(s)·mailto는 새 창으로 (앱 안에서 이동하면 세션이 날아간다).
-           *  - 그 밖의 href는 **DOM에 싣지 않는다.** 모델이 낸 문자열을 브라우저가
-           *    해석할 속성에 두지 않는다는 규칙(아래 code 주석)은 a에도 똑같이 성립한다 —
-           *    글자만 남기는 것이 정직한 렌더링이다.
+           * Links branch three ways (extended in #39):
+           *  - If href is a file in this project, it is the same file link as a backticked
+           *    path — the agent also writes things like `[manager.ts](packages/.../manager.ts)`,
+           *    and that used to be a dead link.
+           *  - http(s) and mailto open in a new window (navigating inside the app would lose
+           *    the session).
+           *  - Any other href is **never put into the DOM.** The rule that a string produced
+           *    by a model must not sit in an attribute the browser would interpret (see the
+           *    `code` comment below) holds just as much for `a` — leaving only the text is the
+           *    honest rendering.
            */
           a: ({ node: _node, href, children, ...props }) => {
             const ref = typeof href === 'string' ? parseFileRef(tryDecode(href), projectRoot) : null
@@ -89,7 +94,7 @@ export const Markdown = memo(function Markdown({
   )
 })
 
-/** 링크의 href는 퍼센트 인코딩돼 있을 수 있다 — 못 풀면 원문 그대로 판정한다 */
+/** A link's href may be percent-encoded — if it cannot be decoded, judge it on the raw text */
 function tryDecode(href: string): string {
   try {
     return decodeURIComponent(href)
@@ -99,14 +104,16 @@ function tryDecode(href: string): string {
 }
 
 /**
- * 대화 속 파일 링크 하나 — 백틱 경로와 마크다운 링크가 같은 버튼이다.
- * 클릭은 읽기 전용 뷰어(#39), 우클릭은 Finder다. 우클릭이 메뉴가 아니라 바로 여는
- * 이유: 항목이 하나뿐인 메뉴는 손만 느리게 한다 (파일 트리는 항목이 여럿이라 메뉴가 맞다).
+ * A single file link inside the conversation — a backticked path and a markdown link are the
+ * same button. Click opens the read-only viewer (#39), right-click opens Finder. Right-click
+ * opens directly instead of showing a menu because a menu with only one entry just slows the
+ * hand down (the file tree has several entries, so a menu makes sense there).
  */
 /*
- * 링크는 자기 프로젝트를 싣고 연다 (#182). 경로는 이 칸 세션의 프로젝트 기준 상대 경로라, 뷰어가
- * 포커스된 세션에서 프로젝트를 고르면 그리드의 옆 칸 링크가 다른 프로젝트의 같은 경로를 열었다 —
- * WKWebView는 버튼 클릭에 포커스를 주지 않아 칸의 onFocusCapture가 포커스를 옮기지 못한다.
+ * The link carries and opens with its own project (#182). The path is relative to this pane's
+ * session's project, so if the viewer picked its project from whichever session is focused, a
+ * link in the neighboring pane of the grid would open the same path in a different project —
+ * WKWebView does not give focus on a button click, so a pane's onFocusCapture cannot move focus.
  */
 function FileLink({
   refInfo,

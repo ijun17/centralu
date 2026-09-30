@@ -1,30 +1,38 @@
 /**
- * 커서가 **눈에 보이는** 첫 줄/마지막 줄에 있는가 (#38의 뒷이야기).
+ * Is the caret on the **visually** first or last line (the story behind #38)?
  *
- * history.ts는 줄을 개행으로만 셌다. 한 줄이 길어 두세 줄로 접히면, 접힌 두 번째 줄에서
- * 위 화살표를 눌러도 개행이 없으니 "첫 줄"로 쳐서 커서 대신 기록이 올라왔다 — 쓰던 글이
- * 사라진 것처럼 보인다 (사용자 지적 2026-09-07).
+ * history.ts used to count lines only by newlines. When a single logical line grows long enough
+ * to wrap into two or three visual lines, pressing the up arrow on the wrapped second line has
+ * no newline to find, so it was treated as the "first line" and history came up instead of the
+ * caret — it looked as though what the person was typing had vanished (reported by a user on
+ * 2026-09-07).
  *
- * 접힌 줄을 세려면 결국 글자의 화면 좌표가 필요하고, textarea에는 그걸 물어볼 API가 없다.
- * 그래서 **같은 폭·같은 글꼴의 거울 <div>** 를 하나 만들어 커서 앞까지를 그려 보고, 그
- * 자리의 y를 읽는다. 값을 아끼는 두 가지 규칙:
+ * Counting wrapped lines eventually needs the on-screen coordinates of the character, and a
+ * textarea has no API to ask for that. So this builds a **mirror `<div>` with the same width and
+ * font**, renders everything up to the caret into it, and reads the y position there. Two rules
+ * keep the cost down:
  *
- *  1. 개행 기준으로 이미 첫/마지막 줄이 아니면 여기까지 오지 않는다 (부르는 쪽에서 거른다).
- *  2. 거울은 화살표를 누른 순간에만 그린다 — 타이핑마다가 아니라. 한 번 만든 노드는
- *     문서에 남겨 두고 다시 쓴다.
+ *  1. If the newline-based check already says it is not the first/last line, this never runs
+ *     (the caller filters it out first).
+ *  2. The mirror is only rendered the moment an arrow key is pressed — not on every keystroke.
+ *     Once a node is created it stays in the document and is reused.
  *
- * 잴 수 없으면(레이아웃이 없는 환경, 폭 0) **true를 돌려준다** — 못 재는 것을 이유로
- * 기록 기능이 사라지면 안 된다. 그 경우 예전 동작(개행만 세기)으로 얌전히 내려앉는다.
+ * When it cannot be measured (an environment with no layout, or zero width), it **returns
+ * true** — history must not disappear just because it could not be measured. In that case it
+ * quietly falls back to the old behavior (counting newlines only).
  */
 
-/** 잰 값에서 첫/마지막 줄 여부만 뽑는 순수 부분 — DOM 없이 시험할 수 있게 떼어 둔다 */
+/**
+ * The pure part that pulls just the first/last-line judgment out of measured values — kept
+ * separate so it can be tested without a DOM
+ */
 export function rowsFromMetrics(
   caretTop: number,
   contentHeight: number,
   lineHeight: number,
 ): { first: boolean; last: boolean } | null {
   if (!(lineHeight > 0) || !(contentHeight > 0)) return null
-  // 반 줄만큼의 여유 — 소수점 높이(예: 16.5px)가 줄 수를 어긋나게 만들지 않게
+  // Half a line of slack — so a fractional height (e.g. 16.5px) does not throw off the row count
   const slack = lineHeight / 2
   return {
     first: caretTop < slack,
@@ -32,7 +40,10 @@ export function rowsFromMetrics(
   }
 }
 
-/** 거울은 하나만 만들어 계속 쓴다 (매 측정마다 노드를 붙였다 떼면 레이아웃이 두 번 돈다) */
+/**
+ * Only one mirror is ever created and reused (attaching and detaching a node on every
+ * measurement would trigger layout twice)
+ */
 let mirror: HTMLDivElement | null = null
 
 function getMirror(): HTMLDivElement {
@@ -45,7 +56,10 @@ function getMirror(): HTMLDivElement {
   return el
 }
 
-/** textarea의 줄바꿈에 영향을 주는 것만 베낀다 — 색·테두리는 안 보이는 노드에 필요 없다 */
+/**
+ * Only copies what affects the textarea's line wrapping — color and borders are not needed on
+ * an invisible node
+ */
 const COPIED = [
   'fontFamily',
   'fontSize',
@@ -64,10 +78,11 @@ const COPIED = [
 ] as const
 
 /**
- * 커서 자리의 y와 전체 높이, 한 줄 높이.
+ * The y position at the caret, the total height, and the line height.
  *
- * 커서 **뒤의 글까지** 거울에 넣는다. 낱말 한가운데 커서가 있을 때 그 낱말이 통째로
- * 다음 줄로 넘어가는지는 뒤 글자들이 정한다 — 앞부분만 그리면 다른 자리에 접힌다.
+ * Renders **the text after the caret too** into the mirror. When the caret sits in the middle
+ * of a word, whether that whole word wraps to the next line depends on the characters after
+ * it — rendering only the part before the caret would wrap it at the wrong spot.
  */
 function measure(el: HTMLTextAreaElement): { caretTop: number; contentHeight: number; lineHeight: number } | null {
   if (typeof window === 'undefined' || typeof getComputedStyle !== 'function') return null
@@ -77,7 +92,8 @@ function measure(el: HTMLTextAreaElement): { caretTop: number; contentHeight: nu
 
   const m = getMirror()
   for (const k of COPIED) m.style[k] = style[k]
-  // 여백은 폭에 이미 반영했다 — 거울에서 다시 주면 y가 그만큼 밀린다
+  // Padding is already accounted for in the width — applying it again on the mirror would push
+  // the y down by that much
   m.style.padding = '0'
   m.style.border = '0'
   m.style.width = `${inner}px`
@@ -92,13 +108,15 @@ function measure(el: HTMLTextAreaElement): { caretTop: number; contentHeight: nu
   const value = el.value
   m.textContent = value.slice(0, caret)
   const rest = document.createElement('span')
-  // 커서가 글 맨 끝이면 잴 대상이 없다 — 마침표 하나가 그 자리의 높이를 대신한다
+  // If the caret is at the very end of the text, there is nothing to measure — a single period
+  // stands in for the height of that spot
   rest.textContent = value.slice(caret) || '.'
   m.appendChild(rest)
 
   const caretTop = rest.offsetTop
   const contentHeight = m.scrollHeight
-  // line-height가 'normal'이면 숫자로 안 나온다 — 한 글자를 그려 그 높이를 쓴다
+  // When line-height is 'normal' it does not come out as a number — render one character and
+  // use its height
   let lineHeight = parseFloat(style.lineHeight)
   if (!(lineHeight > 0)) {
     m.textContent = 'x'
@@ -108,14 +126,17 @@ function measure(el: HTMLTextAreaElement): { caretTop: number; contentHeight: nu
   return { caretTop, contentHeight, lineHeight }
 }
 
-/** 커서가 접힌 것까지 세어 첫 줄에 있나 (못 재면 true — 부르는 쪽의 개행 판단을 따른다) */
+/**
+ * Whether the caret is on the first line, counting wrapped lines (returns true if it cannot be
+ * measured — falls back to the caller's newline-based judgment)
+ */
 export function onFirstVisualLine(el: HTMLTextAreaElement): boolean {
   const m = measure(el)
   if (!m) return true
   return rowsFromMetrics(m.caretTop, m.contentHeight, m.lineHeight)?.first ?? true
 }
 
-/** 커서가 접힌 것까지 세어 마지막 줄에 있나 */
+/** Whether the caret is on the last line, counting wrapped lines */
 export function onLastVisualLine(el: HTMLTextAreaElement): boolean {
   const m = measure(el)
   if (!m) return true

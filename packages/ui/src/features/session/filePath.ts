@@ -1,5 +1,5 @@
 /**
- * Deciding which of an agent's words is a file you can open (issue #39).
+ * Deciding which of an agent's words is a file the person can open (issue #39).
  *
  * Opening the file was never the hard part — `openFile(path)` already exists. The hard
  * part is that this runs over **every inline-code span of every message**, and the text
