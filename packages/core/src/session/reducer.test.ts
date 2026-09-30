@@ -3,12 +3,12 @@ import type { NormalizedEvent } from '@cc/protocol'
 import { applyEvent, detectFileConflicts, initialSession, markRead, rename } from './reducer.js'
 
 const NOW = 1_000_000
-const s0 = () => initialSession({ id: 's1', projectId: 'p1', name: '새 세션' })
+const s0 = () => initialSession({ id: 's1', projectId: 'p1', name: 'new session' })
 const ev = (e: Record<string, unknown>) => ({ sessionId: 's1', ...e }) as NormalizedEvent
 
 /** The event sequence of one real turn (in the order observed in the spike) */
 const TURN: NormalizedEvent[] = [
-  ev({ type: 'message_delta', role: 'assistant', text: '작업을 ' }),
+  ev({ type: 'message_delta', role: 'assistant', text: 'the task ' }),
   ev({ type: 'tool_call', callId: 'c1', summary: { tool: 'Bash', title: 'npm run build', readOnly: false, paths: [] } }),
   ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'npm run build', cwd: '/p' } }),
   ev({ type: 'approval_resolved', requestId: 'r1', decision: 'allow' }),
@@ -61,7 +61,7 @@ describe('when a wait started (what the inbox order is based on)', () => {
 
   it('is reset when work resumes', () => {
     let s = replay(TURN)
-    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: '다시' }), NOW + 1000)
+    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: 'again' }), NOW + 1000)
     expect(s.state).toBe('working')
     expect(s.waitingSince).toBeNull()
   })
@@ -121,7 +121,7 @@ describe('cards are cleared on recovery (back to idle or working)', () => {
   })
 
   it('waiting_approval → working resuming clears the card (the host sends a still-valid request again)', () => {
-    const s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'message_delta', role: 'assistant', text: '계속' }), NOW)
+    const s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'message_delta', role: 'assistant', text: 'continuing' }), NOW)
     expect(s.state).toBe('working')
     expect(s.pendingApproval).toBeNull()
   })
@@ -136,13 +136,13 @@ describe('cards are cleared on recovery (back to idle or working)', () => {
 
 describe('session name (FR-18)', () => {
   it('an automatic name is updated by session_title', () => {
-    const s = applyEvent(s0(), ev({ type: 'session_title', title: 'auth 리팩터링' }), NOW)
-    expect(s.name).toBe('auth 리팩터링')
+    const s = applyEvent(s0(), ev({ type: 'session_title', title: 'auth refactor' }), NOW)
+    expect(s.name).toBe('auth refactor')
   })
 
   it('automatic updates stop after a manual change', () => {
-    const s = applyEvent(rename(s0(), '내가 정한 이름'), ev({ type: 'session_title', title: '자동' }), NOW)
-    expect(s.name).toBe('내가 정한 이름')
+    const s = applyEvent(rename(s0(), 'the name I chose'), ev({ type: 'session_title', title: 'auto' }), NOW)
+    expect(s.name).toBe('the name I chose')
   })
 
   /*
@@ -151,16 +151,16 @@ describe('session name (FR-18)', () => {
    * quietly dropped.
    */
   it('a name the person chose (auto:false) updates a session that is already manual too', () => {
-    const once = applyEvent(s0(), ev({ type: 'session_title', title: '가드 MCP', auto: false }), NOW)
-    expect(once).toMatchObject({ name: '가드 MCP', autoNamed: false })
-    const twice = applyEvent(once, ev({ type: 'session_title', title: '가드 MCP 2차', auto: false }), NOW)
-    expect(twice.name).toBe('가드 MCP 2차')
+    const once = applyEvent(s0(), ev({ type: 'session_title', title: 'Guard MCP', auto: false }), NOW)
+    expect(once).toMatchObject({ name: 'Guard MCP', autoNamed: false })
+    const twice = applyEvent(once, ev({ type: 'session_title', title: 'Guard MCP 2', auto: false }), NOW)
+    expect(twice.name).toBe('Guard MCP 2')
   })
 
   it('an automatic name arriving after a name the person chose is dropped', () => {
-    const named = applyEvent(s0(), ev({ type: 'session_title', title: '가드 MCP', auto: false }), NOW)
+    const named = applyEvent(s0(), ev({ type: 'session_title', title: 'Guard MCP', auto: false }), NOW)
     const s = applyEvent(named, ev({ type: 'session_title', title: 'This session is being continued…', auto: true }), NOW)
-    expect(s.name).toBe('가드 MCP')
+    expect(s.name).toBe('Guard MCP')
   })
 })
 
@@ -186,7 +186,7 @@ describe('what it is busy with (activity)', () => {
   it('dying of an error while compacting does not leave "Compacting" behind', () => {
     const s = applyEvent(
       applyEvent(working(), ev({ type: 'activity', activity: 'compacting' }), NOW),
-      ev({ type: 'error', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } }),
+      ev({ type: 'error', error: { code: 'adapter_crashed', message: 'process exited', retryable: true } }),
       NOW,
     )
     expect(s.activity).toBeNull()
@@ -213,22 +213,22 @@ describe('limits, context and errors', () => {
   })
 
   it('an error leaves the error state and its message', () => {
-    const s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: '죽음', retryable: true } }), NOW)
+    const s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: 'died', retryable: true } }), NOW)
     expect(s.state).toBe('error')
-    expect(s.lastError).toEqual({ code: 'adapter_crashed', message: '죽음' })
+    expect(s.lastError).toEqual({ code: 'adapter_crashed', message: 'died' })
   })
 
   it('resuming from limited with a message_delta also clears the limit banner', () => {
     let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)
     s = applyEvent(s, ev({ type: 'limit_reached', resumeAt: '2026-08-15T14:30:00Z' }), NOW)
-    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: '재개' }), NOW + 1000)
+    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: 'resuming' }), NOW + 1000)
     expect(s.state).toBe('working')
     expect(s.limit).toBeNull()
   })
 
   it('recovering from error clears the lastError banner', () => {
-    let s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: '죽음', retryable: true } }), NOW)
-    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: '살아남' }), NOW + 1000)
+    let s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: 'died', retryable: true } }), NOW)
+    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: 'survived' }), NOW + 1000)
     expect(s.state).toBe('working')
     expect(s.lastError).toBeNull()
   })
@@ -243,7 +243,7 @@ describe('limits, context and errors', () => {
     let s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'question_request', requestId: 'q1', questions: [{ question: '?', header: '', options: [], multiSelect: false }] }), NOW)
     expect(s.pendingApproval).not.toBeNull()
     expect(s.pendingQuestions).toHaveLength(1)
-    s = applyEvent(s, ev({ type: 'error', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } }), NOW)
+    s = applyEvent(s, ev({ type: 'error', error: { code: 'adapter_crashed', message: 'process exited', retryable: true } }), NOW)
     expect(s.state).toBe('error')
     expect(s.pendingApproval).toBeNull()
     expect(s.pendingQuestions).toEqual([])
@@ -279,7 +279,7 @@ describe('thinkingTokens', () => {
 
   it('a chunk that carries only text (a codex summary) makes no number', () => {
     const working = replay([ev({ type: 'state_change', state: 'working' })])
-    const s = applyEvent(working, ev({ type: 'reasoning_delta', text: '**검토 중**' }), NOW)
+    const s = applyEvent(working, ev({ type: 'reasoning_delta', text: '**Reviewing**' }), NOW)
     expect(s.thinkingTokens).toBeNull()
   })
 })
@@ -304,7 +304,7 @@ describe('plan', () => {
   it('survives other events while working', () => {
     const working = replay([ev({ type: 'state_change', state: 'working' })])
     const p = applyEvent(working, ev({ type: 'plan_update', steps }), NOW)
-    const after = applyEvent(p, ev({ type: 'message_delta', role: 'assistant', text: '진행' }), NOW)
+    const after = applyEvent(p, ev({ type: 'message_delta', role: 'assistant', text: 'in progress' }), NOW)
     expect(after.plan).toEqual(steps)
   })
 })

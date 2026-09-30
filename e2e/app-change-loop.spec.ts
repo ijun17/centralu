@@ -246,7 +246,7 @@ test('leaving a template app\'s pinned view open produces only the two opening `
   await openPinned(page, pid)
   await page.waitForTimeout(WATCH_MS)
   const runs = host.showRuns()
-  console.log(`고정 화면 하나: ${WATCH_MS}ms 지켜본 뒤 show 실행 기록 ${runs}줄`)
+  console.log(`one pinned view: after watching for ${WATCH_MS}ms, show ran ${runs} times`)
   expect(runs).toBeLessThanOrEqual(2)
 })
 
@@ -261,7 +261,7 @@ test('a pinned view and an inline view open together do not wake each other — 
   const settled = host.showRuns()
   await page.waitForTimeout(WATCH_MS)
   const more = host.showRuns() - settled
-  console.log(`고정 화면 + 대화 안 화면: 여는 데 show ${settled}줄, 그 뒤 ${WATCH_MS}ms 동안 ${more}줄`)
+  console.log(`pinned view + inline view: show ran ${settled} times to open, then over the next ${WATCH_MS}ms, ${more} more times`)
   expect(more).toBeLessThanOrEqual(2)
 
   // The inline view changes the value — the hidden pinned view receives the notification and re-reads, while the view that made the change already knows from its own response
@@ -287,7 +287,7 @@ test('even an app whose read tool is missing readOnlyHint has the mutual-wakeup 
   const settled = host.showRuns()
   await page.waitForTimeout(WATCH_MS)
   const more = host.showRuns() - settled
-  console.log(`주석 없는 show, 고정 화면 + 대화 안 화면: ${WATCH_MS}ms 동안 show ${more}줄`)
+  console.log(`unannotated show, pinned view + inline view: over ${WATCH_MS}ms, show ran ${more} times`)
   /*
    * A broadcast is capped at one per app per 250ms. At most two views re-read per broadcast (when
    * the owners are mixed), so over 3 seconds the ceiling is (3000/250 + 1) × 2 = 26. Measured at

@@ -53,10 +53,10 @@ describe('waiting for the host', () => {
   it('even if the event is missed, immediately reads the failure message the supervisor left and fails — does not wait out the 30 seconds', async () => {
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'host_info') return null
-      if (cmd === 'host_error') return 'Node.js를 찾지 못했습니다'
+      if (cmd === 'host_error') return 'Could not find Node.js'
       return null
     })
-    await expect(createTauriPlatform()).rejects.toThrow('Node.js를 찾지 못했습니다')
+    await expect(createTauriPlatform()).rejects.toThrow('Could not find Node.js')
     // Subscriptions do not pile up on every retry
     await vi.waitFor(() => expect(unlistened).toContain('host-status'))
   })

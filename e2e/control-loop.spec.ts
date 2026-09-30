@@ -362,12 +362,12 @@ test('The Add project button sits inside the sidebar, below the project list', a
 
 test('Creating a session renders the conversation stream (T5-3)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '안녕하세요')
-  await expect(page.getByTestId('msg-user')).toContainText('안녕하세요')
+  await newSession(page, 'alpha', 'Hello')
+  await expect(page.getByTestId('msg-user')).toContainText('Hello')
 
-  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '네, ' })
-  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '반갑습니다' })
-  await expect(page.getByTestId('msg-assistant')).toContainText('네, 반갑습니다')
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'Yes, ' })
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'nice to meet you' })
+  await expect(page.getByTestId('msg-assistant')).toContainText('Yes, nice to meet you')
 })
 
 /*
@@ -380,7 +380,7 @@ test('Two replies with no human message between them render as two chunks — li
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '리뷰 돌려줘')
+  await newSession(page, 'alpha', 'Run the review')
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'One review ' })
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'is still running.' })
   // The turn ends, and a new turn starts with no human message
@@ -410,14 +410,14 @@ test('Two replies with no human message between them render as two chunks — li
       ts: Date.now(),
     })
     m.messages.set(info.id, [
-      row(1, 'user', '가져온 질문'),
+      row(1, 'user', 'Imported question'),
       row(2, 'assistant', 'First imported reply.'),
       row(3, 'assistant', 'Second imported reply.'),
     ])
     return info.id as string
   })
   await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), id)
-  await expect(page.getByTestId('msg-user')).toHaveText('가져온 질문')
+  await expect(page.getByTestId('msg-user')).toHaveText('Imported question')
   await expect(page.getByTestId('msg-assistant')).toHaveText([
     'First imported reply.',
     'Second imported reply.',
@@ -426,8 +426,8 @@ test('Two replies with no human message between them render as two chunks — li
 
 test('The first prompt becomes the session name (T5-6, FR-18)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'auth 모듈 리팩터링')
-  await expect(page.getByTestId('session-name')).toContainText('auth 모듈 리팩터링')
+  await newSession(page, 'alpha', 'auth module refactor')
+  await expect(page.getByTestId('session-name')).toContainText('auth module refactor')
 })
 
 test('Tool card: read-only calls are collapsed, mutating calls are expanded (T5-3)', async ({ page }) => {
@@ -442,14 +442,14 @@ test('Tool card: read-only calls are collapsed, mutating calls are expanded (T5-
     type: 'tool_result',
     callId: 'c1',
     ok: true,
-    summary: `첫 줄\n둘째 줄\n셋째 줄\n넷째 줄\n파일 내용 200줄`,
+    summary: `line one\nline two\nline three\nline four\n200 lines of file content`,
   })
   // Read-only tools start collapsed — only a preview shows, the rest stays hidden
   await expect(page.getByTestId('tool-card')).toBeVisible()
-  await expect(page.getByTestId('tool-card-output')).toContainText('첫 줄')
-  await expect(page.getByTestId('tool-card-output')).not.toContainText('파일 내용 200줄')
+  await expect(page.getByTestId('tool-card-output')).toContainText('line one')
+  await expect(page.getByTestId('tool-card-output')).not.toContainText('200 lines of file content')
   await page.getByTestId('tool-card-toggle').click()
-  await expect(page.getByTestId('tool-card-output')).toContainText('파일 내용 200줄')
+  await expect(page.getByTestId('tool-card-output')).toContainText('200 lines of file content')
 })
 
 test('Approval: pressing y on the card approves it (T5-4)', async ({ page }) => {
@@ -488,8 +488,8 @@ test('Approval: "always allow" states its scope (T5-4)', async ({ page }) => {
  */
 test('An approval from another session is answered on that session card via the inbox', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // Focus is on beta
+  await newSession(page, 'alpha', 'A task')
+  await newSession(page, 'beta', 'B task') // Focus is on beta
 
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
@@ -610,7 +610,7 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
     const remaining = await page.locator('[data-testid^="inbox-item-"]').count()
     if (remaining === 0) break
     await page.keyboard.press('Enter')
-    await page.getByTestId('prompt-input').fill('이어서 해줘')
+    await page.getByTestId('prompt-input').fill('keep going')
     await page.getByTestId('prompt-input').press('Enter')
     await page.keyboard.press('Meta+i')
   }
@@ -619,8 +619,8 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
 
 test('The "jump to next waiting" shortcut cycles through approvals first (T5-5, FR-17)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '응답대기 세션')
-  await newSession(page, 'alpha', '승인대기 세션')
+  await newSession(page, 'alpha', 'Awaiting-reply session')
+  await newSession(page, 'alpha', 'Awaiting-approval session')
   await emitEvent(page, 0, { type: 'turn_complete' })
   await injectApproval(page, 1, { kind: 'command', command: 'x', cwd: '/tmp' })
 
@@ -630,17 +630,17 @@ test('The "jump to next waiting" shortcut cycles through approvals first (T5-5, 
     return [...(m as any).sessions.values()][0].id
   })
   await page.getByTestId(`session-row-${firstId}`).click()
-  await expect(page.getByTestId('session-name')).toContainText('응답대기 세션')
+  await expect(page.getByTestId('session-name')).toContainText('Awaiting-reply session')
 
   await page.locator('body').click()
   await page.keyboard.press('Meta+Shift+a')
-  await expect(page.getByTestId('session-name')).toContainText('승인대기 세션')
+  await expect(page.getByTestId('session-name')).toContainText('Awaiting-approval session')
 })
 
 test('Unread indicator and marking as read (T5-6, FR-16)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // Focus = beta
+  await newSession(page, 'alpha', 'A task')
+  await newSession(page, 'beta', 'B task') // Focus = beta
 
   /*
     The on-screen representation of unread is **the name's brightness alone** (the dot was
@@ -648,7 +648,7 @@ test('Unread indicator and marking as read (T5-6, FR-16)', async ({ page }) => {
     name). The test checks the row's data-unread attribute, not a color class.
   */
   // New content in an unfocused session -> unread
-  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '결과입니다' })
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'Here are the results' })
   const sessionId = await page.evaluate(() => {
     const m = (window as any).__mock
     return [...(m as any).sessions.values()][0].id
@@ -673,7 +673,7 @@ test('Unread indicator and marking as read (T5-6, FR-16)', async ({ page }) => {
     exactly what happened with the code before the actual fix. What is being asked is "did it turn
     on even briefly", so this checks within those 3 seconds.
   */
-  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '보는 중에 더 왔다' })
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'more came in while watching' })
   await expect(row).not.toHaveAttribute('data-unread', 'true', { timeout: 1000 })
 })
 
@@ -712,7 +712,7 @@ test('Context gauge and limit display (FR-14, FR-9)', async ({ page }) => {
  */
 test('The context gauge stays filled in after restarting the app (#48)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await emitEvent(page, 0, { type: 'context_update', used: 168000, window: 200000, exactness: 'exact' })
   await expect(page.getByTestId('context-gauge')).toContainText('84%')
@@ -734,8 +734,8 @@ test('The inbox shortcut works right after sending a message (regression: the co
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업 하나')
-  await newSession(page, 'alpha', '작업 둘')
+  await newSession(page, 'alpha', 'task one')
+  await newSession(page, 'alpha', 'task two')
   for (const idx of [0, 1]) await emitEvent(page, idx, { type: 'turn_complete' })
 
   // Actual usage order: after sending a message, focus stays in the composer. Do not click body.
@@ -761,7 +761,7 @@ test('A failed send is not swallowed silently (regression: waiting on a session 
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Create a situation where the session is gone (the same state as a session restored after a
   // host restart)
@@ -771,17 +771,17 @@ test('A failed send is not swallowed silently (regression: waiting on a session 
     m.sessions.delete(id)
   })
 
-  await page.getByTestId('prompt-input').fill('계속 진행해줘')
+  await page.getByTestId('prompt-input').fill('go on')
   await page.getByTestId('send').click()
 
   await expect(page.getByTestId('toast')).toContainText('Could not send')
   // No bubble is left behind for a message that failed to send
-  await expect(page.getByTestId('msg-user').filter({ hasText: '계속 진행해줘' })).toHaveCount(0)
+  await expect(page.getByTestId('msg-user').filter({ hasText: 'go on' })).toHaveCount(0)
 })
 
 test('A dormant session automatically resumes when spoken to (C-1, FR-10)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Simulate the state after a host restart: no process, only the transcript remains for the
   // session
@@ -798,17 +798,17 @@ test('A dormant session automatically resumes when spoken to (C-1, FR-10)', asyn
   await expect(page.getByTestId('dormant-note')).toBeVisible()
   await expect(page.getByTestId('prompt-input')).toBeEnabled()
 
-  await page.getByTestId('prompt-input').fill('이어서 해줘')
+  await page.getByTestId('prompt-input').fill('keep going')
   await page.getByTestId('send').click()
 
   // No "resume" button was ever clicked, yet the conversation continues
-  await expect(page.getByTestId('chat-stream')).toContainText('이어서 해줘')
+  await expect(page.getByTestId('chat-stream')).toContainText('keep going')
   await expect(page.getByTestId('dormant-note')).toBeHidden()
 })
 
 test('When resuming truly is not possible, the reason is announced (no silent failure)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -820,17 +820,17 @@ test('When resuming truly is not possible, the reason is announced (no silent fa
     store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
   })
 
-  await page.getByTestId('prompt-input').fill('이어서 해줘')
+  await page.getByTestId('prompt-input').fill('keep going')
   await page.getByTestId('send').click()
 
   await expect(page.getByTestId('toast')).toContainText('Could not resume')
   // No bubble is left behind for a message that failed to send
-  await expect(page.getByTestId('msg-user').filter({ hasText: '이어서 해줘' })).toHaveCount(0)
+  await expect(page.getByTestId('msg-user').filter({ hasText: 'keep going' })).toHaveCount(0)
 })
 
 test('A long conversation renders only what is visible (D-1 virtual scroll)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '긴 작업')
+  await newSession(page, 'alpha', 'long task')
 
   // Inject 200 turns worth
   await page.evaluate(() => {
@@ -841,7 +841,7 @@ test('A long conversation renders only what is visible (D-1 virtual scroll)', as
         type: 'message_delta',
         sessionId: id,
         role: 'assistant',
-        text: `줄 ${i} — 대화 내용입니다.\n`,
+        text: `line ${i} — this is the conversation content.\n`,
       })
       m.emit({ type: 'turn_complete', sessionId: id })
     }
@@ -858,7 +858,7 @@ test('Auto-scroll does not interrupt while scrolled up reading (D-1)', async ({ 
   // Injecting **before** the session is created sends events to a session that does not exist
   // yet, so nothing accumulates on screen — there is nothing to scroll and the test spins
   // uselessly. Fill it in only after creating the session.
-  await newSession(page, 'alpha', '긴 작업')
+  await newSession(page, 'alpha', 'long task')
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
@@ -870,7 +870,7 @@ test('Auto-scroll does not interrupt while scrolled up reading (D-1)', async ({ 
         type: 'message_delta',
         sessionId: id,
         role: 'assistant',
-        text: `줄 ${i} — 대화 내용입니다.\n\n`,
+        text: `line ${i} — this is the conversation content.\n\n`,
       })
   })
 
@@ -899,7 +899,7 @@ test('Auto-scroll does not interrupt while scrolled up reading (D-1)', async ({ 
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
-    m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '새 줄\n' })
+    m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'new line\n' })
   })
   await page.waitForTimeout(300)
   expect(await stream.evaluate((el) => el.scrollTop)).toBe(before)
@@ -958,8 +958,8 @@ test('Intro screen: does not block when only one tool is ready — proceed throu
 
 test('Returns to the session that was being viewed (C-3 workspace snapshot)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫 번째')
-  await newSession(page, 'alpha', '두 번째')
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
 
   // Say the app was closed while viewing the first session
   const firstId = await page.evaluate(() => {
@@ -978,13 +978,13 @@ test('Returns to the session that was being viewed (C-3 workspace snapshot)', as
     store.setState({ focusedSessionId: null })
     await store.getState().attach(m)
   })
-  await expect(page.getByTestId('session-name')).toContainText('첫 번째')
+  await expect(page.getByTestId('session-name')).toContainText('first')
 })
 
 test('Messages in unfocused sessions are trimmed (D-2 windowing)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '긴 세션')
-  await newSession(page, 'alpha', '다른 세션')
+  await newSession(page, 'alpha', 'long session')
+  await newSession(page, 'alpha', 'another session')
 
   const longId: string = (
     await page.evaluate(() => Object.keys((window as any).__store.getState().sessions))
@@ -999,7 +999,7 @@ test('Messages in unfocused sessions are trimmed (D-2 windowing)', async ({ page
         type: 'tool_call',
         sessionId: id,
         callId: `c${i}`,
-        summary: { tool: 'Read', title: `파일 ${i}`, readOnly: true, paths: [] },
+        summary: { tool: 'Read', title: `file ${i}`, readOnly: true, paths: [] },
       })
     }
   }, longId)
@@ -1021,7 +1021,7 @@ test('Scrubbing up and down through 10 inbox items never pushes the cursor out o
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  for (let i = 0; i < 10; i++) await newSession(page, 'alpha', `작업 ${i}`)
+  for (let i = 0; i < 10; i++) await newSession(page, 'alpha', `task ${i}`)
   await page.evaluate(() => {
     const m = (window as any).__mock
     for (const id of m.sessions.keys()) m.emit({ type: 'turn_complete', sessionId: id })
@@ -1047,7 +1047,7 @@ test('Scrubbing up and down through 10 inbox items never pushes the cursor out o
 test('The layout does not break even in a narrow window (L4-4)', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 700 })
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // If horizontal scroll appears, something overflowed
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
@@ -1138,7 +1138,7 @@ test('The project menu opens below the clicked button, and flips upward when the
  */
 test('A row menu stays fully on screen even when the sidebar is narrow', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '좁은 데서')
+  await newSession(page, 'alpha', 'in a narrow spot')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await page.evaluate(() => (window as any).__store.getState().setSidebarWidth(0)) // Collapses to the minimum
 
@@ -1170,9 +1170,9 @@ test('Creating a session: only the tool is picked — model and permission are s
   expect(params.initialPrompt).toBeUndefined()
 
   // The first instruction goes in the composer — it stays on screen as is
-  await page.getByTestId('prompt-input').fill('첫 지시')
+  await page.getByTestId('prompt-input').fill('first instruction')
   await page.getByTestId('prompt-input').press('Enter')
-  await expect(page.getByTestId('msg-user')).toContainText('첫 지시')
+  await expect(page.getByTestId('msg-user')).toContainText('first instruction')
 
   // Model and permission are changed in the settings menu below the composer
   await pickSetting(page, 'settings-model-haiku')
@@ -1233,21 +1233,21 @@ test('An unauthenticated tool is described differently from an uninstalled one (
 
 test('Agent replies render as markdown (M2.5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await emitEvent(page, 0, {
     type: 'message_delta',
     role: 'assistant',
-    text: '## 결과\n\n- **중요** 항목\n- `코드` 조각\n\n```ts\nconst x = 1\n```',
+    text: '## Result\n\n- **Important** item\n- a `code` snippet\n\n```ts\nconst x = 1\n```',
   })
   const md = page.getByTestId('markdown')
-  await expect(md.locator('h2')).toContainText('결과')
-  await expect(md.locator('strong')).toContainText('중요')
+  await expect(md.locator('h2')).toContainText('Result')
+  await expect(md.locator('strong')).toContainText('Important')
   await expect(md.locator('pre code')).toContainText('const x = 1')
 })
 
 test('The create-session dialog warns about concurrent sessions (FR-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '먼저 시작한 작업')
+  await newSession(page, 'alpha', 'the task that started first')
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('concurrent-warning')).toContainText('lose')
@@ -1257,7 +1257,7 @@ test('3-lane layout: the evidence panel sits alongside the conversation and coll
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Git and files do not replace the conversation — both must be visible at once
   await expect(page.getByTestId('chat-stream')).toBeVisible()
@@ -1287,24 +1287,24 @@ test('Git: the diff gets the wide area; the list, staging and commit live in the
       { path: 'src/a.ts', staged: false, status: 'M' },
       { path: 'src/new.ts', staged: false, status: '?' },
     ]
-    m.gitState.diffs['src/a.ts'] = '@@ -1,2 +1,2 @@\n-옛 줄\n+새 줄\n 그대로'
+    m.gitState.diffs['src/a.ts'] = '@@ -1,2 +1,2 @@\n-old line\n+new line\n unchanged'
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Clicking a file in the sidebar opens the wide diff — the wide area has no list in it
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toBeVisible()
   await expect(page.getByTestId('git-panel').locator('[data-testid^="git-file-"]')).toHaveCount(0)
   // The diff is achromatic: distinguished by symbol and brightness, not color
-  await expect(page.locator('[data-diff="add"]')).toContainText('새 줄')
-  await expect(page.locator('[data-diff="del"]')).toContainText('옛 줄')
+  await expect(page.locator('[data-diff="add"]')).toContainText('new line')
+  await expect(page.locator('[data-diff="del"]')).toContainText('old line')
 
   // The sidebar is the source of truth for staging and commit (visible even with an overlay open — #15)
   await page.getByTestId('evidence-stage-all').click()
-  await page.getByTestId('evidence-commit-message').fill('테스트 커밋')
+  await page.getByTestId('evidence-commit-message').fill('test commit')
   await page.getByTestId('evidence-commit').click()
   await expect(page.getByTestId('toast')).toContainText('Committed')
-  expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('테스트 커밋')
+  expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('test commit')
 })
 
 test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ page }) => {
@@ -1317,7 +1317,7 @@ test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ p
     m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
     m.gitState.diffs['src/a.ts'] = d
   }, diff)
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toBeVisible()
 
@@ -1355,7 +1355,7 @@ test('Git panel: checking out with a dirty working tree is not blocked — the r
     ]
     m.gitState.dirty = ['src/a.ts']
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-branch').click()
   // The panels split by the remote flag the host provides — a `/` in the name cannot distinguish
   // local feature/x from remote origin/main (#175)
@@ -1401,9 +1401,9 @@ test('File tree: lazy loading + toggling ignored entries (C-2)', async ({ page }
       { name: 'README.md', path: 'README.md', isDir: false, ignored: false },
     ]
     m.fsState.entries['src'] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
-    m.fsState.files['src/a.ts'] = '첫 줄\n둘째 줄\n셋째 줄'
+    m.fsState.files['src/a.ts'] = 'line one\nline two\nline three'
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-tree')).toBeVisible()
 
@@ -1486,9 +1486,9 @@ test('Code viewer: opening a file, search, and large files (C-3, FR-6)', async (
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.fsState.entries[''] = [{ name: 'big.ts', path: 'big.ts', isDir: false, ignored: false }]
-    m.fsState.files['big.ts'] = Array.from({ length: 3000 }, (_, i) => `줄 ${i} 내용`).join('\n')
+    m.fsState.files['big.ts'] = Array.from({ length: 3000 }, (_, i) => `line ${i} content`).join('\n')
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-big.ts').click()
 
@@ -1501,20 +1501,20 @@ test('Code viewer: opening a file, search, and large files (C-3, FR-6)', async (
   const rendered = await page.locator('[data-testid="code-viewer"] .whitespace-pre').count()
   expect(rendered).toBeLessThan(120)
 
-  await page.getByTestId('viewer-search').fill('줄 42 ')
+  await page.getByTestId('viewer-search').fill('line 42 ')
   await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
 
   // Enter/Shift+Enter move between matches — bringing off-screen matches into view too (#183)
   const search = page.getByTestId('viewer-search')
-  await search.fill('줄 2999 ')
+  await search.fill('line 2999 ')
   await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
-  await search.fill('9 내용')
+  await search.fill('9 content')
   await search.press('Enter')
   await expect(page.getByTestId('viewer-match-count')).toHaveText('1/300')
-  await expect(page.locator('[data-current-match]')).toContainText('줄 9 내용')
+  await expect(page.locator('[data-current-match]')).toContainText('line 9 content')
   await search.press('Shift+Enter')
   await expect(page.getByTestId('viewer-match-count')).toHaveText('300/300')
-  await expect(page.locator('[data-current-match]')).toContainText('줄 2999 내용')
+  await expect(page.locator('[data-current-match]')).toContainText('line 2999 content')
 })
 
 /**
@@ -1537,7 +1537,7 @@ async function openBigFile(page: Page, lines: number, opts: { truncated?: boolea
     },
     { n: lines, truncated: !!opts.truncated },
   )
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-big.ts').click()
   await expect(page.getByTestId('code-viewer')).toBeVisible()
@@ -1621,7 +1621,7 @@ async function openMinifiedFile(page: Page) {
     const text = ['// head', `var a=${'b'.repeat(4_000)}`, 'short()'].join('\n')
     m.fs.readFile = async () => ({ text, truncated: false, binary: false, bytes: text.length })
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-min.js').click()
   await expect(page.getByTestId('code-viewer')).toBeVisible()
@@ -1707,7 +1707,7 @@ test('Viewer: a binary file just gets a notice (C-3 abnormal path)', async ({ pa
     m.fsState.entries[''] = [{ name: 'logo.png', path: 'logo.png', isDir: false, ignored: false }]
     m.fs.readFile = async () => ({ text: '', truncated: false, binary: true, bytes: 20480 })
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-logo.png').click()
   await expect(page.getByTestId('viewer-binary')).toContainText('Binary')
@@ -1729,7 +1729,7 @@ test('Viewer: a supported image is previewed from its raw bytes', async ({ page 
       },
     })
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-logo.png').click()
   await expect(page.getByTestId('viewer-image')).toBeVisible()
@@ -1756,7 +1756,7 @@ test('Viewer: SVG toggles between the rendered image and raw source', async ({ p
       image: { mime: 'image/svg+xml', data: btoa(text) },
     })
   }, svg)
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-logo.svg').click()
 
@@ -1773,16 +1773,16 @@ test('Attachments: attaching a file shows it in the list and rides along with th
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.getByTestId('attach-input').setInputFiles({
     name: 'screenshot.png',
     mimeType: 'image/png',
-    buffer: Buffer.from('가짜 이미지 데이터'),
+    buffer: Buffer.from('fake image data'),
   })
   await expect(page.getByTestId('attachment-list')).toContainText('screenshot.png')
 
-  await page.getByTestId('prompt-input').fill('이 화면 좀 봐줘')
+  await page.getByTestId('prompt-input').fill('take a look at this screen')
   await page.getByTestId('send').click()
 
   const sent = await page.evaluate(() => (window as any).__mock.sentAttachments)
@@ -1794,7 +1794,7 @@ test('Attachments: attaching a file shows it in the list and rides along with th
 
 test('Sending with only an attachment and no text works (D abnormal path: empty text)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await expect(page.getByTestId('send')).toBeDisabled()
   await page.getByTestId('attach-input').setInputFiles({
     name: 'a.txt',
@@ -1808,22 +1808,22 @@ test('Command palette ⌘K: searches sessions and conversation content together 
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'auth 리팩터링')
+  await newSession(page, 'alpha', 'auth refactor')
   await page.evaluate(() => {
     const m = (window as any).__mock
     const ids = [...m.sessions.keys()]
-    m.searchResults = [{ sessionId: ids[0], seq: 3, snippet: '토큰 만료 처리를 고쳤습니다' }]
+    m.searchResults = [{ sessionId: ids[0], seq: 3, snippet: 'Fixed token expiry handling' }]
   })
-  await newSession(page, 'alpha', '배포 스크립트')
+  await newSession(page, 'alpha', 'deploy script')
 
   await page.keyboard.press('Meta+k')
   await expect(page.getByTestId('command-palette')).toBeVisible()
 
-  await page.getByTestId('palette-input').fill('토큰')
-  await expect(page.getByTestId('palette-item-message')).toContainText('토큰 만료')
+  await page.getByTestId('palette-input').fill('token')
+  await expect(page.getByTestId('palette-item-message')).toContainText('token expiry')
 
   await page.getByTestId('palette-item-message').click()
-  await expect(page.getByTestId('session-name')).toContainText('auth 리팩터링')
+  await expect(page.getByTestId('session-name')).toContainText('auth refactor')
 })
 
 /** Picking a project with no sessions from the palette also navigates to that project (#183) — it used to just close the palette */
@@ -1831,7 +1831,7 @@ test('Command palette: picking a project with no sessions navigates to that proj
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('beta')
@@ -1919,7 +1919,7 @@ test('Settings: turning off the spinning indicator stops it, leaving only a brig
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
   await page.evaluate((sid) => {
     ;(window as any).__mock.emit({ type: 'state_change', sessionId: sid, state: 'working' })
@@ -1986,19 +1986,19 @@ test('Settings: turning off the spinning indicator stops it, leaving only a brig
  */
 test('Send key: with the default setting, Enter sends', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫 지시')
+  await newSession(page, 'alpha', 'first instruction')
 
   // This is the composer for someone who has never opened settings — any change here is a regression
   const input = page.getByTestId('prompt-input')
-  await input.fill('그냥 엔터')
+  await input.fill('just enter')
   await input.press('Enter')
   await expect(input).toHaveValue('')
-  await expect(page.getByTestId('msg-user').last()).toContainText('그냥 엔터')
+  await expect(page.getByTestId('msg-user').last()).toContainText('just enter')
 })
 
 test('Send key: once enabled, Enter inserts a newline and the modifier+Enter sends', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫 지시')
+  await newSession(page, 'alpha', 'first instruction')
 
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-appearance').click()
@@ -2006,23 +2006,23 @@ test('Send key: once enabled, Enter inserts a newline and the modifier+Enter sen
   await page.keyboard.press('Escape')
 
   const input = page.getByTestId('prompt-input')
-  await input.fill('첫 줄')
+  await input.fill('line one')
   await input.press('Enter')
   // Only a line was added — nothing was sent
-  await expect(input).toHaveValue('첫 줄\n')
-  await input.pressSequentially('둘째 줄')
-  await expect(page.getByTestId('msg-user').filter({ hasText: '첫 줄' })).toHaveCount(0)
+  await expect(input).toHaveValue('line one\n')
+  await input.pressSequentially('line two')
+  await expect(page.getByTestId('msg-user').filter({ hasText: 'line one' })).toHaveCount(0)
 
   // ⌘ (on Mac) and Ctrl (elsewhere) are treated as one decision, so both send — the UI does not
   // know which platform it is on
   await input.press('Meta+Enter')
   await expect(input).toHaveValue('')
-  await expect(page.getByTestId('msg-user').last()).toContainText('둘째 줄')
+  await expect(page.getByTestId('msg-user').last()).toContainText('line two')
 
-  await input.fill('컨트롤로도')
+  await input.fill('with ctrl too')
   await input.press('Control+Enter')
   await expect(input).toHaveValue('')
-  await expect(page.getByTestId('msg-user').last()).toContainText('컨트롤로도')
+  await expect(page.getByTestId('msg-user').last()).toContainText('with ctrl too')
 
   // Reloading keeps the chosen value — if the setting were not remembered, this feature would
   // have to be re-enabled every time
@@ -2041,7 +2041,7 @@ test('Send key: once enabled, Enter inserts a newline and the modifier+Enter sen
  */
 test('Settings: the composer stays inside the window even at the maximum text size', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('settings')
@@ -2083,8 +2083,8 @@ test('Settings: the composer stays inside the window even at the maximum text si
 test("Settings: changing the text size does not change the grid's column count", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 720 })
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '하나')
-  await newSession(page, 'alpha', '둘')
+  await newSession(page, 'alpha', 'one')
+  await newSession(page, 'alpha', 'two')
   await page.evaluate(() => {
     const store = (window as never as { __store: any }).__store
     const ids = Object.keys(store.getState().sessions)
@@ -2122,7 +2122,7 @@ test('Settings: viewing and deleting approval rules (E-4)', async ({ page }) => 
       { id: 1, scope: 'session', matcher: 'npm test*', decision: 'allow', createdAt: Date.now() },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('settings')
@@ -2140,7 +2140,7 @@ test('Settings: an approval rule row shows which project or session it belongs t
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.evaluate(() => {
     const st = (window as any).__store.getState()
     const id = (name: string) =>
@@ -2180,12 +2180,12 @@ test('Settings: an approval rule row shows which project or session it belongs t
 
   await expect(page.getByTestId('rule-owner-1')).toHaveText('alpha')
   await expect(page.getByTestId('rule-owner-2')).toHaveText('beta')
-  await expect(page.getByTestId('rule-owner-3')).toHaveText('작업')
+  await expect(page.getByTestId('rule-owner-3')).toHaveText('task')
 })
 
 test('Settings: turning off a notification policy is persisted (E-5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
 
   await page.getByTestId('notify-allDone').uncheck()
@@ -2222,7 +2222,7 @@ test('deleting a session: once confirmed it leaves the list and goes to the tras
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '지울 세션')
+  await newSession(page, 'alpha', 'session to delete')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId(`session-menu-${id}`).click()
@@ -2256,7 +2256,7 @@ test("Deleting a session: by default the original is deleted too — unchecking 
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '남겨둘 세션')
+  await newSession(page, 'alpha', 'session to keep')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId(`session-menu-${id}`).click()
@@ -2286,7 +2286,7 @@ test("Deleting a session: by default the original is deleted too — unchecking 
  */
 test('handoff: the note starts a new session and the old one moves to the trash (#204)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '갈아탈 세션')
+  await newSession(page, 'alpha', 'session to switch to')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   /*
     Finish the first turn first — a handoff waits for the running turn to finish (measured
@@ -2319,7 +2319,7 @@ test('handoff: the note starts a new session and the old one moves to the trash 
   // written to the person's own repository. The location varies per handing-off session (#104).
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
-    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '후계자 노트: 여기까지 했다' })
+    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'Successor note: got this far' })
     m.emit({ type: 'turn_complete', sessionId: sid })
     m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
   }, id)
@@ -2327,14 +2327,14 @@ test('handoff: the note starts a new session and the old one moves to the trash 
   // The new session takes the name; the old one is in the trash, its tool file marked to go when it is deleted for good (#204)
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0, { timeout: 15_000 })
   const heirId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
-  await expect(page.getByTestId(`session-row-${heirId}`)).toContainText('갈아탈 세션')
+  await expect(page.getByTestId(`session-row-${heirId}`)).toContainText('session to switch to')
   expect(
     await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id),
   ).toBe(true)
   // The new session's first message is that note
-  await expect(page.getByTestId('chat-stream')).toContainText('후계자 노트')
+  await expect(page.getByTestId('chat-stream')).toContainText('Successor note')
   expect(await page.evaluate(() => [...(window as any).__mock.handoffNotes.values()])).toEqual([
-    '후계자 노트: 여기까지 했다',
+    'Successor note: got this far',
   ])
   expect(
     await page.evaluate(() =>
@@ -2353,7 +2353,7 @@ test('Handoff from a dead session: record mode is preselected, nothing is asked,
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '죽을 세션')
+  await newSession(page, 'alpha', 'session about to die')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   // The session dies — the error state is exactly the basis for deciding "cannot be asked for a note"
   await page.evaluate((sid: string) => {
@@ -2421,7 +2421,7 @@ test('Clicking a project name while viewing one of its sessions opens the projec
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await expect(page.getByTestId('prompt-input')).toBeVisible()
   await expect(page.getByTestId('project-view')).toHaveCount(0)
 
@@ -2449,7 +2449,7 @@ const sessionRows = (page: Page, project: string) =>
 
 test("Sidebar: the arrow folds and unfolds a project's session rows (#205)", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await expect(sessionRows(page, 'alpha')).toHaveCount(1)
 
   await page.getByTestId('project-fold-alpha').click()
@@ -2472,7 +2472,7 @@ test("Sidebar: the arrow folds and unfolds a project's session rows (#205)", asy
 
 test('Sidebar: clicking the name opens the project screen instead of folding (#205)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await expect(page.getByTestId('project-view')).toHaveCount(0)
 
   // Expanded, click the name — the project screen opens and the row stays as is
@@ -2526,8 +2526,8 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // Focus is on beta
+  await newSession(page, 'alpha', 'A task')
+  await newSession(page, 'beta', 'B task') // Focus is on beta
   await page.getByTestId('project-fold-alpha').click()
   await expect(sessionRows(page, 'alpha')).toHaveCount(0)
 
@@ -2548,8 +2548,8 @@ test('Sidebar: navigating from the inbox to a session in a folded project unfold
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
-  await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // Focus is on beta
+  await newSession(page, 'alpha', 'A task')
+  await newSession(page, 'beta', 'B task') // Focus is on beta
   await page.getByTestId('project-fold-alpha').click()
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
@@ -2586,7 +2586,7 @@ test("A project's git, files and viewer can be viewed without any session (dogfo
 
 test('Window drag regions and blocked overscroll (M2.5 window issue)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // With the title bar hidden, each lane's header is the window-move handle (top bar, session,
   // evidence)
@@ -2631,7 +2631,7 @@ test('Picking and loading a past conversation from the create-session modal', as
         {
           externalId: 'ext-1',
           tool: 'claude',
-          title: '어제 하던 리팩터링',
+          title: "yesterday's refactor",
           updatedAt: Date.now() - 3600_000,
           createdAt: null,
           branch: 'main',
@@ -2640,7 +2640,7 @@ test('Picking and loading a past conversation from the create-session modal', as
         {
           externalId: 'ext-2',
           tool: 'claude',
-          title: '빌드 깨진 것 추적',
+          title: 'track down the broken build',
           updatedAt: Date.now() - 86400_000,
           createdAt: null,
           branch: null,
@@ -2651,8 +2651,8 @@ test('Picking and loading a past conversation from the create-session modal', as
     },
     {
       'ext-1': [
-        { role: 'user', text: '이 모듈 좀 쪼개줘' },
-        { role: 'assistant', text: '세 파일로 나눴습니다' },
+        { role: 'user', text: 'split this module up' },
+        { role: 'assistant', text: 'Split into three files' },
       ],
     },
   )
@@ -2669,7 +2669,7 @@ test('Picking and loading a past conversation from the create-session modal', as
   await page.getByTestId('new-session-alpha').click()
   // The default is 'new conversation' — loading must never be the default
   await expect(page.getByTestId('past-new')).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByTestId('past-ext-1')).toContainText('어제 하던 리팩터링')
+  await expect(page.getByTestId('past-ext-1')).toContainText("yesterday's refactor")
   // Even for a tool (codex) whose title is 'the first message', recency must still be visible
   await expect(page.getByTestId('past-ext-1')).toContainText('last 1h ago')
   await expect(page.getByTestId('past-ext-2')).toContainText('Already open')
@@ -2682,8 +2682,8 @@ test('Picking and loading a past conversation from the create-session modal', as
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   // The past conversation is restored on screen
-  await expect(page.getByTestId('chat-stream')).toContainText('이 모듈 좀 쪼개줘')
-  await expect(page.getByTestId('chat-stream')).toContainText('세 파일로 나눴습니다')
+  await expect(page.getByTestId('chat-stream')).toContainText('split this module up')
+  await expect(page.getByTestId('chat-stream')).toContainText('Split into three files')
 
   // Was the original to resume passed through to the host?
   const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
@@ -2714,9 +2714,9 @@ test('An older tool version that cannot list past sessions does not block creati
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill('그래도 새로 시작')
+  await page.getByTestId('prompt-input').fill('start fresh anyway')
   await page.getByTestId('prompt-input').press('Enter')
-  await expect(page.getByTestId('chat-stream')).toContainText('그래도 새로 시작')
+  await expect(page.getByTestId('chat-stream')).toContainText('start fresh anyway')
 })
 
 test('When there are no past conversations, it says so', async ({ page }) => {
@@ -2741,7 +2741,7 @@ test('Clicking a changed file opens the diff in a wide overlay, and Escape retur
     m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
     m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n-old()\n+next()'
   })
-  await newSession(page, 'alpha', '이 함수 고쳐줘')
+  await newSession(page, 'alpha', 'fix this function')
 
   await expect(page.getByTestId('evidence-change-count')).toHaveText('1')
   await page.getByTestId('evidence-file-src/a.ts').click()
@@ -2754,7 +2754,7 @@ test('Clicking a changed file opens the diff in a wide overlay, and Escape retur
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('overlay')).toBeHidden()
   // Closing it leaves the conversation untouched — there is no need to navigate back in
-  await expect(page.getByTestId('chat-stream')).toContainText('이 함수 고쳐줘')
+  await expect(page.getByTestId('chat-stream')).toContainText('fix this function')
 })
 
 test('A file opened from the file tree appears in the same overlay', async ({ page }) => {
@@ -2762,9 +2762,9 @@ test('A file opened from the file tree appears in the same overlay', async ({ pa
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.fsState.entries[''] = [{ name: 'README.md', path: 'README.md', isDir: false, ignored: false }]
-    m.fsState.files['README.md'] = '# Alpha\n읽을 수 있어야 한다'
+    m.fsState.files['README.md'] = '# Alpha\nThis needs to be readable'
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-README.md').click()
@@ -2796,10 +2796,10 @@ test('The overlay covers only the conversation — the handle to open the next f
       { name: 'a.ts', path: 'a.ts', isDir: false, ignored: false },
       { name: 'b.ts', path: 'b.ts', isDir: false, ignored: false },
     ]
-    m.fsState.files['a.ts'] = '첫 파일'
-    m.fsState.files['b.ts'] = '둘째 파일'
+    m.fsState.files['a.ts'] = 'first file'
+    m.fsState.files['b.ts'] = 'second file'
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-a.ts').click()
@@ -2834,9 +2834,9 @@ test('The Git overlay follows the same rule — it does not cover the change lis
     m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
     m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n-old()\n+first()'
     m.fsState.entries[''] = [{ name: 'notes.md', path: 'notes.md', isDir: false, ignored: false }]
-    m.fsState.files['notes.md'] = '읽을 수 있어야 한다'
+    m.fsState.files['notes.md'] = 'This needs to be readable'
   })
-  await newSession(page, 'alpha', '두 파일 고쳐줘')
+  await newSession(page, 'alpha', 'fix both files')
 
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('overlay')).toBeVisible()
@@ -2861,8 +2861,8 @@ test('Switching sessions clears whatever was overlaid — the new conversation m
     m.fsState.entries[''] = [{ name: 'a.ts', path: 'a.ts', isDir: false, ignored: false }]
     m.fsState.files['a.ts'] = 'x'
   })
-  await newSession(page, 'alpha', '첫 번째')
-  await newSession(page, 'alpha', '두 번째')
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
 
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-a.ts').click()
@@ -2871,7 +2871,7 @@ test('Switching sessions clears whatever was overlaid — the new conversation m
   const first = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   await page.getByTestId(`session-row-${first}`).click()
   await expect(page.getByTestId('overlay')).toBeHidden()
-  await expect(page.getByTestId('chat-stream')).toContainText('첫 번째')
+  await expect(page.getByTestId('chat-stream')).toContainText('first')
 })
 
 /** Evidence panel: split by tabs, and collapsing still leaves a way to bring it back */
@@ -2883,19 +2883,19 @@ test('Evidence panel tabs: Git shows only changes, and History shows the graph i
     const m = (window as any).__mock
     m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
     m.gitState.commits = [
-      { sha: 'aaa111', shortSha: 'aaa111', subject: '첫 커밋', author: '나', when: Date.now(), parents: [] },
+      { sha: 'aaa111', shortSha: 'aaa111', subject: 'First commit', author: 'me', when: Date.now(), parents: [] },
       {
         sha: 'bbb222',
         shortSha: 'bbb222',
-        subject: '두 번째',
-        author: '나',
+        subject: 'second',
+        author: 'me',
         when: Date.now(),
         parents: ['a', 'b'],
       },
     ]
     m.fsState.entries[''] = [{ name: 'README.md', path: 'README.md', isDir: false, ignored: false }]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // The Git tab is the default — only changes. The history strip was moved off, covering the
   // neighboring tab strip during the split (#20)
@@ -2906,7 +2906,7 @@ test('Evidence panel tabs: Git shows only changes, and History shows the graph i
   // History lives under the History tab — the lane graph that used to live in the strip moved
   // here too
   await page.getByTestId('evidence-tab-history').click()
-  await expect(page.getByTestId('history-commit-aaa111')).toContainText('첫 커밋')
+  await expect(page.getByTestId('history-commit-aaa111')).toContainText('First commit')
   await expect(page.getByTestId('history-commit-bbb222')).toContainText('merge')
   await expect(page.getByTestId('commit-graph-aaa111')).toBeVisible()
 
@@ -2925,16 +2925,16 @@ test('Clicking a commit in History opens it in the wide area', async ({ page }) 
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.gitState.commits = [
-      { sha: 'aaa111', shortSha: 'aaa111', subject: '첫 커밋', author: '나', when: Date.now(), parents: [] },
+      { sha: 'aaa111', shortSha: 'aaa111', subject: 'First commit', author: 'me', when: Date.now(), parents: [] },
     ]
-    m.gitState.diffs['aaa111'] = '@@ -0,0 +1 @@\n+새 줄'
+    m.gitState.diffs['aaa111'] = '@@ -0,0 +1 @@\n+new line'
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-aaa111').click()
   await expect(page.getByTestId('overlay')).toBeVisible()
-  await expect(page.getByTestId('diff-view')).toContainText('새 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('new line')
 })
 
 test('Collapsing the panel leaves a rail, and it re-expands from there', async ({ page }) => {
@@ -2946,7 +2946,7 @@ test('Collapsing the panel leaves a rail, and it re-expands from there', async (
       { path: 'b.ts', staged: false, status: 'M' },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.getByTestId('evidence-close').click()
   await expect(page.getByTestId('evidence-panel')).toBeHidden()
@@ -2966,16 +2966,16 @@ test('Staging and committing still work in a narrow panel', async ({ page }) => 
     const m = (window as any).__mock
     m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Commit is disabled before staging (a live commit button with nothing staged would be a lie)
-  await page.getByTestId('evidence-commit-message').fill('패널에서 커밋')
+  await page.getByTestId('evidence-commit-message').fill('commit from the panel')
   await expect(page.getByTestId('evidence-commit')).toBeDisabled()
 
   await page.getByTestId('evidence-stage-all').click()
   await page.getByTestId('evidence-commit').click()
   await expect(page.getByTestId('toast')).toContainText('Committed')
-  expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('패널에서 커밋')
+  expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('commit from the panel')
 })
 
 /** M2.6 dogfooding: hide/delete, restart, attachments, and compacted old conversations */
@@ -2983,7 +2983,7 @@ test('Deleting removes only our own record — the notice states plainly that it
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '지울 세션')
+  await newSession(page, 'alpha', 'session to delete')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.getByTestId(`session-menu-${id}`).click()
@@ -3006,14 +3006,14 @@ test('Deleting removes only our own record — the notice states plainly that it
 
 test('Refresh restarts only the agent and keeps the conversation', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '이 대화는 남아야 한다')
+  await newSession(page, 'alpha', 'this conversation must survive')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.getByTestId('restart-session').click()
   await expect(page.getByTestId('toast')).toContainText('Agent restarted')
 
   expect(await page.evaluate(() => (window as any).__mock.restarted)).toContain(id)
-  await expect(page.getByTestId('chat-stream')).toContainText('이 대화는 남아야 한다')
+  await expect(page.getByTestId('chat-stream')).toContainText('this conversation must survive')
 })
 
 /**
@@ -3024,7 +3024,7 @@ test('Refresh restarts only the agent and keeps the conversation', async ({ page
  */
 test('While restarting, the icon spins and the button cannot be pressed again', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Make it take real time — if it finishes instantly, this bug never reproduces
   await page.evaluate(() => {
@@ -3056,13 +3056,13 @@ test('While restarting, the icon spins and the button cannot be pressed again', 
 
 test('Dragging and dropping also attaches a file', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // On the assumption that the webview does not intercept the drop, checks whether the dropped
   // file is captured as an attachment
   const dt = await page.evaluateHandle(() => {
     const data = new DataTransfer()
-    data.items.add(new File(['스크린샷 내용'], 'shot.png', { type: 'image/png' }))
+    data.items.add(new File(['screenshot content'], 'shot.png', { type: 'image/png' }))
     return data
   })
   await page.getByTestId('input-dropzone').dispatchEvent('drop', { dataTransfer: dt })
@@ -3087,7 +3087,7 @@ const dropFile = (page: Page, name: string, type = 'application/pdf') =>
   page.evaluateHandle(
     ({ n, t }: { n: string; t: string }) => {
       const data = new DataTransfer()
-      data.items.add(new File(['내용'], n, { type: t }))
+      data.items.add(new File(['content'], n, { type: t }))
       return data
     },
     { n: name, t: type },
@@ -3097,7 +3097,7 @@ test('Drag-and-drop defaults to rejection across the whole window — even where
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const before = page.url()
 
   /*
@@ -3115,7 +3115,7 @@ test('Drag-and-drop defaults to rejection across the whole window — even where
     for (const where of ['sidebar', 'body']) {
       const el = where === 'body' ? document.body : document.querySelector('[data-testid="sidebar"]')!
       const data = new DataTransfer()
-      data.items.add(new File(['보고서'], 'report.pdf', { type: 'application/pdf' }))
+      data.items.add(new File(['report'], 'report.pdf', { type: 'application/pdf' }))
       out[where] = ['dragenter', 'dragover', 'drop'].map((type) => {
         const e = new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true })
         el.dispatchEvent(e)
@@ -3145,8 +3145,8 @@ test('Drag-and-drop defaults to rejection across the whole window — even where
     const el = document.querySelector('[data-testid="palette-input"]')!
     const drag = (kind: 'text' | 'file') => {
       const data = new DataTransfer()
-      if (kind === 'file') data.items.add(new File(['보고서'], 'report.pdf', { type: 'application/pdf' }))
-      else data.setData('text/plain', '끌어온 글')
+      if (kind === 'file') data.items.add(new File(['report'], 'report.pdf', { type: 'application/pdf' }))
+      else data.setData('text/plain', 'dragged-in text')
       const e = new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true })
       el.dispatchEvent(e)
       return e.defaultPrevented
@@ -3160,7 +3160,7 @@ test('Drag-and-drop defaults to rejection across the whole window — even where
 
 test('Dropping anywhere in the panel, not just the composer, still attaches', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // The middle of the conversation — a spot that does not overlap the composer. This is exactly
   // where this bug lived.
@@ -3262,7 +3262,7 @@ test('Grid — making the panel a drop target does not break reordering sessions
 
 test('Old conversation can still be read back through even after compaction', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // The store holds 250 lines while the screen holds only the most recent page (HISTORY_PAGE=100)
@@ -3273,7 +3273,7 @@ test('Old conversation can still be read back through even after compaction', as
       seq: i + 1,
       role: i % 2 ? 'assistant' : 'user',
       kind: 'text',
-      payload: { text: `옛 대화 ${i + 1}` },
+      payload: { text: `old message ${i + 1}` },
       ts: Date.now(),
     }))
     m.messages.set(sid, rows)
@@ -3307,7 +3307,7 @@ test('Old conversation can still be read back through even after compaction', as
   // Even a conversation the model forgot through compaction still remains in our own record
   expect(await page.evaluate(loaded, id)).toBe(251)
   const first = await page.evaluate((sid: string) => (window as any).__store.getState().chat[sid][0].text, id)
-  expect(first).toBe('옛 대화 1')
+  expect(first).toBe('old message 1')
 })
 
 /*
@@ -3317,7 +3317,7 @@ test('Old conversation can still be read back through even after compaction', as
  */
 test('Older conversation also loads by clicking a button', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await page.evaluate((sid) => {
     const m = (window as any).__mock
@@ -3326,7 +3326,7 @@ test('Older conversation also loads by clicking a button', async ({ page }) => {
       seq: i + 1,
       role: i % 2 ? 'assistant' : 'user',
       kind: 'text',
-      payload: { text: `옛 대화 ${i + 1}` },
+      payload: { text: `old message ${i + 1}` },
       ts: Date.now(),
     }))
     m.messages.set(sid, rows)
@@ -3372,7 +3372,7 @@ test('A session whose events arrive first: an older-conversation path stands eve
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // The host creates two sessions behind the scenes — the UI only learns of it via session_created
@@ -3401,11 +3401,11 @@ test('A session whose events arrive first: an older-conversation path stands eve
           seq: i + 1,
           role: 'user',
           kind: 'text',
-          payload: { text: `기록 ${i + 1}` },
+          payload: { text: `entry ${i + 1}` },
           ts: Date.now(),
         })),
       )
-      m.emit({ type: 'message_delta', sessionId: g, role: 'assistant', text: '열기 전에 온 답' })
+      m.emit({ type: 'message_delta', sessionId: g, role: 'assistant', text: 'reply that arrived before opening' })
       // An agent the app asked for: request -> Read -> Write -> reply, all before the person ever opened it
       m.emit({
         type: 'user_message',
@@ -3438,7 +3438,7 @@ test('A session whose events arrive first: an older-conversation path stands eve
   await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, g])
   await page.getByTestId('grid-button').click()
   const cell = page.getByTestId(`grid-panel-${g}`)
-  await expect(cell.getByTestId('chat-stream')).toContainText('열기 전에 온 답')
+  await expect(cell.getByTestId('chat-stream')).toContainText('reply that arrived before opening')
   await expect(cell.getByTestId('load-older')).toBeVisible()
   // Reading all the way back, every stored line shows exactly once and in order
   await expect
@@ -3454,7 +3454,7 @@ test('A session whose events arrive first: an older-conversation path stands eve
     (id) => (window as any).__store.getState().chat[id].map((c: { text: string }) => c.text),
     g,
   )
-  expect(texts).toEqual([...Array.from({ length: 250 }, (_, i) => `기록 ${i + 1}`), '열기 전에 온 답'])
+  expect(texts).toEqual([...Array.from({ length: 250 }, (_, i) => `entry ${i + 1}`), 'reply that arrived before opening'])
 
   // Open the app-requested agent's session for the first time from the sidebar
   await page.getByTestId(`session-row-${f}`).click()
@@ -3479,7 +3479,7 @@ test('New messages added to a session loaded from history do not collide with ex
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // Open a fresh session whose store already has a transcript with seq 1..5
@@ -3493,7 +3493,7 @@ test('New messages added to a session loaded from history do not collide with ex
         seq: i + 1,
         role: i % 2 ? 'assistant' : 'user',
         kind: 'text',
-        payload: { text: `기록 ${i + 1}` },
+        payload: { text: `entry ${i + 1}` },
         ts: Date.now(),
       })),
     )
@@ -3502,7 +3502,7 @@ test('New messages added to a session loaded from history do not collide with ex
   }, id)
 
   // A live conversation continues on top of that (seq used to restart from 1 here)
-  await page.getByTestId('prompt-input').fill('새로 한 말')
+  await page.getByTestId('prompt-input').fill('a fresh message')
   await page.getByTestId('send').click()
   await page.evaluate(
     (sid) =>
@@ -3510,7 +3510,7 @@ test('New messages added to a session loaded from history do not collide with ex
         type: 'message_delta',
         sessionId: sid,
         role: 'assistant',
-        text: '새 답',
+        text: 'a new reply',
       }),
     id,
   )
@@ -3522,13 +3522,13 @@ test('New messages added to a session loaded from history do not collide with ex
   expect(new Set(seqs).size).toBe(seqs.length)
 
   // With no collision, the old record and the new message each show in their own place
-  await expect(page.getByTestId('chat-stream')).toContainText('기록 5')
-  await expect(page.getByTestId('chat-stream')).toContainText('새로 한 말')
+  await expect(page.getByTestId('chat-stream')).toContainText('entry 5')
+  await expect(page.getByTestId('chat-stream')).toContainText('a fresh message')
 })
 
 test('Tool cards collapse and expand without an inner scrollbar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.evaluate((sid) => {
@@ -3544,7 +3544,7 @@ test('Tool cards collapse and expand without an inner scrollbar', async ({ page 
       sessionId: sid,
       callId: 'c1',
       ok: true,
-      summary: Array.from({ length: 40 }, (_, i) => `출력 ${i + 1}`).join('\n'),
+      summary: Array.from({ length: 40 }, (_, i) => `output ${i + 1}`).join('\n'),
     })
   }, id)
 
@@ -3552,8 +3552,8 @@ test('Tool cards collapse and expand without an inner scrollbar', async ({ page 
   await expect(output).toBeVisible()
 
   // Read-only tools start collapsed, showing only a preview
-  await expect(output).toContainText('출력 1')
-  await expect(output).not.toContainText('출력 40')
+  await expect(output).toContainText('output 1')
+  await expect(output).not.toContainText('output 40')
   await expect(page.getByTestId('tool-card-more')).toContainText('37 more lines')
 
   // There is no inner scroller to intercept the conversation's scroll
@@ -3564,7 +3564,7 @@ test('Tool cards collapse and expand without an inner scrollbar', async ({ page 
   expect(scrollable).toBe(false)
 
   await page.getByTestId('tool-card-more').click()
-  await expect(output).toContainText('출력 40')
+  await expect(output).toContainText('output 40')
   const stillScrollable = await output.evaluate((el) => el.scrollHeight > el.clientHeight + 1)
   expect(stillScrollable).toBe(false)
 })
@@ -3578,7 +3578,7 @@ test('Tool cards collapse and expand without an inner scrollbar', async ({ page 
  */
 test('A single blob with no newlines still stops at three lines when collapsed', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.evaluate((sid) => {
@@ -3631,7 +3631,7 @@ test('A single blob with no newlines still stops at three lines when collapsed',
  */
 test('Dragging to resize the evidence panel persists after a restart', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   const panel = page.getByTestId('evidence-panel')
   const before = (await panel.boundingBox())!.width
@@ -3659,8 +3659,8 @@ test('Dragging to resize the evidence panel persists after a restart', async ({ 
 
 test('A terminal belongs to the project, so it persists across switching sessions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫 세션')
-  await newSession(page, 'alpha', '두 번째 세션')
+  await newSession(page, 'alpha', 'first session')
+  await newSession(page, 'alpha', 'second session')
 
   await page.getByTestId('evidence-tab-terminal').click()
   await expect(page.getByTestId('evidence-terminal')).toBeVisible()
@@ -3691,7 +3691,7 @@ test('A terminal belongs to the project, so it persists across switching session
 
 test('Keyboard input goes to the shell', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-terminal').click()
   await expect(page.getByTestId('evidence-terminal')).toBeVisible()
 
@@ -3709,7 +3709,7 @@ test('Keyboard input goes to the shell', async ({ page }) => {
 
 test('The sidebar uses only one row per project (vertical space)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // The project header must not grow taller than one session row, or the list would be pushed down
   const header = (await page.getByTestId('project-header-alpha').boundingBox())!
@@ -3724,7 +3724,7 @@ test('The sidebar uses only one row per project (vertical space)', async ({ page
 
 test('Opening and closing multiple terminals (stacked vertically)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-terminal').click()
 
   // One already exists when first opened — an empty screen with just a button would add an extra step
@@ -3757,7 +3757,7 @@ test('Opening and closing multiple terminals (stacked vertically)', async ({ pag
 
 test('Resizing the left and right panels does not push the screen sideways', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Resize the sidebar width
   const sidebar = page.getByTestId('sidebar')
@@ -3796,8 +3796,8 @@ test('Typing a slash shows skills, and @ shows files', async ({ page }) => {
     m.commandState = {
       ready: true,
       commands: [
-        { name: 'review', description: '변경을 검토합니다', argumentHint: '<path>' },
-        { name: 'commit', description: '커밋합니다', argumentHint: '' },
+        { name: 'review', description: 'Reviews the changes', argumentHint: '<path>' },
+        { name: 'commit', description: 'Commits', argumentHint: '' },
       ],
     }
     m.fsState.entries[''] = [
@@ -3805,7 +3805,7 @@ test('Typing a slash shows skills, and @ shows files', async ({ page }) => {
       { name: 'store.ts', path: 'src/store.ts', isDir: false, ignored: false },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Slash — only at the very start
   await page.getByTestId('prompt-input').fill('/rev')
@@ -3819,10 +3819,10 @@ test('Typing a slash shows skills, and @ shows files', async ({ page }) => {
   await expect(page.getByTestId('autocomplete')).toBeHidden()
 
   // @ — files
-  await page.getByTestId('prompt-input').fill('이거 봐줘 @Session')
+  await page.getByTestId('prompt-input').fill('take a look at this @Session')
   await expect(page.getByTestId('autocomplete-item-0')).toContainText('SessionView.tsx')
   await page.getByTestId('prompt-input').press('Enter')
-  await expect(page.getByTestId('prompt-input')).toHaveValue('이거 봐줘 @src/SessionView.tsx ')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('take a look at this @src/SessionView.tsx ')
 })
 
 test('When skills have not loaded yet, it does not claim there are none', async ({ page }) => {
@@ -3831,7 +3831,7 @@ test('When skills have not loaded yet, it does not claim there are none', async 
     // Right after creating a session, the CLI is still starting up and cannot be queried yet
     ;(window as any).__mock.commandState = { ready: false, commands: [] }
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await page.getByTestId('prompt-input').fill('/')
   await expect(page.getByTestId('autocomplete-loading')).toContainText('Loading skills')
@@ -3845,9 +3845,9 @@ test('A slash in the middle of a sentence is not treated as a command', async ({
       commands: [{ name: 'review', description: '', argumentHint: '' }],
     }
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
-  await page.getByTestId('prompt-input').fill('경로는 src/rev 입니다')
+  await page.getByTestId('prompt-input').fill('the path is src/rev')
   await expect(page.getByTestId('autocomplete')).toBeHidden()
 })
 
@@ -3876,7 +3876,7 @@ test("The new-session window's scroll stays put even while session events keep a
       sessions: Array.from({ length: 30 }, (_, i) => ({
         externalId: `ext-${i}`,
         tool: 'claude',
-        title: `지난 대화 ${i}`,
+        title: `past conversation ${i}`,
         updatedAt: Date.now() - i * 60_000,
         createdAt: null,
         branch: null,
@@ -3905,7 +3905,7 @@ test("The new-session window's scroll stays put even while session events keep a
           type: 'message_delta',
           sessionId: sid,
           role: 'assistant',
-          text: '진행 중… ',
+          text: 'In progress… ',
         }),
       id,
     )
@@ -3940,7 +3940,7 @@ test('Picking an already-open conversation again navigates to that session inste
         {
           externalId: 'ext-1',
           tool: 'claude',
-          title: '어제 하던 일',
+          title: "yesterday's work",
           updatedAt: Date.now(),
           createdAt: null,
           branch: null,
@@ -3949,7 +3949,7 @@ test('Picking an already-open conversation again navigates to that session inste
         },
       ],
     }
-    m.externalHistory.set('ext-1', [{ role: 'user', text: '어제 하던 일' }])
+    m.externalHistory.set('ext-1', [{ role: 'user', text: "yesterday's work" }])
   })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -3979,7 +3979,7 @@ test('Picking an already-open conversation again navigates to that session inste
  */
 test('Closing one terminal does not recreate the remaining ones', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-terminal').click()
   await page.getByTestId('terminal-add').click()
 
@@ -4149,7 +4149,7 @@ test('Two sessions cannot open the same conversation (blocked here before the to
         {
           externalId: 'ext-1',
           tool: 'claude',
-          title: '하나뿐인 대화',
+          title: 'the only conversation',
           updatedAt: Date.now(),
           createdAt: null,
           branch: null,
@@ -4158,7 +4158,7 @@ test('Two sessions cannot open the same conversation (blocked here before the to
         },
       ],
     }
-    m.externalHistory.set('ext-1', [{ role: 'user', text: '하나뿐인 대화' }])
+    m.externalHistory.set('ext-1', [{ role: 'user', text: 'the only conversation' }])
   })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -4190,7 +4190,7 @@ test('A loaded conversation shows the most recent messages first', async ({ page
         {
           externalId: 'ext-long',
           tool: 'claude',
-          title: '아주 오래된 첫 질문',
+          title: 'a very old first question',
           updatedAt: Date.now(),
           createdAt: null,
           branch: null,
@@ -4204,7 +4204,7 @@ test('A loaded conversation shows the most recent messages first', async ({ page
       'ext-long',
       Array.from({ length: 200 }, (_, i) => ({
         role: i % 2 ? 'assistant' : 'user',
-        text: i === 199 ? '가장 최신 메시지' : `옛 대화 ${i + 1}`,
+        text: i === 199 ? 'the most recent message' : `old message ${i + 1}`,
       })),
     )
   })
@@ -4217,7 +4217,7 @@ test('A loaded conversation shows the most recent messages first', async ({ page
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   // The bottom (most recent) must be visible on screen
-  await expect(page.getByTestId('chat-stream')).toContainText('가장 최신 메시지')
+  await expect(page.getByTestId('chat-stream')).toContainText('the most recent message')
 
   const atBottom = await page
     .getByTestId('chat-stream')
@@ -4227,7 +4227,7 @@ test('A loaded conversation shows the most recent messages first', async ({ page
 
 test('A conversation continued externally shows up on screen once it comes back', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // Simulate the host catching up and writing it into the store
@@ -4241,7 +4241,7 @@ test('A conversation continued externally shows up on screen once it comes back'
         seq: rows.length + 1,
         role: 'user',
         kind: 'text',
-        payload: { text: '터미널에서 한 말' },
+        payload: { text: 'said in the terminal' },
         ts: Date.now(),
       },
       {
@@ -4249,7 +4249,7 @@ test('A conversation continued externally shows up on screen once it comes back'
         seq: rows.length + 2,
         role: 'assistant',
         kind: 'text',
-        payload: { text: '터미널 답' },
+        payload: { text: 'reply from the terminal' },
         ts: Date.now(),
       },
     ])
@@ -4257,13 +4257,13 @@ test('A conversation continued externally shows up on screen once it comes back'
   }, id)
 
   // Receiving the event makes the screen re-read the store
-  await expect(page.getByTestId('chat-stream')).toContainText('터미널에서 한 말')
-  await expect(page.getByTestId('chat-stream')).toContainText('터미널 답')
+  await expect(page.getByTestId('chat-stream')).toContainText('said in the terminal')
+  await expect(page.getByTestId('chat-stream')).toContainText('reply from the terminal')
 })
 
 test('A long URL or path does not push the conversation panel sideways', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   const long = `https://example.com/${'very-long-segment'.repeat(20)}`
@@ -4272,7 +4272,7 @@ test('A long URL or path does not push the conversation panel sideways', async (
   await page.evaluate(
     ({ sid, text }) =>
       (window as any).__mock.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text }),
-    { sid: id, text: `참고: ${long}` },
+    { sid: id, text: `Note: ${long}` },
   )
   await expect(page.getByTestId('msg-assistant').last()).toBeVisible()
 
@@ -4300,7 +4300,7 @@ test('When a session cannot be woken, the reason is shown right there with a way
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // Set up a dormant session that also cannot be woken
@@ -4341,7 +4341,7 @@ test("The session list and header show each session's own tool", async ({ page }
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill('클로드 쪽 작업')
+  await page.getByTestId('prompt-input').fill("Claude's task")
   await page.getByTestId('prompt-input').press('Enter')
 
   await page.getByTestId('project-menu-alpha').click()
@@ -4351,7 +4351,7 @@ test("The session list and header show each session's own tool", async ({ page }
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill('코덱스 쪽 작업')
+  await page.getByTestId('prompt-input').fill("Codex's task")
   await page.getByTestId('prompt-input').press('Enter')
 
   // The tool is distinguished in the list
@@ -4380,10 +4380,10 @@ test('An indicator shows while waiting for a response, with a way to stop from t
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId('prompt-input').fill('something that takes a while')
   await page.getByTestId('prompt-input').press('Enter')
 
-  await page.getByTestId('prompt-input').fill('한참 걸리는 걸 해줘')
+  await page.getByTestId('prompt-input').fill('do something that takes forever')
   await page.getByTestId('send').click()
 
   // Appears the instant it is sent — it does not wait for the host's response
@@ -4403,9 +4403,9 @@ test('An indicator shows while waiting for a response, with a way to stop from t
  */
 test('Compacting looks different from waiting for a response', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '시작')
+  await newSession(page, 'alpha', 'Start')
 
-  await page.getByTestId('prompt-input').fill('대화를 정리해줘')
+  await page.getByTestId('prompt-input').fill('clean up the conversation')
   await page.getByTestId('send').click()
   await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
 
@@ -4459,7 +4459,7 @@ test('the elapsed count survives a view change — the start instant is what is 
  */
 test('A failed compaction leaves that fact visible in the conversation', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '시작')
+  await newSession(page, 'alpha', 'Start')
 
   await emitEvent(page, 0, { type: 'compaction', failed: true, reason: 'Not enough messages to compact.' })
   await expect(page.getByText('Compaction failed — Not enough messages to compact.')).toBeVisible()
@@ -4481,7 +4481,7 @@ test('The Git panel separates staged from changed and lets each file be staged i
       { path: 'src/b.ts', staged: false, status: 'M' },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await expect(page.getByTestId('evidence-group-staged')).toContainText('src/a.ts')
   await expect(page.getByTestId('evidence-group-changed')).toContainText('src/b.ts')
@@ -4498,13 +4498,13 @@ test('Git history connects commits with lines', async ({ page }) => {
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.gitState.commits = [
-      { sha: 'm', shortSha: 'mmmmmmm', subject: '병합', author: 'a', when: 0, parents: ['x', 'y'] },
-      { sha: 'x', shortSha: 'xxxxxxx', subject: '본류', author: 'a', when: 0, parents: ['z'] },
-      { sha: 'y', shortSha: 'yyyyyyy', subject: '가지', author: 'a', when: 0, parents: ['z'] },
-      { sha: 'z', shortSha: 'zzzzzzz', subject: '뿌리', author: 'a', when: 0, parents: [] },
+      { sha: 'm', shortSha: 'mmmmmmm', subject: 'Merge', author: 'a', when: 0, parents: ['x', 'y'] },
+      { sha: 'x', shortSha: 'xxxxxxx', subject: 'Trunk', author: 'a', when: 0, parents: ['z'] },
+      { sha: 'y', shortSha: 'yyyyyyy', subject: 'Branch', author: 'a', when: 0, parents: ['z'] },
+      { sha: 'z', shortSha: 'zzzzzzz', subject: 'Root', author: 'a', when: 0, parents: [] },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   // The graph lives in the History tab — the Git tab's strip was moved off, covering its neighbor
   // during the split
   await page.getByTestId('evidence-tab-history').click()
@@ -4524,12 +4524,12 @@ test('Git history connects commits with lines', async ({ page }) => {
  */
 test('A working session has a spinning marker border', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   const mark = page.getByTestId('tool-mark-claude')
   await expect(mark).toHaveAttribute('data-state', /idle|waiting_input|working/)
 
-  await page.getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId('prompt-input').fill('something that takes a while')
   await page.getByTestId('send').click()
 
   await expect(mark).toHaveAttribute('data-state', 'working')
@@ -4545,7 +4545,7 @@ test('The model list comes from what the tool reports, and effort only appears f
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   const menu = page.getByTestId('settings-menu')
 
@@ -4591,7 +4591,7 @@ test('Speed (Fast) only appears for models that offer a tier, and the chosen val
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Tier belongs to codex — create a codex session (the session menu has no way to switch tools)
   await page.getByTestId('project-menu-alpha').click()
@@ -4627,7 +4627,7 @@ test('Speed (Fast) only appears for models that offer a tier, and the chosen val
 /** Switching models resets effort — the steps differ per model, so the old value must not persist */
 test('Switching models resets the reasoning effort', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await pickSetting(page, 'settings-model-fable')
   await pickSetting(page, 'settings-effort-max')
@@ -4652,7 +4652,7 @@ test('Switching models resets the reasoning effort', async ({ page }) => {
  */
 test('The chosen model and permission stay visible even after restarting the app', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await pickSetting(page, 'settings-model-fable')
   await pickSetting(page, 'settings-effort-high')
@@ -4680,7 +4680,7 @@ test('The file tree folder arrow changes direction when opened and closed', asyn
     m.fsState.entries[''] = [{ name: 'src', path: 'src', isDir: true, ignored: false }]
     m.fsState.entries['src'] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
 
   const dir = page.getByTestId('dir-src').locator('svg')
@@ -4723,12 +4723,12 @@ test('The title sits vertically centered inside the top bar', async ({ page }) =
  */
 test('The composer height returns to one line after sending a message', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   const input = page.getByTestId('prompt-input')
   const oneLine = (await input.boundingBox())!.height
 
-  await input.fill('첫 줄\n둘째 줄\n셋째 줄\n넷째 줄')
+  await input.fill('line one\nline two\nline three\nline four')
   const grown = (await input.boundingBox())!.height
   expect(grown).toBeGreaterThan(oneLine + 20)
 
@@ -4757,25 +4757,25 @@ test('A goal badge appears in the header once a goal is set, and disappears once
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.evaluate((sid: string) => {
     ;(window as any).__store.getState().dispatchEvent({
       type: 'goal',
       sessionId: sid,
-      goal: { objective: '테스트 전부 초록', status: 'active', iterations: 3, reason: '2개 실패' },
+      goal: { objective: 'All tests green', status: 'active', iterations: 3, reason: '2 failing' },
     })
   }, id)
   await expect(page.getByTestId('goal-badge')).toContainText('GOAL · 3')
-  await expect(page.getByTestId('goal-badge')).toHaveAttribute('title', /테스트 전부 초록/)
+  await expect(page.getByTestId('goal-badge')).toHaveAttribute('title', /All tests green/)
 
   // codex's vocabulary (blocked, etc.) passes through unchanged
   await page.evaluate((sid: string) => {
     ;(window as any).__store.getState().dispatchEvent({
       type: 'goal',
       sessionId: sid,
-      goal: { objective: '빌드 초록', status: 'blocked' },
+      goal: { objective: 'Build green', status: 'blocked' },
     })
   }, id)
   await expect(page.getByTestId('goal-badge')).toContainText('GOAL · blocked')
@@ -4796,7 +4796,7 @@ test('Pressing Enter on /usage opens the usage screen instead of sending it — 
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // It appears in autocomplete alongside session commands — the hint states its origin
@@ -4818,7 +4818,7 @@ test('Pressing Enter on /usage opens the usage screen instead of sending it — 
   await expect(page.getByTestId('usage-drop')).toBeHidden()
 
   // Anything following the name means it is talking to the session — it goes out as an ordinary message
-  await page.getByTestId('prompt-input').fill('/usage 지난주 요약해줘')
+  await page.getByTestId('prompt-input').fill('/usage summarize last week')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('usage-drop')).toBeHidden()
   await expect.poll(() => page.evaluate(userCount, id)).toBe(before + 1)
@@ -4838,7 +4838,7 @@ test('The composer height also follows a value inserted by autocomplete', async 
       { name: 'a'.repeat(120) + '.ts', path: 'src/' + 'a'.repeat(120) + '.ts', isDir: false, ignored: false },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   const input = page.getByTestId('prompt-input')
 
@@ -4859,15 +4859,15 @@ test('The composer height also follows a value inserted by autocomplete', async 
  */
 test("Scrolling pins the current turn's own message to the top", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   const input = page.getByTestId('prompt-input')
   // Long enough to create scroll — too short and there would be nothing to scroll past
-  await input.fill('첫 번째 질문\n' + '내용\n'.repeat(40))
+  await input.fill('first question\n' + 'content\n'.repeat(40))
   await page.getByTestId('send').click()
   // The second one is long too — the content below must exceed one screen for the first to count
   // as "fully scrolled past"
-  await input.fill('두 번째 질문\n' + '내용\n'.repeat(40))
+  await input.fill('second question\n' + 'content\n'.repeat(40))
   await page.getByTestId('send').click()
 
   const stream = page.getByTestId('chat-stream')
@@ -4904,7 +4904,7 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
   */
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
   await expect(page.getByTestId('sticky-user')).toBeVisible()
-  await expect(page.getByTestId('sticky-user')).toContainText(/작업|첫 번째 질문/)
+  await expect(page.getByTestId('sticky-user')).toContainText(/task|first question/)
 
   /*
     **The banner shares the same position and the same width as the chat bubble.**
@@ -4968,14 +4968,14 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
   await stream.evaluate((el) => (el.scrollTop = 0))
   const q1End = await stream.evaluate((el) => {
     const rows = [...el.querySelectorAll('div[data-index]')] as HTMLElement[]
-    const row = rows.find((r) => (r.textContent ?? '').includes('첫 번째 질문'))!
+    const row = rows.find((r) => (r.textContent ?? '').includes('first question'))!
     const y = new DOMMatrixReadOnly(getComputedStyle(row).transform).m42
     return y + row.offsetHeight
   })
   // +80: comfortably covers the banner taking up space in the flow and pushing the list down by
   // its own height
   await stream.evaluate((el, y) => (el.scrollTop = y + 80), q1End)
-  await expect(page.getByTestId('sticky-user')).toContainText('첫 번째 질문')
+  await expect(page.getByTestId('sticky-user')).toContainText('first question')
   // When the next user question rises to the banner's spot, the banner retreats upward before it
   // covers that question.
   await expect(page.getByTestId('sticky-user').locator('[data-obscured="true"]')).toHaveClass(
@@ -4987,7 +4987,7 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
     .poll(() =>
       stream.evaluate((el) => {
         const rows = [...el.querySelectorAll('div[data-index]')] as HTMLElement[]
-        const row = rows.find((r) => (r.textContent ?? '').includes('첫 번째 질문'))
+        const row = rows.find((r) => (r.textContent ?? '').includes('first question'))
         return row ? getComputedStyle(row).visibility : 'gone'
       }),
     )
@@ -5031,7 +5031,7 @@ test('An image sent by the agent renders in the conversation — a failure state
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(
     () => (window as never as { __store: any }).__store.getState().focusedSessionId,
   )
@@ -5054,7 +5054,7 @@ test('An image sent by the agent renders in the conversation — a failure state
         mime: '',
         data: '',
         path: '/tmp/big.png',
-        note: '이미지가 너무 큽니다 (12MB)',
+        note: 'Image is too large (12MB)',
       })
     },
     { sid: id, png: PNG },
@@ -5063,7 +5063,7 @@ test('An image sent by the agent renders in the conversation — a failure state
   await expect(img).toBeVisible()
   // Checks whether it actually decoded — naturalWidth is 0 if the source is broken
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-  await expect(page.getByTestId('msg-image-missing')).toContainText('너무 큽니다')
+  await expect(page.getByTestId('msg-image-missing')).toContainText('too large')
   await expect(page.getByTestId('msg-image-missing')).toContainText('/tmp/big.png')
 
   /*
@@ -5078,7 +5078,7 @@ test('An image sent by the agent renders in the conversation — a failure state
   }, id)
   await expect(img).toBeVisible()
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-  await expect(page.getByTestId('msg-image-missing')).toContainText('너무 큽니다')
+  await expect(page.getByTestId('msg-image-missing')).toContainText('too large')
 })
 
 /** So a path never has to be memorized and typed — drag it from the tree and drop it on the composer */
@@ -5088,14 +5088,14 @@ test('Dragging from the file tree drops an @path into the composer', async ({ pa
     const m = (window as any).__mock
     m.fsState.entries[''] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-tab-files').click()
 
-  await page.getByTestId('prompt-input').fill('이거 봐줘')
+  await page.getByTestId('prompt-input').fill('take a look at this')
   await page.dragAndDrop('[data-testid="file-src/a.ts"]', '[data-testid="input-dropzone"]')
 
   // Must be the same shape autocomplete would insert
-  await expect(page.getByTestId('prompt-input')).toHaveValue('이거 봐줘 @src/a.ts ')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('take a look at this @src/a.ts ')
 })
 
 /**
@@ -5106,7 +5106,7 @@ test('Dragging from the file tree drops an @path into the composer', async ({ pa
  */
 test('Streaming text is not duplicated even after attaching twice', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // Reproduce exactly the situation of the app reattaching (host reconnect / remount)
   await page.evaluate(async () => {
@@ -5121,12 +5121,12 @@ test('Streaming text is not duplicated even after attaching twice', async ({ pag
       type: 'message_delta',
       sessionId: s.focusedSessionId,
       role: 'assistant',
-      text: '가나다',
+      text: 'abc',
     })
   })
 
   const reply = page.getByTestId('msg-assistant').last()
-  await expect(reply).toHaveText('가나다')
+  await expect(reply).toHaveText('abc')
 })
 
 /**
@@ -5529,29 +5529,29 @@ test('Renaming a session in the sidebar sticks — the automatic name never over
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`rename-session-${id}`).click()
   const input = page.getByTestId(`session-name-input-${id}`)
-  await input.fill('가드 MCP')
+  await input.fill('Guard MCP')
   await input.press('Enter')
 
-  await expect(page.getByTestId(`session-row-${id}`)).toContainText('가드 MCP')
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('Guard MCP')
 
   // The automatic name must never overwrite it again — even when the tool reports a title, the
   // person's chosen name wins
   await emitEvent(page, 0, { type: 'session_title', title: 'This session is being continued…', auto: true })
-  await expect(page.getByTestId(`session-row-${id}`)).toContainText('가드 MCP')
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('Guard MCP')
 })
 
 test('Pressing Escape while editing the name leaves the old name unchanged', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '원래 이름')
+  await newSession(page, 'alpha', 'original name')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // Double-clicking the name is the same entry point too (the usual tab-name convention)
   await page.getByTestId(`session-row-${id}`).dblclick()
   const input = page.getByTestId(`session-name-input-${id}`)
-  await input.fill('버린 이름')
+  await input.fill('abandoned name')
   await input.press('Escape')
 
-  await expect(page.getByTestId(`session-row-${id}`)).toContainText('원래 이름')
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('original name')
 })
 
 /**
@@ -5560,7 +5560,7 @@ test('Pressing Escape while editing the name leaves the old name unchanged', asy
  */
 test('When a rename fails, the list stays unchanged and the person is told', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '원래 이름')
+  await newSession(page, 'alpha', 'original name')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // Set up a situation where the host refuses — renaming after the session has disappeared is
@@ -5571,11 +5571,11 @@ test('When a rename fails, the list stays unchanged and the person is told', asy
 
   await page.getByTestId(`session-row-${id}`).dblclick()
   const input = page.getByTestId(`session-name-input-${id}`)
-  await input.fill('새 이름')
+  await input.fill('new name')
   await input.press('Enter')
 
   await expect(page.getByTestId('toast')).toContainText('Could not rename')
-  await expect(page.getByTestId(`session-row-${id}`)).toContainText('원래 이름')
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('original name')
 })
 
 /** The composer's attach and send are the same kind of part, so their size and height must match */
@@ -5698,7 +5698,7 @@ test("A grid panel's composer is not pushed out even as the conversation grows l
     const items = Array.from({ length: 60 }, (_, i) => ({
       kind: i % 2 ? 'assistant' : 'user',
       seq: 1000 + i,
-      text: `긴 대화 ${i}`,
+      text: `long conversation ${i}`,
     }))
     store.setState({ chat: { ...store.getState().chat, [sid]: items } })
   }, id)
@@ -5767,7 +5767,7 @@ test('Opening a grid panel shows the most recent conversation first', async ({ p
     const items = Array.from({ length: 80 }, (_, i) => ({
       kind: i % 2 ? 'assistant' : 'user',
       seq: 1000 + i,
-      text: `긴 대화 ${i} `.repeat(6),
+      text: `long conversation ${i} `.repeat(6),
     }))
     store.setState({ chat: { ...store.getState().chat, [sid]: items } })
   }, id)
@@ -5851,7 +5851,7 @@ test('Conversation text can be selected inside a grid panel', async ({ page }) =
     store.setState({
       chat: {
         ...store.getState().chat,
-        [sid]: [{ kind: 'assistant', seq: 1, text: '고를 수 있어야 하는 문장' }],
+        [sid]: [{ kind: 'assistant', seq: 1, text: 'a sentence that must be selectable' }],
       },
     })
   }, id)
@@ -5918,7 +5918,7 @@ test('A session never opened before still shows its conversation in the grid', a
         seq: 1,
         role: 'user',
         kind: 'text',
-        payload: { text: '저장된 옛 질문' },
+        payload: { text: 'a saved old question' },
         ts: Date.now(),
       },
       {
@@ -5926,7 +5926,7 @@ test('A session never opened before still shows its conversation in the grid', a
         seq: 2,
         role: 'assistant',
         kind: 'text',
-        payload: { text: '저장된 옛 답' },
+        payload: { text: 'a saved old answer' },
         ts: Date.now(),
       },
     ])
@@ -5940,7 +5940,7 @@ test('A session never opened before still shows its conversation in the grid', a
   await page.evaluate((sid) => (window as any).__store.getState().setGridPanels([sid]), id)
   await page.getByTestId('grid-button').click()
 
-  await expect(page.getByTestId(`grid-panel-${id}`)).toContainText('저장된 옛 답')
+  await expect(page.getByTestId(`grid-panel-${id}`)).toContainText('a saved old answer')
 })
 
 /**
@@ -6004,7 +6004,7 @@ test('An unfinished draft does not follow the wrong session', async ({ page }) =
   const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.getByTestId(`session-row-${a}`).click()
-  await page.getByTestId('prompt-input').fill('A에게 하려던 말')
+  await page.getByTestId('prompt-input').fill('what I meant to say to A')
 
   // B's composer must be empty
   await page.getByTestId(`session-row-${b}`).click()
@@ -6012,7 +6012,7 @@ test('An unfinished draft does not follow the wrong session', async ({ page }) =
 
   // Returning to A, the unfinished draft must still be there
   await page.getByTestId(`session-row-${a}`).click()
-  await expect(page.getByTestId('prompt-input')).toHaveValue('A에게 하려던 말')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('what I meant to say to A')
 })
 
 /**
@@ -6026,13 +6026,13 @@ test('A draft in the grid survives switching screens and coming back', async ({ 
 
   await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="grid-button"]')
   const panel = page.getByTestId(`grid-panel-${id}`)
-  await panel.getByTestId('prompt-input').fill('그리드에서 쓰던 글')
+  await panel.getByTestId('prompt-input').fill('text being written in the grid')
 
   await page.getByTestId(`session-row-${id}`).click()
-  await expect(page.getByTestId('prompt-input')).toHaveValue('그리드에서 쓰던 글')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('text being written in the grid')
 
   await page.getByTestId('grid-button').click()
-  await expect(panel.getByTestId('prompt-input')).toHaveValue('그리드에서 쓰던 글')
+  await expect(panel.getByTestId('prompt-input')).toHaveValue('text being written in the grid')
 })
 
 /**
@@ -6300,7 +6300,7 @@ test("The orchestrator's session never joins the project list", async ({ page })
  */
 test('In the orchestrator, @ picks a session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'readme 담당')
+  await newSession(page, 'alpha', 'readme owner')
   await page.getByTestId('orchestrator-button').click()
   // The session is born at the first message (#63)
   await page.getByTestId('orchestrator-input').fill('hello')
@@ -6425,8 +6425,8 @@ test('A message inserted by someone else also appears in the conversation', asyn
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
-  await emitEvent(page, 0, { type: 'user_message', seq: 991, text: '오케스트레이터가 시킨 일' })
-  await expect(page.getByTestId('chat-stream')).toContainText('오케스트레이터가 시킨 일')
+  await emitEvent(page, 0, { type: 'user_message', seq: 991, text: 'work the orchestrator assigned' })
+  await expect(page.getByTestId('chat-stream')).toContainText('work the orchestrator assigned')
 })
 
 /**
@@ -6446,10 +6446,10 @@ test('A message instructed by the orchestrator carries an origin label, and it s
   await emitEvent(page, 0, {
     type: 'user_message',
     seq: 991,
-    text: '릴리즈 노트를 정리해줘',
-    from: { sessionId: 'orc-x', name: '지휘 세션' },
+    text: 'clean up the release notes',
+    from: { sessionId: 'orc-x', name: 'coordinator session' },
   })
-  await expect(page.getByTestId('msg-user-from')).toContainText('지휘 세션')
+  await expect(page.getByTestId('msg-user-from')).toContainText('coordinator session')
 
   // Restart leg: discard the in-memory conversation and force-read it back from the transcript
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -6458,7 +6458,7 @@ test('A message instructed by the orchestrator carries an origin label, and it s
     store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
     return store.getState().loadHistory(sid)
   }, id)
-  await expect(page.getByTestId('msg-user-from')).toContainText('지휘 세션')
+  await expect(page.getByTestId('msg-user-from')).toContainText('coordinator session')
 })
 
 /**
@@ -6472,20 +6472,20 @@ test("An instructed message is not absorbed even when the person's identical sen
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
-  await page.getByTestId('prompt-input').fill('같은 문장')
+  await page.getByTestId('prompt-input').fill('the same sentence')
   await page.getByTestId('send').click()
   await emitEvent(page, 0, {
     type: 'user_message',
     seq: 993,
-    text: '같은 문장',
-    from: { sessionId: 'orc-x', name: '지휘 세션' },
+    text: 'the same sentence',
+    from: { sessionId: 'orc-x', name: 'coordinator session' },
   })
 
   // Both the human bubble and the origin-labeled bubble must remain
   await expect(page.getByTestId('msg-user-from')).toBeVisible()
   const counts = await page.evaluate(() => {
     const st = (window as any).__store.getState()
-    const items = st.chat[st.focusedSessionId].filter((i: any) => i.kind === 'user' && i.text === '같은 문장')
+    const items = st.chat[st.focusedSessionId].filter((i: any) => i.kind === 'user' && i.text === 'the same sentence')
     return { total: items.length, marked: items.filter((i: any) => i.from).length }
   })
   expect(counts).toEqual({ total: 2, marked: 1 })
@@ -6501,10 +6501,10 @@ test("codex's reasoning summary shows as a gray block and survives a restore", a
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
-  await emitEvent(page, 0, { type: 'reasoning_delta', text: '**경로 제약을 검토 중**' })
-  await emitEvent(page, 0, { type: 'reasoning_delta', text: '\n\n**최소 횟수 확인**' })
-  await expect(page.getByTestId('msg-reasoning')).toContainText('경로 제약을 검토 중')
-  await expect(page.getByTestId('msg-reasoning')).toContainText('최소 횟수 확인')
+  await emitEvent(page, 0, { type: 'reasoning_delta', text: '**Reviewing path constraints**' })
+  await emitEvent(page, 0, { type: 'reasoning_delta', text: '\n\n**Checking the minimum count**' })
+  await expect(page.getByTestId('msg-reasoning')).toContainText('Reviewing path constraints')
+  await expect(page.getByTestId('msg-reasoning')).toContainText('Checking the minimum count')
 
   // Restore leg: discard the in-memory conversation and force-read it back from the transcript
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -6513,7 +6513,7 @@ test("codex's reasoning summary shows as a gray block and survives a restore", a
     store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
     return store.getState().loadHistory(sid)
   }, id)
-  await expect(page.getByTestId('msg-reasoning')).toContainText('경로 제약을 검토 중')
+  await expect(page.getByTestId('msg-reasoning')).toContainText('Reviewing path constraints')
 })
 
 test("claude's thinking shows as a quantity — Thinking · ~N tokens, and disappears when the turn ends", async ({
@@ -6550,20 +6550,20 @@ test("codex's plan shows as a checklist, updates replace the snapshot, and it di
   await emitEvent(page, 0, {
     type: 'plan_update',
     steps: [
-      { text: '명령 실행 준비', status: 'inProgress' },
-      { text: '명령 실행', status: 'pending' },
+      { text: 'Prepare to run the command', status: 'inProgress' },
+      { text: 'Run the command', status: 'pending' },
     ],
   })
   await expect(page.getByTestId('activity-plan')).toBeVisible()
   await expect(page.getByTestId('plan-step-0')).toHaveAttribute('data-status', 'inProgress')
-  await expect(page.getByTestId('plan-step-1')).toContainText('명령 실행')
+  await expect(page.getByTestId('plan-step-1')).toContainText('Run the command')
 
   // An update is a full snapshot replacement, not delta merging
   await emitEvent(page, 0, {
     type: 'plan_update',
     steps: [
-      { text: '명령 실행 준비', status: 'completed' },
-      { text: '명령 실행', status: 'inProgress' },
+      { text: 'Prepare to run the command', status: 'completed' },
+      { text: 'Run the command', status: 'inProgress' },
     ],
   })
   await expect(page.getByTestId('plan-step-0')).toHaveAttribute('data-status', 'completed')
@@ -6614,16 +6614,16 @@ test('My own sent message does not render twice', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
-  await page.getByTestId('prompt-input').fill('같은 말')
+  await page.getByTestId('prompt-input').fill('the same words')
   await page.getByTestId('send').click()
   // The host reports "that message was added" — since it is already drawn, this must only
   // confirm it
-  await emitEvent(page, 0, { type: 'user_message', seq: 992, text: '같은 말' })
+  await emitEvent(page, 0, { type: 'user_message', seq: 992, text: 'the same words' })
 
   const count = await page.evaluate(() => {
     const st = (window as any).__store.getState()
     const id = st.focusedSessionId
-    return st.chat[id].filter((i: any) => i.kind === 'user' && i.text === '같은 말').length
+    return st.chat[id].filter((i: any) => i.kind === 'user' && i.text === 'the same words').length
   })
   expect(count).toBe(1)
 })
@@ -6902,7 +6902,7 @@ test('Settings opens directly from the top bar', async ({ page }) => {
  */
 test('Permission preset names are never squeezed out by their descriptions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫 지시')
+  await newSession(page, 'alpha', 'first instruction')
   await page.getByTestId('settings-open').click()
   await expect(page.getByTestId('settings-menu')).toBeVisible()
   for (const v of ['safe', 'normal', 'auto']) {
@@ -7014,20 +7014,20 @@ test('Moving away and back does not make a past completion blow again', async ({
  */
 const QUESTIONS = [
   {
-    question: '점심 뭐 먹을까?',
-    header: '점심',
+    question: 'What should we have for lunch?',
+    header: 'Lunch',
     options: [
-      { label: '김밥', description: '빠르다' },
-      { label: '라면', description: '따뜻하다' },
+      { label: 'Kimbap', description: 'Fast' },
+      { label: 'Ramen', description: 'Warm' },
     ],
     multiSelect: false,
   },
   {
-    question: '음료는?',
-    header: '음료',
+    question: 'What about something to drink?',
+    header: 'Drink',
     options: [
-      { label: '물', description: '무난하다' },
-      { label: '커피', description: '깨어난다' },
+      { label: 'Water', description: 'A safe choice' },
+      { label: 'Coffee', description: 'Wakes you up' },
     ],
     multiSelect: false,
   },
@@ -7041,12 +7041,12 @@ test('Clicking an option to answer sends that answer to the session', async ({ p
   await expect(page.getByTestId('question-card')).toBeVisible()
   // The description is the basis for deciding — if it clips, this feature is dead (it actually
   // went unused for exactly that reason)
-  await expect(page.getByTestId('question-card')).toContainText('따뜻하다')
+  await expect(page.getByTestId('question-card')).toContainText('Warm')
 
-  await page.getByTestId('question-option').filter({ hasText: '라면' }).click()
+  await page.getByTestId('question-option').filter({ hasText: 'Ramen' }).click()
   await page.getByTestId('question-submit').click()
 
-  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 라면')
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Ramen')
   await expect(page.getByTestId('question-card')).toHaveCount(0)
 })
 
@@ -7058,22 +7058,22 @@ test('Multiple questions split into tabs, and sending requires answering all of 
   // Multiple questions use tabs, not stacking (#8) — the second question only becomes visible by
   // switching to its own tab
   await expect(page.getByTestId('question-tabs')).toBeVisible()
-  await expect(page.getByTestId('question-card')).not.toContainText('음료는?')
+  await expect(page.getByTestId('question-card')).not.toContainText('What about something to drink?')
 
   // Sending half-answered lets the model invent the rest — so it stays locked until everything is
   // picked
-  await page.getByTestId('question-option').filter({ hasText: '김밥' }).click()
+  await page.getByTestId('question-option').filter({ hasText: 'Kimbap' }).click()
   await expect(page.getByTestId('question-submit')).toBeDisabled()
   // Which tab is still empty reads off the tab row — that is exactly why stacking was dropped
   await expect(page.getByTestId('question-tab-0')).toHaveAttribute('data-answered', 'true')
   await expect(page.getByTestId('question-tab-1')).not.toHaveAttribute('data-answered', 'true')
 
   await page.getByTestId('question-tab-1').click()
-  await page.getByTestId('question-option').filter({ hasText: '커피' }).click()
+  await page.getByTestId('question-option').filter({ hasText: 'Coffee' }).click()
   await expect(page.getByTestId('question-submit')).toBeEnabled()
   await page.getByTestId('question-submit').click()
 
-  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 김밥 | 커피')
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Kimbap | Coffee')
 })
 
 /**
@@ -7087,10 +7087,10 @@ test('Switching tabs keeps what was picked and what was being typed', async ({ p
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: QUESTIONS })
 
   await page.getByTestId('question-other').click()
-  await page.getByTestId('question-other-input').fill('쓰다 만 답')
+  await page.getByTestId('question-other-input').fill('a half-typed answer')
   await page.getByTestId('question-tab-1').click()
   await page.getByTestId('question-tab-0').click()
-  await expect(page.getByTestId('question-other-input')).toHaveValue('쓰다 만 답')
+  await expect(page.getByTestId('question-other-input')).toHaveValue('a half-typed answer')
 })
 
 /*
@@ -7105,10 +7105,10 @@ test('Picking "Other" and typing a custom answer sends exactly that', async ({ p
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
 
   await page.getByTestId('question-other').click()
-  await page.getByTestId('question-other-input').fill('둘 다 말고 국수')
+  await page.getByTestId('question-other-input').fill('Neither — noodles instead')
   await page.getByTestId('question-submit').click()
 
-  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 둘 다 말고 국수')
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Neither — noodles instead')
 })
 
 test('Picking "Other" and leaving it empty cannot be sent', async ({ page }) => {
@@ -7140,7 +7140,7 @@ test('The worktree defaults to off, and turning it on shows the branch on the se
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill('격리해서 고쳐줘')
+  await page.getByTestId('prompt-input').fill('fix it in isolation')
   await page.getByTestId('prompt-input').press('Enter')
 
   // If it stays invisible that this runs in a different directory, the person hits "why isn't my
@@ -7151,7 +7151,7 @@ test('The worktree defaults to off, and turning it on shows the branch on the se
 
 test('A session with the worktree off has no badge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '그냥 여기서 해줘')
+  await newSession(page, 'alpha', 'just do it here')
 
   await expect(page.getByTestId('worktree-badge')).toHaveCount(0)
 })
@@ -7171,7 +7171,7 @@ test('Deleting a worktree session asks first, and deletion requires opting in', 
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill('격리 세션')
+  await page.getByTestId('prompt-input').fill('isolated session')
   await page.getByTestId('prompt-input').press('Enter')
 
   // Set up uncommitted changes — the dialog must state what would be lost in that case
@@ -7203,7 +7203,7 @@ test('Deleting a worktree session asks first, and deletion requires opting in', 
 
 test('Deleting a non-worktree session never mentions worktrees', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '보통 세션')
+  await newSession(page, 'alpha', 'regular session')
 
   await page
     .getByTestId(/^session-menu-/)
@@ -7227,9 +7227,9 @@ test('Deleting a non-worktree session never mentions worktrees', async ({ page }
  */
 test('Grid: only the responding panel has a spinning border', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫째')
+  await newSession(page, 'alpha', 'first')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
-  await newSession(page, 'alpha', '둘째')
+  await newSession(page, 'alpha', 'second')
   const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.dragAndDrop(`[data-testid="session-row-${a}"]`, '[data-testid="grid-button"]')
@@ -7244,7 +7244,7 @@ test('Grid: only the responding panel has a spinning border', async ({ page }) =
   await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
 
   // Only give work to a
-  await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').fill('something that takes a while')
   await page.getByTestId(`grid-panel-${a}`).getByTestId('send').click()
 
   await expect(panelA).toHaveClass(/cc-orbit-ring/)
@@ -7441,26 +7441,26 @@ async function sendMessage(page: Page, body: string) {
  */
 test('arrow up walks back through what you sent, arrow down walks forward (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫 프롬프트')
-  await sendMessage(page, '둘째로 보낸 말')
-  await sendMessage(page, '셋째로 보낸 말')
+  await newSession(page, 'alpha', 'first prompt')
+  await sendMessage(page, 'second thing sent')
+  await sendMessage(page, 'third thing sent')
 
   const input = page.getByTestId('prompt-input')
   await input.click()
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('셋째로 보낸 말')
+  await expect(input).toHaveValue('third thing sent')
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('둘째로 보낸 말')
+  await expect(input).toHaveValue('second thing sent')
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('첫 프롬프트')
+  await expect(input).toHaveValue('first prompt')
 
   // Pressing further up from the oldest entry stays at that entry — if the cursor moved, it reads
   // as "not registering"
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('첫 프롬프트')
+  await expect(input).toHaveValue('first prompt')
 
   await input.press('ArrowDown')
-  await expect(input).toHaveValue('둘째로 보낸 말')
+  await expect(input).toHaveValue('second thing sent')
 })
 
 /**
@@ -7471,35 +7471,35 @@ test('arrow up walks back through what you sent, arrow down walks forward (#38)'
  */
 test('arrow down past the newest gives the unsent draft back (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '보낸 말')
+  await newSession(page, 'alpha', 'sent message')
 
   const input = page.getByTestId('prompt-input')
-  await input.fill('아직 안 보낸 글')
+  await input.fill('not yet sent text')
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('보낸 말')
+  await expect(input).toHaveValue('sent message')
 
   await input.press('ArrowDown')
-  await expect(input).toHaveValue('아직 안 보낸 글')
+  await expect(input).toHaveValue('not yet sent text')
 })
 
 /** Recall belongs to the current conversation — if someone else's message sat in my composer it would be sent as-is */
 test('recall does not reach into another session (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'A에게 한 말')
+  await newSession(page, 'alpha', 'what I said to A')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
-  await newSession(page, 'alpha', 'B에게 한 말')
+  await newSession(page, 'alpha', 'what I said to B')
 
   const input = page.getByTestId('prompt-input')
   await input.click()
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('B에게 한 말')
+  await expect(input).toHaveValue('what I said to B')
 
   // Switching sessions does not carry the recalled text along
   await page.getByTestId(`session-row-${a}`).click()
   await expect(input).toHaveValue('')
   await input.click()
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('A에게 한 말')
+  await expect(input).toHaveValue('what I said to A')
 })
 
 /**
@@ -7515,12 +7515,12 @@ test('the autocomplete list keeps the arrows while it is open (#38)', async ({ p
     ;(window as any).__mock.commandState = {
       ready: true,
       commands: [
-        { name: 'review', description: '변경을 검토합니다', argumentHint: '' },
-        { name: 'restart', description: '다시 시작합니다', argumentHint: '' },
+        { name: 'review', description: 'Reviews the changes', argumentHint: '' },
+        { name: 'restart', description: 'Restarts', argumentHint: '' },
       ],
     }
   })
-  await newSession(page, 'alpha', '보낸 말')
+  await newSession(page, 'alpha', 'sent message')
 
   const input = page.getByTestId('prompt-input')
   await input.fill('/re')
@@ -7545,18 +7545,18 @@ test('the autocomplete list keeps the arrows while it is open (#38)', async ({ p
  */
 test('in a multi-line draft the arrows move the caret first (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '보낸 말')
+  await newSession(page, 'alpha', 'sent message')
 
   const input = page.getByTestId('prompt-input')
-  await input.fill('첫 줄\n둘째 줄')
+  await input.fill('line one\nline two')
 
   // The caret sits at the end (= the last line) — up moves the caret
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('첫 줄\n둘째 줄')
+  await expect(input).toHaveValue('line one\nline two')
 
   // Now it is on the first line — pressing once more here brings up history
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('보낸 말')
+  await expect(input).toHaveValue('sent message')
 })
 
 /**
@@ -7569,7 +7569,7 @@ test('in a multi-line draft the arrows move the caret first (#38)', async ({ pag
  */
 test('a long wrapped line moves the caret before it recalls history (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '보낸 말')
+  await newSession(page, 'alpha', 'sent message')
 
   const input = page.getByTestId('prompt-input')
   // A single line, no newlines, wide enough to wrap the composer's width several times
@@ -7592,7 +7592,7 @@ test('a long wrapped line moves the caret before it recalls history (#38)', asyn
   // Once it reaches the very top line, history takes over from there (no matter how many times it
   // wrapped, pressing up repeatedly reaches it)
   for (let i = 0; i < rows + 1; i++) await input.press('ArrowUp')
-  await expect(input).toHaveValue('보낸 말')
+  await expect(input).toHaveValue('sent message')
 })
 
 /**
@@ -7605,7 +7605,7 @@ test('a long wrapped line moves the caret before it recalls history (#38)', asyn
  */
 test('arrows do not recall while an IME is composing (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '보낸 말')
+  await newSession(page, 'alpha', 'sent message')
 
   const input = page.getByTestId('prompt-input')
   await input.fill('ㅎ')
@@ -7616,7 +7616,7 @@ test('arrows do not recall while an IME is composing (#38)', async ({ page }) =>
 
   // Once composition ends, the same key brings up history
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('보낸 말')
+  await expect(input).toHaveValue('sent message')
 })
 
 /**
@@ -7627,15 +7627,15 @@ test('arrows do not recall while an IME is composing (#38)', async ({ page }) =>
  */
 test('a recalled multi-line message grows the composer (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '한 줄')
+  await newSession(page, 'alpha', 'one line')
 
   const input = page.getByTestId('prompt-input')
-  await sendMessage(page, '첫 줄\n둘째 줄\n셋째 줄')
+  await sendMessage(page, 'line one\nline two\nline three')
   const short = await input.evaluate((el) => el.clientHeight)
 
   await input.click()
   await input.press('ArrowUp')
-  await expect(input).toHaveValue('첫 줄\n둘째 줄\n셋째 줄')
+  await expect(input).toHaveValue('line one\nline two\nline three')
   expect(await input.evaluate((el) => el.clientHeight)).toBeGreaterThan(short)
 })
 
@@ -7688,7 +7688,7 @@ test('a finished turn moves the sidebar changed count, once per burst (#41)', as
  */
 test('granting a file edit refreshes the project count before the turn ends (#41)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await injectApproval(page, 0, { kind: 'file_edit', path: 'src/a.ts', diffPreview: '+one', multi: false })
   await page.evaluate(() => {
@@ -7717,11 +7717,11 @@ test("Committing from the narrow panel still updates the sidebar's changed count
       { path: 'src/b.ts', staged: false, status: 'M' },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await emitEvent(page, 0, { type: 'turn_complete' })
   await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
 
-  await page.getByTestId('evidence-commit-message').fill('패널에서 커밋')
+  await page.getByTestId('evidence-commit-message').fill('commit from the panel')
   await page.getByTestId('evidence-commit').click()
 
   await expect(page.getByTestId('mark-changed-alpha')).toHaveText('1')
@@ -7749,7 +7749,7 @@ test('Staging and switching branches notify the sidebar too — push does not (#
       { name: 'feature', current: false, remote: false },
     ]
   })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.getByTestId('evidence-git-full').click()
 
   await page.evaluate(() => ((window as any).__mock.gitStatusCalls = 0))
@@ -7781,7 +7781,7 @@ test('Git tab: Push remains even when clean, the list re-reads on window return,
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   await expect(page.getByTestId('evidence-clean')).toBeVisible()
   await expect(page.getByTestId('evidence-push')).toBeVisible()
@@ -7915,7 +7915,7 @@ test('Settings > Updates: check now and automatic checking (#43)', async ({ page
  */
 test('Focusing the composer wakes a dormant session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // Set up the dormant state — the focused session a restart restores is exactly this shape
@@ -7950,7 +7950,7 @@ test('Focusing the composer wakes a dormant session', async ({ page }) => {
  */
 test('Closing and restarting from the grid returns to the grid', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await page.evaluate((sid: string) => (window as any).__store.getState().setGridPanels([sid]), id)
   await page.getByTestId('grid-button').click()
@@ -8333,19 +8333,19 @@ test('Opening a PR shows a PR chip, and merging replaces it with the merged badg
 /** #75: a message carrying an attachment renders only once — since text stays exactly as sent, confirmation matches up cleanly */
 test('A message sent with an attachment renders only once', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '첫 인사')
+  await newSession(page, 'alpha', 'first greeting')
 
   // Send with an attachment — the mock echoes back a user_message with just the raw text, the
   // same as the real host
   await page.evaluate(async () => {
     const store = (window as any).__store.getState()
     const sid = Object.keys(store.sessions).find((id: string) => store.sessions[id].name !== 'Orchestrator')
-    await store.send(sid, '이 이미지 봐줘', [
+    await store.send(sid, 'take a look at this image', [
       { kind: 'image', path: '/tmp/att/shot.png', name: 'shot.png', mime: 'image/png', bytes: 10 },
     ])
   })
 
-  const bubbles = page.getByText('이 이미지 봐줘')
+  const bubbles = page.getByText('take a look at this image')
   await expect(bubbles).toHaveCount(1)
   // An attachment with no bytes lies flat as a name chip — what was sent remains visible
   await expect(page.getByTestId('msg-user-attachment')).toContainText('shot.png')
@@ -8354,7 +8354,7 @@ test('A message sent with an attachment renders only once', async ({ page }) => 
 /** An image attachment shows as a real thumbnail, and clicking opens the same zoom as an agent image */
 test('A sent image shows as itself in the bubble and zooms on click', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
 
   // An actual 1x1 PNG — fake bytes would break the <img> and fall through to the flat-chip path
   const PNG_1PX =
@@ -8365,7 +8365,7 @@ test('A sent image shows as itself in the bubble and zooms on click', async ({ p
     buffer: Buffer.from(PNG_1PX, 'base64'),
   })
   await expect(page.getByTestId('attachment-list')).toContainText('pixel.png')
-  await page.getByTestId('prompt-input').fill('이거 봐줘')
+  await page.getByTestId('prompt-input').fill('take a look at this')
   await page.getByTestId('send').click()
 
   const thumb = page.getByTestId('msg-user-attachment')
@@ -8437,7 +8437,7 @@ test('Deleting a project: unlocks only by typing the name, and the file checkbox
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '무슨 일이든')
+  await newSession(page, 'alpha', 'any task at all')
 
   // 1. The menu button stays hidden (present in the DOM, invisible on screen — it appears on
   //    hover/focus). Since creating the session just clicked this button, move the pointer away
@@ -8513,7 +8513,7 @@ test('The orchestrator is still the orchestrator screen when entered via the inb
 
   // Set up the orchestrator and put it into waiting-for-input
   await page.getByTestId('orchestrator-button').click()
-  await page.getByTestId('orchestrator-input').fill('상태 좀 보여줘')
+  await page.getByTestId('orchestrator-input').fill('show me the status')
   await page.getByTestId('orchestrator-input').press('Enter')
   const orc = await page.evaluate(
     () => [...(window as any).__mock.sessions.values()].find((s: any) => s.projectId === null).id,
@@ -8523,7 +8523,7 @@ test('The orchestrator is still the orchestrator screen when entered via the inb
   }, orc)
 
   // While looking elsewhere — switch over to the session screen
-  await newSession(page, 'alpha', '딴 일')
+  await newSession(page, 'alpha', 'something else')
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 
   // Come back via the top bar's waiting list
@@ -8564,7 +8564,7 @@ test('Control rail: inline replies for my turn, notifications, and the toggle al
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '레일 시험')
+  await newSession(page, 'alpha', 'rail test')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   // End the turn to put the session into "my turn" — end only after confirming working (to avoid
   // reversing event order)
@@ -8583,7 +8583,7 @@ test('Control rail: inline replies for my turn, notifications, and the toggle al
   // A row appears for my turn, and an inline reply in that row reaches the session — turning the
   // gears without ever opening the session
   await expect(page.getByTestId(`rail-turn-${id}`)).toBeVisible()
-  await page.getByTestId(`rail-input-${id}`).fill('이어서 진행해')
+  await page.getByTestId(`rail-input-${id}`).fill('keep going')
   await page.getByTestId(`rail-input-${id}`).press('Enter')
   await expect
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
@@ -8593,7 +8593,7 @@ test('Control rail: inline replies for my turn, notifications, and the toggle al
   // tool title bury the narrative loses the context
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
-    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '정렬 문제를 고치는 중입니다' })
+    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'Fixing the sorting issue' })
     m.emit({
       type: 'tool_call',
       sessionId: sid,
@@ -8601,7 +8601,7 @@ test('Control rail: inline replies for my turn, notifications, and the toggle al
       summary: { tool: 'Bash', title: 'pnpm verify', readOnly: false, paths: [] },
     })
   }, id)
-  await expect(page.getByTestId(`rail-running-${id}`)).toContainText('정렬 문제를 고치는 중입니다')
+  await expect(page.getByTestId(`rail-running-${id}`)).toContainText('Fixing the sorting issue')
   await expect(page.getByTestId(`rail-running-${id}`)).toContainText('Bash: pnpm verify')
 
   // An inline reply is recorded as a measured count — "is this still being used" is a number, not
@@ -8617,10 +8617,10 @@ test('Control rail: inline replies for my turn, notifications, and the toggle al
   // A machine notification — the person reads it and dismisses it
   await page.evaluate(() => {
     void (window as any).__store.getState().setAppDoc('control', {
-      notifies: [{ id: 'n1', text: '세션3이 외부 조건에 막혔습니다', priority: 'high', ts: 1 }],
+      notifies: [{ id: 'n1', text: 'Session 3 is blocked on an external condition', priority: 'high', ts: 1 }],
     })
   })
-  await expect(page.getByTestId('rail-notify-n1')).toContainText('막혔습니다')
+  await expect(page.getByTestId('rail-notify-n1')).toContainText('blocked')
   await page.getByTestId('rail-notify-dismiss-n1').click()
   await expect(page.getByTestId('rail-notify-n1')).toHaveCount(0)
 
@@ -8672,13 +8672,13 @@ test('Creating a task: rail dialog -> coordinator session -> appears in the side
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '구성원이 될 세션')
+  await newSession(page, 'alpha', 'session that will become a member')
   const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId('orchestrator-button').click()
   await page.getByTestId('rail-new-task').click()
-  await page.getByTestId('task-title').fill('스킬 구현')
-  await page.getByTestId('task-goal').fill('스킬 X를 끝까지')
+  await page.getByTestId('task-title').fill('Implement the skill')
+  await page.getByTestId('task-goal').fill('See skill X all the way through')
   await page.getByTestId(`task-member-${workerId}`).check()
   await page.getByTestId('task-create').click()
   await expect(page.getByTestId('new-task-dialog')).toBeHidden()
@@ -8693,12 +8693,12 @@ test('Creating a task: rail dialog -> coordinator session -> appears in the side
    * It used to also show up in the sidebar as the same thing under a different-looking row, so
    * both grew longer together as tasks piled up.
    */
-  await expect(page.getByTestId('rail-tasks')).toContainText('스킬 구현')
+  await expect(page.getByTestId('rail-tasks')).toContainText('Implement the skill')
   await expect(page.locator('[data-testid^="homeless-row-"]')).toHaveCount(0)
 
   // Members appear by name (2026-09-06) — a bare count did not say which sessions the task
   // belonged to
-  await expect(page.getByTestId('rail-tasks')).toContainText('구성원이 될 세션')
+  await expect(page.getByTestId('rail-tasks')).toContainText('session that will become a member')
   // Clicking the chip navigates to that session
   await page.locator(`[data-testid^="rail-task-member-"][data-testid$="-${workerId}"]`).click()
   await expect
@@ -8719,7 +8719,7 @@ test('Creating a task: rail dialog -> coordinator session -> appears in the side
  */
 test("Switching sessions does not leave the previous tool's model list behind", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'claude 세션')
+  await newSession(page, 'alpha', 'claude session')
   const claudeId = await page.evaluate(
     () => (window as never as { __store: any }).__store.getState().focusedSessionId,
   )
@@ -8757,7 +8757,7 @@ test("Switching sessions does not leave the previous tool's model list behind", 
   )
   // Open only after the screen has switched to that session — otherwise this would still be
   // opening the codex session's menu
-  await expect(page.getByTestId('session-name')).toHaveText('claude 세션')
+  await expect(page.getByTestId('session-name')).toHaveText('claude session')
   await page.getByTestId('settings-open').click()
   const menu = page.getByTestId('settings-menu')
   await expect(menu.getByTestId('settings-model-gpt-5.6-terra')).toHaveCount(0)
@@ -8807,15 +8807,15 @@ test('Being connected stays quiet, and a disconnect states itself where the donu
  */
 test('Turning off the control app moves the coordinator session down to the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '구성원이 될 세션')
+  await newSession(page, 'alpha', 'session that will become a member')
   const workerId = await page.evaluate(
     () => [...(window as never as { __mock: any }).__mock.sessions.keys()][0],
   )
 
   await page.getByTestId('orchestrator-button').click()
   await page.getByTestId('rail-new-task').click()
-  await page.getByTestId('task-title').fill('스킬 구현')
-  await page.getByTestId('task-goal').fill('스킬 X를 끝까지')
+  await page.getByTestId('task-title').fill('Implement the skill')
+  await page.getByTestId('task-goal').fill('See skill X all the way through')
   await page.getByTestId(`task-member-${workerId}`).check()
   await page.getByTestId('task-create').click()
   await expect(page.getByTestId('new-task-dialog')).toBeHidden()
@@ -8827,7 +8827,7 @@ test('Turning off the control app moves the coordinator session down to the side
   )
 
   // With its home gone, the sidebar takes it in — it must be findable and openable by name
-  await expect(page.getByTestId('homeless-sessions')).toContainText('스킬 구현')
+  await expect(page.getByTestId('homeless-sessions')).toContainText('Implement the skill')
   await page.locator('[data-testid^="homeless-row-"]').first().click()
   await expect(page.getByTestId('session-view')).toBeVisible()
 })
@@ -8845,7 +8845,7 @@ test('Opening a coordinator session shows an empty evidence panel — it does no
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '구성원이 될 세션')
+  await newSession(page, 'alpha', 'session that will become a member')
   const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   // Was viewing alpha — the evidence panel is drawing alpha
@@ -8853,8 +8853,8 @@ test('Opening a coordinator session shows an empty evidence panel — it does no
 
   await page.getByTestId('orchestrator-button').click()
   await page.getByTestId('rail-new-task').click()
-  await page.getByTestId('task-title').fill('스킬 구현')
-  await page.getByTestId('task-goal').fill('스킬 X를 끝까지')
+  await page.getByTestId('task-title').fill('Implement the skill')
+  await page.getByTestId('task-goal').fill('See skill X all the way through')
   await page.getByTestId(`task-member-${workerId}`).check()
   await page.getByTestId('task-create').click()
 
@@ -8936,7 +8936,7 @@ test("A spinning panel's border does not leak over the files/git screen", async 
  */
 test('A long error sentence does not push the conversation sideways', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   const long =
@@ -8978,11 +8978,11 @@ test('While a question is open, text typed into the composer becomes its answer 
   // States what will happen before it is submitted
   await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /answer to the question/i)
 
-  await page.getByTestId('prompt-input').fill('질문 다시 해줄래?')
+  await page.getByTestId('prompt-input').fill('can you ask that again?')
   await page.getByTestId('prompt-input').press('Enter')
 
   // The mock echoes the received answer back exactly — if it were refused, this line would not exist
-  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 질문 다시 해줄래?')
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: can you ask that again?')
   await expect(page.getByTestId('question-card')).toHaveCount(0)
 })
 
@@ -9016,10 +9016,10 @@ test('With multiple questions, sent text becomes a new turn, and a line records 
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q2', questions: QUESTIONS })
   await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /drops the question card/i)
 
-  await page.getByTestId('prompt-input').fill('알아서 해줘')
+  await page.getByTestId('prompt-input').fill('just handle it')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('chat-stream')).toContainText('Questions dropped')
-  await expect(page.getByTestId('chat-stream')).toContainText('"점심 뭐 먹을까?", "음료는?"')
+  await expect(page.getByTestId('chat-stream')).toContainText('"What should we have for lunch?", "What about something to drink?"')
 })
 
 test('A session with an open question cannot be asked for a handoff note, but record mode still works (#174)', async ({
@@ -9091,7 +9091,7 @@ test('Nothing sends while an attachment is uploading, and it goes out with the t
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
+  await newSession(page, 'alpha', 'task')
   await page.evaluate(() => {
     const w = window as any
     const save = w.__mock.agents.saveAttachment
@@ -9109,10 +9109,10 @@ test('Nothing sends while an attachment is uploading, and it goes out with the t
   await expect(page.getByTestId('attach-input')).toHaveValue('')
   await expect(page.getByTestId('attachment-uploading')).toBeVisible()
 
-  await page.getByTestId('prompt-input').fill('이것 좀 봐줘')
+  await page.getByTestId('prompt-input').fill('take a look at this')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('send')).toBeDisabled()
-  await expect(page.getByTestId('prompt-input')).toHaveValue('이것 좀 봐줘')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('take a look at this')
   expect(await page.evaluate(() => (window as any).__mock.sentAttachments.length)).toBe(0)
 
   await page.evaluate(() => (window as any).__release())

@@ -41,14 +41,14 @@ const notePathOf = (mock: MockPlatform, sessionId: string) =>
  */
 function oldRepoNote(mock: MockPlatform, sessionId: string): string {
   const path = `.centralu/handoff/${sessionId}.md`
-  mock.placeFile(path, '옛 자리의 노트')
+  mock.placeFile(path, 'note from the old spot')
   return path
 }
 
 /** Traces of a handoff file being newly placed or cleared from the user's repository (#142) — there must be nothing but the old note */
 const repoHandoffTraces = (mock: MockPlatform, old: string) => [
   ...Object.keys(mock.fsState.files).filter((p) => p.includes('handoff') && p !== old),
-  ...(mock.fsState.files[old] === '옛 자리의 노트' ? [] : [`${old} changed`]),
+  ...(mock.fsState.files[old] === 'note from the old spot' ? [] : [`${old} changed`]),
   ...mock.trashed.filter((p) => p.includes('handoff')),
 ]
 
@@ -355,14 +355,14 @@ describe('events arriving before session registration (U2)', () => {
     mock.sessions.set('u2-s1', sessionInfo('u2-s1'))
 
     // The event arrived before registration (streaming from a session already running on the host)
-    useStore.getState().dispatchEvent(delta('u2-s1', '먼저 온 출력'))
+    useStore.getState().dispatchEvent(delta('u2-s1', 'output that arrived first'))
     expect(useStore.getState().chat['u2-s1']).toBeUndefined()
 
     await useStore.getState().attach(mock)
 
     const chat = useStore.getState().chat['u2-s1']
     expect(chat).toHaveLength(1)
-    expect(chat![0]).toMatchObject({ kind: 'assistant', text: '먼저 온 출력' })
+    expect(chat![0]).toMatchObject({ kind: 'assistant', text: 'output that arrived first' })
   })
 
   it('overlapping with the createSession path still applies it only once (cleared from the pen before replay)', async () => {
@@ -386,13 +386,13 @@ describe('handling resync_required (U3)', () => {
     await useStore.getState().attach(mock)
 
     // A session was created on the host while disconnected, and event replay was reported as impossible
-    mock.sessions.set('u3-s2', sessionInfo('u3-s2', { name: '끊긴 사이 생김' }))
+    mock.sessions.set('u3-s2', sessionInfo('u3-s2', { name: 'created during the disconnect' }))
     mock.setConnectionState('resync_required')
 
     // The label logic draws everything other than `connected` as 'Disconnected' — leaving this value set would be a lie
     expect(useStore.getState().connection).toBe('connected')
     await vi.waitFor(() => expect(useStore.getState().sessions['u3-s2']).toBeDefined())
-    expect(useStore.getState().sessions['u3-s2']!.name).toBe('끊긴 사이 생김')
+    expect(useStore.getState().sessions['u3-s2']!.name).toBe('created during the disconnect')
   })
 
   it('a resync re-reads the conversation being viewed from the store (events from the gap never come again)', async () => {
@@ -447,7 +447,7 @@ describe('history cursor', () => {
   const many = (id: string, n: number) =>
     Array.from({ length: n }, (_, i) => ({
       sessionId: id, seq: i + 1, role: 'user' as const, kind: 'text' as const,
-      payload: { text: `줄 ${i + 1}` }, ts: i + 1,
+      payload: { text: `line ${i + 1}` }, ts: i + 1,
     }))
 
   it('leaving a session while shrinking the window also moves the cursor to the trim point', async () => {
@@ -482,13 +482,13 @@ describe('history cursor', () => {
     await useStore.getState().attach(mock)
 
     // The event arrived before the screen was opened — only `chat` exists, with no cursor
-    mock.emit({ sessionId: 'h3', type: 'message_delta', role: 'assistant', text: '먼저 온 말' } as never)
+    mock.emit({ sessionId: 'h3', type: 'message_delta', role: 'assistant', text: 'message that arrived first' } as never)
     await vi.waitFor(() => expect(useStore.getState().chat['h3']).toBeDefined())
     expect(useStore.getState().history['h3']).toBeUndefined()
 
     await useStore.getState().focusSession('h3')
 
-    expect(await readAll('h3')).toEqual([...Array.from({ length: 120 }, (_, i) => `줄 ${i + 1}`), '먼저 온 말'])
+    expect(await readAll('h3')).toEqual([...Array.from({ length: 120 }, (_, i) => `line ${i + 1}`), 'message that arrived first'])
   })
 })
 
@@ -771,7 +771,7 @@ describe('merging the session list on reconnect (U4)', () => {
 
     // While disconnected: one is deleted, one is renamed, one is newly created
     mock.sessions.delete('u4-gone')
-    mock.sessions.get('u4-s1')!.name = '바뀐 이름'
+    mock.sessions.get('u4-s1')!.name = 'changed name'
     mock.sessions.set('u4-new', sessionInfo('u4-new'))
 
     mock.setConnectionState('disconnected')
@@ -781,7 +781,7 @@ describe('merging the session list on reconnect (U4)', () => {
       const s = useStore.getState().sessions
       expect(s['u4-new']).toBeDefined()
       expect(s['u4-gone']).toBeUndefined()
-      expect(s['u4-s1']!.name).toBe('바뀐 이름')
+      expect(s['u4-s1']!.name).toBe('changed name')
     })
   })
 
@@ -790,15 +790,15 @@ describe('merging the session list on reconnect (U4)', () => {
     mock.sessions.set('u4-s2', sessionInfo('u4-s2'))
     await useStore.getState().attach(mock)
     // Local derived state created by an event — a value the host's list does not carry
-    useStore.getState().dispatchEvent(delta('u4-s2', '진행 중이던 답'))
+    useStore.getState().dispatchEvent(delta('u4-s2', 'reply that was in progress'))
     expect(useStore.getState().sessions['u4-s2']!.preview).not.toBe('')
     const preview = useStore.getState().sessions['u4-s2']!.preview
 
-    mock.sessions.get('u4-s2')!.name = '병합 완료 표식'
+    mock.sessions.get('u4-s2')!.name = 'merge-complete marker'
     mock.setConnectionState('disconnected')
     mock.setConnectionState('connected')
     // The name update is the proof that "the merge actually ran" — preview preservation is checked on top of that
-    await vi.waitFor(() => expect(useStore.getState().sessions['u4-s2']!.name).toBe('병합 완료 표식'))
+    await vi.waitFor(() => expect(useStore.getState().sessions['u4-s2']!.name).toBe('merge-complete marker'))
 
     expect(useStore.getState().sessions['u4-s2']!.preview).toBe(preview)
   })
@@ -914,12 +914,12 @@ describe('the instant a turn started (issue #23)', () => {
     mock.sessions.set('ws-s1', sessionInfo('ws-s1'))
     await useStore.getState().attach(mock)
 
-    useStore.getState().dispatchEvent(delta('ws-s1', '첫 글자'))
+    useStore.getState().dispatchEvent(delta('ws-s1', 'first letter'))
     const started = useStore.getState().workingSince['ws-s1']
     expect(started).toBeDefined()
     expect(useStore.getState().sessions['ws-s1']!.state).toBe('working')
 
-    useStore.getState().dispatchEvent(delta('ws-s1', ' 그리고 다음'))
+    useStore.getState().dispatchEvent(delta('ws-s1', ' and then more'))
     expect(useStore.getState().workingSince['ws-s1']).toBe(started)
   })
 
@@ -928,7 +928,7 @@ describe('the instant a turn started (issue #23)', () => {
     mock.sessions.set('ws-s2', sessionInfo('ws-s2'))
     await useStore.getState().attach(mock)
 
-    useStore.getState().dispatchEvent(delta('ws-s2', '답'))
+    useStore.getState().dispatchEvent(delta('ws-s2', 'reply'))
     expect(useStore.getState().workingSince['ws-s2']).toBeDefined()
 
     useStore.getState().dispatchEvent({ sessionId: 'ws-s2', type: 'turn_complete' } as NormalizedEvent)
@@ -952,14 +952,14 @@ describe('preventing the opening prompt from being drawn twice', () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/ip')
-    const info = await useStore.getState().createSession(p.id, { initialPrompt: '첫 지시' })
+    const info = await useStore.getState().createSession(p.id, { initialPrompt: 'first instruction' })
 
     // The host also stores and announces the opening prompt (the `user_message` in manager.createSession)
     // — the mock also announces it before the response (#172). Even if the same confirmation arrives a
     // second time (reconnect replay), it is never drawn twice
     useStore
       .getState()
-      .dispatchEvent({ type: 'user_message', sessionId: info.id, seq: 1, text: '첫 지시' } as NormalizedEvent)
+      .dispatchEvent({ type: 'user_message', sessionId: info.id, seq: 1, text: 'first instruction' } as NormalizedEvent)
 
     const users = useStore.getState().chat[info.id]!.filter((i) => i.kind === 'user')
     expect(users).toHaveLength(1)
@@ -1082,33 +1082,33 @@ describe('renaming a session (issue #5)', () => {
     mock.sessions.set('rn-s1', sessionInfo('rn-s1'))
     await useStore.getState().attach(mock)
 
-    await useStore.getState().rename('rn-s1', '  가드 MCP  ')
+    await useStore.getState().rename('rn-s1', '  Guard MCP  ')
 
-    expect(useStore.getState().sessions['rn-s1']).toMatchObject({ name: '가드 MCP', autoNamed: false })
+    expect(useStore.getState().sessions['rn-s1']).toMatchObject({ name: 'Guard MCP', autoNamed: false })
     expect(useStore.getState().toast).toBeNull()
   })
 
   it('a failure leaves the name untouched and reports it as a toast', async () => {
     const mock = new MockPlatform()
-    mock.sessions.set('rn-s2', sessionInfo('rn-s2', { name: '옛 이름' }))
+    mock.sessions.set('rn-s2', sessionInfo('rn-s2', { name: 'old name' }))
     await useStore.getState().attach(mock)
     // The host refuses — the actual path is renaming after the session has already disappeared
     mock.sessions.delete('rn-s2')
 
-    await useStore.getState().rename('rn-s2', '새 이름')
+    await useStore.getState().rename('rn-s2', 'new name')
 
-    expect(useStore.getState().sessions['rn-s2']!.name).toBe('옛 이름')
+    expect(useStore.getState().sessions['rn-s2']!.name).toBe('old name')
     expect(useStore.getState().toast).toMatch(/Could not rename/)
   })
 
   it('an empty name is never sent, and is reported right there', async () => {
     const mock = new MockPlatform()
-    mock.sessions.set('rn-s3', sessionInfo('rn-s3', { name: '옛 이름' }))
+    mock.sessions.set('rn-s3', sessionInfo('rn-s3', { name: 'old name' }))
     await useStore.getState().attach(mock)
 
     await useStore.getState().rename('rn-s3', '   ')
 
-    expect(useStore.getState().sessions['rn-s3']!.name).toBe('옛 이름')
+    expect(useStore.getState().sessions['rn-s3']!.name).toBe('old name')
     expect(useStore.getState().toast).toMatch(/empty/i)
   })
 })
@@ -1284,15 +1284,15 @@ describe('messagesToChat — restoring tool output', () => {
   })
 
   it('with several calls, they are paired in the order they were emitted — the two are never swapped', () => {
-    const items = messagesToChat([call(1), call(2), result(3, '첫째'), result(4, '둘째', false)])
+    const items = messagesToChat([call(1), call(2), result(3, 'first'), result(4, 'second', false)])
     expect(items.map((i) => (i.kind === 'tool' ? [i.result, i.ok] : null))).toEqual([
-      ['첫째', true],
-      ['둘째', false],
+      ['first', true],
+      ['second', false],
     ])
   })
 
   it('a result with no match is discarded — never creates a row that never existed', () => {
-    expect(messagesToChat([result(1, '주인 없는 출력')])).toEqual([])
+    expect(messagesToChat([result(1, 'output with no owner')])).toEqual([])
   })
 })
 
@@ -1421,10 +1421,10 @@ describe('messagesToChat — image rows (#40, second pass)', () => {
     const items = messagesToChat([
       {
         sessionId: 's1', seq: 2, role: 'system', kind: 'image', ts: 1,
-        payload: { type: 'message_image', sessionId: 's1', mime: 'image/png', data: '', path: '/tmp/b.png', note: '이미지가 정리되어 더 이상 없습니다 (총량 상한)' },
+        payload: { type: 'message_image', sessionId: 's1', mime: 'image/png', data: '', path: '/tmp/b.png', note: 'The image was cleared and no longer exists (total-size cap)' },
       },
     ])
-    expect(items[0]).toMatchObject({ kind: 'image', data: '', note: expect.stringContaining('정리') })
+    expect(items[0]).toMatchObject({ kind: 'image', data: '', note: expect.stringContaining('cleared') })
   })
 })
 
@@ -1435,11 +1435,11 @@ describe('messagesToChat — reasoning rows', () => {
       sessionId: 's1', seq, role: 'assistant' as const, kind, ts: 1,
       payload: { type: kind === 'text' ? 'message_delta' : 'reasoning_delta', sessionId: 's1', text },
     })
-    const items = messagesToChat([row(1, 'reasoning', '**경로 검토**'), row(2, 'reasoning', '**테스트 확인**'), row(3, 'text', '답')])
+    const items = messagesToChat([row(1, 'reasoning', '**Path review**'), row(2, 'reasoning', '**Test check**'), row(3, 'text', 'reply')])
     expect(items).toEqual([
-      { kind: 'reasoning', seq: 1, storedSeq: 1, text: '**경로 검토**' },
-      { kind: 'reasoning', seq: 2, storedSeq: 2, text: '**테스트 확인**' },
-      { kind: 'assistant', seq: 3, storedSeq: 3, text: '답' },
+      { kind: 'reasoning', seq: 1, storedSeq: 1, text: '**Path review**' },
+      { kind: 'reasoning', seq: 2, storedSeq: 2, text: '**Test check**' },
+      { kind: 'assistant', seq: 3, storedSeq: 3, text: 'reply' },
     ])
   })
 })
@@ -1462,7 +1462,7 @@ describe('neighboring replies are split by stored number (#77)', () => {
   async function opened(id: string) {
     const mock = new MockPlatform()
     mock.sessions.set(id, sessionInfo(id))
-    mock.messages.set(id, [ask(id, 1, '질문'), reply(id, 2, '답'), ask(id, 3, '리뷰 돌려줘'), reply(id, 4, 'Six reviews started.')])
+    mock.messages.set(id, [ask(id, 1, 'question'), reply(id, 2, 'reply'), ask(id, 3, 'Run the review'), reply(id, 4, 'Six reviews started.')])
     await useStore.getState().attach(mock)
     useStore.getState().focusSession(id)
     await vi.waitFor(() => expect(useStore.getState().history[id]).toBeDefined())
@@ -1484,24 +1484,24 @@ describe('neighboring replies are split by stored number (#77)', () => {
 
   it('chunks with the same number are gathered into one item — reasoning too', async () => {
     const mock = await opened('s77-b')
-    mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: '**경로 ' } as never)
-    mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: '검토**' } as never)
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: '**Path ' } as never)
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: 'review**' } as never)
     mock.emit(delta('s77-b', 'One review '))
     mock.emit(delta('s77-b', 'is still running.'))
     expect(shape('s77-b').slice(-2)).toEqual([
-      ['reasoning', 5, '**경로 검토**'],
+      ['reasoning', 5, '**Path review**'],
       ['assistant', 6, 'One review is still running.'],
     ])
   })
 
   it('reasoning with a different number also makes two items', async () => {
     const mock = await opened('s77-c')
-    mock.emit({ type: 'reasoning_delta', sessionId: 's77-c', text: '앞 턴의 생각' } as never)
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-c', text: "the previous turn's thought" } as never)
     mock.emit({ type: 'turn_complete', sessionId: 's77-c' } as never)
-    mock.emit({ type: 'reasoning_delta', sessionId: 's77-c', text: '새 턴의 생각' } as never)
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-c', text: "the new turn's thought" } as never)
     expect(shape('s77-c').slice(-2)).toEqual([
-      ['reasoning', 5, '앞 턴의 생각'],
-      ['reasoning', 6, '새 턴의 생각'],
+      ['reasoning', 5, "the previous turn's thought"],
+      ['reasoning', 6, "the new turn's thought"],
     ])
   })
 
@@ -1510,7 +1510,7 @@ describe('neighboring replies are split by stored number (#77)', () => {
     const mock = new MockPlatform()
     mock.sessions.set(id, sessionInfo(id))
     // Two neighboring replies already exist at the end of history
-    mock.messages.set(id, [ask(id, 1, '리뷰 돌려줘'), reply(id, 2, 'One review is still running.'), reply(id, 3, 'All six reviews are in.')])
+    mock.messages.set(id, [ask(id, 1, 'Run the review'), reply(id, 2, 'One review is still running.'), reply(id, 3, 'All six reviews are in.')])
     await useStore.getState().attach(mock)
 
     // The page is as of the moment it was requested, and the answer arrives later than a message that came after it (same condition as history cursor B)
@@ -1532,7 +1532,7 @@ describe('neighboring replies are split by stored number (#77)', () => {
     mock.emit(delta(id, 'Anything else?'))
 
     expect(shape(id)).toEqual([
-      ['user', 1, '리뷰 돌려줘'],
+      ['user', 1, 'Run the review'],
       ['assistant', 2, 'One review is still running.'],
       ['assistant', 3, 'All six reviews are in.'],
       ['assistant', 4, 'Here is the summary.'],
@@ -1559,12 +1559,12 @@ describe('a conversation item\'s identity — only a changed row becomes a new o
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
     await useStore.getState().attach(mock)
-    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: s, seq: 1, text: '질문' } as NormalizedEvent)
-    useStore.getState().dispatchEvent(delta(s, '답 '))
+    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: s, seq: 1, text: 'question' } as NormalizedEvent)
+    useStore.getState().dispatchEvent(delta(s, 'reply '))
     const before = idOf(s)
     expect(before.length).toBe(2)
 
-    useStore.getState().dispatchEvent(delta(s, '이어서'))
+    useStore.getState().dispatchEvent(delta(s, 'continuing'))
     const after = idOf(s)
     expect(after.length).toBe(2)
     expect(after[0]).toBe(before[0]) // The human message is untouched — same object
@@ -1580,7 +1580,7 @@ describe('a conversation item\'s identity — only a changed row becomes a new o
       type: 'tool_call', sessionId: s, callId: 'c1',
       summary: { tool: 'Read', title: 'a.ts', readOnly: true, paths: [] },
     } as NormalizedEvent)
-    useStore.getState().dispatchEvent(delta(s, '읽는 중'))
+    useStore.getState().dispatchEvent(delta(s, 'reading'))
     const before = idOf(s)
     expect(before.length).toBe(2)
 
@@ -1608,9 +1608,9 @@ describe('restoring written text after a send failure', () => {
     await useStore.getState().attach(mock)
     mock.sessions.delete(s) // The host refuses it (the same trick as the rename-failure test)
 
-    await useStore.getState().send(s, '날아가면 안 되는 문장')
+    await useStore.getState().send(s, 'a sentence that must not be lost')
 
-    expect(useStore.getState().drafts[s]?.text).toBe('날아가면 안 되는 문장')
+    expect(useStore.getState().drafts[s]?.text).toBe('a sentence that must not be lost')
     expect(useStore.getState().toast).toMatch(/Could not send/)
     // Still no bubble left behind that looks sent (existing behavior kept)
     expect((useStore.getState().chat[s] ?? []).some((i) => i.kind === 'user')).toBe(false)
@@ -1623,11 +1623,11 @@ describe('restoring written text after a send failure', () => {
     await useStore.getState().attach(mock)
     mock.sessions.delete(s)
 
-    const inFlight = useStore.getState().send(s, '먼저 보낸 문장')
-    useStore.getState().setDraft(s, { text: '그새 쓴 문장', attachments: [] })
+    const inFlight = useStore.getState().send(s, 'the sentence sent first')
+    useStore.getState().setDraft(s, { text: 'the sentence written meanwhile', attachments: [] })
     await inFlight
 
-    expect(useStore.getState().drafts[s]?.text).toBe('먼저 보낸 문장\n그새 쓴 문장')
+    expect(useStore.getState().drafts[s]?.text).toBe('the sentence sent first\nthe sentence written meanwhile')
   })
 
   it('a success leaves the composer untouched', async () => {
@@ -1636,7 +1636,7 @@ describe('restoring written text after a send failure', () => {
     mock.sessions.set(s, sessionInfo(s))
     await useStore.getState().attach(mock)
 
-    await useStore.getState().send(s, '잘 가는 문장')
+    await useStore.getState().send(s, 'a sentence that goes through')
 
     expect(useStore.getState().drafts[s]).toBeUndefined()
   })
@@ -1691,7 +1691,7 @@ describe('warming up grid sessions', () => {
 describe('app state (#81)', () => {
   it('ensure loads it, a broadcast triggers a re-read, and setAppDoc updates the screen first', async () => {
     const mock = new MockPlatform()
-    mock.appDocs.set('control', { notifies: [{ id: 'n1', text: '첫 알림', ts: 1 }] })
+    mock.appDocs.set('control', { notifies: [{ id: 'n1', text: 'first notification', ts: 1 }] })
     await useStore.getState().attach(mock)
 
     // First use: ensure fills it in
@@ -2080,7 +2080,7 @@ describe('handing off and starting fresh', () => {
   it('makes a new session from the note, hands on the name, and moves the original to the trash (#204)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho1')
-    mock.sessions.set('ho-s1', sessionInfo('ho-s1', { projectId: proj.id, name: '메아', model: 'gpt-5.6', tool: 'codex', externalId: 'rollout-1' }))
+    mock.sessions.set('ho-s1', sessionInfo('ho-s1', { projectId: proj.id, name: 'Mea', model: 'gpt-5.6', tool: 'codex', externalId: 'rollout-1' }))
     const old = oldRepoNote(mock, 'ho-s1')
     await useStore.getState().attach(mock)
 
@@ -2090,7 +2090,7 @@ describe('handing off and starting fresh', () => {
       expect((useStore.getState().chat['ho-s1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
     // The dying session writes its text **as the reply** (#142) — the host reads it from the record after that turn ends and places it as a file
-    const notePath = mockNote(mock, 'ho-s1', '후계자에게: 상태 요약')
+    const notePath = mockNote(mock, 'ho-s1', 'To my successor: status summary')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s1' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s1', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -2101,16 +2101,16 @@ describe('handing off and starting fresh', () => {
      * true inside the file.
      */
     expect(mock.lastCreateParams?.initialPrompt).toContain(notePath)
-    expect(mock.handoffNotes.get(notePath)).toBe('후계자에게: 상태 요약')
-    expect(mock.lastCreateParams?.initialPrompt).toContain('후계자에게: 상태 요약') // Preview
+    expect(mock.handoffNotes.get(notePath)).toBe('To my successor: status summary')
+    expect(mock.lastCreateParams?.initialPrompt).toContain('To my successor: status summary') // Preview
     // Nothing was written to or cleared from the user's repository — even the old note's location is untouched (#142)
     expect(repoHandoffTraces(mock, old)).toEqual([])
     // The full text goes into the record — the only material that can never be recreated once the predecessor is gone
     // Its id goes along too (#106) — this is how the host's cleanup knows this note still has an owner
-    expect(mock.lastCreateParams?.handoff).toEqual({ from: '메아', note: '후계자에게: 상태 요약', fromSessionId: 'ho-s1' })
+    expect(mock.lastCreateParams?.handoff).toEqual({ from: 'Mea', note: 'To my successor: status summary', fromSessionId: 'ho-s1' })
     expect(mock.lastCreateParams?.tool).toBe('codex')
     expect(mock.lastCreateParams?.model).toBe('gpt-5.6')
-    const heir = [...mock.sessions.values()].find((r) => r.name === '메아')
+    const heir = [...mock.sessions.values()].find((r) => r.name === 'Mea')
     expect(heir).toBeDefined()
     expect(heir!.id).not.toBe('ho-s1')
     // The screen's summary also shows the inherited settings immediately — if it is only in the database while the menu says Default, it reads as "never carried over" (dogfooding)
@@ -2127,7 +2127,7 @@ describe('handing off and starting fresh', () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho7')
     mock.sessions.set('ho-g1', sessionInfo('ho-g1', { projectId: proj.id }))
-    mock.sessions.set('ho-g2', sessionInfo('ho-g2', { projectId: proj.id, name: '한가운데' }))
+    mock.sessions.set('ho-g2', sessionInfo('ho-g2', { projectId: proj.id, name: 'Middle' }))
     mock.sessions.set('ho-g3', sessionInfo('ho-g3', { projectId: proj.id }))
     await mock.agents.setGridView(['ho-g1', 'ho-g2', 'ho-g3'])
     await useStore.getState().attach(mock)
@@ -2136,12 +2136,12 @@ describe('handing off and starting fresh', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-g2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mockNote(mock, 'ho-g2', '이어서 하세요')
+    mockNote(mock, 'ho-g2', 'Please continue')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-g2' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-g2', state: 'waiting_input' } as NormalizedEvent)
     await done
 
-    const heir = [...mock.sessions.values()].find((r) => r.name === '한가운데' && r.id !== 'ho-g2')!
+    const heir = [...mock.sessions.values()].find((r) => r.name === 'Middle' && r.id !== 'ho-g2')!
     // The middle panel keeps its successor in place — a panel disappearing and reappearing would scramble the arrangement (dogfooding)
     expect(useStore.getState().gridPanels).toEqual(['ho-g1', heir.id, 'ho-g3'])
     expect(useStore.getState().focusedSessionId).toBe(heir.id)
@@ -2155,7 +2155,7 @@ describe('handing off and starting fresh', () => {
   it('record mode asks the dead session nothing, and leaves the original by default (#78)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-rec')
-    mock.sessions.set('ho-r1', sessionInfo('ho-r1', { projectId: proj.id, name: '죽은 메아', tool: 'codex', state: 'error' }))
+    mock.sessions.set('ho-r1', sessionInfo('ho-r1', { projectId: proj.id, name: 'Dead Mea', tool: 'codex', state: 'error' }))
     const old = oldRepoNote(mock, 'ho-r1')
     await useStore.getState().attach(mock)
 
@@ -2174,13 +2174,13 @@ describe('handing off and starting fresh', () => {
     expect(mock.sessions.has('ho-r1')).toBe(true)
     expect(mock.externallyDeleted).not.toContain('ho-r1')
     // The name is inherited
-    expect([...mock.sessions.values()].some((r) => r.name === '죽은 메아' && r.id !== 'ho-r1')).toBe(true)
+    expect([...mock.sessions.values()].some((r) => r.name === 'Dead Mea' && r.id !== 'ho-r1')).toBe(true)
   })
 
   it('deletes nothing if the session errors while writing — destruction only follows success', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho2')
-    mock.sessions.set('ho-s2', sessionInfo('ho-s2', { projectId: proj.id, name: '메아2' }))
+    mock.sessions.set('ho-s2', sessionInfo('ho-s2', { projectId: proj.id, name: 'Mea 2' }))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-s2')
@@ -2198,14 +2198,14 @@ describe('handing off and starting fresh', () => {
   it('handing off to a different agent never carries over tool-specific settings', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho5')
-    mock.sessions.set('ho-s5', sessionInfo('ho-s5', { projectId: proj.id, name: '갈아타기', tool: 'codex', model: 'gpt-5.6', effort: 'high' }))
+    mock.sessions.set('ho-s5', sessionInfo('ho-s5', { projectId: proj.id, name: 'Switching', tool: 'codex', model: 'gpt-5.6', effort: 'high' }))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-s5', { tool: 'claude' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s5'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mockNote(mock, 'ho-s5', '노트')
+    mockNote(mock, 'ho-s5', 'note')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s5' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s5', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -2220,33 +2220,33 @@ describe('handing off and starting fresh', () => {
   it('turning off deletion leaves the old session standing — a branch, not a switch', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho6')
-    mock.sessions.set('ho-s6', sessionInfo('ho-s6', { projectId: proj.id, name: '분기' }))
+    mock.sessions.set('ho-s6', sessionInfo('ho-s6', { projectId: proj.id, name: 'Branch' }))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-s6', { deleteOld: false })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s6'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mockNote(mock, 'ho-s6', '분기 노트')
+    mockNote(mock, 'ho-s6', 'branch note')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s6' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s6', state: 'waiting_input' } as NormalizedEvent)
     await done
 
     expect(mock.sessions.has('ho-s6')).toBe(true) // The old session survives
     expect(mock.externallyDeleted).not.toContain('ho-s6')
-    expect([...mock.sessions.values()].filter((r) => r.name === '분기').length).toBe(2)
+    expect([...mock.sessions.values()].filter((r) => r.name === 'Branch').length).toBe(2)
   })
 
   it('a running turn\'s report never mixes into the top of the note — the request waits for the turn to end (measured in the Mea session)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho4')
-    mock.sessions.set('ho-s4', sessionInfo('ho-s4', { projectId: proj.id, name: '메아4', state: 'working' }))
+    mock.sessions.set('ho-s4', sessionInfo('ho-s4', { projectId: proj.id, name: 'Mea 4', state: 'working' }))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-s4')
     // The running turn has not ended yet — the prompt is never sent, only that turn's report streams in
     await new Promise((r) => setTimeout(r, 700))
-    mock.emit({ type: 'message_delta', sessionId: 'ho-s4', role: 'assistant', text: '적용했습니다: 직전 작업 보고' } as NormalizedEvent)
+    mock.emit({ type: 'message_delta', sessionId: 'ho-s4', role: 'assistant', text: 'Applied: report on the previous task' } as NormalizedEvent)
     expect((useStore.getState().chat['ho-s4'] ?? []).some((i) => i.kind === 'user')).toBe(false)
 
     // Only once the turn ends is the request finally sent
@@ -2255,14 +2255,14 @@ describe('handing off and starting fresh', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s4'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mockNote(mock, 'ho-s4', '# 1. 프로젝트와 목표')
+    mockNote(mock, 'ho-s4', '# 1. Project and objective')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s4' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s4', state: 'waiting_input' } as NormalizedEvent)
     await done
 
     // The report from the previous turn is not in the text — a handoff starting with "Applied:" was exactly that incident
-    expect(mock.lastCreateParams?.handoff?.note).toBe('# 1. 프로젝트와 목표')
-    expect(mock.lastCreateParams?.initialPrompt).not.toContain('적용했습니다')
+    expect(mock.lastCreateParams?.handoff?.note).toBe('# 1. Project and objective')
+    expect(mock.lastCreateParams?.initialPrompt).not.toContain('Applied:')
   })
 
   /*
@@ -2275,14 +2275,14 @@ describe('handing off and starting fresh', () => {
   it('even a long note never becomes a huge first message — what is handed over is a path, not the content (#102)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-big')
-    mock.sessions.set('ho-big', sessionInfo('ho-big', { projectId: proj.id, name: '오래 산 세션' }))
+    mock.sessions.set('ho-big', sessionInfo('ho-big', { projectId: proj.id, name: 'a session that lived long' }))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-big')
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-big'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    const huge = '# 1. 프로젝트와 목표\n' + '이 세션은 아주 길었고 노트도 그만큼 길다. '.repeat(20_000)
+    const huge = '# 1. Project and objective\n' + 'This session ran long, and the note is just as long. '.repeat(20_000)
     const bigPath = mockNote(mock, 'ho-big', huge)
     mock.emit({ type: 'turn_complete', sessionId: 'ho-big' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-big', state: 'waiting_input' } as NormalizedEvent)
@@ -2293,11 +2293,11 @@ describe('handing off and starting fresh', () => {
     expect(huge.length).toBeGreaterThan(500_000)
     expect(prompt.length).toBeLessThan(2_000)
     expect(prompt).toContain(bigPath)
-    expect(prompt).toContain('# 1. 프로젝트와 목표') // A preview is there
+    expect(prompt).toContain('# 1. Project and objective') // A preview is there
     // And the note is never lost — its full text lives somewhere that outlives the file (the record)
     const kept = mock.lastCreateParams?.handoff?.note ?? ''
     expect(kept).toHaveLength(huge.trim().length)
-    expect(kept.endsWith('노트도 그만큼 길다.')).toBe(true)
+    expect(kept.endsWith('the note is just as long.')).toBe(true)
   })
 
   /*
@@ -2310,19 +2310,19 @@ describe('handing off and starting fresh', () => {
   it('the note survives even if the first turn fails — nothing is ever cleared at a turn boundary (#106)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-sweep')
-    mock.sessions.set('ho-sw', sessionInfo('ho-sw', { projectId: proj.id, name: '치우기' }))
+    mock.sessions.set('ho-sw', sessionInfo('ho-sw', { projectId: proj.id, name: 'Cleanup' }))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-sw', { deleteOld: false })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-sw'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    const notePath = mockNote(mock, 'ho-sw', '읽히기 전에 사라지면 안 되는 글')
+    const notePath = mockNote(mock, 'ho-sw', 'text that must not disappear before it is read')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-sw' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-sw', state: 'waiting_input' } as NormalizedEvent)
     await done
 
-    const heir = [...mock.sessions.values()].find((r) => r.name === '치우기' && r.id !== 'ho-sw')!
+    const heir = [...mock.sessions.values()].find((r) => r.name === 'Cleanup' && r.id !== 'ho-sw')!
     // The first turn dies with a 400 — the note used to disappear right here
     mock.emit({
       type: 'error', sessionId: heir.id,
@@ -2332,7 +2332,7 @@ describe('handing off and starting fresh', () => {
     mock.emit({ type: 'turn_complete', sessionId: heir.id } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 50))
 
-    expect(mock.handoffNotes.get(notePath)).toBe('읽히기 전에 사라지면 안 되는 글')
+    expect(mock.handoffNotes.get(notePath)).toBe('text that must not disappear before it is read')
   })
 
   /*
@@ -2345,8 +2345,8 @@ describe('handing off and starting fresh', () => {
   it('two handoffs in the same project never overwrite or clear each other\'s text (#104)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-pair')
-    mock.sessions.set('ho-a', sessionInfo('ho-a', { projectId: proj.id, name: '왼쪽' }))
-    mock.sessions.set('ho-b', sessionInfo('ho-b', { projectId: proj.id, name: '오른쪽' }))
+    mock.sessions.set('ho-a', sessionInfo('ho-a', { projectId: proj.id, name: 'Left' }))
+    mock.sessions.set('ho-b', sessionInfo('ho-b', { projectId: proj.id, name: 'Right' }))
     await useStore.getState().attach(mock)
 
     // Both are started side by side — doing them one after the other would never surface this bug at all
@@ -2356,8 +2356,8 @@ describe('handing off and starting fresh', () => {
       expect((useStore.getState().chat['ho-a'] ?? []).some((i) => i.kind === 'user')).toBe(true)
       expect((useStore.getState().chat['ho-b'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    const pathA = mockNote(mock, 'ho-a', '왼쪽의 노트')
-    const pathB = mockNote(mock, 'ho-b', '오른쪽의 노트')
+    const pathA = mockNote(mock, 'ho-a', "Left's note")
+    const pathB = mockNote(mock, 'ho-b', "Right's note")
     for (const id of ['ho-a', 'ho-b']) {
       mock.emit({ type: 'turn_complete', sessionId: id } as NormalizedEvent)
       mock.emit({ type: 'state_change', sessionId: id, state: 'waiting_input' } as NormalizedEvent)
@@ -2366,22 +2366,22 @@ describe('handing off and starting fresh', () => {
 
     // Each received its own predecessor's text — when there was one filename, both received whichever one was written last
     const paramsOf = (from: string) => mock.createParamsLog.find((x) => x.handoff?.from === from)
-    expect(paramsOf('왼쪽')?.handoff?.note).toBe('왼쪽의 노트')
-    expect(paramsOf('오른쪽')?.handoff?.note).toBe('오른쪽의 노트')
-    expect(paramsOf('왼쪽')?.initialPrompt).toContain(pathA)
-    expect(paramsOf('오른쪽')?.initialPrompt).toContain(pathB)
+    expect(paramsOf('Left')?.handoff?.note).toBe("Left's note")
+    expect(paramsOf('Right')?.handoff?.note).toBe("Right's note")
+    expect(paramsOf('Left')?.initialPrompt).toContain(pathA)
+    expect(paramsOf('Right')?.initialPrompt).toContain(pathB)
 
     /*
      * Even after one successor's first turn ends, **no text disappears** (#106). While cleanup hung
      * off a turn, whichever finished first cleared away someone else's text (what #104 fixed); now not
      * even its own predecessor's text is cleared here — there is no way to tell whether it was read.
      */
-    const heirA = [...mock.sessions.values()].find((r) => r.name === '왼쪽' && r.id !== 'ho-a')!
+    const heirA = [...mock.sessions.values()].find((r) => r.name === 'Left' && r.id !== 'ho-a')!
     mock.emit({ type: 'turn_complete', sessionId: heirA.id } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 50))
     expect(pathA).not.toBe(pathB)
-    expect(mock.handoffNotes.get(pathA)).toBe('왼쪽의 노트')
-    expect(mock.handoffNotes.get(pathB)).toBe('오른쪽의 노트')
+    expect(mock.handoffNotes.get(pathA)).toBe("Left's note")
+    expect(mock.handoffNotes.get(pathB)).toBe("Right's note")
   })
 
   /*
@@ -2395,12 +2395,12 @@ describe('handing off and starting fresh', () => {
   it('a reply left by a past failure is never mistaken for a freshly written note (#104, #142)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-stale')
-    mock.sessions.set('ho-st', sessionInfo('ho-st', { projectId: proj.id, name: '오래된 자리' }))
+    mock.sessions.set('ho-st', sessionInfo('ho-st', { projectId: proj.id, name: 'an old spot' }))
     await useStore.getState().attach(mock)
 
     // A handoff that failed previously: the same request and its reply are already in the conversation
     mock.emit({ type: 'user_message', sessionId: 'ho-st', seq: 1, text: handoffPrompt() } as NormalizedEvent)
-    mockNote(mock, 'ho-st', '지난 달에 실패한 인수인계가 남긴 옛 노트')
+    mockNote(mock, 'ho-st', 'an old note left by a failed handoff last month')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
 
@@ -2415,11 +2415,11 @@ describe('handing off and starting fresh', () => {
     expect(mock.createParamsLog).toEqual([]) // No successor is born — there is nothing yet for it to receive
 
     // Only once the real note arrives does it proceed
-    mockNote(mock, 'ho-st', '방금 쓴 새 노트')
+    mockNote(mock, 'ho-st', 'a new note just written')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
     await done
-    expect(mock.lastCreateParams?.handoff?.note).toBe('방금 쓴 새 노트')
+    expect(mock.lastCreateParams?.handoff?.note).toBe('a new note just written')
   })
 
   /*
@@ -2433,10 +2433,10 @@ describe('handing off and starting fresh', () => {
   it('never misses the request\'s point even when a previously sent message has not been confirmed yet (#142)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-lag')
-    mock.sessions.set('ho-lag', sessionInfo('ho-lag', { projectId: proj.id, name: '늦은 확정' }))
+    mock.sessions.set('ho-lag', sessionInfo('ho-lag', { projectId: proj.id, name: 'late confirmation' }))
     await useStore.getState().attach(mock)
     // A person spoke first and the turn ended — the mock never sends that message's confirmation (the screen's lastSeq does not know about it)
-    await useStore.getState().send('ho-lag', '먼저 한 말')
+    await useStore.getState().send('ho-lag', 'the thing said first')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-lag' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-lag', state: 'waiting_input' } as NormalizedEvent)
 
@@ -2444,11 +2444,11 @@ describe('handing off and starting fresh', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-lag'] ?? []).filter((i) => i.kind === 'user').length).toBe(2)
     })
-    mockNote(mock, 'ho-lag', '늦은 확정의 노트')
+    mockNote(mock, 'ho-lag', "the late confirmation's note")
     mock.emit({ type: 'turn_complete', sessionId: 'ho-lag' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-lag', state: 'waiting_input' } as NormalizedEvent)
     await done
-    expect(mock.lastCreateParams?.handoff?.note).toBe('늦은 확정의 노트')
+    expect(mock.lastCreateParams?.handoff?.note).toBe("the late confirmation's note")
   })
 
   it('filters out worktree sessions — a worktree\'s lifetime is bound to its session', async () => {
@@ -2474,7 +2474,7 @@ describe('MCP server suggestions', () => {
     const mock = new MockPlatform()
     mock.sessions.set('mcp-s1', sessionInfo('mcp-s1'))
     await useStore.getState().attach(mock)
-    mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: '브라우저' })
+    mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'browser' })
 
     mock.emit({
       type: 'tool_call', sessionId: 'mcp-s1', callId: 'c1',
@@ -2483,7 +2483,7 @@ describe('MCP server suggestions', () => {
 
     await vi.waitFor(() => {
       expect(useStore.getState().mcpProposals).toEqual([
-        { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: '브라우저' },
+        { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'browser' },
       ])
     })
   })
@@ -2508,7 +2508,7 @@ describe('skill suggestions', () => {
     const mock = new MockPlatform()
     mock.sessions.set('sk-s1', sessionInfo('sk-s1'))
     await useStore.getState().attach(mock)
-    mock.skillProposalList.push({ name: 'weekly-report', content: '금요일마다 요약', why: '반복 요청' })
+    mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' })
 
     mock.emit({
       type: 'tool_call', sessionId: 'sk-s1', callId: 'c1',
@@ -2516,12 +2516,12 @@ describe('skill suggestions', () => {
     } as NormalizedEvent)
     await vi.waitFor(() => {
       expect(useStore.getState().skillProposals).toEqual([
-        { name: 'weekly-report', content: '금요일마다 요약', why: '반복 요청' },
+        { name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' },
       ])
     })
 
     await useStore.getState().resolveSkillProposal('weekly-report', true)
-    expect(mock.skillList).toEqual([{ name: 'weekly-report', content: '금요일마다 요약' }])
+    expect(mock.skillList).toEqual([{ name: 'weekly-report', content: 'a summary every Friday' }])
     expect(useStore.getState().skillProposals).toEqual([])
     expect(useStore.getState().toast).toMatch(/Skill saved/)
   })
@@ -2597,7 +2597,7 @@ describe('an event arriving before history', () => {
   const many = (id: string, n: number) =>
     Array.from({ length: n }, (_, i) => ({
       sessionId: id, seq: i + 1, role: 'user' as const, kind: 'text' as const,
-      payload: { text: `줄 ${i + 1}` }, ts: i + 1,
+      payload: { text: `line ${i + 1}` }, ts: i + 1,
     }))
   const quiet = [
     ['state_change', { type: 'state_change', state: 'idle' }],
@@ -2710,12 +2710,12 @@ describe('an event arriving before history', () => {
     useStore.getState().focusSession('a')
 
     // A streaming message arrived first — this is a row that must never be cleared
-    mock.emit(delta('d', '지금 쓰는 중'))
+    mock.emit(delta('d', 'writing right now'))
     useStore.getState().focusSession('d')
     await new Promise((r) => setTimeout(r, 20))
 
     const chat = useStore.getState().chat['d']!
-    expect(chat.map((i) => (i as { text?: string }).text)).toContain('지금 쓰는 중')
+    expect(chat.map((i) => (i as { text?: string }).text)).toContain('writing right now')
     expect(useStore.getState().history['d']).toBeDefined()
   })
 })
@@ -2850,7 +2850,7 @@ describe('a session deleted while awaited is never revived (#163)', () => {
       sessions: { [id]: { ...sessionInfo(id) } as never },
       notices: [{ sessionId: id, kind: 'done', name: id, at: 1 }, { sessionId: 'other', kind: 'done', name: 'other', at: 2 }],
       history: { [id]: { oldestSeq: 1, more: false, loading: false } },
-      drafts: { [id]: { text: '쓰던 글' } as never },
+      drafts: { [id]: { text: 'text being written' } as never },
       stickToBottom: { [id]: true },
       wakeError: { [id]: 'x' },
       wakeLocked: { [id]: true },
@@ -3125,11 +3125,11 @@ describe('a failed send returns what was written (#180)', () => {
     await useStore.getState().attach(mock)
     useStore.getState().setDraft('a180', { text: 'typed after', attachments: [] })
     vi.spyOn(mock.agents, 'answerQuestion').mockRejectedValueOnce(
-      Object.assign(new Error('그 질문은 이미 사라졌습니다'), { code: 'question_gone' }),
+      Object.assign(new Error('That question is already gone'), { code: 'question_gone' }),
     )
     await useStore.getState().send('a180', 'sqlite please')
     expect(useStore.getState().drafts['a180']!.text).toBe('sqlite please\ntyped after')
-    expect(useStore.getState().toast).toBe('그 질문은 이미 사라졌습니다')
+    expect(useStore.getState().toast).toBe('That question is already gone')
   })
 
   it('never claims the first question went out if the orchestrator failed to be born', async () => {

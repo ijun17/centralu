@@ -35,10 +35,10 @@ const commit = (author: string): GitCommit => ({
 
 describe('hasMultipleAuthors', () => {
   it('does not give up space for a name in a solo repository', () => {
-    expect(hasMultipleAuthors([commit('나'), commit('나')])).toBe(false)
+    expect(hasMultipleAuthors([commit('me'), commit('me')])).toBe(false)
   })
   it('writes it when there is someone to tell apart', () => {
-    expect(hasMultipleAuthors([commit('나'), commit('너')])).toBe(true)
+    expect(hasMultipleAuthors([commit('me'), commit('you')])).toBe(true)
   })
   it('has an answer even for an empty list (a repository with no commits)', () => {
     expect(hasMultipleAuthors([])).toBe(false)

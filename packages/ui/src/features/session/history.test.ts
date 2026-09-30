@@ -7,11 +7,11 @@ const bot = (seq: number, text: string): ChatItem => ({ kind: 'assistant', seq, 
 
 describe('collecting sent messages', () => {
   it('only my own messages, oldest first', () => {
-    expect(sentMessages([user(1, '하나'), bot(2, '답'), user(3, '둘')])).toEqual(['하나', '둘'])
+    expect(sentMessages([user(1, 'one'), bot(2, 'reply'), user(3, 'two')])).toEqual(['one', 'two'])
   })
 
   it('the same message back to back counts once — pressing the arrow key twice to move past it would look unpressed', () => {
-    expect(sentMessages([user(1, '다시'), user(2, '다시'), user(3, '그만')])).toEqual(['다시', '그만'])
+    expect(sentMessages([user(1, 'again'), user(2, 'again'), user(3, 'stop')])).toEqual(['again', 'stop'])
   })
 
   it('the same message counts again if another message comes between — that time it really was sent twice', () => {
@@ -21,25 +21,25 @@ describe('collecting sent messages', () => {
   it('tool and approval entries are not something I said', () => {
     const chat: ChatItem[] = [
       { kind: 'tool', seq: 1, tool: 'Bash', title: 'ls', readOnly: true },
-      { kind: 'mark', seq: 2, text: '압축됨' },
-      user(3, '진짜 내 말'),
+      { kind: 'mark', seq: 2, text: 'compacted' },
+      user(3, 'what I actually said'),
     ]
-    expect(sentMessages(chat)).toEqual(['진짜 내 말'])
+    expect(sentMessages(chat)).toEqual(['what I actually said'])
   })
 })
 
 describe('which line the caret is on', () => {
   it('a single line is both the first line and the last — so both up and down go to history', () => {
-    expect(onFirstLine('한 줄', 2)).toBe(true)
-    expect(onLastLine('한 줄', 2)).toBe(true)
+    expect(onFirstLine('one line', 2)).toBe(true)
+    expect(onLastLine('one line', 2)).toBe(true)
   })
 
   it('with multiple lines, only the top line goes up', () => {
-    const text = '첫 줄\n둘째 줄'
+    const text = 'line one\nline two'
     expect(onFirstLine(text, 1)).toBe(true)
-    expect(onFirstLine(text, 7)).toBe(false)
+    expect(onFirstLine(text, 13)).toBe(false)
     expect(onLastLine(text, 1)).toBe(false)
-    expect(onLastLine(text, 7)).toBe(true)
+    expect(onLastLine(text, 13)).toBe(true)
   })
 
   it('the boundary right before and after a newline', () => {
@@ -59,23 +59,23 @@ describe('which line the caret is on', () => {
 })
 
 describe('one arrow-key press', () => {
-  const history = ['가장 오래된', '가운데', '가장 최근']
+  const history = ['oldest', 'middle', 'most recent']
 
   it('pressing up for the first time recalls the most recently sent message', () => {
-    expect(stepHistory({ history, at: null, dir: -1 })).toEqual({ kind: 'recall', at: 2, text: '가장 최근' })
+    expect(stepHistory({ history, at: null, dir: -1 })).toEqual({ kind: 'recall', at: 2, text: 'most recent' })
   })
 
   it('pressing up again keeps going further back', () => {
-    expect(stepHistory({ history, at: 2, dir: -1 })).toEqual({ kind: 'recall', at: 1, text: '가운데' })
+    expect(stepHistory({ history, at: 2, dir: -1 })).toEqual({ kind: 'recall', at: 1, text: 'middle' })
   })
 
   /* Letting the caret move instead would make "history has ended" read as "the arrow key stopped working" */
   it('going further up than the oldest entry stays put', () => {
-    expect(stepHistory({ history, at: 0, dir: -1 })).toEqual({ kind: 'recall', at: 0, text: '가장 오래된' })
+    expect(stepHistory({ history, at: 0, dir: -1 })).toEqual({ kind: 'recall', at: 0, text: 'oldest' })
   })
 
   it('pressing down moves to a more recent entry', () => {
-    expect(stepHistory({ history, at: 0, dir: 1 })).toEqual({ kind: 'recall', at: 1, text: '가운데' })
+    expect(stepHistory({ history, at: 0, dir: 1 })).toEqual({ kind: 'recall', at: 1, text: 'middle' })
   })
 
   /* Losing an in-progress draft to one stray keypress is exactly the kind of loss this app has kept fixing */

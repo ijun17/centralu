@@ -2575,7 +2575,7 @@ const ChatRow = memo(function ChatRow({
           className="rounded-lg border border-edge bg-panel px-3 py-2 text-[12px] text-slate"
           data-testid="msg-image-missing"
         >
-          이미지를 표시하지 못했습니다{item.note ? ` — ${item.note}` : ''}
+          The image could not be displayed{item.note ? ` — ${item.note}` : ''}
           {item.path && <span className="readout mt-1 block truncate text-[11px]">{item.path}</span>}
         </div>
       )

@@ -821,7 +821,7 @@ export class MockPlatform implements Platform {
       if (name === 'control_create_task') {
         const members = (args.memberSessionIds as string[]) ?? []
         const id = `coord-${++this.idc}`
-        const title = String(args.title ?? '업무')
+        const title = String(args.title ?? 'Task')
         this.sessions.set(id, {
           id, projectId: null, kind: 'coordinator', tool: 'claude', externalId: null,
           name: title, autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -840,7 +840,7 @@ export class MockPlatform implements Platform {
         ]
         this.appDocs.set(appId, { ...doc, tasks })
         this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
-        return { text: `업무 "${title}"를 만들었습니다` }
+        return { text: `Created the task "${title}"` }
       }
       return { text: `mock: ${name}` }
     },
@@ -1740,7 +1740,7 @@ export class MockPlatform implements Platform {
         type: 'message_delta',
         sessionId,
         role: 'assistant',
-        text: `답 받음: ${answers.map((a) => a.answers.join('+')).join(' | ')}`,
+        text: `Answer received: ${answers.map((a) => a.answers.join('+')).join(' | ')}`,
       })
       this.emit({ type: 'turn_complete', sessionId })
     },

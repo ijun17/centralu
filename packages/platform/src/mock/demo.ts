@@ -106,8 +106,8 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   }
 
   await mock.projects.setCommands(centralu.id, [
-    { command: 'pnpm dev', label: '데브 서버' },
-    { command: 'pnpm exec vitest run', label: '유닛' },
+    { command: 'pnpm dev', label: 'Dev server' },
+    { command: 'pnpm exec vitest run', label: 'Unit' },
   ])
 
   /*
@@ -115,7 +115,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
    * for approval, waiting for a question, and asleep all need to be on screen together for
    * the sidebar, inbox and grid to show what they actually do.
    */
-  const working = await session(mock, centralu.id, 'claude', '접힌 입력창 마무리')
+  const working = await session(mock, centralu.id, 'claude', 'Finish the collapsed composer')
   /*
    * The conversation is long **enough to scroll** (requested by the person, 2026-09-12).
    *
@@ -125,8 +125,8 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
    * — closer to what this app actually receives than padding it out with made-up chatter.
    */
   talk(mock, working.id, [
-    ['user', '그리드에서 입력창이 떠오를 때 무지개 링을 덮지 않게 해줘.'],
-    ['assistant', '링은 칸의 테두리라 카드보다 위에 서야 합니다. 층 순서를 먼저 재보겠습니다.'],
+    ['user', "When the composer rises in the grid, don't let it cover the rainbow ring."],
+    ['assistant', "The ring is the panel's border, so it has to sit above the card. Let me check the stacking order first."],
   ])
   tool(mock, working.id, 'demo-a', 'Grep', 'z-index in packages/ui', [
     'packages/ui/src/styles/index.css:118:  z-index: 1;',
@@ -134,37 +134,37 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     'packages/ui/src/features/grid/GridView.tsx:238:  z-10',
   ].join('\n'))
   talk(mock, working.id, [
-    ['assistant', '링이 `z-index: 1`, 접힌 카드가 `z-20`입니다. 카드가 위에 서 있으니 아랫변이 카드에 잘립니다.'],
-    ['user', '그럼 링을 올리면 되나? 카드를 내리면 안 되고?'],
+    ['assistant', "The ring is `z-index: 1`, and the collapsed card is `z-20`. The card sits on top, so it clips the ring's bottom edge."],
+    ['user', 'So should I raise the ring? Or could you lower the card instead?'],
     [
       'assistant',
-      '카드를 내리면 대화가 카드를 덮습니다 — 카드는 떠오를 때 글 위로 올라와야 하니 z-20은 그 자리의 값입니다. 올려야 하는 쪽은 링입니다.',
+      "Lowering the card would let the conversation cover it — when it rises, the card has to sit above the text, so z-20 is the right value there. It's the ring that needs to go up.",
     ],
   ])
   tool(mock, working.id, 'demo-b', 'Edit', 'packages/ui/src/styles/index.css', '1 line changed')
   talk(mock, working.id, [
-    ['user', '고쳤으면 재서 보여줘. 눈으로 말고.'],
-    ['assistant', '칸 아랫변의 픽셀을 세로로 훑어서 링 색이 끊기는 줄이 있는지 봤습니다.'],
+    ['user', "If it's fixed, measure it and show me. Not just by eye."],
+    ['assistant', "I scanned the pixels down the panel's bottom edge to check whether the ring's color breaks anywhere."],
   ])
   tool(
     mock,
     working.id,
     'demo-c',
     'Bash',
-    'pnpm exec playwright test -g "무지개 링"',
+    'pnpm exec playwright test -g "rainbow ring"',
     [
       'Running 3 tests using 3 workers',
       '',
-      '  ✓  1 e2e/panel.spec.ts:196:1 › 접힌 입력창은 응답 중 링을 덮지 않는다 (612ms)',
-      '  ✓  2 e2e/panel.spec.ts:231:1 › 떠오른 입력창도 링을 덮지 않는다 (588ms)',
-      '  ✓  3 e2e/control-loop.spec.ts:1204:1 › 응답이 끝나면 링이 꺼진다 (497ms)',
+      '  ✓  1 e2e/panel.spec.ts:196:1 › the collapsed composer does not cover the ring during a response (612ms)',
+      '  ✓  2 e2e/panel.spec.ts:231:1 › the raised composer does not cover the ring either (588ms)',
+      '  ✓  3 e2e/control-loop.spec.ts:1204:1 › the ring turns off once the response ends (497ms)',
       '',
       '  3 passed (1.4s)',
     ].join('\n'),
   )
   talk(mock, working.id, [
-    ['assistant', '세 개 다 통과합니다. 링을 빼고 돌리면 첫 번째가 떨어지는 것도 확인했습니다 — 테스트가 진짜로 그 줄을 보고 있습니다.'],
-    ['user', '좋아. 그리고 리소스 목록 한 번 더 불러와 줄래?'],
+    ['assistant', 'All three pass. I also confirmed the first one fails with the ring removed — so the test really is watching that line.'],
+    ['user', 'Good. And can you fetch the resource list one more time?'],
   ])
   /*
    * One chunk with no line breaks — the place to check by hand whether the collapsed card's
@@ -189,8 +189,8 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     }),
   )
   talk(mock, working.id, [
-    ['assistant', '12개가 왔습니다. 접힌 카드는 세 줄에서 멈추고, 나머지는 펼쳐서 봅니다.'],
-    ['user', '이제 아래 모서리 곡선만 남았지?'],
+    ['assistant', '12 came back. The collapsed card stops at three lines; expand it to see the rest.'],
+    ['user', 'Now only the bottom corner curve is left, right?'],
   ])
   mock.emit({
     type: 'tool_call',
@@ -203,7 +203,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     type: 'message_delta',
     sessionId: working.id,
     role: 'assistant',
-    text: '`z-index: 1`이라 접힌 카드(z-20)가 아랫변을 덮고 있었습니다. 링을 위로 올리겠습니다.',
+    text: "Since it's `z-index: 1`, the collapsed card (z-20) was covering the bottom edge. I'll raise the ring above it.",
   })
   mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact' })
   mock.emit({ type: 'state_change', sessionId: working.id, state: 'working' })
@@ -222,16 +222,16 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
         type: 'plan_update',
         sessionId: working.id,
         steps: [
-          { text: '링의 층을 올린다', status: 'completed' },
-          { text: '아래 모서리를 칸과 같은 곡선으로', status: 'inProgress' },
-          { text: '떠오르는 동안 중간 자리들이 있는지 잰다', status: 'pending' },
+          { text: "Raise the ring's layer", status: 'completed' },
+          { text: "Match the bottom corner's curve to the panel's", status: 'inProgress' },
+          { text: 'Check for gaps mid-transition while it rises', status: 'pending' },
         ],
       }),
     400,
   )
 
-  const approving = await session(mock, centralu.id, 'codex', '남은 프로세스 정리')
-  talk(mock, approving.id, [['user', '고아 프로세스만 골라서 멈추는 스크립트를 돌려줘.']])
+  const approving = await session(mock, centralu.id, 'codex', 'Clean up leftover processes')
+  talk(mock, approving.id, [['user', 'Run a script that picks out only the orphaned processes and stops them.']])
   mock.emit({
     type: 'approval_request',
     sessionId: approving.id,
@@ -239,36 +239,36 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     detail: { kind: 'command', command: 'kill -TERM 40321', cwd: '/Users/you/code/centralu' },
   })
 
-  const asking = await session(mock, site.id, 'claude', '히어로 카피 고르기')
-  talk(mock, asking.id, [['user', '랜딩 히어로 문구 후보 좀 줘.']])
+  const asking = await session(mock, site.id, 'claude', 'Pick the hero copy')
+  talk(mock, asking.id, [['user', 'Give me some candidate lines for the landing hero.']])
   mock.emit({
     type: 'question_request',
     sessionId: asking.id,
     requestId: 'demo-question',
     questions: [
       {
-        question: '어느 쪽 문장으로 갈까요?',
-        header: '히어로',
+        question: 'Which one should we ship?',
+        header: 'Hero',
         multiSelect: false,
         options: [
-          { label: '지켜보지 말고 조종하세요', description: '행동을 부르는 쪽' },
-          { label: '에이전트 여럿, 화면 하나', description: '기능을 말하는 쪽' },
+          { label: 'Stop watching. Start steering.', description: 'The one that asks for something' },
+          { label: 'Many agents, one window.', description: 'The one that states the feature' },
         ],
       },
     ],
   } as NormalizedEvent)
 
-  const done = await session(mock, site.id, 'codex', '이미지 최적화')
+  const done = await session(mock, site.id, 'codex', 'Optimize images')
   talk(mock, done.id, [
-    ['user', 'public/ 밑 이미지들 용량 줄여줘.'],
-    ['assistant', '7개를 webp로 바꿨습니다. 합계 4.2MB → 890KB.'],
+    ['user', 'Shrink the size of the images under public/.'],
+    ['assistant', 'Converted 7 to webp. 4.2MB total → 890KB.'],
   ])
   mock.emit({ type: 'turn_complete', sessionId: done.id })
 
   if (scene === 'grid') {
     // The grid scene's purpose is the screen with several panels — collapsing, the ring, and reading space all show up here
-    const extra = await session(mock, centralu.id, 'claude', '릴리스 노트 정리')
-    talk(mock, extra.id, [['user', '이번 주 커밋으로 릴리스 노트 써줘.']])
+    const extra = await session(mock, centralu.id, 'claude', 'Put together the release notes')
+    talk(mock, extra.id, [['user', "Write release notes from this week's commits."]])
     mock.emit({ type: 'state_change', sessionId: extra.id, state: 'working' })
     const panels = [working.id, approving.id, asking.id, extra.id]
     await mock.agents.setGridView(panels)
@@ -583,7 +583,7 @@ function installResponder(mock: MockPlatform): void {
             type: 'message_delta',
             sessionId,
             role: 'assistant',
-            text: `“${text.slice(0, 60)}” — 데모 목이라 진짜로 하지는 않습니다. `,
+            text: `"${text.slice(0, 60)}" — this is a demo mock, so nothing actually happens here. `,
           }),
       ],
       [
@@ -593,7 +593,7 @@ function installResponder(mock: MockPlatform): void {
             type: 'message_delta',
             sessionId,
             role: 'assistant',
-            text: '대신 화면이 도는 것은 전부 진짜입니다: 스트리밍·툴 카드·끝났을 때의 바람까지.',
+            text: 'But everything the screen does is real: the streaming, the tool card, right down to the flourish when it finishes.',
           }),
       ],
       [1900, () => mock.emit({ type: 'turn_complete', sessionId })],

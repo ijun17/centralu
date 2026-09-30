@@ -183,14 +183,14 @@ describe.each([
   it('a shell command registered on a project comes back with the list (#44, label 2026-09-06)', async () => {
     const [p] = await h.platform.projects.list()
     const saved = await h.platform.projects.setCommands(p!.id, [
-      { command: 'pnpm test', label: '  테스트  ' },
+      { command: 'pnpm test', label: '  test  ' },
       { command: '   ' },
       { command: 'pnpm lint', label: '' },
     ])
     // An empty command is not saved, a label is trimmed, and an empty label means no label
-    expect(saved).toEqual([{ command: 'pnpm test', label: '테스트' }, { command: 'pnpm lint' }])
+    expect(saved).toEqual([{ command: 'pnpm test', label: 'test' }, { command: 'pnpm lint' }])
     const found = (await h.platform.projects.list()).find((x) => x.id === p!.id)
-    expect(found?.commands).toEqual([{ command: 'pnpm test', label: '테스트' }, { command: 'pnpm lint' }])
+    expect(found?.commands).toEqual([{ command: 'pnpm test', label: 'test' }, { command: 'pnpm lint' }])
 
     // Deleting also comes through the same door — sending only what remains is the new list
     await h.platform.projects.setCommands(p!.id, [{ command: 'pnpm lint' }])
@@ -211,7 +211,7 @@ describe.each([
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
     events.length = 0
-    await h.platform.agents.send(s.id, '안녕')
+    await h.platform.agents.send(s.id, 'hi')
     await waitFor(() => events.length > 0)
     expect(events.some((e) => e.sessionId === s.id)).toBe(true)
   })
@@ -219,17 +219,17 @@ describe.each([
   it('the first message becomes the session name (FR-18)', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
-    await h.platform.agents.send(s.id, 'auth 리팩터링해줘')
-    await waitFor(async () => (await h.platform.agents.listSessions()).find((x) => x.id === s.id)?.name === 'auth 리팩터링해줘')
+    await h.platform.agents.send(s.id, 'refactor auth please')
+    await waitFor(async () => (await h.platform.agents.listSessions()).find((x) => x.id === s.id)?.name === 'refactor auth please')
   })
 
   it('after a rename, the automatic name does not overwrite it', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
-    await h.platform.agents.rename(s.id, '내 세션')
-    await h.platform.agents.send(s.id, '다른 프롬프트')
+    await h.platform.agents.rename(s.id, 'my session')
+    await h.platform.agents.send(s.id, 'a different prompt')
     const found = (await h.platform.agents.listSessions()).find((x) => x.id === s.id)
-    expect(found?.name).toBe('내 세션')
+    expect(found?.name).toBe('my session')
   })
 
   it('markRead does not move backward', async () => {
@@ -244,7 +244,7 @@ describe.each([
   it('saves a message and reads it back', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
-    await h.platform.agents.send(s.id, '기록될 메시지')
+    await h.platform.agents.send(s.id, 'a message to record')
     await waitFor(async () => (await h.platform.agents.loadMessages(s.id)).length > 0)
     const msgs = await h.platform.agents.loadMessages(s.id)
     expect(msgs[0]!.role).toBe('user')

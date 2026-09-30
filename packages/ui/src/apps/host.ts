@@ -54,7 +54,7 @@ export function attachAppHost(impl: AppHostApi): void {
 
 export function appHost(): AppHostApi {
   if (!attached) {
-    throw new Error('앱 호스트가 아직 붙지 않았습니다 — attachAppHost()가 첫 렌더보다 먼저여야 합니다')
+    throw new Error('The app host is not attached yet — attachAppHost() must run before the first render')
   }
   return attached
 }

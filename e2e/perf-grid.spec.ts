@@ -73,7 +73,7 @@ async function boot(page: Page, count: number): Promise<string[]> {
       chat[id] = Array.from({ length: 200 }, (_, i) => ({
         kind: i % 2 ? 'assistant' : 'user',
         seq: 1000 + i,
-        text: `지난 대화 ${i} `.repeat(8),
+        text: `past message ${i} `.repeat(8),
       }))
     }
     store.setState({ chat })
@@ -101,7 +101,7 @@ async function streamAndMeasure(page: Page, streaming: string[], frames: number)
           gaps.push(now - last)
           last = now
           for (const id of ids) {
-            mock.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `토큰${i} ` })
+            mock.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `token${i} ` })
           }
           i++
           if (i < n) requestAnimationFrame(tick)
@@ -115,7 +115,7 @@ async function streamAndMeasure(page: Page, streaming: string[], frames: number)
        * If the screen never actually changed, frames are smooth by definition —
        * only checking that the last token is in the DOM turns this into "smooth while actually painting."
        */
-      const painted = document.body.innerText.includes(`토큰${n - 1}`)
+      const painted = document.body.innerText.includes(`token${n - 1}`)
       const store = (window as never as { __store: any }).__store
       const grew = (store.getState().chat[ids[0]!] ?? []).at(-1)?.text?.length ?? 0
 
@@ -140,13 +140,13 @@ async function streamAndMeasure(page: Page, streaming: string[], frames: number)
 
 const show = (label: string, r: Result) =>
   console.log(
-    `${label.padEnd(34)} p50=${String(r.p50).padStart(5)}ms  p95=${String(r.p95).padStart(6)}ms  max=${String(r.max).padStart(6)}ms  건너뜀=${String(r.janky).padStart(3)}/${r.frames}  heap=${r.heapMB}MB  그려짐=${r.painted}  +${r.grew}자`,
+    `${label.padEnd(34)} p50=${String(r.p50).padStart(5)}ms  p95=${String(r.p95).padStart(6)}ms  max=${String(r.max).padStart(6)}ms  skipped=${String(r.janky).padStart(3)}/${r.frames}  heap=${r.heapMB}MB  painted=${r.painted}  +${r.grew} chars`,
   )
 
 test('1 focus view (baseline)', async ({ page }) => {
   const ids = await boot(page, 1)
   await page.getByTestId(`session-row-${ids[0]}`).click()
-  show('포커스 뷰 · 1개 스트리밍', await streamAndMeasure(page, ids, 120))
+  show('Focus view · 1 streaming', await streamAndMeasure(page, ids, 120))
 })
 
 test('grid, 4 panels, all streaming', async ({ page }) => {
@@ -154,7 +154,7 @@ test('grid, 4 panels, all streaming', async ({ page }) => {
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[3]}`)).toBeVisible()
-  show('그리드 4칸 · 4개 스트리밍', await streamAndMeasure(page, ids, 120))
+  show('Grid 4 panels · 4 streaming', await streamAndMeasure(page, ids, 120))
 })
 
 test('grid, 9 panels, all streaming', async ({ page }) => {
@@ -162,7 +162,7 @@ test('grid, 9 panels, all streaming', async ({ page }) => {
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
-  show('그리드 9칸 · 9개 스트리밍', await streamAndMeasure(page, ids, 120))
+  show('Grid 9 panels · 9 streaming', await streamAndMeasure(page, ids, 120))
 })
 
 test('grid, 9 panels, only 1 streaming (the steady-state load from §5.4)', async ({ page }) => {
@@ -170,7 +170,7 @@ test('grid, 9 panels, only 1 streaming (the steady-state load from §5.4)', asyn
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
-  show('그리드 9칸 · 1개만 스트리밍', await streamAndMeasure(page, [ids[0]!], 120))
+  show('Grid 9 panels · only 1 streaming', await streamAndMeasure(page, [ids[0]!], 120))
 })
 
 test('can the person type while 9 panels are streaming', async ({ page }) => {
@@ -187,7 +187,7 @@ test('can the person type while 9 panels are streaming', async ({ page }) => {
     let i = 0
     const tick = () => {
       if (!on) return
-      for (const id of l) mock.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `토큰${i++} ` })
+      for (const id of l) mock.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `token${i++} ` })
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
@@ -197,13 +197,13 @@ test('can the person type while 9 panels are streaming', async ({ page }) => {
   const box = page.getByTestId(`grid-panel-${ids[0]}`).getByTestId('prompt-input')
   await box.click()
   const t0 = Date.now()
-  await box.pressSequentially('타자 지연 측정', { delay: 0 })
+  await box.pressSequentially('key test', { delay: 0 })
   const typed = Date.now() - t0
   const value = await box.inputValue()
 
   await page.evaluate(() => (window as never as { __stop?: () => void }).__stop?.())
-  console.log(`타자: 8글자에 ${typed}ms (글자당 ${Math.round(typed / 8)}ms), 값="${value}"`)
-  expect(value).toBe('타자 지연 측정')
+  console.log(`typing: 8 chars in ${typed}ms (${Math.round(typed / 8)}ms/char), value="${value}"`)
+  expect(value).toBe('key test')
 })
 
 /**
@@ -223,7 +223,7 @@ test('time to first open 9 panels', async ({ page }) => {
         id,
         Array.from({ length: 200 }, (_, i) => ({
           sessionId: id, seq: i + 1, role: i % 2 ? 'assistant' : 'user',
-          kind: 'text', payload: { text: `저장된 대화 ${i} `.repeat(8) }, ts: 0,
+          kind: 'text', payload: { text: `saved message ${i} `.repeat(8) }, ts: 0,
         })),
       )
     }
@@ -234,14 +234,14 @@ test('time to first open 9 panels', async ({ page }) => {
 
   const t0 = Date.now()
   await page.getByTestId('grid-button').click()
-  await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toContainText('저장된 대화')
+  await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toContainText('saved message')
   const opened = Date.now() - t0
 
   const loadedCount = await page.evaluate(
     (list: string[]) => list.filter((id) => (window as never as { __store: any }).__store.getState().chat[id]?.length).length,
     ids,
   )
-  console.log(`9칸 처음 열기: ${opened}ms, 대화가 채워진 칸 ${loadedCount}/9`)
+  console.log(`first open of 9 panels: ${opened}ms, panels with loaded conversation ${loadedCount}/9`)
   expect(loadedCount).toBe(9)
 })
 
@@ -323,7 +323,7 @@ for (const n of [4, 6, 9]) {
       { list: ids, frames: 120 },
     )
     console.log(
-      `드래그 리플로우 ${n}칸: p50=${r.p50}ms p95=${r.p95}ms max=${r.max}ms 건너뜀=${r.janky}/${r.frames} 재배열=${r.reorders}`,
+      `drag reflow ${n} panels: p50=${r.p50}ms p95=${r.p95}ms max=${r.max}ms skipped=${r.janky}/${r.frames} reorders=${r.reorders}`,
     )
     expect(r.reorders).toBeGreaterThan(0)
   })
@@ -336,13 +336,13 @@ for (const n of [200, 5000]) {
       ({ sid, count }: { sid: string; count: number }) => {
         const store = (window as never as { __store: any }).__store
         const items = Array.from({ length: count }, (_, i) => ({
-          kind: i % 2 ? 'assistant' : 'user', seq: 1000 + i, text: `지난 대화 ${i} `.repeat(8),
+          kind: i % 2 ? 'assistant' : 'user', seq: 1000 + i, text: `past message ${i} `.repeat(8),
         }))
         store.setState({ chat: { ...store.getState().chat, [sid]: items } })
       },
       { sid: ids[0]!, count: n },
     )
     await page.getByTestId(`session-row-${ids[0]}`).click()
-    show(`포커스 뷰 · 대화 ${n}줄`, await streamAndMeasure(page, ids, 120))
+    show(`Focus view · ${n} lines of conversation`, await streamAndMeasure(page, ids, 120))
   })
 }

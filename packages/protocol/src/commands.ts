@@ -408,7 +408,7 @@ export const ProjectInfo = z.object({
    *
    * A row used to be the bare command string so that "there is no label that can drift
    * away from it". The label came back by user request (2026-09-06) — `pnpm dev` reads
-   * worse than "데브 서버" at a glance — but the drift argument still shapes the rule:
+   * worse than "Dev server" at a glance — but the drift argument still shapes the rule:
    * every surface that shows the label **also shows the command**, so a name can never
    * silently mean something else. The command string stays the identity everywhere
    * (run ledger, host PTY registry); the label is display-only.

@@ -45,16 +45,16 @@ describe('sorting slash commands', () => {
 describe('working out what to autocomplete', () => {
   it('a slash only at the very start (a path in the middle of a sentence must not be read as a command)', () => {
     expect(detectTrigger('/rev', 4)?.kind).toBe('command')
-    expect(detectTrigger('경로는 src/rev', '경로는 src/rev'.length)).toBeNull()
+    expect(detectTrigger('the path is src/rev', 'the path is src/rev'.length)).toBeNull()
   })
 
   it('@ only starting right after whitespace (does not match email addresses)', () => {
-    expect(detectTrigger('이거 봐줘 @src/a', '이거 봐줘 @src/a'.length)?.kind).toBe('file')
+    expect(detectTrigger('take a look at this @src/a', 'take a look at this @src/a'.length)?.kind).toBe('file')
     expect(detectTrigger('me@example.com', 'me@example.com'.length)).toBeNull()
   })
 
   it('pinpoints exactly where the replacement should be inserted', () => {
-    const text = '보자 @Ses'
+    const text = "let's see @Ses"
     const t = detectTrigger(text, text.length)!
     expect(t.query).toBe('Ses')
     expect(text.slice(t.start)).toBe('@Ses')

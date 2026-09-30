@@ -67,7 +67,7 @@ async function newSession(page: Page, prompt: string): Promise<string> {
 async function workingGrid(page: Page): Promise<string[]> {
   await page.setViewportSize({ width: 1280, height: 800 })
   await setup(page)
-  const ids = [await newSession(page, '하나'), await newSession(page, '둘'), await newSession(page, '셋')]
+  const ids = [await newSession(page, 'one'), await newSession(page, 'two'), await newSession(page, 'three')]
   await page.evaluate((l: string[]) => {
     const store = (window as never as { __store: any }).__store
     store.getState().setGridPanels(l)

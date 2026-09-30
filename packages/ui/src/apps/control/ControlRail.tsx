@@ -151,7 +151,7 @@ export function ControlRail() {
               >
                 <span className="block truncate text-[11px] text-ash">{t.title}</span>
                 <span className="block truncate text-[10px] text-slate">
-                  반장: {sessions[t.coordinatorId]?.state ?? 'gone'}
+                  Foreman: {sessions[t.coordinatorId]?.state ?? 'gone'}
                 </span>
               </button>
               {/*

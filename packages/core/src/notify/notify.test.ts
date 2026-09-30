@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, allDoneNotification, badgeCount, notificationFor } from './notify.js'
 
-const s = (state: SessionState, name = '세션') => ({ id: 's1', name, state })
+const s = (state: SessionState, name = 'session') => ({ id: 's1', name, state })
 const bg = { appFocused: false }
 
 describe('immediate notifications (approvals and errors only)', () => {
@@ -32,7 +32,7 @@ describe('immediate notifications (approvals and errors only)', () => {
   })
 
   it('the notification body includes the session name (you have to know which session it is to act)', () => {
-    expect(notificationFor(s('waiting_approval', 'auth 리팩터링'), 'working', bg)?.body).toContain('auth 리팩터링')
+    expect(notificationFor(s('waiting_approval', 'auth refactor'), 'working', bg)?.body).toContain('auth refactor')
   })
 })
 

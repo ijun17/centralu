@@ -4114,7 +4114,7 @@ export const useStore = create<AppState>((set, get) => ({
       const projectId = get().sessions[sessionId]?.projectId
       if (changing && projectId) get().refreshProjectGit(projectId)
     } catch (e) {
-      set({ toast: (e as Error).message || '승인을 전달하지 못했습니다' })
+      set({ toast: (e as Error).message || 'Could not send the approval' })
     } finally {
       // A failure must allow pressing it again. A success already dismissed the card, so the `pendingApproval` check above blocks a repeat
       set((s) => {
@@ -4130,7 +4130,7 @@ export const useStore = create<AppState>((set, get) => ({
       await get().platform!.agents.answerQuestion(sessionId, requestId, answers)
       return true
     } catch (e) {
-      set({ toast: (e as Error).message || '답을 전달하지 못했습니다' })
+      set({ toast: (e as Error).message || 'Could not send the answer' })
       return false
     }
   },

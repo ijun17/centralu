@@ -64,7 +64,7 @@ test('↑/↓ pressed inside a field of the new-session dialog do not select a p
     ;(window as any).__mock.externalSessions = {
       supported: true,
       sessions: [
-        { externalId: 'ext-0', tool: 'claude', title: '지난 대화', updatedAt: Date.now(), createdAt: null, branch: null, imported: false, importedAs: null },
+        { externalId: 'ext-0', tool: 'claude', title: 'past conversation', updatedAt: Date.now(), createdAt: null, branch: null, imported: false, importedAs: null },
       ],
     }
   })

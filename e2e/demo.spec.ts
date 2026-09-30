@@ -18,7 +18,7 @@ test('?demo has something to see the moment it opens', async ({ page }) => {
   await expect(page.getByTestId('project-landing-site')).toBeVisible()
   await expect(page.getByTestId('session-name')).toBeVisible()
   // A past conversation exists too (including a tool card)
-  await expect(page.getByTestId('chat-stream')).toContainText('무지개 링')
+  await expect(page.getByTestId('chat-stream')).toContainText('rainbow ring')
   await expect(page.getByTestId('tool-card').first()).toBeVisible()
   // The dashboard's donut and the evidence panel's git changes are also filled in
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
@@ -31,12 +31,12 @@ test('?demo has something to see the moment it opens', async ({ page }) => {
 
 test('?demo replies when sent a message', async ({ page }) => {
   await page.goto('/?demo')
-  await page.getByTestId('prompt-input').fill('답 오나 보자')
+  await page.getByTestId('prompt-input').fill("let's see if this gets a reply")
   await page.getByTestId('prompt-input').press('Enter')
 
   // Script: one tool call, a few reply chunks, then done. Once done, it settles into 'awaiting input'.
-  await expect(page.getByTestId('chat-stream')).toContainText('답 오나 보자', { timeout: 10_000 })
-  await expect(page.getByTestId('chat-stream')).toContainText('데모 목이라', { timeout: 10_000 })
+  await expect(page.getByTestId('chat-stream')).toContainText("let's see if this gets a reply", { timeout: 10_000 })
+  await expect(page.getByTestId('chat-stream')).toContainText('demo mock', { timeout: 10_000 })
 })
 
 test('?demo=grid comes up as a grid with four panels', async ({ page }) => {

@@ -12,12 +12,12 @@ describe('appendPath', () => {
   })
 
   it('inserts a space after existing text — running together with the preceding word would stop it from being a path', () => {
-    expect(appendPath('이거 봐줘', 'src/a.ts')).toBe('이거 봐줘 @src/a.ts ')
+    expect(appendPath('take a look at this', 'src/a.ts')).toBe('take a look at this @src/a.ts ')
   })
 
   it('does not add another space if it already ends in whitespace', () => {
-    expect(appendPath('이거 봐줘 ', 'src/a.ts')).toBe('이거 봐줘 @src/a.ts ')
-    expect(appendPath('줄바꿈\n', 'src/a.ts')).toBe('줄바꿈\n@src/a.ts ')
+    expect(appendPath('take a look at this ', 'src/a.ts')).toBe('take a look at this @src/a.ts ')
+    expect(appendPath('line break\n', 'src/a.ts')).toBe('line break\n@src/a.ts ')
   })
 
   it('chains together across multiple drops', () => {

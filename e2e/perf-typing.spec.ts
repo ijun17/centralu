@@ -100,7 +100,7 @@ async function fill(page: Page, id: string, turns: number) {
       const body = Array.from(
         { length: 12 },
         (_, k) =>
-          `문단 ${k}. \`inline code\` 와 [링크](https://example.com) 가 섞인 제법 긴 줄입니다. 실제 답변이 이만큼은 됩니다.`,
+          `Paragraph ${k}. A fairly long line mixing \`inline code\` and a [link](https://example.com). A real reply runs about this long.`,
       ).join('\n\n')
       const code = Array.from({ length: 20 }, (_, k) => `  const value${k} = compute(${k}, options)`).join(
         '\n',
@@ -110,7 +110,7 @@ async function fill(page: Page, id: string, turns: number) {
           type: 'message_delta',
           sessionId: id,
           role: 'assistant',
-          text: `## 턴 ${i}\n\n${body}\n\n- 목록 1\n- 목록 2\n- 목록 3\n\n\`\`\`ts\nfunction turn${i}() {\n${code}\n}\n\`\`\`\n`,
+          text: `## Turn ${i}\n\n${body}\n\n- item 1\n- item 2\n- item 3\n\n\`\`\`ts\nfunction turn${i}() {\n${code}\n}\n\`\`\`\n`,
         })
         m.emit({ type: 'turn_complete', sessionId: id })
       }
@@ -174,7 +174,7 @@ async function stream(page: Page, id: string, on: boolean) {
       }
       w.__mock.emit({ type: 'state_change', sessionId: id, state: 'working' })
       w.__streamTimer = setInterval(() => {
-        w.__mock.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '흐르는 답변 조각. ' })
+        w.__mock.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'a streaming reply chunk. ' })
       }, 30) as never as number
     },
     { id, on },
@@ -185,19 +185,19 @@ test('what does typing one character cost', async ({ page }) => {
   test.setTimeout(180000)
   const id = await boot(page)
 
-  show('대화 0턴', await typeAndMeasure(page, 40))
+  show('conversation, 0 turns', await typeAndMeasure(page, 40))
 
   await fill(page, id, 50)
-  show('대화 50턴', await typeAndMeasure(page, 40))
+  show('conversation, 50 turns', await typeAndMeasure(page, 40))
 
   await fill(page, id, 150)
-  show('대화 200턴', await typeAndMeasure(page, 40))
+  show('conversation, 200 turns', await typeAndMeasure(page, 40))
 
   await fill(page, id, 200)
-  show('대화 400턴', await typeAndMeasure(page, 40))
+  show('conversation, 400 turns', await typeAndMeasure(page, 40))
 
   await stream(page, id, true)
   await page.waitForTimeout(500)
-  show('대화 400턴 · 답변 흐르는 중', await typeAndMeasure(page, 40))
+  show('conversation, 400 turns · reply streaming', await typeAndMeasure(page, 40))
   await stream(page, id, false)
 })

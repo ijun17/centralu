@@ -21,7 +21,7 @@ import {
 } from './index.js'
 
 const GOLDEN_EVENTS_V1: unknown[] = [
-  { type: 'message_delta', sessionId: 's1', role: 'assistant', text: '안녕' },
+  { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi' },
   { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: 'npm test', readOnly: false, paths: [] } },
   { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: true, summary: 'exit 0' },
   // The whole record of a tool call (#221) — optional, so the two frames above still parse
@@ -44,11 +44,11 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     requestId: 'q1',
     questions: [
       {
-        question: '점심 뭐 먹을까?',
-        header: '점심',
+        question: 'What should we have for lunch?',
+        header: 'Lunch',
         options: [
-          { label: '김밥', description: '빠르다' },
-          { label: '라면', description: '따뜻하다' },
+          { label: 'Kimbap', description: 'Fast' },
+          { label: 'Ramen', description: 'Warm' },
         ],
         multiSelect: false,
       },
@@ -63,13 +63,13 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'context_update', sessionId: 's1', used: 1000, window: 200000, exactness: 'exact' },
   { type: 'limit_reached', sessionId: 's1', resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 },
   // A v1 frame from before auto existed — must be read as an automatic name (adding a field must never break an old frame)
-  { type: 'session_title', sessionId: 's1', title: 'auth 리팩터링' },
+  { type: 'session_title', sessionId: 's1', title: 'auth refactor' },
   // A name a person set (issue #5). auto=false means an automatic name never overwrites it again
-  { type: 'session_title', sessionId: 's1', title: '가드 MCP', auto: false },
+  { type: 'session_title', sessionId: 's1', title: 'Guard MCP', auto: false },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
-  { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
+  { type: 'user_message', sessionId: 's1', seq: 12, text: 'text the orchestrator inserted' },
   // The origin of a message that arrived via instruction (FR-11)
-  { type: 'user_message', sessionId: 's1', seq: 13, text: '릴리즈 노트 정리', from: { sessionId: 'orc-1', name: '지휘 세션' } },
+  { type: 'user_message', sessionId: 's1', seq: 13, text: 'clean up the release notes', from: { sessionId: 'orc-1', name: 'coordinator session' } },
   // A message sent by an inline conversation app screen (M4 B-1, B-4) — a person sent it, but an app wrote it
   { type: 'user_message', sessionId: 's1', seq: 15, text: 'Show details for row 3', fromApp: { appId: 'slider', projectId: 'p1', name: 'Slider' } },
   // An inline conversation app screen (M4 B-1) — open (input), result, cancelled, rejected, closed
@@ -79,7 +79,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'app_view', sessionId: 's1', seq: 17, callId: 'toolu_3', appId: 'slider', projectId: 'p1', tool: 'spoof', phase: 'rejected', reason: 'This app does not serve ui://other/main' },
   { type: 'app_view', sessionId: 's1', callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'closed', reason: 'This app was removed' },
   // Reasoning (measured in #58): codex has summary text, claude only a token estimate — so both are optional
-  { type: 'reasoning_delta', sessionId: 's1', seq: 14, text: '**경로 제약을 검토 중**' },
+  { type: 'reasoning_delta', sessionId: 's1', seq: 14, text: '**Reviewing path constraints**' },
   { type: 'reasoning_delta', sessionId: 's1', estTokens: 150 },
   // Measured in #58 (codex turn/plan/updated): a snapshot — the real shape with all three states present
   {
@@ -96,7 +96,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // An image an agent produced (#40) — display-only, so no seq
   { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/shot.png' },
   // An image that failed to render is still an event — a failure should be visible
-  { type: 'message_image', sessionId: 's1', mime: '', data: '', path: '/tmp/big.png', note: '이미지가 너무 큽니다 (12MB)' },
+  { type: 'message_image', sessionId: 's1', mime: '', data: '', path: '/tmp/big.png', note: 'Image is too large (12MB)' },
   { type: 'activity', sessionId: 's1', activity: 'compacting' },
   // While codex's /review (a dedicated RPC) is running (measured — an enteredReviewMode item)
   { type: 'activity', sessionId: 's1', activity: 'reviewing' },
@@ -105,7 +105,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'compaction', sessionId: 's1', before: 25485, after: 3686 },
   { type: 'settings_changed', sessionId: 's1', model: 'gpt-5.3-codex', effort: 'high', verbosity: null },
   // A marker for a session born from a handoff (#102) — note is never carried in a broadcast, so the shape without it is the golden one
-  { type: 'handoff', sessionId: 's1', from: '메아' },
+  { type: 'handoff', sessionId: 's1', from: 'Mea' },
   { type: 'history_synced', sessionId: 's1', added: 2 },
   { type: 'session_deleted', sessionId: 's1' },
   // An announcement for a session the host created on its own (#69) — session is a SessionInfo, but the
@@ -130,10 +130,10 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   {
     type: 'goal',
     sessionId: 's1',
-    goal: { objective: '테스트 전부 초록', status: 'active', iterations: 2, reason: '1개 실패', tokenBudget: null, tokensUsed: 300 },
+    goal: { objective: 'All tests green', status: 'active', iterations: 2, reason: '1 failing', tokenBudget: null, tokensUsed: 300 },
   },
   { type: 'goal', sessionId: 's1', goal: null },
-  { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } },
+  { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: 'process exited', retryable: true } },
   /*
    * An event that does not belong to a session (issue #43). It must parse **even without**
    * sessionId — the fact that this app as a whole is out of date is not owned by any conversation.

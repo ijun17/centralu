@@ -330,7 +330,7 @@ function bundle(over: Record<string, unknown> = {}) {
     tool: null,
     args: null,
     runId: null,
-    text: `앱 Team notes (alpha/notes): 앱 프로세스가 끝났습니다 (2026-09-25T00:00:00.000Z)\n이유: exited (code 7)\n표준에러 (마지막 줄들):\n${stderr.join('\n')}`,
+    text: `App Team notes (alpha/notes): the app's process ended (2026-09-25T00:00:00.000Z)\nReason: exited (code 7)\nstderr (last lines):\n${stderr.join('\n')}`,
     ...over,
   }
 }
@@ -421,7 +421,7 @@ test.describe('C-6: errors reach the builder', () => {
     const said = await builderSaid(page, builderId)
     expect(said).toHaveLength(1)
     expect(said[0]).toContain('[Centralu] The person sent you this error report from the app "Team notes" (app-notes) that you build.')
-    expect(said[0]).toContain('\n> 이유: exited (code 7)\n')
+    expect(said[0]).toContain('\n> Reason: exited (code 7)\n')
     expect(said[0]).toContain('\n> stderr line 12')
 
     // A re-read does not send it again — the host holds the fact that it was sent (sentAt)

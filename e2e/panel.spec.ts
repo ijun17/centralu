@@ -95,8 +95,8 @@ async function stubUsage(page: Page, windows?: unknown[]) {
  */
 test('in the grid, the composer is collapsed and rises when the cursor reaches the bottom', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '하나')
-  const b = await newSession(page, 'alpha', 'claude', '둘')
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  const b = await newSession(page, 'alpha', 'claude', 'two')
   await openGrid(page, [a, b])
   // If a newly created panel's input field is focused, the collapse cannot be observed — blur it
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
@@ -136,8 +136,8 @@ test('in the grid, the composer is collapsed and rises when the cursor reaches t
  */
 test('a raised composer does not lower while the cursor is over it — so it can be clicked', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '하나')
-  const b = await newSession(page, 'alpha', 'claude', '둘')
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  const b = await newSession(page, 'alpha', 'claude', 'two')
   await openGrid(page, [a, b])
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
@@ -173,7 +173,7 @@ test('a raised composer does not lower while the cursor is over it — so it can
  */
 test('the composer rises smoothly rather than snapping up', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '하나')
+  const a = await newSession(page, 'alpha', 'claude', 'one')
   await openGrid(page, [a])
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   const panel = page.getByTestId(`grid-panel-${a}`)
@@ -210,13 +210,13 @@ test('the composer rises smoothly rather than snapping up', async ({ page }) => 
  */
 test('a raised composer neither covers nor pushes the last line', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '하나')
+  const a = await newSession(page, 'alpha', 'claude', 'one')
   // Has to be long enough to reach the bottom — a short conversation never touches the card in the first place
   await page.evaluate((sid: string) => {
     const m = (window as never as { __mock: any }).__mock
     for (let i = 0; i < 40; i++) {
-      m.emit({ type: 'user_message', sessionId: sid, seq: 0, text: `물음 ${i + 1}` })
-      m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: `답 ${i + 1}` })
+      m.emit({ type: 'user_message', sessionId: sid, seq: 0, text: `question ${i + 1}` })
+      m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: `reply ${i + 1}` })
     }
   }, a)
   await openGrid(page, [a])
@@ -281,7 +281,7 @@ test('a raised composer neither covers nor pushes the last line', async ({ page 
  */
 test('the collapsed composer does not cover the response ring — the ring sits above it', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '하나')
+  const a = await newSession(page, 'alpha', 'claude', 'one')
   await openGrid(page, [a])
   const panel = page.getByTestId(`grid-panel-${a}`)
   await expect(panel.locator('.cc-orbit-ring-layer')).toBeVisible()
@@ -309,8 +309,8 @@ test('a collapsed composer does not scroll the panel up — a header button gets
   page,
 }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '하나')
-  const b = await newSession(page, 'alpha', 'claude', '둘')
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  const b = await newSession(page, 'alpha', 'claude', 'two')
   await openGrid(page, [a, b])
 
   // The collapsed panel (a): there must be no room to scroll up at all — try scrolling and check
@@ -336,7 +336,7 @@ test('a collapsed composer does not scroll the panel up — a header button gets
  */
 test('turning collapsing off keeps the composer always expanded, and the focus view never collapses it in the first place', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '하나')
+  const a = await newSession(page, 'alpha', 'claude', 'one')
   await openGrid(page, [a])
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
@@ -369,7 +369,7 @@ test('turning collapsing off keeps the composer always expanded, and the focus v
 test('usage gets one donut per tool — the screen never guesses which tool is meant', async ({ page }) => {
   await setup(page)
   await stubUsage(page)
-  await newSession(page, 'alpha', 'claude', '클로드 작업')
+  await newSession(page, 'alpha', 'claude', "Claude's task")
 
   // Even while looking only at a Claude session, the Codex donut stays in its own spot
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
@@ -436,7 +436,7 @@ test('a tool that is not logged in gets no donut', async ({ page }) => {
  */
 test('if the weekly limit is unknown, the donut says so', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   // The default mock has no windows — weekly cannot be selected
   const donut = page.getByTestId('usage-donut-claude')
@@ -478,14 +478,14 @@ async function seedCommits(
 test('history is a tab next to git, showing the short hash together with how long ago', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [
-    { sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 },
-    { sha: 'bbb2222', subject: '두 번째', author: '나', daysAgo: 3 },
+    { sha: 'aaa1111', subject: 'First commit', author: 'me', daysAgo: 0 },
+    { sha: 'bbb2222', subject: 'second', author: 'me', daysAgo: 3 },
   ])
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-tab-history').click()
   await expect(page.getByTestId('evidence-history')).toBeVisible()
-  await expect(page.getByTestId('history-commit-aaa1111')).toContainText('첫 커밋')
+  await expect(page.getByTestId('history-commit-aaa1111')).toContainText('First commit')
   await expect(page.getByTestId('history-commit-aaa1111')).toContainText('aaa1111')
   await expect(page.getByTestId('history-commit-bbb2222')).toContainText('3d ago')
 
@@ -497,37 +497,37 @@ test('history is a tab next to git, showing the short hash together with how lon
 test('a single-author repository does not repeat the name, but shows it once there are several authors', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [
-    { sha: 'aaa1111', subject: '혼자 한 일', author: '나', daysAgo: 1 },
-    { sha: 'bbb2222', subject: '그것도 혼자', author: '나', daysAgo: 2 },
+    { sha: 'aaa1111', subject: 'solo work', author: 'me', daysAgo: 1 },
+    { sha: 'bbb2222', subject: 'that too, alone', author: 'me', daysAgo: 2 },
   ])
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
   await page.getByTestId('evidence-tab-history').click()
   await expect(page.getByTestId('history-commit-aaa1111')).toContainText('1d ago')
   // At 340px, the same name on every row is noise, not information
-  await expect(page.getByTestId('history-commit-aaa1111')).not.toContainText('나')
+  await expect(page.getByTestId('history-commit-aaa1111')).not.toContainText('me')
 
   // Once there is someone to distinguish, it makes room at that point
   await seedCommits(page, [
-    { sha: 'aaa1111', subject: '내가 한 일', author: '나', daysAgo: 1 },
-    { sha: 'bbb2222', subject: '네가 한 일', author: '너', daysAgo: 2 },
+    { sha: 'aaa1111', subject: 'what I did', author: 'me', daysAgo: 1 },
+    { sha: 'bbb2222', subject: 'what you did', author: 'you', daysAgo: 2 },
   ])
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('evidence-tab-history').click()
-  await expect(page.getByTestId('history-commit-bbb2222')).toContainText('너')
+  await expect(page.getByTestId('history-commit-bbb2222')).toContainText('you')
 })
 
 test('clicking a commit opens its diff in the wide view', async ({ page }) => {
   await setup(page)
-  await seedCommits(page, [{ sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 }])
+  await seedCommits(page, [{ sha: 'aaa1111', subject: 'First commit', author: 'me', daysAgo: 0 }])
   await page.evaluate(() => {
-    ;(window as never as { __mock: any }).__mock.gitState.diffs['aaa1111'] = '@@ -0,0 +1 @@\n+새 줄'
+    ;(window as never as { __mock: any }).__mock.gitState.diffs['aaa1111'] = '@@ -0,0 +1 @@\n+new line'
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-aaa1111').click()
   await expect(page.getByTestId('overlay')).toBeVisible()
-  await expect(page.getByTestId('diff-view')).toContainText('새 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('new line')
 })
 
 /** A list that is silently cut off is a list that lies by implying "there are no older commits" */
@@ -537,12 +537,12 @@ test('the list cuts off at 100, and the screen says so', async ({ page }) => {
     page,
     Array.from({ length: 130 }, (_, i) => ({
       sha: `c${String(i).padStart(6, '0')}`,
-      subject: `커밋 ${i}`,
-      author: '나',
+      subject: `commit ${i}`,
+      author: 'me',
       daysAgo: i,
     })),
   )
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-tab-history').click()
   await expect(page.locator('[data-testid^="history-commit-"]')).toHaveCount(100)
@@ -555,12 +555,12 @@ test('below the cap, it does not mention being cut off at all', async ({ page })
     page,
     Array.from({ length: 12 }, (_, i) => ({
       sha: `c${String(i).padStart(6, '0')}`,
-      subject: `커밋 ${i}`,
-      author: '나',
+      subject: `commit ${i}`,
+      author: 'me',
       daysAgo: i,
     })),
   )
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-tab-history').click()
   await expect(page.locator('[data-testid^="history-commit-"]')).toHaveCount(12)
@@ -590,7 +590,7 @@ test('a new file shows A and a deleted file shows D', async ({ page }) => {
       { path: 'src/old.ts', staged: false, status: 'M' },
     ]
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   const mark = async (path: string) =>
     page.getByTestId(`evidence-file-${path}`).locator('span').first().textContent()
@@ -607,18 +607,18 @@ test('the diff follows even a second file click — the list is not covered, so 
       { path: 'src/a.ts', staged: false, status: 'M' },
       { path: 'src/b.ts', staged: false, status: 'M' },
     ]
-    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+첫째 파일의 줄'
-    m.gitState.diffs['src/b.ts'] = '@@ -1 +1 @@\n+둘째 파일의 줄'
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+line from the first file'
+    m.gitState.diffs['src/b.ts'] = '@@ -1 +1 @@\n+line from the second file'
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-file-src/a.ts').click()
-  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the first file')
 
   // This was broken here: the name changed to src/b.ts but the content below was still the first file's diff
   await page.getByTestId('evidence-file-src/b.ts').click()
-  await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
-  await expect(page.getByTestId('diff-view')).not.toContainText('첫째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the second file')
+  await expect(page.getByTestId('diff-view')).not.toContainText('line from the first file')
 })
 
 test('a file picked from the wide list is not reverted by a list refresh', async ({ page }) => {
@@ -629,21 +629,21 @@ test('a file picked from the wide list is not reverted by a list refresh', async
       { path: 'src/a.ts', staged: false, status: 'M' },
       { path: 'src/b.ts', staged: false, status: 'M' },
     ]
-    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+첫째 파일의 줄'
-    m.gitState.diffs['src/b.ts'] = '@@ -1 +1 @@\n+둘째 파일의 줄'
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+line from the first file'
+    m.gitState.diffs['src/b.ts'] = '@@ -1 +1 @@\n+line from the second file'
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-file-src/a.ts').click()
-  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the first file')
 
   // The next file is also picked from the sidebar — there is no list inside the wide view (the left column was removed on 2026-09-07)
   await page.getByTestId('evidence-file-src/b.ts').click()
-  await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the second file')
   await page.getByTestId('evidence-stage-all').click()
   await expect(page.getByTestId('evidence-unstage-all')).toBeVisible()
   // Even if staging changes the list, the diff being viewed must not be dragged back to the first path
-  await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the second file')
 })
 
 test('clicking the same file again still opens it — even after switching to a different tab', async ({ page }) => {
@@ -651,12 +651,12 @@ test('clicking the same file again still opens it — even after switching to a 
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
     m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
-    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+첫째 파일의 줄'
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+line from the first file'
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-file-src/a.ts').click()
-  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the first file')
 
   // After switching to the branch view from the sidebar (there is no tab inside the overlay — the only entry point is the sidebar, since 2026-09-07)
   await page.getByTestId('evidence-branch').click()
@@ -664,7 +664,7 @@ test('clicking the same file again still opens it — even after switching to a 
 
   // Click the same file again — a matching path must not mean "nothing happened"
   await page.getByTestId('evidence-file-src/a.ts').click()
-  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the first file')
   await expect(page.getByTestId('git-branches')).toBeHidden()
 })
 
@@ -676,7 +676,7 @@ test('clicking the same file again still opens it — even after switching to a 
  */
 test('a file-name band appears at every file boundary of a commit diff', async ({ page }) => {
   await setup(page)
-  await seedCommits(page, [{ sha: 'aaa1111', subject: '두 파일 커밋', author: '나', daysAgo: 0 }])
+  await seedCommits(page, [{ sha: 'aaa1111', subject: 'commit touching two files', author: 'me', daysAgo: 0 }])
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
     m.gitState.diffs['aaa1111'] = [
@@ -684,19 +684,19 @@ test('a file-name band appears at every file boundary of a commit diff', async (
       '--- a/src/a.ts',
       '+++ b/src/a.ts',
       '@@ -1 +1 @@',
-      '+첫 파일 줄',
+      '+first file line',
       'diff --git a/src/b.ts b/src/b.ts',
       '--- a/src/b.ts',
       '+++ b/src/b.ts',
       '@@ -1 +1 @@',
-      '+둘째 파일 줄',
+      '+second file line',
     ].join('\n')
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-aaa1111').click()
-  await expect(page.getByTestId('diff-view')).toContainText('첫 파일 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('first file line')
 
   const bands = page.getByTestId('diff-file-band')
   await expect(bands).toHaveCount(2)
@@ -707,23 +707,23 @@ test('a file-name band appears at every file boundary of a commit diff', async (
 test('a commit also opens from the second click onward — the list stays, so it stays clickable', async ({ page }) => {
   await setup(page)
   await seedCommits(page, [
-    { sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 },
-    { sha: 'bbb2222', subject: '두 번째', author: '나', daysAgo: 1 },
+    { sha: 'aaa1111', subject: 'First commit', author: 'me', daysAgo: 0 },
+    { sha: 'bbb2222', subject: 'second', author: 'me', daysAgo: 1 },
   ])
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
-    m.gitState.diffs['aaa1111'] = '@@ -0,0 +1 @@\n+첫 커밋의 줄'
-    m.gitState.diffs['bbb2222'] = '@@ -0,0 +1 @@\n+두 번째의 줄'
+    m.gitState.diffs['aaa1111'] = '@@ -0,0 +1 @@\n+line from the first commit'
+    m.gitState.diffs['bbb2222'] = '@@ -0,0 +1 @@\n+line from the second commit'
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-aaa1111').click()
-  await expect(page.getByTestId('diff-view')).toContainText('첫 커밋의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the first commit')
 
   await page.getByTestId('history-commit-bbb2222').click()
-  await expect(page.getByTestId('diff-view')).toContainText('두 번째의 줄')
-  await expect(page.getByTestId('diff-view')).not.toContainText('첫 커밋의 줄')
+  await expect(page.getByTestId('diff-view')).toContainText('line from the second commit')
+  await expect(page.getByTestId('diff-view')).not.toContainText('line from the first commit')
 })
 
 /** Since this is a question asked of the repository, it is treated the same as the git tab */
@@ -776,7 +776,7 @@ async function commandRuns(page: Page): Promise<{ key: string; running: boolean;
 
 test('the run dialog: register → select → run streams the log, and finishing leaves the exit code', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm test')
@@ -793,9 +793,9 @@ test('the run dialog: register → select → run streams the log, and finishing
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __store: any }
     const pid = Object.keys(w.__store.getState().projects)[0]
-    w.__mock.emitCommandOutput(pid, 'pnpm test', '테스트 3개 통과\r\n')
+    w.__mock.emitCommandOutput(pid, 'pnpm test', '3 tests passed\r\n')
   })
-  await expect(page.getByTestId('run-log')).toContainText('테스트 3개 통과')
+  await expect(page.getByTestId('run-log')).toContainText('3 tests passed')
 
   // The ending of a one-off run: finishing leaves the exit code as a badge
   await page.evaluate(() => {
@@ -810,17 +810,17 @@ test('the run dialog: register → select → run streams the log, and finishing
   await expect(page.getByTestId('run-menu')).toBeHidden()
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-command-0').click()
-  await expect(page.getByTestId('run-log')).toContainText('테스트 3개 통과')
+  await expect(page.getByTestId('run-log')).toContainText('3 tests passed')
 
   // Rerunning replaces the log — the old log must not mix in ahead of the new run
   await page.getByTestId('run-exec').click()
-  await expect(page.getByTestId('run-log')).not.toContainText('테스트 3개 통과')
+  await expect(page.getByTestId('run-log')).not.toContainText('3 tests passed')
   await expect(page.getByTestId('run-running-0')).toBeVisible()
 })
 
 test('the run dialog: a dev server is stopped with Stop, and its log is kept', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
@@ -830,7 +830,7 @@ test('the run dialog: a dev server is stopped with Stop, and its log is kept', a
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __store: any }
     const pid = Object.keys(w.__store.getState().projects)[0]
-    w.__mock.emitCommandOutput(pid, 'pnpm dev', '서버가 5173에서 듣는 중\r\n')
+    w.__mock.emitCommandOutput(pid, 'pnpm dev', 'Server listening on 5173\r\n')
   })
   await expect(page.getByTestId('run-log')).toContainText('5173')
 
@@ -842,7 +842,7 @@ test('the run dialog: a dev server is stopped with Stop, and its log is kept', a
 
 test('the open button turns white while a command is running', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   const open = page.getByTestId('run-open')
   // `hover:text-chalk` is always attached, so the check anchors on a word boundary — loose matching would always pass
@@ -874,7 +874,7 @@ test('the open button turns white while a command is running', async ({ page }) 
 
 test('the run dialog: a registered command survives closing and reopening the dialog', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm lint')
@@ -888,7 +888,7 @@ test('the run dialog: a registered command survives closing and reopening the di
 
 test('the run dialog: deleting targets something different from running — a running command that gets deleted cannot be undone', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('run-open').click()
   for (const cmd of ['pnpm test', 'pnpm lint']) {
@@ -920,8 +920,8 @@ test('grid: a file link opens from the project of the panel it was clicked in �
   await page.evaluate(async () => {
     await (window as never as { __store: any }).__store.getState().addProject('/tmp/beta')
   })
-  const alpha = await newSession(page, 'alpha', 'claude', '알파 작업')
-  const beta = await newSession(page, 'beta', 'claude', '베타 작업')
+  const alpha = await newSession(page, 'alpha', 'claude', 'alpha task')
+  const beta = await newSession(page, 'beta', 'claude', 'beta task')
   await page.evaluate((sid: string) => {
     ;(window as never as { __mock: any }).__mock.emit({
       type: 'message_delta', sessionId: sid, role: 'assistant', text: 'Look at `src/index.ts`.',
@@ -964,8 +964,8 @@ test('the run dialog: a command goes to the clicked panel\'s project — not whi
   await page.evaluate(async () => {
     await (window as never as { __store: any }).__store.getState().addProject('/tmp/beta')
   })
-  const alpha = await newSession(page, 'alpha', 'claude', '알파 작업')
-  const beta = await newSession(page, 'beta', 'claude', '베타 작업')
+  const alpha = await newSession(page, 'alpha', 'claude', 'alpha task')
+  const beta = await newSession(page, 'beta', 'claude', 'beta task')
 
   // Register a command on the beta session
   await page.getByTestId('run-open').click()
@@ -998,7 +998,7 @@ test('the run dialog: a command goes to the clicked panel\'s project — not whi
 
 test('the run dialog: absent from the orchestrator — with no project there is no directory to run in', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
   await expect(page.getByTestId('run-open')).toBeVisible()
   // The status dot is retired from the header, and the fact that it is responding is carried by the grid border and sidebar instead.
   await expect(page.getByTestId('dot-idle')).toHaveCount(0)
@@ -1027,7 +1027,7 @@ test('an orchestrator session can also be placed in the grid to view side by sid
   await page.evaluate(async () => {
     const st = (window as never as { __store: any }).__store.getState()
     await st.openOrchestrator()
-    await st.askOrchestrator('그리드에서 같이 보자')
+    await st.askOrchestrator('view it together in the grid')
   })
 
   const id: string = await page.evaluate(() => (window as never as { __store: any }).__store.getState().orchestratorId)
@@ -1044,33 +1044,33 @@ test('an orchestrator session can also be placed in the grid to view side by sid
 
 test('command aliases: the name leads and the command backs it up — in the list, the selected-run row, and the terminal panel (2026-09-06)', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
-  await page.getByTestId('run-add-name').fill('데브 서버')
+  await page.getByTestId('run-add-name').fill('Dev server')
   await page.getByTestId('run-add').click()
   // Wherever the name is shown, the command shows alongside it — this prevents the name from silently drifting to mean a different command
-  await expect(page.getByTestId('run-command-0')).toContainText('데브 서버')
+  await expect(page.getByTestId('run-command-0')).toContainText('Dev server')
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm dev')
 
   await page.getByTestId('run-command-0').click()
   await page.getByTestId('run-exec').click()
-  await expect(page.getByTestId('run-selected')).toContainText('데브 서버 · pnpm dev')
+  await expect(page.getByTestId('run-selected')).toContainText('Dev server · pnpm dev')
   await page.keyboard.press('Escape')
 
   // Both show in the command terminal of the terminal panel too
   await page.getByTestId('evidence-tab-terminal').click()
-  await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('데브 서버')
+  await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('Dev server')
   await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('pnpm dev')
 
   // Editing the alias — using the button that appears on hover, saved with Enter
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-command-0').hover()
   await page.getByTestId('run-rename-0').click()
-  await page.getByTestId('run-rename-input-0').fill('로컬 서버')
+  await page.getByTestId('run-rename-input-0').fill('Local server')
   await page.getByTestId('run-rename-input-0').press('Enter')
-  await expect(page.getByTestId('run-command-0')).toContainText('로컬 서버')
+  await expect(page.getByTestId('run-command-0')).toContainText('Local server')
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm dev')
 })
 
@@ -1085,7 +1085,7 @@ test('command aliases: the name leads and the command backs it up — in the lis
 
 test('a running command shows as a terminal in the terminal panel — and goes down for any reason it finishes', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   // Start a dev server from the run dialog and close the dialog
   await page.getByTestId('run-open').click()
@@ -1103,7 +1103,7 @@ test('a running command shows as a terminal in the terminal panel — and goes d
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __store: any }
     const pid = Object.keys(w.__store.getState().projects)[0]
-    w.__mock.emitCommandOutput(pid, 'pnpm dev', '서버가 5173에서 듣는 중\r\n')
+    w.__mock.emitCommandOutput(pid, 'pnpm dev', 'Server listening on 5173\r\n')
   })
   await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('5173')
 
@@ -1130,7 +1130,7 @@ test('a running command shows as a terminal in the terminal panel — and goes d
 
 test('the × on a command terminal means stop — the resulting exit takes the terminal down and the shell survives', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
@@ -1160,10 +1160,10 @@ test('the × on a command terminal means stop — the resulting exit takes the t
  */
 test('the grid panel border and the sidebar marker spin at the same angle — even joining late', async ({ page }) => {
   await setup(page)
-  const id = await newSession(page, 'alpha', 'claude', '작업')
+  const id = await newSession(page, 'alpha', 'claude', 'task')
 
   // Start spinning first in the focus view — this is where the sidebar marker's orbit is born
-  await page.getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId('prompt-input').fill('something that takes a while')
   await page.getByTestId('send').click()
   await expect(page.getByTestId('tool-mark-claude')).toHaveClass(/cc-orbit/)
 
@@ -1195,8 +1195,8 @@ test('the grid panel border and the sidebar marker spin at the same angle — ev
  */
 test('clicking a different panel\'s composer in the grid moves the picked session — the view stays the grid', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '첫째')
-  const b = await newSession(page, 'alpha', 'claude', '둘째')
+  const a = await newSession(page, 'alpha', 'claude', 'first')
+  const b = await newSession(page, 'alpha', 'claude', 'second')
   await openGrid(page, [a, b])
 
   // Start from the last-picked session (b)
@@ -1384,7 +1384,7 @@ async function dropOnBodyBottom(page: Page) {
  */
 test('the active tab\'s controls live in the tab strip, not in a second header', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   const actions = page.getByTestId('evidence-actions')
   await page.getByTestId('evidence-tab-terminal').click()
@@ -1403,7 +1403,7 @@ test('the active tab\'s controls live in the tab strip, not in a second header',
  */
 test('when the strip runs out of room the extra tabs fold into a … menu', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('evidence-tab-terminal')).toBeVisible()
 
@@ -1427,7 +1427,7 @@ test('tab order is dragged, and survives a relaunch — one arrangement for the 
   page,
 }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
   expect(await tabOrder(page)).toEqual(['git', 'history', 'files', 'terminal'])
 
   await startTabDrag(page, 'terminal')
@@ -1447,7 +1447,7 @@ test('tab order is dragged, and survives a relaunch — one arrangement for the 
   }, '/tmp/alpha')
   await page.getByTestId('add-project').click()
   await expect(page.getByTestId('project-alpha')).toBeVisible()
-  await newSession(page, 'alpha', 'claude', '다시')
+  await newSession(page, 'alpha', 'claude', 'again')
   await expect.poll(() => tabOrder(page)).toEqual(['terminal', 'git', 'history', 'files'])
 })
 
@@ -1455,7 +1455,7 @@ test('dragging a tab to the bottom half splits the panel — two tabs visible at
   page,
 }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await startTabDrag(page, 'files')
   await dropOnBodyBottom(page)
@@ -1478,7 +1478,7 @@ test('dragging a tab to the bottom half splits the panel — two tabs visible at
  */
 test('the boundary between two split panels is dragged to move it — it survives a relaunch, and a double-click resets it to 50/50', async ({ page }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
   await startTabDrag(page, 'files')
   await dropOnBodyBottom(page)
   await expect(page.getByTestId('evidence-tabs-1')).toBeVisible()
@@ -1508,7 +1508,7 @@ test('the boundary between two split panels is dragged to move it — it survive
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
   }, '/tmp/alpha')
   await page.getByTestId('add-project').click()
-  await newSession(page, 'alpha', 'claude', '다시')
+  await newSession(page, 'alpha', 'claude', 'again')
   await page.getByTestId('panel-split-handle').dblclick()
   expect(await page.evaluate(() => (window as any).__store.getState().panelSplit)).toBe(0.5)
 })
@@ -1530,7 +1530,7 @@ test('a tall top group never paints over the bottom group‘s tab strip', async 
       status: 'M',
     }))
   })
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await startTabDrag(page, 'files')
   await dropOnBodyBottom(page)
@@ -1548,7 +1548,7 @@ test('dragging the bottom group‘s last tab back to the top strip closes the sp
   page,
 }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
   await startTabDrag(page, 'files')
   await dropOnBodyBottom(page)
   await expect(page.getByTestId('evidence-tabs-1')).toBeVisible()
@@ -1567,7 +1567,7 @@ test('⌘⇧1–4 keeps working after a reorder — the digit follows the tab, n
   page,
 }) => {
   await setup(page)
-  await newSession(page, 'alpha', 'claude', '작업')
+  await newSession(page, 'alpha', 'claude', 'task')
 
   await startTabDrag(page, 'terminal')
   await dropOnTab(page, 'git', 'left')
@@ -1591,9 +1591,9 @@ test('⌘⇧1–4 keeps working after a reorder — the digit follows the tab, n
 
 test('the grid previews the rearrangement while dragging — panel sizes stay put, nothing is saved yet', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '첫째')
-  const b = await newSession(page, 'alpha', 'claude', '둘째')
-  const c = await newSession(page, 'alpha', 'claude', '셋째')
+  const a = await newSession(page, 'alpha', 'claude', 'first')
+  const b = await newSession(page, 'alpha', 'claude', 'second')
+  const c = await newSession(page, 'alpha', 'claude', 'third')
   await openGrid(page, [a, b, c])
   await expect(page.getByTestId(`grid-panel-${c}`)).toBeVisible()
   const sizeBefore = await page.getByTestId(`grid-panel-${b}`).boundingBox()
@@ -1622,9 +1622,9 @@ test('the grid previews the rearrangement while dragging — panel sizes stay pu
 
 test('dropping leaves it exactly as previewed — panels move as the same node (scroll survives)', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '첫째')
-  const b = await newSession(page, 'alpha', 'claude', '둘째')
-  const c = await newSession(page, 'alpha', 'claude', '셋째')
+  const a = await newSession(page, 'alpha', 'claude', 'first')
+  const b = await newSession(page, 'alpha', 'claude', 'second')
+  const c = await newSession(page, 'alpha', 'claude', 'third')
   await openGrid(page, [a, b, c])
   await expect(page.getByTestId(`grid-panel-${c}`)).toBeVisible()
 
@@ -1637,7 +1637,7 @@ test('dropping leaves it exactly as previewed — panels move as the same node (
         [sid]: Array.from({ length: 80 }, (_, i) => ({
           kind: i % 2 ? 'assistant' : 'user',
           seq: 1000 + i,
-          text: `지난 대화 ${i}`,
+          text: `past conversation ${i}`,
         })),
       },
     })
@@ -1721,8 +1721,8 @@ test('dropping leaves it exactly as previewed — panels move as the same node (
  */
 test('a session clicked from a notification that is in the grid goes to that panel in the grid', async ({ page }) => {
   await setup(page)
-  const a = await newSession(page, 'alpha', 'claude', '첫째')
-  const b = await newSession(page, 'alpha', 'claude', '둘째')
+  const a = await newSession(page, 'alpha', 'claude', 'first')
+  const b = await newSession(page, 'alpha', 'claude', 'second')
   await openGrid(page, [a, b])
   await expect(page.getByTestId('grid')).toBeVisible()
 
@@ -1746,8 +1746,8 @@ test('a session clicked from a notification that is in the grid goes to that pan
 /** A session not in the grid behaves as before — it goes to the big screen */
 test('a session that is not in the grid still goes to the focus view when clicked from a notification', async ({ page }) => {
   await setup(page)
-  const onGrid = await newSession(page, 'alpha', 'claude', '칸 안')
-  const outside = await newSession(page, 'alpha', 'claude', '칸 밖의 세션')
+  const onGrid = await newSession(page, 'alpha', 'claude', 'in a panel')
+  const outside = await newSession(page, 'alpha', 'claude', 'session outside the panel')
   await openGrid(page, [onGrid])
   await expect(page.getByTestId('grid')).toBeVisible()
 

@@ -104,7 +104,7 @@ async function recordFileSearches(page: Page) {
 
 test('a syllable still being formed is not a file query', async ({ page }) => {
   await setup(page)
-  await newSession(page, '작업')
+  await newSession(page, 'task')
   await recordFileSearches(page)
 
   await page.getByTestId('prompt-input').click()
@@ -132,7 +132,7 @@ test('a syllable still being formed is not a file query', async ({ page }) => {
 
 test('the Enter that finishes a syllable does not send the message', async ({ page }) => {
   await setup(page)
-  await newSession(page, '작업')
+  await newSession(page, 'task')
   await page.getByTestId('prompt-input').click()
 
   await composeStep(page, '안', { start: true })
