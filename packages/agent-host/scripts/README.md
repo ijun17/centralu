@@ -39,6 +39,6 @@ They are kept so that whoever asks "why was it built this way" can run them agai
 
 | Script | What it measured, and what it decided |
 |---|---|
-| `probe-askuserquestion.mts` | how AskUserQuestion is actually received and answered → `adapters/claude/index.ts` follows this result |
+| `probe-askuserquestion.mts` | how AskUserQuestion is actually received, and which of four answers (`--mode A\|B\|C\|D\|all`) reaches the model → `adapters/claude/index.ts` answers with `updatedInput.answers` (mode D, #241) |
 | `probe-permission-mode.mts` | can the permission mode override the global setting on a per-session basis (M0's top-priority premise) |
 | `probe-subagent-stream.mts` | how a subagent's messages get mixed into the parent stream (#98) → `adapters/claude/normalize.ts` splits them by parent_tool_use_id, and closes the background agent card on task_notification |
