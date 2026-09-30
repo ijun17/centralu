@@ -1158,7 +1158,7 @@ test('Creating a session: only the tool is picked — model and permission are s
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
-  // The dialog only lets you pick the tool and resumption — no model input, no prompt field (#8)
+  // The dialog only lets the person pick the tool and resumption — no model input, no prompt field (#8)
   await expect(page.getByTestId('model-input')).toHaveCount(0)
   await expect(page.getByTestId('initial-prompt')).toHaveCount(0)
   await page.getByTestId('tool-option-claude').click()
@@ -5900,8 +5900,8 @@ test("Dragging a grid panel's header does not move the app window", async ({ pag
  * grid" (dogfooding finding).
  *
  * Loading history was hooked only into focusSession. In the focus view, selecting and viewing
- * are the same action, so this never showed — but the grid is a screen you **view without
- * selecting**.
+ * are the same action, so this never showed — but the grid is a screen people **view
+ * without selecting**.
  */
 test('A session never opened before still shows its conversation in the grid', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -6862,7 +6862,7 @@ test('A pending approval also calls out with sound and the dock badge', async ({
  * Settings are split into tabs (issue #7).
  *
  * Three groups used to be stacked into one long scroll. That reads fine at three, but settings
- * only ever grow, and by eight, finding what you want gets buried somewhere in the scroll. The
+ * only ever grow, and by eight, finding what the person wants gets buried somewhere in the scroll. The
  * tabs are split by **what the person came looking for** — make it stop pinging me
  * (Notifications), undo that auto-allow from earlier (Permissions), what was that key again
  * (Shortcuts). Only one tab is rendered at a time, so a tab not selected must not be on screen.
@@ -6980,8 +6980,8 @@ test('Moving to an already-finished session does not trigger a gust', async ({ p
 })
 
 /*
- * And from one completion, it used to blow again and again — blowing anew every time you moved
- * away and back.
+ * And from one completion, it used to blow again and again — blowing anew every time the person
+ * moved away and back.
  */
 test('Moving away and back does not make a past completion blow again', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
