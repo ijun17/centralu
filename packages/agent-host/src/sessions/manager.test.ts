@@ -1729,7 +1729,7 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     const report = sent.find((t) => t.includes('[Centralu]'))
     expect(report).toBeTruthy()
     /*
-     * **The name alone does not tell you which session it is.** A session resumed from
+     * **The name alone does not say which session it is.** A session resumed from
      * compaction has a name that is entirely "This session is being continued from a p…" — there
      * were actually four sessions sharing that same name. Pointing at the wrong one sends a
      * directive to the wrong project — the id has to be carried along.
