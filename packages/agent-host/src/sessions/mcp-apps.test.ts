@@ -14,12 +14,15 @@ import { SessionManager } from './manager.js'
 import { FIXTURE_APP } from './session-apps.test-helpers.js'
 
 /**
- * 사람이 승인한 MCP 서버는 사용자 폴더의 화면 없는 앱이 된다 (M4 A-7, 결정 8).
+ * An MCP server a person approved becomes a headless app in the user folder (M4 A-7, decision 8).
  *
- * 예전에는 승인하면 서버가 app_settings(`orchestrator_mcp_servers`)에 적히고 오케스트레이터의 MCP 설정에
- * 날것으로 실렸다 — 호출은 중개도 기록도 지나지 않았고, 목록도 지우기도 없었다. 여기서는 진짜 저장소·
- * 진짜 런타임·진짜 앱 프로세스(픽스처)로 본다. 어댑터만 가짜다: 받은 옵션을 적어 두고, 붙은 앱은 그
- * 옵션의 `apps`(세션 붙이기)로 부른다 — 어댑터의 대리 서버가 부르는 것과 같은 문이다.
+ * It used to be that, once approved, a server was written to app_settings
+ * (`orchestrator_mcp_servers`) and loaded raw into the orchestrator's MCP configuration — a call
+ * passed through neither an intermediary nor a record, and there was no listing and no removal.
+ * This is checked here with a real store, a real runtime and a real app process (a fixture); only
+ * the adapter is fake — it records the options it received, and an attached app is called through
+ * those options' `apps` (session attachment) — the same door an adapter's proxy server calls
+ * through.
  */
 
 class Handle implements SessionHandle {
@@ -64,7 +67,7 @@ let adapter: CapturingAdapter
 let mgr: SessionManager
 let rpc: ReturnType<typeof createRpcHandler>
 
-/** 매니저와 런타임을 잇는다 — 옛 명부를 옮기는 것도 이 순간이다(host의 main과 같은 자리) */
+/** Connects the manager to the runtime — this is also the moment the legacy registry is migrated (the same seam as the host's main) */
 function connect(): void {
   mgr.useExternalApps(rt)
 }
@@ -111,13 +114,13 @@ async function proposeAndApprove(name: string, server = SERVER, why?: string) {
   return { orc, resolved: await mgr.resolveMcpProposal(name, true) }
 }
 
-describe('승인한 MCP 서버는 사용자 폴더의 앱이 된다 (A-7)', () => {
-  it('제안은 아무것도 만들지 않고, 승인이 앱을 만들고 오케스트레이터를 재시작하며, 그 도구는 중개를 지나 기록된다', async () => {
+describe('an approved MCP server becomes a user-folder app (A-7)', () => {
+  it('a proposal creates nothing; approval creates the app and restarts the orchestrator, and the tool is recorded going through the intermediary', async () => {
     connect()
     const orc = await mgr.orchestrator()
     await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER, why: '시험용 서버' })
     expect(mgr.mcpProposals().map((p) => p.name)).toEqual(['echoer'])
-    // 제안 단계에서는 아무것도 없다
+    // Nothing exists yet at the proposal stage
     expect(existsSync(join(dataRoot, 'apps', 'echoer'))).toBe(false)
     expect(userApps()).toEqual([])
 
@@ -125,22 +128,22 @@ describe('승인한 MCP 서버는 사용자 폴더의 앱이 된다 (A-7)', () =
     expect(await mgr.resolveMcpProposal('echoer', true)).toEqual({ ok: true })
     expect(mgr.mcpProposals()).toEqual([])
 
-    // 화면 없는 앱: 서버 명령만 있고 home이 없다. 앱은 뜨지 않은 채로 선다(처음 필요할 때 뜬다)
+    // A headless app: only a server command, no home. The app stands without starting (it starts the first time it is needed)
     const m = readManifest('echoer')
     expect(m).toMatchObject({ manifestVersion: 1, id: 'echoer', name: 'echoer', description: '시험용 서버', server: SERVER })
     expect(m).not.toHaveProperty('home')
     expect(rt.list().find((a) => a.appId === 'echoer')).toMatchObject({ projectId: null, status: 'stopped', trusted: true, error: null })
-    // 예전 명부에는 적히지 않는다
+    // It is not written to the legacy registry
     expect(store.appSetting(LEGACY_KEY)).toBeNull()
 
-    // 오케스트레이터가 다시 떴고, 그 서버는 앱 대리 서버로 붙는다 — 날것으로 실리는 서버는 없다
+    // The orchestrator has restarted, and that server is attached as an app proxy server — no server is loaded raw
     expect(adapter.seen.length).toBe(before + 1)
     const o = adapter.last()
     expect(o.sessionId).toBe(orc.id)
     expect(attached(o)).toEqual(['app-echoer'])
     expect(o).not.toHaveProperty('extraMcpServers')
 
-    // 그 도구를 부르면 중개를 지나고, 호출자(이 오케스트레이터)와 함께 기록된다
+    // Calling that tool goes through the intermediary and is recorded with the caller (this orchestrator)
     const out = await o.apps!.call('app-echoer', 'poke', { to: 3 })
     expect(out.isError).toBeFalsy()
     expect(out.content).toEqual([{ type: 'text', text: 'poked 3' }])
@@ -149,7 +152,7 @@ describe('승인한 MCP 서버는 사용자 폴더의 앱이 된다 (A-7)', () =
     ])
   })
 
-  it('거절은 제안만 걷는다 — 앱도 재시작도 없다', async () => {
+  it('a rejection only clears the proposal — no app, no restart', async () => {
     connect()
     const orc = await mgr.orchestrator()
     await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'figma', command: 'npx', args: [] })
@@ -160,7 +163,7 @@ describe('승인한 MCP 서버는 사용자 폴더의 앱이 된다 (A-7)', () =
     expect(adapter.seen.length).toBe(before)
   })
 
-  it('이미 있는 앱의 이름과 내장 앱의 이름으로는 제안할 수 없다 — 덮어쓰기가 곧 명령 바꿔치기다', async () => {
+  it('cannot be proposed under the name of an existing app or a built-in app — overwriting would be swapping out the command', async () => {
     connect()
     const { orc } = await proposeAndApprove('dup')
     const again = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'dup', command: 'evil', args: [] })
@@ -172,7 +175,7 @@ describe('승인한 MCP 서버는 사용자 폴더의 앱이 된다 (A-7)', () =
     expect(mgr.mcpProposals()).toEqual([])
   })
 
-  it('승인하는 사이에 같은 id의 다른 앱이 생겼으면 덮어쓰지 않고 실패하며, 제안은 남는다', async () => {
+  it('if a different app with the same id appeared while it was awaiting approval, it fails instead of overwriting, and the proposal stays', async () => {
     connect()
     const orc = await mgr.orchestrator()
     await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'taken', command: 'npx', args: ['-y', 'x'] })
@@ -185,11 +188,11 @@ describe('승인한 MCP 서버는 사용자 폴더의 앱이 된다 (A-7)', () =
   })
 })
 
-describe('옛 명부의 승인된 서버를 옮긴다 (A-7)', () => {
-  it('기동에서 한 번 옮기고, 다시 돌아도 같다 — 옮긴 항목만 옛 키에서 걷고 옮기지 못한 항목은 남긴다', async () => {
+describe('migrates an approved server from the legacy registry (A-7)', () => {
+  it('migrates once at startup, and running again yields the same result — only migrated entries are cleared from the legacy key, entries that could not be migrated stay', async () => {
     const legacy = [
       { name: 'echoer', ...SERVER },
-      // #93 이전에 승인된 이름 — 앱 id가 될 수 없다
+      // A name approved before #93 — it cannot be a valid app id
       { name: 'centralu', command: 'npx', args: ['-y', 'whatever'] },
     ]
     store.setAppSetting(LEGACY_KEY, JSON.stringify(legacy))
@@ -199,8 +202,9 @@ describe('옛 명부의 승인된 서버를 옮긴다 (A-7)', () => {
     expect(JSON.parse(store.appSetting(LEGACY_KEY)!)).toEqual([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }])
 
     /*
-     * 앱을 쓴 뒤 키를 걷기 전에 host가 죽었다고 치자 — 옛 키가 처음 그대로 남아 있다. 다음 기동은 같은
-     * 항목을 다시 옮기려 하고, 그때 앱이 둘 생기거나 이미 옮긴 앱을 다시 쓰면 안 된다.
+     * Suppose the host died after writing the app but before clearing the key — the legacy key is
+     * left just as it was at the start. The next startup tries to migrate the same entry again,
+     * and it must not end up with two apps or overwrite the app already migrated.
      */
     store.setAppSetting(LEGACY_KEY, JSON.stringify(legacy))
     const written = statSync(manifestPath('echoer')).mtimeMs
@@ -213,20 +217,20 @@ describe('옛 명부의 승인된 서버를 옮긴다 (A-7)', () => {
     expect(readdirSync(join(dataRoot, 'apps'))).toEqual(['echoer'])
     expect(JSON.parse(store.appSetting(LEGACY_KEY)!)).toEqual([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }])
 
-    // 오케스트레이터는 옮긴 앱을 받고, 옛 항목은 어디에도 날것으로 실리지 않는다
+    // The orchestrator receives the migrated app, and the legacy entry is loaded raw nowhere
     await mgr.orchestrator()
     expect(attached(adapter.last())).toEqual(['app-echoer'])
     expect(adapter.last()).not.toHaveProperty('extraMcpServers')
   })
 
-  it('다 옮기면 옛 키가 사라진다', async () => {
+  it('once everything is migrated, the legacy key disappears', async () => {
     store.setAppSetting(LEGACY_KEY, JSON.stringify([{ name: 'echoer', ...SERVER }]))
     connect()
     expect(userApps()).toEqual(['echoer'])
     expect(store.appSetting(LEGACY_KEY)).toBeNull()
   })
 
-  it('같은 id의 다른 앱이 이미 있으면 그 앱을 덮어쓰지 않고, 항목을 남긴다', async () => {
+  it('if a different app with the same id already exists, does not overwrite it, and keeps the entry', async () => {
     plantApp(join(dataRoot, 'apps'), 'echoer', { server: SERVER })
     const mine = readFileSync(manifestPath('echoer'), 'utf8')
     const theirs = { name: 'echoer', command: 'npx', args: ['-y', 'other-server'] }
@@ -237,8 +241,8 @@ describe('옛 명부의 승인된 서버를 옮긴다 (A-7)', () => {
   })
 })
 
-describe('지우기 (apps.remove, A-7)', () => {
-  it('사용자 폴더 앱을 지우면 목록과 오케스트레이터에서 떨어지고, 폴더는 app-trash로 간다', async () => {
+describe('removal (apps.remove, A-7)', () => {
+  it('removing a user-folder app drops it from the list and the orchestrator, and its folder goes to app-trash', async () => {
     connect()
     const { orc } = await proposeAndApprove('echoer')
     const apps = adapter.last().apps!
@@ -251,22 +255,22 @@ describe('지우기 (apps.remove, A-7)', () => {
     expect(userApps()).toEqual([])
     expect(existsSync(join(dataRoot, 'apps', 'echoer'))).toBe(false)
     expect(readdirSync(join(dataRoot, 'app-trash'))).toEqual([expect.stringMatching(/^echoer-\d+$/)])
-    // 붙어 있던 세션이 떼어 낸다 — Claude는 이 알림으로 서버 집합을 바꾼다
+    // The attached session detaches it — Claude changes its set of servers on this notification
     await tick()
     expect(changed).toBeGreaterThan(0)
     expect(apps.current().map((a) => a.server)).toEqual([])
-    // 도구 이름을 아는 쪽(다음 스레드를 기다리는 Codex)이 불러도 거절된다
+    // Even a caller that still knows the tool's name (Codex, waiting for its next thread) is refused
     const late = await apps.call('app-echoer', 'poke', { to: 1 })
     expect(late.isError).toBe(true)
     expect(JSON.stringify(late.content)).toContain('not attached to this session')
-    // 지운 앱의 기록은 남는다
+    // The removed app's run record stays
     expect(rt.runs({ projectId: null, appId: 'echoer' })).toEqual([expect.objectContaining({ tool: 'peek', callerSessionId: orc.id })])
-    // 같은 이름을 다시 제안할 수 있다
+    // The same name can be proposed again
     const again = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER })
     expect(again.isError).toBeFalsy()
   })
 
-  it('프로젝트 앱은 지우지 않는다 — 저장소의 파일이라 거두는 자리는 git이다', async () => {
+  it('a project app is not removed — it is a file in the repository, so git is the place to clean it up', async () => {
     connect()
     plantApp(join(repo, ...PROJECT_APPS), 'notes', { server: SERVER })
     const projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id

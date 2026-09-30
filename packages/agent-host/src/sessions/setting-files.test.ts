@@ -13,17 +13,23 @@ import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 
 /**
- * 세션마다 도구가 받는 설정 파일 (M4 결정 3, #92·#152) — 종류 × 프로젝트 신뢰 × 프리셋, 만들 때와 깨울 때.
+ * The setting files a tool receives per session (M4 decision 3, #92/#152) — kind × project trust ×
+ * preset, both when created and when woken up.
  *
- *   오케스트레이터·조율 세션                  아무 파일도 (Claude `settingSources: []`, Codex는 저장소 층을 끈다)
- *   워커·매니저·프로젝트 앱의 만드는 세션,    그 프로젝트의 신뢰 그대로
- *   프로젝트 앱이 부탁한 에이전트(D-1)
- *   사용자 폴더 앱의 만드는 세션              신뢰 — 그 폴더는 사용자 자신의 것이다
- *   사용자 폴더 앱이 부탁한 에이전트(D-1)     사람 자신의 설정만 — 글은 앱이 썼고, 폴더(orchestratorHome)는 워커가 쓸 수 있다
+ *   orchestrator, coordinating session          no files at all (Claude's `settingSources: []`, Codex
+ *                                                turns off its store layer)
+ *   worker, manager, a project app's building    exactly that project's trust
+ *   session, an agent a project app assigned (D-1)
+ *   a user-folder app's building session         trusted — that folder is the user's own
+ *   an agent a user-folder app assigned (D-1)    only the person's own settings — the text was
+ *                                                written by the app, and the folder
+ *                                                (orchestratorHome) can be written by a worker
  *
- * 진짜 매니저가 진짜 어댑터를 띄운다. 도구만 흉내다: Claude는 SDK의 `query`가, Codex는 app-server 클라이언트가
- * 받은 것을 적는다 — 이 테스트가 보는 것은 "도구가 무엇을 받았나"다. 그 값으로 CLI가 무엇을 읽는지는
- * adapters/claude/project-trust.test.ts(SDK의 병합 엔진)와 scripts/probe-project-trust.mts(실제 CLI)가 잰다.
+ * A real manager spins up a real adapter. Only the tool is mocked: for Claude, the SDK's `query`
+ * records what it received, and for Codex, the app-server client does — what this test checks is
+ * "what did the tool receive." What the CLI reads from that value is measured separately by
+ * adapters/claude/project-trust.test.ts (the SDK's merge engine) and
+ * scripts/probe-project-trust.mts (the real CLI).
  */
 
 const state = vi.hoisted(() => ({
@@ -42,10 +48,10 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
       return {
         async *[Symbol.asyncIterator]() {
           yield { type: 'system', subtype: 'init', session_id: conversation }
-          // 이벤트가 하나 와야 매니저가 대화 id를 적는다 — 그래야 다음 깨우기가 진짜 재개(resume)다
+          // An event must arrive before the manager records the conversation id — otherwise the next wake would not be a real resume
           await new Promise((r) => setTimeout(r, 0))
           yield { type: 'system', subtype: 'status', status: null }
-          await new Promise(() => {}) // 세션은 살아 있다
+          await new Promise(() => {}) // the session stays alive
         },
         interrupt: async () => {},
         close: () => {},
@@ -72,8 +78,9 @@ vi.mock('../adapters/codex/client.js', () => ({
 }))
 
 /**
- * 대화 목록·기록은 도구의 저장소(~/.claude의 대화 파일, codex app-server)를 읽는다 — 이 테스트가 보는 것은 띄울 때의
- * 옵션뿐이다. 없으면 매니저는 "모른다"로 보고 깨우기를 막지 않는다(externalIndexOf).
+ * The conversation list and history read the tool's own store (~/.claude's conversation files,
+ * the codex app-server) — what this test checks is only the options at spawn time. Without them,
+ * the manager treats it as "unknown" and does not block waking up (externalIndexOf).
  */
 function offline(a: AgentAdapter): AgentAdapter {
   a.listExternalSessions = undefined
@@ -131,7 +138,7 @@ type Kind =
 type Files = 'none' | 'user' | 'all'
 type Created = { app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }
 
-/** 결정 3의 표 — 이 파일이 지키는 약속 전부다 */
+/** Decision 3's table — the entire contract this file holds */
 const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
   orchestrator: () => 'none',
   coordinator: () => 'none',
@@ -143,7 +150,7 @@ const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
   'user-folder-app agent': () => 'user',
 }
 
-/** 그 종류의 세션을 제품이 세우는 길로 세운다 — 도구가 처음 뜨는 것까지 */
+/** Stands up a session of that kind through the same path the product uses — right up through the tool's first launch */
 const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   orchestrator: async (tool) => {
     mgr.configureOrchestrator(tool)
@@ -157,12 +164,12 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   manager: async (tool) => {
     store.setProjectDefaultTool(projectId, tool)
     const seat = (await rpc('worktrees.createManager', { projectId, baseBranch: 'main' })) as SessionInfo
-    // 매니저는 자리만 먼저 선다 — 도구와 파일은 처음 깰 때 받는다
+    // The manager's seat stands up first, on its own — it receives a tool and files only the first time it is woken
     await mgr.resumeSession(seat.id)
     return seat.id
   },
   'project-app builder': async (tool) => {
-    // 신뢰한 프로젝트에만 앱과 만드는 세션이 선다
+    // An app and its building session only stand up in a trusted project
     await rpc('projects.setTrusted', { projectId, trusted: true })
     return ((await rpc('apps.create', { projectId, id: 'notes', name: 'Notes', tool })) as Created).builder!.id
   },
@@ -173,9 +180,11 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
 }
 
 /**
- * 앱이 부탁한 에이전트 (M4 D-1) — 중개 창구가 부르는 그 문(`runAppAgent`)으로 세운다. 세션이 서는 순간 id를 받고, 턴은
- * 끝나지 않는다(가짜 도구는 답하지 않는다) — 여기서 보는 것은 띄울 때 받은 것이다. 도구가 깔렸고 로그인했다고 답하게
- * 한다: 이 기계의 Codex는 로그인하지 않았고, 이 시험이 보는 것은 로그인이 아니다.
+ * An agent an app assigned (M4 D-1) — stood up through the same door the intermediary calls
+ * (`runAppAgent`). The id is received the moment the session stands up, and the turn is never
+ * finished (the fake tool never answers) — what is checked here is only what it received at
+ * launch. The adapter is made to report that it is installed and logged in: Codex is not logged
+ * in on this machine, and being logged in is not what this test checks.
  */
 async function appAgent(tool: ToolName, appProjectId: string | null, appId: string): Promise<string> {
   const adapter = adapters.get(tool)!
@@ -193,13 +202,13 @@ async function appAgent(tool: ToolName, appProjectId: string | null, appId: stri
 const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']
 const CLAUDE_PERMISSION: Record<PermissionPreset, string> = { safe: 'default', normal: 'from-settings', auto: 'bypassPermissions' }
 const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/workspace-write', normal: 'from-settings', auto: 'never/workspace-write' }
-/** Codex는 사용자의 ~/.codex를 스레드 단위로 끄지 않는다 — 끌 수 있는 것은 저장소 층뿐이라 none과 user가 같은 값이다 */
+/** Codex does not turn off the user's ~/.codex per thread — only the store layer can be turned off, so none and user share the same value */
 const CODEX_FILES: Record<Files, string> = { none: 'repo-off', user: 'repo-off', all: 'all' }
 
 const settle = () => new Promise((r) => setTimeout(r, 5))
 const trustedNow = () => store.projectRoots().find((p) => p.id === projectId)!.trusted
 
-/** 방금 뜬 도구가 받은 것 한 줄 — 어느 길로(새로·재개), 어떤 설정 파일, 어떤 권한 */
+/** One line summarizing what the tool that just launched received — which path (new or resumed), which setting files, which permission */
 function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): string {
   const head = `trust=${trustedNow() ? 'yes' : 'no'} preset=${preset}`
   if (tool === 'claude') {
@@ -217,7 +226,7 @@ function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): 
     doc === 0 && cwdTrust === 'untrusted' ? 'repo-off'
     : doc === undefined && config.projects === undefined ? 'all'
     : `doc=${doc ?? 'unset'} cwd-trust=${cwdTrust ?? 'unset'}`
-  // 재개(thread/resume)에는 권한을 싣지 않는다 — 여기서 보는 것은 파일이다
+  // A resume (thread/resume) does not carry permissions — what is checked here is the files
   const permission =
     method === 'thread/resume' ? '' : ` permission=${params.approvalPolicy ? `${String(params.approvalPolicy)}/${String(params.sandbox)}` : 'from-settings'}`
   return `${head}: ${method === 'thread/resume' ? 'resume' : 'new'} files=${files}${permission}`
@@ -230,20 +239,20 @@ function expected(tool: ToolName, kind: Kind, t: boolean, preset: PermissionPres
   return `${head} files=${CODEX_FILES[files]}${via === 'resume' ? '' : ` permission=${CODEX_PERMISSION[preset]}`}`
 }
 
-describe.each(['claude', 'codex'] as const)('%s — 세션의 종류가 설정 파일을 정한다 (도구를 받는지가 아니라)', (tool) => {
-  it.each(Object.keys(FILES) as Kind[])('%s: 만들 때와, 신뢰 × 프리셋마다 다시 깨울 때', async (kind) => {
+describe.each(['claude', 'codex'] as const)('%s — the session\'s kind decides the setting files (not whether the tool receives them)', (tool) => {
+  it.each(Object.keys(FILES) as Kind[])('%s: at creation, and again on every wake across trust × preset', async (kind) => {
     const id = await MAKE[kind](tool)
     await settle()
-    // 앱이 부른 에이전트는 safe로 선다 — 사람의 전역 bypass도 앱의 지시에는 건너가지 않는다(runAppAgent)
+    // An agent an app calls stands up as safe — the person's global bypass does not carry over to an app's instruction (runAppAgent)
     const born: PermissionPreset = kind === 'project-app agent' || kind === 'user-folder-app agent' ? 'safe' : 'normal'
     const seen = [launched(tool, id, born)]
-    // 매니저는 자리가 먼저 서고 처음 깨울 때 새로 뜬다 — 나머지는 만들 때 새로 뜬다
+    // The manager stands up its seat first and only launches on its first wake — everything else launches at creation
     const want = [expected(tool, kind, trustedNow(), born, 'new')]
     for (const trusted of [false, true]) {
       await rpc('projects.setTrusted', { projectId, trusted })
       for (const preset of PRESETS) {
         await mgr.updateSettings(id, { permissionPreset: preset })
-        // 신뢰는 다음에 뜰 때 닿는다 — 깨우는 길(resumeSession)로 다시 띄운다
+        // Trust only takes effect the next time it launches — relaunch through the wake path (resumeSession)
         expect((await mgr.restartSession(id)).resumed).toBe(true)
         await settle()
         seen.push(launched(tool, id, preset))

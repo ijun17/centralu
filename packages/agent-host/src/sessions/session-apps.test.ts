@@ -7,13 +7,15 @@ import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
 import { FIXTURE_APP, attachWorld, type AttachWorld } from './session-apps.test-helpers.js'
 
 /**
- * 어느 세션이 어느 앱을 받는가 (M4 A-5, 결정 4) — 진짜 런타임과 진짜 앱 프로세스로 본다.
+ * Which session receives which app (M4 A-5, decision 4) — verified against a real runtime and
+ * real app processes.
  *
- *   프로젝트의 세션   그 프로젝트의 앱, 신뢰한 프로젝트일 때만
- *   오케스트레이터    사용자 폴더의 앱만
- *   붙지 않는 앱      틀린 매니페스트, 신뢰하지 않은 프로젝트, 연달아 실패해 멈춘 앱
+ *   a project's session    that project's apps, only if the project is trusted
+ *   orchestrator           only the user-folder apps
+ *   an unattached app      an invalid manifest, an untrusted project, an app halted after repeated failures
  *
- * 그리고 그 집합이 바뀌면(앱이 오고 감, 신뢰가 뒤집힘, 도구가 바뀜) 붙은 쪽이 듣는다.
+ * And when that set changes (an app comes or goes, trust flips, the tool list changes), the
+ * attached side hears about it.
  */
 
 let w: AttachWorld
@@ -30,7 +32,7 @@ beforeEach(() => {
   w.plant('p2', 'other')
   w.plant('user', 'helper')
   w.rt.refresh()
-  // 짝을 못 찾은 호출(B-1)을 오래 기다리지 않게 — 제품의 값은 5초다
+  // So an unmatched call (B-1) is not waited on for long — the production value is 5 seconds
   hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 300 })
 })
 
@@ -39,20 +41,20 @@ afterEach(async () => {
   await w.dispose()
 })
 
-describe('결정 4 — 붙는 앱', () => {
-  it('프로젝트의 세션은 신뢰한 자기 프로젝트의 앱만, 오케스트레이터는 사용자 폴더의 앱만 받는다', () => {
+describe('decision 4 — which apps attach', () => {
+  it('a project session receives only its own trusted project\'s apps, and the orchestrator receives only user-folder apps', () => {
     expect(servers(worker('p1'))).toEqual(['app-notes', 'app-tasks'])
-    // 조율 세션도 프로젝트의 세션이다 — 종류가 아니라 프로젝트가 가른다
+    // A coordinating session is a project session too — the split is by project, not by kind
     expect(servers({ id: 'c1', kind: 'coordinator', projectId: 'p1' })).toEqual(['app-notes', 'app-tasks'])
-    // 신뢰하지 않은 프로젝트의 앱은 그 프로젝트의 세션에도 붙지 않는다
+    // An untrusted project's apps do not attach to that project's sessions either
     expect(servers(worker('p2'))).toEqual([])
-    // 사용자 폴더의 앱은 오케스트레이터에게만 — 프로젝트의 앱은 오케스트레이터에게 안 간다
+    // User-folder apps go only to the orchestrator — a project's apps never go to the orchestrator
     expect(servers(ORCH)).toEqual(['app-helper'])
-    // 프로젝트가 없는 세션(오케스트레이터가 아닌)은 아무것도 받지 않는다
+    // A session with no project (and that is not the orchestrator) receives nothing
     expect(servers(worker(null))).toEqual([])
   })
 
-  it('틀린 매니페스트와 연달아 실패해 멈춘 앱은 붙지 않고, 다시 시작하면 돌아온다', async () => {
+  it('an invalid manifest and an app halted after repeated failures do not attach, and come back once restarted', async () => {
     w.plant('p1', 'broken', ['--mode', 'crash-on-start'])
     writeFileSync(join(w.roots.p1, '.centralu', 'apps', 'tasks', MANIFEST_FILE), '{ not json')
     w.rt.refresh()
@@ -61,7 +63,7 @@ describe('결정 4 — 붙는 앱', () => {
 
     let heard = 0
     a.onChange(() => heard++)
-    // 픽스처가 뜨자마자 죽는다 — maxFailures 1이라 한 번에 멈춘다
+    // The fixture dies the moment it starts up — maxFailures is 1, so it halts after just one
     await w.rt.tools({ projectId: 'p1', appId: 'broken' }).catch(() => {})
     await kit.until(() => heard, (n) => n > 0)
     expect(a.current().map((x) => x.server)).toEqual(['app-notes'])
@@ -71,13 +73,13 @@ describe('결정 4 — 붙는 앱', () => {
     expect(a.current().map((x) => x.server)).toEqual(['app-broken', 'app-notes'])
   })
 
-  it('가져온 앱은 사람이 켜기 전에는 오케스트레이터에 붙지 않고, 이름으로 불러도 막히며, 켜면 붙는다 (M4 E-3)', async () => {
+  it('an imported app does not attach to the orchestrator before the person turns it on, calling it by name is refused, and turning it on attaches it (M4 E-3)', async () => {
     const source = kit.plantApp(join(w.root, 'src'), 'imp', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } })
     const { token, review } = await w.rt.prepareImport(source)
     w.rt.commitImport(token, { enable: false })
     const a = hub.attach(ORCH)
     expect(a.current().map((x) => x.server)).toEqual(['app-helper'])
-    // Codex 스레드처럼 옛 이름을 들고 있어도 — 부를 때마다 런타임이 다시 막는다
+    // Even holding the old name, as a Codex thread would — the runtime blocks it again on every call
     const refused = await w.rt.call({ projectId: null, appId: 'imp' }, 'peek', {}, { kind: 'session', sessionId: 'o1' })
     expect(refused).toMatchObject({ status: 'rejected', error: expect.stringContaining('not enabled yet') })
 
@@ -89,16 +91,18 @@ describe('결정 4 — 붙는 앱', () => {
   })
 })
 
-describe('붙은 앱의 집합이 바뀌면 듣는다', () => {
-  it('앱 폴더가 생기고 사라지면 알림이 오고, current()가 따라간다', async () => {
+describe('hearing about it when the set of attached apps changes', () => {
+  it('a notification arrives when an app folder appears or disappears, and current() follows along', async () => {
     const a = hub.attach(worker('p1'))
     let heard = 0
     a.onChange(() => heard++)
 
     /*
-     * 다시 훑기는 폴더 감시가 부르는 것과 같은 함수(rescan)다. 감시의 fs 이벤트를 기다리지 않고
-     * 직접 훑는다 — 병렬 실행에서 macOS의 fs 이벤트가 몇 초씩 늦는 것을 실측했고, 감시 자체는
-     * 발견 테스트(discovery.test.ts)가 본다. 여기서 보는 것은 "훑어서 바뀌었으면 알린다"다.
+     * Rescanning calls the same function (rescan) that the folder watcher calls. It is called
+     * directly here rather than waiting on the watcher's fs events — under parallel test runs,
+     * macOS fs events were measured lagging by several seconds, and the watcher itself is
+     * covered by discovery.test.ts. What is checked here is only "if a rescan finds a change, it
+     * announces it."
      */
     w.plant('p1', 'fresh')
     w.rt.refresh()
@@ -112,7 +116,7 @@ describe('붙은 앱의 집합이 바뀌면 듣는다', () => {
     expect(heard).toBeGreaterThan(before)
   })
 
-  it('신뢰가 뒤집히면 붙은 앱이 모두 떨어지고, 되돌리면 다시 붙는다', async () => {
+  it('flipping trust off detaches every attached app, and flipping it back on reattaches them', async () => {
     const a = hub.attach(worker('p1'))
     let heard = 0
     a.onChange(() => heard++)
@@ -128,7 +132,7 @@ describe('붙은 앱의 집합이 바뀌면 듣는다', () => {
     expect(a.current().map((x) => x.server)).toEqual(['app-notes', 'app-tasks'])
   })
 
-  it('다른 세션에만 해당하는 변화는 알리지 않는다 — 사용자 폴더 앱이 늘어도 프로젝트 세션은 조용하다', async () => {
+  it('does not announce a change that only concerns another session — a project session stays quiet even when a user-folder app is added', async () => {
     const a = hub.attach(worker('p1'))
     const o = hub.attach(ORCH)
     let heardA = 0
@@ -143,18 +147,18 @@ describe('붙은 앱의 집합이 바뀌면 듣는다', () => {
   })
 })
 
-describe('도구 목록', () => {
-  it('처음에는 모르고(null), 처음 필요할 때 앱을 띄워 에이전트 도구만 읽는다 — 설명과 주석은 그대로', async () => {
+describe('the tool list', () => {
+  it('is unknown at first (null), and reads only the agent tools by spinning up the app the first time it is needed — descriptions and annotations pass through unchanged', async () => {
     const a = hub.attach(worker('p1'))
     expect(a.current().find((x) => x.server === 'app-notes')?.tools).toBeNull()
-    // 붙이는 것만으로는 앱이 뜨지 않는다 (성능 예산: 아무것도 안 할 때 앱 프로세스 0개)
+    // Attaching alone does not spin up the app (performance budget: zero app processes while nothing is happening)
     expect(w.records('notes').filter((r) => r.t === 'start')).toEqual([])
 
     let heard = 0
     a.onChange(() => heard++)
     const tools = await a.tools('app-notes')
     const names = tools.map((t) => t.name).sort()
-    // app_only는 화면 전용이다 — 에이전트의 목록에 오르지 않는다. run_status는 host가 더한 도구다
+    // app_only is UI-only — it never appears in the agent's list. run_status is a tool the host added
     expect(names).toEqual(['echo', 'hold', 'peek', 'poke', 'run_status'])
     expect(tools.find((t) => t.name === 'peek')).toMatchObject({
       title: 'Peek',
@@ -166,7 +170,7 @@ describe('도구 목록', () => {
       properties: { to: { type: 'number', description: 'the new value' } },
     })
 
-    // 읽은 목록은 기억된다 — 앱이 내려가도 다음 세션은 앱을 띄우지 않고 목록을 안다
+    // The list read is remembered — even after the app goes down, the next session knows the list without spinning the app up
     await kit.until(() => heard, (n) => n > 0)
     await w.rt.restart({ projectId: 'p1', appId: 'notes' })
     const b = hub.attach(worker('p1', 'w2'))
@@ -174,7 +178,7 @@ describe('도구 목록', () => {
     expect(w.records('notes').filter((r) => r.t === 'start')).toHaveLength(1)
   })
 
-  it('앱이 다시 뜨며 도구가 달라지면 알린다', async () => {
+  it('announces it when the tools change after the app comes back up', async () => {
     const extra = join(w.root, 'extra.json')
     w.plant('p1', 'grows', ['--mode', 'attach', '--extra-from', extra])
     w.rt.refresh()
@@ -185,15 +189,15 @@ describe('도구 목록', () => {
 
     writeFileSync(extra, JSON.stringify(['added_later']))
     await w.rt.restart({ projectId: 'p1', appId: 'grows' })
-    await a.tools('app-grows') // 기억한 목록을 준다 — 앱을 띄우는 것은 다음 필요다
+    await a.tools('app-grows') // returns the remembered list — spinning the app up happens on the next need
     await w.rt.tools({ projectId: 'p1', appId: 'grows' }, 'model')
     await kit.until(() => heard, (n) => n > 0)
     expect(a.current().find((x) => x.server === 'app-grows')?.tools?.map((t) => t.name)).toContain('added_later')
   })
 })
 
-describe('부르기', () => {
-  it('세션의 호출은 호출자가 그 세션인 채로 런타임에 닿고 기록된다', async () => {
+describe('calling', () => {
+  it('a session\'s call reaches the runtime, and is recorded, with the caller set to that session', async () => {
     const a = hub.attach(worker('p1', 'sess-rec'))
     const out = await a.call('app-notes', 'poke', { to: 3 })
     expect(out).toMatchObject({ isError: false, content: [{ type: 'text', text: 'poked 3' }] })
@@ -203,9 +207,9 @@ describe('부르기', () => {
     expect(runs[0]).toMatchObject({ tool: 'poke', callerKind: 'session', callerSessionId: 'sess-rec', status: 'ok' })
   })
 
-  it('붙지 않은 앱은 이름을 알아도 부를 수 없다 — 런타임까지 가지 않는다', async () => {
+  it('an unattached app cannot be called even by its known name — it never reaches the runtime', async () => {
     const a = hub.attach(worker('p1'))
-    // 다른 프로젝트의 앱, 사용자 폴더의 앱
+    // another project's app, a user-folder app
     for (const server of ['app-other', 'app-helper']) {
       const out = await a.call(server, 'echo', { text: 'x' })
       expect(out.isError).toBe(true)
@@ -215,7 +219,7 @@ describe('부르기', () => {
     expect(w.rt.runs({ projectId: null, appId: 'helper' })).toEqual([])
   })
 
-  it('신뢰를 잃은 뒤의 호출은 막힌다 — 붙을 때가 아니라 부를 때마다 다시 본다', async () => {
+  it('a call after trust is lost is blocked — checked again on every call, not only when it attached', async () => {
     const a = hub.attach(worker('p1'))
     w.trust.p1 = false
     w.rt.refresh()
@@ -226,26 +230,27 @@ describe('부르기', () => {
 })
 
 /**
- * 호출과 대화 카드의 짝 (M4 B-1). 대화 안 화면은 그 호출의 카드 아래에 선다 — 어느 카드인지를 붙이기가
- * 정한다. 어댑터가 id를 주면 그것이고, 아니면 어댑터가 본 호출 시작(`noteCall`)과 (서버, 도구, 인자)로
- * 먼저 온 순서대로 짝짓는다. 두 알림은 다른 길(Codex의 표준 출력, 다리의 WebSocket)로 오므로 어느 쪽이
- * 먼저여도 맞아야 한다.
+ * Joining a call to its conversation card (M4 B-1). The in-conversation UI stands beneath that
+ * call's card — the attachment decides which card that is. If the adapter gives an id, that is
+ * it; otherwise it is joined by the call start the adapter saw (`noteCall`) and by matching
+ * (server, tool, args), in the order they arrived. The two notifications come by different paths
+ * (Codex's stdout, the bridge's WebSocket), so it must work whichever one arrives first.
  */
-describe('카드 id 짝짓기 (B-1)', () => {
+describe('joining a call to its card id (B-1)', () => {
   const heard = () => {
     const calls: { tool: string; callId: Promise<string | null> }[] = []
     hub.onCall((c) => calls.push({ tool: c.tool, callId: c.callId }))
     return calls
   }
 
-  it('어댑터가 준 id가 곧 카드다', async () => {
+  it('the id the adapter gave is the card', async () => {
     const calls = heard()
     const a = hub.attach(worker('p1'))
     await a.call('app-notes', 'poke', { to: 1 }, { callId: 'toolu_1' })
     expect(await calls[0]!.callId).toBe('toolu_1')
   })
 
-  it('어댑터가 먼저 본 호출 시작과 짝짓는다 — 인자의 키 순서와 문자열·객체 모양은 가리지 않는다', async () => {
+  it('joins to the call start the adapter saw first — ignoring key order and whether args are a string or an object', async () => {
     const calls = heard()
     const a = hub.attach(worker('p1'))
     a.noteCall('item-1', 'app-notes', 'poke', '{"to":2,"x":{"b":1,"a":2}}')
@@ -255,7 +260,7 @@ describe('카드 id 짝짓기 (B-1)', () => {
     expect(await Promise.all(calls.map((c) => c.callId))).toEqual(['item-2', 'item-1'])
   })
 
-  it('호출이 먼저 와도 뒤이어 온 호출 시작과 짝짓는다', async () => {
+  it('joins to a call start that arrives afterward, even if the call arrives first', async () => {
     const calls = heard()
     const a = hub.attach(worker('p1'))
     const p = a.call('app-notes', 'poke', { to: 4 })
@@ -265,7 +270,7 @@ describe('카드 id 짝짓기 (B-1)', () => {
     expect(await calls[0]!.callId).toBe('item-4')
   })
 
-  it('끝난 카드(승인에서 거절된 호출)는 짝짓기에서 빠진다 — 같은 인자로 다시 부른 호출이 옛 카드에 붙지 않는다', async () => {
+  it('a finished card (a call refused at approval) is excluded from joining — a retry with the same args does not attach to the old card', async () => {
     const calls = heard()
     const a = hub.attach(worker('p1'))
     a.noteCall('denied', 'app-notes', 'poke', { to: 5 })
@@ -275,12 +280,12 @@ describe('카드 id 짝짓기 (B-1)', () => {
     expect(await calls[0]!.callId).toBe('retry')
   })
 
-  it('짝이 끝내 오지 않으면 null이다 — 호출은 그대로 끝난다', async () => {
+  it('is null if a match never arrives — the call still finishes normally', async () => {
     hub.dispose()
     hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 100 })
     const calls = heard()
     const a = hub.attach(worker('p1'))
-    // 다른 도구·다른 인자의 시작은 이 호출의 짝이 아니다
+    // A start with a different tool or different args is not a match for this call
     a.noteCall('item-x', 'app-notes', 'peek', {})
     a.noteCall('item-y', 'app-notes', 'poke', { to: 99 })
     const out = await a.call('app-notes', 'poke', { to: 6 })

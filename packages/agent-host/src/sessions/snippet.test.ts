@@ -2,43 +2,44 @@ import { describe, expect, it } from 'vitest'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
 
 /**
- * 도그푸딩에서 recall이 못 쓰게 된 두 이유를 그대로 시험한다:
- * 조각이 너무 짧아 판단이 안 됐고, 같은 말이 여러 번 나와 limit이 무의미했다.
+ * Tests, as-is, the two reasons dogfooding made recall unusable: a fragment was too short to
+ * judge, and the same phrase appeared multiple times, making the limit meaningless.
  */
-describe('찾은 자리 둘레 잘라내기', () => {
+describe('cutting out the area around a found spot', () => {
   const body = `${'앞'.repeat(400)}은하수 그라데이션${'뒤'.repeat(400)}`
 
-  it('낱말 앞뒤로 문맥을 준다 — 15자 토막으로는 무엇인지 가릴 수 없다', () => {
+  it('gives context around the word — a 15-character fragment gives no way to tell what it is', () => {
     const s = windowAround(body, '은하수', 160)
     expect(s).toContain('은하수 그라데이션')
-    // 앞뒤가 실제로 딸려온다
+    // Context actually comes along on both sides
     expect(s.length).toBeGreaterThan(300)
     expect(s).toMatch(/^…앞/)
     expect(s).toMatch(/뒤…$/)
   })
 
-  it('짧은 본문은 통째로 준다 (자를 것이 없으면 자르지 않는다)', () => {
+  it('gives a short body whole (nothing is cut if there is nothing to cut)', () => {
     expect(windowAround('짧은 말', '짧은', 160)).toBe('짧은 말')
   })
 
-  it('낱말을 못 찾아도 빈손으로 돌려보내지 않는다', () => {
-    // FTS가 다른 형태(조사 붙은 꼴 등)로 맞춘 경우
+  it('does not return empty-handed even when the word cannot be found', () => {
+    // The case where FTS matched a different form of the word (e.g. one with a particle attached)
     const s = windowAround(body, '없는낱말', 50)
     expect(s.length).toBeGreaterThan(0)
   })
 
-  it('줄바꿈은 한 칸으로 — 한 줄 결과에 여러 줄이 끼면 목록이 깨진다', () => {
+  it('collapses a newline to a single space — a multi-line result would break a one-line-per-entry list', () => {
     expect(windowAround('가\n\n나   다', '가', 100)).toBe('가 나 다')
   })
 })
 
-describe('가까운 결과 걷어내기', () => {
+describe('sweeping out nearby hits', () => {
   /*
-   * 저장소의 한 행은 스트리밍 델타 하나라 한 응답이 수백 행이다.
-   * 그래서 한 응답 안에서 낱말이 여러 번 나오면 같은 이야기가 여러 건으로 잡힌다
-   * (도그푸딩: limit 8인데 같은 것이 5번, 실질 3건).
+   * A single row in the store is one streaming delta, so one response spans hundreds of rows.
+   * That means a word appearing multiple times within one response gets caught as multiple hits
+   * for the same story (dogfooding: with limit 8, the same one appeared 5 times, so only 3 were
+   * actually distinct).
    */
-  it('같은 세션에서 seq가 가까우면 한 건으로 본다', () => {
+  it('treats hits in the same session as one when their seq are close together', () => {
     const hits = [
       { sessionId: 'a', seq: 100 },
       { sessionId: 'a', seq: 103 },
@@ -51,7 +52,7 @@ describe('가까운 결과 걷어내기', () => {
     ])
   })
 
-  it('세션이 다르면 seq가 같아도 남긴다 — 서로 다른 이야기다', () => {
+  it('keeps both if the sessions differ, even with the same seq — they are different stories', () => {
     const hits = [
       { sessionId: 'a', seq: 100 },
       { sessionId: 'b', seq: 100 },
@@ -59,7 +60,7 @@ describe('가까운 결과 걷어내기', () => {
     expect(dedupeNearbyHits(hits)).toHaveLength(2)
   })
 
-  it('가장 앞의 것을 남긴다 (검색 순위가 높은 쪽)', () => {
+  it('keeps the earliest one (the one that ranks higher in search)', () => {
     const hits = [
       { sessionId: 'a', seq: 200 },
       { sessionId: 'a', seq: 201 },

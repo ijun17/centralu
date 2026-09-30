@@ -13,8 +13,9 @@ import { SessionManager } from './manager.js'
 import { FIXTURE_APP } from './session-apps.test-helpers.js'
 
 /**
- * 매니저가 세션을 띄울 때 결정 4대로 앱을 넘기는가 (M4 A-5) — 진짜 저장소·신뢰·워크트리로 본다.
- * 어댑터만 가짜다: 받은 옵션을 적어 두는 것이 이 테스트가 보는 전부다.
+ * Whether the manager hands apps to a session according to decision 4 when it spawns it (M4 A-5)
+ * — checked with a real store, real trust and a real worktree. Only the adapter is fake: all this
+ * test checks is the options it received.
  */
 
 class Handle implements SessionHandle {
@@ -92,18 +93,18 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('매니저가 넘기는 앱 (결정 4)', () => {
-  it('일반 워커는 자기 프로젝트의 외부 앱을 받는다 — 내장 앱 도구는 지금처럼 받지 않는다', async () => {
+describe('apps handed to a session by the manager (decision 4)', () => {
+  it('an ordinary worker receives its own project\'s external apps — it still does not receive the built-in app tools', async () => {
     await create()
     const o = adapter.last()
     expect(servers(o)).toEqual(['app-notes'])
     expect(o.orchestratorTools).toBeUndefined()
     expect(o.toolProfile).toBeUndefined()
-    // host로 돌아오는 길은 받는다 — Codex의 앱 다리가 이 주소로 돌아온다
+    // The path back to the host is still received — Codex's app bridge returns to this address
     expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
   })
 
-  it('워크트리 세션은 워크트리에서 뜨되, 프로젝트 뿌리의 앱을 받는다', async () => {
+  it('a worktree session starts in the worktree, but receives the project root\'s apps', async () => {
     const s = await create({ worktree: true })
     const o = adapter.last()
     expect(o.cwd).toBe(s.worktree?.path)
@@ -111,20 +112,20 @@ describe('매니저가 넘기는 앱 (결정 4)', () => {
     expect(servers(o)).toEqual(['app-notes'])
   })
 
-  it('신뢰하지 않은 프로젝트의 세션은 앱을 받지 않는다', async () => {
+  it('a session in an untrusted project receives no apps', async () => {
     await rpc('projects.setTrusted', { projectId, trusted: false })
     await create()
     expect(servers(adapter.last())).toEqual([])
   })
 
-  it('오케스트레이터는 사용자 폴더의 앱만 받고, 내장 도구도 그대로 받는다', async () => {
+  it('the orchestrator receives only user-folder apps, and still receives the built-in tools', async () => {
     await mgr.orchestrator()
     const o = adapter.last()
     expect(servers(o)).toEqual(['app-helper'])
     expect(o.orchestratorTools).toBeDefined()
   })
 
-  it('되살릴 때도 붙인다 — 프로세스를 갈아 끼운 세션이 앱을 잃지 않는다', async () => {
+  it('attaches apps on resume too — a session whose process was swapped out does not lose its apps', async () => {
     const s = await create()
     adapter.seen = []
     await mgr.restartSession(s.id)

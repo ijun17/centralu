@@ -1,19 +1,25 @@
 import type { NormalizedEvent, StoredMessage } from '@cc/protocol'
 
 /**
- * 앱이 부탁한 에이전트 (M4 D-1) — 세션에 무엇을 보내고, 끝난 세션에서 무엇을 답으로 읽는가.
+ * An agent an app has assigned (M4 D-1) — what gets sent to the session, and what gets read as
+ * its answer once the session finishes.
  *
- * 세션을 세우고 기다리는 일은 매니저가 한다(`SessionManager.runAppAgent`). 보내는 글의 틀은 대화 안 화면의 말과 같은 것을
- * 쓴다(`manager.ts`의 `appMessageFrame`). 여기는 그 뒤의 일만 다룬다: 턴의 결말을 기다리는 것과, 마지막 답을 대화 기록에서
- * 골라내는 규칙.
+ * Standing the session up and waiting for it is the manager's job (`SessionManager.runAppAgent`).
+ * The frame around the text it sends is the same one used for in-conversation UI messages
+ * (`manager.ts`'s `appMessageFrame`). What lives here is only what comes after: waiting for the
+ * turn's outcome, and the rule for picking the final answer out of the conversation record.
  */
 
 /**
- * 턴의 마지막 답 — 대화 기록의 끝에서 마지막 도구 호출 뒤에 선 에이전트의 글.
+ * The final answer of a turn — the agent's text standing after the last tool call at the end of
+ * the conversation record.
  *
- * "마지막 글 하나"가 아니라 "마지막 도구 호출 뒤의 글"인 이유: 에이전트는 글을 쓰고, 도구를 부르고, 다시 쓴다. 도구 앞의
- * 글은 계획이지 답이 아니다. 추론 요약(`reasoning`)은 답이 아니므로 건너뛰고, 도구 호출·결과·승인·마커·사람의 말을
- * 만나면 멈춘다. 끝에 글이 없으면(도구 호출로 턴이 끝났다) 빈 답이다 — 앞의 계획을 답인 척 돌려주지 않는다.
+ * Why it is "the text after the last tool call" and not simply "the last piece of text": an agent
+ * writes text, calls a tool, and writes again. Text before a tool call is a plan, not an answer.
+ * A reasoning summary (`reasoning`) is skipped since it is not an answer, and the scan stops the
+ * moment it meets a tool call, a tool result, an approval, a marker or something a person said.
+ * If there is no text at the end (the turn ended on a tool call), the answer is empty — an
+ * earlier plan is never handed back pretending to be the answer.
  */
 export function finalAnswer(messages: readonly StoredMessage[]): string {
   const parts: string[] = []
@@ -30,21 +36,27 @@ export function finalAnswer(messages: readonly StoredMessage[]): string {
 }
 
 /**
- * 앱이 답을 기다리는 세션 하나 (M4 D-1) — 그 세션의 이벤트를 보고 턴의 결말을 정한다.
+ * One session an app is waiting on for an answer (M4 D-1) — decides the outcome of its turn by
+ * watching that session's events.
  *
- *   turn_complete   답이 났다(구조화 출력이 있으면 함께). 단 사람이 멈춘 턴의 끝은 답이 아니다 — 멈췄다고 돌려준다
- *   error           턴이 실패했다(도구가 죽은 것 포함)
- *   limit_reached   사용량 한도 — 기다려도 이 턴은 풀리지 않는다
- *   승인·질문        사람을 기다린다 — 앱에 한 줄 알린다(앱이 멈춘 것이 아니라 사람을 기다린다는 것)
- *   usage_update    쓴 토큰(D-5) — 결말과 상관없이 넘긴다. Claude는 턴의 결말 바로 앞에 세션 누적을 싣고(`result`의
- *                   modelUsage, 모든 모델의 합), Codex는 스레드 누적을 싣는다. 부탁마다 새 세션이라 마지막 값이 곧 이 부탁의 몫이다
+ *   turn_complete       the answer landed (with structured output, if there is any). The end of a
+ *                       turn the person stopped is not an answer, though — it is returned as stopped
+ *   error               the turn failed (including a tool dying)
+ *   limit_reached       a usage limit — this turn will not resolve no matter how long we wait
+ *   approval, question  waiting on the person — the app is told in one line (that it is waiting
+ *                       on the person, not that the app itself has stalled)
+ *   usage_update        tokens spent (D-5) — passed through regardless of the outcome. Claude
+ *                       carries the session's running total right before the turn's outcome (the
+ *                       `result`'s modelUsage, summed across every model), while Codex carries the
+ *                       thread's running total. Since each assignment is a fresh session, the last
+ *                       value is exactly this assignment's share.
  *
- * 한 번 정해지면 그 뒤의 이벤트는 보지 않는다(토큰만 빼고).
+ * Once the outcome is decided, later events are ignored (except for tokens).
  */
 export class AgentRunWait {
-  /** 사람이 그 세션의 턴을 멈췄다 (`SessionManager.interrupt`) */
+  /** The person stopped that session's turn (`SessionManager.interrupt`) */
   stoppedByPerson = false
-  /** 사람이 그 세션을 지웠다 — 끝맺을 세션이 없다 */
+  /** The person deleted that session — there is no session left to conclude */
   deleted = false
   readonly done: Promise<{ output?: unknown }>
   private settle!: { resolve: (v: { output?: unknown }) => void; reject: (e: Error) => void }
@@ -56,15 +68,18 @@ export class AgentRunWait {
     private onUsage: (tokens: { input: number; output: number }) => void = () => {},
   ) {
     this.done = new Promise((resolve, reject) => (this.settle = { resolve, reject }))
-    // 기다리는 쪽이 붙기 전에 실패해도 처리되지 않은 거절로 새지 않게
+    // So a failure before anyone is waiting does not leak as an unhandled rejection
     this.done.catch(() => {})
   }
 
   onEvent(e: NormalizedEvent): void {
     /*
-     * 기록의 입력은 모델이 읽은 입력 **전부**다 — 캐시에서 읽은 것과 캐시에 쓴 것까지 (TokenUsage의 세 칸은 겹치지 않는다). 기록 판의
-     * 토큰은 앱이 사람의 에이전트를 얼마나 썼는가이고, 에이전트는 부를 때마다 문맥 전체를 다시 읽는다 — 캐시를 빼면 25k를 읽은
-     * 실행이 1k로 보였다. Codex도 같은 합이 된다(캐시 입력은 원래 입력 안에 세어 알려 준다).
+     * The input recorded here is **all** of the input the model read — including what it read
+     * from cache and what it wrote to cache (TokenUsage's three fields do not overlap). What is
+     * recorded here is how much of the person's agent the app used, and an agent re-reads its
+     * whole context on every call — without the cache, a run that read 25k looked like it read
+     * only 1k. Codex ends up with the same sum (cached input is already counted inside its
+     * reported input).
      */
     if (e.type === 'usage_update') {
       const t = e.tokens

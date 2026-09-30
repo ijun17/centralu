@@ -13,10 +13,13 @@ import { SessionManager } from './manager.js'
 import { FIXTURE_APP, type PlantKit } from './session-apps.test-helpers.js'
 
 /**
- * 앱의 중개(M4 D)를 매니저까지 이어서 보는 시험의 세계 — 진짜 매니저·런타임·앱 프로세스(픽스처의 `mediation`)·실행 기록.
- * 어댑터만 가짜다: 받은 옵션을 적고, 시험이 정한 대로 에이전트의 답을 흘린다.
+ * A test world that follows an app's mediation (M4 D) all the way through the manager — a real
+ * manager, runtime, app process (the fixture's `mediation`) and run record. Only the adapter is
+ * fake: it records the options it received, and emits the agent's answer however the test
+ * dictates.
  *
- * (테스트 전용 파일이다. 앱 폴더를 심는 손은 `session-apps.test-helpers.ts`처럼 시험 파일이 넘긴다)
+ * (A test-only file. Planting app folders is handed off to test files, the same way
+ * `session-apps.test-helpers.ts` does.)
  */
 
 export class FakeHandle implements SessionHandle {
@@ -35,14 +38,14 @@ export class FakeHandle implements SessionHandle {
   }
   send(text: string) {
     this.sent.push(text)
-    // 도구는 나중에 답한다 — 같은 틱에 답하면 실제로는 없는 순서를 시험하게 된다
+    // The tool answers later — answering on the same tick would test an ordering that does not actually occur
     setTimeout(() => this.onSend(this, text), 5)
   }
   respondApproval(requestId: string, decision: string) {
     this.answered.push({ requestId, decision })
     return true
   }
-  /** Claude 어댑터처럼: 멈추면 이 세션이 부른 앱 호출을 모두 취소한다 */
+  /** Like the Claude adapter: stopping cancels every app call this session made */
   interrupt() {
     this.interrupted = true
     this.opts.apps?.cancelAll()
@@ -64,7 +67,7 @@ export class FakeAdapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
   }
   loggedIn = true
-  /** 에이전트가 받은 말에 어떻게 답하나 — 기본은 아무 말도 없다(시험이 정한다) */
+  /** How to answer what the agent receives — silence by default (the test decides) */
   onSend: (h: FakeHandle, text: string) => void = () => {}
   handles = new Map<string, FakeHandle>()
   opened: CreateSessionOpts[] = []
@@ -97,20 +100,21 @@ export type BrokerWorld = {
   events: NormalizedEvent[]
   projectId: string
   /**
-   * 능력 물음의 카드(M4 D-4)에 사람 대신 답한다 — 기본은 허락이다(묻는 것 자체를 보지 않는 시험). null이면 아무도 답하지 않고,
-   * 시험이 카드를 보고 직접 답한다.
+   * Answers the capability-question card (M4 D-4) in place of a person — allowed by default (for
+   * a test that does not care about the question itself). null means nobody answers, and the test
+   * inspects the card and answers it directly.
    */
   answerCapabilities: 'allow' | 'deny' | null
-  /** 픽스처 앱(`--mode mediation`)을 심는다 — 프로젝트(`repo`) 또는 사용자 폴더에, 매니페스트의 `uses`와 함께 */
+  /** Plants the fixture app (`--mode mediation`) — in the project (`repo`) or the user folder, with the manifest's `uses` */
   plant(where: 'project' | 'user', id: string, uses: Record<string, unknown>): string
-  /** 세션의 에이전트가 붙은 앱의 `ask_broker`를 부른다 — 에이전트가 앱 도구를 부르는 그 길(A-5) */
+  /** Calls the attached app's `ask_broker` as a session's agent would — the same path an agent calls an app tool through (A-5) */
   callFromSession(session: SessionInfo, server: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AppToolResult>
-  /** 앱이 세운 세션들 (부른 세션은 빼고) */
+  /** The sessions the app stood up (excluding the calling session) */
   agentSessions(): SessionInfo[]
   dispose(): Promise<void>
 }
 
-/** `ask_broker`가 돌려준 중개의 답 (픽스처가 structuredContent에 싣는다) */
+/** The mediation's answer, returned by `ask_broker` (the fixture carries it in structuredContent) */
 export const brokerSaid = (r: AppToolResult) => r.structuredContent as { isError: boolean; text: string; structured: unknown }
 
 export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}): Promise<BrokerWorld> {
@@ -128,18 +132,18 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
     ['codex', codex],
   ])
   const events: NormalizedEvent[] = []
-  // eslint-disable-next-line prefer-const -- 세계(w)는 매니저를 만든 뒤에 선다. 방송을 받는 함수가 그 뒤의 w를 읽는다
+  // eslint-disable-next-line prefer-const -- the world (w) is only assigned after the manager is created. The broadcast listener reads that later w
   let w: BrokerWorld
   const onEvent = (e: NormalizedEvent) => {
     events.push(e)
-    // 사람 대신 답한다 — 실제 사람처럼 카드가 선 **뒤에** (같은 틱에 답하면 실제로는 없는 순서를 시험하게 된다)
+    // Answer in place of the person — **after** the card has stood up, as a real person would (answering on the same tick would test an ordering that does not actually occur)
     if (e.type === 'approval_request' && e.detail.kind === 'capability' && w?.answerCapabilities) {
       const answer = w.answerCapabilities
       setTimeout(() => {
         try {
           w.mgr.respondApproval(e.sessionId, e.requestId, answer)
         } catch {
-          // 그새 닫힌 카드다
+          // the card was already closed in the meantime
         }
       }, 5)
     }

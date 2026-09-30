@@ -7,21 +7,23 @@ import { ExternalApps, type RuntimeTiming } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
 
 /**
- * 세션에 앱을 붙이는 테스트(A-5)가 함께 쓰는 세계 — 진짜 런타임, 진짜 앱 프로세스(픽스처),
- * 진짜 실행 기록(host의 main과 같은 이음새 `storeRunLedger`).
+ * The world shared by tests that attach apps to a session (A-5) — a real runtime, a real app
+ * process (a fixture), and a real run record (`storeRunLedger`, the same seam the host's main
+ * uses).
  *
- *   p1     신뢰한 프로젝트
- *   p2     신뢰하지 않은 프로젝트
- *   user   사용자 폴더 (`<dataRoot>/apps`) — 언제나 신뢰
+ *   p1     a trusted project
+ *   p2     an untrusted project
+ *   user   the user folder (`<dataRoot>/apps`) — always trusted
  *
- * (테스트 전용 파일이다. 제품 코드는 이것을 임포트하지 않는다)
+ * (A test-only file. Product code never imports it.)
  *
- * 앱 폴더를 심는 손(`apps/external/test-helpers.ts`)은 **테스트가 넘긴다.** 이 파일은 `.test.ts`가
- * 아니라서 층 규칙(`host-core-blind-to-apps`)을 그대로 받는다 — 코어 쪽 파일이 런타임의 문
- * (`runtime.ts`) 뒤를 임포트하지 않게 규칙을 느슨하게 하는 대신, 테스트 파일이 들고 온다.
+ * Planting app folders (`apps/external/test-helpers.ts`) is **handed in by the test.** This file
+ * is not a `.test.ts`, so it is still bound by the layer rule (`host-core-blind-to-apps`) — rather
+ * than loosening the rule so that a core-side file could import behind the runtime's door
+ * (`runtime.ts`), the test file carries it in instead.
  */
 
-/** `apps/external/test-helpers.ts`의 두 손 — 테스트 파일이 그대로 넘긴다 */
+/** The two hands of `apps/external/test-helpers.ts` — passed straight through by the test file */
 export type PlantKit = {
   plantApp(parentDir: string, id: string, over?: Record<string, unknown>): string
   PROJECT_APPS: readonly string[]
@@ -38,11 +40,11 @@ export type AttachWorld = {
   trust: { p1: boolean; p2: boolean }
   store: Store
   rt: ExternalApps
-  /** 픽스처 앱 하나를 심는다 (기본 `--mode attach`). 반환은 앱 폴더 */
+  /** Plants one fixture app (`--mode attach` by default). Returns the app folder */
   plant(where: 'p1' | 'p2' | 'user', id: string, args?: string[]): string
-  /** 그 앱 프로세스가 스스로 적은 기록 */
+  /** The record that app process wrote about itself */
   records(id: string): Rec[]
-  /** `hold` 도구를 풀어 주는 문 파일의 경로 (`--gate`로 넘긴다) */
+  /** The path to the gate file that releases the `hold` tool (passed via `--gate`) */
   gate(id: string): string
   dispose(): Promise<void>
 }

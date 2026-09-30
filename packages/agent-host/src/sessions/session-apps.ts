@@ -4,47 +4,55 @@ import { appMcpServerName } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
 
 /**
- * 세션에 외부 앱을 붙인다 (M4 A-5) — **어느 세션이 어느 앱을 받는가**와, 세션의 에이전트가
- * 앱을 부르는 길을 여기서 한 번 정한다.
+ * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path
+ * a session's agent calls an app through, are both decided once, here.
  *
- * 어댑터는 이 결정을 모른다. 받은 목록을 자기 방식(Claude는 인프로세스 대리 서버, Codex는
- * stdio 다리)으로 붙이고, 호출은 전부 `call`로 보낸다. `call`은 런타임의 단 하나의 길
- * (`ExternalApps.call`)을 호출자 `{ kind: 'session' }`으로 부른다 — 그래서 에이전트가 부른
- * 것도 화면이 부른 것과 같은 공개 범위 검사, 실행 id, 기록을 지난다(A-4, A-6).
+ * The adapter does not know this decision. It attaches the list it is given in its own way
+ * (Claude through an in-process proxy server, Codex through a stdio bridge), and every call goes
+ * through `call`. `call` invokes the runtime's single path (`ExternalApps.call`) with the caller
+ * `{ kind: 'session' }` — so a call made by an agent passes through the same visibility check,
+ * gets the same run id, and is recorded the same way as one made by the UI (A-4, A-6).
  *
- * 코어가 외부 앱에 대해 아는 문은 `apps/external/runtime.ts` 하나다(`host-core-blind-to-apps`).
- * 이 파일도 그 문만 쓴다.
+ * The one door the core knows about external apps through is `apps/external/runtime.ts`
+ * (`host-core-blind-to-apps`). This file uses only that door too.
  */
 
 /**
- * 붙일 앱을 정하는 데 필요한 세션의 모양 — 이것이 결정 4가 보는 전부다. `builderOf`는 그 세션이 만드는 앱이다
- * (M4 C-3): 만드는 세션은 자기 앱을 늘 받는다.
+ * The shape of a session needed to decide which apps to attach — this is the whole of what
+ * decision 4 sees. `builderOf` is the app that session is building (M4 C-3): a building session
+ * always receives its own app.
  */
 export type AppSessionKey = { id: string; kind: SessionKind; projectId: string | null; builderOf?: AppRef | null }
 
 /**
- * 도구 목록을 모르는 앱을 띄워 알아낼 때 기다리는 상한.
+ * The upper bound on how long we wait when an app whose tool list is unknown has to be spun up
+ * to find out.
  *
- * Claude CLI는 세션을 시작하며 붙은 서버마다 `tools/list`를 부르고, Codex는 스레드를 시작하며
- * 다리의 `tools/list`를 기다린다. 앱이 뜨다 멈추면 세션까지 멈춘다 — 그래서 상한을 두고, 넘으면
- * 빈 목록으로 붙인다. 늦게라도 앱이 뜨면 목록을 다시 읽고 알린다(Claude는 곧바로, Codex는 다음
- * 스레드부터). 런타임의 연결 상한(30초)보다 짧아야 이 상한이 먼저 걸린다.
+ * The Claude CLI calls `tools/list` for every attached server as it starts a session, and Codex
+ * waits for the bridge's `tools/list` as it starts a thread. If an app hangs while starting, the
+ * session hangs with it — hence this cap; past it, the app is attached with an empty tool list.
+ * If the app comes up later anyway, the list is read again and announced (immediately for
+ * Claude, starting from the next thread for Codex). This must be shorter than the runtime's
+ * connection cap (30 seconds) so that it is this cap that triggers first.
  */
 export const TOOL_LIST_WAIT_MS = 15_000
 
 /**
- * 먼저 돌려준 실행의 결말을 들고 있는 시간 (A-5 "오래 걸리는 호출"). 에이전트는 보통 몇 분 안에
- * `run_status`로 다시 묻는다. 이보다 오래된 것은 결과 본문 없이 기록(상태·이유)으로만 답한다.
+ * How long the outcome of a call that was already handed back early is kept (A-5, "long-running
+ * calls"). An agent normally asks again with `run_status` within a few minutes. Anything older
+ * than this is answered from the record (status and reason) only, without the result body.
  */
 export const DETACHED_KEEP_MS = 60 * 60_000
-/** 세션 하나가 들고 있을 수 있는 먼저 돌려준 실행의 수 — 넘치면 오래된 끝난 것부터 버린다 */
+/** The number of early-returned calls one session may hold — past this, the oldest finished ones are dropped first */
 const DETACHED_PER_SESSION = 50
 
 /**
- * 모든 앱 대리 서버에 host가 더하는 도구 (A-5) — 먼저 돌려받은 호출의 상태와 결과를 본다.
+ * A tool the host adds to every app proxy server (A-5) — to check the status and result of a
+ * call that was already handed back early.
  *
- * 읽기만 한다(`readOnlyHint`) — 그래서 어느 프리셋에서도 묻지 않는다(결정 5). 앱에 같은 이름의
- * 도구가 있으면 host의 것이 이긴다: 오래 걸리는 호출을 이어서 볼 길이 앱마다 달라지면 안 된다.
+ * It only reads (`readOnlyHint`) — so no preset ever asks about it (decision 5). If the app has
+ * a tool with the same name, the host's own wins: the path for following up on a long-running
+ * call must not differ from app to app.
  */
 export const RUN_STATUS_TOOL = 'run_status'
 const RUN_STATUS_SPEC: AppToolSpec = {
@@ -60,16 +68,17 @@ const RUN_STATUS_SPEC: AppToolSpec = {
   annotations: { title: 'Run status', readOnlyHint: true, openWorldHint: false },
 }
 
-/** 먼저 돌려준 실행 하나 — 결말이 오면 채운다 */
+/** One call that was already handed back early — filled in once its outcome arrives */
 type Detached = { sessionId: string; server: string; startedAt: number; outcome: AppCallOutcome | null }
 
 /**
- * 카드 id 짝짓기 (M4 B-1) — 어댑터가 본 호출 시작과 다리로 들어온 호출이 서로를 기다리는 시간.
- * 같은 host 안의 두 길(어댑터의 표준 출력, 다리의 WebSocket)이라 보통 몇 ms 안에 만난다. 넘기면
- * 그 호출에는 대화 안 화면이 서지 않는다(호출 자체는 그대로 돈다).
+ * Card-id joining (M4 B-1) — how long a call start seen by the adapter and a call that came in
+ * through the bridge wait for each other. Since both are two paths inside the same host (the
+ * adapter's stdout, the bridge's WebSocket), they usually meet within a few ms. If the wait is
+ * exceeded, that call simply gets no in-conversation card (the call itself keeps running).
  */
 export const CALL_JOIN_WAIT_MS = 5_000
-/** 짝을 못 만난 채 적어 둔 호출 시작을 들고 있는 시간과 수 — 넘치면 오래된 것부터 버린다 */
+/** How long, and how many, unmatched call starts are kept — past this, the oldest are dropped first */
 const NOTED_KEEP_MS = 60_000
 const NOTED_MAX = 64
 
@@ -77,12 +86,14 @@ type Noted = { callId: string; server: string; tool: string; args: string; at: n
 type Waiter = { server: string; tool: string; args: string; resolve: (callId: string | null) => void; timer: NodeJS.Timeout }
 
 /**
- * 세션의 에이전트가 앱 도구를 부른 한 번 (M4 B-1) — 대화 안 화면이 듣는다.
+ * One instance of a session's agent calling an app tool (M4 B-1) — listened to by the
+ * in-conversation UI.
  *
- * 부르는 순간에 알린다(결말을 기다리지 않는다). 화면은 호출이 시작될 때 tool-input을, 끝날 때
- * tool-result를 받는다 — 규격의 순서가 곧 이 두 약속의 순서다.
+ * Announced the moment the call is made (does not wait for the outcome). The UI gets tool-input
+ * when the call starts and tool-result when it ends — the order of these two promises follows
+ * the order of the protocol.
  */
-/** 세션의 앱 호출이 보낸 진행의 말 — 어느 대화의 어느 카드인지와 그 한 줄 */
+/** A progress line sent by a session's app call — which conversation, which card, and the one line */
 export type SessionAppProgress = { sessionId: string; callId: string; message: string }
 
 export type SessionAppCall = {
@@ -91,26 +102,29 @@ export type SessionAppCall = {
   server: string
   tool: string
   args: Record<string, unknown>
-  /** 대화의 도구 카드 id — 어댑터가 알려 줬거나 짝지은 것. 끝내 못 찾으면 null */
+  /** The conversation's tool-card id — either told to us by the adapter or joined by us. null if it is never found */
   callId: Promise<string | null>
-  /** 호출의 결말 (먼저 돌려준 호출이어도 진짜 결말이다) */
+  /** The call's outcome (the real one, even for a call that was already handed back early) */
   outcome: Promise<AppCallOutcome>
 }
 
 /**
- * 세션에 붙을 수 없는 앱의 상태 (결정 4) — 틀린 매니페스트, 신뢰하지 않은 프로젝트, 연달아 실패해 멈춤, 그리고 사람이 아직 켜지
- * 않은 가져온 앱(M4 E-3). 붙이지 않아도 부를 때마다 런타임이 다시 막는다(Codex 스레드에 남은 이름).
+ * States of an app that cannot be attached to a session (decision 4) — an invalid manifest, an
+ * untrusted project, halted after repeated failures, and an imported app the person has not
+ * turned on yet (M4 E-3). Even when not attached, the runtime blocks it again on every call (in
+ * case the name lingers in a Codex thread).
  */
 const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
 type Hit = { ref: AppRef; server: string }
 
 export class SessionAppsHub {
-  /** 세션 id → 지금 살아 있는 핸들의 붙이기. 핸들을 갈아 끼우면 새 것이 자리를 잇는다 */
+  /** session id → the attachment of the handle currently alive for it. Swapping the handle out lets a new one take its place */
   private live = new Map<string, Attachment>()
   /**
-   * 실행 id → 먼저 돌려준 실행. **핸들이 아니라 hub에 둔다** — 세션이 다시 떠도(재개·재시작)
-   * 같은 세션의 에이전트는 같은 id로 이어서 물을 수 있어야 한다.
+   * run id → an early-returned call. **Kept on the hub, not on the handle** — even after a
+   * session respawns (resume, restart), the same session's agent must be able to keep asking
+   * about it with the same id.
    */
   readonly detached = new Map<string, Detached>()
   private stopListening: () => void
@@ -127,7 +141,7 @@ export class SessionAppsHub {
     })
   }
 
-  /** 핸들 하나를 위한 붙이기를 만든다 — 어댑터에 넘기고, 핸들이 닫힐 때 어댑터가 닫는다 */
+  /** Creates the attachment for one handle — handed to the adapter, and closed by the adapter when the handle closes */
   attach(session: AppSessionKey): SessionApps {
     const a = new Attachment(this, session)
     this.live.set(session.id, a)
@@ -135,9 +149,11 @@ export class SessionAppsHub {
   }
 
   /**
-   * 다리(인프로세스로 못 붙이는 어댑터 — Codex)가 들어오는 문. 다리는 별도 프로세스라 세션 id와
-   * 서버 이름만 들고 온다 — 그 세션의 **지금 살아 있는 핸들의** 붙이기가 답한다. 살아 있는 핸들이
-   * 없으면(세션이 잠들었거나 닫혔으면) 거절한다: 핸들 없는 세션의 이름으로 앱을 부를 수는 없다.
+   * The door the bridge (the adapter that cannot attach in-process — Codex) comes in through.
+   * Since the bridge is a separate process, it only carries a session id and a server name — the
+   * attachment of that session's **currently live handle** answers on its behalf. If there is no
+   * live handle (the session is asleep or closed), it is refused: an app cannot be called under
+   * the name of a session with no handle.
    */
   forSession(sessionId: string): SessionApps {
     const a = this.live.get(sessionId)
@@ -146,8 +162,9 @@ export class SessionAppsHub {
   }
 
   /**
-   * 세션의 앱 호출을 듣는다 (M4 B-1). 대화 안 화면이 여기서 "화면이 달린 도구인가"를 보고 화면을 연다.
-   * 이 층은 화면을 모른다 — 알리기만 한다.
+   * Listens for a session's app calls (M4 B-1). The in-conversation UI checks here whether a
+   * tool has a screen attached and opens it. This layer does not know about the UI — it only
+   * announces.
    */
   onCall(listener: (c: SessionAppCall) => void): () => void {
     this.callListeners.add(listener)
@@ -155,15 +172,17 @@ export class SessionAppsHub {
   }
 
   /**
-   * 세션의 앱 호출이 보낸 진행의 말을 듣는다 (M4 D) — 앱이 중개에서 받은 "사람을 기다린다" 같은 한 줄. 매니저가 그 세션의 도구 카드에
-   * 실행 중 출력으로 붙인다. 이 층은 대화를 모른다 — 알리기만 한다.
+   * Listens for progress lines sent by a session's app call (M4 D) — a one-liner such as
+   * "waiting on the person" received from an app's intermediary. The manager attaches it to that
+   * session's tool card as running output. This layer does not know about the conversation — it
+   * only announces.
    */
   onCallProgress(listener: (p: SessionAppProgress) => void): () => void {
     this.progressListeners.add(listener)
     return () => void this.progressListeners.delete(listener)
   }
 
-  /** @internal 붙이기가 진행의 말 하나를 알린다 */
+  /** @internal The attachment announces one progress line */
   progress(p: SessionAppProgress): void {
     for (const l of [...this.progressListeners]) {
       try {
@@ -174,13 +193,13 @@ export class SessionAppsHub {
     }
   }
 
-  /** 세션이 **지워졌다** (잠든 것과 다르다 — 잠든 세션은 다시 깬다). 그 세션의 화면을 걷는 신호다 */
+  /** A session has **been deleted** (different from being asleep — an asleep session wakes back up). The signal to tear down that session's UI */
   onSessionGone(listener: (sessionId: string) => void): () => void {
     this.goneListeners.add(listener)
     return () => void this.goneListeners.delete(listener)
   }
 
-  /** 매니저가 세션을 지울 때 부른다 */
+  /** Called by the manager when it deletes a session */
   sessionGone(sessionId: string): void {
     for (const l of [...this.goneListeners]) {
       try {
@@ -191,7 +210,7 @@ export class SessionAppsHub {
     }
   }
 
-  /** @internal 붙이기가 호출 하나를 알린다 — 듣는 쪽의 실패는 호출을 막지 않는다 */
+  /** @internal The attachment announces one call — a listener's failure does not block the call */
   announce(c: SessionAppCall): void {
     for (const l of [...this.callListeners]) {
       try {
@@ -202,23 +221,26 @@ export class SessionAppsHub {
     }
   }
 
-  /** @internal 닫힌 붙이기가 자리를 비운다 — 이미 새 핸들이 이었으면 건드리지 않는다 */
+  /** @internal A closed attachment vacates its spot — does not touch it if a new handle has already taken over */
   release(a: Attachment): void {
     if (this.live.get(a.session.id) === a) this.live.delete(a.session.id)
   }
 
   /**
-   * 이 세션이 받는 앱 (결정 4).
+   * The apps this session receives (decision 4).
    *
-   *   오케스트레이터        사용자 폴더의 앱 (프로젝트에 속하지 않으므로 프로젝트 앱은 없다)
-   *   프로젝트의 세션        그 프로젝트의 앱 — 신뢰한 프로젝트일 때만. 워크트리 세션도 같은
-   *                        프로젝트 id를 가지므로 뿌리의 앱을 받는다(A-2: 인스턴스는 프로젝트당 하나)
-   *   그 밖(프로젝트 없음)   없음
-   *   만드는 세션 (C-3)       위에 더해 **자기 앱** — 사용자 폴더 앱의 만드는 세션은 프로젝트가 없어 위 규칙으로는
-   *                        아무것도 받지 못한다. 자기가 만드는 앱의 도구를 불러 보는 것이 그 세션의 일이다
+   *   orchestrator                the user-folder apps (it belongs to no project, so there are no project apps)
+   *   a project's session         that project's apps — only if the project is trusted. A worktree session
+   *                               carries the same project id, so it receives the root's apps too
+   *                               (A-2: one instance per project)
+   *   other (no project)          none
+   *   a building session (C-3)    the above, plus **its own app** — the building session of a user-folder
+   *                               app has no project, so the rule above would give it nothing. Calling
+   *                               the tools of the app it is building is exactly that session's job
    *
-   * 신뢰는 런타임의 상태(`untrusted`)로 읽는다 — 정본은 저장소 하나고 런타임이 그것을 부를
-   * 때마다 읽는다. 여기에 사본을 두면 신뢰를 끈 뒤에도 사본이 "예"라고 답한다.
+   * Trust is read from the runtime's state (`untrusted`) — there is one source of truth (the
+   * store), and the runtime reads it fresh on every call. Keeping a copy here would let that copy
+   * keep answering "yes" even after trust is revoked.
    */
   refsFor(session: AppSessionKey): Hit[] {
     return this.rt
@@ -233,7 +255,7 @@ export class SessionAppsHub {
       .sort((x, y) => x.server.localeCompare(y.server))
   }
 
-  /** @internal 먼저 돌려준 실행을 적는다 — 적을 때마다 오래된 것을 걷는다 */
+  /** @internal Records an early-returned call — sweeps out old ones every time it does */
   remember(runId: string, d: Detached): void {
     const now = Date.now()
     for (const [id, x] of this.detached) {
@@ -254,19 +276,20 @@ export class SessionAppsHub {
   }
 }
 
-/** 핸들 하나의 붙이기 — 어댑터가 보는 `SessionApps`의 구현 */
+/** The attachment for one handle — the implementation of `SessionApps` as the adapter sees it */
 class Attachment implements SessionApps {
   private listeners = new Set<() => void>()
   /**
-   * 이 핸들이 부른, 아직 끝나지 않은 호출 (먼저 돌려준 것 포함). 세션을 멈추거나 핸들을 닫으면
-   * 여기 있는 것을 모두 취소한다 — 취소는 런타임이 앱(notifications/cancelled)과 그 아래 중개
-   * 일까지 전한다(A-4의 부모 신호).
+   * Calls made by this handle that have not finished yet (including early-returned ones). When
+   * the session stops or the handle closes, everything here is cancelled — the cancellation is
+   * carried by the runtime all the way down to the app (notifications/cancelled) and any
+   * intermediary work beneath it (A-4's parent signal).
    */
   private inflight = new Set<AbortController>()
-  /** 마지막으로 알린(또는 처음 본) 모양 — 같으면 알리지 않는다 */
+  /** The shape last announced (or first seen) — if it is unchanged, nothing is announced */
   private seen: string
   private closed = false
-  /** 카드 id 짝짓기 (B-1) — 어댑터가 본 호출 시작, 그리고 짝을 기다리는 호출 */
+  /** Card-id joining (B-1) — call starts seen by the adapter, and calls waiting to be joined */
   private noted: Noted[] = []
   private waiters: Waiter[] = []
 
@@ -290,7 +313,7 @@ class Attachment implements SessionApps {
     return () => void this.listeners.delete(listener)
   }
 
-  /** @internal 런타임이 "바뀌었을 수 있다"고 했다 — 이 세션이 보는 것이 정말 바뀌었을 때만 알린다 */
+  /** @internal The runtime says "something may have changed" — announce only if what this session sees actually changed */
   recheck(): void {
     if (this.closed) return
     const now = JSON.stringify(this.current())
@@ -311,8 +334,9 @@ class Attachment implements SessionApps {
     const known = this.hub.rt.knownTools(hit.ref, 'model')
     if (known) return withRunStatus(known.map(toSpec))
     /*
-     * 처음 필요한 순간이다 — 앱을 띄워 목록을 읽는다. 상한을 넘기거나 뜨지 못하면 빈 목록으로
-     * 붙이고 그 이유를 남긴다. 뜨는 일 자체는 계속되고, 목록이 읽히면 런타임이 알린다.
+     * This is the first moment it is needed — spin up the app and read its list. If the cap is
+     * exceeded or it fails to start, attach it with an empty list and log the reason. Starting
+     * itself keeps going in the background, and the runtime announces once the list is read.
      */
     const waitMs = this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS
     let timer: NodeJS.Timeout | undefined
@@ -339,13 +363,14 @@ class Attachment implements SessionApps {
     opts: { signal?: AbortSignal; waitMs?: number; callId?: string } = {},
   ): Promise<AppToolResult> {
     const hit = this.find(server)
-    // 붙지 않은 앱은 런타임까지 가지 않는다 — 이 세션이 부를 수 있는 앱은 결정 4가 정한 것뿐이다
+    // An unattached app never reaches the runtime — the only apps this session can call are the ones decision 4 gave it
     if (!hit) return failure(`This app is not attached to this session: ${server}`)
     if (tool === RUN_STATUS_TOOL) return this.runStatus(hit, args)
 
     /*
-     * 호출마다 취소 손잡이 하나 — 부른 쪽의 신호(CLI의 notifications/cancelled)와 이 세션의 멈춤
-     * (cancelAll) 둘 중 먼저 오는 것이 당긴다. 먼저 돌려준 호출도 끝날 때까지 여기 남는다.
+     * One cancellation handle per call — whichever comes first pulls it, either the caller's
+     * signal (the CLI's notifications/cancelled) or this session stopping (cancelAll). Even a
+     * call that was already handed back early stays here until it actually finishes.
      */
     const abort = new AbortController()
     const onUp = () => abort.abort()
@@ -354,23 +379,23 @@ class Attachment implements SessionApps {
     this.inflight.add(abort)
 
     let runId: string | null = null
-    /** 이 호출의 대화 카드 — 아래에서 짝짓는다. 진행의 말은 호출이 앱에 간 뒤에 오므로 그때는 서 있다 */
+    /** This call's conversation card — joined below. Progress lines arrive after the call reaches the app, by which point it is set */
     let card: Promise<string | null> | null = null
     const sessionId = this.session.id
     const onProgress = (message: string) =>
       void card?.then((callId) => {
-        // 카드가 없는 호출(Claude 서브에이전트의 호출 등)은 붙일 자리가 없다 — 호출 자체는 그대로 돈다
+        // A call with no card (e.g. a call from a Claude subagent) has nowhere to attach the message — the call itself keeps running
         if (callId) this.hub.progress({ sessionId, callId, message })
       })
     const pending = this.hub.rt
       .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id), onProgress })
-      // 앱이 부르는 사이에 사라졌다(폴더가 지워짐) — 던지지 않고 실패한 호출로 돌려준다
+      // Vanished mid-call (the app's folder was deleted) — return it as a failed call instead of throwing
       .catch((err: Error): AppCallOutcome => ({ runId: runId ?? '', status: 'error', result: null, error: err.message, durationMs: 0 }))
       .finally(() => {
         this.inflight.delete(abort)
         opts.signal?.removeEventListener('abort', onUp)
       })
-    // 대화 안 화면(B-1)이 듣는다 — 짝짓기는 모든 호출이 한다: 적어 둔 시작을 호출마다 소비해야 남은 것이 엉뚱한 호출과 짝지어지지 않는다
+    // The in-conversation UI (B-1) listens here — every call goes through joining: each call must consume its own noted start, or a leftover entry could be joined to the wrong call
     this.hub.announce({
       sessionId: this.session.id,
       ref: hit.ref,
@@ -383,10 +408,11 @@ class Attachment implements SessionApps {
     if (!opts.waitMs) return toResult(await pending)
 
     /*
-     * **상한이 있는 쪽의 호출** (플랜 "오래 걸리는 호출"). Codex는 MCP 도구 호출을 300초에 끊는다.
-     * 그 전에(240초) 실행 id와 "아직 도는 중"을 먼저 돌려주고, 호출은 그대로 둔다 — 결과는 앱
-     * 화면과 기록에 남고, 에이전트는 `run_status`로 이어서 본다. 끊기게 두면 앱의 일은 계속되는데
-     * 에이전트는 결과를 받을 길을 잃는다.
+     * **The call on the timed-out side** (the plan's "long-running calls"). Codex cuts off an MCP
+     * tool call at 300 seconds. Before that (at 240 seconds), the run id and "still running" are
+     * handed back early, and the call is left running — its result still lands in the app's UI
+     * and record, and the agent follows up with `run_status`. Left to be cut off, the app's work
+     * would keep going while the agent lost any way to get the result.
      */
     let timer: NodeJS.Timeout | undefined
     const first = await Promise.race([
@@ -414,11 +440,13 @@ class Attachment implements SessionApps {
   }
 
   /**
-   * `run_status` — 이 세션이 **이 앱에** 부른 실행만 본다. 다른 세션이나 화면의 실행은 결과가 그
-   * 쪽의 것이라 보이지 않는다(실행 id를 알아도).
+   * `run_status` — sees only the runs this session made **to this app**. A run made by another
+   * session or by the UI is invisible, since its result belongs to that other side (even knowing
+   * its run id does not help).
    *
-   * 먼저 돌려준 실행은 결과 본문까지, 그 밖의 실행(제때 끝났거나 오래전 것)은 기록이 아는 상태와
-   * 이유까지만 답한다 — 기록은 결과 본문을 남기지 않는다(A-6: 인자도 요약만 남긴다).
+   * An early-returned run answers with the full result body; every other run (one that finished
+   * in time, or an old one) answers only with whatever status and reason the record knows — the
+   * record keeps no result body (A-6: even the arguments are kept only as a summary).
    */
   private runStatus(hit: Hit, args: Record<string, unknown>): AppToolResult {
     const runId = typeof args.run_id === 'string' ? args.run_id.trim() : ''
@@ -454,12 +482,12 @@ class Attachment implements SessionApps {
   readOnly(server: string, tool: string): boolean {
     const hit = this.find(server)
     if (!hit) return false
-    // host가 더한 도구 — 상태를 읽기만 한다
+    // A tool the host added — it only reads status
     if (tool === RUN_STATUS_TOOL) return true
     /*
-     * 앱을 띄우지 않고 이미 읽은 목록만 본다. 승인 콜백은 모델이 **이미 본** 목록의 도구를 두고
-     * 불리므로, 목록을 모르는 채로 불렸다면 그 도구는 모델이 우리 목록에서 고른 것이 아니다 —
-     * 그때는 묻는다.
+     * Looks only at the list already read, without spinning up the app. The approval callback is
+     * invoked over a tool from the list the model has **already seen**, so if it is invoked while
+     * the list is unknown, that tool was not one the model chose from our list — in that case, ask.
      */
     const found = this.hub.rt.knownTools(hit.ref, 'model')?.find((t) => t.name === tool)
     return found?.annotations?.readOnlyHint === true
@@ -472,7 +500,7 @@ class Attachment implements SessionApps {
   noteCall(callId: string, server: string, tool: string, args: unknown): void {
     if (this.closed || !callId) return
     const key = argsKey(args)
-    // 다리가 먼저 왔다 — 기다리던 호출이 곧 이 카드다
+    // The bridge arrived first — the waiting call is exactly this card
     const w = this.waiters.findIndex((x) => x.server === server && x.tool === tool && x.args === key)
     if (w !== -1) {
       const [waiter] = this.waiters.splice(w, 1)
@@ -490,12 +518,13 @@ class Attachment implements SessionApps {
   }
 
   /**
-   * 이 호출의 카드 id (B-1).
+   * This call's card id (B-1).
    *
-   * **어댑터가 id를 알려 주면 그것이 답이다** — 에이전트의 MCP 클라이언트가 요청에 실어 보낸 id라서
-   * 짝짓기가 필요 없다. 같은 id로 적어 둔 시작은 버린다(두 길이 모두 알린 경우). 없으면 적어 둔 시작
-   * 중 (서버, 도구, 인자)가 같은 가장 오래된 것이다. 아직 없으면 잠깐 기다린다 — 어댑터의 알림이
-   * 다리의 호출보다 늦게 도착할 수 있다.
+   * **If the adapter tells us the id, that is the answer** — it is the id the agent's MCP client
+   * sent along with the request, so no joining is needed. Any noted start under the same id is
+   * discarded (the case where both paths announced it). If there is none, it is the oldest noted
+   * start whose (server, tool, args) match. If there is not one of those yet either, wait a
+   * moment — the adapter's notification can arrive later than the bridge's call.
    */
   private joinCall(server: string, tool: string, args: Record<string, unknown>, explicit?: string): Promise<string | null> {
     if (explicit) {
@@ -532,7 +561,7 @@ class Attachment implements SessionApps {
   close(): void {
     if (this.closed) return
     this.closed = true
-    // 닫힌 핸들의 호출은 받을 곳이 없다 — 먼저 돌려준 것까지 멈춘다
+    // A closed handle's calls have nowhere to be received — stop even the early-returned ones
     this.cancelAll()
     this.listeners.clear()
     this.noted = []
@@ -544,9 +573,10 @@ class Attachment implements SessionApps {
   }
 
   /**
-   * 서버 이름 → 앱. **부를 때마다 결정 4를 다시 본다** — 세션이 떴을 때 붙었던 앱이라도 지금
-   * 신뢰를 잃었거나 멈췄으면 부르지 않는다. Codex는 스레드가 도는 동안 붙은 서버를 못 바꾸므로
-   * 이 검사가 떼어 낸 앱을 실제로 막는 자리다.
+   * server name → app. **Decision 4 is re-checked on every call** — even an app that was attached
+   * when the session spawned is not called if it has since lost trust or halted. Codex cannot
+   * change the servers attached while a thread is running, so this check is the actual place that
+   * blocks a detached app.
    */
   private find(server: string): Hit | null {
     if (this.closed) return null
@@ -557,8 +587,9 @@ class Attachment implements SessionApps {
 type RuntimeTool = Awaited<ReturnType<ExternalApps['tools']>>[number]
 
 /**
- * 인자의 비교 열쇠 — 키 순서를 가리지 않는 JSON. 어댑터가 본 인자는 문자열(Codex `item.arguments`)일
- * 수도, 객체일 수도 있다. 문자열이면 풀어서 같은 모양으로 맞춘다.
+ * The comparison key for arguments — JSON that ignores key order. The arguments the adapter sees
+ * may be a string (Codex's `item.arguments`) or an object. If it is a string, it is parsed and
+ * brought to the same shape.
  */
 function argsKey(args: unknown): string {
   let v = args
@@ -585,17 +616,19 @@ function stable(v: unknown): string {
   return JSON.stringify(v) ?? 'null'
 }
 
-/** 앱의 도구 목록에 host의 `run_status`를 더한다 — 같은 이름의 앱 도구는 가린다(RUN_STATUS_SPEC 참고) */
+/** Adds the host's `run_status` to an app's tool list — an app tool with the same name is hidden (see RUN_STATUS_SPEC) */
 function withRunStatus(tools: AppToolSpec[]): AppToolSpec[] {
   return [...tools.filter((t) => t.name !== RUN_STATUS_TOOL), RUN_STATUS_SPEC]
 }
 
-/** 런타임의 도구(MCP `Tool`) → 세션에 내놓는 모양. outputSchema는 뺀다(아래) */
+/** A runtime tool (MCP `Tool`) → the shape exposed to a session. outputSchema is dropped (see below) */
 function toSpec(t: RuntimeTool): AppToolSpec {
   /*
-   * outputSchema를 싣지 않는 이유: 대리 서버를 거친 결과가 앱이 선언한 모양과 어긋나는 경우가
-   * 있다 — 거절·취소는 host가 만든 글 한 줄이다. 받는 쪽 클라이언트가 선언을 믿고 검증하면
-   * 그 한 줄이 "모양이 틀렸다"로 바뀌어 이유가 가려진다. structuredContent는 결과에 그대로 싣는다.
+   * Why outputSchema is not carried over: a result that has gone through the proxy server can
+   * disagree with the shape the app declared — a refusal or a cancellation is a one-line message
+   * made by the host. If a receiving client trusts the declaration and validates against it, that
+   * one line turns into "the shape is wrong," and the real reason gets hidden. structuredContent
+   * is still carried through on the result as-is.
    */
   return {
     name: t.name,
@@ -607,7 +640,7 @@ function toSpec(t: RuntimeTool): AppToolSpec {
   }
 }
 
-/** 런타임의 결말 → 에이전트가 받는 도구 결과 */
+/** A runtime outcome → the tool result an agent receives */
 export function toResult(o: AppCallOutcome): AppToolResult {
   if (o.result) {
     return {

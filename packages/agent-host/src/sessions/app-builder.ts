@@ -2,15 +2,19 @@ import { relative } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 
 /**
- * 만드는 세션의 역할문 (M4 C-2) — 앱 하나를 만들고 고치는 세션이 받는 안내.
+ * The role prompt for a building session (M4 C-2) — the guidance a session that creates and edits
+ * one app receives.
  *
- * **파일이 아니라 역할문으로 준다.** 앱 폴더의 AGENTS.md·CLAUDE.md가 같은 규칙을 적고 있지만, 그 파일에 기댈 수
- * 없다: 프로젝트 앱의 만드는 세션은 cwd가 프로젝트 뿌리라 앱 폴더의 안내를 스스로 찾아 읽지 않고, 프로젝트의 신뢰를
- * 거두면 폴더의 설정 파일을 아예 읽지 않는다(결정 3, manager의 settingFilesFor). 사용자 폴더 앱의 세션은 앱 폴더가
- * cwd이고 그 폴더를 믿으므로 그 안내(Claude는 CLAUDE.md, Codex는 AGENTS.md)를 읽는다. 규칙의 핵심은 여기 싣고,
- * 자세한 것은 파일을 가리킨다.
+ * **Given as a role prompt, not a file.** The app folder's AGENTS.md and CLAUDE.md state the same
+ * rules, but that file cannot be relied on: a project app's building session has its cwd at the
+ * project root, so it does not go looking for the app folder's own guidance on its own, and once a
+ * project's trust is revoked, its setting files are not read at all (decision 3, the manager's
+ * settingFilesFor). A user-folder app's session has the app folder as its cwd and trusts that
+ * folder, so it does read that guidance (Claude reads CLAUDE.md, Codex reads AGENTS.md). The core
+ * of the rule is carried here, and the file is pointed to for the details.
  *
- * 세션이 만들어질 때 `roleAppend`로 박제되고, 되살릴 때마다 같은 글이 다시 실린다(조율 세션과 같은 물리).
+ * It is baked into `roleAppend` when the session is created, and the same text is loaded again on
+ * every resume (the same physical mechanism as a coordinating session).
  */
 export function builderRole(app: ExternalAppInfo, cwd: string): string {
   const name = app.name ?? app.appId

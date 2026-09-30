@@ -1,36 +1,40 @@
 /**
- * 오케스트레이터에게 주는 앱 안내서 (#30).
+ * The app guide given to the orchestrator (#30).
  *
- * **파일이 아니라 코드다 — 그게 이 파일의 요점이다.** docs/를 런타임에 읽으면
- * 그 폴더에 쓸 수 있는 모든 세션이 오케스트레이터의 지식을 고칠 수 있다 —
- * AGENTS.md를 심어 조종에 성공했던 그 공격의 한 다리 건너 재판이다 (실측으로
- * 확인된 구멍이라 orchestrator-home.ts가 폴더 문서를 끈 것이다). 여기 내용은
- * 빌드에 함께 컴파일되므로, 바꾸려면 이 저장소의 PR을 거쳐야 한다.
+ * **It is code, not a file — that is the whole point of this file.** If docs/ were read at
+ * runtime, every session with write access to that folder could edit the orchestrator's
+ * knowledge — one step removed from the attack that succeeded before by planting an AGENTS.md
+ * (a hole confirmed by measurement, which is why orchestrator-home.ts turned off reading folder
+ * documents). The content here is compiled into the build, so changing it must go through a pull
+ * request in this repository.
  *
- * 그래서 docs/에서 자동으로 뽑지도 않는다. 뽑아 만들면 44KB 사양서가 통째로 들어와
- * 오케스트레이터의 컨텍스트를 덮는다 — 이 안내서의 일은 "사람에게 앱을 설명하기"이고,
- * 그 일에는 사람이 고른 요약이 원문보다 낫다. docs가 바뀌면 여기도 사람이 고친다.
+ * That is also why it is not auto-extracted from docs/. Extracting it would pull in the whole
+ * 44KB specification and bury the orchestrator's context — this guide's job is "explain the app
+ * to the person," and for that job a summary a person chose is better than the raw source. When
+ * docs change, a person updates this file too.
  *
- * **단, 도구 목록은 사람이 적지 않는다** (M4 P-4). 손으로 적은 목록은 두 번 틀렸다:
- * 보관 기능이 폐기된 뒤(58d2335)에도 `archive_session`을 안내했고, 관제 앱(#81)의 도구는
- * 하나도 몰랐다. 어느 자리가 무엇을 부를 수 있는지는 도구 명부(orchestrator-tools.ts)가
- * 이미 판정하고 있으므로, 그 판정을 그대로 받아 그린다(`GuideSeats`). 명부도 컴파일된
- * 코드라 위의 이유(런타임에 파일을 읽지 않는다)는 그대로 지켜진다. 사람이 쓴 글에 남은
- * 도구 이름은 app-guide.test.ts가 명부와 대조한다.
+ * **The one exception: the tool list is not written by hand** (M4 P-4). The hand-written list was
+ * wrong twice: it kept advertising `archive_session` even after the archive feature was removed
+ * (58d2335), and it knew nothing at all about the control-rail app's tools (#81). Which seat can
+ * call which tool is already decided by the tool registry (orchestrator-tools.ts), so that
+ * decision is taken as-is and rendered here (`GuideSeats`). The registry is also compiled code,
+ * so the reason above (nothing is read from a file at runtime) still holds. Tool names left in
+ * the hand-written text are checked against the registry by app-guide.test.ts.
  */
 
 export const APP_GUIDE_TOPICS = ['overview', 'sessions', 'orchestrator', 'apps', 'approvals', 'settings', 'updates'] as const
 export type AppGuideTopic = (typeof APP_GUIDE_TOPICS)[number]
 
-/** 명부가 주는 도구 한 줄 — 이름과 설명(모델에게 주는 설명 그대로) */
+/** One tool entry from the registry — the name and description (the same description given to the model) */
 export type GuideTool = { name: string; description: string }
 
 /**
- * 지휘하는 세 자리가 **지금** 부를 수 있는 도구들.
+ * The tools each of the three directing seats can call **right now**.
  *
- * 부르는 쪽(orchestrator-tools.ts)이 명부의 판정(profileAllows, appToolEntries)으로 채운다.
- * 이 파일이 명부를 임포트하지 않는 이유: 명부가 app_guide 스키마를 그리려고 이 파일의
- * 주제 목록을 임포트한다 — 반대 방향까지 이으면 순환이다.
+ * The caller (orchestrator-tools.ts) fills this in from the registry's decisions
+ * (profileAllows, appToolEntries). Why this file does not import the registry: the registry
+ * imports this file's topic list to draw the app_guide schema — wiring the import the other way
+ * too would create a cycle.
  */
 export type GuideSeats = { orchestrator: GuideTool[]; manager: GuideTool[]; scoped: GuideTool[] }
 
@@ -116,11 +120,12 @@ Notifications · Appearance · Permissions(저장된 승인 규칙) · Shortcuts
 }
 
 /**
- * 도구 설명의 첫 마디 — 안내서 한 줄에는 이만큼이면 된다.
+ * The first clause of a tool's description — that much is enough for one guide line.
  *
- * 설명 전문은 모델에게 주는 사용법이라 길다(언제 쓰고 언제 쓰지 말지). 사람에게 "이 자리는
- * 무엇을 할 수 있나"를 말하는 데는 첫 문장이면 충분하다. 이슈 번호와 강조 표시(모델에게
- * 주는 경고)는 이 한 줄에서 뜻이 없으니 걷어 낸다.
+ * The full description is a usage note for the model, so it is long (when to use it, when not
+ * to). Telling a person "what can this seat do" only needs the first sentence. Issue numbers and
+ * emphasis markers (warnings meant for the model) carry no meaning in this one line, so they are
+ * stripped.
  */
 function gist(description: string): string {
   const first = description.split(/ — |\. /)[0] ?? description
@@ -158,8 +163,8 @@ ${toolLines(seats.scoped)}`
 }
 
 /**
- * 주제를 주면 그 대목을, 없으면 개요와 주제 목록을 돌려준다.
- * 모르는 주제는 목록을 들려주며 거절한다 — 조용한 빈손보다 낫다.
+ * Given a topic, returns that section; given none, returns the overview and the topic list.
+ * An unknown topic is rejected along with the list — better than a quiet, empty answer.
  */
 export function appGuide(topic: string | undefined, seats: GuideSeats): { text: string; isError?: boolean } {
   if (!topic) {

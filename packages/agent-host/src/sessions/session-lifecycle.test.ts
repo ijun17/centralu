@@ -7,10 +7,12 @@ import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 
 /**
- * 세션 수명주기의 경주 — 프로세스를 갈아 끼우거나 깨우는 **도중에** 다른 일이 끼는 경우.
+ * Races in the session lifecycle — cases where something else lands **in the middle of** swapping
+ * a process out or waking one up.
  *
- * 가짜 어댑터는 두 가지를 테스트 손에 쥐여 준다: 핸들마다 받은 이벤트 받이(`emit`) — 내려놓은 핸들이
- * 늦게 말하는 모양을 만든다 — 와, 멈춰 둘 수 있는 `createSession` — 깨우는 중인 창을 만든다.
+ * The fake adapter hands the test two things: an event sink per handle (`emit`) — to make a
+ * discarded handle speak late — and a `createSession` that can be held — to create a window
+ * during which the session is still waking up.
  */
 class Handle implements SessionHandle {
   externalId: string | null = 'ext-1'
@@ -48,11 +50,11 @@ class Adapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
   }
   created: Handle[] = []
-  /** 이어 가는 대화를 쥔 프로세스 — 뜨기 시작한 순간부터 닫힐 때까지 (Codex의 쓰기 잠금 흉내) */
+  /** The process holding a resumed conversation — from the moment it starts coming up until it closes (mimics Codex's write lock) */
   locked = new Set<string>()
-  /** createSession이 받은 옵션, 멈추기 **전에** 적는다 — 깨우기가 옵션을 넘긴 순간을 테스트가 안다 */
+  /** The options createSession received, recorded **before** it holds — so the test knows the moment waking passed its options along */
   asked: CreateSessionOpts[] = []
-  /** 켜 두면 createSession이 `release()`를 부를 때까지 멈춘다 — 깨우는 중인 창 */
+  /** When set, createSession holds until `release()` is called — the window during which a session is waking up */
   gate: Promise<void> | null = null
   private open: (() => void) | null = null
   constructor(readonly tool: ToolName) {}
@@ -69,7 +71,7 @@ class Adapter implements AgentAdapter {
   get last() {
     return this.created.at(-1)!
   }
-  /** 켜 두면 detect가 `openDetect()`까지 멈춘다 — 도구 바꾸기가 확인하는 사이의 창 */
+  /** When set, detect holds until `openDetect()` — the window while a tool switch is confirming */
   detectGate: Promise<void> | null = null
   openDetect: (() => void) | null = null
   async detect() {
@@ -113,7 +115,7 @@ async function newSession(preset: 'safe' | 'normal' | 'auto' = 'normal'): Promis
   return s.id
 }
 
-/** 조건이 설 때까지 이벤트 루프를 돌린다 — 매니저의 await 사슬이 가짜 어댑터에 닿기를 기다린다 */
+/** Spins the event loop until the condition holds — waits for the manager's await chain to reach the fake adapter */
 async function until(ok: () => boolean): Promise<void> {
   for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 1))
   expect(ok()).toBe(true)
@@ -122,21 +124,21 @@ async function until(ok: () => boolean): Promise<void> {
 const texts = (sessionId: string) =>
   store.loadMessages(sessionId, 100).map((r) => JSON.stringify(r.payload))
 
-describe('갈아 끼운 프로세스의 늦은 말 (#157)', () => {
-  it('재시작 뒤 옛 핸들이 adapter_crashed를 올려도 새 핸들이 남고, 옛 턴의 글과 끝은 기록되지 않는다', async () => {
+describe('a swapped-out process speaking late (#157)', () => {
+  it('keeps the new handle even if the old handle raises adapter_crashed after a restart, and does not record the old turn\'s text or its end', async () => {
     const id = await newSession()
     const old = claude.last
     old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '옛 턴의 앞부분' })
-    // 사람이 턴을 멈췄다 (이슈의 순서: Stop → 설정 변경)
+    // The person stopped the turn (the issue's order of events: Stop → change settings)
     old.emit({ type: 'state_change', sessionId: id, state: 'waiting_input', reason: 'interrupted' })
 
-    // 설정을 바꾸면 프로세스를 갈아 끼운다
+    // Changing settings swaps the process out
     await rpc('agents.updateSettings', { sessionId: id, effort: 'high' })
     const fresh = claude.last
     expect(fresh).not.toBe(old)
     expect(old.disposed).toBe(true)
 
-    // 옛 프로세스가 끝나 가던 턴을 마저 내고, 오류 result를 안은 채 죽는다
+    // The old process finishes emitting the turn it was in the middle of, then dies carrying an error result
     old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '옛 프로세스의 늦은 글' })
     old.emit({ type: 'turn_complete', sessionId: id })
     old.emit({
@@ -151,13 +153,13 @@ describe('갈아 끼운 프로세스의 늦은 말 (#157)', () => {
     expect(events.some((e) => e.type === 'turn_complete')).toBe(false)
     expect(texts(id).some((t) => t.includes('옛 프로세스의 늦은 글'))).toBe(false)
 
-    // 새 핸들의 크래시는 지금처럼 걷는다 — 가드가 크래시 분기를 통째로 막은 것이 아니다
+    // The new handle's own crash is still handled the same way as before — the guard did not block the crash branch entirely
     fresh.emit({ type: 'error', sessionId: id, error: { code: 'adapter_crashed', message: 'gone', retryable: true } })
     expect(fresh.disposed).toBe(true)
     expect(mgr.isLive(id)).toBe(false)
   })
 
-  it('내려놓은 핸들이 닫으며 놓아주는 승인 카드는 받는다 — 카드가 남지 않게', async () => {
+  it('still takes an approval card released by a discarded handle as it closes — so no card is left stuck', async () => {
     const id = await newSession('safe')
     const old = claude.last
     old.emit({ type: 'approval_request', sessionId: id, requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
@@ -236,19 +238,21 @@ describe('A reply cut by replacing the process stays one row (#213)', () => {
 })
 
 /*
- * 깨우는 동안 바꾼 설정 (#162). 깨우기는 설정을 읽어 프로세스에 넘긴 뒤 프로세스를 기다린다 — 큰 Codex 대화는
- * 십수 초다. 그 사이에 권한을 safe로 바꾸면 화면과 저장소는 safe인데 프로세스는 auto로 돌았고, safe를 다시
- * 골라도 매니저의 기록(running)이 이미 safe라 아무 일도 없었다.
+ * Settings changed while waking up (#162). Waking reads settings and hands them to the process,
+ * then waits for the process — a large Codex conversation can take a dozen-plus seconds. If
+ * permissions were switched to safe during that wait, the UI and the store said safe while the
+ * process actually ran with auto, and picking safe again did nothing because the manager's record
+ * (running) already said safe.
  */
-describe('깨우는 중·재시작 중에 바꾼 설정은 프로세스에 닿는다 (#162)', () => {
-  it('잠든 auto 세션을 깨우는 동안 safe로 바꾸면, 결국 safe로 뜬 프로세스가 남는다', async () => {
+describe('a setting changed while waking or restarting still reaches the process (#162)', () => {
+  it('leaves a process that ends up running with safe if it is switched to safe while an asleep auto session is waking', async () => {
     const id = await newSession('auto')
-    await mgr.disposeAll() // 잠든 세션 (host 재시작과 같은 상태)
+    await mgr.disposeAll() // an asleep session (the same state as a host restart)
     claude.hold()
     const asked = claude.asked.length
     const waking = rpc('agents.resumeSession', { sessionId: id })
     await until(() => claude.asked.length > asked)
-    expect(claude.asked.at(-1)!.permissionPreset).toBe('auto') // 깨우기는 이미 auto를 넘겼다
+    expect(claude.asked.at(-1)!.permissionPreset).toBe('auto') // waking has already passed auto along
 
     const changing = rpc('agents.updateSettings', { sessionId: id, permissionPreset: 'safe' })
     claude.release()
@@ -260,7 +264,7 @@ describe('깨우는 중·재시작 중에 바꾼 설정은 프로세스에 닿�
     expect(claude.last.opts.permissionPreset).toBe('safe')
   })
 
-  it('재시작이 도는 동안 온 두 번째 변경도 프로세스에 닿는다', async () => {
+  it('a second change that arrives while a restart is running also reaches the process', async () => {
     const id = await newSession('auto')
     claude.hold()
     const asked = claude.asked.length
@@ -279,11 +283,11 @@ describe('깨우는 중·재시작 중에 바꾼 설정은 프로세스에 닿�
 })
 
 /*
- * 오케스트레이터가 부탁한 보고 (#166). 두 어댑터는 실패한 턴에 turn_complete를 내지 않고 error만 낸다 — 그래서
- * turn_complete에서만 보고하던 매니저는 실패를 보고하지 않았고, 남은 표식이 나중의 관계없는 턴을 "끝났습니다"로
- * 보고했다.
+ * A report the orchestrator asked for (#166). Neither adapter emits turn_complete for a failed
+ * turn, only error — so the manager, which used to report only on turn_complete, never reported
+ * the failure, and the leftover flag then reported an unrelated later turn as "finished."
  */
-describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
+describe('a report goes exactly once, however the turn ends (#166)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
   const handleOf = (id: string) => claude.created.filter((h) => h.sessionId === id).at(-1)!
 
@@ -291,7 +295,7 @@ describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
     const worker = await newSession()
     const orc = await mgr.orchestrator()
     const tools = claude.asked.find((o) => o.sessionId === orc.id)!.orchestratorTools!
-    /** 오케스트레이터 대화에 저장된 보고들 — 화면과 기록이 읽는 본문이다 */
+    /** The reports stored in the orchestrator's conversation — the text the UI and the record read */
     const reports = () =>
       store
         .loadMessages(orc.id, 100)
@@ -301,7 +305,7 @@ describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
     return { worker, tools, w: handleOf(worker), reports }
   }
 
-  it('실패한 턴은 실패 보고를 한 번 보내고, 뒤의 관계없는 턴은 보고하지 않는다', async () => {
+  it('sends one failure report for a failed turn, and does not report the unrelated turn after it', async () => {
     const { worker, tools, w, reports } = await setup()
     await tools.sendToSession(worker, '빌드를 고쳐 줘', true)
     w.emit({ type: 'error', sessionId: worker, error: { code: 'internal', message: 'API Error: 400 bad model', retryable: true } })
@@ -312,7 +316,7 @@ describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
     expect(reports()[0]).toContain('API Error: 400 bad model')
     expect(reports()[0]).not.toContain('끝났습니다')
 
-    // 사람이 직접 말을 건 턴과, 부탁 없이 시킨 턴은 보고하지 않는다
+    // A turn the person spoke to directly, and a turn assigned without asking for a report, are not reported
     await rpc('agents.send', { sessionId: worker, text: '직접 묻는 말' })
     w.emit({ type: 'turn_complete', sessionId: worker })
     await tools.sendToSession(worker, '조용히 해 줘', false)
@@ -321,7 +325,7 @@ describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
     expect(reports()).toHaveLength(1)
   })
 
-  it('부탁 없이 다시 시키면 이전 부탁은 지워진다 — 새 지시가 그것을 대신한다', async () => {
+  it('clears the previous report request when assigned again without one — the new instruction replaces it', async () => {
     const { worker, tools, w, reports } = await setup()
     await tools.sendToSession(worker, '끝나면 알려줘', true)
     await tools.sendToSession(worker, '아니, 이걸 대신 해 줘', false)
@@ -330,7 +334,7 @@ describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
     expect(reports()).toEqual([])
   })
 
-  it('끝난 턴은 지금처럼 "끝났습니다"로 보고한다', async () => {
+  it('reports a finished turn as "finished," as before', async () => {
     const { worker, tools, w, reports } = await setup()
     await tools.sendToSession(worker, '끝나면 알려줘', true)
     w.emit({ type: 'turn_complete', sessionId: worker })
@@ -341,10 +345,11 @@ describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
 })
 
 /*
- * 기다린 사이에 지워지거나 도구가 바뀐 세션 (#163). 깨우기는 프로세스를 기다린 뒤 세션이 아직 있는지, 아직 같은
- * 도구인지 보지 않고 핸들을 앉히고 행을 다시 썼다.
+ * A session deleted or switched to another tool while waiting (#163). Waking used to wait for the
+ * process and then seat the handle and rewrite the row without checking whether the session still
+ * existed or was still the same tool.
  */
-describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
+describe('deleting or switching tools while a session is waking up (#163)', () => {
   async function sleeping() {
     const id = await newSession()
     await mgr.disposeAll()
@@ -352,7 +357,7 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
   }
   const listed = () => store.listSessions().map((x) => x.id)
 
-  it('깨우는 도중에 지운 세션은 되살아나지 않고, 막 뜬 프로세스는 닫힌다', async () => {
+  it('a session deleted while waking does not come back to life, and the process that just came up is closed', async () => {
     const id = await sleeping()
     claude.hold()
     const asked = claude.asked.length
@@ -366,12 +371,12 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
     expect(listed()).not.toContain(id)
     expect(claude.last.disposed).toBe(true)
     expect(mgr.isLive(id)).toBe(false)
-    // host를 다시 켜도 돌아오지 않는다
+    // It does not come back even after the host restarts
     const again = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), () => {})
     expect(again.listSessions().map((x) => x.id)).not.toContain(id)
   })
 
-  it('도구 쪽 대화까지 지울 때는 깨어나던 프로세스가 닫힌 뒤에 지운다 — 잠금에 막히지 않는다', async () => {
+  it('when also deleting the tool-side conversation, it deletes after the waking process has closed — not blocked by the lock', async () => {
     const id = await sleeping()
     claude.hold()
     const asked = claude.asked.length
@@ -385,7 +390,7 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
     expect(listed()).not.toContain(id)
   })
 
-  it('깨우기가 send에서 시작됐으면, 지운 세션의 에이전트는 그 말을 받지 않는다', async () => {
+  it('if waking was started from a send, the agent of a deleted session never receives that message', async () => {
     const id = await sleeping()
     claude.hold()
     const asked = claude.asked.length
@@ -401,7 +406,7 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
     expect(listed()).not.toContain(id)
   })
 
-  it('깨우는 도중에 도구를 바꾸면 옛 도구의 프로세스가 남지 않는다', async () => {
+  it('switching tools while waking leaves no process of the old tool behind', async () => {
     const id = await sleeping()
     claude.hold()
     const asked = claude.asked.length
@@ -419,14 +424,14 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
     expect(m.externalId).toBe(null)
   })
 
-  it('도구 바꾸기가 확인하는 사이에 시작된 깨우기도 옛 도구의 핸들을 앉히지 않는다', async () => {
+  it('a wake started while a tool switch is confirming also does not seat the old tool\'s handle', async () => {
     const id = await sleeping()
     codex.detectGate = new Promise((r) => (codex.openDetect = r))
     const switching = rpc('agents.switchTool', { sessionId: id, tool: 'codex' })
     claude.hold()
     const asked = claude.asked.length
     const waking = rpc('agents.resumeSession', { sessionId: id }) as Promise<{ resumed: boolean }>
-    await until(() => claude.asked.length > asked) // 깨우기는 아직 claude로 뜬다
+    await until(() => claude.asked.length > asked) // the wake still comes up with claude at this point
     codex.openDetect!()
     await switching
     claude.release()
@@ -437,7 +442,7 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
     expect(mgr.listSessions().find((x) => x.id === id)!.externalId).toBe(null)
   })
 
-  it('턴 도중에 도구를 바꾸면 meta와 저장소도 idle이다 — 방송만 idle이 아니다', async () => {
+  it('switching tools mid-turn leaves meta and the store as idle too — not only the broadcast', async () => {
     const id = await newSession()
     await rpc('agents.send', { sessionId: id, text: '긴 일' })
     expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('working')
@@ -447,7 +452,7 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
     expect(store.listSessions().find((x) => x.id === id)!.state).toBe('idle')
   })
 
-  it('PR을 확인하는 사이에 지운 워크트리 세션은 id 없는 행으로 남지 않는다', async () => {
+  it('a worktree session deleted while checking its PR does not leave behind a row with no id', async () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     const internals = mgr as unknown as { meta: Map<string, { worktree: unknown }> }
@@ -464,11 +469,12 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
 })
 
 /*
- * 턴 도중의 설정 변경 (#164). 두 어댑터 모두 실시간 반영이 없어서 설정이 바뀌면 곧바로 프로세스를 갈아 끼웠다 — 도는
- * 턴이 사라졌는데 화면은 "(from next turn)"이라고 말했다.
+ * Changing settings mid-turn (#164). Neither adapter applies settings live, so changing a setting
+ * used to swap the process out immediately — the running turn vanished, while the UI still said
+ * "(from next turn)."
  */
-describe('턴 도중에 바꾼 설정은 턴이 끝나면 적용된다 (#164)', () => {
-  it('working이면 프로세스를 내리지 않고, 턴이 끝나면 새 설정으로 갈아 끼운다', async () => {
+describe('a setting changed mid-turn is applied once the turn ends (#164)', () => {
+  it('does not bring the process down while working, and swaps it for one with the new settings once the turn ends', async () => {
     const id = await newSession()
     const running = claude.last
     await rpc('agents.send', { sessionId: id, text: '긴 일' })
@@ -484,7 +490,7 @@ describe('턴 도중에 바꾼 설정은 턴이 끝나면 적용된다 (#164)', 
     expect(claude.last.opts.effort).toBe('high')
   })
 
-  it('승인을 기다리는 턴도 끊지 않는다 — 턴이 오류로 끝나도 그때 적용한다', async () => {
+  it('does not cut off a turn waiting on approval either — applies the change once the turn ends, even if it ends with an error', async () => {
     const id = await newSession('safe')
     const running = claude.last
     running.emit({ type: 'approval_request', sessionId: id, requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
@@ -498,7 +504,7 @@ describe('턴 도중에 바꾼 설정은 턴이 끝나면 적용된다 (#164)', 
     expect(claude.last.opts.permissionPreset).toBe('auto')
   })
 
-  it('쉬는 세션은 지금 갈아 끼우고 그렇다고 답한다', async () => {
+  it('an idle session is swapped right away, and the response says so', async () => {
     const id = await newSession()
     const r = (await rpc('agents.updateSettings', { sessionId: id, effort: 'high' })) as { applied?: string }
     expect(r.applied).toBe('restarted')
@@ -507,10 +513,12 @@ describe('턴 도중에 바꾼 설정은 턴이 끝나면 적용된다 (#164)', 
 })
 
 /*
- * 목록 밖의 오래된 대화 (#165). 깨우기 전의 "도구에 아직 있나" 확인은 도구가 준 최신 200개만 봤다 — 201번째보다
- * 오래된 대화는 파일이 멀쩡해도 "기록이 없다"로 막혔고, 다시 눌러도 같은 200개가 돌아왔다.
+ * An old conversation outside the list (#165). The "is it still in the tool" check before waking
+ * only looked at the latest 200 conversations the tool gave back — a conversation older than the
+ * 201st was blocked with "no record," even with a perfectly intact file, and pressing again just
+ * returned the same 200.
  */
-describe('도구의 목록이 가득 차면 목록에 없다고 없는 것이 아니다 (#165)', () => {
+describe('when a tool\'s list is full, being absent from the list does not mean it is gone (#165)', () => {
   class Listing extends Adapter {
     rows: { externalId: string; updatedAt: number }[] = []
     failWith: string | null = null
@@ -531,10 +539,10 @@ describe('도구의 목록이 가득 차면 목록에 없다고 없는 것이 �
     rpc = createRpcHandler(mgr, adapters)
   })
 
-  /** 이 세션의 대화(ext-1)보다 새 대화 n개 */
+  /** n conversations newer than this session's conversation (ext-1) */
   const newer = (n: number) => Array.from({ length: n }, (_, i) => ({ externalId: `newer-${i}`, updatedAt: 1_000_000 - i }))
 
-  it('더 새로운 대화 250개 뒤의 대화도 깨운다', async () => {
+  it('wakes a conversation even 250 newer conversations behind it', async () => {
     const id = await newSession()
     await mgr.disposeAll()
     listing.rows = newer(250)
@@ -544,7 +552,7 @@ describe('도구의 목록이 가득 차면 목록에 없다고 없는 것이 �
     expect(r.resumed).toBe(true)
   })
 
-  it('목록이 다 온 것이면 지금처럼 "기록이 없다"고 말한다', async () => {
+  it('when the list really is complete, still says "no record," as before', async () => {
     const id = await newSession()
     await mgr.disposeAll()
     listing.rows = newer(3)
@@ -554,7 +562,7 @@ describe('도구의 목록이 가득 차면 목록에 없다고 없는 것이 �
     expect(r.reason).toMatch(/has no record of this conversation/)
   })
 
-  it('이어가기가 다른 이유로 실패하면 목록이 가득 찼어도 진짜 오류를 돌려준다', async () => {
+  it('when resuming fails for a different reason, returns the real error even with a full list', async () => {
     const id = await newSession()
     await mgr.disposeAll()
     listing.rows = newer(250)

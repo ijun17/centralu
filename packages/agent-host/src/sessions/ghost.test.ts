@@ -4,10 +4,11 @@ import { Store } from '../dev-services/store.js'
 import type { AgentAdapter } from '../adapters/contract.js'
 
 /**
- * 유령 세션 회귀 테스트 (M2.5 도그푸딩에서 발견).
+ * A regression test for ghost sessions (found during M2.5 dogfooding).
  *
- * 어댑터 생성 실패 시 세션 레코드가 먼저 저장돼 있으면, 목록에는 보이지만
- * 말을 걸 수 없는 세션이 DB에 쌓인다 (실제로 19개가 쌓였다).
+ * If the session record was already saved before the adapter's creation failed, a session
+ * accumulates in the DB that shows up in the list but cannot be talked to (19 of them actually
+ * piled up in practice).
  */
 const failingAdapter: AgentAdapter = {
   tool: 'claude',
@@ -19,8 +20,8 @@ const failingAdapter: AgentAdapter = {
   },
 }
 
-describe('세션 생성 실패', () => {
-  it('어댑터가 실패하면 세션이 저장되지 않는다 (유령 세션 방지)', async () => {
+describe('session creation failure', () => {
+  it('a session is not saved if the adapter fails (preventing ghost sessions)', async () => {
     const store = new Store()
     const mgr = new SessionManager(store, new Map([['claude', failingAdapter]]), () => {})
     await mgr.addProject('/tmp')
@@ -35,7 +36,7 @@ describe('세션 생성 실패', () => {
     store.close()
   })
 
-  it('실패 이유가 그대로 전달된다 (사용자가 원인을 알아야 고친다)', async () => {
+  it('the failure reason is passed through as-is (the user needs to know the cause to fix it)', async () => {
     const store = new Store()
     const mgr = new SessionManager(store, new Map([['claude', failingAdapter]]), () => {})
     await mgr.addProject('/tmp')

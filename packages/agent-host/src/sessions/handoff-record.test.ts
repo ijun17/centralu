@@ -3,11 +3,12 @@ import type { StoredMessage } from '@cc/protocol'
 import { buildHandoffRecord, RECORD_CAP } from './handoff-record.js'
 
 /**
- * 인수인계 기록 빌더 (#78 → #102) — 요약자 없는 결정론적 빌더.
+ * The handoff record builder (#78 → #102) — a deterministic builder with no summarizer.
  *
- * 여기서 지키는 계약은 **파일의 계약**이다: 부피는 툴 행을 최근순으로 접어서 줄이고,
- * 상한은 균일한 열화가 아니라 선언된 경계로 만든다. 담긴 항목 안은 자르지 않는다 —
- * 반쯤 잘린 항목은 온전한 척하지만, 통째로 빠진 구간은 첫 줄이 말해 준다.
+ * The contract kept here is **the file's contract**: volume is reduced by collapsing tool rows,
+ * most recent first, and the cap is made from a declared boundary rather than uniform
+ * degradation. Nothing inside an included entry is cut — a half-cut entry would pretend to be
+ * intact, but a span dropped entirely is announced by the first line.
  */
 
 const row = (
@@ -19,14 +20,14 @@ const row = (
 
 const base = { name: '메아', tool: 'codex', summary: null, pivotSeq: null }
 
-/** 툴 호출 한 쌍 (호출 + 결과) */
+/** One tool-call pair (call + result) */
 const call = (seq: number, tool: string, path: string, body: string): StoredMessage[] => [
   row(seq, 'system', 'tool_call', { callId: `c${seq}`, summary: { tool, title: path, paths: [path] } }),
   row(seq + 1, 'system', 'tool_result', { callId: `c${seq}`, ok: true, summary: body }),
 ]
 
-describe('인수인계 기록 빌더 (#102)', () => {
-  it('헤더가 파일 자신에 대해 말한다 — 누구에게서 누구에게로, 어디까지, 어느 파일들', () => {
+describe('the handoff record builder (#102)', () => {
+  it('the header speaks about the file itself — from whom to whom, how far, which files', () => {
     const text = buildHandoffRecord({
       ...base,
       toTool: 'claude',
@@ -39,36 +40,36 @@ describe('인수인계 기록 빌더 (#102)', () => {
 
     const head = text.split('\n')
     expect(head[0]).toBe('# Handoff · 메아 · codex → claude')
-    // 어디까지 담았는지를 파일이 스스로 선언한다 — 잘렸는지 아닌지를 읽는 쪽이 알 수 있어야 한다
+    // The file declares for itself how far it reaches — the reader must be able to tell whether it was cut
     expect(head[1]).toContain('covers seq 1–4 of 4')
     expect(head[1]).toContain('2.0 MB cap')
-    // 손댄 파일은 헤더로 올린다 — 바이트당 값이 가장 높고, 뽑는 값은 공짜다
+    // Touched files are lifted into the header — they have the highest value per byte, and computing them is free
     expect(head[2]).toBe('touched: packages/ui/src/api.ts')
     expect(text).toContain('[user] 포트는 4317로 하자')
     expect(text).toContain('[assistant] 4317로 잡았습니다')
-    // 대화의 언어를 따르라는 지시 — 인수인계가 언어를 갈아타면 사용자가 갈아탄 셈이 된다
+    // The instruction to match the conversation's language — if a handoff switched languages, that would be the user switching languages
     expect(text).toContain('Match the language')
   })
 
-  it('툴 traffic은 최근순 3단으로 접힌다 — 원문 / 한 줄 / 세어서 한 덩어리', () => {
+  it('tool traffic is collapsed into three tiers, most recent first — verbatim / one line / counted into one block', () => {
     const rows: StoredMessage[] = []
     for (let i = 1; i <= 1_100; i++) {
       rows.push(...call(i * 2 - 1, i % 2 ? 'Read' : 'Edit', `file-${i}.ts`, `body-${i}`))
     }
     const text = buildHandoffRecord({ ...base, rows })
 
-    // 1단 — 최근 40개는 결과 본문까지 그대로 (다시 돌려보지 않고 믿을 만한 범위)
+    // Tier 1 — the most recent 40 carry their result body verbatim (a range trustworthy enough not to need re-running)
     expect(text).toContain('body-1100')
-    // 2단 — 그 앞은 한 줄 흔적만: 무엇을 어느 파일에 했고 됐는가
+    // Tier 2 — before that, only a one-line trace: what was done to which file, and whether it succeeded
     expect(text).toContain('Edit file-1050.ts (ok)')
     expect(text).not.toContain('body-1050')
-    // 3단 — 가장 오래된 무리는 개수와 경로로 접힌다
+    // Tier 3 — the oldest group is collapsed into a count and its paths
     expect(text).toMatch(/60 earlier tool calls \(Edit ×30, Read ×30\)/)
     expect(text).not.toContain('file-10.ts (ok)')
     expect(text).not.toContain('body-10\n')
   })
 
-  it('상한은 최근부터 채우고, 담긴 항목 안은 자르지 않는다', () => {
+  it('the cap fills from the most recent, and nothing inside an included entry is cut', () => {
     const rows: StoredMessage[] = []
     for (let i = 1; i <= 200; i++) {
       rows.push(row(i, i % 2 ? 'user' : 'assistant', 'text', { text: `메시지 ${i} ` + '내용'.repeat(300) }))
@@ -76,15 +77,15 @@ describe('인수인계 기록 빌더 (#102)', () => {
     const text = buildHandoffRecord({ ...base, rows, cap: 60_000 })
 
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(60_000)
-    // 최근 것은 **통째로** 남는다 — 머리만 남기는 강등은 없어졌다
+    // The most recent material survives **whole** — the old demotion to a first-few-characters stub is gone
     expect(text).toContain(`[assistant] 메시지 200 ` + '내용'.repeat(300))
-    // 오래된 것은 통째로 빠지고, 그 사실이 헤더에 적힌다
+    // Old material is dropped entirely, and that fact is stated in the header
     expect(text).not.toContain('메시지 1 ')
     expect(text).toMatch(/covers seq \d+–200 of 200/)
     expect(text).toContain("earlier material stays in the app's records")
   })
 
-  it('기본 상한은 2MB이고, 평범한 세션은 상한을 건드리지 않는다', () => {
+  it('the default cap is 2MB, and an ordinary session never touches the cap', () => {
     const rows: StoredMessage[] = []
     for (let i = 1; i <= 500; i++) rows.push(row(i, 'assistant', 'text', { text: `줄 ${i}` }))
     const text = buildHandoffRecord({ ...base, rows })
@@ -95,7 +96,7 @@ describe('인수인계 기록 빌더 (#102)', () => {
     expect(text).toContain('covers seq 1–500 of 500')
   })
 
-  it('피벗이 있으면 거기서 시작하고 도구의 요약을 그 위에 올린다', () => {
+  it('if there is a pivot, starts from there and places the tool\'s summary above it', () => {
     const text = buildHandoffRecord({
       ...base,
       summary: '# 프로젝트와 목표\n' + 'MGH 스킬 이펙트 작업이다. '.repeat(20),
@@ -112,32 +113,32 @@ describe('인수인계 기록 빌더 (#102)', () => {
     expect(text).toContain('MGH 스킬 이펙트')
     expect(text.indexOf('MGH 스킬 이펙트')).toBeLessThan(text.indexOf('── verbatim from here ──'))
     expect(text).toContain('[user] 컴팩트 뒤의 질문')
-    // 요약이 그 자리를 대신한다 — 같은 내용을 원문으로 또 실으면 파일만 두꺼워진다
+    // The summary stands in for that span — carrying the same content again verbatim would only bulk up the file
     expect(text).not.toContain('옛날 이야기')
     expect(text).toContain("earlier material stays in the app's records")
   })
 
   /*
-   * 실측: codex 세션에는 우리 저장소에 컴팩션 마커가 **하나도 없다** (컴팩션이 자기
-   * 롤아웃 파일에서 일어난다). 피벗을 전제하는 규칙은 claude에서만 성립하므로,
-   * 없어도 기록은 만들어져야 한다 — 요약이 있든 없든.
+   * Measured: codex sessions have **zero** compaction markers in our store (compaction happens
+   * inside its own rollout file). A rule that assumes a pivot only holds for claude, so a record
+   * must still be built without one — whether or not there is a summary.
    */
-  it('피벗이 없어도 기록은 만들어진다 — 요약만 있어도, 아무것도 없어도', () => {
+  it('a record is still built with no pivot — with only a summary, or with nothing at all', () => {
     const rows = [row(1, 'user', 'text', { text: '첫 질문' }), row(2, 'assistant', 'text', { text: '첫 답' })]
 
     const withSummary = buildHandoffRecord({ ...base, summary: '롤아웃 요약', pivotSeq: null, rows })
     expect(withSummary).toContain('롤아웃 요약')
-    // 어디서 접혔는지 모르므로 아무것도 버리지 않는다
+    // Nothing is dropped, since where it would have been folded is unknown
     expect(withSummary).toContain('[user] 첫 질문')
     expect(withSummary).toContain('covers seq 1–2 of 2')
 
-    // 요약이 없는 것은 실패가 아니다 — 섹션만 없다
+    // Having no summary is not a failure — only the section is missing
     const bare = buildHandoffRecord({ ...base, rows })
     expect(bare).not.toContain("The tool's last compaction summary")
     expect(bare).toContain('[assistant] 첫 답')
   })
 
-  it('추론·승인·마커는 후임자가 읽을 것이 아니라 빠진다', () => {
+  it('reasoning, approvals and markers are dropped, since they are not for a successor to read', () => {
     const text = buildHandoffRecord({
       ...base,
       rows: [

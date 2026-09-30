@@ -13,8 +13,9 @@ import { SessionManager } from './manager.js'
 import { profileAllows } from './orchestrator-tools.js'
 
 /**
- * 새 앱 만들기 (M4 C-1b) — `apps.create` RPC와 오케스트레이터의 `create_app`이 같은 문을 지나는가, 그 문이
- * 무엇을 거절하는가. 진짜 저장소·신뢰·런타임·템플릿으로 본다. 어댑터만 가짜다.
+ * Creating a new app (M4 C-1b) — whether the `apps.create` RPC and the orchestrator's `create_app`
+ * go through the same door, and what that door refuses. Checked with a real store, real trust, a
+ * real runtime and a real template. Only the adapter is fake.
  */
 
 class Handle implements SessionHandle {
@@ -82,7 +83,7 @@ afterEach(async () => {
 })
 
 describe('apps.create', () => {
-  it('신뢰한 프로젝트에 템플릿 앱을 펼치고, 데이터 폴더를 만들고, 목록에 세운다 — 띄우지는 않는다', async () => {
+  it('unpacks a template app into a trusted project, creates its data folder, and lists it — without starting it', async () => {
     const { app } = await create({ projectId, id: 'resource-search', name: '리소스 검색' })
     expect(app).toMatchObject({ appId: 'resource-search', projectId, name: '리소스 검색', status: 'stopped', home: 'show', error: null })
     expect(app.dir).toBe(join(appsDir(), 'resource-search'))
@@ -94,25 +95,25 @@ describe('apps.create', () => {
     })
     expect(existsSync(join(dataRoot, 'app-data', projectId, 'resource-search'))).toBe(true)
     expect(((await rpc('apps.list', {})) as ExternalAppInfo[]).map((a) => a.appId)).toEqual(['resource-search'])
-    // 만든 앱은 진짜로 뜬다 — 처음 필요할 때
+    // The created app really starts — the first time it is needed
     const tools = await rt.tools({ projectId, appId: 'resource-search' })
     expect(tools.map((t) => t.name)).toEqual(['show', 'increment', 'reset'])
   })
 
-  it('projectId가 null이면 사용자 폴더에 만든다', async () => {
+  it('creates it in the user folder when projectId is null', async () => {
     const { app } = await create({ projectId: null, id: 'timer', name: 'Timer', description: 'Counts down' })
     expect(app).toMatchObject({ appId: 'timer', projectId: null, description: 'Counts down', trusted: true })
     expect(app.dir).toBe(join(dataRoot, 'apps', 'timer'))
     expect(existsSync(join(dataRoot, 'app-data', '_user', 'timer'))).toBe(true)
   })
 
-  it('신뢰하지 않은 프로젝트에는 만들지 않는다 — 폴더도 생기지 않는다', async () => {
+  it('does not create in an untrusted project — no folder appears either', async () => {
     await rpc('projects.setTrusted', { projectId, trusted: false })
     await expect(create({ projectId, id: 'notes', name: 'Notes' })).rejects.toThrow(/does not make apps in a project it does not trust/)
     expect(existsSync(join(repo, '.centralu'))).toBe(false)
   })
 
-  it('쓸 수 없는 이름은 거절한다 — centralu·app- 머리, 밑줄, 대문자, 내장 앱의 id', async () => {
+  it('refuses names it cannot use — a centralu or app- prefix, underscores, uppercase letters, a built-in app\'s id', async () => {
     const refused: Record<string, RegExp> = {
       'centralu-tools': /ids starting with "centralu" belong to Centralu itself/,
       'app-notes': /ids starting with "app-" are how apps attach to sessions/,
@@ -128,7 +129,7 @@ describe('apps.create', () => {
     expect(existsSync(appsDir()) ? readdirSync(appsDir()) : []).toEqual([])
   })
 
-  it('이미 있는 id는 덮어쓰지 않는다 — 멀쩡한 앱도, 매니페스트가 틀린 폴더도', async () => {
+  it('does not overwrite an existing id — neither an intact app nor a folder with an invalid manifest', async () => {
     plantApp(appsDir(), 'notes', { server: { command: 'node', args: ['mine.mjs'] } })
     mkdirSync(join(appsDir(), 'draft'))
     writeFileSync(join(appsDir(), 'draft', 'half-written.txt'), 'someone is working here')
@@ -137,12 +138,12 @@ describe('apps.create', () => {
     await expect(create({ projectId, id: 'draft', name: 'Draft' })).rejects.toThrow(/An app "draft" already exists/)
     expect(JSON.parse(readFileSync(join(appsDir(), 'notes', 'centralu.app.json'), 'utf8')).server.args).toEqual(['mine.mjs'])
     expect(readdirSync(join(appsDir(), 'draft'))).toEqual(['half-written.txt'])
-    // 같은 id를 두 번 만들어도 두 번째는 거절된다
+    // Even creating the same id twice — the second attempt is refused
     await create({ projectId: null, id: 'once', name: 'Once' })
     await expect(create({ projectId: null, id: 'once', name: 'Once' })).rejects.toThrow(/An app "once" already exists/)
   })
 
-  it('프로젝트의 .centralu가 저장소 밖을 가리키는 링크면 만들지 않는다 — 밖에 아무것도 쓰지 않는다', async () => {
+  it('does not create if a project\'s .centralu is a link pointing outside its repository — writes nothing outside it', async () => {
     const outside = join(root, 'outside')
     mkdirSync(outside)
     symlinkSync(outside, join(repo, '.centralu'))
@@ -151,8 +152,8 @@ describe('apps.create', () => {
   })
 })
 
-describe('create_app (오케스트레이터)', () => {
-  it('프로젝트를 이름으로 가리켜 같은 문으로 만들고, 거절은 이유를 돌려준다', async () => {
+describe('create_app (the orchestrator)', () => {
+  it('names a project by its name to create through the same door, and a refusal returns its reason', async () => {
     const orch = await mgr.orchestrator()
     const name = store.listProjects()[0]!.name
     const made = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
@@ -174,7 +175,7 @@ describe('create_app (오케스트레이터)', () => {
     expect(untrusted.text).toContain('does not make apps in a project it does not trust')
   })
 
-  it('오케스트레이터만 쓴다 — 매니저·조율 세션의 묶음에는 없다', () => {
+  it('only the orchestrator uses it — it is absent from the manager\'s and the coordinating session\'s profiles', () => {
     expect(profileAllows('orchestrator', 'create_app')).toBe(true)
     expect(profileAllows('manager', 'create_app')).toBe(false)
     expect(profileAllows('scoped', 'create_app')).toBe(false)

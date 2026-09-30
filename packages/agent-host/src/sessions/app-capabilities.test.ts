@@ -6,12 +6,17 @@ import { PROJECT_APPS, plantApp, until } from '../apps/external/test-helpers.js'
 import { brokerSaid, brokerWorld, type BrokerWorld } from './app-broker.test-helpers.js'
 
 /**
- * 능력 승인이 **어디에 서는가** (M4 D-4) — 진짜 매니저·런타임·앱 프로세스·저장소로 본다.
+ * **Where** a capability approval stands (M4 D-4) — checked with a real manager, runtime, app
+ * process and store.
  *
- *   세션에서 시작된 사슬  그 세션의 승인 카드(`approval_request`의 `capability`) — 어댑터의 카드와 같은 자리, 같은 답의 길
- *   화면에서 시작된 사슬  그 앱의 물음(`apps.questions`) — 고정 화면이 그리고 `apps.answerQuestion`으로 답한다
+ *   a chain started from a session  that session's approval card (`approval_request`'s
+ *                                   `capability`) — the same spot, the same answer path, as an
+ *                                   adapter's own card
+ *   a chain started from the UI     that app's question (`apps.questions`) — drawn by a fixed
+ *                                   screen and answered through `apps.answerQuestion`
  *
- * 답은 저장소에 기억된다(`app_permissions`). 사람 대신 아무도 답하지 않는다(`answerCapabilities: null`) — 시험이 카드를 보고 답한다.
+ * The answer is remembered in the store (`app_permissions`). Nobody answers in place of the person
+ * (`answerCapabilities: null`) — the test inspects the card and answers it itself.
  */
 
 let w: BrokerWorld
@@ -35,8 +40,8 @@ afterEach(async () => {
   await w.dispose()
 })
 
-describe('세션에서 시작된 사슬 — 그 세션의 승인 카드', () => {
-  it('카드가 서고 세션은 승인 대기가 된다. 허락하면 부탁이 이어지고, 답은 기억되어 다음에는 묻지 않는다', async () => {
+describe('a chain started from a session — that session\'s approval card', () => {
+  it('a card stands up and the session becomes waiting-for-approval. Allowing it lets the request proceed, and the answer is remembered so it is not asked again', async () => {
     w.plant('project', 'notes', { agent: true })
     w.rt.refresh()
     answerAgent()
@@ -51,7 +56,7 @@ describe('세션에서 시작된 사슬 — 그 세션의 승인 카드', () => 
       text: 'run an agent (Claude Code) in a new session',
     })
     expect(w.mgr.listSessions().find((s) => s.id === caller.id)).toMatchObject({ state: 'waiting_approval', pendingApproval: { requestId: card!.requestId } })
-    // 부탁은 사람을 기다린다 — 아직 에이전트 세션이 없다
+    // The request waits on the person — there is no agent session yet
     expect(w.agentSessions()).toEqual([])
 
     w.mgr.respondApproval(caller.id, card!.requestId, 'allow')
@@ -59,7 +64,7 @@ describe('세션에서 시작된 사슬 — 그 세션의 승인 카드', () => 
     expect(w.mgr.listSessions().find((s) => s.id === caller.id)).toMatchObject({ pendingApproval: null })
     expect(w.events).toContainEqual(expect.objectContaining({ type: 'approval_resolved', sessionId: caller.id, requestId: card!.requestId, decision: 'allow' }))
 
-    // 기억은 저장소에 있다(host가 다시 떠도 남는다) — 다음 부탁에는 카드가 서지 않는다
+    // The memory lives in the store (it survives even if the host restarts) — no card stands for the next request
     expect(w.store.getAppPermission(`${w.projectId}/notes`, 'agent:claude')).toMatchObject({ decision: 'allow', text: 'run an agent (Claude Code) in a new session' })
     expect(RpcMethods['apps.permissions'].result.parse(await w.rpc('apps.permissions', { appId: 'notes', projectId: w.projectId })) as AppPermission[]).toMatchObject([
       { capability: 'agent:claude', decision: 'allow', current: true, text: 'run an agent (Claude Code) in a new session' },
@@ -68,7 +73,7 @@ describe('세션에서 시작된 사슬 — 그 세션의 승인 카드', () => 
     expect(capabilityCards(caller.id)).toHaveLength(1)
   })
 
-  it('거절하면 부탁은 거절로 끝나고 그 거절도 기억된다. 카드의 "항상 허용"은 허용이다', async () => {
+  it('denying it ends the request in a refusal, and that refusal is also remembered. A card\'s "always allow" is an allow', async () => {
     w.plant('project', 'notes', { agent: true, host: ['sessions.list'] })
     w.rt.refresh()
     answerAgent()
@@ -86,20 +91,20 @@ describe('세션에서 시작된 사슬 — 그 세션의 승인 카드', () => 
     expect(brokerSaid(await always).isError).toBe(false)
   })
 
-  it('어댑터의 카드가 떠 있으면 그것이 닫힌 뒤에 선다 — 한 세션의 카드 자리는 하나다', async () => {
+  it('if an adapter\'s card is already standing, this one stands only after that one closes — one session has one card slot', async () => {
     w.plant('project', 'notes', { agent: true })
     w.rt.refresh()
     answerAgent()
     const caller = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
     const h = w.claude.handles.get(caller.id)!
-    // 에이전트가 먼저 다른 도구의 승인을 묻고 있다
+    // The agent is already asking for approval of a different tool
     h.emit({ type: 'approval_request', sessionId: caller.id, requestId: 'req-bash', detail: { kind: 'command', command: 'ls', cwd: w.repo } })
     const pending = w.callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })
     await new Promise((r) => setTimeout(r, 400))
     expect(capabilityCards(caller.id)).toEqual([])
     expect(w.mgr.listSessions().find((s) => s.id === caller.id)!.pendingApproval?.requestId).toBe('req-bash')
 
-    // 사람이 어댑터의 카드에 답한다 — 어댑터가 닫았다고 알리면 우리 카드가 선다
+    // The person answers the adapter's card — once the adapter announces it closed, our card stands up
     w.mgr.respondApproval(caller.id, 'req-bash', 'allow')
     h.emit({ type: 'approval_resolved', sessionId: caller.id, requestId: 'req-bash', decision: 'allow' })
     const [card] = await until(() => capabilityCards(caller.id), (c) => c.length === 1)
@@ -107,7 +112,7 @@ describe('세션에서 시작된 사슬 — 그 세션의 승인 카드', () => 
     expect(brokerSaid(await pending).isError).toBe(false)
   })
 
-  it('답이 없으면 5분(시험은 짧게) 뒤 카드를 거두고 거절한다 — 기억하지 않는다', async () => {
+  it('with no answer, the card is withdrawn and refused after 5 minutes (shortened for this test) — nothing is remembered', async () => {
     await w.dispose()
     w = await brokerWorld({ plantApp, PROJECT_APPS }, { capabilityQuestionMs: 400 })
     w.answerCapabilities = null
@@ -123,14 +128,14 @@ describe('세션에서 시작된 사슬 — 그 세션의 승인 카드', () => 
   })
 })
 
-describe('화면에서 시작된 사슬 — 그 앱의 물음', () => {
-  it('물음이 목록에 서고 방송된다. 답하면 멈춰 있던 화면의 호출이 이어지고 물음은 사라진다', async () => {
+describe('a chain started from the UI — that app\'s question', () => {
+  it('the question stands in the list and is broadcast. Answering it lets the stalled UI call proceed, and the question disappears', async () => {
     w.plant('project', 'notes', { agent: true })
     w.rt.refresh()
     answerAgent()
     const pending = w.rt.call(APP(), 'ask_broker', { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } }, { kind: 'view' })
     const [q] = await until(() => w.mgr.appQuestionList(), (l) => l.length === 1)
-    // RPC의 답은 프로토콜의 모양 그대로다 (schema smoke와 같은 대조)
+    // The RPC's answer keeps exactly the protocol's shape (the same kind of check as a schema smoke test)
     expect(RpcMethods['apps.questions'].result.parse(await w.rpc('apps.questions', {}))).toEqual([q])
     expect(q).toMatchObject({
       app: { appId: 'notes', projectId: w.projectId, name: 'App notes' },
@@ -148,7 +153,7 @@ describe('화면에서 시작된 사슬 — 그 앱의 물음', () => {
     await expect(w.rpc('apps.answerQuestion', { questionId: q!.id, decision: 'allow' })).rejects.toThrow('That question is no longer open')
   })
 
-  it('매니페스트의 uses가 바뀌면 저장된 답도 옛 답이 되어 다시 묻는다 — 잊으면 다시 묻는다', async () => {
+  it('if the manifest\'s uses changes, a stored answer becomes stale and it asks again — forgetting it also asks again', async () => {
     const dir = w.plant('project', 'notes', { agent: true })
     w.rt.refresh()
     answerAgent()
@@ -161,7 +166,7 @@ describe('화면에서 시작된 사슬 — 그 앱의 물음', () => {
     await ask()
     const again = w.rt.call(APP(), 'ask_broker', { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } }, { kind: 'view' })
     expect((await again).status).toBe('ok')
-    expect(w.events.filter((e) => e.type === 'external_app_questions_changed')).toHaveLength(2) // 섰다, 닫혔다
+    expect(w.events.filter((e) => e.type === 'external_app_questions_changed')).toHaveLength(2) // it stood up, then closed
 
     const file = join(dir, 'centralu.app.json')
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), uses: { agent: true, host: ['git.status'] } }))

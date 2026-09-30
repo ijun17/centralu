@@ -3,22 +3,23 @@ import { join } from 'node:path'
 import { dataRoot } from '../data-dir.js'
 
 /**
- * 오케스트레이터의 작업 디렉토리.
+ * The orchestrator's working directory.
  *
- * **프로젝트 안에 두지 않는다.** 프로젝트 안이면 그 프로젝트의 세션과 같은 파일을
- * 만지게 되고, 그건 FR-2가 경고하는 동시 세션 충돌을 우리 손으로 만드는 것이다.
+ * **It is not placed inside a project.** Inside a project it would touch the same files as that
+ * project's sessions, which is us manufacturing with our own hands the concurrent-session
+ * conflict that FR-2 warns about.
  *
- * 그리고 **비어 있다.** 한때 여기에 AGENTS.md로 역할을 적어두려 했는데,
- * 그게 곧 취약점이었다:
+ * And it is **empty.** At one point there was an attempt to write a role here as AGENTS.md, and
+ * that turned out to be a vulnerability:
  *
- *   워커 세션은 자기 프로젝트에만 권한이 있지만 파일은 쓸 수 있다.
- *   그 세션이 (또는 그 세션이 읽은 저장소의 내용이) 이 폴더에 지시문을 써 넣으면,
- *   **모든 세션에 지시할 수 있는** 오케스트레이터가 그것을 자기 지시로 읽는다.
- *   낮은 권한에서 높은 권한으로 넘어가는 길이 생기는 셈이다.
+ *   A worker session only has permission in its own project, but it can still write files.
+ *   If that session (or content in a repository the session read) wrote an instruction into
+ *   this folder, the orchestrator — which **can instruct every session** — would read it as its
+ *   own instruction. That opens a path from low privilege up to high privilege.
  *
- * 그래서 이 폴더에서는 아무것도 읽지 않는다 (settingSources: []).
- * 역할은 세션을 띄울 때 ORCHESTRATOR_ROLE로 직접 주입한다 —
- * 파일을 거치지 않으므로 아무도 도중에 바꿔 쓸 수 없다.
+ * So nothing is ever read from this folder (settingSources: []). The role is injected directly as
+ * ORCHESTRATOR_ROLE when the session is spawned — since it never goes through a file, nobody can
+ * rewrite it along the way.
  */
 export function orchestratorHome(): string {
   const dir = join(dataRoot(), 'orchestrator')
@@ -44,9 +45,9 @@ export const ORCHESTRATOR_ROLE = `너는 Centralu 앱의 중앙 오케스트레�
 `
 
 /*
- * 여기 있던 projectOrchestratorRole(#13)은 폐기했다 (2026-09-01).
+ * projectOrchestratorRole(#13), which used to live here, was removed (2026-09-01).
  *
- * 프로젝트마다 세션을 지휘하는 자리가 워크트리 매니저(#69)와 둘이 되면서, 만든 사람조차
- * 둘을 헷갈렸다 — 그리고 프로젝트 오케스트레이터는 한 번도 쓰이지 않았다. 지휘석은
- * 프로젝트당 하나로 충분하고, 그 자리는 매니저가 이미 갖고 있다.
+ * Once the seat that directs sessions per project doubled up with the worktree manager (#69),
+ * even the person who built it confused the two — and the project orchestrator was never used
+ * even once. One directing seat per project is enough, and the manager already holds that seat.
  */

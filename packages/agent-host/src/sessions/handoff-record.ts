@@ -1,53 +1,60 @@
 import type { StoredMessage } from '@cc/protocol'
 
 /**
- * 인수인계 기록 (#78) — **요약자 없는 인수인계**, 그리고 그 결과는 **파일이다** (#102).
+ * The handoff record (#78) — **a handoff with no summarizer**, and its result **is a file**
+ * (#102).
  *
- * 살아 있는 인수인계는 죽는 에이전트가 노트를 쓴다(답으로 쓰고 host가 파일로 놓는다, #142). 서비스가 중단되면 그 길이
- * 막히는데, 대화 원문은 우리 저장소에 컴팩션 없이 전부 남아 있다. 이 모듈은
- * 그 원문을 후임자가 읽을 수 있는 글로 물질화한다 — LLM 없이, 결정론적으로.
+ * A live handoff has the dying agent write its own note (written as its reply, and the host lands
+ * it as a file, #142). If the service is interrupted that path is blocked, but the raw
+ * conversation is still fully present in our store with no compaction. This module materializes
+ * that raw conversation into text a successor can read — deterministically, with no LLM.
  *
- * **더는 한 통의 채팅 메시지에 맞추지 않는다** (#102). 예전 이 파일에는 사다리가
- * 있었다: 오래된 답변을 앞 500자로 강등하고, 요약을 줄이고, 그래도 넘치면 앞에서부터
- * 버렸다. 그 사다리가 존재한 이유는 단 하나 — 결과를 initialPrompt 한 통으로 보냈기
- * 때문이다. 이제 host가 이 글을 데이터 폴더의 노트 자리(`<데이터>/handoff/<프로젝트 id>/<세션 id>.md`,
- * #142)에 쓰고 후임자는 경로만 받는다. 맞출 봉투가 없으므로 균일한 열화도 필요 없다.
+ * **It is no longer sized to fit one chat message** (#102). This file used to have a ladder: an
+ * old reply got demoted to its first 500 characters, then the summary was shortened, and if it
+ * still overflowed, material was dropped from the front. That ladder existed for exactly one
+ * reason — the result used to be sent as a single initialPrompt. Now the host writes this text
+ * into a note slot in the data folder (`<data>/handoff/<project id>/<session id>.md`, #142) and
+ * the successor only receives the path. With no envelope to fit, there is no need for uniform
+ * degradation either.
  *
- * **무엇이 부피인가는 실측이다** (#102): tool_result 45% + tool_call 43% = 88%.
- * 사람이 한 말은 8%뿐이다. 행 하나는 작고(tool_result 평균 0.6KB) 문제는 **개수**라서,
- * 본문을 깎는 대신 **행을 접는다** — 최근순 3단.
+ * **What actually takes up the space is measured** (#102): tool_result 45% + tool_call 43% = 88%.
+ * What people said is only 8%. Each row is small (tool_result averages 0.6KB) and the problem is
+ * **count**, so instead of trimming the body, **rows are collapsed** — in three tiers, most recent
+ * first.
  *
- * **경계는 선언한다.** 균일하게 열화된 글은 온전해 보이면서 온전하지 않고, 읽는
- * 쪽에 그것을 알 방법이 없다. 그래서 최근 것부터 상한까지 담고, 어디까지 담았는지를
- * 첫 줄에 적는다. 자르기가 정당한 이유는 원문이 저장소에 그대로 남아 있기 때문이다:
- * 이 파일은 **사본이 아니라 뷰**이고, 더 넓은 뷰는 언제든 다시 만들 수 있다.
+ * **The boundary is stated explicitly.** Text degraded uniformly can look intact while it is not,
+ * and the reader has no way to tell. So this fills from the most recent material up to the cap,
+ * and the first line says how far it reaches. Cutting is justified because the raw material stays
+ * intact in the store: this file is **a view, not a copy**, and a wider view can always be built
+ * again.
  *
- * **피벗은 선택이다.** 마지막 컴팩트 마커가 있으면 거기서부터 담고 도구의 요약을
- * 그 위에 올린다. 실측: codex 세션에는 우리 저장소에 컴팩션 마커가 **하나도 없다**
- * (컴팩션이 자기 롤아웃 파일에서 일어난다). 피벗을 전제하는 규칙은 claude에서만
- * 성립하므로, 없으면 그냥 최근 상한만 적용한다.
+ * **The pivot is optional.** If there is a last compaction marker, material is filled from there
+ * and the tool's own summary is placed above it. Measured: codex sessions have **zero** compaction
+ * markers in our store (compaction happens inside its own rollout file). A rule that assumes a
+ * pivot only holds for claude, so when there is none, only the recency cap is applied.
  */
 
 /**
- * 기록 파일의 바이트 상한. 2MB = 실측 전사 20만 행 중 최근 수만 행이 들어가는 크기이자,
- * 사람이 `rg`로 뒤지기에 아무 부담이 없는 크기다. 메시지 봉투가 아니라 **파일** 상한이라
- * 컨텍스트가 아니라 디스크·읽기 비용만 제한한다.
+ * The byte cap on the record file. 2MB is measured as the size that fits the most recent tens of
+ * thousands of rows out of a 200,000-row transcript, and it is also a size a person can search
+ * through with `rg` with no strain. It is a **file** cap, not a message-envelope cap, so it limits
+ * only disk and read cost, not context.
  */
 export const RECORD_CAP = 2_000_000
 
 /**
- * 최근 툴 호출 몇 개를 결과 본문까지 그대로 실을까.
- * 40 ≈ 전임자의 마지막 두어 턴 — "머리에 들고 있던 것"의 실측 폭이다.
- * (평균 0.6KB × 40 ≈ 25KB. 여기까지가 다시 돌려보지 않고도 믿을 만한 범위다.)
+ * How many of the most recent tool calls carry their full result body verbatim.
+ * 40 ≈ the predecessor's last couple of turns — the measured width of "what was on their mind."
+ * (0.6KB average × 40 ≈ 25KB. Up to here is a range trustworthy enough not to need re-running.)
  */
 const TOOLS_VERBATIM = 40
 /**
- * 그 앞 몇 개를 한 줄 흔적으로 남길까.
- * 1,000 ≈ 하루치 작업. 한 줄이 ~70B라 1,000줄이어도 70KB로, 상한의 3%다 —
- * "무엇을 어느 파일에 했는가"의 연대기는 이 값이면 거의 끊기지 않는다.
+ * How many before that are kept as a one-line trace.
+ * 1,000 ≈ a day's work. One line is ~70B, so even 1,000 lines is 70KB, 3% of the cap — at this
+ * value, the chronicle of "what was done to which file" is almost never cut off.
  */
 const TOOLS_LINE = 1_000
-/** 헤더·접힘 줄에 적는 파일 경로 개수 상한 — 목록이 본문을 밀어내면 목록이 아니다 */
+/** The cap on how many file paths appear in the header/collapsed lines — a list that pushes out the body is not a list */
 const TOUCHED_MAX = 60
 
 const bytes = (s: string) => Buffer.byteLength(s, 'utf8')
@@ -60,17 +67,17 @@ type ToolEntry = {
   tool: string
   title: string
   paths: string[]
-  /** null이면 결과가 아직 안 붙은 호출 (턴 중간에 끊긴 세션) */
+  /** null means a call whose result has not landed yet (a session cut off mid-turn) */
   ok: boolean | null
   result: string
 }
 type TextEntry = { kind: 'text'; seq: number; text: string }
 type Entry = ToolEntry | TextEntry
 
-/** 행들을 항목으로 — 추론·승인·마커는 후임자가 읽을 것이 아니라 뺀다 */
+/** Rows to entries — reasoning, approvals and markers are dropped, since they are not for a successor to read */
 function toEntries(rows: StoredMessage[]): Entry[] {
   const out: Entry[] = []
-  // tool_result가 자기 호출 항목에 눕도록 callId로 짝을 찾는다
+  // Match by callId so a tool_result lands on its own call entry
   const byCall = new Map<string, ToolEntry>()
   for (const r of rows) {
     const p = r.payload as { text?: string; callId?: string; ok?: boolean; summary?: unknown }
@@ -107,16 +114,17 @@ function toEntries(rows: StoredMessage[]): Entry[] {
 const isTool = (e: Entry): e is ToolEntry => e.kind === 'tool'
 
 /**
- * 한 줄 흔적 — `[38817] Edit packages/ui/src/store/store.ts (ok)`.
- * 줄머리의 seq는 자릿점을 찍지 않는다: 이건 세는 수가 아니라 **찾는 이름**이라,
- * 기록에서 그 행을 다시 꺼내려는 사람이 그대로 검색할 수 있어야 한다.
+ * A one-line trace — `[38817] Edit packages/ui/src/store/store.ts (ok)`.
+ * The seq at the start of the line does not get thousands separators: it is not a quantity to
+ * count but **a name to search for**, and it must be searchable as-is by a person trying to pull
+ * that row back out of the record.
  */
 const toolLine = (e: ToolEntry) =>
   `[${e.seq}] ${e.tool}${e.title ? ` ${e.title}` : ''}${e.ok == null ? '' : e.ok ? ' (ok)' : ' (failed)'}`
 
 const indent = (s: string) => s.replace(/^/gm, '    ')
 
-/** 가장 오래된 툴 무리는 세어서 한 덩어리로 — 개수와 손댄 파일만 남는다 */
+/** The oldest tool group is counted and turned into one block — only the count and the touched files survive */
 function collapsedLine(list: ToolEntry[]): string {
   const counts = new Map<string, number>()
   for (const e of list) counts.set(e.tool, (counts.get(e.tool) ?? 0) + 1)
@@ -129,7 +137,7 @@ function collapsedLine(list: ToolEntry[]): string {
   return `[${list[0]!.seq}–${list[list.length - 1]!.seq}] ${num(list.length)} earlier tool calls (${kinds})${where}`
 }
 
-/** 최근에 손댄 파일부터 — 후임자가 가장 먼저 찾는 것이고, 뽑는 값은 공짜다 */
+/** Most recently touched files first — the thing a successor looks for first, and computing it costs nothing extra */
 function touchedPaths(entries: Entry[]): string[] {
   const seen: string[] = []
   for (let i = entries.length - 1; i >= 0 && seen.length < TOUCHED_MAX; i--) {
@@ -143,13 +151,13 @@ function touchedPaths(entries: Entry[]): string[] {
 export function buildHandoffRecord(opts: {
   name: string
   tool: string
-  /** 후임자가 될 도구. 모르면 생략 — 헤더가 화살표 없이 전임 도구만 적는다 */
+  /** The tool the successor will use. Omit if unknown — the header then writes only the predecessor's tool, with no arrow */
   toTool?: string
-  /** 도구의 마지막 컴팩트 요약 원문 (codex 롤아웃에서). null이면 요약 섹션이 없다 */
+  /** The tool's last compaction-summary text (from a codex rollout). null means no summary section */
   summary: string | null
-  /** 세션의 **전체** 행, 시간순 — 피벗 앞뒤 처리는 여기서 한다 */
+  /** **All** of the session's rows, in time order — handling before and after the pivot happens here */
   rows: StoredMessage[]
-  /** 마지막 성공한 컴팩트 마커의 seq. null이면 피벗 없이 최근 상한만 적용한다 */
+  /** The seq of the last successful compaction marker. null means only the recency cap is applied, with no pivot */
   pivotSeq: number | null
   cap?: number
 }): string {
@@ -157,14 +165,15 @@ export function buildHandoffRecord(opts: {
   const all = toEntries(opts.rows)
   const lastSeq = opts.rows.length ? opts.rows[opts.rows.length - 1]!.seq : 0
 
-  // 요약이 **있을 때만** 피벗 이전을 접는다 — 요약 없이 버리면 그 구간이 어디에도 없다
+  // Material before the pivot is only folded away **when there is a summary** — dropping it with no summary would leave that span nowhere at all
   const summary = opts.summary?.trim() || null
   const folded = summary != null && opts.pivotSeq != null
   const entries = folded ? all.filter((e) => e.seq > opts.pivotSeq!) : all
 
   /*
-   * 3단 접기. 단은 **툴 항목만** 세고, 사람이 한 말은 어느 단에서도 손대지 않는다 —
-   * 부피의 88%가 툴이고 8%가 말이라, 말을 깎아서 버는 것이 없다.
+   * The three-tier fold. Only **tool entries** are counted for the tiers; what people said is
+   * untouched at every tier — 88% of the volume is tools and 8% is speech, so trimming speech
+   * would buy nothing.
    */
   const tools = entries.filter(isTool)
   const verbatimFrom = Math.max(0, tools.length - TOOLS_VERBATIM)
@@ -181,7 +190,7 @@ export function buildHandoffRecord(opts: {
       continue
     }
     if (collapsed.has(e)) {
-      // 접힌 무리는 처음 만난 자리에 한 줄로 선다 — 시간 순서 안에 남아야 읽힌다
+      // A collapsed group stands as one line at the spot it is first encountered — it must stay in time order to read correctly
       if (!collapseWritten) {
         collapseWritten = true
         rendered.push({ seq: e.seq, text: collapsedLine(collapsing) })
@@ -208,10 +217,11 @@ export function buildHandoffRecord(opts: {
   const verbatimMark = '── verbatim from here ──\n\n'
 
   /*
-   * 상한은 **최근부터** 채운다. 담긴 항목 안을 잘라 내지 않는 것이 규칙이다 —
-   * 반쯤 잘린 항목은 온전한 척하지만, 통째로 빠진 구간은 첫 줄이 말해 준다.
+   * The cap is filled **starting from the most recent.** The rule is never to cut inside an
+   * entry that is included — a half-cut entry would pretend to be intact, but a span dropped
+   * entirely is announced by the first line.
    */
-  const fixed = bytes(instructions + touchedLine + summarySection + verbatimMark) + 200 // covers 줄 몫의 슬랙
+  const fixed = bytes(instructions + touchedLine + summarySection + verbatimMark) + 200 // slack for the covers line
   const size = () => rendered.reduce((n, e) => n + bytes(e.text) + 2, fixed)
   let dropped = 0
   while (size() > cap && rendered.length > 1) {

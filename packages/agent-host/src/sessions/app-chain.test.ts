@@ -4,11 +4,14 @@ import { PROJECT_APPS, plantApp, until } from '../apps/external/test-helpers.js'
 import { brokerWorld, type BrokerWorld } from './app-broker.test-helpers.js'
 
 /**
- * 사슬 (M4 D-6) — 세션의 에이전트가 앱(notes)을 부르고, notes가 다른 앱(helper)을 부르고, helper가 에이전트를 부탁한다.
- * 진짜 매니저·런타임·앱 프로세스 둘·저장소로 본다(어댑터만 가짜).
+ * A chain (M4 D-6) — a session's agent calls an app (notes), notes calls another app (helper), and
+ * helper assigns an agent. Checked with a real manager, runtime, two app processes and a store
+ * (only the adapter is fake).
  *
- *   취소  사람이 부른 세션을 멈추면 그 아래가 모두 멈춘다 — 부탁받아 돌던 에이전트 세션까지(인터럽트)
- *   기록  사슬의 줄마다 부모가 이어지고, notes의 기록 하나를 읽으면 사슬 전체가 온다
+ *   cancellation  stopping the session that called stops everything beneath it — even the agent
+ *                 session that was running on assignment (an interrupt)
+ *   the record    every row of the chain is linked to its parent, so reading one of notes'
+ *                 records brings back the entire chain
  */
 
 let w: BrokerWorld
@@ -21,12 +24,12 @@ afterEach(async () => {
   await w.dispose()
 })
 
-describe('사슬의 취소와 기록', () => {
-  it('부른 세션을 멈추면 취소가 사슬을 따라 내려가 부탁받은 에이전트를 멈추고, 사슬의 줄은 모두 취소로 닫힌다', async () => {
+describe('cancellation and the record for a chain', () => {
+  it('stopping the calling session cascades cancellation down the chain, stopping the assigned agent, and every row of the chain closes as cancelled', async () => {
     w.plant('project', 'notes', { apps: ['helper'] })
     w.plant('project', 'helper', { agent: true })
     w.rt.refresh()
-    // 에이전트는 답하지 않는다 — 멈출 때까지 돈다
+    // The agent never answers — it runs until stopped
     w.claude.onSend = () => {}
     const caller = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
     const pending = w.callFromSession(caller, 'app-notes', {
@@ -44,9 +47,9 @@ describe('사슬의 취소와 기록', () => {
     expect(handle!.interrupted).toBe(true)
     await until(() => w.mgr.listSessions().find((s) => s.id === agent!.id)?.state, (s) => s === 'idle')
 
-    // 사슬의 줄이 모두 닫힐 때까지 — 에이전트 세션을 쉬게 둔 뒤에 부탁의 줄이 닫힌다
+    // Wait until every row of the chain has closed — the assignment's row closes only after the agent session has gone idle
     await until(() => w.rt.runs({ projectId: w.projectId, appId: 'notes' }), (l) => l.length === 3 && l.every((r) => r.status !== 'running'))
-    // notes의 기록 하나에 사슬 전체가 — RPC가 돌려주는 모양 그대로
+    // The whole chain is present in a single record of notes — kept exactly the shape the RPC returns
     const runs = RpcMethods['apps.runs'].result.parse(await w.rpc('apps.runs', { appId: 'notes', projectId: w.projectId }))
     const notesRun = runs.find((r) => r.appId === 'notes')!
     const helperRun = runs.find((r) => r.appId === 'helper' && r.kind === 'tool')!
