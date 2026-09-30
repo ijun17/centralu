@@ -1,22 +1,23 @@
 import { query, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 
 /**
- * SDK Query 중 우리가 쓰는 부분만.
- * 외부 타입을 어댑터 밖으로 내보내지 않기 위해 최소 표면만 적는다.
+ * Only the part of the SDK Query that we use.
+ * We write down only the minimal surface, so external types do not leave the adapter.
  */
 type QueryHandle = AsyncIterable<unknown> &
   UsageQuery &
   ModelQuery & {
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
-    /** 진행 중인 턴을 끊는다. 스트리밍 입력 모드에서만 쓸 수 있다 — 우리가 쓰는 모드가 그렇다 */
+    /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
     interrupt(): Promise<unknown>
     supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
-    /** 질의를 닫고 CLI 프로세스를 끝낸다 (sdk.d.ts) — dispose가 부른다 (#157) */
+    /** Closes the query and terminates the CLI process (sdk.d.ts) — called by dispose (#157). */
     close(): void
     /**
-     * 동적으로 붙인 MCP 서버의 집합을 **통째로 바꾼다** (sdk.d.ts). 처음 `mcpServers`로 넘긴
-     * 인프로세스 서버도 이 집합에 들어 있다(설치된 0.3.263의 sdk.mjs: 초기 SDK 서버가 같은
-     * 맵에 앉는다) — 그래서 부를 때마다 오케스트레이터 서버까지 전부 실어야 한다.
+     * **Replaces the whole set** of dynamically attached MCP servers (sdk.d.ts). The in-process
+     * server originally passed via `mcpServers` is also part of this set (measured in the
+     * installed sdk.mjs from 0.3.263: the initial SDK server sits in the same map) — so every call
+     * has to carry the orchestrator server along with everything else.
      */
     setMcpServers(servers: Record<string, McpServerConfig>): Promise<{ added: string[]; removed: string[]; errors: Record<string, string> }>
   }
@@ -44,25 +45,29 @@ import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 const exec = promisify(execFile)
 
 /**
- * Claude Code 어댑터 (M0 검증 반영 — docs/spikes/m0-findings.md).
- * 제약 3가지:
- *  1. allowedTools에 bare 도구명 금지 (canUseTool이 셰도잉됨)
- *  2. includePartialMessages: true (스트리밍 델타)
- *  3. 신뢰한 프로젝트에서는 settingSources를 지정하지 않는다 = **사용자·프로젝트 설정·훅·CLAUDE.md를
- *     전부 로드한다.** (한때 주석이 정반대로 적혀 있었다. 실측: 생략하면 전역 훅 3개가 실제로 돌았다.)
- *     의도한 것이다 — 이 앱은 워크플로우를 강제하지 않는다. 사람이 자기 도구에
- *     맞춰 둔 설정은 이 앱 안에서도 그대로 살아 있어야 한다.
- *     예외가 둘이다(settingSourcesFor): 오케스트레이터·조율 세션(settingSources: [] — 파일로 들어오는
- *     지시가 곧 권한 상승 통로다)과, 신뢰하지 않은 프로젝트(['user'] — 저장소의 파일이 승인을 정하지 못한다, #92).
+ * The Claude Code adapter (reflects M0 validation — docs/spikes/m0-findings.md).
+ * Three constraints:
+ *  1. Bare tool names are not allowed in allowedTools (it would shadow canUseTool).
+ *  2. `includePartialMessages: true` (streaming deltas).
+ *  3. In a trusted project, `settingSources` is left unspecified, which means **the user's
+ *     settings, project settings, hooks and CLAUDE.md are all loaded.** (A comment here once said
+ *     the opposite. Measured: omitting it actually ran three global hooks.) This is intentional —
+ *     this app does not force a workflow. Settings a person tuned for their own tool have to keep
+ *     working the same way inside this app.
+ *     There are two exceptions (`settingSourcesFor`): orchestrator/coordination sessions
+ *     (`settingSources: []` — an instruction arriving through a file is itself a privilege-
+ *     escalation channel) and untrusted projects (`['user']` — files from the repo must not be
+ *     able to decide approvals, #92).
  */
 
 type PendingApproval = { resolve: (r: { behavior: 'allow'; updatedInput: unknown } | { behavior: 'deny'; message: string }) => void; input: unknown }
 
 /**
- * AskUserQuestion의 인자 → 우리 Question[].
+ * AskUserQuestion's arguments to our own `Question[]`.
  *
- * SDK 타입을 믿지 않고 직접 읽는다 (경계 규칙). 형태가 어긋나면 빈 배열을 돌려
- * **평소 경로로 흘려보낸다** — 반쯤 그린 선택지를 내미는 것보다 낫다.
+ * This reads the raw shape directly rather than trusting the SDK's type (a boundary rule). If the
+ * shape is off, it returns an empty array and **lets it fall through the ordinary path** — better
+ * than presenting a half-drawn set of choices.
  */
 function parseQuestions(input: unknown): Question[] {
   const raw = (input as { questions?: unknown })?.questions
@@ -89,17 +94,19 @@ function parseQuestions(input: unknown): Question[] {
 }
 
 /**
- * 이 도구가 **우리 인프로세스 서버의** 도구인가 (승인 예외의 판정).
+ * Is this tool one belonging to **our own in-process server** (the judgment behind the approval
+ * exception)?
  *
- * MCP 도구 이름은 `mcp__<서버>__<도구>`이고 칸막이가 `__`다. 그래서 접두 검사
- * (`startsWith('mcp__centralu__')`)는 서버 이름 자체를 보지 못한다 —
- * `centralu__pw`라는 이름의 서버가 내놓는 `mcp__centralu__pw__navigate`도 통과했고,
- * 그 도구는 canUseTool을 통째로 건너뛰었다 (실측, #93).
+ * An MCP tool name has the shape `mcp__<server>__<tool>`, with `__` as the separator. So a prefix
+ * check (`startsWith('mcp__centralu__')`) cannot see the server name itself — a server named
+ * `centralu__pw` producing `mcp__centralu__pw__navigate` also passed that check, and that tool
+ * bypassed `canUseTool` entirely (measured, #93).
  *
- * 칸을 세어 **서버 이름 전체**로 판정한다. 우리 도구 이름에는 `__`가 없으므로
- * (list_sessions·propose_mcp_server… 전부 홑밑줄) 칸은 정확히 셋이다.
- * 이름 쪽에서 이미 막지만(mcpServerNameError), 신뢰를 내주는 자리는 남의 검사를
- * 믿지 않고 자기 힘으로 옳아야 한다.
+ * This counts segments and judges by **the full server name** instead. None of our own tool
+ * names contain `__` (list_sessions, propose_mcp_server, and so on all use a single underscore),
+ * so there are exactly three segments. The name is already blocked on the naming side
+ * (`mcpServerNameError`), but a place that grants trust must not rely on another layer's check —
+ * it has to be correct on its own.
  */
 function isOrchestratorTool(toolName: string): boolean {
   const parts = toolName.split('__')
@@ -107,11 +114,13 @@ function isOrchestratorTool(toolName: string): boolean {
 }
 
 /**
- * 이 도구가 외부 앱 대리 서버의 도구라면 그 서버와 도구 이름 (M4 A-5) — `mcp__app-<id>__<도구>`.
+ * If this tool belongs to an external app's proxy server, its server and tool name (M4 A-5) —
+ * `mcp__app-<id>__<tool>`.
  *
- * 위와 같은 이유로 칸을 센다. 앱 id에는 밑줄이 없고 앱의 도구 이름에는 `__`가 없으므로
- * (manifest.ts의 두 규칙) 우리 것이면 칸이 정확히 셋이다. 이름만으로 무엇을 내주지는 않는다 —
- * 읽기 전용인지는 붙은 앱의 목록에 묻는다(`SessionApps.readOnly`).
+ * This counts segments for the same reason as above. An app id never contains an underscore and
+ * an app's own tool names never contain `__` (two rules enforced in manifest.ts), so a tool that
+ * is ours has exactly three segments. This never grants anything based on the name alone —
+ * whether it is read-only is asked of the attached app's own list (`SessionApps.readOnly`).
  */
 function appToolOf(toolName: string): { server: string; tool: string } | null {
   const parts = toolName.split('__')
@@ -120,66 +129,76 @@ function appToolOf(toolName: string): { server: string; tool: string } | null {
 }
 
 /**
- * 프리셋 → SDK 권한 옵션.
+ * Preset to SDK permission options.
  *
- * **normal은 값을 보내지 않는다.** 이 앱은 사용자 설정·훅·CLAUDE.md를 전부 로드하면서
- * (settingSources 미지정) 권한만 조용히 덮어쓰고 있었다. 워크플로우를 강제하지 않는다는
- * 원칙과 어긋나는 자리는 거기였다.
+ * **Normal sends no value at all.** This app loads the user's settings, hooks and CLAUDE.md in
+ * full (settingSources left unspecified), but was silently overriding permissions on top of that.
+ * That was exactly the place where we broke our own principle of not forcing a workflow.
  *
- * 그런데 **그냥 빼면 안 된다.** 실측(probe-perm2.mts):
+ * But **it cannot simply be omitted.** Measured (probe-perm2.mts):
  *
- *   permissionMode:'default'                 우리 콜백 불림   (설정 무시)
- *   permissionMode:'bypassPermissions'       안 불림
- *   아무것도 안 보냄                          우리 콜백 불림   ← 설정 여전히 무시!
- *   안 보냄 + resolvePermissionModeInCli      안 불림          ← 설정이 살아났다
+ *   permissionMode:'default'                our callback is called    (settings ignored)
+ *   permissionMode:'bypassPermissions'      not called
+ *   sending nothing at all                   our callback is called    ← settings still ignored!
+ *   sending nothing + resolvePermissionModeInCli   not called          ← settings finally apply
  *
- * 안 보내도 SDK가 'default'로 굳힌다. 그래서 **아무것도 안 바꾸면서 바꾼 줄 알게 되는**
- * 변경이 될 뻔했다. CLI에게 해석을 넘기라고 명시해야 비로소 설정이 산다.
+ * Even with nothing sent, the SDK still fixes the mode to 'default'. So this was on track to
+ * become a change that **looked like nothing changed while it actually did**. Only explicitly
+ * telling the CLI to resolve the mode itself makes the settings apply.
  *
- * 이 값으로 세 프리셋의 뜻이 처음으로 서로 달라진다 —
- * 전에는 safe와 normal이 글자 그대로 같은 동작이었다.
+ * With this value, the meaning of the three presets differs from each other for the first time —
+ * before this, safe and normal were literally identical in behavior.
  *
- * **"내 설정"이 누구의 설정인가는 여기서 정하지 않는다** — 어느 파일을 읽을지(settingSourcesFor)가
- * 정한다. 신뢰하지 않은 프로젝트에서 normal은 사용자 설정만 따른다(#92, 아래 표).
+ * **Whose settings count as "my settings" is not decided here** — that is decided by which files
+ * get read (`settingSourcesFor`). In an untrusted project, normal follows only the user's own
+ * settings (#92, see the table below).
  */
 function permissionOptionsFor(preset: 'safe' | 'normal' | 'auto'): Record<string, unknown> {
-  if (preset === 'auto') return { permissionMode: 'bypassPermissions' } // 무조건 통과
-  if (preset === 'safe') return { permissionMode: 'default' } // 내 설정과 무관하게 항상 묻는다
-  return { resolvePermissionModeInCli: true } // 내 설정을 따른다
+  if (preset === 'auto') return { permissionMode: 'bypassPermissions' } // Unconditionally allowed.
+  if (preset === 'safe') return { permissionMode: 'default' } // Always asks, regardless of the person's own settings.
+  return { resolvePermissionModeInCli: true } // Follows the person's own settings.
 }
 
 /**
- * 어느 설정 파일을 읽는가 (M4 결정 3, #92·#152) — **저장소에 커밋된 파일이 승인을 정하지 못하게 한다.**
+ * Which settings files get read (M4 decision 3, #92, #152) — **so that a file committed to the
+ * repo cannot be able to decide an approval.**
  *
- *   오케스트레이터·조율 세션(noSettingFiles)   []        아무 파일도 안 읽는다 (아래 query 옵션의 주석)
- *   신뢰한 프로젝트·사용자 폴더 앱의 세션       생략      사용자·프로젝트·로컬 전부 — CLI의 기본 그대로
- *   신뢰하지 않은 프로젝트                      ['user']  사용자 설정만 (~/.claude)
+ *   orchestrator/coordination sessions (noSettingFiles)   []        reads no files at all (see the comment on the query option below)
+ *   trusted project / a user-folder app's session          omitted   user, project and local, all of it — the CLI's own default
+ *   untrusted project                                       ['user'] only the user's own settings (~/.claude)
  *
- * **어느 줄인지는 매니저가 세션의 종류와 프로젝트로 정해서 넘긴다** (manager의 settingFilesFor). 도구를 받는지로
- * 가르면 안 된다 — 예전에는 `orchestratorTools`가 곧 `[]`였는데, 워크트리 매니저와 만드는 세션도 그 도구를
- * 받는다. 신뢰한 프로젝트의 만드는 세션이 CLAUDE.md도, 사용자의 ~/.claude(전역 bypass)도 읽지 못해서 사람이
- * 다른 모든 자리에서 끈 승인 카드를 띄웠다. 실측(이 어댑터로 만드는 세션을 띄워 `touch`를 시킴, normal, CLI 2.1.282,
- * haiku, 2026-09-25): 예전(`[]`) 카드 뜸·프로젝트 훅 안 돎·CLAUDE.md 안 읽힘 → 지금(생략) 카드 없음(사용자의
- * bypass)·훅 돎·CLAUDE.md 읽힘. 오케스트레이터는 지금도 카드 뜸·아무것도 안 읽힘이다.
+ * **Which row applies is decided by the manager, based on the session's kind and project, and
+ * passed down** (the manager's `settingFilesFor`). This must never be inferred from whether the
+ * session receives tools — it once was: `orchestratorTools` being set used to mean `[]`, but the
+ * worktree manager and builder sessions also receive those tools. A builder session in a trusted
+ * project could then read neither CLAUDE.md nor the user's own ~/.claude (the global bypass),
+ * which popped an approval card the person had turned off everywhere else. Measured (launching a
+ * builder session through this adapter and having it run `touch`, normal, CLI 2.1.282, haiku,
+ * 2026-09-25): before (`[]`) — card popped up, project hooks did not run, CLAUDE.md was not read;
+ * now (omitted) — no card (the user's own bypass), hooks ran, CLAUDE.md was read. The orchestrator
+ * still pops a card and still reads nothing, as before.
  *
- * 저장소의 `.claude/`는 우리 승인 카드를 끌 수 있었다. 실측(probe-project-trust.mts, CLI 2.1.282,
- * SDK 0.3.263, 받아 온 저장소 흉내로 임시 폴더에 심고 `touch`를 시킴. 사용자 설정은 손대지 않았다):
+ * A `.claude/` planted in the repo was able to disable our own approval card. Measured
+ * (probe-project-trust.mts, CLI 2.1.282, SDK 0.3.263, planted into a temp folder standing in for
+ * a checked-out repo and had it run `touch`; the user's own settings were left untouched):
  *
- *   심은 것                          프리셋  생략(전부 읽음)         ['user']
- *   settings.json의 permissions.allow safe   콜백 불림               콜백 불림
- *   settings.local.json의 allow        safe   **안 불림**             콜백 불림
- *   settings.json의 PreToolUse 훅(allow) safe **안 불림**, 훅 돎      콜백 불림, 훅 안 돎
- *   같은 훅                            normal 안 불림                 안 불림 ← 사용자 설정(bypass)이 정했다
- *   CLAUDE.md · .claude/commands        -     읽힘 · 목록에 뜸         안 읽힘 · 안 뜸
+ *   planted                                    preset  omitted (reads everything)    ['user']
+ *   permissions.allow in settings.json          safe    callback called               callback called
+ *   allow in settings.local.json                safe    **not called**                callback called
+ *   PreToolUse hook (allow) in settings.json    safe    **not called**, hook runs      callback called, hook does not run
+ *   the same hook                               normal  not called                    not called ← decided by the user's own settings (bypass)
+ *   CLAUDE.md, .claude/commands                 -       read, shows up in the list     not read, does not show up
  *
- * 커밋된 settings.json의 allow 규칙은 CLI가 이미 따르지 않았다. 구멍은 settings.local.json(보통 git에서
- * 빠지지만 커밋할 수 있다)과 훅이었고, **safe에서도** 카드를 껐다. 훅은 그 자체로 임의 명령이기도 하다.
+ * The CLI already did not honor allow rules from a committed settings.json. The actual holes were
+ * settings.local.json (usually excluded from git, but it can still be committed) and hooks, and
+ * both disabled the card **even in safe**. A hook is itself an arbitrary command as well.
  *
- * 신뢰하지 않은 프로젝트에서 normal이 `resolvePermissionModeInCli`를 그대로 보내는 이유: 결정 3이 끄는
- * 것은 저장소의 파일이지 사람 자신의 선택이 아니다. 사용자가 ~/.claude에 bypass를 걸어 두었으면 그것이
- * 이긴다(마지막 줄) — 그 사람이 모든 자리에서 그렇게 하기로 한 것이다. 신뢰하지 않은 폴더에서 사용자의
- * defaultMode까지 덮어 'default'로 묻게 하면 이 앱이 워크플로우를 강제하는 것이 된다. 어디서나 카드를
- * 원하는 사람에게는 safe가 있다.
+ * Why normal still sends `resolvePermissionModeInCli` as-is in an untrusted project: decision 3
+ * disables files from the repo, not the person's own choice. If the user set bypass in their own
+ * ~/.claude, that wins (see the last row of the table) — that is the person's own decision, made
+ * to apply everywhere. Overriding even the user's own `defaultMode` to force 'default' and always
+ * ask, just because the folder is untrusted, would turn this app into something that forces a
+ * workflow. Someone who wants a card everywhere already has safe for that.
  */
 function settingSourcesFor(opts: Pick<CreateSessionOpts, 'noSettingFiles' | 'projectTrusted'>): Record<string, unknown> {
   if (opts.noSettingFiles) return { settingSources: [] }
@@ -192,26 +211,27 @@ class ClaudeSession implements SessionHandle {
   private queue: string[] = []
   private notify: (() => void) | null = null
   private closed = false
-  /** 보낸 말의 턴이 아직 result로 닫히지 않았다 — 중단을 표시할지 가른다 (interrupt 참고) */
+  /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
   private turnOpen = false
-  /** 답을 기다리는 선택지들. 승인과 달리 **여러 장이 동시에 떠 있을 수 있다** */
+  /** Choices waiting on an answer. Unlike approvals, **more than one can be open at once**. */
   private questions = new Map<string, (r: unknown) => void>()
   private pending = new Map<string, PendingApproval>()
-  /** 살아 있는 질의 — 슬래시 명령·컨텍스트를 물어보는 창구 */
+  /** The live query — the channel for asking about slash commands and context. */
   private query: QueryHandle | null = null
-  /** 자동 승인 매처. 세션 시작 시 저장된 규칙을 주입받고, 'always' 응답으로 늘어난다 */
+  /** Auto-approval matchers. Seeded with the saved rules at session start, and grows with each 'always' response. */
   private alwaysAllow = new Set<string>()
   private reqCounter = 0
   private readonly stream: ClaudeStreamNormalizer
   /**
-   * 붙어 있는 앱의 대리 서버 (M4 A-5) — 서버 이름 → 대리 서버와, 마지막으로 본 도구 목록.
-   * 같은 앱이 붙어 있는 동안은 같은 객체를 다시 싣는다: SDK는 이미 연결된 이름이면 새 객체를
-   * 무시하고(sdk.mjs `setMcpServers`), 다른 객체로 바꾸려면 떼었다 다시 붙여야 한다.
+   * Proxy servers for attached apps (M4 A-5) — server name to proxy server, plus the last tool
+   * list seen. The same object is reloaded for as long as the same app stays attached: the SDK
+   * ignores a new object for a name that is already connected (sdk.mjs `setMcpServers`), so
+   * swapping in a different object requires detaching and reattaching.
    */
   private appProxies = new Map<string, { proxy: AppProxy; tools: string }>()
-  /** 오케스트레이터의 인프로세스 서버 — 처음 넘긴 그 객체를 서버 집합을 바꿀 때마다 다시 싣는다 */
+  /** The orchestrator's in-process server — the same object passed initially is reloaded every time the server set changes. */
   private orchestratorServer: ReturnType<typeof orchestratorMcp> | null = null
-  /** 서버 집합 바꾸기를 한 줄로 세운다 — 앞선 것이 끝나기 전에 뒤의 것이 끼지 않게 */
+  /** Serializes server-set changes into one line — so a later change never interleaves with one that has not finished yet. */
   private serversSync: Promise<unknown> = Promise.resolve()
   private stopAppWatch: (() => void) | null = null
 
@@ -224,13 +244,14 @@ class ClaudeSession implements SessionHandle {
   }
 
   async start(): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- async generator 안에서 인스턴스 접근 필요
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the instance needs to be reachable inside an async generator
     const self = this
     const preset = this.opts.permissionPreset
 
     /*
-     * 외부 앱 (M4 A-5) — 앱마다 대리 서버 하나. 지금 붙은 것을 싣고, 앱이 오고 가거나 도구가
-     * 바뀌면 세션을 다시 띄우지 않고 따라간다(syncApps).
+     * External apps (M4 A-5) — one proxy server per app. Loads whatever is currently attached,
+     * and follows along without restarting the session when an app comes, goes, or its tools
+     * change (syncApps).
      */
     for (const a of this.opts.apps?.current() ?? []) {
       this.appProxies.set(a.server, { proxy: appProxy(this.opts.apps!, a.server), tools: JSON.stringify(a.tools) })
@@ -256,51 +277,55 @@ class ClaudeSession implements SessionHandle {
       }
     }
 
-    // 사용량은 계정의 성질이지만 SDK는 Query에만 그 메서드를 둔다 — 살아 있는 질의를 빌려 쓴다 (liveQueries)
+    // Usage is a property of the account, but the SDK only exposes the method on a Query — this borrows a live query for it (liveQueries).
     const q: QueryHandle = (this.query = query({
       prompt: input(),
       options: {
         cwd: this.opts.cwd,
         model: this.opts.model,
         /**
-         * SDK가 자체 동봉한 네이티브 CLI를 찾는데, host를 번들하면 그 경로가 깨진다
-         * ("Native CLI binary for darwin-arm64 not found" — 배포 앱에서 세션 생성이 전부 실패했다).
-         * 사용자가 이미 설치해 쓰는 `claude`를 직접 가리킨다. dev에서도 동일하게 동작한다.
+         * The SDK looks for the native CLI it bundles itself, and bundling the host breaks that
+         * path ("Native CLI binary for darwin-arm64 not found" — every session creation failed in
+         * the packaged app). This points directly at the `claude` the user already has installed.
+         * It behaves the same way in dev.
          */
         pathToClaudeCodeExecutable: whichTool('claude') ?? undefined,
         /*
-         * 추론 강도. 모델이 지원할 때만 의미가 있어서, 지원 여부 판단은
-         * 목록을 주는 쪽(supportedModels)에 맡기고 여기서는 받은 값을 넘기기만 한다.
+         * Reasoning effort. It only matters when the model supports it, so deciding support is
+         * left to whatever provides the list (supportedModels) — this just passes through the
+         * value it received.
          */
         effort: this.opts.effort as never,
         includePartialMessages: true,
-        // MCP 서버 — 오케스트레이터의 도구와 붙은 외부 앱(승인된 MCP 서버 포함) (mcpServers() 참고)
+        // MCP servers — the orchestrator's tools and any attached external apps (including approved MCP servers). See mcpServers().
         ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
         /*
-         * 읽을 설정 파일 (settingSourcesFor) — 오케스트레이터·조율 세션은 **파일에서 지시를 읽지 않는다.**
+         * Which settings files get read (settingSourcesFor) — orchestrator/coordination sessions
+         * **never read instructions from a file.**
          *
-         * 워커 세션은 자기 프로젝트에만 권한이 있지만 파일은 쓸 수 있다.
-         * 그 세션이 오케스트레이터 폴더에 지시문을 써 넣으면, 모든 세션에
-         * 지시할 수 있는 오케스트레이터가 그걸 자기 지시로 읽는다 —
-         * 낮은 권한에서 높은 권한으로 넘어가는 길이다.
+         * A worker session only has permissions in its own project, but it can still write files.
+         * If it wrote an instruction into the orchestrator's own folder, the orchestrator — which
+         * can instruct every session — would read that as its own instruction: a path from low
+         * privilege to high privilege.
          *
-         * 실측값 (probe):
-         *   생략        CLAUDE.md 읽음 · 사용자 전역 훅 3개 실행
-         *   ['project'] CLAUDE.md 읽음 · 훅 0개
-         *   []          아무것도 안 읽음      ← 관제탑에는 이것뿐이다
+         * Measured values (probe):
+         *   omitted       CLAUDE.md read, 3 of the user's global hooks ran
+         *   ['project']   CLAUDE.md read, 0 hooks
+         *   []            nothing read at all      ← this is the only one the control tower uses
          *
-         * 역할은 아래 systemPrompt로 직접 주입한다. 파일을 거치지 않으므로
-         * 도중에 누구도 바꿔 쓸 수 없다. 프로젝트의 세션은 도구를 받든(매니저·만드는 세션)
-         * 안 받든(워커) 프로젝트의 신뢰가 정한다(#92·#152).
+         * The role is injected directly through `systemPrompt` below instead. It never goes
+         * through a file, so nobody can rewrite it along the way. For a project's own session,
+         * whether it receives tools (manager, builder sessions) or not (worker) makes no
+         * difference — the project's own trust decides it (#92, #152).
          */
         ...settingSourcesFor(this.opts),
-        // 작업 폴더 밖에서 읽을 폴더 (#142 — 물려받은 인수인계 노트). 없으면 묻는다(실측은 CreateSessionOpts.readableDirs)
+        // A folder to read outside the working folder (#142 — an inherited handoff note). Without it, this asks (measured in CreateSessionOpts.readableDirs).
         ...(this.opts.readableDirs?.length ? { additionalDirectories: this.opts.readableDirs } : {}),
         ...(this.opts.orchestratorTools
           ? {
               /*
-               * 역할은 파일이 아니라 여기서 보증한다. AGENTS.md는 사람이 고칠 수 있고
-               * 고쳐야 하는 파일이라, 지워지면 안 되는 것을 거기 두면 안 된다.
+               * The role is guaranteed here, not by a file. AGENTS.md is a file the person can
+               * and should edit, so nothing that must never be erased belongs there.
                */
               ...(this.opts.systemPromptAppend
                 ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: this.opts.systemPromptAppend } }
@@ -309,27 +334,32 @@ class ClaudeSession implements SessionHandle {
           : {}),
         ...permissionOptionsFor(preset),
         /*
-         * 앱이 스키마를 주고 부탁한 에이전트 (M4 D-1). 질의 단위 옵션이라 세션을 시작할 때만 줄 수 있다. 실측(SDK 0.3.263,
-         * CLI 2.1.282, haiku): CLI가 `StructuredOutput` 도구를 더하고, 모델이 글로 먼저 답하면 "[structured-output-enforce]"
-         * 메시지로 그 도구를 부르게 한다. 그 도구는 canUseTool을 지나지 않았다(승인 카드가 뜨지 않는다). 답은
-         * `result.structured_output`에 온다 — 정규화기가 `turn_complete.output`으로 옮긴다.
+         * The agent an app hands a schema and asks for output (M4 D-1). It is a per-query option,
+         * so it can only be given when the session starts. Measured (SDK 0.3.263, CLI 2.1.282,
+         * haiku): the CLI adds a `StructuredOutput` tool, and if the model answers in plain text
+         * first, a "[structured-output-enforce]" message makes it call that tool instead. That
+         * tool never went through `canUseTool` (no approval card appears). The answer arrives on
+         * `result.structured_output` — the normalizer moves it to `turn_complete.output`.
          */
         ...(this.opts.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: this.opts.outputSchema } } : {}),
         resume: this.opts.resumeExternalId,
-        // allowedTools는 절대 설정하지 않는다 (M0: canUseTool 셰도잉)
+        // allowedTools is never set (M0: it would shadow canUseTool).
         /*
-         * **auto에도 콜백을 넘긴다** (#171). 예전에는 auto에서 넘기지 않아서 AskUserQuestion이 사람에게 닿지 않았다 —
-         * 선택지 카드가 뜨지 않았고 모델은 답 없이 나아갔다. 실측(probe-auto-callback.mts, CLI 2.1.282, SDK 0.3.263,
-         * haiku, 임시 폴더, 2026-09-27) — bypassPermissions에 콜백을 넘기면:
+         * **The callback is passed even in auto** (#171). It used to be omitted for auto, and
+         * AskUserQuestion never reached the person — no choice card appeared, and the model moved
+         * on without an answer. Measured (probe-auto-callback.mts, CLI 2.1.282, SDK 0.3.263,
+         * haiku, a temp folder, 2026-09-27) — passing a callback alongside bypassPermissions:
          *
-         *   AskUserQuestion                      콜백에 온다 (bypass보다 먼저 묻는 도구다)
-         *   보통 Bash                             안 온다 — bypass가 그대로 통과시킨다
-         *   설정 파일의 ask 규칙에 걸린 Bash       콜백에 온다 → allow로 답하면 실행된다
-         *   같은 요청, 콜백 없음(예전의 auto)      거절 — "Claude requested permissions to use Bash, but you haven't granted it yet."
+         *   AskUserQuestion                             reaches the callback (a tool asked about even before bypass)
+         *   ordinary Bash                                does not reach it — bypass just lets it through
+         *   Bash caught by an `ask` rule in the settings file   reaches the callback → answering allow runs it
+         *   the same request, with no callback (old-style auto)   denied — "Claude requested permissions to use Bash, but you haven't granted it yet."
          *
-         * 그래서 auto의 콜백은 선택지만 받고 **나머지는 예전처럼 거절한다.** 여기서 허용하면 신뢰한 프로젝트의
-         * `.claude/settings.json`에 적힌 ask 규칙을 우리 콜백이 대신 허용하게 된다 — 저장소의 파일이 승인을 정하지
-         * 못하게 한 #92와 반대 방향이다. (SDK는 이 조합에 CLAUDE_SDK_CAN_USE_TOOL_SHADOWED 경고를 한 줄 남긴다.)
+         * So auto's own callback only accepts question choices, and **denies everything else the
+         * way it used to.** Allowing it here would let our own callback approve an `ask` rule
+         * written into a trusted project's own `.claude/settings.json` — the opposite direction
+         * from #92, which exists so files from the repo cannot decide approvals. (The SDK leaves a
+         * `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning line for this combination.)
          */
         canUseTool: async (toolName: string, toolInput: Record<string, unknown>) => {
           if (preset === 'auto' && toolName !== 'AskUserQuestion') {
@@ -339,31 +369,33 @@ class ClaudeSession implements SessionHandle {
           }
           }
           /*
-           * **우리 도구는 우리가 보증한다.**
+           * **We vouch for our own tools ourselves.**
            *
-           * 오케스트레이터의 centralu 도구는 이 앱이 관리하는 세션 밖으로
-           * 나갈 수 없고(매니저만 본다), 진짜 위험한 일 — 대상 세션이 무엇을
-           * 실행하는가 — 은 **그 세션의 권한 설정이 그대로 가른다.**
-           * 여기서 또 물으면 승인이 두 겹이 되고, "한 창에서 지시한다"는
-           * 이 기능의 존재 이유가 사라진다.
+           * The orchestrator's centralu tools can never reach outside the sessions this app
+           * manages (only the manager ever sees them), and the actual dangerous part — what the
+           * target session runs — **is already gated entirely by that session's own permission
+           * settings.** Asking again here would double up approval, and the reason this feature
+           * exists in the first place — issuing instructions from one window — would disappear.
            *
-           * 실측에서 이걸 안 하면 목록 한 번 읽는 데도 승인 창이 떠서
-           * 오케스트레이터가 첫 도구에서 멈춰 섰다.
+           * Measured: without this, even a single list read popped an approval window, and the
+           * orchestrator stalled on its very first tool call.
            */
           if (isOrchestratorTool(toolName)) {
             return { behavior: 'allow' as const, updatedInput: toolInput }
           }
 
           /*
-           * **읽기만 하는 앱 도구는 묻지 않는다** (M4 결정 5).
+           * **A read-only app tool is never asked about** (M4 decision 5).
            *
-           * 기준은 앱이 도구에 단 주석(`readOnlyHint: true`)이고, 판정은 이름이 아니라 붙은
-           * 앱의 목록이 한다 — `app-`로 시작하는 서버라고 믿어 주지 않는다(#93의 교훈).
-           * 나머지 앱 도구는 아래의 보통 승인 카드로 간다: safe는 언제나, normal은 이
-           * 콜백이 불리면 묻는다. auto에서는 이 콜백에 오지 않는다(bypassPermissions가 통과시킨다 — 위 실측).
-           * Codex의 `writes` 방식과 같은 기준이라 두 도구가 같게 움직인다.
+           * The criterion is the annotation the app attached to the tool (`readOnlyHint: true`),
+           * and the judgment is made from the attached app's own list, not the name — a server
+           * simply starting with `app-` is never trusted on its own (the lesson from #93). Every
+           * other app tool goes through the ordinary approval card below: safe always asks, normal
+           * asks whenever this callback is called. In auto, this callback is never reached
+           * (bypassPermissions lets it through — see the measurement above). This is the same
+           * criterion as Codex's `writes` approach, so the two adapters behave the same way.
            *
-           * centralu의 예외와는 따로다 — 그 예외는 넓히지 않는다.
+           * This is separate from the centralu exception above — that exception is never widened.
            */
           const appTool = appToolOf(toolName)
           if (appTool && self.opts.apps?.readOnly(appTool.server, appTool.tool)) {
@@ -371,21 +403,22 @@ class ClaudeSession implements SessionHandle {
           }
 
           /*
-           * **선택지는 승인이 아니라 질문이다** (FR: AskUserQuestion).
+           * **A choice is a question, not an approval** (FR: AskUserQuestion).
            *
-           * 실측으로 길을 찾았다 (probe-askuserquestion.mts):
-           *   canUseTool로 온다        ✅ 인자(질문·선택지)가 통째로 들어온다
-           *   onUserDialog로 온다      ❌ 종류를 선언해도 한 번도 안 불렸다
-           *   그냥 실행시키면          → "The user did not answer the questions."
+           * The path here was found by measurement (probe-askuserquestion.mts):
+           *   arrives via canUseTool    yes — the arguments (question, choices) arrive whole
+           *   arrives via onUserDialog  no — never called even once, no matter what kind was declared
+           *   letting it just execute   → "The user did not answer the questions."
            *
-           * 그래서 여기서 가로채 사람에게 묻고, 답을 **deny의 message로 돌려준다.**
-           * 이상해 보이지만 그 message가 곧 이 도구의 결과로 모델에게 간다 —
-           * 실측에서 모델은 "사용자는 라면을 골랐습니다"라고 정확히 읽었다.
-           * allow로 보내면 CLI가 자기 화면을 띄우려다 실패하고 답 없이 끝난다.
+           * So this intercepts it here, asks the person, and **returns the answer as a deny's
+           * message.** It looks strange, but that message is exactly what goes to the model as
+           * this tool's own result — measured, and the model read it correctly, as in "The user
+           * chose ramen." Answering with allow instead makes the CLI try and fail to show its own
+           * dialog, and it ends with no answer at all.
            */
           if (toolName === 'AskUserQuestion') {
             const questions = parseQuestions(toolInput)
-            // 질문 형태가 아니면 우리가 그릴 수 없다 — 삼키지 말고 평소대로 흘린다
+            // If the shape is not a question, we cannot render it — never swallow it, let it flow through as usual.
             if (questions.length === 0) return { behavior: 'allow' as const, updatedInput: toolInput }
             const requestId = `q-${++self.reqCounter}`
             self.emit({ type: 'question_request', sessionId: self.sessionId, requestId, questions })
@@ -395,10 +428,13 @@ class ClaudeSession implements SessionHandle {
           }
           const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
           /*
-           * 규칙의 열쇠 — 명령은 명령 전문, 파일 편집은 **그 경로**다 (#170). 화면이 "항상 허용"에 싣는 매처가 그렇고
-           * (명령은 core의 suggestMatcher, 편집은 detail.path), Codex 어댑터가 같은 규칙으로 찾는다. 예전에는 편집을
-           * `Edit:file_edit`로 찾아서, 경로로 저장된 규칙이 영영 맞지 않았다 — 같은 파일을 다시 고칠 때마다 물었다.
-           * 그 밖의 종류(`other`)에는 열쇠가 없다: "항상"이 무엇을 뜻할지 아직 정하지 않았다.
+           * The rule's key — for a command it is the full command text, for a file edit it is
+           * **the path** (#170). This matches what the UI carries on "always allow" (a command
+           * uses core's `suggestMatcher`, an edit uses `detail.path`), and the Codex adapter looks
+           * things up by the same rule. This used to look up an edit by `Edit:file_edit`, so a
+           * rule saved by path could never match — the same file was asked about again every time
+           * it was edited again. Other kinds (`other`) have no key at all: what "always" would
+           * even mean for them has not been decided yet.
            */
           const key =
             detail.kind === 'command' ? detail.command
@@ -416,22 +452,26 @@ class ClaudeSession implements SessionHandle {
     }))
     ClaudeAdapter.liveQueries.add(q)
 
-    // 앱이 오고 가면 서버 집합을, 도구가 바뀌면 그 서버의 목록을 따라간다 — 세션을 다시 띄우지 않는다
+    // Follows the server set when apps come and go, and that server's list when its tools change — never restarting the session.
     this.stopAppWatch = this.opts.apps?.onChange(() => this.syncApps()) ?? null
 
     void (async () => {
       try {
         /*
-         * 메시지 하나로는 판단이 안 서는 것(본문이 델타로 이미 나갔는가, 띄워 둔
-         * 백그라운드 에이전트)은 정규화기가 기억한다 — ClaudeStreamNormalizer 참고.
-         * /usage 같은 로컬 합성 응답은 델타가 0개라(실측), 그 기억이 없으면 통짜 본문을
-         * 낼지 판단할 수 없다 — 내면 보통 턴에서 두 번 붙고, 안 내면 영영 안 보인다.
+         * The normalizer remembers what a single message cannot decide on its own — whether the
+         * body already went out as deltas, or a background agent that is still running. See
+         * `ClaudeStreamNormalizer`. A local synthetic response like /usage produces zero deltas
+         * (measured), and without that memory there would be no way to decide whether to emit the
+         * whole-response body — emitting it always gets it appended twice on an ordinary turn,
+         * and never emitting it means it never shows up at all.
          */
         for await (const msg of q) {
           /*
-           * **닫은 뒤에 온 말은 받지 않는다** (#157). dispose가 프로세스를 끝내도 이미 읽어 둔 메시지가
-           * 몇 개 더 나올 수 있다 — 끝나 가던 턴의 글과 result다. 그 세션 자리에는 이미 새 프로세스가
-           * 앉아 있을 수 있으므로, 옛 턴의 끝이 새 프로세스의 기록으로 들어가면 안 된다.
+           * **Nothing arriving after close is accepted** (#157). Even after dispose terminates
+           * the process, a few already-buffered messages can still come through — the tail text
+           * and result of a turn that was wrapping up. A new process may already be sitting in
+           * that session's slot, so the end of the old turn must never land in the new process's
+           * own record.
            */
           if (this.closed) break
           const m = msg as { type?: string; session_id?: string; subtype?: string }
@@ -439,15 +479,16 @@ class ClaudeSession implements SessionHandle {
           this.noteAppCalls(msg)
           if (m.type === 'result') this.turnOpen = false
           for (const e of this.stream.push(msg)) this.emit(e)
-          // 턴이 끝나면 지금 창에 무엇이 들어 있는지 묻는다 (FR-14)
+          // Once a turn ends, asks what is currently in the context window (FR-14).
           if (m.type === 'result') void this.reportContext(q)
         }
         /*
-         * **스트림이 끝났는데 우리가 닫은 게 아니면 CLI가 죽은 것이다.**
+         * **If the stream ended and we did not close it, the CLI died.**
          *
-         * CLI 프로세스가 조용히 사라지면 스트림은 예외 없이 그냥 끝나기도 한다.
-         * 그때 아무 말도 안 올리면 화면은 영원히 '작업 중'이고 다음 말은 허공으로 간다 —
-         * codex 어댑터가 onExit(expected=false)에서 하는 것과 같은 신호를 올린다.
+         * When the CLI process disappears silently, the stream can sometimes just end with no
+         * exception at all. If nothing is emitted at that point, the UI stays "working" forever
+         * and the next message goes nowhere — this raises the same signal the codex adapter raises
+         * from `onExit(expected=false)`.
          */
         ClaudeAdapter.liveQueries.delete(q)
         if (!this.closed) {
@@ -461,10 +502,12 @@ class ClaudeSession implements SessionHandle {
       } catch (err) {
         ClaudeAdapter.liveQueries.delete(q)
         /*
-         * **우리가 닫은 프로세스의 예외는 크래시가 아니다** (#157). 위의 정상 종료 분기와 같은 규칙이다.
-         * 멈춘 턴(마지막 result가 error_during_execution) 뒤에 설정을 바꾸면 옛 CLI는 오류 result를 안은 채
-         * 끝나고, SDK는 그것을 "Claude Code returned an error result: …"로 바꿔 던진다. 예전에는 그 예외가
-         * adapter_crashed로 올라가 매니저가 방금 새로 띄운 프로세스를 죽은 것으로 여겨 닫았다.
+         * **An exception from a process we ourselves closed is not a crash** (#157). Same rule as
+         * the clean-exit branch above. If settings change after a stopped turn (the last result
+         * was `error_during_execution`), the old CLI ends still carrying an error result, and the
+         * SDK turns that into a thrown exception, "Claude Code returned an error result: …". This
+         * used to surface as adapter_crashed, and the manager would treat the brand-new process it
+         * had just started as dead and close it.
          */
         if (this.closed) return
         this.releaseAgents('The session process ended before this agent reported back')
@@ -478,11 +521,14 @@ class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * 붙은 앱의 도구를 부르는 `tool_use`를 붙이기에 적는다 (M4 B-1 — 대화 안 화면의 카드 짝짓기).
+   * Records a `tool_use` calling an attached app's tool with the attachment layer (M4 B-1 —
+   * conversation-view card matching).
    *
-   * 보통은 필요 없다: CLI가 호출에 카드 id를 실어 보낸다(app-proxy.ts `CLAUDE_TOOL_USE_META`). 그 자리가
-   * 바뀐 CLI에서도 화면이 제 카드를 찾도록 Codex와 같은 짝짓기를 뒤에 둔다. 결과(`tool_result`)가 온
-   * 카드는 짝짓기에서 뺀다 — 승인에서 거절된 호출은 앱까지 오지 않는다.
+   * This is not usually needed: the CLI carries the card id on the call itself
+   * (app-proxy.ts's `CLAUDE_TOOL_USE_META`). This keeps the same matching logic as Codex as a
+   * fallback, so the UI can still find its own card even on a CLI where that mechanism changed.
+   * A card that has already received a result (`tool_result`) is removed from matching — a call
+   * denied at approval never reaches the app at all.
    */
   private noteAppCalls(msg: unknown): void {
     const apps = this.opts.apps
@@ -500,11 +546,13 @@ class ClaudeSession implements SessionHandle {
 
   send(text: string): void {
     /*
-     * /goal은 아직 대화형 CLI 전용이다 (실측 2026-09-07, 0.3.231과 최신 0.3.263
-     * 양쪽에서 재측정): 헤드리스 원류에 active_goal도 local_command_output도 0건,
-     * 세팅 API도 타입 어디에도 없다. 그냥 보내면 모델이 글자를 읽고 골 **역할극**을
-     * 한다 ("Goal achieved!" — 훅 없이 말만). 조용한 거짓말보다 정직한 한 줄이 낫다.
-     * SDK가 이 경로를 열면 이 가로채기가 그 배선 자리다 (active_goal 수신은 배선 완료).
+     * /goal is still exclusive to the interactive CLI (measured 2026-09-07, and remeasured on
+     * both 0.3.231 and the current 0.3.263): zero occurrences of `active_goal` or
+     * `local_command_output` in the raw headless stream, and no setting API anywhere in the
+     * types. If it is simply sent, the model reads the literal text and **role-plays** the goal
+     * ("Goal achieved!" — words with no actual hook behind them). An honest one-liner beats a
+     * quiet lie. If the SDK ever opens this path, this interception is where the wiring goes
+     * (receiving `active_goal` is the wiring already in place).
      */
     if (/^\/goal(\s|$)/.test(text.trim())) {
       this.emit({
@@ -525,15 +573,15 @@ class ClaudeSession implements SessionHandle {
 
   respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): boolean {
     const p = this.pending.get(requestId)
-    // 프로세스를 갈아 끼우면 이 맵은 비어서 다시 뜬다 — 그 전에 뜬 카드의 id는 여기에 없다
+    // Swapping the process empties this map and it starts fresh — the id of a card that came up before then is no longer here.
     if (!p) return false
     this.pending.delete(requestId)
     if (decision === 'deny') {
       p.resolve({ behavior: 'deny', message: 'Denied by user' })
     } else {
       if (decision === 'always') {
-        // 매처는 core가 계산해 UI가 보내준다 (agent-host는 core를 import하지 않는다 — 경계 규칙).
-        // 없으면 명령 전문으로 대체한다.
+        // The matcher is computed by core and sent by the UI (agent-host never imports core — a boundary rule).
+        // If none is given, this falls back to the full command text.
         const cmd = (p.input as { command?: string }).command
         const m = matcher ?? cmd
         if (m) this.alwaysAllow.add(m)
@@ -541,15 +589,16 @@ class ClaudeSession implements SessionHandle {
       p.resolve({ behavior: 'allow', updatedInput: p.input })
     }
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
-    void scope // scope별 영속화는 세션 매니저가 store에 기록한다
+    void scope // Per-scope persistence is recorded to the store by the session manager.
     return true
   }
 
   /**
-   * 선택지에 답한다. 승인과 같은 규칙 — **닿았는지를 돌려준다.**
+   * Answers a choice. The same rule as approval — **returns whether it was reached.**
    *
-   * 답은 deny의 message로 나간다. 그 message가 이 도구의 결과가 되어 모델에게 간다
-   * (실측으로 확인). 거절이라는 이름이지만 실제로 전달되는 것은 사람이 고른 내용이다.
+   * The answer goes out as a deny's message. That message becomes this tool's own result on its
+   * way to the model (confirmed by measurement). It is named a denial, but what actually gets
+   * delivered is what the person chose.
    */
   answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
     const resolve = this.questions.get(requestId)
@@ -560,33 +609,39 @@ class ClaudeSession implements SessionHandle {
     return true
   }
 
-  /** 저장된 규칙 주입 (재시작 후에도 '항상 허용'이 유지되도록) */
+  /** Injects saved rules (so "always allow" survives a restart). */
   applyRules(matchers: readonly string[]): void {
     for (const m of matchers) this.alwaysAllow.add(m)
   }
 
-  /** 접미 와일드카드(`npm test*`)만 지원 — core의 matchesRule과 같은 규칙 */
+  /** Only supports a trailing wildcard (`npm test*`) — the same rule as core's `matchesRule`. */
   /**
-   * 컨텍스트 사용량 보고 (FR-14).
+   * Reports context usage (FR-14).
    *
-   * **SDK에 직접 묻는다.** result 메시지의 modelUsage로 계산하면 안 된다 —
-   * 그건 세션 누적이라 캐시 재읽기가 매 턴 더해지고, 창 크기를 넘어선다
-   * (실측: "컨텍스트 533%"). getContextUsage()는 지금 창의 점유를 돌려준다.
+   * **Asks the SDK directly.** This must not be computed from a result message's `modelUsage` —
+   * that number accumulates over the session, so re-reading the cache adds to it every turn, and
+   * it ends up exceeding the window size (measured: "context 533%"). `getContextUsage()` returns
+   * how full the current window actually is.
    *
-   * 실패해도 조용히 넘어간다 — 게이지가 잠깐 안 보이는 것이 대화를 막는 것보다 낫다.
+   * A failure here is swallowed quietly — the gauge briefly disappearing is better than blocking
+   * the conversation.
    */
   /**
-   * 이 세션의 MCP 서버 전부 — 처음 띄울 때도, 집합을 바꿀 때도 이 한 곳에서 조립한다.
+   * All of this session's MCP servers — assembled in this one place, both at first launch and
+   * whenever the set changes.
    *
-   * 둘이다. 둘 다 인프로세스라 별도 프로세스가 없다:
-   *   1. 오케스트레이터의 도구 (FR-11) — 이 도구들이 볼 수 있는 것은 매니저가 넘겨준 것뿐이다.
-   *   2. 외부 앱의 대리 서버 (M4 A-5) — `app-<id>`. 사람이 승인한 MCP 서버(propose_mcp_server)도
-   *      사용자 폴더의 앱이 되어 여기로 온다(A-7). 예전에는 그 서버를 stdio 항목으로 날것으로 실었다 —
-   *      호출이 중개도 기록도 지나지 않았고, `centralu`라는 이름 하나가 인프로세스 오케스트레이터를
-   *      갈아치울 수 있었다(#93). 이제 날것으로 싣는 서버는 없다.
+   * There are two, and both are in-process, so there is never a separate process:
+   *   1. The orchestrator's tools (FR-11) — everything these tools can see is exactly what the
+   *      manager handed them.
+   *   2. External apps' proxy servers (M4 A-5) — `app-<id>`. A server the person approved
+   *      (`propose_mcp_server`) also becomes an app in the user's own folder and arrives here
+   *      (A-7). This server used to be loaded raw, as a stdio entry — calls never went through
+   *      mediation or recording, and a single server named `centralu` could replace the
+   *      in-process orchestrator outright (#93). No server is ever loaded raw anymore.
    *
-   * 집합을 바꿀 때(`setMcpServers`) 1을 빼면 SDK가 그것을 **떼어 낸다** — 그 호출은 동적으로
-   * 붙인 서버 전부를 넘긴 것으로 바꾼다. 그래서 언제나 전부를 싣는다.
+   * When the set changes (`setMcpServers`), leaving out #1 makes the SDK **detach it** — that
+   * call replaces the entire set of dynamically attached servers with whatever was passed. So
+   * this always loads everything, every time.
    */
   private mcpServers(): Record<string, McpServerConfig> {
     return {
@@ -596,10 +651,10 @@ class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * 붙은 앱이 바뀌었다 (M4 A-5) — 재시작 없이 따라간다.
+   * An attached app changed (M4 A-5) — followed without a restart.
    *
-   *   앱이 오고 감(신뢰가 뒤집힘 포함)   `setMcpServers`로 집합을 바꾼다. 새 도구는 다음 턴부터 보인다
-   *   붙은 앱의 도구가 바뀜              그 대리 서버가 `tools/list_changed`를 보낸다 — 서버는 그대로
+   *   an app comes or goes (including trust flipping)   changes the set via `setMcpServers`; new tools become visible starting the next turn
+   *   an attached app's own tools changed                that proxy server sends `tools/list_changed` — the server itself stays the same
    */
   private syncApps(): void {
     const apps = this.opts.apps
@@ -616,7 +671,7 @@ class ClaudeSession implements SessionHandle {
       const tools = JSON.stringify(a.tools)
       const held = this.appProxies.get(a.server)
       if (!held) {
-        // 떼었다 다시 붙는 앱도 새 대리 서버로 온다 — SDK가 뗀 서버는 다시 연결할 수 없다
+        // An app that detaches and reattaches also arrives with a fresh proxy server — a server the SDK has detached cannot be reconnected.
         this.appProxies.set(a.server, { proxy: appProxy(apps, a.server), tools })
         setChanged = true
       } else if (held.tools !== tools) {
@@ -636,7 +691,7 @@ class ClaudeSession implements SessionHandle {
       .catch((err: Error) => console.error(`[claude] ${this.sessionId.slice(0, 8)} could not update app servers: ${err.message}`))
   }
 
-  /** 슬래시 명령 목록 (SDK 공개 API) */
+  /** The list of slash commands (an SDK public API). */
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
     if (!this.query) throw new Error('Session is not ready yet')
     return this.query.supportedCommands()
@@ -651,7 +706,7 @@ class ClaudeSession implements SessionHandle {
         this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact' })
       }
     } catch {
-      // 컨텍스트를 못 물어봐도 대화는 계속된다
+      // The conversation continues even if context usage cannot be read.
     }
   }
 
@@ -663,21 +718,24 @@ class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * 중단.
+   * Interrupt.
    *
-   * 두 가지를 **둘 다** 해야 한다. 예전엔 승인만 거절하고 말았는데,
-   * 그러면 도구를 기다리던 턴만 풀릴 뿐 모델이 그냥 생각 중일 때는 아무 일도 일어나지 않았다.
-   * 버튼은 눌리는데 아무것도 멈추지 않는 것 — 이 프로젝트가 금지하는 조용한 실패다.
+   * **Both** of the following have to happen. This used to only deny the pending approval, which
+   * only freed a turn that was waiting on a tool — if the model was simply thinking, nothing
+   * happened at all. A button that does not stop anything when pressed is exactly the kind of
+   * silent failure this project forbids.
    *
-   *   1) 대기 중 승인 거절: canUseTool이 promise를 붙들고 있으면 그 자리에서 멈춰 있어
-   *      중단 신호가 도착해도 정리될 지점이 없다. 먼저 풀어준다.
-   *   2) SDK interrupt: 실제로 턴을 끊는다. 우리는 프롬프트를 async generator로 넘기는
-   *      스트리밍 입력 모드라 이 메서드를 쓸 수 있다.
+   *   1) Deny the pending approval: if `canUseTool` is holding a promise, it is stuck there with
+   *      no point to clean up at even once the interrupt signal arrives. So it is released first.
+   *   2) SDK interrupt: this actually cuts the turn. We can call this method because we pass the
+   *      prompt as an async generator, in streaming input mode.
    */
   interrupt(): void {
     /*
-     * 이 세션이 부른 앱 호출도 멈춘다 (M4 A-5). CLI가 턴을 끊으며 도구 호출에 취소를 보내는지는
-     * SDK가 약속하지 않는다 — 우리가 직접 끊는다. 취소는 런타임이 앱과 그 아래 일까지 전한다.
+     * This also stops any app calls this session made (M4 A-5). The SDK makes no promise about
+     * whether the CLI sends a cancellation to a tool call when it interrupts a turn — we cut it
+     * off directly. The cancellation propagates through the runtime, down to the app and whatever
+     * it was doing.
      */
     this.opts.apps?.cancelAll()
     for (const [id, p] of this.pending) {
@@ -687,13 +745,15 @@ class ClaudeSession implements SessionHandle {
     this.pending.clear()
     this.releaseQuestions('Stopped by user')
     /*
-     * 끊긴 턴의 결말(error_during_execution)은 실패가 아니라 중단이다 (#168, 정규화기의 stopping). **도는 턴이
-     * 있을 때만** 표시한다 — 쉬는 세션에서 누른 Stop이 표시를 남기면 다음 턴의 진짜 실패를 삼킨다.
+     * The ending of an interrupted turn (`error_during_execution`) is an interruption, not a
+     * failure (#168, the normalizer's `stopping`). This flags it **only while a turn is actually
+     * running** — if pressing Stop on an idle session left the flag set, it would swallow a real
+     * failure on the next turn.
      */
     if (this.turnOpen) this.stream.stopped()
 
     void this.query?.interrupt().catch((err: Error) => {
-      // 못 끊었으면 그렇다고 말한다. 멈춘 줄 알고 기다리게 두는 게 제일 나쁘다.
+      // If we could not actually stop it, say so. Letting the person believe it stopped and wait is the worst outcome.
       this.emit({
         type: 'error',
         sessionId: this.sessionId,
@@ -705,24 +765,25 @@ class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * 매달린 승인을 **말없이 놓지 않는다.**
+   * A pending approval is **never released silently.**
    *
-   * 여기서 알리지 않으면 화면에는 승인 카드가 그대로 남는다. 그 카드의 requestId는
-   * 새로 뜬 프로세스의 맵에 없으므로 눌러도 아무 일이 없고, 세션은 멀쩡히 idle인데
-   * 화면만 "에이전트가 막혀 있음"이라고 말한다 — 나가는 길이 없는 상태다.
-   * interrupt()는 이미 이렇게 하고 있었다. 프로세스를 갈아 끼울 때만 빠져 있었다.
+   * Without a notification here, the approval card stays on the screen. Its `requestId` is not in
+   * the new process's own map, so pressing it does nothing at all — the session is perfectly idle,
+   * but the UI says "the agent is stuck", with no way out. `interrupt()` already handled this the
+   * same way; only swapping the process was missing it.
    */
   async dispose(): Promise<void> {
     this.closed = true
     this.notify?.()
-    // 앱 붙이기는 핸들과 함께 닫힌다 — 새 핸들은 자기 것을 받는다
+    // App attachment closes along with the handle — a new handle gets its own.
     this.stopAppWatch?.()
     this.opts.apps?.close()
     /*
-     * 큐에 남은 메시지도 같은 규칙이다 (codex 어댑터의 compact 큐와 대칭 — 2026-09-02
-     * 유실 사고 후 맞춤). generator가 closed를 보고 빠져나가면 여기 남은 건 아무도
-     * 안 읽는다 — 화면에는 이미 보낸 것으로 남아 있으므로(매니저가 먼저 기록한다),
-     * 말없이 버리면 "보냈는데 에이전트가 못 읽는" 상태가 조용히 생긴다.
+     * A message left in the queue follows the same rule (symmetric with the codex adapter's
+     * compact queue — matched after the 2026-09-02 loss incident). Once the generator sees
+     * `closed` and exits, nothing left here is ever read by anyone — and because the UI already
+     * shows it as sent (the manager records it first), dropping it silently would quietly create
+     * a "sent, but the agent never read it" state.
      */
     if (this.queue.length > 0) {
       const n = this.queue.length
@@ -745,10 +806,12 @@ class ClaudeSession implements SessionHandle {
     this.releaseQuestions('Session closed')
     this.releaseAgents('The session closed before this agent reported back')
     /*
-     * **프로세스를 끝낸다** (#157). 예전에는 입력 제너레이터만 끝냈다 — SDK가 CLI의 stdin을 닫을 뿐이고, CLI는
-     * 돌던 턴을 마저 돌았다(auto에서는 묻는 일이 없으니 남은 도구 호출까지). 갈아 끼운 세션에서는 옛 프로세스와
-     * 새 프로세스가 한 대화에 함께 쓰고 있었던 셈이다. `close()`는 stdin을 닫고 끝나지 않으면 SIGTERM을 보낸다
-     * (sdk.d.ts "Close the query and terminate the underlying process"). 사용량 창구도 여기서 거둔다.
+     * **Terminates the process** (#157). This used to only end the input generator — the SDK just
+     * closes the CLI's stdin, and the CLI keeps running the turn it was already on (including any
+     * remaining tool calls in auto, where nothing ever asks). In a swapped-out session, the old
+     * process and the new process ended up both writing into the same conversation. `close()`
+     * closes stdin and sends SIGTERM if it has not ended (sdk.d.ts: "Close the query and
+     * terminate the underlying process"). The usage window is also reclaimed here.
      */
     if (this.query) {
       ClaudeAdapter.liveQueries.delete(this.query)
@@ -756,12 +819,12 @@ class ClaudeSession implements SessionHandle {
     }
   }
 
-  /** 띄워 둔 백그라운드 에이전트의 카드를 닫는다 — 프로세스와 함께 사라졌으므로 통지는 안 온다 (#98) */
+  /** Closes the card of a background agent that was still running — no notification arrives, since it disappeared with the process (#98). */
   private releaseAgents(why: string): void {
     for (const e of this.stream.release(why)) this.emit(e)
   }
 
-  /** 답을 기다리던 선택지를 놓아준다 — 승인과 같은 이유로 **말없이 놓지 않는다** */
+  /** Releases a choice that was still waiting on an answer — **never released silently**, for the same reason as approval. */
   private releaseQuestions(why: string): void {
     for (const [id, resolve] of this.questions) {
       resolve({ behavior: 'deny', message: why })
@@ -772,46 +835,49 @@ class ClaudeSession implements SessionHandle {
 }
 
 /**
- * 로그인 여부를 CLI에게 **직접 묻는다** (`claude auth status --json`).
+ * Asks the CLI **directly** whether it is logged in (`claude auth status --json`).
  *
- * `claude --version`은 인증을 아예 보지 않는다 — 자격이 하나도 없어도 성공한다.
- * 그래서 예전에는 "깔려 있음"이 곧 "로그인됨"이었고, 화면은 로그인 안 된 Claude를
- * 언제나 초록 점으로 그렸다. 세션을 시작해 봐야 그제서야 실패했다 (#11).
+ * `claude --version` does not check authentication at all — it succeeds with zero credentials
+ * configured. So this used to treat "installed" as "logged in", and the UI always drew a Claude
+ * that was not logged in as a green dot. The failure only showed up once a session was actually
+ * started (#11).
  *
- * **왜 `claude -p`로 진짜 질의를 던지지 않는가:**
- * detect()는 앱이 뜰 때마다, 새 세션 다이얼로그를 열 때마다 도는 길목이다.
- * 여기서 추론을 한 번이라도 태우면 **앱을 켜는 행위 자체에 과금이 붙는다.**
- * 인증 여부를 알자고 치를 값이 아니다.
+ * **Why this does not fire a real query with `claude -p`:**
+ * `detect()` runs every time the app starts and every time the new-session dialog opens. Firing
+ * even one inference call here would mean **simply launching the app gets billed.** That is not a
+ * price worth paying to learn whether the person is authenticated.
  *
- * **왜 codex처럼 자격 파일 존재 확인으로 하지 않는가:**
- * Claude Code의 자격은 한 곳에 있지 않다 — macOS 키체인, OAuth 토큰,
- * `ANTHROPIC_API_KEY`, `apiKeyHelper`, Bedrock/Vertex 중 어디든 될 수 있고
- * `CLAUDE_CONFIG_DIR`이 그 위치를 통째로 옮긴다. 그 목록을 우리가 흉내내면
- * CLI가 한 번 바뀔 때마다 우리 판정이 틀린다. **CLI가 아는 것은 CLI에게 묻는다.**
+ * **Why this does not check for a credentials file, the way the codex adapter does:**
+ * Claude Code's credentials do not live in one place — they can be the macOS keychain, an OAuth
+ * token, `ANTHROPIC_API_KEY`, `apiKeyHelper`, or Bedrock/Vertex, and `CLAUDE_CONFIG_DIR` can move
+ * that whole location elsewhere. If we tried to reimplement that list ourselves, our own judgment
+ * would go wrong every time the CLI changed. **What the CLI knows is asked of the CLI.**
  *
- * 실측(2.1.223): 네트워크를 타지 않는다 — 죽은 프록시를 물려도 답이 같고 0.2초에
- * 끝난다. `CLAUDE_CONFIG_DIR`도, `ANTHROPIC_API_KEY`도 CLI가 알아서 반영한다.
+ * Measured (2.1.223): this never touches the network — the answer is the same even with a dead
+ * proxy configured, and it finishes in 0.2 seconds. The CLI picks up both `CLAUDE_CONFIG_DIR` and
+ * `ANTHROPIC_API_KEY` on its own.
  *
- * 로그인 안 됐을 때는 **종료 코드 1**이지만 stdout에는 JSON이 그대로 나온다.
- * 그래서 던져진 오류에 붙어 온 stdout도 읽는다.
+ * When not logged in, it exits with **code 1**, but the JSON still comes out on stdout as usual.
+ * So this also reads the stdout attached to the thrown error.
  *
- * 판단이 안 서면 **통과시킨다**(true). 틀린 "로그인 안 됨"은 멀쩡한 것을 고치게
- * 만들어서 지금 상태보다 나쁘다. 옛 CLI에는 `auth` 하위 명령이 없어서
- * JSON 대신 오류 문구가 나오는데, 그건 "로그인 안 됨"이 아니라 "모름"이다.
+ * When the answer cannot be determined, this **passes it through** (true). A wrong "not logged
+ * in" would push the person to fix something that is not broken, which is worse than the status
+ * quo. An old CLI without an `auth` subcommand prints an error message instead of JSON, and that
+ * means "unknown", not "not logged in".
  */
 async function claudeLoggedIn(bin: string): Promise<boolean> {
   let out = ''
   try {
     out = (await exec(bin, ['auth', 'status', '--json'], { timeout: 5000 })).stdout
   } catch (e) {
-    // 종료 코드 1(=로그인 안 됨)이어도 stdout의 JSON은 믿을 수 있다
+    // Even with exit code 1 (= not logged in), the JSON on stdout can still be trusted.
     out = typeof (e as { stdout?: unknown }).stdout === 'string' ? (e as { stdout: string }).stdout : ''
   }
   try {
     const flag = (JSON.parse(out) as { loggedIn?: unknown }).loggedIn
     return typeof flag === 'boolean' ? flag : true
   } catch {
-    return true // JSON이 아니면 이 CLI는 auth status를 모르는 것이다 — 모르면 통과
+    return true // If it is not JSON, this CLI does not know about auth status — when unknown, pass it through.
   }
 }
 
@@ -826,36 +892,40 @@ export class ClaudeAdapter implements AgentAdapter {
     login: 'claude auth login',
   }
   /**
-   * 사용량을 물어볼 창구.
+   * The channel used to ask about usage.
    *
-   * 사용량은 **계정**의 성질인데 SDK는 세션(Query)에만 그 메서드를 준다.
-   * 그래서 살아 있는 질의 하나를 빌려 쓴다 — 어느 세션에 묻든 답은 같다.
+   * Usage is a property of the **account**, but the SDK only puts that method on a session
+   * (Query). So this borrows one live query — the answer is the same no matter which session is
+   * asked.
    */
   /**
-   * 사용량·모델 목록은 계정의 성질인데 SDK는 둘 다 Query에만 둔다 — 살아 있는 질의를 빌려 쓴다.
+   * Usage and the model list are both properties of the account, but the SDK puts both only on a
+   * Query — a live query is borrowed for both.
    *
-   * **살아 있는 것만 담는다** (#157). 예전에는 마지막으로 시작한 질의 하나를 들고 있다가 그 세션이 닫히거나
-   * 죽어도 놓지 않아서, 더 오래된 세션이 살아 있는데도 죽은 질의에 물었다. 넣은 차례가 곧 시작한 차례다.
+   * **Only live queries are kept here** (#157). This used to hold on to the single most-recently
+   * started query even after that session closed or died, so it kept asking a dead query while an
+   * older session was still alive. Insertion order is the same as start order.
    */
   static readonly liveQueries = new Set<UsageQuery & ModelQuery>()
-  /** 가장 최근에 시작해 아직 살아 있는 질의 */
+  /** The most recently started query that is still alive. */
   static get lastQuery(): (UsageQuery & ModelQuery) | null {
     let last: (UsageQuery & ModelQuery) | null = null
     for (const q of ClaudeAdapter.liveQueries) last = q
     return last
   }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, // M0 검증: 전역 bypass를 세션 단위로 덮어쓸 수 있음
+    approvals: true, // M0 validation: the global bypass can be overridden per session.
     contextUsage: 'exact',
     resume: true,
     autoTitle: true,
     attachments: ['image', 'file'],
-    // SDK 0.3.231의 타입에 응답 길이 노브가 없다 (effortLevel뿐 — #54에서 실측).
-    // 생기면 여기만 채우면 된다 — UI는 이 배열을 보고 행을 그린다.
+    // The SDK 0.3.231 type has no response-length knob at all (only effortLevel — measured in #54).
+    // If one appears, only this needs to be filled in — the UI draws its rows from this array.
     verbosities: [],
-    // 대화 파일(JSONL)에 잠금이 없다 — 우리가 세션을 쥔 동안에도 터미널의 claude가
-    // 같은 대화에 쓸 수 있다. 그러니 "내려놓은 시각까지는 전부 내 것" 표식을 못 찍는다.
-    // 어차피 여기 기록 읽기는 SDK가 로컬 파일을 읽는 것이라 스킵의 이득도 몇 ms뿐이다.
+    // The conversation file (JSONL) has no lock — while we hold a session, a `claude` in a
+    // terminal can still write into the same conversation. So there is no way to stamp "everything
+    // up to the moment I set it down is mine." Reading history here already means the SDK reading
+    // the local file anyway, so skipping it would only save a few milliseconds regardless.
     exclusiveWriter: false,
   }
 
@@ -863,7 +933,7 @@ export class ClaudeAdapter implements AgentAdapter {
     const path = whichTool('claude')
     try {
       const { stdout } = await exec(path ?? 'claude', ['--version'], { timeout: 5000 })
-      // 어디에 설치된 것을 쓰는지 보여준다 — 여러 버전이 깔린 환경에서 혼란을 줄인다
+      // Shows which install is actually being used — reduces confusion in an environment with several versions installed.
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       const loggedIn = await claudeLoggedIn(path ?? 'claude')
       return {
@@ -886,16 +956,16 @@ export class ClaudeAdapter implements AgentAdapter {
     return listClaudeSessions(cwd, limit)
   }
 
-  /** 대화 원본 삭제 ("진짜로 삭제") — SDK의 deleteSession이 자기 파일 배치를 안다 */
+  /** Deletes the original conversation ("actually delete") — the SDK's deleteSession knows its own file layout. */
   deleteExternalConversation(externalId: string, cwd: string) {
     return deleteClaudeSession(externalId, cwd)
   }
 
   /**
-   * 계정 사용량 (FR-9).
+   * Account usage (FR-9).
    *
-   * **살아 있는 세션이 있어야 물어볼 수 있다** — SDK가 Query에만 이 메서드를 둔다.
-   * 세션이 하나도 없으면 던지고, 매니저가 이유와 함께 degrade한다.
+   * **This can only be asked about while a session is alive** — the SDK puts this method only on
+   * a Query. It throws when there is no session at all, and the manager degrades with a reason.
    */
   async listUsage() {
     const q = ClaudeAdapter.lastQuery
@@ -904,7 +974,7 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 
   async listModels() {
-    // 사용량과 같은 사정 — SDK는 이 메서드도 Query에만 둔다
+    // The same situation as usage — the SDK also puts this method only on a Query.
     const q = ClaudeAdapter.lastQuery
     if (!q) throw new Error('A running session is required to list models')
     return readClaudeModels(q)

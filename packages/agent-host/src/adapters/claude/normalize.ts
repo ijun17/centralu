@@ -1,8 +1,8 @@
 import type { ApprovalDetail, NormalizedEvent, ToolSummary } from '@cc/protocol'
 
 /**
- * Claude SDK 메시지 → NormalizedEvent 변환 (순수 함수라 계약 테스트가 가능하다).
- * SDK 타입은 여기서 끝난다 — 밖으로 나가는 건 protocol 타입뿐.
+ * Converts Claude SDK messages into NormalizedEvent (a pure function, so contract tests are
+ * possible). SDK types end here — only protocol types ever leave.
  */
 
 const READ_ONLY = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task'])
@@ -20,34 +20,37 @@ export function toolSummary(name: string, input: Json): ToolSummary {
     if (p) paths.push(p)
     title = `${name}: ${p || '?'}`
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
-  // 제안 카드(#63)는 이유를 제목으로 쓴다 — UI가 그대로 사람에게 보여주는 유일한 인자다
+  // A proposal card (#63) uses the reason as its title — the only argument the UI shows the person as-is.
   else if (name.endsWith('propose_project')) title = str(input.reason, name)
-  // 제안 카드가 브랜치 이름을 미리 채우는 유일한 운반로다 (#69) — 제목에 싣는다
+  // The only channel through which a proposal card can pre-fill a branch name (#69) — carried in the title.
   else if (name.endsWith('propose_worktree_session')) title = str(input.branch, name)
   /*
-   * 에이전트 카드의 제목은 맡긴 일이다 (#98). 이름만 있던 동안 카드는 전부 "Agent Agent"였고,
-   * 에이전트 셋을 나란히 띄우면 어느 카드가 무엇인지 알 길이 없었다 (도그푸딩 세션: 셋 다 같은 줄).
+   * An agent card's title is the work handed to it (#98). While it was just the name, every card
+   * said "Agent Agent", and launching three agents side by side left no way to tell which card was
+   * which (a dogfooding session: all three showed the same line).
    */
   else if (name === 'Agent' || name === 'Task') title = str(input.description, name)
   return { tool: name, title, readOnly: READ_ONLY.has(name), paths }
 }
 
 /**
- * `files_touched`로 알릴 경로 — 파일을 **바꾼** 도구의 것만 (#185).
+ * The paths reported through `files_touched` — only from tools that **changed** a file (#185).
  *
- * `toolSummary`의 `paths`에는 Read의 경로도 들어 있다(인계 기록이 "무엇을 봤나"로 쓴다). 그것을
- * 그대로 내보내면 에이전트가 읽기만 한 파일에도 트리의 "Edited by agent"가 붙는다.
+ * `toolSummary`'s `paths` also include Read's own path (a handoff record uses it as "what was
+ * looked at"). Emitting that as-is would tag a file the agent only read with "Edited by agent" in
+ * the tree.
  */
 function editedPaths(s: ToolSummary): string[] {
   return FILE_EDIT_TOOLS.has(s.tool) ? s.paths : []
 }
 
 /**
- * 서브에이전트의 걸음 한 줄 — 그 에이전트 카드의 실행 중 출력에 붙는다 (#98).
+ * One line of a subagent's step — appended to that agent card's live output (#98).
  *
- * 부모의 카드와 같은 제목 규칙(toolSummary)을 쓰되 도구 이름을 앞에 붙인다: Bash의 제목은
- * 명령 전문이라 이름이 없으면 무엇을 했는지가 아니라 무엇을 쳤는지만 남는다.
- * 여러 줄 명령(heredoc)은 첫 줄만 — 카드의 꼬리는 세 줄이라 명령 하나가 통째로 차지한다.
+ * Uses the same title rule as the parent's own card (`toolSummary`), but with the tool name
+ * prepended: Bash's title is the full command text, so without the name what remains is what was
+ * typed, not what it actually did. A multi-line command (a heredoc) only keeps its first line —
+ * the card's tail is three lines, so a single command would otherwise take up the whole thing.
  */
 function stepLine(s: ToolSummary): string {
   const lines = s.title.split('\n')
@@ -56,7 +59,7 @@ function stepLine(s: ToolSummary): string {
   return head === s.tool || head.startsWith(`${s.tool}:`) ? head : `${s.tool}: ${head}`
 }
 
-/** "34 tool uses · 2m 13s" — 에이전트 카드의 결과 머리 (#98) */
+/** "34 tool uses · 2m 13s" — the opening of an agent card's result (#98). */
 function agentStats(toolUses: unknown, durationMs: unknown, status?: string): string {
   const parts: string[] = []
   if (status && status !== 'completed') parts.push(status)
@@ -69,11 +72,13 @@ function agentStats(toolUses: unknown, durationMs: unknown, status?: string): st
 }
 
 /**
- * 에이전트 카드의 결과 본문 — 걸음 수와 보고서 머리.
+ * An agent card's result body — the step count plus the opening of the report.
  *
- * 카드 결과는 어느 도구든 300자에서 자른다(아래 tool_result). 에이전트의 보고서는
- * 수만 자가 예사라(도그푸딩: 15~24KB) 카드에는 머리만 오르고, 전문은 부모가 받아
- * 자기 말로 옮긴다 — 카드가 전문을 그리면 그게 곧 "답이 두 번 보인다"다.
+ * A card's result is cut at 300 characters for every tool (see `tool_result` below). An agent's
+ * report routinely runs to tens of thousands of characters (dogfooding: 15-24KB), so only the
+ * opening lands on the card, while the parent receives the full text and writes it in its own
+ * words — if the card rendered the full text too, that is exactly what "the answer appears
+ * twice" means.
  *
  * This returns the report uncut: its first 300 characters are the card's `summary`, and the whole of it is the
  * result's `output`, the record (#221).
@@ -101,16 +106,17 @@ function resultOutput(content: unknown): string {
 }
 
 /**
- * 이 user 메시지가 **백그라운드 에이전트를 띄운 결과**인가 (#98).
+ * Is this user message **the result of launching a background agent** (#98)?
  *
- * 실측(probe-subagent-stream.mts): 띄우는 순간 Agent 호출의 tool_result가 바로 오고,
- * 본문은 모델에게 하는 말이다 — "Async agent launched successfully. (This tool result is
- * internal metadata — never quote or paste any part of it … into a user-facing reply.)".
- * 에이전트가 실제로 끝나는 것은 한참 뒤의 system/task_notification이다.
- * 판정은 tool_use_result의 모양(sdk-tools.d.ts AgentOutput)으로 한다: status가
- * 'async_launched'이고 agentId가 있는 것은 에이전트뿐이다 (워크플로는 taskId를 싣는다).
- * 결과 블록이 정확히 하나일 때만 — tool_use_result는 메시지에 하나라 블록이 여럿이면
- * 어느 블록의 것인지 모른다.
+ * Measured (probe-subagent-stream.mts): the Agent call's `tool_result` arrives the instant it is
+ * launched, and its body is text meant for the model — "Async agent launched successfully. (This
+ * tool result is internal metadata — never quote or paste any part of it … into a user-facing
+ * reply.)". The agent's actual completion is the `system/task_notification` that arrives much
+ * later. The judgment is made from the shape of `tool_use_result` (sdk-tools.d.ts `AgentOutput`):
+ * only an agent has `status === 'async_launched'` together with an `agentId` (a workflow instead
+ * carries a `taskId`). This only applies when there is exactly one result block — a message has
+ * only one `tool_use_result`, so with more than one block there is no way to tell which block it
+ * belongs to.
  */
 function backgroundLaunch(m: Json): string | null {
   const r = (m.tool_use_result ?? {}) as Json
@@ -119,7 +125,7 @@ function backgroundLaunch(m: Json): string | null {
   return blocks.length === 1 ? str(blocks[0]?.tool_use_id) || null : null
 }
 
-/** 승인 요청을 배너 판정 가능한 3종으로 정규화 (core/approval이 kind만 보고 판단) */
+/** Normalizes an approval request into one of 3 kinds the banner can judge (core/approval decides based on `kind` alone). */
 export function approvalDetail(name: string, input: Json, cwd: string): ApprovalDetail {
   if (name === 'Bash') return { kind: 'command', command: str(input.command), cwd }
   if (FILE_EDIT_TOOLS.has(name)) {
@@ -132,21 +138,24 @@ export function approvalDetail(name: string, input: Json, cwd: string): Approval
 }
 
 /**
- * SDK 메시지 하나 → 이벤트 0..N개.
- * `msg`는 의도적으로 unknown — SDK 타입을 이 경계 밖으로 흘리지 않기 위해서다.
+ * One SDK message to 0..N events.
+ * `msg` is deliberately `unknown` — so SDK types never flow past this boundary.
  */
 export function normalizeMessage(
   msg: unknown,
   sessionId: string,
   opts?: {
     /**
-     * 이 assistant 메시지의 본문이 이미 스트리밍 델타로 나갔는가 — 어댑터가 세어서 준다.
+     * Whether this assistant message's body already went out as streaming deltas — the adapter
+     * tracks this and passes it in.
      *
-     * 본문은 보통 stream_event 델타로만 그리고 assistant 메시지의 text 블록은 버렸는데,
-     * **델타 없이 오는 응답이 실재한다**: /usage처럼 CLI가 로컬에서 합성하는 답은
-     * 델타 0개, 통짜 assistant 메시지 하나다 (실측 — 델타 0 · 본문 1,046자).
-     * 그 경우 여기서 안 내면 명령은 실행됐는데 답이 화면에 영영 안 나타난다.
-     * 반대로 스트리밍된 턴에서 또 내면 같은 글이 두 번 붙는다 — 그래서 플래그가 필요하다.
+     * The body is normally drawn only from `stream_event` deltas, and an assistant message's own
+     * text block is dropped — but **a response that arrives with no deltas at all is real**: an
+     * answer the CLI synthesizes locally, like /usage, arrives as zero deltas and one whole-body
+     * assistant message (measured — 0 deltas, a 1,046-character body). In that case, not emitting
+     * it here means the command ran but the answer never shows up in the UI at all. Conversely,
+     * emitting it again on a turn that was streamed appends the same text twice — hence the need
+     * for this flag.
      */
     textStreamed?: boolean
     /**
@@ -164,24 +173,27 @@ export function normalizeMessage(
   const out: NormalizedEvent[] = []
 
   /*
-   * 서브에이전트의 메시지는 부모의 대화가 아니다 (#98).
+   * A subagent's messages are not the parent's conversation (#98).
    *
-   * Agent 도구로 띄운 서브에이전트의 assistant·user 메시지는 부모의 스트림으로 섞여 오고,
-   * 그것을 띄운 호출의 id를 parent_tool_use_id에 싣는다 (sdk.d.ts SDKAssistantMessage:
-   * "parent_tool_use_id is non-null when the message was produced inside a subagent started
-   * by that tool_use"). 이 필드를 한 번도 안 봐서, 서브에이전트의 도구 호출은 부모가 글을
-   * 쓰는 도중 그 자리에 박혔고(낱말 한가운데 — `남았` / Bash / `는지`), 보고서 전문
-   * (15~24KB)은 부모의 답변으로 한 번, 부모의 요약으로 또 한 번 보였다.
+   * The assistant and user messages of a subagent launched with the Agent tool arrive mixed into
+   * the parent's own stream, carrying the id of the call that launched it in `parent_tool_use_id`
+   * (sdk.d.ts SDKAssistantMessage: "parent_tool_use_id is non-null when the message was produced
+   * inside a subagent started by that tool_use"). This field was never checked, so a subagent's
+   * tool call would get stuck right in the middle of the parent writing its own text (mid-word —
+   * split across `남았` / Bash / `는지`), and the full report (15-24KB) showed up once as the
+   * parent's own answer and once again as the parent's summary.
    *
-   * **글은 오지 않을 것이라 믿지 않는다.** SDK 문서는 forwardSubagentText를 켜야 글이
-   * 온다고 하지만, 실측(CLI 2.1.282, 옵션 없음)에서 서브에이전트의 마지막 글이 그대로
-   * 왔다. 부모 대화에서는 무엇이든 버리고, 도구 호출만 **그것을 띄운 카드의 실행 중
-   * 출력**으로 돌린다 — 누가 했는지는 callId가 말한다. 대화에 줄을 새로 세우지 않으므로
-   * 부모의 문단도 더는 잘리지 않는다. 사용량도 버린다: 서브에이전트의 토큰이 부모의
-   * 사용량 칸을 덮어쓰고 있었다.
+   * **Do not assume text will never arrive here.** The SDK docs say text only arrives with
+   * `forwardSubagentText` turned on, but measured (CLI 2.1.282, with no such option set), a
+   * subagent's final text arrived anyway. Everything is dropped from the parent's own
+   * conversation, and only a tool call is routed — as **the live output of the card that launched
+   * it** — with `callId` recording who did it. Because this never adds a new line to the
+   * conversation, the parent's paragraph is no longer split either. Usage is dropped too: a
+   * subagent's own tokens were overwriting the parent's usage figures.
    *
-   * 파일은 예외다 — 서브에이전트가 고친 파일도 이 세션의 작업 폴더에서 바뀐 파일이라
-   * 충돌 감지·하이라이트(FR-2, FR-5)에는 그대로 알린다.
+   * Files are the exception — a file a subagent edited is still a file changed inside this
+   * session's own working folder, so it is still reported to conflict detection and highlighting
+   * (FR-2, FR-5).
    */
   const parent = str(m.parent_tool_use_id)
   if (parent && (type === 'assistant' || type === 'user' || type === 'stream_event')) {
@@ -197,18 +209,19 @@ export function normalizeMessage(
   }
 
   /*
-   * 지금 무엇을 하는 중인가.
+   * What is currently happening.
    *
-   * 프로브로 실제 순서를 확인했다:
-   *   status:'compacting' → (39초) → status:null + compact_result:'success' → compact_boundary
-   * 그 39초 동안 화면은 '응답 대기'와 한 글자도 다르지 않았다 — 도그푸딩에서 나온 문제다.
+   * A probe confirmed the actual ordering:
+   *   status:'compacting' → (39 seconds) → status:null + compact_result:'success' → compact_boundary
+   * For those 39 seconds, the UI looked no different from ordinary "waiting for response" — a
+   * problem that surfaced from dogfooding.
    */
   if (type === 'system' && str(m.subtype) === 'status') {
     out.push({ type: 'activity', sessionId, activity: m.status === 'compacting' ? 'compacting' : null })
     /*
-     * 실패는 삼키지 않는다. 압축이 실패하면 컨텍스트는 그대로인데 화면에는
-     * 아무 일도 없었던 것처럼 보인다 — 실측에서 실제로 나온 경우다
-     * ("Not enough messages to compact.").
+     * A failure is never swallowed. If compaction fails, the context stays exactly as it was, but
+     * the UI would otherwise look as if nothing had happened — a case that measured, actually
+     * occurred ("Not enough messages to compact.").
      */
     if (str(m.compact_result) === 'failed') {
       out.push({ type: 'compaction', sessionId, failed: true, reason: str(m.compact_error, 'Unknown reason') })
@@ -217,9 +230,11 @@ export function normalizeMessage(
   }
 
   /*
-   * 골 판정 통지 (2026-09-07 — `/goal`의 Stop 훅, SDKActiveGoalMessage). #58 부류:
-   * 이 타입이 없던 동안 골 상태는 조용히 버려졌다. value가 null이면 걷힌 것(달성 포함)이고,
-   * 걸려 있는 동안 claude의 상태 어휘는 'active' 하나다 — 바퀴 수와 미달 사유가 내용이다.
+   * A goal-status notification (2026-09-07 — /goal's Stop hook, SDKActiveGoalMessage). The same
+   * category as #58: while this type was not handled, goal state was silently dropped. A `value`
+   * of null means the goal was cleared (including having been achieved), and while one is set,
+   * Claude's status vocabulary has exactly one word, 'active' — the iteration count and the reason
+   * it has not been reached are the actual content.
    */
   if (type === 'active_goal') {
     const v = (m.value ?? null) as Json | null
@@ -239,11 +254,13 @@ export function normalizeMessage(
   }
 
   /*
-   * 로컬 명령의 출력 (SDKLocalCommandOutputMessage — /usage류의 **일반화된 채널**).
+   * The output of a local command (SDKLocalCommandOutputMessage — the **generalized channel** for
+   * things like /usage).
    *
-   * /usage의 답이 델타 없는 assistant 메시지로 와서 안 보였던 사건(도그푸딩)의 자매다:
-   * CLI가 로컬에서 처리하는 명령의 출력이 이 system 메시지로 오는 경우가 있고,
-   * 버리면 명령은 실행됐는데 답만 사라진다. 사람에게는 assistant의 말과 같은 자리다.
+   * This is the sibling of the dogfooding incident where /usage's answer arrived as a delta-less
+   * assistant message and never showed up: the output of a command the CLI handles locally can
+   * also arrive as this system message, and dropping it means the command ran but only the answer
+   * disappeared. To the person, this occupies the same place as something the assistant said.
    */
   if (type === 'system' && str(m.subtype) === 'local_command_output') {
     const content = str(m.content)
@@ -252,10 +269,11 @@ export function normalizeMessage(
   }
 
   /*
-   * 압축이 끝난 지점 (FR-14).
+   * The point where compaction finished (FR-14).
    *
-   * 이게 없어서 **Claude 세션에는 압축 마커가 한 번도 뜬 적이 없다** — Codex에만 있었다.
-   * 마커가 없으면 접힌 자리를 모르니 "그 위로 거슬러 읽기"도 성립하지 않는다.
+   * Without this, **a compaction marker never once appeared in a Claude session** — only Codex
+   * had one. Without a marker, there is no way to know where the fold is, so "scroll back past
+   * this point" cannot work either.
    */
   if (type === 'system' && str(m.subtype) === 'compact_boundary') {
     const meta = (m.compact_metadata ?? {}) as Json
@@ -269,7 +287,7 @@ export function normalizeMessage(
     return out
   }
 
-  // 스트리밍 델타 (includePartialMessages: true 필요 — M0 확인)
+  // Streaming deltas (needs includePartialMessages: true — confirmed in M0).
   if (type === 'stream_event') {
     const e = m.event as Json | undefined
     if (str(e?.type) === 'content_block_delta') {
@@ -278,10 +296,11 @@ export function normalizeMessage(
         out.push({ type: 'message_delta', sessionId, role: 'assistant', text: str(d?.text) })
       }
       /*
-       * thinking (#58 실측, 2026-08-26): 본문이 통째로 암호화라 thinking은 항상 ""이고
-       * estimated_tokens(증분)만 온다. 그래서 텍스트가 아니라 "생각 중 ~N 토큰"이라는
-       * **진행 사실**만 낼 수 있다 — 없는 내용을 있는 척하지 않는다. 어느 날 CLI가
-       * 텍스트를 실어 보내기 시작하면 여기 text가 그대로 흐른다.
+       * Thinking (measured in #58, 2026-08-26): the whole body arrives encrypted, so `thinking`
+       * is always "" and only `estimated_tokens` (an increment) comes through. So this can only
+       * emit **the fact of progress** — "thinking, ~N tokens" — rather than the text; it never
+       * pretends content exists that is not there. If the CLI ever starts sending readable text
+       * here, the `text` field just flows through as-is.
        */
       if (str(d?.type) === 'thinking_delta') {
         const text = str(d?.thinking)
@@ -296,7 +315,7 @@ export function normalizeMessage(
 
   if (type === 'assistant') {
     const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
-    // 델타 없이 온 본문의 유일한 출구 (위 opts.textStreamed 주석 참고 — /usage가 이 길로 온다)
+    // The only way out for a body that arrives with no deltas at all (see the opts.textStreamed comment above — /usage arrives this way).
     // Thinking follows the same rule as text, but on its own flag: a message can stream its thinking and
     // then call a tool without any text, and then only the thinking has already gone out.
     if (!opts?.reasoningStreamed) {
@@ -329,7 +348,7 @@ export function normalizeMessage(
         if (paths.length) out.push({ type: 'files_touched', sessionId, paths })
       }
     }
-    // 사용량은 assistant 메시지에도 실려 온다
+    // Usage also comes carried on an assistant message.
     const usage = (m.message as Json | undefined)?.usage as Json | undefined
     if (usage) {
       out.push({
@@ -349,19 +368,20 @@ export function normalizeMessage(
   if (type === 'user') {
     const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
     /*
-     * 백그라운드 에이전트를 띄운 결과는 **결과가 아니다** (#98). 여기서 카드를 닫으면
-     * 카드에는 모델에게만 하라는 말("never quote…")이 결과로 오르고, 에이전트가 정말로
-     * 일하는 동안 카드는 이미 끝난 것처럼 보인다. 카드를 열어 둔 채 사실만 한 줄 남기고,
-     * 끝났을 때 task_notification이 닫는다 (ClaudeStreamNormalizer).
+     * The result of launching a background agent is **not actually a result** (#98). Closing the
+     * card here would show the text meant only for the model ("never quote…") as its result, and
+     * make the card look already finished while the agent is still genuinely working. This leaves
+     * the card open with only a one-line status, and `task_notification` closes it when the agent
+     * actually finishes (`ClaudeStreamNormalizer`).
      */
     const launched = backgroundLaunch(m)
     if (launched) return [{ type: 'tool_output_delta', sessionId, callId: launched, text: 'Running in the background\n' }]
     /*
-     * 포그라운드 에이전트의 결과는 tool_use_result에서 그린다 — SDK가 그러라고 한다
-     * (sdk.d.ts: "For the Agent/Task tool the completed shape is the subagent's final report
+     * A foreground agent's result is drawn from `tool_use_result` — the SDK says to do exactly
+     * that (sdk.d.ts: "For the Agent/Task tool the completed shape is the subagent's final report
      * without the model-directed agentId/usage trailer, plus run totals — render from it
-     * instead of parsing the tool_result text."). 본문을 그대로 쓰면 카드에는
-     * "[Subagent hand-back] The text below is…"로 시작하는 JSON이 오른다 (실측).
+     * instead of parsing the tool_result text."). Using the body as-is would put JSON starting
+     * with "[Subagent hand-back] The text below is…" on the card (measured).
      */
     const agent = (m.tool_use_result ?? {}) as Json
     // The finished agent's whole report is the result's record (#221); the card shows its head
@@ -386,18 +406,20 @@ export function normalizeMessage(
           ...(output ? { output } : {}),
         })
         /*
-         * 도구 결과에 실려 온 이미지 (#40). 스크린샷을 찍거나 이미지 파일을 Read하면
-         * 여기로 온다 — 실측 모양: {type:'image', source:{type:'base64', data, media_type}}.
-         * (assistant 본문에는 이미지가 실리지 않는다 — 도구 결과가 유일한 길이다)
+         * An image carried in a tool result (#40). This is where one arrives when a screenshot is
+         * taken or an image file is Read — the measured shape:
+         * {type:'image', source:{type:'base64', data, media_type}}. (An assistant body never
+         * carries an image — a tool result is the only way one arrives.)
          */
         if (Array.isArray(c)) {
           for (const part of c as Json[]) {
             if (str(part.type) !== 'image') continue
             const source = (part.source ?? {}) as Json
             /*
-             * base64가 아닌 소스(url 등)는 예전엔 소리 없이 사라졌다 (#58 조사에서 발견).
-             * 못 그리는 건 어쩔 수 없지만 못 그린다는 사실은 보여야 한다 — 이미지 실패의
-             * 기존 규칙(너무 큼·파일 없음)과 같은 상자를 쓴다.
+             * A non-base64 source (a URL, say) used to vanish silently (found during the #58
+             * investigation). There is nothing we can do about failing to render it, but the fact
+             * that it failed to render still has to be shown — this uses the same box as the
+             * existing image-failure cases (too large, file missing).
              */
             if (str(source.type) !== 'base64' || !str(source.data)) {
               out.push({
@@ -408,7 +430,7 @@ export function normalizeMessage(
             }
             const data = str(source.data)
             const mime = str(source.media_type) || 'image/png'
-            // base64 ~11M자 ≈ 원본 8MB. 그 이상은 화면에 뿌리는 대신 왜 안 그리는지 말한다
+            // ~11M base64 characters is roughly an 8MB original. Beyond that, this explains why it is not shown instead of rendering it.
             if (data.length > 11_000_000) {
               out.push({
                 type: 'message_image', sessionId, mime, data: '',
@@ -425,17 +447,19 @@ export function normalizeMessage(
   }
 
   /*
-   * 한도 (M0 발견: rate_limit_event.rate_limit_info).
+   * A limit (M0 finding: `rate_limit_event.rate_limit_info`).
    *
-   * **막힌 것만 한도다.** status는 셋이다 (SDK: 'allowed' | 'allowed_warning' | 'rejected').
-   * `!== 'allowed'`로 보던 동안 allowed_warning — "가까워졌지만 아직 통과한다" — 가
-   * rejected와 같은 취급을 받아, 아무것도 막히지 않은 세션에 한도 배너가 붙었다
-   * (도그푸딩: "한도에 도달하지 않았는데 탭에 떴다").
+   * **Only an actual block counts as a limit.** There are three statuses (SDK:
+   * 'allowed' | 'allowed_warning' | 'rejected'). While this checked `!== 'allowed'`,
+   * `allowed_warning` — "getting close, but still going through" — was treated the same as
+   * `rejected`, and a limit banner appeared on a session that was never actually blocked
+   * (dogfooding: "it showed up in the tab even though the limit had not been reached").
    *
-   * 코덱스 어댑터가 같은 실수를 먼저 고치면서 이쪽을 기준으로 인용했는데, 기준이
-   * 틀려 있었다. 지금은 코덱스 쪽이 옳다 — 도구가 주는 명시적 신호만 본다.
-   * 경고를 버리는 것은 아니다: 남은 여유는 사용량 창(agents.usage)이 퍼센트로 보여준다.
-   * 배너는 "지금 못 쓴다"는 말이라, 쓸 수 있는데 붙으면 그 말이 거짓이 된다.
+   * The Codex adapter fixed the same mistake first and cited this file as its own reference, but
+   * the reference itself was wrong. Codex has it right now — this only reacts to the explicit
+   * signal the tool actually gives. The warning is not discarded: the usage window
+   * (agents.usage) still shows remaining headroom as a percentage. The banner says "cannot be
+   * used right now", and showing it while it can still be used would make that a lie.
    */
   if (type === 'rate_limit_event') {
     const info = (m.rate_limit_info ?? {}) as Json
@@ -456,19 +480,23 @@ export function normalizeMessage(
     const models = Object.values(modelUsage)
     if (models.length > 0) {
       /*
-       * 컨텍스트 사용량은 여기서 계산하지 않는다.
+       * Context usage is never computed here.
        *
-       * modelUsage는 **세션 누적**이다. 캐시 재읽기(cacheReadInputTokens)가 매 턴
-       * 더해지므로 이걸 더해 쓰면 창 크기를 금세 넘어선다 —
-       * 실제로 "컨텍스트 533%"로 나타났다.
-       * 지금 창에 무엇이 들어 있는지는 SDK의 getContextUsage()가 알고 있고,
-       * 어댑터가 턴이 끝날 때 그걸 물어서 context_update를 낸다.
+       * `modelUsage` is a **session-wide accumulation**. Re-reading the cache
+       * (`cacheReadInputTokens`) adds to it every single turn, so summing it here quickly exceeds
+       * the window size — this actually showed up as "context 533%". What is currently in the
+       * window is instead known by the SDK's own `getContextUsage()`, which the adapter asks at
+       * the end of a turn to emit `context_update`.
        */
       /*
-       * **모든 모델을 더한다.** modelUsage는 모델마다 한 칸이고(sdk.d.ts: 본 루프·서브에이전트·압축 같은 내부 호출까지, 토큰과
-       * 비용을 셀 때 쓰라는 칸), 턴 하나에 모델이 여럿이다 — 제목을 짓거나 도구 결과를 줄이는 작은 모델이 본 모델보다 먼저 올 수
-       * 있다. 첫 칸만 읽던 동안, 앱이 부탁한 에이전트의 실행이 "1.1k tokens"로 적혔다: 기록 줄은 1108/13과 1038/16이었는데
-       * CLI 기록에서 본 모델(Opus)은 출력만 200·363에 캐시 입력 24k–80k를 썼다. 적힌 것은 작은 모델의 몫이었다.
+       * **Every model is summed.** `modelUsage` has one entry per model (sdk.d.ts: meant to
+       * count tokens and cost across everything, including internal calls like the main loop, a
+       * subagent, or compaction), and a single turn can involve more than one model — a small
+       * model used to title something or shorten a tool result can appear before the main model
+       * does. While only the first entry was read, an app-requested agent's own run was recorded
+       * as "1.1k tokens": the log lines were 1108/13 and 1038/16, while the model actually seen in
+       * the CLI log (Opus) used only 200/363 output tokens against 24k-80k cache input tokens.
+       * What got recorded was the small model's share.
        */
       const sum = (field: string) => models.reduce((n, u) => n + Number(u[field] ?? 0), 0)
       out.push({
@@ -485,9 +513,11 @@ export function normalizeMessage(
     }
     if (str(m.subtype) !== 'success' || m.is_error === true) {
       /*
-       * 실패한 결말에는 `result`가 없고 `errors`(글의 목록)가 있다(sdk.d.ts SDKResultError). 둘 다 비었으면 끝난 방식의 이름이라도
-       * 싣는다 — 앱이 부탁한 에이전트(M4 D-1)가 구조화 출력을 끝내 못 맞추면(`error_max_structured_output_retries`) 그 이름이
-       * 앱이 받는 유일한 이유다.
+       * A failed ending has no `result`, only `errors` (a list of strings) (sdk.d.ts
+       * `SDKResultError`). If both are empty, this still carries at least the name of how it
+       * ended — when an app-requested agent (M4 D-1) never manages to match its structured output
+       * (`error_max_structured_output_retries`), that name is the only reason the app ever
+       * receives.
        */
       const errors = Array.isArray(m.errors) ? m.errors.filter((x): x is string => typeof x === 'string' && x.length > 0) : []
       out.push({
@@ -496,7 +526,7 @@ export function normalizeMessage(
         error: { code: 'internal', message: str(m.result) || errors.join('\n') || `Turn failed: ${str(m.subtype)}`, retryable: true },
       })
     } else {
-      // 스키마로 답한 턴의 답 (M4 D-1) — 글로는 오지 않고 여기에만 있다(protocol의 turn_complete 주석)
+      // The answer of a turn that answered with a schema (M4 D-1) — it never arrives as text, only here (see protocol's turn_complete comment).
       out.push(m.structured_output === undefined ? { type: 'turn_complete', sessionId } : { type: 'turn_complete', sessionId, output: m.structured_output })
     }
     return out
@@ -506,48 +536,56 @@ export function normalizeMessage(
 }
 
 /**
- * 부모의 스트림 하나를 따라가며 정규화한다 — 메시지 하나만 봐서는 판단이 안 서는 것들의 기억.
+ * Normalizes while following one parent stream — memory for things that cannot be decided by
+ * looking at a single message alone.
  *
- * 둘 다 예전엔 어댑터 루프에 있었거나 아예 없었다:
+ * Both of these used to live in the adapter loop, or did not exist at all:
  *
- *  1. **본문이 델타로 이미 나갔는가** (textStreamed, normalizeMessage의 opts 참고).
- *     assistant 메시지가 올 때마다 내려가는 표식인데, 서브에이전트의 assistant도
- *     그 "assistant"로 세고 있었다 (#98). 서브에이전트의 메시지가 부모의 마지막 델타와
- *     부모의 본문 사이에 끼면 표식이 부모의 본문 앞에서 먼저 내려가, **부모의 글 전체가
- *     한 번 더 붙었다.** 이제 부모의 메시지만 센다.
+ *  1. **Whether the body already went out as deltas** (`textStreamed`, see `normalizeMessage`'s
+ *     opts). This flag is cleared every time an assistant message arrives, but a subagent's own
+ *     assistant message was also being counted as "assistant" (#98). If a subagent's message
+ *     landed between the parent's last delta and the parent's own body, the flag was cleared
+ *     early, before the parent's body arrived, and **the parent's whole text was appended a
+ *     second time.** Now only the parent's own messages are counted.
  *
- *  2. **띄워 둔 백그라운드 에이전트** (#98). 띄운 순간의 tool_result로는 카드를 닫지
- *     않는다(backgroundLaunch). 끝났다는 소식은 system/task_notification으로 오고
- *     (실측: tool_use_id·status·summary·usage{tool_uses, duration_ms}) 그때 닫는다.
- *     열어 둔 카드만 닫는다 — 통지는 부모가 직접 띄운 백그라운드 Bash에도, 서브에이전트
- *     안의 Bash(owned_by_subagent)에도 오는데(실측), 그 카드들은 이미 제 결과로 닫혀 있다.
+ *  2. **A background agent that is still running** (#98). The `tool_result` from the moment it is
+ *     launched does not close the card (`backgroundLaunch`). News that it finished arrives as
+ *     `system/task_notification` (measured: `tool_use_id`, `status`, `summary`,
+ *     `usage{tool_uses, duration_ms}`), and that is what closes it. Only a card left open gets
+ *     closed — the notification also arrives (measured) for a background Bash the parent launched
+ *     directly, and for a Bash inside a subagent (`owned_by_subagent`), but those cards are already
+ *     closed by their own result.
  *
- *     **부모가 글을 쓰는 도중이면 닫기를 미룬다.** 에이전트 셋을 나란히 띄우면 하나가
- *     끝나는 순간 부모는 다른 하나의 소식을 받아 적고 있기 예사다(도그푸딩 세션).
- *     tool_result는 저장 쪽에서 글 덩어리의 경계라(manager persistMessage) 그 자리에서
- *     내면 부모의 문단이 행 둘로 갈린다 — 화면은 이어 붙여 그리지만 인수인계 기록과
- *     미리보기는 행을 읽는다. 부모가 내지 않은 사건으로 부모의 글이 잘리지 않게,
- *     그 덩어리가 닫히는 assistant 메시지 뒤로 보낸다.
+ *     **Closing is deferred while the parent is mid-write.** Running three agents side by side
+ *     routinely means the parent is writing an update about a different agent at the exact moment
+ *     one of them finishes (a dogfooding session). Because `tool_result` marks a chunk boundary on
+ *     the storage side (`manager persistMessage`), emitting it right there splits the parent's
+ *     paragraph into two rows — the UI renders it joined back together, but the handoff record and
+ *     the preview both read by row. To keep an event the parent did not emit from cutting the
+ *     parent's own text, this is sent after the assistant message that closes that chunk instead.
  */
 export class ClaudeStreamNormalizer {
   private textStreamed = false
   /** Readable thinking of the current assistant message already went out as deltas (see normalizeMessage's opts) */
   private reasoningStreamed = false
   /**
-   * 우리가 턴을 끊었다 — 그 뒤 처음 오는 result가 끊긴 턴의 결말이다 (#168).
+   * We interrupted the turn — the first `result` that arrives after that is the ending of the
+   * interrupted turn (#168).
    *
-   * CLI는 끊긴 턴을 `error_during_execution` result로 닫는다. 그것을 여느 실패처럼 error로 내면 사람이 멈춘 턴이
-   * "Turn failed: error_during_execution" 표식과 error 상태로 남는다. 상태는 interrupt()가 이미 입력 대기로
-   * 돌려 두었으므로 그 결말은 아무것도 내지 않는다. 다른 이유의 `error_during_execution`은 지금처럼 실패다.
+   * The CLI closes an interrupted turn with an `error_during_execution` result. Emitting that as
+   * an ordinary error would leave a turn the person stopped on purpose recorded with a "Turn
+   * failed: error_during_execution" marker and an error state. Since `interrupt()` has already
+   * returned the state to waiting-for-input, that ending emits nothing at all. An
+   * `error_during_execution` for any other reason is still a failure, as before.
    */
   private stopping = false
   private readonly background = new Set<string>()
-  /** 부모의 글 덩어리가 닫히기를 기다리는 에이전트 카드 닫기 */
+  /** Agent card closures waiting for the parent's text chunk to close. */
   private deferred: NormalizedEvent[] = []
 
   constructor(private readonly sessionId: string) {}
 
-  /** 어댑터가 턴을 끊었다 (위 stopping) */
+  /** The adapter interrupted the turn (see `stopping` above). */
   stopped(): void {
     this.stopping = true
   }
@@ -597,9 +635,11 @@ export class ClaudeStreamNormalizer {
     // Only thinking that carried text counts: encrypted thinking streams token estimates, and its block is ""
     if (type === 'stream_event' && events.some((e) => e.type === 'reasoning_delta' && !!e.text)) this.reasoningStreamed = true
     /*
-     * assistant 메시지가 한 본문의 끝이다 — 다음 본문은 다시 처음부터 센다. **result도 끝이다** (#168): 글을 쓰는
-     * 도중에 멈추면 그 덩어리의 assistant 메시지가 오지 않아서, 표식이 켜진 채 다음 턴으로 넘어가 델타 없이 오는
-     * 통짜 응답(/usage 같은 로컬 응답, CLI가 합성한 API 오류)을 버렸다.
+     * An assistant message marks the end of one body — the next body starts counting again from
+     * scratch. **A result also marks an end** (#168): stopping mid-write means that chunk's
+     * assistant message never arrives, so the flag stayed set into the next turn and dropped a
+     * whole-response message that arrived with no deltas (a local response like /usage, or an API
+     * error the CLI synthesized).
      */
     if (type === 'assistant' || type === 'result') {
       this.textStreamed = false
@@ -609,20 +649,21 @@ export class ClaudeStreamNormalizer {
       this.stopping = false
       if (str(m.subtype) === 'error_during_execution') events = events.filter((e) => e.type !== 'error')
     }
-    // 덩어리가 닫혔다(또는 본문 없이 턴이 끝났다) — 미뤄 둔 카드 닫기를 이제 낸다
+    // The chunk closed (or the turn ended with no body) — the deferred card closures are emitted now.
     if ((type === 'assistant' || type === 'result') && this.deferred.length > 0) events.push(...this.deferred.splice(0))
     return events
   }
 
   /**
-   * 아직 돌아오지 않은 에이전트의 카드를 **말없이 열어 두지 않는다.**
+   * A card for an agent that never reported back is **never left open silently.**
    *
-   * 백그라운드 에이전트는 CLI 프로세스 안에서 돈다(task_type 'local_agent') — 프로세스를
-   * 닫거나 잃으면 함께 사라지고, 통지는 영영 오지 않는다. 그대로 두면 카드는 "아직 일하는
-   * 중"으로 남는다. 승인·질문 카드를 dispose에서 놓아주는 것과 같은 규칙이다.
+   * A background agent runs inside the CLI process (`task_type: 'local_agent'`) — closing or
+   * losing the process makes it disappear along with it, and the notification never arrives at
+   * all. Left alone, the card would stay marked "still working" forever. This is the same rule as
+   * releasing approval and question cards in `dispose`.
    */
   release(why: string): NormalizedEvent[] {
-    // 돌아왔지만 부모의 글이 닫히기를 기다리던 것은 제 결과로 닫는다 — 이미 끝난 일이다
+    // Something that already reported back but was waiting for the parent's text to close is closed with its own result — it already finished.
     const out: NormalizedEvent[] = this.deferred.splice(0)
     for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })
     this.background.clear()

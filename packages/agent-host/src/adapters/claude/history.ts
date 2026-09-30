@@ -2,22 +2,24 @@ import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 
 /**
- * Claude Code가 보관 중인 이전 세션 읽기.
+ * Reads past sessions Claude Code has kept.
  *
- * **공식 SDK API만 쓴다** (`listSessions` / `getSessionMessages`).
- * `~/.claude/projects/**\/*.jsonl`을 직접 파싱하지 않는다 — 그 파일 포맷은
- * 문서화된 계약이 아니라서 도구가 올라가면 소리 없이 깨지고, 깨진 줄도 모른다.
- * SDK는 자기 버전이 쓴 트랜스크립트를 스스로 읽으므로 버전 호환은 SDK의 몫이 된다.
+ * **Only the official SDK API is used** (`listSessions` / `getSessionMessages`).
+ * `~/.claude/projects/**\/*.jsonl` is never parsed directly — that file format is not a
+ * documented contract, so an update to the tool can break it silently, and there would be no
+ * way to know the parsing broke. The SDK reads the transcripts its own version wrote, so version
+ * compatibility becomes the SDK's problem, not ours.
  *
- * 다만 **SDK 자체가 낡을 수는 있다**(구버전 lockfile로 설치된 환경).
- * 그래서 named import 대신 동적 import + 함수 존재 확인으로 접근한다:
- * 없으면 모듈 로드 자체가 터지는 대신 '지원하지 않음'으로 물러난다.
+ * That said, **the SDK itself can be old** (an environment installed with an old lockfile).
+ * So this reaches it through a dynamic import plus a function-existence check instead of a
+ * named import: if the function is missing, the module load does not blow up — this falls back
+ * to "not supported" instead.
  */
 
 export const UNSUPPORTED =
   'The installed Claude Code SDK does not support listing past sessions (update the SDK)'
 
-/** SDK 표면 중 우리가 쓰는 부분만. 여기 없는 필드는 있어도 무시한다 (앞으로 늘어나도 안전) */
+/** Only the part of the SDK surface we use. A field not listed here is ignored even if present (safe as the SDK grows). */
 type SdkSessionInfo = {
   sessionId?: unknown
   summary?: unknown
@@ -47,7 +49,7 @@ async function sessionApi(): Promise<SessionApi | null> {
   return cached
 }
 
-/** 테스트에서 SDK 표면을 갈아 끼운다 (구버전·미지원 상황을 재현하기 위해) */
+/** Swaps in the SDK surface from a test, to reproduce old-version or unsupported situations. */
 export function __setSessionApiForTest(api: SessionApi | null | undefined): void {
   cached = api
 }
@@ -59,14 +61,16 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
   const sdk = await sessionApi()
   if (!sdk?.listSessions) throw new Error(UNSUPPORTED)
   /*
-   * includeProgrammatic:true — SDK로 만든 세션(=Centralu가 만든 것)까지 포함한다.
+   * includeProgrammatic:true — this also includes sessions created through the SDK (i.e., the
+   * ones Centralu itself created).
    *
-   * 처음에는 false로 걸렀다. "우리가 만든 건 이미 사이드바에 있으니 중복"이라는 이유였는데,
-   * **숨김의 의미가 '목록에서 치우기'가 되면서 그 전제가 깨졌다** —
-   * 숨긴 세션은 사이드바에 없고, 여기서도 안 보이면 되돌릴 길이 사라진다.
-   * (실측: 우리가 만든 세션은 false에서 0건, true에서 1건으로 나왔다)
+   * We originally filtered with false. The reasoning was "sessions we created are already in the
+   * sidebar, so this would be a duplicate" — but **that premise broke once "hidden" came to mean
+   * "removed from the list"**: a hidden session is not in the sidebar, and if it also does not
+   * show up here, there is no way back for it.
+   * (Measured: a session we created returned 0 rows with false, 1 row with true.)
    *
-   * 중복은 목록의 imported 표시로 거른다.
+   * The duplicate case is filtered out using the list's `imported` flag instead.
    */
   const rows = await sdk.listSessions({ dir: cwd, limit, includeProgrammatic: true })
   if (!Array.isArray(rows)) return []
@@ -76,7 +80,7 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
     if (!id) continue
     out.push({
       externalId: id,
-      // 제목 후보에도 하네스가 주입한 블록이 섞여 온다 (실측) — 걷어낸 뒤 고른다
+      // Title candidates can also have harness-injected blocks mixed in (measured) — strip them before picking one.
       title:
         [r.customTitle, r.summary, r.firstPrompt]
           .map((c) => (typeof c === 'string' ? cleanTitle(c) : ''))
@@ -102,7 +106,7 @@ export async function readClaudeHistory(
   for (const r of rows) {
     const role = r?.type === 'user' ? 'user' : r?.type === 'assistant' ? 'assistant' : null
     if (!role) continue
-    // 사용자 턴에서만 걷어낸다 — 모델의 말에 든 태그는 모델이 실제로 쓴 것이다
+    // Only stripped from user turns — a tag inside the model's own words is something the model actually wrote.
     const raw = textOf(r.message)
     const text = role === 'user' ? stripInjectedBlocks(raw) : raw
     if (!text) continue
@@ -112,11 +116,12 @@ export async function readClaudeHistory(
 }
 
 /**
- * Anthropic 메시지 → 화면에 보일 텍스트.
+ * Anthropic message to the text shown in the UI.
  *
- * 도구 호출/결과는 일부러 버린다. 불러오기의 목적은 **대화를 되찾는 것**이지
- * 실행 로그를 되살리는 게 아니다 — 로그까지 끌고 오면 스크롤만 길어지고
- * 정작 무슨 얘기를 했는지가 묻힌다. (도구 이름만 한 줄로 남긴다)
+ * Tool calls and results are dropped on purpose. The point of loading history is **to bring
+ * back the conversation**, not to replay the execution log — pulling the log in as well just
+ * lengthens the scroll and buries what was actually said. (Only the tool name is kept, as a
+ * single line.)
  */
 function textOf(message: unknown): string {
   if (typeof message === 'string') return message.trim()
@@ -133,12 +138,13 @@ function textOf(message: unknown): string {
 }
 
 /**
- * 대화 원본을 도구 쪽에서 지운다 (도그푸딩 "진짜로 삭제").
+ * Deletes the original conversation on the tool's side (the "actually delete" case surfaced by
+ * dogfooding).
  *
- * 파일(`~/.claude/projects/**`)을 우리가 직접 rm하지 않는 이유는 읽기와 같다 —
- * 트랜스크립트가 어디에 어떤 부속(서브에이전트 폴더 등)과 함께 사는지는 SDK의
- * 사정이고, SDK의 `deleteSession`이 자기 배치를 스스로 안다. 없으면(구버전)
- * UNSUPPORTED로 던진다 — 매니저가 이유와 함께 사람에게 알린다.
+ * The reason we do not `rm` the files (`~/.claude/projects/**`) ourselves is the same as for
+ * reading — where the transcript lives, and with which attachments (subagent folders, etc.), is
+ * the SDK's own business, and the SDK's `deleteSession` knows its own layout. If it is missing
+ * (an old version), this throws UNSUPPORTED — the manager tells the person, with the reason.
  */
 export async function deleteClaudeSession(externalId: string, cwd: string): Promise<void> {
   const sdk = await sessionApi()

@@ -2,11 +2,15 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
- * Stop이 남기는 것 (#168). CLI는 끊긴 턴을 `error_during_execution` result로 닫는다 — 그 result가 실패 표식이 되면
- * 사람이 멈춘 턴이 "Turn failed"로 기록된다. 글을 쓰는 도중에 멈추면 그 덩어리의 assistant 메시지가 오지 않는데,
- * 그때 켜진 "본문이 델타로 나갔다" 표식이 다음 턴의 통짜 응답을 버리게 해서도 안 된다.
+ * What Stop leaves behind (#168). The CLI closes an interrupted turn with an
+ * `error_during_execution` result — if that result is treated as a failure marker, a turn the
+ * person stopped on purpose gets recorded as "Turn failed". If the stop happens mid-write, the
+ * assistant message for that chunk never arrives, and the "body already went out as deltas" flag
+ * that got set at that point must not also cause the next turn's whole-response message to be
+ * dropped.
  *
- * SDK를 가짜로 바꿔 끼우고, 테스트가 CLI의 메시지를 하나씩 밀어 넣어 어댑터의 루프를 통째로 지난다.
+ * The SDK is swapped for a fake, and the test pushes the CLI's messages in one by one to run the
+ * whole of the adapter's loop.
  */
 const cli = vi.hoisted(() => {
   const inbox: unknown[] = []
@@ -55,8 +59,8 @@ async function session() {
   return { handle, events, errors: () => events.filter((e) => e.type === 'error') }
 }
 
-describe('Claude에서 턴을 멈추면 (#168)', () => {
-  it('끊긴 턴의 error_during_execution은 실패로 남지 않는다 — 다른 이유의 같은 결말은 지금처럼 실패다', async () => {
+describe('stopping a turn in Claude (#168)', () => {
+  it('does not leave an interrupted error_during_execution as a failure — the same ending for another reason is still a failure', async () => {
     const { handle, events, errors } = await session()
     handle.send('긴 일을 해 줘')
     cli.push(delta('하는 중'))
@@ -68,7 +72,7 @@ describe('Claude에서 턴을 멈추면 (#168)', () => {
     expect(errors()).toEqual([])
     expect(events.at(-1)).toMatchObject({ type: 'state_change', state: 'waiting_input', reason: 'interrupted' })
 
-    // 멈추지 않은 턴의 같은 결말은 실패다 — 표시는 한 번만 쓰인다
+    // The same ending for a turn that was not stopped is a failure — the flag is only consumed once.
     handle.send('다시')
     cli.push(interrupted)
     await tick()
@@ -76,7 +80,7 @@ describe('Claude에서 턴을 멈추면 (#168)', () => {
     await handle.dispose()
   })
 
-  it('쉬는 세션에서 누른 Stop은 다음 턴의 진짜 실패를 삼키지 않는다', async () => {
+  it('pressing Stop on an idle session does not swallow a real failure on the next turn', async () => {
     const { handle, errors } = await session()
     handle.interrupt()
     handle.send('해 줘')
@@ -86,16 +90,16 @@ describe('Claude에서 턴을 멈추면 (#168)', () => {
     await handle.dispose()
   })
 
-  it('글을 쓰는 도중에 멈춰도 다음 턴의 통짜 응답은 화면에 나온다', async () => {
+  it('a whole-response message on the next turn still shows up in the UI, even after stopping mid-write', async () => {
     const { handle, events } = await session()
     handle.send('길게 써 줘')
     cli.push(delta('반쯤 쓴 글'))
     await tick()
     handle.interrupt()
-    cli.push(interrupted) // 부분 블록의 assistant 메시지는 오지 않는다
+    cli.push(interrupted) // The assistant message for the partial block never arrives.
     await tick()
 
-    // 델타 없이 오는 통짜 응답 (/usage 같은 로컬 응답)
+    // A whole-response message that arrives without any deltas (e.g., a local response like /usage).
     handle.send('/usage')
     cli.push({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: '사용량 42%' }] } })
     await tick()

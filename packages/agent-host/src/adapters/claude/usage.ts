@@ -1,19 +1,21 @@
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
 
 /**
- * Claude 사용량·한도 (FR-9).
+ * Claude usage and limits (FR-9).
  *
- * **구독 한도만 다룬다.** extra_usage(추가 결제 크레딧)는 범위 밖이라 읽지 않는다.
+ * **Only subscription limits are handled here.** `extra_usage` (extra paid credits) is out of
+ * scope and is not read.
  *
- * 이 API는 SDK가 이름으로 불안정을 표시해 두었다
- * (usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET).
- * 그래도 쓰는 이유: 파일을 뒤지는 것보다 낫다. 사라지면 호출이 던지므로 우리가 **알 수 있고**,
- * 그때는 그 카드만 접으면 된다. 조용히 틀린 값을 보여주는 쪽이 훨씬 나쁘다.
+ * The SDK marks this API as unstable in its own name
+ * (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`).
+ * We use it anyway, because it is still better than scraping files. If it disappears, the call
+ * throws, so we **find out**, and at that point we only need to collapse that one card. Silently
+ * showing a wrong number would be far worse.
  *
- * 실측한 창 (max 플랜):
- *   kind=session      group=session   8%  → 5시간 창
- *   kind=weekly_all   group=weekly   15%  → 주간 전체
- *   kind=weekly_scoped group=weekly   6%  → 주간 모델별
+ * Measured windows (max plan):
+ *   kind=session       group=session   8%  → 5-hour window
+ *   kind=weekly_all    group=weekly   15%  → weekly, all models
+ *   kind=weekly_scoped group=weekly    6%  → weekly, per model
  */
 
 const LABEL: Record<string, string> = {
@@ -33,7 +35,7 @@ type RawLimit = {
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
-/** 응답 → 우리 모양. 도구 타입을 밖으로 내보내지 않기 위해 여기서 끝낸다 */
+/** Response shape to our shape. This is the boundary that keeps the tool's type from leaking out. */
 export function toSnapshot(raw: unknown): UsageSnapshot {
   const res = (raw ?? {}) as { subscription_type?: unknown; rate_limits?: { limits?: unknown } | null }
   const limits = Array.isArray(res.rate_limits?.limits) ? (res.rate_limits.limits as RawLimit[]) : []
@@ -56,12 +58,12 @@ export function toSnapshot(raw: unknown): UsageSnapshot {
   return {
     plan: str(res.subscription_type),
     windows,
-    // Claude의 플랜 한도에는 일간 창이 없다 (실측). 비워 두면 UI가 그 줄을 접는다.
+    // Claude's plan limits have no daily window (measured). Leaving it empty makes the UI collapse that row.
     daily: [],
   }
 }
 
-/** SDK Query 중 사용량 부분만 */
+/** Only the usage part of the SDK Query. */
 export type UsageQuery = {
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<unknown>
 }

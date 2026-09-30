@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
- * auto 세션의 선택지 (#171). auto는 canUseTool을 넘기지 않아서, 모델이 AskUserQuestion으로 물어도 선택지 카드가
- * 뜨지 않았다. 콜백을 넘기되 선택지만 받고, 나머지(설정 파일의 ask 규칙에 걸린 요청)는 예전의 auto처럼 거절하는지
- * 본다 — 실측은 scripts/probe-auto-callback.mts. SDK를 가짜로 바꿔 끼우고 어댑터가 넘긴 옵션을 직접 본다.
+ * Choice cards for auto sessions (#171). Auto did not pass a `canUseTool` callback, so when the
+ * model asked via AskUserQuestion no choice card appeared. This checks that the callback is now
+ * passed, that it only accepts question choices, and that everything else (a request caught by
+ * an `ask` rule in the settings file) is still denied the way old-style auto denied it — measured
+ * in scripts/probe-auto-callback.mts. The SDK is swapped for a fake and the options the adapter
+ * passed are inspected directly.
  */
 type CanUseTool = (name: string, input: Record<string, unknown>) => Promise<{ behavior: string; message?: string }>
 const sdk = vi.hoisted(() => ({ options: null as null | { canUseTool?: CanUseTool; permissionMode?: string } }))
@@ -13,7 +16,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: ({ options }: { options: { canUseTool?: CanUseTool; permissionMode?: string } }) => {
     sdk.options = options
     return {
-      // eslint-disable-next-line require-yield -- CLI가 아무 말도 하지 않는 스트림 — 이 시험은 콜백만 부른다
+      // eslint-disable-next-line require-yield -- a stream where the CLI says nothing; this test only calls the callback
       async *[Symbol.asyncIterator]() {
         await new Promise(() => {})
       },
@@ -27,8 +30,8 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 
 const { ClaudeAdapter } = await import('./index.js')
 
-describe('auto 세션의 AskUserQuestion (#171)', () => {
-  it('선택지는 카드로 올라오고, 권한 모드는 그대로 bypassPermissions다', async () => {
+describe('AskUserQuestion in auto sessions (#171)', () => {
+  it('question choices come up as a card, and the permission mode stays bypassPermissions', async () => {
     const events: NormalizedEvent[] = []
     const handle = await new ClaudeAdapter().createSession({ sessionId: 's1', cwd: '/x', permissionPreset: 'auto' }, (e) => events.push(e))
     expect(sdk.options?.permissionMode).toBe('bypassPermissions')
@@ -41,7 +44,7 @@ describe('auto 세션의 AskUserQuestion (#171)', () => {
     await handle.dispose()
   })
 
-  it('콜백에 온 나머지 요청은 예전의 auto처럼 거절한다 — 카드도 허용도 없다', async () => {
+  it('denies every other request that reaches the callback, as old-style auto did — no card, no approval', async () => {
     const events: NormalizedEvent[] = []
     const handle = await new ClaudeAdapter().createSession({ sessionId: 's2', cwd: '/x', permissionPreset: 'auto' }, (e) => events.push(e))
     const r = await Promise.race([

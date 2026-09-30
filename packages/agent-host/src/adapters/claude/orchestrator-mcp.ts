@@ -14,22 +14,25 @@ import {
 import type { ToolProfile } from '../../apps/contract.js'
 
 /**
- * 오케스트레이터의 도구를 Claude에게 붙인다 (FR-11).
+ * Attaches the orchestrator's tools to Claude (FR-11).
  *
- * **인프로세스 MCP다** — 별도 프로세스도, 포트도, 인증도 없다. host 안의 함수가
- * 그대로 도구가 된다. 그래서 "이 앱이 관리하는 세션만"이 규칙이 아니라 구조다:
- * 이 도구들이 볼 수 있는 것은 넘겨받은 OrchestratorTools가 전부고,
- * 거기엔 파일도 프로젝트도 다른 도구도 없다.
+ * **This is an in-process MCP** — no separate process, no port, no authentication. A function
+ * inside the host becomes the tool as-is. So "only the sessions this app manages" is not a rule
+ * we enforce, it is structural: everything these tools can see is whatever `OrchestratorTools`
+ * was handed, and that object contains no files, no projects, no other tools.
  *
- * **도구의 이름·설명·실행은 여기서 정하지 않는다** (sessions/orchestrator-tools.ts).
- * Codex는 다리를 거쳐 같은 것을 쓰므로, 정의가 둘이면 같은 앱인데 도구가 달라진다.
+ * **The tools' names, descriptions and execution are not decided here** (see
+ * sessions/orchestrator-tools.ts). Codex reaches the same definitions through a bridge, so if
+ * there were two definitions the same app would end up with different tools depending on which
+ * adapter is running.
  *
- * SDK 타입은 이 파일 밖으로 나가지 않는다 (anti-corruption).
+ * SDK types do not leave this file (anti-corruption).
  */
 
 /**
- * 서버 이름은 도구 정의 옆에서 온다 (sessions/orchestrator-tools.ts) — 승인 예외도,
- * 제안된 이름을 막는 검사도 같은 글자를 봐야 한다 (#93).
+ * The server name comes from next to the tool definitions (sessions/orchestrator-tools.ts) —
+ * both the approval exception and the check that blocks a proposed name have to look at the
+ * same string (#93).
  */
 export { ORCHESTRATOR_MCP_NAME }
 
@@ -38,13 +41,14 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
     name: ORCHESTRATOR_MCP_NAME,
     version: '1',
     /*
-     * **미루지 않는다.**
+     * **Do not defer.**
      *
-     * SDK는 기본적으로 MCP 도구를 도구 검색(ToolSearch) 뒤로 미룬다. 실측에서 그 탓에
-     * 오케스트레이터가 list_sessions만 찾아 부르고 send_to_session은 보지도 못한 채
-     * 아무 말 없이 턴을 끝냈다 — 목록만 읽고 일은 안 시킨 셈이다.
+     * By default the SDK defers MCP tools behind tool search (ToolSearch). Measured: because of
+     * that, the orchestrator would look up and call only `list_sessions`, never even see
+     * `send_to_session`, and end the turn silently — it read the list and never handed out the
+     * work.
      *
-     * 오케스트레이터에게 이 도구들은 곁다리가 아니라 존재 이유다.
+     * For the orchestrator these tools are not a side feature; they are the reason it exists.
      */
     alwaysLoad: true,
     instructions:
@@ -52,8 +56,8 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
       : profile === 'scoped' ? SCOPED_INSTRUCTIONS
       : profile === 'builder' ? BUILDER_INSTRUCTIONS
       : ORCHESTRATOR_INSTRUCTIONS,
-    // 묶음이 허용하는 것만 노출한다 (#69) — 실행 쪽도 같은 판정을 한 번 더 한다.
-    // 앱 도구(#81)도 같은 목록에 합류한다: 실행은 어차피 runOrchestratorTool이 명부로 라우팅한다
+    // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
+    // App tools (#81) join the same list: execution routes through runOrchestratorTool's registry either way.
     tools: [
       ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)),
       ...appToolEntries(profile),

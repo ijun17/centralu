@@ -7,12 +7,14 @@ import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-
 import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../contract.js'
 
 /**
- * Claude 세션에 붙은 외부 앱 (M4 A-5) — 앱마다 인프로세스 대리 서버.
+ * An external app attached to a Claude session (M4 A-5) — one in-process proxy server per app.
  *
- * 가짜는 `query` 하나다: CLI를 띄우지 않고 SDK에 넘긴 옵션과 `setMcpServers` 호출을 적는다.
- * 대리 서버는 **진짜** `createSdkMcpServer`로 만들어지고, 테스트가 CLI 자리에 서서 JSON-RPC를
- * 직접 보낸다 — 앱 쪽은 진짜 런타임과 진짜 앱 프로세스(픽스처)다. 그래서 "CLI가 부른 도구가
- * 런타임의 한 길을 세션 호출자로 지나 기록된다"를 끝에서 끝까지 본다.
+ * The only fake here is `query`: it never starts the CLI, and just records the options passed to
+ * the SDK and any `setMcpServers` calls. The proxy server is built with the **real**
+ * `createSdkMcpServer`, and the test stands in for the CLI, sending JSON-RPC directly — on the
+ * app side, everything is a real runtime and a real app process (a fixture). So this checks, end
+ * to end, that "a tool the CLI calls travels the runtime's one path, tagged as a session caller,
+ * and gets recorded."
  */
 
 type Sent = { jsonrpc: '2.0'; id?: number; method?: string; result?: Record<string, unknown>; error?: unknown }
@@ -20,7 +22,7 @@ type Sent = { jsonrpc: '2.0'; id?: number; method?: string; result?: Record<stri
 const captured = vi.hoisted(() => ({
   options: null as Record<string, unknown> | null,
   setCalls: [] as Record<string, unknown>[],
-  /** CLI가 내보낼 메시지 — 시험이 넣으면 스트림이 흘린다 (대화 안 화면의 짝짓기, B-1) */
+  /** Messages the CLI would emit — the stream yields them once the test pushes them in (conversation-view matching, B-1). */
   feed: [] as unknown[],
   wake: null as (() => void) | null,
 }))
@@ -30,7 +32,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
   query: (args: { options: Record<string, unknown> }) => {
     captured.options = args.options
     return {
-      // 시험이 넣은 메시지만 흘리고, 없으면 조용히 기다린다
+      // Only yields messages the test pushed in, and waits quietly when there are none.
       async *[Symbol.asyncIterator]() {
         for (;;) {
           const next = captured.feed.shift()
@@ -64,14 +66,14 @@ const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { t
 
 async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) {
   handle = await new ClaudeAdapter().createSession(
-    // 프로젝트의 앱은 신뢰한 프로젝트에만 붙는다(결정 4) — 매니저가 넘기는 것과 같게 그 세션은 신뢰한 프로젝트의 것이다
+    // A project's apps attach only in a trusted project (decision 4) — this session belongs to a trusted project, matching what the manager passes.
     { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), ...over },
     () => {},
   )
   return handle
 }
 
-/** 대리 서버에 CLI처럼 붙는다 — SDK의 v1 서버가 받는 전송의 모양 그대로 */
+/** Attaches to the proxy server the way the CLI would — exactly the transport shape the SDK's v1 server receives. */
 async function connect(server: string) {
   const sent: Sent[] = []
   const pipe = {
@@ -109,7 +111,7 @@ beforeEach(() => {
   w.plant('p1', 'tasks')
   w.plant('user', 'helper')
   w.rt.refresh()
-  // 짝을 못 찾은 호출(B-1)을 오래 기다리지 않게 — 제품의 값은 5초다
+  // So an unmatched call (B-1) does not wait long — the product's own value is 5 seconds.
   hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 300 })
 })
 
@@ -120,16 +122,16 @@ afterEach(async () => {
   await w.dispose()
 })
 
-describe('앱마다 인프로세스 대리 서버', () => {
-  it('붙은 앱마다 app-<id> 서버가 실리고, 일반 워커는 여전히 사용자 설정을 읽는다', async () => {
+describe('one in-process proxy server per app', () => {
+  it('an app-<id> server is loaded per attached app, and an ordinary worker still reads the user\'s own settings', async () => {
     await start(WORKER)
     expect(Object.keys(servers()).sort()).toEqual(['app-notes', 'app-tasks'])
     expect(servers()['app-notes']).toMatchObject({ type: 'sdk', name: 'app-notes' })
-    // 오케스트레이터만 파일의 지시를 닫는다 — 앱이 붙었다고 (신뢰한 프로젝트) 워커의 설정 로드가 바뀌지 않는다
+    // Only the orchestrator turns off reading settings files — an app being attached (in a trusted project) never changes a worker's own settings load.
     expect(captured.options).not.toHaveProperty('settingSources')
   })
 
-  it('CLI의 tools/list는 에이전트 도구만 받는다 — 설명·주석·스키마는 앱이 말한 그대로', async () => {
+  it('the CLI\'s tools/list receives only the agent-facing tools — with description, annotations and schema exactly as the app declared them', async () => {
     await start(WORKER)
     const { request } = await connect('app-notes')
     const { tools } = (await request('tools/list')) as { tools: Record<string, unknown>[] }
@@ -148,7 +150,7 @@ describe('앱마다 인프로세스 대리 서버', () => {
     })
   })
 
-  it('CLI의 tools/call은 런타임의 한 길을 세션 호출자로 지나 기록된다', async () => {
+  it('the CLI\'s tools/call travels the runtime\'s one path, tagged as a session caller, and gets recorded', async () => {
     await start(WORKER)
     const { request } = await connect('app-notes')
     const out = await request('tools/call', { name: 'poke', arguments: { to: 7 } })
@@ -157,7 +159,7 @@ describe('앱마다 인프로세스 대리 서버', () => {
     const runs = w.rt.runs({ projectId: 'p1', appId: 'notes' })
     expect(runs.map((r) => [r.tool, r.callerKind, r.callerSessionId, r.status])).toEqual([['poke', 'session', 'claude-s1', 'ok']])
 
-    // 화면 전용 도구는 이름을 알아도 거절된다 — 거절도 한 줄이다
+    // A UI-only tool is rejected even if its name is known — the rejection is still recorded as one line.
     const refused = await request('tools/call', { name: 'app_only', arguments: {} })
     expect(refused).toMatchObject({ isError: true })
     expect(w.rt.runs({ projectId: 'p1', appId: 'notes' })[0]).toMatchObject({ tool: 'app_only', status: 'rejected', callerKind: 'session' })
@@ -165,17 +167,18 @@ describe('앱마다 인프로세스 대리 서버', () => {
 })
 
 /**
- * 대화 안 화면의 카드 (M4 B-1). Claude Code는 MCP 도구 호출에 그 도구 사용의 id를 싣는다
- * (`_meta["claudecode/toolUseId"]`, 설치된 CLI 바이너리에서 확인). 그 id가 대화의 `tool_call` callId다.
+ * The card in the conversation view (M4 B-1). Claude Code carries that tool use's id on an MCP
+ * tool call (`_meta["claudecode/toolUseId"]`, confirmed in the installed CLI binary). That id is
+ * the conversation's `tool_call` callId.
  */
-describe('대화 안 화면의 카드 id — Claude', () => {
+describe('the conversation-view card id — Claude', () => {
   const heard = () => {
     const ids: Promise<string | null>[] = []
     hub.onCall((c) => ids.push(c.callId))
     return ids
   }
 
-  it('CLI가 tools/call에 실은 도구 사용 id가 그 호출의 카드 id가 된다', async () => {
+  it('the tool use id the CLI carries on tools/call becomes that call\'s card id', async () => {
     const ids = heard()
     await start(WORKER)
     const { request } = await connect('app-notes')
@@ -184,7 +187,7 @@ describe('대화 안 화면의 카드 id — Claude', () => {
     expect(await ids[0]).toBe('toolu_01ABC')
   })
 
-  it('id가 실려 오지 않으면 스트림의 tool_use와 짝짓는다 — 결과가 온 카드는 짝이 되지 않는다', async () => {
+  it('matches against a tool_use from the stream when no id is carried along — a card that already has a result is not matched', async () => {
     const ids = heard()
     await start(WORKER)
     const { request } = await connect('app-notes')
@@ -192,7 +195,7 @@ describe('대화 안 화면의 카드 id — Claude', () => {
       type: 'assistant',
       message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'mcp__app-notes__poke', input: { to } }] },
     })
-    // 승인에서 거절된 호출: tool_use 뒤에 곧바로 그 결과(거절)가 온다
+    // A call denied at approval: its result (the denial) arrives right after the tool_use.
     captured.feed.push(toolUse('toolu_denied', 2), {
       type: 'user',
       message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_denied', is_error: true, content: 'denied' }] },
@@ -206,22 +209,22 @@ describe('대화 안 화면의 카드 id — Claude', () => {
   })
 })
 
-describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
+describe('an attached app changing is followed without a restart', () => {
   const last = () => captured.setCalls.at(-1) ?? null
 
-  it('앱이 생기면 새 집합으로 setMcpServers를 부른다 — 이미 붙은 서버는 같은 객체로', async () => {
+  it('calls setMcpServers with the new set when an app appears — an already-attached server keeps the same object', async () => {
     await start(WORKER)
     const notes = servers()['app-notes']
-    // 폴더 감시가 부르는 다시 훑기를 직접 부른다 (fs 이벤트의 늦음을 기다리지 않는다 — session-apps.test.ts 참고)
+    // Calls the rescan that folder watching would trigger, directly (does not wait for fs-event lag — see session-apps.test.ts).
     w.plant('p1', 'fresh')
     w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null && 'app-fresh' in s)
     expect(Object.keys(last()!).sort()).toEqual(['app-fresh', 'app-notes', 'app-tasks'])
-    // 같은 객체여야 SDK가 연결을 그대로 둔다 — 새 객체면 무시되거나(같은 이름) 끊겼다 다시 붙는다
+    // The object has to stay the same for the SDK to keep the connection as-is — a new object either gets ignored (same name) or drops and reattaches.
     expect(last()!['app-notes']).toBe(notes)
   })
 
-  it('앱이 사라지면 그 서버를 뺀 집합으로 부른다', async () => {
+  it('calls with the server excluded from the set when an app disappears', async () => {
     await start(WORKER)
     rmSync(join(w.roots.p1, '.centralu', 'apps', 'tasks'), { recursive: true, force: true })
     w.rt.refresh()
@@ -229,7 +232,7 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
     expect(Object.keys(last()!)).toEqual(['app-notes'])
   })
 
-  it('신뢰가 뒤집히면 앱이 모두 떨어지고, 되돌리면 새 대리 서버로 다시 붙는다', async () => {
+  it('when trust flips, every app drops, and reverting it reattaches with a fresh proxy server', async () => {
     await start(WORKER)
     const before = servers()['app-notes']
     w.trust.p1 = false
@@ -241,15 +244,16 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
     w.rt.refresh()
     await kit.until(() => captured.setCalls.length, (n) => n === 2)
     expect(Object.keys(last()!).sort()).toEqual(['app-notes', 'app-tasks'])
-    // SDK가 뗀 서버는 다시 연결할 수 없다 — 다시 붙는 앱은 새 객체다
+    // A server the SDK has detached cannot be reconnected — an app that reattaches is a new object.
     expect(last()!['app-notes']).not.toBe(before)
   })
 
   /*
-   * 사람이 승인한 MCP 서버도 사용자 폴더의 앱이다(A-7) — 여기서 `second`가 승인 직후의 그 앱이다.
-   * 날것으로 실리는 서버는 없고, 집합에는 centralu와 앱 대리 서버만 있다.
+   * A server the person approved is also an app in the user's own folder (A-7) — `second` here is
+   * exactly that app, right after approval. No server is ever loaded raw; the set contains only
+   * centralu and app proxy servers.
    */
-  it('오케스트레이터의 집합 바꾸기에는 centralu가 처음 그대로, 사용자 폴더 앱과 함께 실린다', async () => {
+  it('when the orchestrator\'s set changes, centralu stays the original object, alongside the user-folder apps', async () => {
     const tools = {} as OrchestratorTools
     await start({ id: 'orch-1', kind: 'orchestrator', projectId: null }, {
       orchestratorTools: tools,
@@ -262,11 +266,11 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
     w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null && 'app-second' in s)
     expect(Object.keys(last()!).sort()).toEqual(['app-helper', 'app-second', 'centralu'])
-    // 빠뜨리면 SDK가 오케스트레이터 서버를 떼어 낸다 — 같은 객체가 그대로 실려야 한다
+    // Omitting it would make the SDK drop the orchestrator server — the same object has to be included every time.
     expect(last()!['centralu']).toBe(centralu)
   })
 
-  it('붙은 앱의 도구만 바뀌면 서버를 갈지 않고 tools/list_changed를 보낸다', async () => {
+  it('sends tools/list_changed instead of swapping the server when only an attached app\'s tools change', async () => {
     const extra = join(w.root, 'extra.json')
     w.plant('p1', 'grows', ['--mode', 'attach', '--extra-from', extra])
     w.rt.refresh()
@@ -287,11 +291,13 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
 })
 
 /**
- * 앱 도구의 승인 (결정 5): 읽기 전용 주석이 있는 도구는 묻지 않고, 나머지는 세션 프리셋을 따른다.
- * 판정은 붙은 앱이 **실제로 말한** 주석으로 한다 — 이름이 `app-`로 시작한다고 믿어 주지 않는다.
+ * Approval for app tools (decision 5): a tool with a read-only annotation is never asked about,
+ * and everything else follows the session preset. The judgment is made using the annotation the
+ * attached app **actually declared** — a name simply starting with `app-` is never trusted on its
+ * own.
  */
-describe('앱 도구의 승인 — 읽기 전용 × 프리셋', () => {
-  /** 실제 승인 콜백. 200ms 안에 답이 없으면 사람에게 물은 것이다 (승인 카드가 떴다) */
+describe('approval of app tools — read-only x preset', () => {
+  /** The real approval callback. If there is no answer within 200ms, it asked the person (the approval card came up). */
   async function decide(toolName: string): Promise<unknown> {
     const canUseTool = captured.options?.canUseTool as ((n: string, i: Record<string, unknown>) => Promise<unknown>) | undefined
     expect(typeof canUseTool).toBe('function')
@@ -300,50 +306,52 @@ describe('앱 도구의 승인 — 읽기 전용 × 프리셋', () => {
   const ALLOW = { behavior: 'allow', updatedInput: { to: 1 } }
 
   for (const preset of ['safe', 'normal'] as const) {
-    it(`${preset}: 읽기 전용 도구는 묻지 않고, 나머지 앱 도구는 사람에게 묻는다`, async () => {
+    it(`${preset}: a read-only tool is never asked about, and every other app tool asks the person`, async () => {
       const h = await start(WORKER, { permissionPreset: preset })
-      // 모델이 목록을 받은 뒤의 상황 — CLI가 tools/list를 부른 것과 같다
+      // The situation once the model has received the list — the same as the CLI having called tools/list.
       await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-notes')
 
       expect(await decide('mcp__app-notes__peek')).toEqual(ALLOW)
       expect(await decide('mcp__app-notes__poke')).toBe('asked-the-human')
-      // 주석이 없는 도구도 읽기 전용이 아니다
+      // A tool with no annotation at all is also not read-only.
       expect(await decide('mcp__app-notes__echo')).toBe('asked-the-human')
     })
   }
 
   /*
-   * auto는 bypassPermissions라 앱 도구가 콜백에 오지 않는다. 콜백은 선택지(AskUserQuestion) 때문에 넘기고(#171), 설정 파일의
-   * ask 규칙에 걸려 콜백에 온 요청은 콜백이 없던 예전처럼 거절한다 — 사람에게 묻지도, 대신 허용하지도 않는다.
+   * Auto is bypassPermissions, so app tools never reach the callback. The callback is still
+   * passed for choice questions (AskUserQuestion) (#171), and a request that reaches the callback
+   * because it hit an `ask` rule in the settings file is denied the way it was before there was a
+   * callback at all — never asking the person, and never approving it on their behalf either.
    */
-  it('auto: 앱 도구를 포함해 아무것도 묻지 않는다 (bypassPermissions — 콜백에 와도 카드 없이 거절)', async () => {
+  it('auto: asks about nothing, including app tools (bypassPermissions — a request reaching the callback is denied with no card)', async () => {
     await start(WORKER, { permissionPreset: 'auto' })
     expect(captured.options?.permissionMode).toBe('bypassPermissions')
     expect(await decide('mcp__app-notes__echo')).toMatchObject({ behavior: 'deny' })
   })
 
-  it('이름만 앱을 흉내 내는 도구는 통과하지 못한다 — 붙지 않은 앱, 모르는 목록, 칸을 더 붙인 이름', async () => {
+  it('a tool that only imitates an app\'s name does not pass — an unattached app, an unknown list, or a name with an extra segment', async () => {
     await start(WORKER, { permissionPreset: 'normal' })
-    // 목록을 아직 모른다 — 모델이 우리 목록에서 고른 도구가 아니다
+    // The list is not known yet — this is not a tool the model picked from our own list.
     expect(await decide('mcp__app-notes__peek')).toBe('asked-the-human')
     await w.rt.tools({ projectId: 'p1', appId: 'notes' })
-    // 다른 프로젝트의 앱은 이 세션에 붙지 않았다 (읽기 전용 도구가 있어도)
+    // An app from a different project is not attached to this session (even with a read-only tool).
     await w.rt.tools({ projectId: 'p2', appId: 'other' }).catch(() => {})
     expect(await decide('mcp__app-other__peek')).toBe('asked-the-human')
-    // 칸을 하나 더 붙여 남의 서버 이름 뒤에 숨은 도구
+    // A tool hiding behind someone else's server name with one extra segment appended.
     expect(await decide('mcp__app-notes__peek__x')).toBe('asked-the-human')
-    // 이제 목록을 안다 — 같은 이름이 통과한다
+    // Now the list is known — the same name passes.
     expect(await decide('mcp__app-notes__peek')).toEqual(ALLOW)
   })
 })
 
 /**
- * 오래 걸리는 호출 — Claude의 인프로세스 서버는 호출 상한이 사실상 없다(SDK 기본 약 28시간, sdk.d.ts
- * `createSdkMcpServer`). 그래서 먼저 돌려주지 않고 기다린다. `run_status`는 그래도 목록에 있다 —
- * 두 도구가 같은 목록을 본다.
+ * A slow call — Claude's in-process server effectively has no call timeout (the SDK's default is
+ * about 28 hours, sdk.d.ts `createSdkMcpServer`). So it waits, rather than returning early.
+ * `run_status` still shows up in the list — both tools see the same list.
  */
-describe('오래 걸리는 호출 — Claude는 기다린다', () => {
-  it('run_status가 목록에 읽기 전용으로 오르고, 승인 없이 불린다', async () => {
+describe('a slow call — Claude waits', () => {
+  it('run_status is listed as read-only and gets called without approval', async () => {
     await start(WORKER, { permissionPreset: 'safe' })
     const { request } = await connect('app-notes')
     const { tools } = (await request('tools/list')) as { tools: { name: string; annotations?: Record<string, unknown> }[] }
@@ -352,14 +360,14 @@ describe('오래 걸리는 호출 — Claude는 기다린다', () => {
     expect(await canUseTool('mcp__app-notes__run_status', { run_id: 'run_x' })).toEqual({ behavior: 'allow', updatedInput: { run_id: 'run_x' } })
   })
 
-  it('240초가 지나도 "아직 도는 중"으로 먼저 돌려주지 않는다 — 끝날 때 결과가 온다', async () => {
+  it('still does not return early with "still running" even after 240 seconds — the result arrives when it finishes', async () => {
     await start(WORKER)
     const { request, sent } = await connect('app-notes')
     await request('tools/list')
     const realSetTimeout = globalThis.setTimeout
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      // CLI처럼 호출을 보낸다 — 답은 sent에 온다
+      // Sends the call the way the CLI would — the answer arrives in sent.
       const pipe = (servers()['app-notes'] as unknown as { instance: { server: { transport: { onmessage(m: unknown): void } } } }).instance.server.transport
       pipe.onmessage({ jsonrpc: '2.0', id: 900, method: 'tools/call', params: { name: 'hold', arguments: {} } })
       const deadline = performance.now() + 15_000
@@ -367,7 +375,7 @@ describe('오래 걸리는 호출 — Claude는 기다린다', () => {
         if (performance.now() > deadline) throw new Error('the app never started holding')
         await new Promise((r) => realSetTimeout(r, 10))
       }
-      // 240초도, Codex의 300초도 넘긴다. 10분에는 런타임의 host → 앱 울타리(callTimeoutMs)가 선다
+      // This outlasts both Claude's 240 seconds and Codex's 300 seconds. At 10 minutes, the runtime's own host-to-app boundary (callTimeoutMs) kicks in.
       await vi.advanceTimersByTimeAsync(6 * 60_000)
       expect(sent.find((m) => m.id === 900)).toBeUndefined()
     } finally {
@@ -381,11 +389,12 @@ describe('오래 걸리는 호출 — Claude는 기다린다', () => {
 })
 
 /**
- * 세션을 멈추거나 닫으면 그 세션의 앱 호출이 멈춘다 (M4 A-5). CLI가 턴을 끊으며 도구 호출에
- * 취소를 보내는지는 SDK가 약속하지 않는다 — 가짜 query의 interrupt는 아무것도 하지 않으므로,
- * 여기서 멈춘다면 어댑터가 직접 끊은 것이다.
+ * Stopping or closing a session stops that session's app calls (M4 A-5). The SDK makes no promise
+ * about whether the CLI sends a cancellation to a tool call when it interrupts a turn — the fake
+ * `query`'s `interrupt` does nothing at all, so if a call stops here, the adapter itself cut it
+ * off directly.
  */
-describe('멈추면 앱 호출도 멈춘다 — Claude', () => {
+describe('stopping stops app calls too — Claude', () => {
   async function holdViaCli() {
     const { request, sent } = await connect('app-notes')
     await request('tools/list')
@@ -395,7 +404,7 @@ describe('멈추면 앱 호출도 멈춘다 — Claude', () => {
     return sent
   }
 
-  it('interrupt는 도는 앱 호출을 취소한다 — 앱이 취소를 받고 CLI는 실패로 받는다', async () => {
+  it('interrupt cancels an app call in progress — the app receives the cancellation, and the CLI sees a failure', async () => {
     const h = await start(WORKER)
     const sent = await holdViaCli()
     h.interrupt()
@@ -405,7 +414,7 @@ describe('멈추면 앱 호출도 멈춘다 — Claude', () => {
     expect(w.rt.runs({ projectId: 'p1', appId: 'notes' })[0]).toMatchObject({ tool: 'hold', status: 'cancelled' })
   })
 
-  it('dispose도 도는 앱 호출을 취소한다', async () => {
+  it('dispose also cancels an app call in progress', async () => {
     const h = await start(WORKER)
     await holdViaCli()
     await h.dispose()

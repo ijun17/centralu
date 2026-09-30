@@ -1,6 +1,6 @@
 /**
- * 계약 테스트 (T3-2): 실 SDK 없이, 스파이크에서 관찰한 실제 메시지 형태를 픽스처로 검증한다.
- * SDK 형식이 바뀌면 여기가 먼저 깨진다.
+ * Contract tests (T3-2): without the real SDK, this checks against fixtures of the actual message
+ * shapes observed during the spike. If the SDK's format changes, this is what breaks first.
  */
 import { describe, expect, it } from 'vitest'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
@@ -8,7 +8,7 @@ import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary }
 const SID = 's1'
 const n = (msg: unknown) => normalizeMessage(msg, SID)
 
-describe('스트리밍 델타', () => {
+describe('streaming deltas', () => {
   it('stream_event content_block_delta → message_delta', () => {
     const out = n({
       type: 'stream_event',
@@ -18,10 +18,11 @@ describe('스트리밍 델타', () => {
   })
 
   /*
-   * thinking (#58 실측): 본문은 항상 ""(암호화)이고 estimated_tokens 증분만 온다.
-   * 그래서 진행 사실(estTokens)만 이벤트가 된다 — 빈 델타는 여전히 아무것도 아니다.
+   * Thinking (measured in #58): the body is always "" (encrypted), and only an
+   * `estimated_tokens` increment arrives. So only the fact of progress (`estTokens`) becomes an
+   * event — an empty delta is still nothing at all.
    */
-  it('thinking_delta의 토큰 추정치는 reasoning_delta가 된다', () => {
+  it('a thinking_delta\'s token estimate becomes a reasoning_delta', () => {
     const out = n({
       type: 'stream_event',
       event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '', estimated_tokens: 150 } },
@@ -29,7 +30,7 @@ describe('스트리밍 델타', () => {
     expect(out).toEqual([{ type: 'reasoning_delta', sessionId: SID, estTokens: 150 }])
   })
 
-  it('thinking에 텍스트가 실려 오는 날이 오면 그대로 흐른다', () => {
+  it('if thinking ever arrives with text, it flows through as-is', () => {
     const out = n({
       type: 'stream_event',
       event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '경로를 따져보자', estimated_tokens: 10 } },
@@ -37,36 +38,38 @@ describe('스트리밍 델타', () => {
     expect(out).toEqual([{ type: 'reasoning_delta', sessionId: SID, text: '경로를 따져보자', estTokens: 10 }])
   })
 
-  it('내용 없는 델타는 무시한다', () => {
+  it('ignores a delta with no content', () => {
     expect(n({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta' } } })).toEqual([])
   })
 })
 
 /*
- * 델타 없이 오는 본문 (도그푸딩: "클코 사용량 스킬 메시지로 안되는데?").
+ * A body that arrives with no deltas (dogfooding: "the CC usage skill's message isn't showing
+ * up?").
  *
- * /usage처럼 CLI가 로컬에서 합성하는 답은 stream_event가 0개고 통짜 assistant
- * 메시지 하나다 (실측 — 델타 0 · 본문 1,046자). 본문을 델타로만 그리면 명령은
- * 실행됐는데 답이 화면에 영영 안 나타난다. 반대로 스트리밍된 턴에서 또 내면
- * 같은 글이 두 번 붙는다 — textStreamed 플래그가 그 갈림길이다.
+ * An answer the CLI synthesizes locally, like /usage, produces zero stream_events and one
+ * whole-body assistant message (measured — 0 deltas, a 1,046-character body). Rendering the body
+ * only from deltas means the command ran but the answer never shows up in the UI at all.
+ * Conversely, emitting it again on a turn that was streamed appends the same text twice — the
+ * `textStreamed` flag is the fork in that road.
  */
-describe('델타 없이 온 assistant 본문', () => {
+describe('an assistant body that arrives with no deltas', () => {
   const assistant = {
     type: 'assistant',
     message: { role: 'assistant', content: [{ type: 'text', text: '사용량: 18%' }] },
   }
 
-  it('델타가 없었으면 통짜 본문을 message_delta로 낸다 — /usage의 답이 이 길로 온다', () => {
+  it('emits the whole body as a message_delta when there were no deltas — this is the path /usage\'s answer takes', () => {
     const events = normalizeMessage(assistant, SID, { textStreamed: false })
     expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: '사용량: 18%' })
   })
 
-  it('델타로 이미 나간 본문은 또 내지 않는다 — 두 번 붙으면 그게 새 버그다', () => {
+  it('does not emit a body again once it already went out as deltas — appearing twice would be a new bug', () => {
     const events = normalizeMessage(assistant, SID, { textStreamed: true })
     expect(events.filter((e) => e.type === 'message_delta')).toEqual([])
   })
 
-  it('로컬 명령 출력(system/local_command_output)도 본문이다 — 같은 부류의 일반 채널', () => {
+  it('local command output (system/local_command_output) is also a body — the same generalized channel', () => {
     const events = normalizeMessage(
       { type: 'system', subtype: 'local_command_output', content: '명령 출력 내용' },
       SID,
@@ -74,7 +77,7 @@ describe('델타 없이 온 assistant 본문', () => {
     expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: '명령 출력 내용' })
   })
 
-  it('active_goal → goal 이벤트 (2026-09-07 — /goal의 Stop 훅 판정)', () => {
+  it('active_goal becomes a goal event (2026-09-07 — the judgment behind /goal\'s Stop hook)', () => {
     const events = normalizeMessage(
       {
         type: 'active_goal',
@@ -92,14 +95,14 @@ describe('델타 없이 온 assistant 본문', () => {
     ])
   })
 
-  it('active_goal value=null → 걷힘 통지 (달성 포함)', () => {
+  it('active_goal with value=null is a clear notification (including having been achieved)', () => {
     const events = normalizeMessage({ type: 'active_goal', value: null }, SID)
     expect(events).toEqual([{ type: 'goal', sessionId: SID, goal: null }])
   })
 })
 
-describe('도구 호출 (스파이크 실제 형태)', () => {
-  it('Bash tool_use → tool_call (명령 전문이 title)', () => {
+describe('tool calls (the actual shape from the spike)', () => {
+  it('a Bash tool_use becomes a tool_call, with the full command text as its title', () => {
     const out = n({
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'npm run build' } }] },
@@ -107,7 +110,7 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
     expect(out[0]).toMatchObject({ type: 'tool_call', callId: 'tu1', summary: { tool: 'Bash', title: 'npm run build', readOnly: false } })
   })
 
-  it('Write tool_use → tool_call + files_touched (충돌 감지용)', () => {
+  it('a Write tool_use becomes a tool_call plus files_touched (for conflict detection)', () => {
     const out = n({
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'tu2', name: 'Write', input: { file_path: '/tmp/hello.txt', content: 'hi' } }] },
@@ -116,7 +119,7 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
     expect(out[1]).toMatchObject({ type: 'files_touched', paths: ['/tmp/hello.txt'] })
   })
 
-  it('Read는 만진 파일이 아니다 — files_touched를 내지 않는다 (#185)', () => {
+  it('Read does not count as touching a file — it emits no files_touched (#185)', () => {
     const out = n({
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'tu3', name: 'Read', input: { file_path: '/repo/src/a.ts' } }] },
@@ -124,12 +127,12 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
     expect(out.map((e) => e.type)).toEqual(['tool_call'])
   })
 
-  it('조회성 도구는 readOnly로 표시된다 (카드 접힘 정책)', () => {
+  it('a read-only tool is marked readOnly (card-collapsing policy)', () => {
     expect(toolSummary('Read', { file_path: '/a.ts' }).readOnly).toBe(true)
     expect(toolSummary('Bash', { command: 'ls' }).readOnly).toBe(false)
   })
 
-  it('tool_result → ok 판정', () => {
+  it('tool_result decides ok', () => {
     const out = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'M0_SPIKE_OK' }] } })
     expect(out[0]).toMatchObject({ type: 'tool_result', callId: 'tu1', ok: true, summary: 'M0_SPIKE_OK' })
     const err = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'nope', is_error: true }] } })
@@ -137,10 +140,10 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
   })
 
   /*
-   * 도구 결과에 실려 온 이미지 (#40). 실측 모양(이미지 파일 Read):
+   * An image carried in a tool result (#40). The measured shape (from a Read of an image file):
    * content: [{type:'image', source:{type:'base64', data, media_type}}]
    */
-  it('tool_result의 image 블록 → message_image (실측 모양)', () => {
+  it('a tool_result\'s image block becomes a message_image (the measured shape)', () => {
     const out = n({
       type: 'user',
       message: {
@@ -153,12 +156,12 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
         ],
       },
     })
-    // 도구 줄은 그대로 남고(무엇이 실행됐는지), 이미지가 따로 나온다
+    // The tool line stays as-is (what actually ran), and the image comes out separately.
     expect(out[0]).toMatchObject({ type: 'tool_result', callId: 'tu1' })
     expect(out[1]).toEqual({ type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs' })
   })
 
-  it('너무 큰 이미지는 그리는 대신 이유를 말한다', () => {
+  it('an image that is too large explains why instead of rendering it', () => {
     const big = 'a'.repeat(11_000_001)
     const out = n({
       type: 'user',
@@ -172,7 +175,7 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
     expect(img).toMatchObject({ data: '', note: expect.stringContaining('너무 큽니다') })
   })
 
-  it('base64가 아닌 이미지 소스는 보이는 실패가 된다 (#58 — 예전엔 조용히 사라졌다)', () => {
+  it('a non-base64 image source becomes a visible failure (#58 — it used to vanish silently)', () => {
     const out = n({
       type: 'user',
       message: {
@@ -184,43 +187,43 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
   })
 })
 
-describe('승인 요청 정규화 (배너 판정의 입력)', () => {
-  it('Bash → command (배너 제자리 승인 가능)', () => {
+describe('normalizing an approval request (input to the banner\'s judgment)', () => {
+  it('Bash becomes command (in-place banner approval is possible)', () => {
     expect(approvalDetail('Bash', { command: 'npm test' }, '/p')).toEqual({ kind: 'command', command: 'npm test', cwd: '/p' })
   })
 
-  it('Write/Edit → file_edit (diff 확인 필요)', () => {
+  it('Write/Edit become file_edit (a diff needs to be shown)', () => {
     const d = approvalDetail('Edit', { file_path: '/a.ts', new_string: 'const a = 1' }, '/p')
     expect(d).toMatchObject({ kind: 'file_edit', path: '/a.ts', diffPreview: 'const a = 1', multi: false })
   })
 
-  it('그 외 → other', () => {
+  it('everything else becomes other', () => {
     expect(approvalDetail('WebFetch', { url: 'http://x' }, '/p').kind).toBe('other')
   })
 })
 
-describe('한도 (M0 발견: rate_limit_event)', () => {
-  it('allowed면 이벤트 없음', () => {
+describe('a limit (M0 finding: rate_limit_event)', () => {
+  it('no event when allowed', () => {
     expect(n({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1786750200 } })).toEqual([])
   })
 
   /*
-   * 이 셋이 SDK가 말하는 전부다 ('allowed' | 'allowed_warning' | 'rejected').
-   * 예전 테스트는 status: 'blocked'라는 **없는 값**으로 통과하고 있었다 — 그래서
-   * `!== 'allowed'`라는 판정이 allowed_warning을 삼키는 것을 아무도 못 봤다.
-   * 도구의 어휘를 지어내면 테스트는 우리 상상만 지킨다.
+   * These three are all the SDK ever says ('allowed' | 'allowed_warning' | 'rejected'). This test
+   * used to pass using `status: 'blocked'`, a value that **does not exist** — so nobody noticed
+   * that the `!== 'allowed'` check was also swallowing `allowed_warning`. Making up a tool's own
+   * vocabulary only means the test protects our own imagination.
    */
-  it('경고는 한도가 아니다 — allowed_warning이면 이벤트 없음', () => {
+  it('a warning is not a limit — no event for allowed_warning', () => {
     expect(n({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1786750200, rateLimitType: 'five_hour' } })).toEqual([])
   })
 
-  it('rejected면 limit_reached + 해제 시각 ISO 변환', () => {
+  it('rejected produces limit_reached, with the reset time converted to ISO', () => {
     const out = n({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1786750200, rateLimitType: 'five_hour' } })
     expect(out[0]).toMatchObject({ type: 'limit_reached', resumeAt: new Date(1786750200 * 1000).toISOString(), windowMins: 300 })
   })
 })
 
-describe('result 메시지 (usage·컨텍스트·완료)', () => {
+describe('the result message (usage, context, completion)', () => {
   const RESULT = {
     type: 'result',
     subtype: 'success',
@@ -233,26 +236,29 @@ describe('result 메시지 (usage·컨텍스트·완료)', () => {
     },
   }
 
-  it('modelUsage로 컨텍스트를 계산하지 않는다 (누적값이라 창을 넘어선다)', () => {
+  it('does not compute context usage from modelUsage (it accumulates, and would exceed the window)', () => {
     /*
-     * modelUsage는 세션 누적이다. 캐시 재읽기가 매 턴 더해지므로
-     * 이걸 더해 쓰면 턴이 쌓일수록 비율이 폭주한다 — 실측 "컨텍스트 533%".
-     * 지금 창의 점유는 SDK의 getContextUsage()가 알고, 어댑터가 그걸 물어서 낸다.
+     * `modelUsage` is a session-wide accumulation. Re-reading the cache adds to it every turn, so
+     * summing it here makes the ratio run away the more turns pile up — measured as "context
+     * 533%". What is currently in the window is known by the SDK's own `getContextUsage()`, which
+     * the adapter asks and emits from.
      */
     expect(n(RESULT).find((e) => e.type === 'context_update')).toBeUndefined()
   })
 
-  it('usage와 비용을 싣는다', () => {
+  it('carries usage and cost', () => {
     const u = n(RESULT).find((e) => e.type === 'usage_update')
     expect(u).toMatchObject({ tokens: { outputTokens: 186, costUsd: 0.0078 } })
   })
 
   /*
-   * 턴 하나에 모델이 여럿이다 (M4 D-5). 실측(앱이 부탁한 에이전트, 실제 Claude): 기록 판이 실행마다 "1.1k tokens"를 보였고 줄은
-   * 1108/13과 1038/16이었는데, CLI 기록에서 본 모델(Opus)은 출력 200·363에 캐시 입력 24k–80k를 썼다. modelUsage의 첫 칸이 제목을
-   * 짓는 작은 모델이었다. 모양은 그 실행 그대로다 — 작은 모델이 먼저 온다.
+   * A single turn can involve more than one model (M4 D-5). Measured (an app-requested agent,
+   * real Claude): the record panel showed "1.1k tokens" on every run, with log lines of 1108/13
+   * and 1038/16, while the model actually seen in the CLI log (Opus) used 200/363 output tokens
+   * against 24k-80k cache input tokens. The first entry in `modelUsage` was the small titling
+   * model. The shape here is exactly that run — the small model arrives first.
    */
-  it('usage는 modelUsage의 모든 모델을 더한다 — 작은 모델이 먼저 와도 본 모델의 몫이 빠지지 않는다', () => {
+  it('usage sums every model in modelUsage — the main model\'s own share is not dropped even when the small model arrives first', () => {
     const u = n({
       ...RESULT,
       total_cost_usd: 0.4163,
@@ -270,26 +276,28 @@ describe('result 메시지 (usage·컨텍스트·완료)', () => {
     expect(u).toMatchObject({ tokens: { inputTokens: 1117, outputTokens: 376, cacheReadTokens: 80412, cacheCreationTokens: 4213, costUsd: 0.4163 } })
   })
 
-  it('성공이면 turn_complete로 끝난다', () => {
+  it('ends with turn_complete on success', () => {
     expect(n(RESULT).at(-1)).toEqual({ type: 'turn_complete', sessionId: SID })
   })
 
-  it('실패면 error를 낸다', () => {
+  it('emits an error on failure', () => {
     const out = n({ ...RESULT, subtype: 'error_max_turns', is_error: true, result: '최대 턴 초과' })
     expect(out.at(-1)).toMatchObject({ type: 'error', error: { code: 'internal', message: '최대 턴 초과' } })
   })
 
   /*
-   * 스키마로 답한 턴 (M4 D-1, 앱이 부탁한 에이전트). 픽스처는 실측한 결말이다(SDK 0.3.263, CLI 2.1.282, haiku): 모델이 글로
-   * "Red and yellow."라고 먼저 답했고, 구조화 출력은 이 결말에만 있었다 — `result`는 그 JSON의 글, `structured_output`은 값.
+   * A turn answered with a schema (M4 D-1, an app-requested agent). The fixture is a measured
+   * ending (SDK 0.3.263, CLI 2.1.282, haiku): the model answered in text first, "Red and
+   * yellow.", and the structured output existed only in this ending — `result` is that JSON as
+   * text, `structured_output` is the value.
    */
-  it('구조화 출력은 turn_complete.output으로 옮긴다 — 글에는 없다', () => {
+  it('moves structured output to turn_complete.output — it is not in the text', () => {
     const out = n({ ...RESULT, result: '{"colors":["red","yellow"]}', structured_output: { colors: ['red', 'yellow'] } })
     expect(out.at(-1)).toEqual({ type: 'turn_complete', sessionId: SID, output: { colors: ['red', 'yellow'] } })
   })
 
-  it('구조화 출력을 끝내 못 맞추면 error다 — 빈 답으로 끝나지 않고, 이유가 있으면 그 이유를 싣는다', () => {
-    // 실패한 결말의 모양(sdk.d.ts SDKResultError): result가 없고 errors가 있다
+  it('is an error when structured output never manages to match — not a blank ending, and carries the reason if there is one', () => {
+    // The shape of a failed ending (sdk.d.ts SDKResultError): no `result`, only `errors`.
     const bare = n({ ...RESULT, subtype: 'error_max_structured_output_retries', is_error: true, errors: [] })
     expect(bare.at(-1)).toMatchObject({ type: 'error', error: { message: 'Turn failed: error_max_structured_output_retries' } })
     const said = n({ ...RESULT, subtype: 'error_max_structured_output_retries', is_error: true, errors: ['output did not match the schema'] })
@@ -298,23 +306,23 @@ describe('result 메시지 (usage·컨텍스트·완료)', () => {
 })
 
 /*
- * 픽스처는 지어낸 게 아니라 프로브로 관찰한 실제 메시지다.
- * 관찰한 순서: status:'compacting' → (39.1초) → status:null(+compact_result) → compact_boundary
+ * The fixture is not made up — it is the actual message a probe observed. The observed ordering:
+ * status:'compacting' → (39.1 seconds) → status:null (+compact_result) → compact_boundary
  */
-describe('압축 — 무엇을 하는 중인지 말한다', () => {
-  it('압축이 시작되면 activity로 알린다 (응답 대기와 구분되어야 한다)', () => {
+describe('compaction — saying what is currently happening', () => {
+  it('reports activity when compaction starts (must be distinguishable from waiting for a response)', () => {
     expect(n({ type: 'system', subtype: 'status', status: 'compacting' })).toEqual([
       { type: 'activity', sessionId: SID, activity: 'compacting' },
     ])
   })
 
-  it('평범한 요청 중은 activity가 없다', () => {
+  it('has no activity during an ordinary request', () => {
     expect(n({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([
       { type: 'activity', sessionId: SID, activity: null },
     ])
   })
 
-  it('압축 실패를 삼키지 않는다 — 이유까지 남긴다', () => {
+  it('does not swallow a compaction failure — records the reason as well', () => {
     const out = n({
       type: 'system',
       subtype: 'status',
@@ -328,7 +336,7 @@ describe('압축 — 무엇을 하는 중인지 말한다', () => {
     ])
   })
 
-  it('compact_boundary → 마커 (Claude에는 지금까지 이 마커가 없었다)', () => {
+  it('compact_boundary becomes a marker (Claude never had this marker until now)', () => {
     const out = n({
       type: 'system',
       subtype: 'compact_boundary',
@@ -338,7 +346,7 @@ describe('압축 — 무엇을 하는 중인지 말한다', () => {
   })
 })
 
-describe('알 수 없는 메시지는 조용히 무시한다', () => {
+describe('an unknown message is ignored silently', () => {
   it.each([
     { type: 'system', subtype: 'init' },
     { type: 'system', subtype: 'thinking_tokens' },

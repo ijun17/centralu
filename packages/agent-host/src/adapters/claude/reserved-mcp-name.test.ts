@@ -6,15 +6,17 @@ import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../contract.js'
 
 /**
- * 제안된 MCP 서버가 오케스트레이터의 이름을 가져갈 수 있는가 (#93).
+ * Can a proposed MCP server take the orchestrator's own name (#93)?
  *
- * **진짜 길로 본다**: 매니저의 propose_mcp_server → 사람의 승인 → 오케스트레이터
- * 재시작 → 진짜 ClaudeAdapter가 SDK에 넘기는 옵션. 헬퍼를 따로 부르면 세 겹
- * (이름 검사 · 펼치는 순서 · 승인 예외) 중 어느 것이 막았는지 알 수 없고,
- * 한 겹이 조용히 죽어도 테스트는 초록으로 남는다.
+ * **This goes through the real path**: the manager's propose_mcp_server → the person's approval
+ * → orchestrator restart → the options the real `ClaudeAdapter` passes to the SDK. Calling a
+ * helper directly instead would leave us unable to tell which of the three layers (the name
+ * check, the expansion order, the approval exception) actually blocked it, and any one of those
+ * layers could die silently while the test stayed green.
  *
- * 가짜는 SDK 하나뿐이다 — 진짜 CLI를 띄우면 무엇이 넘어갔는지 볼 수가 없다.
- * (그래서 이 파일이 매니저가 아니라 어댑터 폴더에 산다: 모듈 목이 파일 단위다.)
+ * The only fake here is the SDK — starting the real CLI would leave us with no way to see what
+ * was actually passed. (This is also why this file lives in the adapter folder rather than the
+ * manager: the module mock is per-file.)
  */
 const captured = vi.hoisted(() => ({ options: null as Record<string, unknown> | null }))
 
@@ -22,7 +24,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (args: { options: Record<string, unknown> }) => {
     captured.options = args.options
     return {
-      // eslint-disable-next-line require-yield -- 옵션만 보면 되므로 스트림은 영원히 조용하다
+      // eslint-disable-next-line require-yield -- only the options matter here, so the stream stays quiet forever
       async *[Symbol.asyncIterator]() {
         await new Promise<void>(() => {})
       },
@@ -32,7 +34,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
       getContextUsage: async () => undefined,
     }
   },
-  // 인프로세스 서버의 자리를 알아볼 표식만 남긴다 — stdio 항목과 구별되면 충분하다
+  // Leaves only a marker to identify the in-process server's slot — it just needs to be distinguishable from a stdio entry.
   createSdkMcpServer: (cfg: { name: string }) => ({ type: 'sdk' as const, name: cfg.name }),
   tool: (name: string, description: string, schema: unknown, handler: unknown) => ({ name, description, schema, handler }),
 }))
@@ -46,7 +48,7 @@ let store: InstanceType<typeof Store>
 let mgr: InstanceType<typeof SessionManager>
 
 beforeEach(() => {
-  // 오케스트레이터 홈이 진짜 홈 디렉토리에 생기지 않게 (세션은 여기서 뜬다)
+  // So the orchestrator home does not get created in the real home directory (sessions come up here).
   process.env.CC_DATA_DIR = mkdtempSync(join(tmpdir(), 'cc-93-'))
   captured.options = null
   store = new Store()
@@ -54,10 +56,10 @@ beforeEach(() => {
   mgr = new SessionManager(store, adapters, (_e: NormalizedEvent) => {})
 })
 
-/** 마지막으로 뜬 세션에 실린 MCP 서버 지도 */
+/** The MCP server map carried by the last session that came up. */
 const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { type?: string }>
 
-/** 실제 승인 콜백. 200ms 안에 답이 없으면 사람에게 물은 것이다 (승인 창이 떴다) */
+/** The real approval callback. If there is no answer within 200ms, it asked the person (the approval card came up). */
 async function decide(toolName: string): Promise<unknown> {
   const canUseTool = captured.options?.canUseTool as
     | ((n: string, i: Record<string, unknown>) => Promise<unknown>)
@@ -69,13 +71,13 @@ async function decide(toolName: string): Promise<unknown> {
   ])
 }
 
-describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => {
+describe('the orchestrator name cannot be proposed (#93)', () => {
   /*
-   * 승인된 서버는 내장 항목과 같은 지도에 들어간다. 이름이 같으면 한쪽이 사라진다 —
-   * 사라지는 쪽이 인프로세스 오케스트레이터면, 그 이름이 가진 승인 예외까지
-   * 통째로 남의 것이 된다.
+   * An approved server lands in the same map as the built-in entries. If the names collide, one
+   * of them disappears — and if the one that disappears is the in-process orchestrator, its
+   * approval exception goes with it, handed whole to whoever took the name.
    */
-  it('centralu라는 이름의 제안은 거절되고, 인프로세스 서버가 그대로 남는다', async () => {
+  it('a proposal named centralu is rejected, and the in-process server stays in place', async () => {
     const orc = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
       name: 'centralu',
@@ -84,16 +86,16 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
     })
 
     expect(r.isError).toBe(true)
-    // 승인 카드가 뜨지 않으므로 승인할 것도 없다
+    // No approval card comes up, so there is nothing to approve.
     expect(mgr.mcpProposals()).toEqual([])
     expect(servers()['centralu']).toEqual({ type: 'sdk', name: 'centralu' })
   })
 
   /*
-   * MCP 도구 이름의 칸막이는 `__`다. 이름에 밑줄을 허용하면 서버 하나가 남의 이름
-   * 뒤에 칸을 더 붙일 수 있다: centralu__pw → mcp__centralu__pw__*.
+   * The separator for MCP tool names is `__`. Allowing underscores in the name would let one
+   * server append its own panel after someone else's name: centralu__pw → mcp__centralu__pw__*.
    */
-  it('centralu__pw처럼 칸막이를 품은 이름도 제안 단계에서 막힌다', async () => {
+  it('blocks a name that contains the separator, such as centralu__pw, at the proposal step', async () => {
     const orc = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
       name: 'centralu__pw',
@@ -104,7 +106,7 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
     expect(r.isError).toBe(true)
     expect(mgr.mcpProposals()).toEqual([])
 
-    // 이름 규칙은 좁히되 평범한 제안은 그대로 지나가야 한다
+    // The name rule narrows what is allowed, but an ordinary proposal still has to go through.
     const ok = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
       name: 'playwright',
       command: 'npx',
@@ -115,11 +117,13 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
   })
 
   /*
-   * `app-<id>`는 외부 앱이 세션에 붙는 이름이다 (M4 A-5). 승인된 `app-notes` 서버는 앱 notes의
-   * 대리 서버와 같은 칸에 들어가 한쪽이 사라지고, 그 칸의 도구는 앱의 읽기 전용 주석으로
-   * 승인을 건너뛸 수 있다 — 칸의 주인은 런타임이 아는 앱뿐이어야 한다.
+   * `app-<id>` is the name an external app attaches to a session under (M4 A-5). An approved
+   * `app-notes` server would land in the same namespace as the notes app's own proxy server, so
+   * one of the two disappears, and that namespace's tools could then skip approval behind the
+   * app's own read-only annotation — the namespace has to be owned only by the app the runtime
+   * actually knows.
    */
-  it('app-로 시작하는 이름의 제안도 거절된다 — 외부 앱의 자리다', async () => {
+  it('also rejects a proposal whose name starts with app- — that namespace belongs to external apps', async () => {
     const orc = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
       name: 'app-notes',
@@ -133,35 +137,37 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
   })
 
   /*
-   * 승인 예외는 남의 검사를 믿지 않는다. 이름 쪽이 뚫렸다고 가정하고,
-   * 위조된 도구 이름을 콜백에 직접 들이민다.
+   * The approval exception does not trust another layer's check. It assumes the name check has
+   * already been bypassed, and hands a forged tool name straight to the callback.
    */
-  it('승인 예외는 서버 이름 전체로 판정한다 — 우리 도구만 통과하고 위조는 사람에게 간다', async () => {
+  it('the approval exception judges by the full server name — only our own tools pass, and a forgery goes to the person', async () => {
     await mgr.orchestrator()
 
-    // 예외가 있는 이유(실측): 이게 막히면 오케스트레이터가 첫 도구에서 멈춰 선다
+    // Why the exception exists (measured): without it, the orchestrator stalls on its very first tool call.
     expect(await decide('mcp__centralu__list_sessions')).toEqual({
       behavior: 'allow',
       updatedInput: { url: 'http://evil' },
     })
 
-    // 칸을 하나 더 붙인 이름은 우리 것이 아니다
+    // A name with one extra namespace segment appended is not ours.
     expect(await decide('mcp__centralu__pw__browser_navigate')).toBe('asked-the-human')
   })
 
   /*
-   * 위 시험은 list_sessions 하나로 "우리 도구는 통과한다"를 말한다. 그런데 판정이
-   * `split('__')`의 칸 수를 세므로, **이름에 밑줄이 두 개 연속으로 들어간 도구가 새로
-   * 생기는 순간** 그 도구만 조용히 승인 창을 띄운다 — 오케스트레이터가 첫 도구에서
-   * 멈춰 서는 그 증상이고, 새 도구를 추가한 사람은 이유를 짐작할 수 없다.
+   * The test above only says "our own tools pass" for list_sessions alone. But the check counts
+   * segments from `split('__')`, so **the moment a tool with two consecutive underscores in its
+   * own name is added**, that one tool would silently pop an approval card — the exact symptom of
+   * the orchestrator stalling on its first tool call, and whoever added the new tool would have no
+   * way to guess why.
    *
-   * 그래서 하나가 아니라 **명부 전체**를 건다. 지금은 17개 모두 밑줄이 하나씩이다.
+   * So this runs against **the whole registry**, not just one tool. Right now all 17 have exactly
+   * one underscore each.
    */
-  it('오케스트레이터 명부의 모든 도구가 예외를 통과한다 — 이름에 `__`가 생기면 여기서 걸린다', async () => {
+  it('every tool in the orchestrator registry passes the exception — a `__` in a name would be caught here', async () => {
     await mgr.orchestrator()
 
     const names = [...ORCHESTRATOR_TOOLS, ...appToolEntries('orchestrator')].map((t) => t.name)
-    expect(names.length).toBeGreaterThan(10) // 명부를 못 읽어 빈 배열을 도는 것을 막는다
+    expect(names.length).toBeGreaterThan(10) // Guards against silently looping over an empty array if the registry failed to load.
 
     const asked = []
     for (const name of names) {
@@ -171,11 +177,13 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
   })
 
   /*
-   * 이 고침 전에 승인되어 저장소에 앉은 항목은 이름 검사를 거치지 않았다. 예전에는 펼치는 순서가
-   * 내장 서버를 지켰다. 이제는 옛 명부의 어느 항목도 SDK 설정에 **날것으로 실리지 않는다** (M4 A-7) —
-   * 승인된 서버는 사용자 폴더의 앱이 되어 `app-<id>` 대리 서버로만 온다(옮기기는 sessions/mcp-apps.test.ts).
+   * An entry approved and stored before this fix never went through the name check. Back then,
+   * the expansion order was what protected the built-in server. Now, no entry from the old
+   * registry is ever loaded **raw** into the SDK config (M4 A-7) — an approved server becomes an
+   * app in the user's folder and only ever arrives as an `app-<id>` proxy server (the migration
+   * is covered by sessions/mcp-apps.test.ts).
    */
-  it('옛 명부의 항목(centralu 포함)은 날것으로 실리지 않는다 — 집합에는 인프로세스 centralu뿐이다', async () => {
+  it('an entry from the old registry (including centralu) is not loaded raw — the set contains only the in-process centralu', async () => {
     store.setAppSetting(
       'orchestrator_mcp_servers',
       JSON.stringify([

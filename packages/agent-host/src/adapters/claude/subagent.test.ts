@@ -2,28 +2,30 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
- * 서브에이전트의 메시지는 부모의 스트림으로 섞여 온다 (#98).
+ * A subagent's messages arrive mixed into the parent's own stream (#98).
  *
- * 순서와 모양은 실측 그대로다 (scripts/probe-subagent-stream.mts, CLI 2.1.282,
- * 2026-09-25). 백그라운드 에이전트를 띄운 부모가 글을 스트리밍하는 동안:
+ * The order and shape here are exactly as measured (scripts/probe-subagent-stream.mts, CLI
+ * 2.1.282, 2026-09-25). While a parent that launched a background agent is streaming text:
  *
  *   stream_event text_delta ×27  parent=null
- *   assistant parent=toolu_…   [thinking]            ← 서브에이전트
+ *   assistant parent=toolu_…   [thinking]              ← subagent
  *   stream_event text_delta ×17  parent=null
- *   assistant parent=toolu_…   [tool_use Bash]       ← 서브에이전트
+ *   assistant parent=toolu_…   [tool_use Bash]         ← subagent
  *   stream_event text_delta ×32  parent=null
- *   assistant parent=null      [text 946자]          ← 부모의 본문
+ *   assistant parent=null      [text, 946 characters]  ← the parent's own body
  *   result
- *   user      parent=toolu_…   [tool_result]        ← 부모가 쉬는 동안 계속된다
- *   assistant parent=toolu_…   [text "I am done."]   ← forwardSubagentText 없이도 온다
+ *   user      parent=toolu_…   [tool_result]          ← keeps going while the parent is idle
+ *   assistant parent=toolu_…   [text "I am done."]     ← arrives even without forwardSubagentText
  *   system/task_notification {tool_use_id, status, summary, usage}
  *
- * 도그푸딩의 증상이 이 순서에서 그대로 나온다: 부모의 문단이 낱말 한가운데서
- * 남의 도구 호출에 잘리고(`남았` / Bash / `는지`), 서브에이전트의 보고서 전문이
- * 부모의 답변으로 한 번, 부모의 요약으로 또 한 번 — "답이 두 번 보인다".
+ * The dogfooding symptom comes straight out of this ordering: the parent's own paragraph gets cut
+ * mid-word by someone else's tool call (split across `남았` / Bash / `는지`), and the subagent's
+ * full report shows up once as the parent's own answer and once again as the parent's summary —
+ * "the answer appears twice".
  *
- * SDK를 가짜로 바꿔 끼우고 **어댑터의 루프를 통째로** 지난다 — 본문이 델타로 이미
- * 나갔는지 세는 표식(textStreamed)이 루프에 있고, 그 표식도 이 순서에 걸린다.
+ * The SDK is swapped for a fake and this runs **the whole of the adapter's loop** — the flag that
+ * tracks whether the body already went out as deltas (`textStreamed`) lives in that loop, and this
+ * ordering is exactly what trips it.
  */
 const script = vi.hoisted(() => ({ messages: [] as unknown[], release: () => {} }))
 
@@ -31,7 +33,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: () => ({
     async *[Symbol.asyncIterator]() {
       for (const m of script.messages) yield m
-      // 스트림이 끝나면 어댑터는 CLI가 죽었다고 판단한다 — 테스트가 닫을 때까지 붙든다
+      // The adapter treats a closed stream as the CLI having died — this holds it open until the test closes it.
       await new Promise<void>((r) => (script.release = r))
     },
     interrupt: async () => {},
@@ -58,7 +60,7 @@ const parentText = (text: string) => ({
   parent_tool_use_id: null,
   message: { role: 'assistant', content: [{ type: 'text', text }], usage: { input_tokens: 12, output_tokens: 34 } },
 })
-/** 서브에이전트의 assistant 메시지 — 사용량은 부모의 것과 구별되게 튀는 값으로 둔다 */
+/** A subagent's own assistant message — the usage numbers are deliberately odd values, so they are distinguishable from the parent's. */
 const sub = (content: unknown[]) => ({
   type: 'assistant',
   parent_tool_use_id: AGENT,
@@ -81,7 +83,7 @@ const FIRST = '별도 작업이라 범위에서 뺐고, 결과 보고에 어디�
 const SECOND = '는지 적게 했습니다.'
 const LATER = '조사가 돌아왔습니다.'
 
-/** 실측 순서: 부모가 백그라운드 에이전트를 띄우고, 그 에이전트가 부모의 스트림 사이사이에 일한다 */
+/** The measured ordering: the parent launches a background agent, and that agent works interleaved with the parent's own stream. */
 const backgroundRun = [
   { type: 'system', subtype: 'init', session_id: 'ext-1' },
   {
@@ -152,7 +154,7 @@ const backgroundRun = [
   delta(SECOND),
   parentText(FIRST + SECOND),
   result,
-  // 부모의 턴은 끝났다 — 서브에이전트는 계속 일한다
+  // The parent's turn has ended — the subagent keeps working.
   subResult(SUB_1, "describe('ui 레이어 경계', () => {"),
   sub([{ type: 'tool_use', id: SUB_2, name: 'Grep', input: { pattern: 'boundaries' } }]),
   subResult(SUB_2, 'tooling/boundaries.test.ts'),
@@ -170,7 +172,7 @@ const backgroundRun = [
     summary: REPORT,
     usage: { total_tokens: 13620, tool_uses: 3, duration_ms: 134_000 },
   },
-  // 통지를 받은 부모가 새 턴을 연다 (실측: system/init이 다시 온다)
+  // The parent opens a new turn once it receives the notification (measured: system/init arrives again).
   { type: 'system', subtype: 'init', session_id: 'ext-1' },
   delta(LATER),
   parentText(LATER),
@@ -191,13 +193,13 @@ async function run(messages: unknown[]): Promise<NormalizedEvent[]> {
 const texts = (events: NormalizedEvent[]) =>
   events.flatMap((e) => (e.type === 'message_delta' ? [e.text] : [])).join('')
 
-describe('서브에이전트의 메시지는 부모의 대화가 아니다 (#98)', () => {
-  it('부모의 글은 부모의 것뿐이다 — 서브에이전트의 보고서가 부모 답변으로 새지 않는다', async () => {
+describe('a subagent\'s messages are not the parent\'s conversation (#98)', () => {
+  it('the parent\'s text is the parent\'s alone — a subagent\'s report does not leak into the parent\'s answer', async () => {
     const events = await run(backgroundRun)
     expect(texts(events)).toBe(FIRST + SECOND + LATER)
   })
 
-  it('부모의 도구 호출은 부모의 것뿐이다 — 서브에이전트의 호출·결과는 대화에 줄을 만들지 않는다', async () => {
+  it('the parent\'s tool calls are the parent\'s alone — a subagent\'s calls and results add no lines to the conversation', async () => {
     const events = await run(backgroundRun)
     expect(events.filter((e) => e.type === 'tool_call').map((e) => (e as { callId: string }).callId)).toEqual([AGENT])
     expect(
@@ -205,26 +207,26 @@ describe('서브에이전트의 메시지는 부모의 대화가 아니다 (#98)
     ).toEqual([])
   })
 
-  it('부모의 글 한 덩어리는 남의 사건에 잘리지 않는다 — `남았` / Bash / `는지`가 다시 나지 않는다', async () => {
+  it('one chunk of the parent\'s text is not split by someone else\'s event — `남았` / Bash / `는지` never happens again', async () => {
     const events = await run(backgroundRun)
     const first = events.findIndex((e) => e.type === 'message_delta' && e.text === FIRST)
     const second = events.findIndex((e) => e.type === 'message_delta' && e.text === SECOND)
     expect(first).toBeGreaterThanOrEqual(0)
     expect(second).toBeGreaterThan(first)
-    // 두 조각 사이에 대화에 줄을 만드는 사건이 하나도 없어야 한다
+    // Between the two chunks, there must be no event at all that adds a line to the conversation.
     const between = events.slice(first + 1, second).map((e) => e.type)
     expect(between.filter((t) => t === 'tool_call' || t === 'tool_result' || t === 'message_delta')).toEqual([])
   })
 
-  it('서브에이전트의 사용량이 부모의 사용량을 덮지 않는다', async () => {
+  it('a subagent\'s usage does not overwrite the parent\'s own usage', async () => {
     const events = await run(backgroundRun)
     const usage = events.filter((e) => e.type === 'usage_update').map((e) => e.tokens.inputTokens)
     expect(usage).not.toContain(99_999)
   })
 })
 
-describe('서브에이전트의 일은 그것을 띄운 Agent 카드에 붙는다 (#98)', () => {
-  it('걸음마다 그 카드의 실행 중 출력으로 간다 — 누가 했는지가 callId로 남는다', async () => {
+describe('a subagent\'s work attaches to the Agent card that launched it (#98)', () => {
+  it('every step goes to that card\'s live output — who did it is recorded by callId', async () => {
     const events = await run(backgroundRun)
     const live = events
       .filter((e) => e.type === 'tool_output_delta' && e.callId === AGENT)
@@ -235,12 +237,12 @@ describe('서브에이전트의 일은 그것을 띄운 Agent 카드에 붙는�
     expect(live).toContain('Edit: /repo/tooling/boundaries.test.ts')
   })
 
-  it('서브에이전트가 고친 파일은 여전히 이 세션이 만진 파일이다 (충돌 감지·하이라이트)', async () => {
+  it('a file edited by a subagent still counts as touched by this session (conflict detection, highlighting)', async () => {
     const events = await run(backgroundRun)
     expect(events).toContainEqual({ type: 'files_touched', sessionId: 's1', paths: ['/repo/tooling/boundaries.test.ts'] })
   })
 
-  it('백그라운드 에이전트의 카드는 끝났을 때 한 번 닫힌다 — 보고서 머리와 걸음 수를 들고', async () => {
+  it('a background agent\'s card closes exactly once, when it finishes — carrying the report\'s opening and the step count', async () => {
     const events = await run(backgroundRun)
     const results = events.filter((e) => e.type === 'tool_result' && e.callId === AGENT)
     expect(results).toHaveLength(1)
@@ -248,22 +250,23 @@ describe('서브에이전트의 일은 그것을 띄운 Agent 카드에 붙는�
     expect(done?.ok).toBe(true)
     expect(done?.summary).toContain('3 tool uses')
     expect(done?.summary).toContain('I checked all 13 items')
-    // 모델에게만 하는 말("never quote…")은 사람의 카드에 오르지 않는다
+    // Text meant only for the model ("never quote…") never lands on the person's card.
     expect(done?.summary).not.toContain('Async agent launched')
-    // 닫히는 자리는 통지가 온 뒤다 — 띄운 순간이 아니다
+    // It closes after the notification arrives, not at the moment it was launched.
     const notified = events.findIndex((e) => e.type === 'tool_output_delta' && e.text.includes('Edit:'))
     expect(events.indexOf(done!)).toBeGreaterThan(notified)
   })
 
   /*
-   * 카드를 닫는 tool_result는 저장 쪽에서 글 덩어리의 경계다(manager persistMessage) —
-   * 부모가 쓰는 도중에 내면 부모의 문단이 행 둘로 갈린다. 에이전트 셋을 나란히 띄운
-   * 도그푸딩 세션에서는 한 에이전트가 끝나는 순간 부모가 다른 에이전트의 소식을 적고 있었다.
+   * On the storage side, the tool_result that closes a card marks a chunk boundary (manager
+   * persistMessage) — emitting it while the parent is mid-write splits the parent's paragraph
+   * into two rows. In a dogfooding session that ran three agents side by side, the parent was
+   * writing an update about a different agent at the exact moment one of the agents finished.
    */
-  it('부모가 쓰는 도중에 에이전트가 끝나도 그 글을 자르지 않는다 — 카드는 덩어리가 닫힌 뒤에 닫힌다', async () => {
+  it('does not cut the parent\'s text even when an agent finishes mid-write — the card closes only after the chunk closes', async () => {
     const notification = backgroundRun.find((m) => (m as { subtype?: string }).subtype === 'task_notification')
     const events = await run([
-      ...backgroundRun.slice(0, 4), // init · Agent 호출 · task_started · 띄운 결과
+      ...backgroundRun.slice(0, 4), // init, the Agent call, task_started, the launch result
       delta('로컬 조사도 돌아왔습니다. Codex'),
       notification,
       delta(' 세션에서 앱 도구를 부르면 조용히 거절됩니다.'),
@@ -277,8 +280,8 @@ describe('서브에이전트의 일은 그것을 띄운 Agent 카드에 붙는�
     expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(1)
   })
 
-  it('돌아오지 않은 채 세션이 닫히면 카드를 열어 두지 않는다 — 에이전트는 프로세스와 함께 사라졌다', async () => {
-    // 띄우고, 한 걸음 걷고, 통지 없이 끝난다
+  it('does not leave a card open if the session closes before the agent reports back — the agent vanished along with the process', async () => {
+    // Launches it, takes one step, and ends with no notification.
     const events = await run(backgroundRun.slice(0, 7))
     const results = events.filter((e) => e.type === 'tool_result' && e.callId === AGENT)
     expect(results).toEqual([
@@ -286,21 +289,22 @@ describe('서브에이전트의 일은 그것을 띄운 Agent 카드에 붙는�
     ])
   })
 
-  it('카드의 제목은 에이전트에게 맡긴 일이다 — "Agent"만으로는 무엇을 하는 카드인지 모른다', async () => {
+  it('the card\'s title is the work handed to the agent — "Agent" alone does not say what the card is for', async () => {
     const events = await run(backgroundRun)
     const call = events.find((e) => e.type === 'tool_call')
     expect(call).toMatchObject({ callId: AGENT, summary: { tool: 'Agent', title: 'Research the build' } })
   })
 })
 
-describe('부모 본문의 중복 방지 표식은 부모의 것이다 (#98)', () => {
+describe('the parent body\'s duplicate-prevention flag belongs to the parent (#98)', () => {
   /*
-   * 델타로 이미 나간 본문은 assistant 메시지에서 다시 내지 않는다 (textStreamed).
-   * 그 표식은 assistant 메시지가 올 때마다 내려간다 — 서브에이전트의 assistant가
-   * 부모의 마지막 델타와 부모의 본문 사이에 끼면, 표식이 부모의 본문 앞에서
-   * 먼저 내려가 부모의 글 전체가 한 번 더 붙는다.
+   * A body already sent out as deltas is not emitted again from the assistant message
+   * (`textStreamed`). That flag is cleared every time an assistant message arrives — if a
+   * subagent's own assistant message lands between the parent's last delta and the parent's
+   * body, the flag gets cleared early, before the parent's body arrives, and the parent's whole
+   * text is appended a second time.
    */
-  it('서브에이전트 메시지가 부모의 마지막 델타와 본문 사이에 끼어도 부모의 글은 한 번이다', async () => {
+  it('the parent\'s text is emitted once even when a subagent message lands between its last delta and its body', async () => {
     const events = await run([
       { type: 'system', subtype: 'init', session_id: 'ext-1' },
       delta('부모의 '),
@@ -313,13 +317,14 @@ describe('부모 본문의 중복 방지 표식은 부모의 것이다 (#98)', (
   })
 })
 
-describe('포그라운드 에이전트의 결과 (#98)', () => {
+describe('a foreground agent\'s result (#98)', () => {
   /*
-   * 포그라운드는 Agent 호출의 tool_result가 곧 완료다. 그 본문은 모델에게 하는 말
-   * ("[Subagent hand-back] The text below…")로 시작하고, SDK는 사람에게 보일 것은
-   * tool_use_result에서 그리라고 한다 (sdk.d.ts SDKUserMessage.tool_use_result).
+   * In the foreground case, the Agent call's tool_result is itself the completion. Its body
+   * begins with text meant for the model ("[Subagent hand-back] The text below…"), and the SDK
+   * says what should be shown to the person should be drawn from tool_use_result instead
+   * (sdk.d.ts SDKUserMessage.tool_use_result).
    */
-  it('카드에는 보고서와 걸음 수가 오른다 — 모델에게 하는 머리말이 아니라', async () => {
+  it('the card carries the report and the step count — not the preamble meant for the model', async () => {
     const events = await run([
       { type: 'system', subtype: 'init', session_id: 'ext-1' },
       {

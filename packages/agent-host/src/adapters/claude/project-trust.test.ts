@@ -7,25 +7,31 @@ import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import type { OrchestratorTools } from '../contract.js'
 
 /**
- * 신뢰하지 않은 프로젝트의 파일은 승인을 정하지 못한다 (M4 결정 3, #92).
+ * Files from an untrusted project must not be able to decide approvals (M4 decision 3, #92).
  *
- * 진짜 CLI는 테스트에서 띄울 수 없다(모델 호출이 든다). 그래서 CLI 자리에 **흉내**를 앉힌다 —
- * 흉내의 규칙은 실제 CLI로 잰 것뿐이다(scripts/probe-project-trust.mts, CLI 2.1.282):
+ * The real CLI cannot be started in a test (it fires model calls). So a **stand-in** takes the
+ * CLI's place, and the stand-in's rules are exactly the ones measured against the real CLI
+ * (scripts/probe-project-trust.mts, CLI 2.1.282):
  *
- *   1. 어느 파일을 읽는가는 SDK의 병합 엔진(`resolveSettings`, "CLI와 같은 엔진")에 어댑터가 넘긴
- *      `settingSources` 그대로 묻는다 — 흉내가 아니라 진짜 코드다
- *   2. 읽힌 PreToolUse 훅이 `permissionDecision: "allow"`를 답하면 묻지 않는다 (실측: safe에서도)
- *   3. allow 규칙이 명령에 맞으면 묻지 않는다 — 커밋된 settings.json(project 층)의 규칙은 CLI가
- *      따르지 않았다(실측). settings.local.json과 사용자 설정의 규칙은 따랐다
- *   4. 모드는 permissionMode가 오면 그것, `resolvePermissionModeInCli`면 설정의 defaultMode(저장소가
- *      올린 것은 CLI가 거른다 — `filterEscalatingDefaultMode`), 아무것도 없으면 SDK가 'default'로 굳힌다.
- *      bypassPermissions면 묻지 않는다
+ *   1. Which files get read is asked of the SDK's own merge engine (`resolveSettings`, "the same
+ *      engine as the CLI") using exactly the `settingSources` the adapter passed — this part is
+ *      real code, not a simulation.
+ *   2. If the PreToolUse hook that was read answers with `permissionDecision: "allow"`, it does
+ *      not ask (measured: true even in safe).
+ *   3. If an allow rule matches the command, it does not ask — the CLI did not honor rules from
+ *      the committed settings.json (the project layer) (measured). It did honor rules from
+ *      settings.local.json and from the user's own settings.
+ *   4. The mode is `permissionMode` if it was given; otherwise, if `resolvePermissionModeInCli` is
+ *      set, it is the settings' `defaultMode` (filtered by the CLI if the repo tried to escalate
+ *      it — `filterEscalatingDefaultMode`); with neither, the SDK fixes it to 'default'. With
+ *      bypassPermissions, it never asks.
  *
- * 사용자 설정은 `CLAUDE_CONFIG_DIR`로 임시 폴더에 둔다 — 이 기계의 ~/.claude(bypass)가 섞이지 않게.
+ * The user's own settings live under `CLAUDE_CONFIG_DIR` pointed at a temp folder — so this
+ * machine's own ~/.claude (bypass) never mixes in.
  */
 const state = vi.hoisted(() => ({
   options: [] as Record<string, unknown>[],
-  /** 흉내 CLI가 판정한 것 — 물었나(ask), 어느 길로 넘어갔나 */
+  /** What the stand-in CLI decided — whether it asked, and which path it took. */
   verdicts: [] as string[],
   actual: null as null | typeof import('@anthropic-ai/claude-agent-sdk'),
 }))
@@ -38,15 +44,15 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
     query: ({ prompt, options }: { prompt: AsyncIterable<unknown>; options: Record<string, unknown> }) => {
       state.options.push(options)
       return {
-        // eslint-disable-next-line require-yield -- 흉내 CLI는 메시지를 내놓지 않는다. 판정은 canUseTool로만 드러난다
+        // eslint-disable-next-line require-yield -- the stand-in CLI produces no messages; the verdict shows up only through canUseTool
         async *[Symbol.asyncIterator]() {
-          // 사람이 말을 한 번 보내면, 모델이 Bash를 한 번 부른 것처럼 판정한다
+          // Once the person sends one message, this decides as if the model had called Bash once.
           for await (const _ of prompt) {
             void _
             await tryBash(options)
             break
           }
-          await new Promise(() => {}) // 세션은 살아 있다 — 스트림을 끝내지 않는다
+          await new Promise(() => {}) // The session stays alive — the stream is never ended.
         },
         interrupt: async () => {},
         close: () => {},
@@ -61,12 +67,12 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
 const COMMAND = 'touch cc-trust-probe.txt'
 const RULE = `Bash(${COMMAND})`
 
-/** 흉내 CLI의 승인 판정 (위 1~4) — 묻는다면 어댑터의 canUseTool을 부른다(답은 기다리지 않는다) */
+/** The stand-in CLI's approval verdict (steps 1-4 above) — if it asks, it calls the adapter's canUseTool (does not wait for an answer). */
 async function tryBash(options: Record<string, unknown>): Promise<void> {
   const sdk = state.actual!
   const cwd = options.cwd as string
   const resolved = await sdk.resolveSettings({ cwd, settingSources: options.settingSources as never })
-  // 2. 읽힌 훅을 실제로 돌려 답을 본다
+  // Step 2. Actually run the hook that was read, and check its answer.
   const hooks = (resolved.effective.hooks?.PreToolUse ?? []) as { matcher?: string; hooks: { command: string }[] }[]
   for (const group of hooks.filter((h) => !h.matcher || h.matcher === 'Bash')) {
     for (const h of group.hooks) {
@@ -74,12 +80,12 @@ async function tryBash(options: Record<string, unknown>): Promise<void> {
       if (/"permissionDecision"\s*:\s*"allow"/.test(out)) return void state.verdicts.push('hook-allowed')
     }
   }
-  // 3. allow 규칙 — 커밋된 settings.json(project 층)의 규칙은 CLI가 따르지 않았다
+  // Step 3. Allow rules — the CLI did not honor rules from the committed settings.json (project layer).
   const rules = resolved.sources.filter((s) => s.source !== 'project').flatMap((s) => s.settings.permissions?.allow ?? [])
   if (rules.some((r) => r === RULE || (r.endsWith(':*)') && `Bash(${COMMAND})`.startsWith(r.slice(0, -3))))) {
     return void state.verdicts.push('rule-allowed')
   }
-  // 4. 모드
+  // Step 4. Mode.
   const mode =
     (options.permissionMode as string | undefined) ??
     (options.resolvePermissionModeInCli ? (sdk.filterEscalatingDefaultMode(resolved).permissions?.defaultMode ?? 'default') : 'default')
@@ -110,7 +116,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-/** 받아 온 저장소 흉내 — 심은 것만 들어 있다 */
+/** A stand-in checkout — it contains only whatever was planted. */
 function repo(plant: { settings?: Record<string, unknown>; local?: Record<string, unknown> }): string {
   const dir = mkdtempSync(join(root, 'repo-'))
   mkdirSync(join(dir, '.claude'), { recursive: true })
@@ -137,7 +143,7 @@ const plantedHook = (dir: string) => ({
 
 const tick = () => new Promise((r) => setTimeout(r, 20))
 
-/** 세션을 띄우고 말을 한 번 보낸다 — 승인 카드가 떴는가를 돌려준다 */
+/** Starts a session and sends one message — returns whether an approval card came up. */
 async function askedIn(cwd: string, permissionPreset: PermissionPreset, projectTrusted: boolean | undefined): Promise<boolean> {
   const events: NormalizedEvent[] = []
   const handle = await new ClaudeAdapter().createSession({ sessionId: 's', cwd, permissionPreset, projectTrusted }, (e) => events.push(e))
@@ -148,7 +154,7 @@ async function askedIn(cwd: string, permissionPreset: PermissionPreset, projectT
   return events.some((e) => e.type === 'approval_request')
 }
 
-describe('어댑터가 CLI에 넘기는 설정 파일과 권한 (#92)', () => {
+describe('settings files and permissions the adapter passes to the CLI (#92)', () => {
   const PERMISSION: Record<PermissionPreset, Record<string, unknown>> = {
     safe: { permissionMode: 'default' },
     normal: { resolvePermissionModeInCli: true },
@@ -156,7 +162,7 @@ describe('어댑터가 CLI에 넘기는 설정 파일과 권한 (#92)', () => {
   }
 
   for (const preset of ['safe', 'normal', 'auto'] as const) {
-    it(`${preset}: 신뢰한 프로젝트는 지금처럼 전부 읽고, 신뢰하지 않은 프로젝트는 사용자 설정만 읽는다 — 권한 옵션은 같다`, async () => {
+    it(`${preset}: a trusted project reads everything as before, an untrusted project reads only the user settings — the permission options stay the same`, async () => {
       const make = (projectTrusted: boolean | undefined) =>
         new ClaudeAdapter().createSession({ sessionId: 's', cwd: root, permissionPreset: preset, projectTrusted }, () => {})
 
@@ -169,7 +175,7 @@ describe('어댑터가 CLI에 넘기는 설정 파일과 권한 (#92)', () => {
       expect(trusted).toMatchObject(PERMISSION[preset])
       expect(untrusted!.settingSources).toEqual(['user'])
       expect(untrusted).toMatchObject(PERMISSION[preset])
-      // 모르면 신뢰하지 않은 것이다 — 빠뜨린 호출자가 저장소의 파일을 열어 주지 않게
+      // Unknown means untrusted — so a caller that forgot to pass it never gets the repo's files opened up for it.
       expect(unknown!.settingSources).toEqual(['user'])
       for (const o of state.options) {
         const keys = Object.keys(o).filter((k) => k === 'permissionMode' || k === 'resolvePermissionModeInCli')
@@ -179,7 +185,7 @@ describe('어댑터가 CLI에 넘기는 설정 파일과 권한 (#92)', () => {
   }
 
   for (const preset of ['safe', 'normal', 'auto'] as const) {
-    it(`${preset}: 아무 파일도 읽지 않는 세션(noSettingFiles — 오케스트레이터·조율 세션)은 신뢰와 무관하게 [] — 권한 옵션은 같다`, async () => {
+    it(`${preset}: a session that reads no files at all (noSettingFiles — orchestrator/coordination sessions) always gets [] regardless of trust — the permission options stay the same`, async () => {
       for (const projectTrusted of [true, false, undefined]) {
         const h = await new ClaudeAdapter().createSession(
           { sessionId: 'o', cwd: root, permissionPreset: preset, projectTrusted, noSettingFiles: true, orchestratorTools: {} as OrchestratorTools, toolProfile: 'orchestrator' },
@@ -193,11 +199,13 @@ describe('어댑터가 CLI에 넘기는 설정 파일과 권한 (#92)', () => {
   }
 
   /*
-   * 도구를 받는다는 것만으로는 파일을 끄지 않는다 (#152). 워크트리 매니저와 만드는 세션도 오케스트레이터 도구를
-   * 받지만 프로젝트의 세션이다 — 예전에는 도구가 곧 []여서, 신뢰한 프로젝트의 만드는 세션이 CLAUDE.md도 사용자의
-   * ~/.claude(전역 bypass)도 읽지 못했다.
+   * Receiving orchestrator tools alone does not disable file reading (#152). The worktree manager
+   * and builder sessions also receive orchestrator tools, but they are still sessions of the
+   * project — previously, having tools meant settingSources was always [], so a builder session
+   * in a trusted project could not read CLAUDE.md, nor the user's own ~/.claude (the global
+   * bypass).
    */
-  it('도구를 받는 프로젝트의 세션(매니저·만드는 세션)은 도구가 없는 워커처럼 신뢰를 따른다', async () => {
+  it('a project session that receives tools (manager/builder) follows trust the same as a tool-less worker', async () => {
     for (const toolProfile of ['manager', 'builder'] as const) {
       for (const projectTrusted of [true, false]) {
         const h = await new ClaudeAdapter().createSession(
@@ -211,15 +219,15 @@ describe('어댑터가 CLI에 넘기는 설정 파일과 권한 (#92)', () => {
   })
 })
 
-describe('저장소에 심은 .claude/가 승인 카드를 끄는가 (#92, 흉내 CLI)', () => {
-  it('신뢰하지 않은 프로젝트: settings.local.json의 allow 규칙은 카드를 끄지 못한다 (safe·normal)', async () => {
+describe('does a .claude/ planted in the repo disable the approval card? (#92, stand-in CLI)', () => {
+  it('untrusted project: an allow rule in settings.local.json cannot disable the card (safe, normal)', async () => {
     const dir = repo({ local: { permissions: { allow: [RULE] } } })
     expect(await askedIn(dir, 'safe', false)).toBe(true)
     expect(await askedIn(dir, 'normal', false)).toBe(true)
     expect(state.verdicts).toEqual(['ask', 'ask'])
   })
 
-  it('신뢰하지 않은 프로젝트: settings.json의 훅은 돌지 않고, 그 훅의 "allow"도 카드를 끄지 못한다', async () => {
+  it('untrusted project: a settings.json hook never runs, and even its "allow" cannot disable the card', async () => {
     const dir = repo({})
     writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify(plantedHook(dir)))
     expect(await askedIn(dir, 'safe', false)).toBe(true)
@@ -228,16 +236,17 @@ describe('저장소에 심은 .claude/가 승인 카드를 끄는가 (#92, 흉�
   })
 
   /*
-   * 커밋된 settings.json의 allow 규칙은 CLI가 이미 따르지 않는다(실측) — 그래서 이 줄은 우리 고침이
-   * 없어도 초록이다. 뒤집기 증거는 위 두 줄(local 규칙과 훅)이 진다. 여기서는 신뢰하지 않은 프로젝트에서
-   * 그 파일이 무엇을 담든 카드가 뜬다는 약속만 적어 둔다.
+   * The CLI already does not honor allow rules from the committed settings.json (measured) — so
+   * this test would stay green even without our fix. The flip-check burden is carried by the two
+   * tests above (the local rule and the hook). This one only records the guarantee that, in an
+   * untrusted project, the card comes up no matter what that file contains.
    */
-  it('신뢰하지 않은 프로젝트: settings.json의 permissions.allow도 카드를 끄지 못한다', async () => {
+  it('untrusted project: permissions.allow in settings.json also cannot disable the card', async () => {
     const dir = repo({ settings: { permissions: { allow: [RULE] } } })
     expect(await askedIn(dir, 'normal', false)).toBe(true)
   })
 
-  it('신뢰한 프로젝트는 지금과 같다 — 저장소의 local 규칙과 훅이 그대로 산다', async () => {
+  it('a trusted project behaves as it does today — the repo\'s local rules and hooks still apply', async () => {
     const local = repo({ local: { permissions: { allow: [RULE] } } })
     expect(await askedIn(local, 'safe', true)).toBe(false)
     const hooked = repo({})
@@ -247,26 +256,28 @@ describe('저장소에 심은 .claude/가 승인 카드를 끄는가 (#92, 흉�
     expect(state.verdicts).toEqual(['rule-allowed', 'hook-allowed'])
   })
 
-  it('신뢰하지 않은 프로젝트에서도 사용자 자신의 설정은 그대로 정한다 — 끄는 것은 저장소의 몫뿐이다', async () => {
+  it('even in an untrusted project, the user\'s own settings still decide things as normal — only the repo\'s own settings get disabled', async () => {
     const dir = repo({ local: { permissions: { allow: ['Bash(rm -rf:*)'] } } })
-    // 사용자의 allow 규칙은 safe에서도 산다
+    // The user's own allow rule still applies even in safe.
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { allow: [RULE] } }))
     expect(await askedIn(dir, 'safe', false)).toBe(false)
-    // 사용자의 defaultMode(bypass)는 normal이 따른다 — 신뢰하지 않은 폴더라고 덮어쓰지 않는다
+    // normal honors the user's own defaultMode (bypass) — an untrusted folder does not override it.
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
     expect(await askedIn(dir, 'normal', false)).toBe(false)
-    // safe는 사용자의 bypass와 무관하게 묻는다 (지금과 같다)
+    // safe asks regardless of the user's own bypass (as it does today).
     expect(await askedIn(dir, 'safe', false)).toBe(true)
     expect(state.verdicts).toEqual(['rule-allowed', 'mode-allowed', 'ask'])
   })
 })
 
 /*
- * 물려받은 인수인계 노트 (#142) — 노트는 데이터 폴더에 있고 후임자의 cwd는 프로젝트다. Claude는 작업 폴더 밖 읽기를
- * 묻는다(실측은 CreateSessionOpts.readableDirs). 그 폴더만 추가 작업 폴더로 준다 — 받지 않은 세션에는 아무것도 없다.
+ * An inherited handoff note (#142) — the note lives in the data folder, while the successor's cwd
+ * is the project. Claude asks before reading outside the working folder (measured in
+ * `CreateSessionOpts.readableDirs`). Only that one folder is handed over as an extra working
+ * folder — a session that did not receive one gets nothing extra.
  */
-describe('물려받은 노트의 폴더 (#142)', () => {
-  it('readableDirs는 additionalDirectories로 가고, 없으면 키도 없다', async () => {
+describe('the folder for an inherited note (#142)', () => {
+  it('readableDirs becomes additionalDirectories, and without one there is no key at all', async () => {
     const notes = join(root, 'data', 'handoff', 'p1')
     await (await new ClaudeAdapter().createSession({ sessionId: 's', cwd: root, permissionPreset: 'safe', readableDirs: [notes] }, () => {})).dispose()
     await (await new ClaudeAdapter().createSession({ sessionId: 's', cwd: root, permissionPreset: 'safe' }, () => {})).dispose()
