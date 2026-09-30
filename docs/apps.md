@@ -268,7 +268,10 @@ call.
   the same entry, instance and frame as the app view's: the frame never moves in the document (a
   moved iframe loses its document), the view is laid over the panel's slot and only its style
   changes (`pinned-app/slots.ts`). In a panel the view has no header; the panel's Open goes to the
-  app view, and hiding the panel closes the view, teardown first.
+  app view, and hiding the panel closes the view, teardown first. The app's sidebar row dropped on
+  the screen brings a hidden panel back where it lands. While one of the project's rows is dragged
+  in, the view is hidden, not unloaded: in WebKit a drag goes into a frame whatever its
+  pointer-events say, and the row would land in the app instead of beside it.
 - **`ui/message`** from a pinned view asks the person which session to send it to. Nothing is sent
   before a choice, and cancelling tells the view it was not sent. Once picked, it goes the inline
   view's way (`apps.viewMessage`): stored as the app's message, and framed as the app's text for the
