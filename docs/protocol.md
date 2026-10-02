@@ -41,7 +41,7 @@ type NormalizedEvent =
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker
   // in-turn progress (display-only, never persisted)
-  | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing
+  | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated snapshot
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: live command output tail; #98: a subagent's steps, on the Agent call that spawned it
   // things a person must answer
@@ -174,7 +174,7 @@ own process ([plans/apps-plan.md](plans/apps-plan.md)).
 
 ```ts
 type ProtocolError = {
-  code: 'adapter_crashed' | 'tool_not_installed' | 'not_logged_in'
+  code: 'adapter_crashed' | 'conversation_locked' | 'tool_not_installed' | 'not_logged_in'
       | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'internal'
   message: string          // a human-readable explanation (must be displayable in the UI as is)
   retryable: boolean

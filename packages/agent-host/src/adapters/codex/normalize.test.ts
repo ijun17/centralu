@@ -320,11 +320,19 @@ describe('state and gauges', () => {
     expect(n('error', { error, willRetry: false, threadId: 'th', turnId: '' })).toHaveLength(1)
   })
 
-  it('an error Codex will retry (willRetry) is not left as a failure marker (#168)', () => {
+  it('an error Codex will retry (willRetry) is not a failure marker but the retrying activity (#168)', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const error = { message: 'stream disconnected before completion; retrying 1/5', codexErrorInfo: null, additionalDetails: null, misalignment: null }
-    expect(n('error', { error, willRetry: true, threadId: 'th', turnId: '' })).toEqual([])
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining('retrying after'))
+    // As codex-cli 0.153.4 sent it (2026-10-03): the attempt in `message`, the reason in `additionalDetails`
+    const error = {
+      message: 'Reconnecting... 1/2',
+      codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+      additionalDetails: 'stream disconnected before completion: stream closed before response.completed',
+      misalignment: null,
+    }
+    expect(n('error', { error, willRetry: true, threadId: 'th', turnId: 'turn-1' })).toEqual([
+      { type: 'activity', sessionId: S, activity: 'retrying' },
+    ])
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('stream closed before response.completed'))
     spy.mockRestore()
   })
 

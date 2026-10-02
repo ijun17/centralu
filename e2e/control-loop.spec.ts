@@ -4463,6 +4463,41 @@ test('Compacting looks different from waiting for a response', async ({ page }) 
   await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
 })
 
+// Codex reconnecting on its own (#168) is a wait of several attempts, not a failure — it says so while it lasts
+test('Reconnecting looks different from waiting for a response, and leaves no failure line', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'Start')
+
+  await page.getByTestId('prompt-input').fill('say hi')
+  await page.getByTestId('send').click()
+  await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
+
+  await emitEvent(page, 0, { type: 'activity', activity: 'retrying' })
+  await expect(page.getByTestId('activity-label')).toHaveText('Reconnecting')
+
+  await emitEvent(page, 0, { type: 'activity', activity: null })
+  await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
+  await expect(page.getByText('could not finish this turn')).toHaveCount(0)
+})
+
+/*
+ * A lock found after a slow background resume had already handed the session back (#168, item 5).
+ * It arrives as an event, not as the wake result — the fork offer has to appear all the same.
+ */
+test('A lock error that arrives after the session was handed back offers Continue in a fork', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'Start')
+  await expect(page.getByTestId('dormant-note')).toBeHidden()
+
+  await emitEvent(page, 0, {
+    type: 'error',
+    error: { code: 'conversation_locked', message: 'This conversation is already open elsewhere', retryable: true },
+  })
+  await expect(page.getByTestId('dormant-note')).toContainText('already open elsewhere')
+  await expect(page.getByTestId('dormant-fork')).toBeVisible()
+  await expect(page.getByText('Could not open this conversation — This conversation is already open elsewhere')).toBeVisible()
+})
+
 /**
  * The elapsed count used to restart whenever the row was remounted (issue #23): a turn
  * three minutes old read as if it had just begun. The lie ran in the worst direction —

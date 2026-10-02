@@ -3088,11 +3088,21 @@ export const useStore = create<AppState>((set, get) => ({
     let withSeq = hostSeq != null ? bumpSeq(next, hostSeq) : next
     // A message sent by me (or by the orchestrator) also gets marked read by the host — the screen follows
     if (e.type === 'user_message') withSeq = markReadPure(withSeq, e.seq)
+    /*
+     * A lock found after the session was already handed back (#168, item 5) — a slow background
+     * resume. The host has dropped the handle, so the session is dormant again, and its dormant line
+     * offers the same "Continue in a fork" as a lock found while waking.
+     */
+    const lockedLate = e.type === 'error' && e.error.code === 'conversation_locked' ? e.error.message : null
+    if (lockedLate !== null) withSeq = { ...withSeq, live: false }
 
     set((st) => {
       const sessions = { ...st.sessions, [sessionId]: withSeq }
       return {
         sessions,
+        ...(lockedLate !== null
+          ? { wakeError: { ...st.wakeError, [sessionId]: lockedLate }, wakeLocked: { ...st.wakeLocked, [sessionId]: true } }
+          : {}),
         chat: chat === undefined ? st.chat : { ...st.chat, [sessionId]: chat },
         // A turn begins because an event arrived — this is where its start instant is
         // recorded, so the elapsed line survives remounting (issue #23)
@@ -5720,6 +5730,8 @@ export function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): s
 
 /** A failed turn's one line (#107) — carries the tool's own sentence as is. Rewording it into our own words would erase the cause */
 export function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
+  // No turn was running — the conversation could not be opened at all (#168, item 5)
+  if (e.error.code === 'conversation_locked') return `Could not open this conversation — ${e.error.message}`
   return `The agent could not finish this turn — ${e.error.message}`
 }
 

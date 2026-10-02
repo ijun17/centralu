@@ -561,17 +561,27 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      *  - **an error that will be retried** (willRetry) — Codex continues on its own, e.g. by
      *    reconnecting. Leaving a marker here would leave "this turn did not finish" in the
      *    conversation even when the turn eventually succeeds. If it does fail for good, the
-     *    turn/completed(failed) below reports it. This case is only logged to host.log.
+     *    turn/completed(failed) below reports it. It shows as the `retrying` activity while
+     *    it lasts (the adapter puts the previous activity back once output resumes) and goes
+     *    to host.log with Codex's reason.
      *  - **an error that belongs to a turn** — that turn ends with a turn/completed(failed)
      *    carrying the same sentence. Emitting both would leave two lines of marker (measured: one
      *    token-refresh failure left the same sentence three times across two lines within the same
      *    second). We treat the turn's own outcome as the source of truth.
+     *
+     * Measured with codex-cli 0.153.4 (2026-10-03, a provider whose stream closed before
+     * `response.completed`, stream_max_retries=2): `error{message:"Reconnecting... 1/2",
+     * additionalDetails:<the reason>, willRetry:true, turnId}`, the same for 2/2, then
+     * `error{message:<the reason>, willRetry:false, turnId}` and `turn/completed{status:"failed",
+     * error:{message:<the same reason>}}`. A real 400 (an unsupported model) skipped the retries
+     * and sent the last two only.
      */
     case 'error': {
       const message = str(obj(p.error).message) || str(p.message) || 'Unknown error'
       if (p.willRetry === true) {
-        console.error(`[codex] ${sessionId.slice(0, 8)} retrying after: ${message}`)
-        return []
+        const why = str(obj(p.error).additionalDetails)
+        console.error(`[codex] ${sessionId.slice(0, 8)} retrying after: ${message}${why ? ` (${why})` : ''}`)
+        return [{ type: 'activity', sessionId, activity: 'retrying' }]
       }
       if (str(p.turnId)) return []
       return [{ type: 'error', sessionId, error: { code: 'internal', message, retryable: true } }]

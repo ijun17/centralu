@@ -13,6 +13,7 @@ import type {
   ApprovalDetail,
   ApprovalScope,
   PermissionPreset,
+  SessionActivity,
   ToolDescriptor,
 } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
@@ -249,6 +250,19 @@ class CodexSession implements SessionHandle {
    */
   private sendsIssued = 0
   private sendsStopped = 0
+  /**
+   * Codex is reconnecting on its own (#168): the `retrying` activity is up, and `activityBefore`
+   * is what was showing before it (compacting, reviewing or nothing). Codex sends no "reconnected"
+   * notification — the next item is the sign that output flows again, so that is where the
+   * previous activity is put back.
+   */
+  private retrying = false
+  private activityBefore: SessionActivity | null = null
+  /**
+   * The thread never came up. Only possible after a lazy resume handed the handle out:
+   * watchBackgroundStart reports that once, counting the messages it swallowed (#168, item 5).
+   */
+  private startFailed = false
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
@@ -287,6 +301,10 @@ class CodexSession implements SessionHandle {
       { cwd: opts.cwd, command: whichTool('codex') ?? 'codex' },
     )
     this.ready = this.start()
+    // Registered before any send's continuation, so the flag is set by the time a send's catch runs
+    this.ready.catch(() => {
+      this.startFailed = true
+    })
   }
 
   private async start(): Promise<void> {
@@ -521,6 +539,17 @@ class CodexSession implements SessionHandle {
     if (n.method === 'turn/started') this.turnId = turnIdOf(n.params)
     if (n.method === 'turn/completed' || n.method === 'turn/failed') this.turnId = null
 
+    // Output flows again after a reconnect — the retrying activity gives way to what was showing before it
+    if (this.retrying && n.method.startsWith('item/')) {
+      this.retrying = false
+      this.emit({ type: 'activity', sessionId: this.sessionId, activity: this.activityBefore })
+    }
+    // A finished turn takes its activity with it (the state machine clears it on leaving working)
+    if (n.method === 'turn/completed') {
+      this.retrying = false
+      this.activityBefore = null
+    }
+
     this.noteAppCall(n)
 
     // Where compact/review ends — if messages piled up during it, they go out now
@@ -538,6 +567,12 @@ class CodexSession implements SessionHandle {
       if (e.type === 'message_image' && !e.data && e.path) {
         void imageEventFromDisk(this.sessionId, e.path).then((filled) => this.emit(filled))
         continue
+      }
+      if (e.type === 'activity') {
+        // Each attempt sends its own notice; one indication is enough
+        if (e.activity === 'retrying' && this.retrying) continue
+        if (e.activity === 'retrying') this.retrying = true
+        else this.activityBefore = e.activity
       }
       this.emit(e)
     }
@@ -830,6 +865,8 @@ class CodexSession implements SessionHandle {
         )
       })
       .catch((e: Error) => {
+        // The thread never came up — watchBackgroundStart says so once, counting this message (#168, item 5)
+        if (this.startFailed) return
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
@@ -996,13 +1033,26 @@ class CodexSession implements SessionHandle {
     }, BACKGROUND_RESUME_CAP_MS)
     this.ready.then(
       () => clearTimeout(timer),
-      (e: Error) => {
+      (e: Error & { code?: string }) => {
         clearTimeout(timer)
         if (this.closed) return
+        /*
+         * A lock error keeps its code (#168, item 5). Arriving here instead of inside the 3-second
+         * window used to turn it into adapter_crashed, so the screen could not offer "continue in
+         * a fork". Measured on 0.153.4: a second app-server resuming a held thread is refused with
+         * -32600 "thread <id> already has an active writer" in 35 ms to 1.3 s, so this is rare,
+         * but a slow start can push it past the window.
+         *
+         * Messages sent meanwhile were never delivered (send stays quiet about them, so the
+         * failure is said once): the person is told, since the screen shows them as sent.
+         */
+        const unsent = this.sendsIssued - this.sendsStopped
+        const note = unsent > 0 ? ` — ${unsent} message(s) sent while it was opening were not delivered` : ''
+        const locked = e.code === 'conversation_locked'
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
-          error: { code: 'adapter_crashed', message: e.message, retryable: true },
+          error: { code: locked ? 'conversation_locked' : 'adapter_crashed', message: e.message + note, retryable: true },
         })
         void this.dispose().catch(() => {})
       },

@@ -10,6 +10,7 @@ import type { NormalizedEvent } from '@cc/protocol'
  *  1. For a large thread, the handle comes out first after 3 seconds — a message waits in the ready queue until delivered
  *  2. A lock error is thrown as-is within the 3-second window — this keeps the "split off and continue" fork-in-the-road UI alive
  *  3. When a background resume fails, it does not go quietly to sleep — the manager retires it via adapter_crashed
+ *     (or conversation_locked, when the failure is the lock)
  */
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params: Record<string, unknown> | undefined }[],
@@ -117,6 +118,39 @@ describe('codex lazy resume — like Claude', () => {
         () => {},
       ),
     ).rejects.toThrow(/already open elsewhere/)
+  })
+
+  /*
+   * The lock error past the 3-second window (#168, item 5). It used to become adapter_crashed,
+   * losing the code the fork offer is drawn from, and a message queued meanwhile raised the same
+   * failure a second time as `internal`. The rejection text is codex-cli 0.153.4's (measured
+   * 2026-10-03: -32600 from a second app-server resuming a held thread).
+   */
+  it('a lock error after the window keeps conversation_locked, said once, naming the message it swallowed (#168)', { timeout: 10_000 }, async () => {
+    state.hang.add('thread/resume')
+    const events: NormalizedEvent[] = []
+    const h = await new CodexAdapter().createSession(
+      { sessionId: 's5', cwd: '/tmp', permissionPreset: 'normal', resumeExternalId: 'held' },
+      (e) => events.push(e),
+    )
+    h.send('message sent while it was opening')
+
+    state.rejecters.get('thread/resume')!(new Error('thread 01a0fd98-ac0b-7cf3-8dd9-a342a98dcac6 already has an active writer'))
+    await tick()
+    await tick()
+    const errors = events.filter((e) => e.type === 'error')
+    expect(errors).toEqual([
+      {
+        type: 'error',
+        sessionId: 's5',
+        error: {
+          code: 'conversation_locked',
+          message: expect.stringMatching(/already open elsewhere.*1 message\(s\) sent while it was opening were not delivered/),
+          retryable: true,
+        },
+      },
+    ])
+    expect(methods()).not.toContain('turn/start')
   })
 
   it('adapter_crashed is raised when a background resume fails — does not leave a silent zombie', { timeout: 10_000 }, async () => {

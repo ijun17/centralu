@@ -74,8 +74,13 @@ export type SessionState = z.infer<typeof SessionState>
  * generating a reply: both just blink a dot. Measured: one manual compaction took 39 seconds,
  * and during that time there was no way to tell whether it was stuck or working.
  */
-/** The kind of busy. compacting comes from either tool, reviewing comes from codex's /review (a dedicated RPC) */
-export const SessionActivity = z.enum(['compacting', 'reviewing'])
+/**
+ * The kind of busy. compacting comes from either tool, reviewing comes from codex's /review (a
+ * dedicated RPC). retrying is codex reconnecting on its own after a dropped stream (an `error`
+ * notification with `willRetry`, #168): the turn is still alive, so it is not a failure, but a
+ * wait of several attempts should not look like an ordinary one.
+ */
+export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
 
 /**
  * The goal set on a session (2026-09-07 — claude's `/goal` active_goal, and codex's thread/goal/*).
@@ -566,6 +571,13 @@ export type AdapterCapabilities = z.infer<typeof AdapterCapabilities>
 
 export const ProtocolErrorCode = z.enum([
   'adapter_crashed',
+  /*
+   * Another process holds this conversation (Codex's writer lock), so the session could not be
+   * opened. Carried as a code, not a sentence, so the screen can offer "continue in a fork".
+   * A lock error that arrives after the adapter already handed the session back (a slow
+   * background resume) comes as an event with this code (#168, item 5).
+   */
+  'conversation_locked',
   'tool_not_installed',
   'not_logged_in',
   'session_not_found',

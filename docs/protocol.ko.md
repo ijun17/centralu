@@ -42,7 +42,7 @@ type NormalizedEvent =
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커
   // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
-  | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중
+  | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중 / 재연결 중 (codex)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated 스냅샷
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: 실행 중 명령 출력의 꼬리 · #98: 서브에이전트의 걸음 (띄운 Agent 호출에)
   // 사람이 답해야 하는 것
@@ -169,7 +169,7 @@ UI는 그 칸 없이 문서를 썼다. 새로 설치한 뒤 레일에서 한 줄
 
 ```ts
 type ProtocolError = {
-  code: 'adapter_crashed' | 'tool_not_installed' | 'not_logged_in'
+  code: 'adapter_crashed' | 'conversation_locked' | 'tool_not_installed' | 'not_logged_in'
       | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'internal'
   message: string          // a human-readable explanation (must be displayable in the UI as is)
   retryable: boolean

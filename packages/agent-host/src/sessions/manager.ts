@@ -2657,7 +2657,8 @@ export class SessionManager {
        * disappear** (until an explicit restart). Removing it means send()'s "resume if missing" path
        * becomes automatic recovery on its own.
        */
-      if (e.type === 'error' && e.error.code === 'adapter_crashed') {
+      // A lock error after a lazy resume handed the handle out (#168, item 5) leaves a handle with no thread — the same as a crash
+      if (e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')) {
         const dead = this.handles.get(e.sessionId)
         if (dead) {
           // Closed before it is removed — so a message issued during close (notice of an unsent message)

@@ -2866,6 +2866,47 @@ describe('a session deleted while awaited is never revived (#163)', () => {
 })
 
 /*
+ * A lock found after a slow background resume had already handed the session back (#168, item 5).
+ * It used to arrive as adapter_crashed: the session stayed "live" on screen and the fork offer,
+ * drawn only from the wake result, never appeared.
+ */
+describe('a late lock error offers the fork (#168)', () => {
+  it('the session turns dormant with the reason and the fork offer, and the marker does not speak of a turn', () => {
+    const id = 'late-lock-168'
+    useStore.setState({ sessions: { [id]: { ...sessionInfo(id), live: true } as never }, chat: {}, wakeError: {}, wakeLocked: {} })
+    useStore.getState().dispatchEvent({
+      type: 'error',
+      sessionId: id,
+      seq: 7,
+      error: { code: 'conversation_locked', message: 'This conversation is already open elsewhere', retryable: true },
+    } as NormalizedEvent)
+
+    const st = useStore.getState()
+    expect(st.sessions[id]!.live).toBe(false)
+    expect(st.wakeLocked[id]).toBe(true)
+    expect(st.wakeError[id]).toBe('This conversation is already open elsewhere')
+    expect(st.chat[id]!.map((i) => (i as { text?: string }).text)).toEqual([
+      'Could not open this conversation — This conversation is already open elsewhere',
+    ])
+  })
+
+  it('any other error leaves the session live and offers no fork', () => {
+    const id = 'other-error-168'
+    useStore.setState({ sessions: { [id]: { ...sessionInfo(id), live: true } as never }, chat: {}, wakeError: {}, wakeLocked: {} })
+    useStore.getState().dispatchEvent({
+      type: 'error',
+      sessionId: id,
+      seq: 3,
+      error: { code: 'internal', message: 'boom', retryable: true },
+    } as NormalizedEvent)
+
+    const st = useStore.getState()
+    expect(st.sessions[id]!.live).toBe(true)
+    expect(st.wakeLocked[id]).toBeUndefined()
+  })
+})
+
+/*
  * The settings-change toast states what the host actually did (#164). It used to always say "(from
  * next turn)."
  */

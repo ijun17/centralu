@@ -2145,6 +2145,21 @@ describe('messaging a crashed session again revives it and sends', () => {
     expect(revived.sent).toContain('words after the crash')
     expect(dead.sent).not.toContain('words after the crash')
   })
+
+  // A lock found after a lazy resume handed the handle out (#168, item 5) leaves a handle with no thread
+  it('conversation_locked from a live handle removes it too, so the session reads as dormant', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const held = adapter.handleOf(s.id)!
+    ;(held as unknown as { emit: (e: NormalizedEvent) => void }).emit({
+      type: 'error',
+      sessionId: s.id,
+      error: { code: 'conversation_locked', message: 'This conversation is already open elsewhere', retryable: true },
+    })
+
+    expect(mgr.isLive(s.id)).toBe(false)
+    expect(held.disposed).toBe(true)
+  })
 })
 
 /*

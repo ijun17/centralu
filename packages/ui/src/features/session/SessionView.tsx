@@ -2221,7 +2221,10 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
             ? 'Compacting context'
             : activity === 'reviewing'
               ? 'Reviewing changes'
-              : thinkingTokens
+              : // Codex's own word for it (#168): the connection dropped and it is trying again
+                activity === 'retrying'
+                ? 'Reconnecting'
+                : thinkingTokens
                 ? `Thinking · ~${thinkingTokens >= 1000 ? `${(thinkingTokens / 1000).toFixed(1)}k` : thinkingTokens} tokens`
                 : 'Waiting for response'}
         </span>
