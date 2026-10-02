@@ -483,11 +483,40 @@ describe('approval request conversion (the basis for approving right from the ba
     expect(d).toEqual({ kind: 'command', command: 'npm run build', cwd: '/tmp/p' })
   })
 
-  it('a file-edit approval → kind=file_edit (branches to "needs review" since the diff must be seen)', () => {
-    const d = approvalDetailFrom('item/fileChange/requestApproval', {
-      item: { changes: [{ path: 'a.ts', diff: '+x' }, { path: 'b.ts', diff: '-y' }] },
+  it('a file-edit approval → kind=file_edit with the changes of the item it names (branches to "needs review" since the diff must be seen)', () => {
+    const d = approvalDetailFrom(
+      'item/fileChange/requestApproval',
+      { threadId: 't', turnId: 'u', itemId: 'fc', startedAtMs: 1, reason: null, grantRoot: null },
+      [
+        { path: 'a.ts', diff: '+x' },
+        { path: 'b.ts', diff: '-y' },
+      ],
+    )
+    expect(d).toEqual({ kind: 'file_edit', path: 'a.ts', diffPreview: 'a.ts\n+x\n\nb.ts\n-y', multi: true })
+  })
+
+  it('a file-edit approval whose item is unknown says (no path) rather than an empty path (#169)', () => {
+    const d = approvalDetailFrom('item/fileChange/requestApproval', { threadId: 't', turnId: 'u', itemId: 'gone', startedAtMs: 1 })
+    expect(d).toEqual({ kind: 'file_edit', path: '(no path)', diffPreview: '', multi: false })
+  })
+
+  it('the older applyPatchApproval builds its card from fileChanges, keyed by path (#169)', () => {
+    const d = approvalDetailFrom('applyPatchApproval', {
+      conversationId: 't',
+      callId: 'c',
+      fileChanges: {
+        'src/a.ts': { type: 'update', unified_diff: '@@ -1 +1 @@\n-a\n+b\n', move_path: null },
+        'src/new.ts': { type: 'add', content: 'export {}\n' },
+      },
+      reason: null,
+      grantRoot: null,
     })
-    expect(d).toMatchObject({ kind: 'file_edit', path: 'a.ts', multi: true })
+    expect(d).toEqual({
+      kind: 'file_edit',
+      path: 'src/a.ts',
+      diffPreview: 'src/a.ts\n@@ -1 +1 @@\n-a\n+b\n\n\nsrc/new.ts\nexport {}\n',
+      multi: true,
+    })
   })
 
   it('an unknown approval kind becomes other (leaves the judgment to the person)', () => {

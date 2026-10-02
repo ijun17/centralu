@@ -87,11 +87,13 @@
     "account/rateLimits/updated",
     "error",
     "thread/goal/updated",
-    "thread/goal/cleared"
+    "thread/goal/cleared",
+    "item/fileChange/patchUpdated"
   ],
   "serverRequests": [
     "item/commandExecution/requestApproval",
     "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
     "mcpServer/elicitation/request"
   ],
   "_mcpToolApprovalModesComment": [

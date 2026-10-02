@@ -24,7 +24,7 @@ import { listCodexThreads, readCodexHistory } from './history.js'
 import { imageEventFromDisk } from './images.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
-import { approvalDetailFrom, goalFromCodex, normalizeNotification, toCodexDecision } from './normalize.js'
+import { approvalDetailFrom, fileChangesOf, goalFromCodex, normalizeNotification, toCodexDecision } from './normalize.js'
 
 const exec = promisify(execFile)
 
@@ -217,6 +217,12 @@ class CodexSession implements SessionHandle {
   private appServers = new Set<string>()
   private reqCounter = 0
   private alwaysAllow = new Set<string>()
+  /**
+   * The changes of each file-change item still open, by item id (#169). The approval request for that item
+   * names it and carries nothing else (measured — see approvalDetailFrom), so the card's path and diff come
+   * from here. Forgotten when the item completes.
+   */
+  private fileChanges = new Map<string, { path: string; diff: string }[]>()
   /**
    * Messages that arrived while a compact/review turn was running (measured while dogfooding,
    * 2026-09-02, MGH session).
@@ -506,6 +512,8 @@ class CodexSession implements SessionHandle {
      * approval the child is asking for, the child gets stuck. While the thread is still unknown
      * (before the thread/start response), a child cannot exist yet, so we let it through.
      */
+    // Before the thread filter: a child thread's approval requests do reach us (see above), and its card needs its changes too
+    this.noteFileChange(n)
     const from = (n.params as { threadId?: unknown } | undefined)?.threadId
     if (typeof from === 'string' && this.threadId !== null && from !== this.threadId) return
     // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
@@ -533,6 +541,20 @@ class CodexSession implements SessionHandle {
       }
       this.emit(e)
     }
+  }
+
+  /** Keeps a file-change item's changes until it completes — see `fileChanges` */
+  private noteFileChange(n: { method: string; params?: unknown }): void {
+    const p = (n.params ?? {}) as { item?: Record<string, unknown>; itemId?: unknown; changes?: unknown }
+    // The patch can be revised before it is approved (generated/v2/FileChangePatchUpdatedNotification.ts) — not measured
+    if (n.method === 'item/fileChange/patchUpdated' && typeof p.itemId === 'string') {
+      this.fileChanges.set(p.itemId, fileChangesOf(p))
+      return
+    }
+    const item = p.item
+    if (!item || item.type !== 'fileChange' || typeof item.id !== 'string') return
+    if (n.method === 'item/started') this.fileChanges.set(item.id, fileChangesOf(item))
+    else if (n.method === 'item/completed') this.fileChanges.delete(item.id)
   }
 
   /**
@@ -602,6 +624,21 @@ class CodexSession implements SessionHandle {
       return
     }
 
+    /*
+     * **A permissions request is not answered with a decision** (#169). Its response is
+     * `{ permissions: GrantedPermissionProfile, scope }` (generated/v2/PermissionsRequestApprovalResponse.ts),
+     * so the general path below, which answers `{ decision }`, sent Codex a reply of the wrong shape whatever
+     * the person chose. There is no card that can show a permission profile yet, so it is refused the way
+     * that type allows — nothing granted, for this turn only — and said in the log, so a request that
+     * should have been asked about is one grep away. It only arrives with Codex's `request_permissions_tool`
+     * feature turned on; not measured.
+     */
+    if (r.method === 'item/permissions/requestApproval') {
+      console.error('[codex] permissions request refused, no card for it yet:', JSON.stringify(r.params ?? {}).slice(0, 500))
+      this.client.respond(r.id, { permissions: {}, scope: 'turn' })
+      return
+    }
+
     if (!r.method.includes('requestApproval') && !r.method.endsWith('Approval')) {
       /*
        * A server request that is not an approval is passed through with an empty response (so we
@@ -619,7 +656,8 @@ class CodexSession implements SessionHandle {
       unknown
     >
 
-    const detail = approvalDetailFrom(r.method, params)
+    const itemId = typeof params.itemId === 'string' ? params.itemId : ''
+    const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId))
 
     // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
     const key = detail.kind === 'command' ? detail.command : detail.kind === 'file_edit' ? detail.path : ''

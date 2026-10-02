@@ -82,8 +82,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
     return { tool: 'Bash', title: cmd, readOnly: isReadOnlyCommand(cmd), paths: [] }
   }
   if (type === 'fileChange') {
-    const changes = Array.isArray(item.changes) ? item.changes : []
-    const paths = changes.map((c) => str(obj(c).path)).filter(Boolean)
+    const paths = fileChangesOf(item).map((c) => c.path).filter(Boolean)
     return { tool: 'Edit', title: paths.join(', ') || 'Edit files', readOnly: false, paths }
   }
   if (type === 'mcpToolCall') {
@@ -173,24 +172,78 @@ function isReadOnlyCommand(cmd: string): boolean {
   return ['ls', 'cat', 'pwd', 'grep', 'rg', 'find', 'head', 'tail', 'wc', 'git'].includes(head)
 }
 
-export function approvalDetailFrom(method: string, params: Record<string, unknown>): ApprovalDetail {
+/**
+ * The changes a `fileChange` item carries (generated/v2/ThreadItem.ts: `changes: FileUpdateChange[]`,
+ * each `{ path, kind, diff }`). The adapter remembers them per item id, because the approval request
+ * for that item does not carry them (see approvalDetailFrom).
+ */
+export function fileChangesOf(item: Record<string, unknown>): { path: string; diff: string }[] {
+  const changes = Array.isArray(item.changes) ? item.changes : []
+  return changes.map((c) => ({ path: str(obj(c).path), diff: str(obj(c).diff) }))
+}
+
+/**
+ * Turns a server's approval request into the card's detail.
+ *
+ * **A file-change request carries no change** (#169). Measured against codex-cli 0.153.4
+ * (scripts/probe-codex-file-approval.mts, preset safe, one edit of one file):
+ *
+ *   item/started  {item: {type: 'fileChange', id: 'exec-4d7c…', status: 'inProgress',
+ *                  changes: [{path: '/…/notes.txt', kind: {type: 'update', move_path: null},
+ *                             diff: '@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n'}]}, threadId, turnId, startedAtMs}
+ *   request       item/fileChange/requestApproval {threadId, turnId, itemId: 'exec-4d7c…',
+ *                  startedAtMs, reason: null, grantRoot: null}            — 1ms after item/started
+ *   item/completed the same item, status 'completed', the same changes
+ *
+ * The request names the item and nothing else. This read `params.item.changes`, which no version of the
+ * request has, so every card had an empty path and an empty diff and the person approved blind. The changes
+ * come from the item instead, which the adapter remembers by id and passes in as `itemChanges`.
+ *
+ * The older `applyPatchApproval` carries its own changes, keyed by path (generated/ApplyPatchApprovalParams.ts:
+ * `fileChanges: { [path]: FileChange }`, where an update has `unified_diff` and an add or a delete `content`).
+ * Not measured: app-server 0.153.4 sent the v2 request above.
+ *
+ * A command request carries its command and cwd at the top level (measured in the same run); `item` is
+ * read first only because older versions were written against it.
+ */
+export function approvalDetailFrom(
+  method: string,
+  params: Record<string, unknown>,
+  itemChanges?: readonly { path: string; diff: string }[],
+): ApprovalDetail {
   if (method === 'item/commandExecution/requestApproval') {
     const item = obj(params.item)
     return { kind: 'command', command: str(item.command) || str(params.command), cwd: str(item.cwd) || str(params.cwd) }
   }
-  if (method === 'item/fileChange/requestApproval' || method === 'applyPatchApproval') {
-    const item = obj(params.item)
-    const changes = Array.isArray(item.changes) ? item.changes : []
-    const paths = changes.map((c) => str(obj(c).path)).filter(Boolean)
-    const diff = changes.map((c) => str(obj(c).diff ?? obj(c).unifiedDiff)).filter(Boolean).join('\n')
-    return {
-      kind: 'file_edit',
-      path: paths[0] ?? str(params.path) ?? '(no path)',
-      diffPreview: diff.slice(0, 4000),
-      multi: paths.length > 1,
-    }
+  if (method === 'item/fileChange/requestApproval') return fileEditDetail(itemChanges ?? [])
+  if (method === 'applyPatchApproval') {
+    const changes = Object.entries(obj(params.fileChanges)).map(([path, c]) => ({
+      path,
+      diff: str(obj(c).unified_diff) || str(obj(c).content),
+    }))
+    return fileEditDetail(changes)
   }
   return { kind: 'other', raw: JSON.stringify(params).slice(0, 2000) }
+}
+
+/**
+ * The card for one or more file changes. The card prints the path and then the preview, so a single file's
+ * preview is its diff alone; with several files each diff is headed by its own path, or the hunks of two files
+ * would read as one. `(no path)` when nothing names a file — an empty string looks like a card that failed to
+ * draw rather than a request that did not say.
+ */
+function fileEditDetail(changes: readonly { path: string; diff: string }[]): ApprovalDetail {
+  const named = changes.filter((c) => c.path)
+  const diff =
+    named.length > 1
+      ? named.map((c) => `${c.path}\n${c.diff}`).join('\n\n')
+      : changes.map((c) => c.diff).filter(Boolean).join('\n')
+  return {
+    kind: 'file_edit',
+    path: named[0]?.path || '(no path)',
+    diffPreview: diff.slice(0, 4000),
+    multi: named.length > 1,
+  }
 }
 
 /**
