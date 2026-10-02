@@ -4950,8 +4950,44 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
   // as "fully scrolled past"
   await input.fill('second question\n' + 'content\n'.repeat(40))
   await page.getByTestId('send').click()
+  /*
+    And the second question gets an answer much taller than the screen, so that at the bottom
+    the last question has fully scrolled past with room to spare: the banner there pins it, and
+    there is no next user message for it to step aside from.
+
+    Without the answer, the bottom is no such place. The second question is taller than the
+    screen and never fully scrolls past, so the banner there pins the first question and the
+    second question crosses it — the banner is stepped aside (`cc-hang-out-up`,
+    pointer-events: none). The checks below that need a banner a person can see and click used
+    to run there anyway, and passed or failed by timing (2026-10-03, Chromium):
+    - the expand check opened it with a DOM click, which ignores pointer-events, and its real
+      click was then intercepted by the second question's row. Playwright scrolled the list
+      itself looking for a clickable spot — sometimes landing in the ~6px window where the
+      banner was back, sometimes far enough that the first question no longer counted as
+      scrolled past, the pinned turn changed, and the expanded card was unmounted mid-click
+      ("element was detached from the DOM", 3 runs in 40);
+    - the shape check measured the banner while it was stepping out, and read a gap from the
+      ceiling of -2px (the 6px gap minus the 8px it rises) whenever the exit animation won.
+  */
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const id = [...m.sessions.keys()][0]
+    for (let i = 0; i < 60; i++)
+      m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `answer line ${i}\n\n` })
+    m.emit({ type: 'turn_complete', sessionId: id })
+  })
 
   const stream = page.getByTestId('chat-stream')
+  const banner = page.getByTestId('sticky-user')
+  // The banner moves while it enters or steps aside — positions are read only once it holds still
+  const bannerAtRest = () =>
+    page.evaluate(
+      () =>
+        new Promise<void>((r) => {
+          const card = document.querySelector('[data-testid="sticky-user"] > div')
+          void Promise.all((card?.getAnimations() ?? []).map((a) => a.finished.catch(() => {}))).then(() => r())
+        }),
+    )
 
   /*
     **Wait for it to settle first.** Right after sending, it is still animating down to the
@@ -4959,10 +4995,27 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
     down, which would look like "it is at the top, so why is it still pinned" when it was
     actually never at the top.
     (This intermittently failed exactly this way under the full suite.)
+
+    The test takes itself to the bottom rather than waiting for the auto-scroll to get there,
+    and waits until the height stops changing — every row measured, nothing left to follow.
+    The answer lands as one burst right behind the send, and in WebKit the auto-scroll let go
+    of the bottom on its own in 2 runs of 30: with no wheel, pointer or key on the list,
+    scrollTop dropped 54px on the frame the answer's height landed, which `decideFollow` reads
+    as the person scrolling up, and the list stopped 914px short. That is a follow race to look
+    at on its own, not what this test is about.
   */
+  let lastHeight = -1
   await expect
-    .poll(async () => stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
-    .toBeLessThan(80)
+    .poll(async () => {
+      const height = await stream.evaluate((el) => {
+        el.scrollTop = el.scrollHeight
+        return el.scrollHeight
+      })
+      const steady = height === lastHeight
+      lastHeight = height
+      return steady
+    })
+    .toBe(true)
 
   /*
     There is nothing to pin at the top (this own message has not scrolled past the top of the
@@ -4977,15 +5030,15 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
   await expect(page.getByTestId('sticky-user')).toBeHidden({ timeout: 3000 })
 
   /*
-    Scrolling down pins the own message that has scrolled past.
-    Which one gets pinned is decided by "has it fully scrolled past", and that depends on row
-    height — if the test tried to replicate that arithmetic, the smallest layout change would
-    break it. There are two contracts kept here: it does not appear at the top, and it appears
-    once scrolled down past what I said.
+    Scrolling down pins the own message that has scrolled past — at the bottom, the last one.
+    Naming it exactly is not row-height arithmetic: its answer is about three screens tall, so
+    no layout change short of a broken one leaves it on screen there. Nothing follows it, so it
+    has no reason to step aside. (`data-obscured` lives on the card inside the banner.)
   */
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
-  await expect(page.getByTestId('sticky-user')).toBeVisible()
-  await expect(page.getByTestId('sticky-user')).toContainText(/task|first question/)
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('second question')
+  await expect(banner.locator('[data-obscured="true"]')).toHaveCount(0)
 
   /*
     **The banner shares the same position and the same width as the chat bubble.**
@@ -4997,13 +5050,7 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
     things are kept as a contract: the right edge matches, and it never exceeds 75%. (Measured
     only after the entrance animation finishes — while it is still moving it sits a few px lower.)
   */
-  await page.evaluate(
-    () =>
-      new Promise<void>((r) => {
-        const el = document.querySelector('[data-testid="sticky-user"] .cc-hang')
-        void Promise.all((el?.getAnimations?.() ?? []).map((a) => a.finished.catch(() => {}))).then(() => r())
-      }),
-  )
+  await bannerAtRest()
   const shape = await page.evaluate(() => {
     const s = document.querySelector('[data-testid="chat-stream"]') as HTMLElement
     const btn = document.querySelector('[data-testid="sticky-user"] button') as HTMLElement
@@ -5086,16 +5133,21 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
     its height within the flow would shift every virtual-scroll coordinate below it, so the
     collapsed row's own position must stay exactly where it was.
   */
-  // The new rule is that the banner steps aside where it would meet the next user message.
-  // The expand check runs at the last user message, where there is no such collision.
+  // At the bottom again: the last question is pinned, nothing below it to step aside for
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
-  await expect(page.getByTestId('sticky-user')).not.toHaveAttribute('data-obscured', 'true')
-  const collapsed = page.getByTestId('sticky-user').getByRole('button').first()
+  await expect(banner).toContainText('second question')
+  await expect(banner.locator('[data-obscured="true"]')).toHaveCount(0)
+  /*
+    Real clicks, not DOM clicks: what is kept is that a person can click it. They wait for the
+    banner's entrance animation to end — a click started while it ran had Playwright's
+    scroll-into-view step move the list itself (in WebKit 249-504px up, 6 runs in 6, 1-3ms
+    before the pointerdown), which no person's click does.
+  */
+  await bannerAtRest()
+  const settledTop = await stream.evaluate((el) => el.scrollTop)
+  const collapsed = banner.getByRole('button').first()
   const collapsedBox = (await collapsed.boundingBox())!
-  // The virtual list repositions rows right after scrolling. Since this checks the expand-state
-  // transition itself, not a hit-test on the click target, it uses a DOM click that will not
-  // trigger another scroll during that repositioning.
-  await collapsed.evaluate((el: HTMLButtonElement) => el.click())
+  await collapsed.click()
   const expanded = page.getByTestId('sticky-user-expanded')
   await expect(expanded).toBeVisible()
   // Multiple lines expanded (clearly taller than the one collapsed line), and the collapsed row's
@@ -5107,6 +5159,12 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
   // Clicking it again collapses it
   await expanded.click()
   await expect(page.getByTestId('sticky-user-expanded')).toBeHidden()
+  /*
+    Neither click moved the list. If one had, Playwright had to scroll to find something
+    clickable, and a pass would mean only that its scrolling got lucky — the way this test
+    used to pass.
+  */
+  expect(await stream.evaluate((el) => el.scrollTop)).toBe(settledTop)
 })
 
 /**
