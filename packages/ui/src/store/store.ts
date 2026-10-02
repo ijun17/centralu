@@ -1817,7 +1817,7 @@ export function projectScreenOf(
 }
 
 /**
- * The project the focus lane is showing — its screen, or one of its sessions — or null. The sidebar tints that
+ * The project the focus lane is showing — its screen, one of its sessions or one of its apps — or null. The sidebar tints that
  * project's group, so the person can see which project they are in as well as which row.
  *
  * Only the focus lane counts: the grid and the orchestrator are views of their own, lit by their own buttons, and a
@@ -1828,8 +1828,17 @@ export function projectScreenOf(
  * screen is not showing.
  */
 export function openProjectOf(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'sessions'>,
+  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'>,
 ): string | null {
+  /*
+   * An app open in the app view belongs to its project the way a session does: the person is inside that project, so
+   * its group is tinted and the app's own row carries the mark. An app in the user folder belongs to no project and
+   * tints nothing, like a session with no project.
+   */
+  if (s.view === 'app') {
+    const pid = s.focusedApp?.projectId
+    return pid && s.projects[pid] ? pid : null
+  }
   if (!s.focusedSessionId) return projectScreenOf(s)
   if (s.view !== 'focus') return null
   const pid = s.sessions[s.focusedSessionId]?.projectId

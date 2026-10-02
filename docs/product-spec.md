@@ -473,11 +473,11 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 - Sidebar: the project/session tree, status dots (🔴 approval / 🔵 awaiting response / ⚙ working / ⏳ limited / ⛔ error / 👑 orchestrator), unread dot, branch and change-count summary. Collapsible.
   - **Which project is open** (2026-10-01). A thin divider separates each project's group — its name row, its
     sessions and its apps — from the next. While the focus view shows a project's screen (§5.5) or one of its
-    sessions, that project's whole group is tinted with the graphite of the selected Grid and Orchestrator
+    sessions, or the app view shows one of its apps (2026-10-03), that project's whole group is tinted with the graphite of the selected Grid and Orchestrator
     buttons, lighter, and the open row inside it keeps a stronger mark of its own (the ash bar): the name row for
-    the project screen, the session's row for a session. A row mark alone says "this row"; the tint says whose, and
-    it is the only mark a folded project (#205) has room for. The grid, the orchestrator and a session with no
-    project tint nothing — none of them is a project. Both layers are colour only, so selecting moves no row.
+    the project screen, the session's row for a session, the app's row for an app. A row mark alone says "this row"; the tint says whose, and
+    it is the only mark a folded project (#205) has room for. The grid, the orchestrator, a session with no
+    project and an app in the user folder tint nothing — none of them is a project. Both layers are colour only, so selecting moves no row.
 - Focus view: one session at full width. Bottom tabs switch to the file tree/git/viewer — at full width each tab is actually a usable size.
 
 ### 5.2 Inbox (⌘I)

@@ -56,6 +56,47 @@ export function sidebarSelectionTests(): void {
       await expect(marked(page)).toHaveCount(1)
     })
 
+    test('opening an app of a project tints its group and marks the app’s row; an app in the user folder tints nothing', async ({
+      page,
+    }) => {
+      await setup(page, ['/tmp/alpha', '/tmp/beta'])
+      const pid = await page.evaluate(
+        () =>
+          (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find(
+            (p) => p.name === 'alpha',
+          )!.id,
+      )
+      await page.evaluate(
+        (projectId) =>
+          (window as any).__mock.setExternalApps(
+            [projectId, null].map((owner) => ({
+              appId: 'slider',
+              projectId: owner,
+              dir: owner ? '/tmp/alpha/.centralu/apps/slider' : '/tmp/user-apps/slider',
+              name: 'Slider',
+              version: '0.1.0',
+              description: null,
+              home: 'home',
+              trusted: true,
+              status: 'stopped',
+              error: null,
+              warnings: [],
+            })),
+          ),
+        pid,
+      )
+
+      await page.getByTestId(`app-row-${pid}/slider`).click()
+      await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-selected', 'true')
+      await expect(tinted(page)).toHaveCount(1)
+      await expect(page.getByTestId(`app-row-${pid}/slider`)).toHaveAttribute('aria-current', 'page')
+      await expect(page.getByTestId('project-header-alpha')).not.toHaveAttribute('aria-current', 'page')
+      await expect(marked(page)).toHaveCount(1)
+
+      await page.getByTestId('user-apps-list').getByRole('button', { name: /Slider/ }).click()
+      await expect(tinted(page)).toHaveCount(0)
+    })
+
     test('opening a session of a project tints its group and marks the session’s row, not the name row', async ({
       page,
     }) => {
