@@ -12,6 +12,14 @@ CONTRIBUTING.md). Existing Korean comments stay until someone translates them wi
 reasoning intact (#27); do not add new ones. You may talk to the person in whatever language
 they use — this rule is about what lands in the repository and on GitHub.
 
+## Commits
+
+Commit messages follow [docs/commit-conventions.md](docs/commit-conventions.md):
+Conventional Commits, `<type>(<scope>): <description>`, with a body when the reason does not
+fit the subject. Read it before the first commit; do not copy the style of recent history.
+From mid-September to early October 2026, agents wrote plain sentences instead, against the
+document (the owner confirmed the document on 2026-10-03).
+
 ## Pull requests
 
 Use the template in `.github/pull_request_template.md` (Why / What changed / Verified /
