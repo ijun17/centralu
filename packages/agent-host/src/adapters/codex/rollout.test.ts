@@ -75,4 +75,37 @@ describe("codex rollout's compact summary (#78)", () => {
 
     expect(await lastCompactSummary('t-missing', dir)).toBeNull()
   })
+
+  /*
+   * A remote compaction (codex-cli 0.153.4 on a ChatGPT login, measured 2026-10-03) keeps the
+   * summary encrypted. The line below is the measured one, with the encrypted blob and metadata
+   * shortened: the first user message is the person's own prompt (215 characters, so it passes
+   * the length check), not a summary.
+   */
+  const PROMPT =
+    'Use the spawn_agent tool to start exactly one sub-agent. Its task: reply with the single word pong and do nothing else. ' +
+    'Wait for it to finish, then reply with the single word done. Do not run commands or read files.'
+  const encryptedLine = JSON.stringify({
+    timestamp: '2026-10-02T17:11:11.953Z',
+    ordinal: 41,
+    type: 'compacted',
+    payload: {
+      message: '',
+      replacement_history: [
+        { type: 'message', id: 'msg_01a0fd98', role: 'user', content: [{ type: 'input_text', text: PROMPT }] },
+        { type: 'compaction', id: 'cmp_04ef218d', encrypted_content: 'gAAAAABqv-Wvz9B5bzA6lhRcH9AHg0Dz' },
+      ],
+      window_number: 1,
+    },
+  })
+
+  it("an encrypted (remote) compaction has no readable summary — the person's own message is never passed off as one", async () => {
+    put('t-remote', [JSON.stringify({ type: 'session_meta' }), encryptedLine])
+    expect(await lastCompactSummary('t-remote', dir)).toBeNull()
+  })
+
+  it('an encrypted compaction after a readable one leaves no summary — the older one stopped covering the conversation', async () => {
+    put('t-mixed', [compactedLine('', 'older summary. ' + SUMMARY), encryptedLine])
+    expect(await lastCompactSummary('t-mixed', dir)).toBeNull()
+  })
 })

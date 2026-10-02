@@ -19,6 +19,13 @@ import { join } from 'node:path'
  * is not promoted to an always-on path that runs on every compaction (decision for #78). Any
  * failure lies down as null: without a summary, the record builder just falls back to compressing
  * the raw text, and the handoff still proceeds.
+ *
+ * **The app-server's read requests do not carry the summary** (measured 2026-10-03, codex-cli
+ * 0.153.4). `thread/read` (with turns), `thread/turns/list` (itemsView full) and
+ * `thread/items/list` all work on a thread no process holds, but a compaction is only
+ * `{ type: "contextCompaction", id }` there — no text. They also need a working binary, which
+ * this path must not assume. So this stays on the file. (`Thread.path`, marked UNSTABLE, gives the
+ * same file the name search finds.)
  */
 
 /** The minimum length to call something a summary — a fragment a few characters long is not promoted to "summary" */
@@ -38,6 +45,18 @@ export async function findRolloutPath(
   } catch {
     return null
   }
+}
+
+/**
+ * **A remote compaction keeps its summary encrypted** (measured 2026-10-03, codex-cli 0.153.4,
+ * ChatGPT login). Its `message` is empty and replacement_history is the person's own messages,
+ * kept as they were, followed by `{ type: "compaction", encrypted_content }`. There is no readable
+ * summary, and the first user message is something the person wrote: taking it would head the
+ * handoff record with their own words labelled as a summary.
+ */
+function isEncrypted(payload: unknown): boolean {
+  const history = (payload as { replacement_history?: { type?: string }[] }).replacement_history
+  return Array.isArray(history) && history.some((item) => item?.type === 'compaction')
 }
 
 /** Pulls the summary text out of a single compacted item — if message is empty, uses replacement_history's first user message */
@@ -79,6 +98,11 @@ export async function lastCompactSummary(
       try {
         const j = JSON.parse(line) as { type?: string; payload?: unknown }
         if (j.type !== 'compacted') continue
+        // An encrypted compaction supersedes any earlier summary — that one no longer covers the conversation up to here
+        if (isEncrypted(j.payload)) {
+          last = null
+          continue
+        }
         const s = summaryOf(j.payload)
         if (s) last = s
       } catch {
