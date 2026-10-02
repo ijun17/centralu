@@ -160,7 +160,7 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 - **Keyboard first**: with an approval request focused, `y` allow / `n` deny / `a` always allow. No mouse needed. Buttons shown alongside.
 - **The scope and expressiveness of "always allow"**: show the scope as you press — the default is **session scope**, with a modifier (⌥a) for project scope. Record which scope it was saved at on the approval card. Allow pattern rules (e.g. `npm test*`), but when registering one, **preview the list of commands in the current session's history that match that pattern**. Full rules can be inspected and deleted in settings. Rather than limiting expressiveness, make the consequences visible.
 - **Approval requests from unfocused sessions**: the inbox counter in the top bar carries them — it says how many are waiting, its list names them, and clicking one lands you on that session, where the card is answered with y/n/a. There was a global banner across the top of the window that let you allow in place (with a "needs review" state for requests the strip could not show enough of: file edits, multi-file operations, truncated commands). It was removed 2026-09-10: appearing and disappearing **shifted the whole window**, and the line you were reading — or the button you were reaching for — moved with it. An alert that displaces the work it interrupts costs more than the jump it saves.
-- **Approval queue**: when several approvals pile up, handle them in sequence from the inbox (FR-15) — handling one automatically moves to the next approval.
+- **Approval queue**: when several approvals pile up, handle them in sequence from the inbox (FR-15). Handling one leaves the person on that session; `⌘⇧A` moves to the next waiting one.
 - The approval request card summarises what is needed to judge: the full command, or the file path + a diff preview.
 
 #### FR-4. Git status GUI
@@ -296,7 +296,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - A single list that **ignores** project structure and gathers only the items waiting on my intervention right now.
 - Ordering: urgency first (approval → error → awaiting response); within the same urgency, ascending by when the wait started.
 - Each item: session name, project, kind of wait, elapsed time, a one-line preview of the last content.
-- Select an item → jump to that session's focus view; when handling (approval/response) is complete, **automatically move to the next item**.
+- Select an item → jump to that session's focus view. When handling (approval/response) is complete, the person **stays on that session**, so they can see how the agent takes what they just sent; `⌘⇧A` (FR-17) moves to the next waiting item. *(Changed 2026-10-02: this used to say the app moves to the next item automatically. Nothing did since the archive's `d` key and its `afterHandled` path were retired with FR-20, and the owner chose to keep it that way: a screen that switches the moment a reply is sent is hard to predict.)*
 - ~~**`d` (dismiss)**~~ — **retired 2026-09-02.** It archived the session, which was the only entry point archive ever had and had no exit; "I do not need to answer this" removed the session from the app. The inbox is a view of *state*, so the only honest way to empty it is to change the state — that is, to answer. See FR-20.
 - One shortcut to open/close the inbox (default `⌘I`). If there are waiting items when the app starts, show the inbox first.
 - If FR-1's sidebar is "the map", the inbox is "the queue of things to do". The entry point when you come back to the desk is the inbox.
@@ -491,7 +491,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-- Enter to jump → handle → automatically on to the next item. When the loop is done, "inbox empty ✓".
+- Enter to jump → handle → `⌘⇧A` on to the next item. When the loop is done, the inbox reads "Nothing waiting".
 
 ### 5.3 Secondary screens
 
