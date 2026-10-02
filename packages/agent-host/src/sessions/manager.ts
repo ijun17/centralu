@@ -2854,7 +2854,16 @@ export class SessionManager {
       const streamKind = e.type === 'message_delta' ? ('text' as const) : ('reasoning' as const)
       const text = e.text ?? ''
       const run = this.streams.get(m.id)
-      if (run && run.kind === streamKind) {
+      /*
+       * A chunk that names a different message than the open row is a new message (#212). Codex can say two
+       * things in a row with nothing recorded between them (a poll of a running command is not an item), and
+       * with no boundary here the two became one row: "…polling it now.It is still running…". A chunk that
+       * names no message continues the open row, as before.
+       */
+      const messageId = e.type === 'message_delta' ? e.messageId : undefined
+      const openId = run?.payload.messageId
+      const newMessage = !!messageId && typeof openId === 'string' && openId !== messageId
+      if (run && run.kind === streamKind && !newMessage) {
         run.text += text
         if (run.text.length - run.written >= STREAM_FLUSH_CHARS || Date.now() - run.lastWrite >= STREAM_FLUSH_MS) {
           this.flushStream(m.id, run)
@@ -2862,7 +2871,7 @@ export class SessionManager {
         m.lastSeq = run.seq
         return run.seq
       }
-      // If the kind changes (answer <-> reasoning), that point is a boundary
+      // If the kind changes (answer <-> reasoning) or the message does, that point is a boundary
       if (run) this.closeStream(m.id)
       // A row is never started with an empty chunk — the "" delta codex sends at the end once created 1,853
       // empty rows

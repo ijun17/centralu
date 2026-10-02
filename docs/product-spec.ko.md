@@ -605,7 +605,7 @@ interface AgentAdapter {
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
 - `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 휴지통에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
-- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
+- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 행이 닫히는 곳은 기록되는 이벤트, 턴의 끝, 답과 추론 사이의 전환, 그리고 열린 행과 다른 메시지를 가리키는 조각(`messageId`, #212: codex는 사이에 아무것도 기록되지 않은 채 두 말을 연달아 할 수 있다)이다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계
 - `workspace(id, layout_json, updated_at)` — 스냅숏

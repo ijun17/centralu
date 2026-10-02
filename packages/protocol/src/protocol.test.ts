@@ -22,6 +22,8 @@ import {
 
 const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi' },
+  // Which message the chunk belongs to (#212) — optional, so the frame above still parses
+  { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi', messageId: 'm1' },
   { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: 'npm test', readOnly: false, paths: [] } },
   { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: true, summary: 'exit 0' },
   // The whole record of a tool call (#221) — optional, so the two frames above still parse

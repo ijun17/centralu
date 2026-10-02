@@ -34,7 +34,7 @@ type Push    = { kind: 'event'; seq: number; sessionId?: string; event: Normaliz
 ```ts
 type NormalizedEvent =
   // 대화 내용 (별도 표기가 없으면 seq로 영속된다)
-  | { type: 'message_delta';    sessionId, role, text }         // 스트리밍 본문
+  | { type: 'message_delta';    sessionId, role, text, messageId? }  // 스트리밍 본문; messageId: 어느 메시지의 조각인지 (#212)
   | { type: 'reasoning_delta';  sessionId, text?, estTokens? }  // #58: codex는 요약 텍스트, claude는 토큰 추정치뿐
   | { type: 'user_message';     sessionId, seq, text, from? }   // 사람의 말, 또는 다른 세션의 지시 (FR-11)
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: 도구가 받은 입력 그대로 (#221)

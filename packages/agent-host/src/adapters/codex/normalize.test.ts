@@ -17,6 +17,15 @@ describe('streaming and tool calls', () => {
     ])
   })
 
+  it('an agentMessage chunk names its item, so the host can tell one message from the next (#212)', () => {
+    expect(n('item/agentMessage/delta', { threadId: 't', turnId: 'u', itemId: 'msg-1', delta: 'hello' })).toEqual([
+      { type: 'message_delta', sessionId: S, role: 'assistant', text: 'hello', messageId: 'msg-1' },
+    ])
+    expect(n('item/completed', { item: { type: 'agentMessage', id: 'msg-1', text: 'hello', phase: 'commentary' } })).toEqual([
+      { type: 'message_delta', sessionId: S, role: 'assistant', text: '', messageId: 'msg-1' },
+    ])
+  })
+
   /*
    * Reasoning summary (measured for #58). This stream only arrives when model_reasoning_summary
    * is turned on in the thread settings, and the measured shape is {itemId, delta, summaryIndex}.

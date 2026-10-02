@@ -33,7 +33,7 @@ its own examples.
 ```ts
 type NormalizedEvent =
   // conversation content (persisted via seq except where noted)
-  | { type: 'message_delta';    sessionId, role, text }         // streaming body
+  | { type: 'message_delta';    sessionId, role, text, messageId? }  // streaming body; messageId: which message it belongs to (#212)
   | { type: 'reasoning_delta';  sessionId, text?, estTokens? }  // #58: codex gives summary text; claude only a token estimate
   | { type: 'user_message';     sessionId, seq, text, from? }   // human input, or another session's instruction (FR-11)
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: the raw tool input (#221)

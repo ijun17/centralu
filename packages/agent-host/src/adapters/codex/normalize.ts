@@ -219,12 +219,24 @@ export function goalFromCodex(g: Record<string, unknown>): SessionGoal | null {
   }
 }
 
+/** The message a chunk belongs to — left out rather than empty, since absent means "the same message as before" */
+const messageIdOf = (id: unknown): { messageId?: string } => (typeof id === 'string' && id ? { messageId: id } : {})
+
 export function normalizeNotification(sessionId: string, n: Notification): NormalizedEvent[] {
   const p = obj(n.params)
 
   switch (n.method) {
+    /*
+     * Each chunk names its agentMessage item (generated/v2/AgentMessageDeltaNotification.ts: `itemId`), and the
+     * host starts a new row when that changes (#212). Without it, two messages with nothing recorded between
+     * them were stored as one row. Measured (scripts/probe-codex-message-boundary.mts, codex-cli 0.153.4): two
+     * commentary messages with a `write_stdin` poll of a running command between them. The poll arrives as
+     * `item/commandExecution/terminalInteraction`, which is not an item, and the reasoning items between them
+     * had no summary text. The row read "It is still running; I'm polling it now.It is still running; I'm
+     * polling it again."
+     */
     case 'item/agentMessage/delta':
-      return [{ type: 'message_delta', sessionId, role: 'assistant', text: str(p.delta) || str(p.text) }]
+      return [{ type: 'message_delta', sessionId, role: 'assistant', text: str(p.delta) || str(p.text), ...messageIdOf(p.itemId) }]
 
     /*
      * Reasoning summary (measured for #58). This stream only arrives if model_reasoning_summary
@@ -306,7 +318,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const type = str(item.type)
       if (type === 'agentMessage') {
         // A fallback for when the streamed deltas were missed (empty when deltas already arrived, to avoid duplicating)
-        return str(item.text) ? [{ type: 'message_delta', sessionId, role: 'assistant', text: '' }] : []
+        return str(item.text) ? [{ type: 'message_delta', sessionId, role: 'assistant', text: '', ...messageIdOf(item.id) }] : []
       }
       if (type === 'userMessage' || type === 'reasoning') return []
       // The marker is emitted by thread/compacted — emitting it again here would put two lines in the same spot

@@ -21,6 +21,7 @@ import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
+import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
 
 class FakeHandle implements SessionHandle {
@@ -53,6 +54,10 @@ class FakeHandle implements SessionHandle {
   /** A single streaming chunk (reproduces the actual stored form exactly). */
   emitDelta(text: string) {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
+  }
+  /** Any event exactly as an adapter would emit it — for replaying a real adapter's output */
+  emitEvent(e: NormalizedEvent) {
+    this.emit(e)
   }
   emitToolCall(tool: string, title: string) {
     this.emit({
@@ -3284,6 +3289,70 @@ describe('a streaming message is stored as a single row (#66)', () => {
     // The fake handle answers send with an echo delta — since there is no boundary between that echo and
     // "new answer," they correctly form one row.
     expect(texts).toEqual(['what it was saying', 'stop, do this first', 'echo:stop, do this firstnew answer'])
+  })
+
+  /*
+   * The frames codex-cli 0.153.4 sent while a command ran and the model polled it with `write_stdin`
+   * (scripts/probe-codex-message-boundary.mts), from the command's start to the end of the turn. The
+   * token-usage and status notifications between them are left out; nothing else is. Between the two
+   * commentary messages there is a terminal interaction (not an item) and a reasoning item with no summary
+   * text, so nothing the host records.
+   */
+  const MSG_NOW = 'msg_0c76dd52d2509a27016abfe6b25b1887d0b926d25d4c05f25f'
+  const MSG_AGAIN = 'msg_0c76dd52d2509a27016abfe6babe3487d0b8234e8e9d0b4d7b'
+  const MSG_DONE = 'msg_0c76dd52d2509a27016abfe6bc240887d0bcd7538c709efc59'
+  const EXEC = 'exec-c74246f4-0d0f-4622-be80-ae917d5abbcf'
+  const command = { type: 'commandExecution', id: EXEC, command: "/bin/zsh -lc 'sleep 12 && echo finished'" }
+  const reasoning = (id: string) => [
+    { method: 'item/started', params: { item: { type: 'reasoning', id, summary: [] } } },
+    { method: 'item/completed', params: { item: { type: 'reasoning', id, summary: [] } } },
+  ]
+  const message = (id: string, phase: string, chunks: string[]) => [
+    { method: 'item/started', params: { item: { type: 'agentMessage', id, text: '', phase } } },
+    ...chunks.map((delta) => ({ method: 'item/agentMessage/delta', params: { itemId: id, delta } })),
+    { method: 'item/completed', params: { item: { type: 'agentMessage', id, text: chunks.join(''), phase } } },
+  ]
+  const MEASURED_POLL = [
+    { method: 'item/started', params: { item: { ...command, status: 'inProgress', aggregatedOutput: null, exitCode: null } } },
+    ...reasoning('rs_0c76dd52d2509a27016abfe6b224d887d0b808153aa50eb4ec'),
+    ...message(MSG_NOW, 'commentary', ['It', ' is', ' still', ' running', ';', ' I', '’m', ' polling', ' it', ' now', '.']),
+    { method: 'item/commandExecution/terminalInteraction', params: { itemId: EXEC, processId: '86732', stdin: '' } },
+    ...reasoning('rs_0c76dd52d2509a27016abfe6ba5f4c87d09b5ffa33363b3f4e'),
+    ...message(MSG_AGAIN, 'commentary', ['It', ' is', ' still', ' running', ';', ' I', '’m', ' polling', ' it', ' again', '.']),
+    { method: 'item/commandExecution/outputDelta', params: { itemId: EXEC, delta: 'finished\n' } },
+    { method: 'item/completed', params: { item: { ...command, status: 'completed', aggregatedOutput: 'finished\n', exitCode: 0 } } },
+    ...message(MSG_DONE, 'final_answer', ['done']),
+    { method: 'turn/completed', params: { turn: { id: '01a0fd9c-f6bc-77c0-a085-d1306fecfce2', status: 'completed', error: null } } },
+  ]
+
+  it('two codex messages with nothing recorded between them are two rows, live and reopened (#212, measured frames)', async () => {
+    const { s, h } = await openSession()
+    for (const frame of MEASURED_POLL) for (const e of normalizeNotification(s.id, frame)) h.emitEvent(e)
+    await new Promise((r) => setTimeout(r, 0))
+
+    const rows = store.loadMessages(s.id, 50)
+    expect(rows.map((r) => [r.kind, (r.payload as { text?: string }).text])).toEqual([
+      ['tool_call', undefined],
+      ['text', 'It is still running; I’m polling it now.'],
+      ['text', 'It is still running; I’m polling it again.'],
+      ['tool_result', undefined],
+      ['text', 'done'],
+    ])
+    // Live, the screen starts a new bubble when the stored number changes — so each message carries its own
+    const liveSeqs = (id: string) =>
+      new Set(events.filter((e) => e.type === 'message_delta' && e.messageId === id && e.text).map((e) => (e as { seq?: number }).seq))
+    expect([...liveSeqs(MSG_NOW)]).toEqual([rows[1]!.seq])
+    expect([...liveSeqs(MSG_AGAIN)]).toEqual([rows[2]!.seq])
+  })
+
+  it('chunks that name no message still grow the open row (#212 leaves other tools as they were)', async () => {
+    const { s, h } = await openSession()
+    h.emitEvent({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'one ', messageId: 'm1' })
+    h.emitDelta('row')
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(store.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)).toEqual(['one row'])
   })
 
   it('an attachment is stored as a path in the payload, and loadMessages re-reads the image bytes from the file', async () => {

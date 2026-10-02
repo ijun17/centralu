@@ -68,7 +68,21 @@ export const AppChangeCause = z.looseObject({ kind: z.string(), instanceId: z.st
 export type AppChangeCause = z.infer<typeof AppChangeCause>
 
 export const NormalizedEvent = z.discriminatedUnion('type', [
-  z.object({ ...base, ...persistedSeq, type: z.literal('message_delta'), role: z.enum(['assistant']), text: z.string() }),
+  /**
+   * A chunk of the assistant's reply. `messageId` names the message the chunk belongs to, where the tool says
+   * so (codex: the agentMessage item id). The host keeps one open row per session and grows it with every
+   * chunk until a recorded event closes it, so two messages with nothing recorded between them used to become
+   * one row (#212). A chunk whose `messageId` differs from the open row's starts a new row. Absent means
+   * "the same message as before", which is what every chunk meant before this field existed.
+   */
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('message_delta'),
+    role: z.enum(['assistant']),
+    text: z.string(),
+    messageId: z.string().optional(),
+  }),
   /**
    * Only as much of the model's reasoning as is actually visible (measured in #58, 2026-08-26).
    *
