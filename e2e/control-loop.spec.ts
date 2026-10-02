@@ -3316,6 +3316,21 @@ test('Old conversation can still be read back through even after compaction', as
  * environment where the observer does not wake up, a manual way must remain).
  */
 test('Older conversation also loads by clicking a button', async ({ page }) => {
+  /*
+   * The observer can be switched off mid-test, to stand in for the WKWebView whose observer
+   * never woke. It has to be wrapped before the app loads: the sentinel builds its observer
+   * from whatever `IntersectionObserver` is at the time.
+   */
+  await page.addInitScript(() => {
+    const Real = window.IntersectionObserver
+    window.IntersectionObserver = class extends Real {
+      constructor(cb: IntersectionObserverCallback, opts?: IntersectionObserverInit) {
+        super((entries, observer) => {
+          if (!(window as any).__observerDead) cb(entries, observer)
+        }, opts)
+      }
+    }
+  })
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -3344,17 +3359,48 @@ test('Older conversation also loads by clicking a button', async ({ page }) => {
    * IntersectionObserver, or click breaks, the others still carry it through to the end (the
    * "wall" stopping at 100 was that bug).
    */
+  // Scrolling up loads the first batch (100->200) on its own
   await page.getByTestId('chat-stream').evaluate((el) => el.scrollTo({ top: 0 }))
-  /*
-   * The scroll trigger loads the first batch (100->200) — clicking the button before that
-   * settling finishes lets the click fall through a re-render (the detached-retry flake,
-   * 2026-09-06). Clicking only after it settles leaves the rest (200->250) entirely to the
-   * button — this order proves each path is responsible for its own batch.
-   */
   await expect.poll(() => page.evaluate(loaded, id)).toBe(200)
   await expect
     .poll(() => page.evaluate((sid) => (window as any).__store.getState().history[sid].loading, id))
     .toBe(false)
+
+  /*
+   * Then both automatic routes die, so the rest (200->250) can only be the button's.
+   *
+   * Clicking is itself a scroll to the top: Playwright scrolls the button into view first, and
+   * that scroll is one of the two automatic triggers. Whichever ran first decided the test.
+   * When the scroll event came first, it loaded the last page, the button retired because
+   * nothing older remained, and the click waited on a detached element until the timeout
+   * (measured 2026-10-03: 7 in 50 in Chromium, 50 in 50 in WebKit, and in every traced failure
+   * the scroll handler was the caller). When the click came first it passed — and it also
+   * passed with the button's click handler removed (1 in 10), because the scroll then loaded
+   * the page in its place.
+   *
+   * Scroll events on the conversation stop at the window, before the sentinel's listener
+   * hears them, and the observer is switched off.
+   */
+  await page.evaluate(() => {
+    ;(window as any).__observerDead = true
+    window.addEventListener(
+      'scroll',
+      (e) => {
+        if ((e.target as HTMLElement).dataset?.testid === 'chat-stream') e.stopPropagation()
+      },
+      { capture: true },
+    )
+  })
+  /*
+   * The routes really are dead: at the top with the button on screen, nothing loads. Two frames
+   * is long enough for both a scroll event and an observer callback to have been delivered.
+   */
+  await page.getByTestId('chat-stream').evaluate(async (el) => {
+    el.scrollTo({ top: 0 })
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  })
+  expect(await page.evaluate(loaded, id)).toBe(200)
+
   await page.getByTestId('load-older').getByRole('button').click()
   await expect.poll(() => page.evaluate(loaded, id)).toBe(250)
   // Once everything is loaded, the button retires too
