@@ -5007,12 +5007,19 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
   const shape = await page.evaluate(() => {
     const s = document.querySelector('[data-testid="chat-stream"]') as HTMLElement
     const btn = document.querySelector('[data-testid="sticky-user"] button') as HTMLElement
+    /*
+      The right edge is compared with a rendered bubble, not with the stream's own box. The
+      stream's border box includes its scrollbar, which headless Chromium hides but WebKit lays
+      out at the 10px that index.css gives it — measured against the box, WebKit reported an
+      inset of 10 on every run while the banner and the bubble both ended at x=914.
+    */
+    const bubble = s.querySelector('[data-index]:not(.invisible) [data-testid="msg-user"]') as HTMLElement
     const cs = getComputedStyle(s)
     const rowWidth = s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
     const b = btn.getBoundingClientRect()
     return {
       gapFromCeiling: Math.round(b.top - s.getBoundingClientRect().top),
-      rightInset: Math.round(s.getBoundingClientRect().right - parseFloat(cs.paddingRight) - b.right),
+      rightInset: Math.round(bubble.getBoundingClientRect().right - b.right),
       widthRatio: b.width / rowWidth,
     }
   })
