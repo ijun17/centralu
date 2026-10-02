@@ -33,6 +33,8 @@ export type SpawnSpec = {
   prior?: PriorDiscovery
   probeTimeoutMs: number
   connectTimeoutMs: number
+  /** After a failed start, how long to wait for the process to exit before writing the reason (`RuntimeTiming.startExitWaitMs`) */
+  exitWaitMs: number
   /**
    * Opens the broker server on fd 3 — right after starting, before the connection. The app has to be
    * able to call the broker from within its very first tool call. Closed with the function this
@@ -152,7 +154,7 @@ export class AppProcess {
        * closed during the server/discover probe" arrived before news of the exit — reading that
        * message alone makes it look like the generation probe itself is the problem.
        */
-      await proc.waitExit(250)
+      await proc.waitExit(spec.exitWaitMs)
       const head = proc.exit ? `exited before it was ready (${describeExit(proc.exit)})` : (e as Error).message
       const reason = proc.reason(head)
       const stderr = proc.log.tailLines()

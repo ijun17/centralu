@@ -120,6 +120,13 @@ export type RuntimeTiming = {
   /** The cap for the connection and for the first tool list, each */
   connectTimeoutMs: number
   /**
+   * After a start fails, how long to wait for news of the process exiting before writing the
+   * reason (`AppProcess.start`). An app that exits at once is then reported as "exited before it
+   * was ready (code 3)", not as the SDK's "connection closed" that arrives first. A broken server
+   * that stays alive (S-6) waits all of it, once per failed start.
+   */
+  startExitWaitMs: number
+  /**
    * The cap for one host → app tool call. Reset every time the app sends a progress notification.
    * Each caller also has its own cap (Codex 300 seconds, a screen 60 seconds — from the plan,
    * "long-running calls"); this is the outer fence around all of them.
@@ -170,6 +177,7 @@ export const DEFAULT_TIMING: RuntimeTiming = {
    */
   probeTimeoutMs: 10_000,
   connectTimeoutMs: 30_000,
+  startExitWaitMs: 250,
   callTimeoutMs: 10 * 60_000,
   logMaxBytes: 1024 * 1024,
   checkDrainMs: 30_000,
@@ -1819,6 +1827,7 @@ export class ExternalApps {
       prior: e.life.verdict,
       probeTimeoutMs: this.timing.probeTimeoutMs,
       connectTimeoutMs: this.timing.connectTimeoutMs,
+      exitWaitMs: this.timing.startExitWaitMs,
       serveFd3: (fd3, note) =>
         serveBroker(
           fd3,
