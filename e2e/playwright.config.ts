@@ -39,7 +39,9 @@ export default defineConfig({
   projects: [
     { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC] },
     { name: 'startup', testMatch: STARTUP_SPEC, use: { baseURL: STARTUP_URL } },
-    { name: 'recovery', testMatch: RECOVERY_SPEC, use: { baseURL: RECOVERY_URL } },
+    // One worker: the relay port (5178) is baked into this project's UI build, so two of its
+    // tests at once would collide on it (`--repeat-each 5` failed 4 of 5 with EADDRINUSE).
+    { name: 'recovery', testMatch: RECOVERY_SPEC, use: { baseURL: RECOVERY_URL }, workers: 1 },
   ],
   webServer: [
     {
