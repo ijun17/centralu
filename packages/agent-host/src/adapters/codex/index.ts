@@ -25,7 +25,7 @@ import { listCodexThreads, readCodexHistory } from './history.js'
 import { imageEventFromDisk } from './images.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
-import { approvalDetailFrom, fileChangesOf, goalFromCodex, normalizeNotification, toCodexDecision } from './normalize.js'
+import { approvalDetailFrom, childSteps, fileChangesOf, goalFromCodex, normalizeNotification, toCodexDecision } from './normalize.js'
 
 const exec = promisify(execFile)
 
@@ -186,6 +186,12 @@ const APP_STARTUP_TIMEOUT_SEC = 30
 
 /** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
+/**
+ * How many child items wait for their launch call at most (#222, `unlinked`). The wait is milliseconds long (measured:
+ * the link came in the same millisecond as the child's first notification), so this only bounds a thread that is
+ * never named.
+ */
+const UNLINKED_CAP = 2_000
 /** The ceiling for a background resume — the same value as the manager's step limit (150s). Past this, it is considered stuck */
 const BACKGROUND_RESUME_CAP_MS = 150_000
 
@@ -263,6 +269,20 @@ class CodexSession implements SessionHandle {
    * watchBackgroundStart reports that once, counting the messages it swallowed (#168, item 5).
    */
   private startFailed = false
+  /**
+   * Child threads (#222): a child's thread id, to the `spawnAgent` item that launched it. Its steps are kept under
+   * that card. Learned from the item's `receiverThreadIds` on `item/completed` (the `item/started` has an empty list).
+   */
+  private childCalls = new Map<string, string>()
+  /**
+   * A child's items that arrived before its launch call named it. The child starts before the parent's `spawnAgent`
+   * completes: measured (codex-cli 0.160.0), the child's first `thread/status/changed` came in the same millisecond
+   * as, and before, the `item/completed` that names it. Held, not dropped, and replayed once the link arrives. What is
+   * still unlinked when the parent's turn ends belonged to no launch call this session saw (one from before a restart),
+   * and is let go with a log line.
+   */
+  private unlinked = new Map<string, { method: string; params?: unknown }[]>()
+  private unlinkedCount = 0
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
@@ -533,7 +553,15 @@ class CodexSession implements SessionHandle {
     // Before the thread filter: a child thread's approval requests do reach us (see above), and its card needs its changes too
     this.noteFileChange(n)
     const from = (n.params as { threadId?: unknown } | undefined)?.threadId
-    if (typeof from === 'string' && this.threadId !== null && from !== this.threadId) return
+    /*
+     * A child's notification is not the parent's conversation, but what the child did is kept (#222): its items become
+     * steps under the `spawnAgent` card that launched it, which the host stores apart from the conversation.
+     */
+    if (typeof from === 'string' && this.threadId !== null && from !== this.threadId) {
+      this.onChildNotification(from, n)
+      this.noteSpawn(n)
+      return
+    }
     // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
     // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
     if (n.method === 'turn/started') this.turnId = turnIdOf(n.params)
@@ -575,6 +603,48 @@ class CodexSession implements SessionHandle {
         else this.activityBefore = e.activity
       }
       this.emit(e)
+    }
+    this.noteSpawn(n)
+    if (n.method === 'turn/completed' && this.unlinked.size > 0) {
+      console.error(`[codex] ${this.sessionId.slice(0, 8)} let go of ${this.unlinkedCount} items from ${this.unlinked.size} threads no spawnAgent call named`)
+      this.unlinked.clear()
+      this.unlinkedCount = 0
+    }
+  }
+
+  /**
+   * A child thread's notification (#222): its items become steps under the `spawnAgent` card that launched it, or wait
+   * for that card to name the thread (`unlinked`). Only items are kept — the child's turn, status and deltas carry
+   * nothing `childSteps` reads.
+   */
+  private onChildNotification(thread: string, n: { method: string; params?: unknown }): void {
+    if (n.method !== 'item/started' && n.method !== 'item/completed') return
+    const call = this.childCalls.get(thread)
+    if (call) {
+      for (const e of childSteps(this.sessionId, call, n)) this.emit(e)
+      return
+    }
+    if (this.unlinkedCount >= UNLINKED_CAP) return
+    this.unlinked.set(thread, [...(this.unlinked.get(thread) ?? []), n])
+    this.unlinkedCount += 1
+  }
+
+  /**
+   * A `spawnAgent` call completed and named the threads it started (#222) — from the parent, or from a child that
+   * started its own. Those threads' steps go under this card from now on, starting with whatever arrived before it.
+   */
+  private noteSpawn(n: { method: string; params?: unknown }): void {
+    if (n.method !== 'item/completed') return
+    const item = (n.params as { item?: Record<string, unknown> } | undefined)?.item
+    if (!item || item.type !== 'collabAgentToolCall' || item.tool !== 'spawnAgent' || typeof item.id !== 'string') return
+    const receivers = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []
+    for (const thread of receivers) {
+      if (typeof thread !== 'string' || this.childCalls.has(thread)) continue
+      this.childCalls.set(thread, item.id)
+      const held = this.unlinked.get(thread) ?? []
+      this.unlinked.delete(thread)
+      this.unlinkedCount -= held.length
+      for (const early of held) this.onChildNotification(thread, early)
     }
   }
 

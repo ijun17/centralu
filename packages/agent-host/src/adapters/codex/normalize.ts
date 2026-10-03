@@ -1,4 +1,4 @@
-import type { ApprovalDetail, NormalizedEvent, SessionGoal } from '@cc/protocol'
+import type { ApprovalDetail, NormalizedEvent, SessionGoal, SubagentStep } from '@cc/protocol'
 
 /**
  * Codex protocol to NormalizedEvent conversion (based on the method names confirmed in M0).
@@ -138,6 +138,17 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
   }
   if (type === 'webSearch') {
     return { tool: 'WebSearch', title: str(item.query), readOnly: true, paths: [] }
+  }
+  /*
+   * A collab call (generated/v2/ThreadItem.ts `collabAgentToolCall`): spawning a child agent, waiting for it, sending
+   * it more work. The card used to say "collabAgentToolCall" twice. It is named by the collab tool now, so a
+   * `spawnAgent` card is recognised as the one that launched a subagent (#222, `launchesSubagent`), and it reads as the
+   * work handed over: the prompt's first line, as a Claude agent card reads as its description (#98).
+   */
+  if (type === 'collabAgentToolCall') {
+    const tool = str(item.tool) || type
+    const line = str(item.prompt).split('\n')[0] ?? ''
+    return { tool, title: line.length > 200 ? `${line.slice(0, 200)} …` : line || tool, readOnly: true, paths: [] }
   }
   return { tool: type || 'tool', title: str(item.title) || type, readOnly: true, paths: [] }
 }
@@ -590,6 +601,44 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     default:
       return []
   }
+}
+
+/**
+ * A child thread's notification, as steps of the subagent a `spawnAgent` call launched (#222).
+ *
+ * Measured live (scripts/probe-codex-subagent.mts, codex-cli 0.160.0 and 0.153.4 in #222): the child's
+ * `item/started` and `item/completed` arrive on the parent's connection with the child's `threadId`, for its prompt
+ * (`userMessage`), its reasoning, its commands and its `agentMessage`. Steps are read from them alone:
+ *
+ *   - text and reasoning from the **completed** item (`text`, `summary`), whole. The child's deltas are not read:
+ *     a step is one row (see `SubagentStep`), and the completed item carries the same text again
+ *   - a tool call when its item starts, its result when it completes, exactly as the parent's own (`input` and
+ *     `output` included, #221)
+ *   - its prompt is not a step: it is the launch call's own `prompt`, already on the parent's card
+ *
+ * A file a child changed is still a file changed in this session's folder, so `files_touched` goes out as the
+ * parent's, as Claude's subagents do (#98). Everything else a child sends (its turn and status, usage, images) is
+ * not part of its record here.
+ */
+export function childSteps(sessionId: string, parentCallId: string, n: Notification): NormalizedEvent[] {
+  if (n.method !== 'item/started' && n.method !== 'item/completed') return []
+  const item = obj(obj(n.params).item)
+  const type = str(item.type)
+  const step = (s: SubagentStep): NormalizedEvent => ({ type: 'subagent_event', sessionId, parentCallId, step: s })
+  if (type === 'agentMessage') {
+    const text = n.method === 'item/completed' ? str(item.text) : ''
+    return text ? [step({ type: 'message_delta', sessionId, role: 'assistant', text, ...messageIdOf(item.id) })] : []
+  }
+  if (type === 'reasoning') {
+    const parts = n.method === 'item/completed' && Array.isArray(item.summary) ? item.summary.map(str).filter(Boolean) : []
+    return parts.length ? [step({ type: 'reasoning_delta', sessionId, text: parts.join('\n\n') })] : []
+  }
+  const out: NormalizedEvent[] = []
+  for (const e of normalizeNotification(sessionId, n)) {
+    if (e.type === 'tool_call' || e.type === 'tool_result') out.push(step(e))
+    else if (e.type === 'files_touched') out.push(e)
+  }
+  return out
 }
 
 /** Converts an approval response into a Codex decision (only the ones we use, out of the six) */
