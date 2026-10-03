@@ -118,7 +118,20 @@ if (pathResult.source !== 'unchanged') {
  * Two hosts on the same data folder desync the session list and contend over SQLite.
  * Failing to start with a stated reason is better than going quietly wrong.
  */
-const lock = acquireInstanceLock(dbPath)
+let lock: ReturnType<typeof acquireInstanceLock>
+try {
+  lock = acquireInstanceLock(dbPath)
+} catch (err) {
+  // Ownership could not be checked at all (an unreadable ownership file) — not starting is the safe answer (#82)
+  const message = `[agent-host] ${(err as Error).message}`
+  console.error(message)
+  try {
+    writeSync(1, `${message}\n`)
+  } catch {
+    // stderr (host.log) has it
+  }
+  process.exit(1)
+}
 if (!lock.ok) {
   const message = lockConflictMessage(lock.heldByPid, lock.lockPath)
   console.error(message)

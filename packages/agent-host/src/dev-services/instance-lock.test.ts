@@ -1,10 +1,10 @@
 import { describe, expect, it, afterEach } from 'vitest'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireInstanceLock, processStartTime } from './instance-lock.js'
+import { OWNERSHIP_FILE, acquireInstanceLock, lockConflictMessage, processStartTime } from './instance-lock.js'
 
 /**
  * If two hosts use the same data folder, each carries a different session list while writing to
@@ -124,4 +124,95 @@ describe('the lock-conflict message reaches the supervisor', () => {
     expect(r.stdout).toContain('Another Centralu is already using this data')
     expect(r.stdout).toContain(`Lock file: ${join(db, '..', 'host.lock')}`)
   }, 60_000)
+})
+
+/*
+ * #82: ownership is an exclusive SQLite lock held for the host's lifetime, not the lock file's
+ * check-then-write. Measured on main: 8 hosts started at once produced 2 owners, a second acquire
+ * in the same process succeeded, and a missing host.lock let a second owner in while the first
+ * was alive. Each test below was run against that code; the failures are quoted in the PR.
+ */
+describe('single-writer ownership (#82)', () => {
+  const lockModule = fileURLToPath(new URL('./instance-lock.ts', import.meta.url))
+  const root = fileURLToPath(new URL('../../../../', import.meta.url))
+
+  /** A separate process that takes the lock, reports, then holds it, exits, or dies by SIGKILL */
+  function child(db: string, mode: 'hold' | 'crash', holdMs = 1500) {
+    const script = join(dirname(db), `child-${Math.random().toString(36).slice(2)}.mts`)
+    writeFileSync(
+      script,
+      `const { acquireInstanceLock } = await import(${JSON.stringify(lockModule)})
+const r = acquireInstanceLock(${JSON.stringify(db)})
+console.log(r.ok ? 'acquired' : 'blocked')
+if (r.ok && ${JSON.stringify(mode)} === 'crash') process.kill(process.pid, 'SIGKILL')
+setTimeout(() => process.exit(0), ${holdMs})
+`,
+    )
+    const p = spawn(process.execPath, ['--import', 'tsx', script], { cwd: root, stdio: ['ignore', 'pipe', 'inherit'] })
+    let out = ''
+    p.stdout.on('data', (d: Buffer) => (out += String(d)))
+    const said = new Promise<string>((resolve) => p.stdout.once('data', () => resolve(out.trim())))
+    const exited = new Promise<void>((resolve) => p.once('exit', () => resolve()))
+    return { said, exited, out: () => out.trim(), kill: () => p.kill('SIGKILL') }
+  }
+
+  it('a second acquire in the same process is refused while the first is held', () => {
+    const db = dbIn()
+    const first = acquireInstanceLock(db)
+    expect(first.ok).toBe(true)
+    const second = acquireInstanceLock(db)
+    expect(second).toMatchObject({ ok: false, heldByPid: process.pid })
+    if (first.ok) first.release()
+    const third = acquireInstanceLock(db)
+    expect(third.ok).toBe(true)
+    if (third.ok) third.release()
+  })
+
+  it('an owner in another process keeps others out even when host.lock is gone', async () => {
+    const db = dbIn()
+    const owner = child(db, 'hold', 4000)
+    try {
+      expect(await owner.said).toBe('acquired')
+      // A contender that read the folder before the owner wrote its file, or a person tidying up
+      rmSync(join(db, '..', 'host.lock'))
+      const r = acquireInstanceLock(db)
+      expect(r).toMatchObject({ ok: false, heldByPid: null })
+      expect(lockConflictMessage(null, join(db, '..', 'host.lock'))).toContain('already using this data (pid unknown)')
+    } finally {
+      owner.kill()
+      await owner.exited
+    }
+  }, 20_000)
+
+  it('the operating system releases ownership when the owner is SIGKILLed — the next host starts', async () => {
+    const db = dbIn()
+    const owner = child(db, 'crash')
+    expect(await owner.said).toBe('acquired')
+    await owner.exited
+    // The killed owner's host.lock is still there, naming a dead pid
+    expect(existsSync(join(db, '..', 'host.lock'))).toBe(true)
+    const r = acquireInstanceLock(db)
+    expect(r.ok).toBe(true)
+    if (r.ok) r.release()
+  }, 20_000)
+
+  it('of hosts started at the same moment, exactly one owns the folder', async () => {
+    const db = dbIn()
+    const contenders = Array.from({ length: 6 }, () => child(db, 'hold', 4000))
+    try {
+      const said = await Promise.all(contenders.map((c) => c.said))
+      expect(said.filter((s) => s === 'acquired')).toHaveLength(1)
+      expect(said.filter((s) => s === 'blocked')).toHaveLength(5)
+    } finally {
+      for (const c of contenders) c.kill()
+      await Promise.all(contenders.map((c) => c.exited))
+    }
+  }, 30_000)
+
+  it('an ownership file that cannot be read refuses the start instead of guessing', () => {
+    const db = dbIn()
+    writeFileSync(join(db, '..', OWNERSHIP_FILE), 'this is not a database, and it is longer than a SQLite header')
+    expect(() => acquireInstanceLock(db)).toThrow(/Cannot check who owns this data folder/)
+    expect(existsSync(join(db, '..', 'host.lock'))).toBe(false)
+  })
 })
