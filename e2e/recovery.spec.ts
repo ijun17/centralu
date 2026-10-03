@@ -36,11 +36,13 @@ test('the UI recovers from a dropped socket and from a host restart, re-reading 
     seedSession(store, PROJECT, SESSION, 'alpha')
   })
   const port = await freePort()
-  let host: RealHost = await startHost(ws, port)
   const relay = new Relay(() => port)
-  await relay.listen(RECOVERY_RELAY_PORT)
-
+  // Started inside the try: when the relay port was taken, a host started before it was left
+  // running under pid 1 after the test failed (four of them, 2026-10-03).
+  let host!: RealHost
   try {
+    host = await startHost(ws, port)
+    await relay.listen(RECOVERY_RELAY_PORT)
     await page.goto('/')
     await expect(row(page)).toContainText('alpha')
     await expect(connectionBanner(page)).toHaveCount(0)
@@ -87,7 +89,7 @@ test('the UI recovers from a dropped socket and from a host restart, re-reading 
     })
   } finally {
     await relay.close()
-    await host.kill('SIGTERM')
+    if (host) await host.kill('SIGTERM')
     ws.cleanup()
   }
 })
