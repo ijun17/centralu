@@ -14,6 +14,17 @@ const STARTUP_PORT = 5176
 const STARTUP_URL = `http://127.0.0.1:${STARTUP_PORT}`
 const STARTUP_SPEC = /startup\.spec\.ts/
 
+/**
+ * The recovery suite (#82) runs the real web platform against a real host process, so its UI has
+ * to be built with a token and a host address — the address of the TCP relay the spec puts in
+ * front of the host (e2e/fixtures/real-host.ts), which lets the spec drop the page's socket and
+ * restart the host behind it. Its own server for the same reason as the startup suite's: the
+ * token and address are baked in when vite starts.
+ */
+const RECOVERY_PORT = 5177
+const RECOVERY_URL = `http://127.0.0.1:${RECOVERY_PORT}`
+const RECOVERY_SPEC = /recovery\.spec\.ts/
+
 export default defineConfig({
   testDir: '.',
   // Keep security-diff.spec.ts in the default `pnpm e2e` suite; the separate config is only for isolated local reruns.
@@ -26,8 +37,9 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: 'http://127.0.0.1:5174', trace: 'off' },
   projects: [
-    { name: 'app', testIgnore: STARTUP_SPEC },
+    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC] },
     { name: 'startup', testMatch: STARTUP_SPEC, use: { baseURL: STARTUP_URL } },
+    { name: 'recovery', testMatch: RECOVERY_SPEC, use: { baseURL: RECOVERY_URL } },
   ],
   webServer: [
     {
@@ -44,6 +56,14 @@ export default defineConfig({
       // An empty value makes bootstrap treat it as 'absent' — this way even a person who has
       // exported a token in their shell gets the same test
       env: { VITE_HOST_TOKEN: '' },
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: `pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${RECOVERY_PORT} --strictPort`,
+      url: RECOVERY_URL,
+      // Must match RECOVERY_TOKEN and RECOVERY_RELAY_PORT in e2e/fixtures/real-host.ts
+      env: { VITE_HOST_TOKEN: 'e2e-recovery-token', VITE_HOST_URL: 'ws://127.0.0.1:5178' },
       reuseExistingServer: false,
       timeout: 60000,
     },
