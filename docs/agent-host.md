@@ -141,12 +141,15 @@ of one of these.
 
 ```
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
-UI reconnects   → hello → subscribe({ afterSeq }) → replay the missed events → restore the screen
-host restarts   → session processes die → attempt resume with the externalId from the store
-                  (the same path as FR-10)
+UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
+                  or resync (another lifetime, out of the buffer, over budget) → restore the screen
+host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
+                → attempt resume with the externalId from the store (the same path as FR-10)
 ```
 
-Thanks to this design, half of FR-10 (restore on restart) is the same code path as an ordinary reconnect — it is the default behaviour, not a special case.
+Thanks to this design, half of FR-10 (restore on restart) is the same code path as an ordinary reconnect — it is the default behaviour, not a special case. The rules for the cursor, the replay budget and the transport bounds are in [protocol.md](protocol.md) §1.
+
+**One host per data folder** (`dev-services/instance-lock.ts`). Two hosts on one folder would each hold their own session list and write to the same `store.db`. Ownership is an exclusive SQLite transaction (`BEGIN EXCLUSIVE` on `host-ownership.sqlite`, DELETE journal mode) that the host holds for its whole lifetime (#82): taking it is atomic, a second host is refused at once, and the operating system releases it when the host dies, however it dies, so a crash leaves nothing stale. `host.lock` (pid and start time) remains as the description of the owner in the conflict message, and for older hosts that know only that file: a live, matching `host.lock` still refuses the start. Before #82 ownership was the file alone, checked and then written: 8 hosts started at once produced 2 owners. This is single-machine ownership — not a distributed lease, and not for a data folder on a network filesystem.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

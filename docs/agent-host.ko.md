@@ -135,12 +135,15 @@ interface AdapterCapabilities {
 
 ```
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
-UI reconnects   → hello → subscribe({ afterSeq }) → replay the missed events → restore the screen
-host restarts   → session processes die → attempt resume with the externalId from the store
-                  (the same path as FR-10)
+UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
+                  or resync (another lifetime, out of the buffer, over budget) → restore the screen
+host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
+                → attempt resume with the externalId from the store (the same path as FR-10)
 ```
 
-이 설계 덕분에 FR-10의 절반(재시작 시 복원)은 평범한 재연결과 같은 코드 경로다 — 특별한 경우가 아니라 기본 동작이다.
+이 설계 덕분에 FR-10의 절반(재시작 시 복원)은 평범한 재연결과 같은 코드 경로다 — 특별한 경우가 아니라 기본 동작이다. 커서·재생 예산·전송 한도의 규칙은 [protocol.ko.md](protocol.ko.md) §1에 있다.
+
+**데이터 폴더 하나에 호스트 하나** (`dev-services/instance-lock.ts`). 한 폴더에 호스트가 둘이면 각자 제 세션 목록을 들고 같은 `store.db`에 쓴다. 소유권은 호스트가 살아 있는 내내 쥐는 배타적 SQLite 트랜잭션이다(`host-ownership.sqlite`에 `BEGIN EXCLUSIVE`, DELETE 저널 모드) (#82). 잡는 일은 원자적이고, 두 번째 호스트는 곧바로 거절되며, 호스트가 어떻게 죽든 운영체제가 풀어 주므로 크래시가 낡은 흔적을 남기지 않는다. `host.lock`(pid와 시작 시각)은 충돌 메시지에 주인을 적는 설명으로, 그리고 그 파일만 아는 옛 호스트를 위해 남는다: 살아 있고 맞아떨어지는 `host.lock`은 여전히 시작을 거절한다. #82 전에는 파일 하나를 확인하고 나서 쓰는 방식이라, 동시에 띄운 호스트 8개에서 주인이 2개 나왔다. 한 기계 안의 소유권이다 — 분산 임대가 아니고, 네트워크 파일시스템 위의 데이터 폴더용도 아니다.
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 
