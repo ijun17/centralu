@@ -1,8 +1,18 @@
-import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent, ReactNode, Ref, RefObject } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { shouldMarkRead, type SessionSummary } from '@cc/core'
-import { EMPTY_DRAFT, composerTarget, inlineFrameShown, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
+import { launchesSubagent } from '@cc/protocol'
+import {
+  EMPTY_DRAFT,
+  composerTarget,
+  inlineFrameShown,
+  messagesToChat,
+  useStore,
+  type ChatAttachment,
+  type ChatItem,
+  type Draft,
+} from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
@@ -2522,6 +2532,7 @@ const ChatRow = memo(function ChatRow({
   projectId = null,
   sessionId,
   leaving = false,
+  nested = false,
 }: {
   item: ChatItem
   projectRoot: string | null
@@ -2533,6 +2544,11 @@ const ChatRow = memo(function ChatRow({
    * collapses it (M4 B-1)
    */
   leaving?: boolean
+  /**
+   * A subagent's step drawn inside its launch card (#222), not a row of the conversation. An app
+   * view stands under the parent's own calls only — the host opens none for a subagent's.
+   */
+  nested?: boolean
 }) {
   if (item.kind === 'user') {
     return (
@@ -2677,10 +2693,10 @@ const ChatRow = memo(function ChatRow({
   if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
   return (
     <>
-      <ToolCard item={item} />
+      <ToolCard item={item} sessionId={sessionId} projectRoot={projectRoot} projectId={projectId} />
       {/* The app view this call opened (M4 B-1) — its own view is looked up by the card's id.
       Nothing is rendered if there is none */}
-      {item.callId && <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />}
+      {item.callId && !nested && <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />}
     </>
   )
 })
@@ -2879,7 +2895,17 @@ const PREVIEW_CLAMP = 'max-h-[3lh] overflow-hidden'
  * Two things are never lost even while collapsed: a failure stays visible as 'Failed' in the
  * title row, and a few lines of output preview are shown as-is.
  */
-function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
+function ToolCard({
+  item,
+  sessionId,
+  projectRoot,
+  projectId,
+}: {
+  item: Extract<ChatItem, { kind: 'tool' }>
+  sessionId: string
+  projectRoot: string | null
+  projectId: string | null
+}) {
   const [open, setOpen] = useState(false)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   const hidden = Math.max(0, lines.length - PREVIEW_LINES)
@@ -2964,6 +2990,87 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
               {/* Only counted when lines can actually be counted — "N more lines" would be a
               lie for a blob with no newlines */}
               {hidden > 0 ? `${hidden} more lines` : 'Show all'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {launchesSubagent(item.tool) && item.callId && (
+        <SubagentSteps sessionId={sessionId} callId={item.callId} projectRoot={projectRoot} projectId={projectId} />
+      )}
+    </div>
+  )
+}
+
+/**
+ * What the subagent a launch card started did (#222), collapsed under the card.
+ *
+ * The conversation never shows these steps: a subagent's calls landing among the parent's was
+ * the confusion #98 removed. They are read from the host only when the person opens this, and
+ * drawn with the conversation's own rows (`messagesToChat`, `ChatRow`) — its text, its reasoning,
+ * its tool cards — so a step reads the same here as the parent's does above. An agent the
+ * subagent launched is a launch card too, with its own steps inside.
+ *
+ * Whether it is open and what it read live in the store, keyed by the card: the virtual list
+ * detaches a row that scrolls away, and a card drawn again must come back as it was left.
+ */
+function SubagentSteps({
+  sessionId,
+  callId,
+  projectRoot,
+  projectId,
+}: {
+  sessionId: string
+  callId: string
+  projectRoot: string | null
+  projectId: string | null
+}) {
+  const steps = useStore((s) => s.subagentSteps[sessionId]?.[callId])
+  const toggle = useStore((s) => s.toggleSubagentSteps)
+  const loadMore = useStore((s) => s.loadMoreSubagentSteps)
+  const rows = steps?.rows
+  const items = useMemo(() => (rows ? messagesToChat(rows) : []), [rows])
+  const open = !!steps?.open
+
+  return (
+    <div className="border-t border-edge" data-testid="subagent-steps">
+      <button
+        className="flex w-full items-center gap-2 px-2.5 py-1 text-left"
+        onClick={() => toggle(sessionId, callId)}
+        aria-expanded={open}
+        data-testid="subagent-steps-toggle"
+      >
+        <span className="shrink-0 text-slate">
+          <ChevronIcon open={open} />
+        </span>
+        <span className="readout text-[11px] text-slate">Subagent&apos;s steps</span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2 border-t border-edge px-2.5 py-2" data-testid="subagent-steps-list">
+          {items.map((it) => (
+            <ChatRow key={it.seq} item={it} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} nested />
+          ))}
+          {steps?.loading && <p className="readout text-[11px] text-slate">Loading the steps…</p>}
+          {steps?.error && (
+            <p className="text-[11px] text-chalk" data-testid="subagent-steps-error">
+              Could not load the steps — {steps.error}{' '}
+              <button className="readout text-slate underline hover:text-chalk" onClick={() => void loadMore(sessionId, callId)}>
+                Try again
+              </button>
+            </p>
+          )}
+          {steps && !steps.loading && !steps.error && items.length === 0 && (
+            <p className="text-[11px] text-slate" data-testid="subagent-steps-empty">
+              No steps were recorded for this agent. One that ran before Centralu kept them left only its report.
+            </p>
+          )}
+          {steps?.more && !steps.loading && (
+            <button
+              className="readout self-start text-[10px] text-slate transition-colors hover:text-chalk"
+              onClick={() => void loadMore(sessionId, callId)}
+              data-testid="subagent-steps-more"
+            >
+              Show more steps
             </button>
           )}
         </div>

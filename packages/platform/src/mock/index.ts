@@ -42,6 +42,7 @@ import {
   parseUiPreferences,
   osPathBaseName,
   sessionLiveDefaults,
+  SUBAGENT_STEPS_PAGE,
   wireBaseName,
   wireJoin,
   wireSegments,
@@ -96,6 +97,10 @@ export class MockPlatform implements Platform {
   private gridPanels: string[] = []
   /** Messages saved per session — left open so a test can build a "session with an already-long history" */
   messages = new Map<string, StoredMessage[]>()
+  /** A subagent's steps per launch card (#222), keyed `<session id> <launch call id>` — left open like `messages` */
+  subagentMessages = new Map<string, StoredMessage[]>()
+  /** How many times a launch card's steps were read — a test checks they are read only when opened */
+  subagentReads = 0
   /** The row of text currently streaming, per session — the very row inside `messages` (growing it also grows the record) */
   private streams = new Map<string, StoredMessage>()
   private handlers = new Set<(e: NormalizedEvent) => void>()
@@ -167,7 +172,23 @@ export class MockPlatform implements Platform {
 
   /** The channel through which tests inject events */
   emit(event: NormalizedEvent): void {
-    let out = event
+    /*
+     * A native subagent's step (#222) — like the host: kept under its launch card, apart from the conversation, numbered
+     * within that launch (`stepSeq`), and sent on without a conversation seq. It never touches the session's state or
+     * its open text row.
+     */
+    if (event.type === 'subagent_event') {
+      const key = `${event.sessionId} ${event.parentCallId}`
+      const rows = this.subagentMessages.get(key) ?? []
+      const step = event.step
+      const kind = step.type === 'message_delta' ? 'text' : step.type === 'reasoning_delta' ? 'reasoning' : step.type
+      const stepSeq = rows.length + 1
+      rows.push({ sessionId: event.sessionId, seq: stepSeq, role: kind === 'text' || kind === 'reasoning' ? 'assistant' : 'system', kind, payload: step, ts: this.now() })
+      this.subagentMessages.set(key, rows)
+      for (const h of this.handlers) h({ ...event, stepSeq })
+      return
+    }
+    let out: NormalizedEvent = event
     /*
      * An in-conversation screen (M4 B-1). Like the host: remembers the instance as belonging
      * to that conversation (apps.viewMessage), and holds onto the input and outcome to return
@@ -2006,6 +2027,11 @@ export class MockPlatform implements Platform {
       const all = this.messages.get(sessionId) ?? []
       const filtered = beforeSeq ? all.filter((m) => m.seq < beforeSeq) : all
       return filtered.slice(-limit)
+    },
+    loadSubagentMessages: async (sessionId: string, parentCallId: string, afterSeq = 0, limit = SUBAGENT_STEPS_PAGE) => {
+      this.subagentReads += 1
+      const all = this.subagentMessages.get(`${sessionId} ${parentCallId}`) ?? []
+      return all.filter((m) => m.seq > afterSeq).slice(0, limit)
     },
     listExternalSessions: async (_projectId: string, tool: ToolName, _limit = 30) => {
       // The same rule as the host: the original held by a session that is not hidden is "already open"

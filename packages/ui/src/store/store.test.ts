@@ -98,6 +98,7 @@ beforeEach(() => {
     focusedProjectId: null,
     view: 'focus',
     history: {},
+    subagentSteps: {},
     resuming: {},
     wakeError: {},
     wakeLocked: {},
@@ -1365,6 +1366,74 @@ describe('a tool row finds its pair by callId — beside an open agent card (#98
       { sessionId: 's', seq: 2, role: 'system', kind: 'tool_result', payload: { ...bashDone, callId: 'toolu_elsewhere' }, ts: 0 },
     ])
     expect(tools(items)).toEqual([{ tool: 'Agent', result: undefined, live: undefined }])
+  })
+})
+
+/**
+ * A launch card's subagent steps (#222): read only when the person opens them, never part of the conversation, and
+ * joined live by later steps once every earlier one is read.
+ */
+describe('a subagent\'s steps under its launch card (#222)', () => {
+  const AGENT = 'toolu_agent'
+  const step = (sessionId: string, s: object) =>
+    ({ type: 'subagent_event', sessionId, parentCallId: AGENT, step: { sessionId, ...s } }) as NormalizedEvent
+  const grep = (sessionId: string) =>
+    step(sessionId, { type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Grep', title: 'Grep: boundaries', readOnly: true, paths: [] } })
+  const grepDone = (sessionId: string) => step(sessionId, { type: 'tool_result', callId: 'toolu_sub', ok: true, summary: 'tooling/boundaries.test.ts' })
+  const said = (sessionId: string, text: string) => step(sessionId, { type: 'message_delta', role: 'assistant', text })
+
+  const setup = async (s: string) => {
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s))
+    await useStore.getState().attach(mock)
+    mock.emit({ sessionId: s, type: 'tool_call', callId: AGENT, summary: { tool: 'Agent', title: 'Research', readOnly: true, paths: [] } } as NormalizedEvent)
+    return mock
+  }
+  const steps = (s: string) => messagesToChat(useStore.getState().subagentSteps[s]?.[AGENT]?.rows ?? []).map(line)
+
+  it('a step is not the conversation: no row, no unread, no state change, nothing read until the card is opened', async () => {
+    const s = 'sub-quiet'
+    const mock = await setup(s)
+    const before = useStore.getState().sessions[s]!
+    const chat = useStore.getState().chat[s]
+    mock.emit(grep(s))
+    mock.emit(said(s, 'The test holds.'))
+    expect(useStore.getState().chat[s]).toBe(chat)
+    expect(useStore.getState().sessions[s]).toBe(before)
+    expect(useStore.getState().subagentSteps[s]).toBeUndefined()
+    expect(mock.subagentReads).toBe(0)
+  })
+
+  it('opening the card reads its steps once; closing and opening again does not read them again', async () => {
+    const s = 'sub-open'
+    const mock = await setup(s)
+    mock.emit(grep(s))
+    mock.emit(grepDone(s))
+    mock.emit(said(s, 'The test holds.'))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Grep: boundaries', 'The test holds.']))
+    expect(messagesToChat(useStore.getState().subagentSteps[s]![AGENT]!.rows)[0]).toMatchObject({ result: 'tooling/boundaries.test.ts' })
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    expect(useStore.getState().subagentSteps[s]![AGENT]!.open).toBe(false)
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    expect(mock.subagentReads).toBe(1)
+  })
+
+  it('a later step joins an opened card live, once, and not while earlier pages are unread', async () => {
+    const s = 'sub-live'
+    const mock = await setup(s)
+    mock.emit(grep(s))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Grep: boundaries']))
+    mock.emit(grepDone(s))
+    mock.emit(said(s, 'Found it.'))
+    // The same step arriving again (a replay) is drawn once
+    useStore.getState().dispatchEvent({ ...(said(s, 'Found it.') as object), stepSeq: 3 } as NormalizedEvent)
+    expect(steps(s)).toEqual(['Grep: boundaries', 'Found it.'])
+
+    useStore.setState((st) => ({ subagentSteps: { ...st.subagentSteps, [s]: { [AGENT]: { ...st.subagentSteps[s]![AGENT]!, more: true } } } }))
+    mock.emit(said(s, 'Past an unread page.'))
+    expect(steps(s)).toEqual(['Grep: boundaries', 'Found it.'])
   })
 })
 

@@ -170,6 +170,11 @@ export interface AgentPort {
   markRead(sessionId: string, seq: number): Promise<void>
   listSessions(): Promise<SessionInfo[]>
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
+  /**
+   * The steps of the native subagent one card launched (#222), oldest first, paging forward from `afterSeq`. Asked only
+   * when the person opens that card's steps — they are never part of `loadMessages`.
+   */
+  loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit?: number): Promise<StoredMessage[]>
   capabilities(tool: ToolName): Promise<AdapterCapabilities>
   /**
    * This session's slash commands (skills).

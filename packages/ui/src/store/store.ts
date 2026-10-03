@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, SessionInfo } from '@cc/protocol'
+import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, SessionInfo, SUBAGENT_STEPS_PAGE } from '@cc/protocol'
 import type {
   AppId,
   AppQuestion,
@@ -13,6 +13,7 @@ import type {
   ProjectInfo,
   QuestionAnswer,
   StoredMessage,
+  SubagentStep,
   ToolDefaults,
   ToolName,
   UiPreferences,
@@ -496,6 +497,17 @@ export type ChatItem = (
   storedSeq?: number
 }
 
+/**
+ * One launch card's subagent steps on screen (#222).
+ *
+ *   open     the section is expanded
+ *   rows     the steps read so far, oldest first, by their number within the launch (`seq`)
+ *   more     the host has more past `rows` than one page carried; live steps wait for those to be read
+ *   loading  a page is being read
+ *   error    why the last read failed, shown in place of the steps
+ */
+export type SubagentSteps = { open: boolean; rows: StoredMessage[]; more: boolean; loading: boolean; error: string | null }
+
 export type AppState = {
   platform: Platform | null
   connection: ConnectionState
@@ -779,6 +791,16 @@ export type AppState = {
    * where reading further back starts from.
    */
   history: Record<string, { oldestSeq: number; more: boolean; loading: boolean }>
+  /**
+   * The steps of a native subagent, per session and launch card (#222) — present once the person has opened that
+   * card's steps, and only then read from the host. Kept here rather than in the card, so a card the virtual list
+   * detaches and draws again comes back as it was left (open, loaded), not collapsed and reading again.
+   */
+  subagentSteps: Record<string, Record<string, SubagentSteps>>
+  /** Opens or closes a launch card's steps; the first opening reads them */
+  toggleSubagentSteps(sessionId: string, callId: string): void
+  /** Reads the next page of a launch card's steps */
+  loadMoreSubagentSteps(sessionId: string, callId: string): Promise<void>
   /**
    * The session currently being woken up.
    *
@@ -2298,6 +2320,7 @@ export const useStore = create<AppState>((set, get) => ({
   railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
+  subagentSteps: {},
   resuming: {},
   wakeError: {},
   wakeLocked: {},
@@ -2789,6 +2812,20 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
+    /*
+     * A native subagent's step (#222). It is not the conversation: it changes no state, adds no row and never moves
+     * unread. It only joins a launch card's steps the person has opened, once every earlier step is read (`more`
+     * false) — appended past a page not read yet, it would leave a hole in the middle.
+     */
+    if (e.type === 'subagent_event') {
+      if (e.stepSeq === undefined) return
+      const cur = get().subagentSteps[e.sessionId]?.[e.parentCallId]
+      if (!cur || cur.more || cur.rows.some((r) => r.seq === e.stepSeq)) return
+      const row = subagentRow(e.sessionId, e.stepSeq, e.step)
+      set((s) => putSubagentSteps(s.subagentSteps, e.sessionId, e.parentCallId, { ...cur, rows: [...cur.rows, row] }))
+      return
+    }
+
     // A capability question was created or closed (M4 D-4) — same coarseness, the whole list is re-read
     if (e.type === 'external_app_questions_changed') {
       void get().refreshAppQuestions()
@@ -3014,6 +3051,7 @@ export const useStore = create<AppState>((set, get) => ({
            */
           notices: s.notices.filter((n) => n.sessionId !== sessionId),
           history: omitKey(s.history, sessionId),
+          subagentSteps: omitKey(s.subagentSteps, sessionId),
           drafts: omitKey(s.drafts, sessionId),
           stickToBottom: omitKey(s.stickToBottom, sessionId),
           wakeError: omitKey(s.wakeError, sessionId),
@@ -3363,6 +3401,37 @@ export const useStore = create<AppState>((set, get) => ({
         history: { ...s.history, [sessionId]: { ...cur, loading: false } },
         toast: `Could not load past conversation: ${(e as Error).message}`,
       }))
+    }
+  },
+  toggleSubagentSteps(sessionId, callId) {
+    const cur = get().subagentSteps[sessionId]?.[callId]
+    const open = !cur?.open
+    set((s) => putSubagentSteps(s.subagentSteps, sessionId, callId, { ...(cur ?? SUBAGENT_STEPS_UNREAD), open }))
+    // Read on the first opening, and again after a failed read — never while it is closed
+    if (open && (!cur || cur.error)) void get().loadMoreSubagentSteps(sessionId, callId)
+  },
+  async loadMoreSubagentSteps(sessionId, callId) {
+    const platform = get().platform
+    const cur = get().subagentSteps[sessionId]?.[callId]
+    if (!platform || !cur || cur.loading) return
+    const after = cur.rows.at(-1)?.seq ?? 0
+    set((s) => putSubagentSteps(s.subagentSteps, sessionId, callId, { ...cur, loading: true, error: null }))
+    try {
+      const page = await platform.agents.loadSubagentMessages(sessionId, callId, after, SUBAGENT_STEPS_PAGE)
+      set((s) => {
+        const now = s.subagentSteps[sessionId]?.[callId] ?? cur
+        // A live step may have joined while the page was on its way: one row per number, in order
+        const rows = [...new Map([...now.rows, ...page].map((r) => [r.seq, r])).values()].sort((a, b) => a.seq - b.seq)
+        return putSubagentSteps(s.subagentSteps, sessionId, callId, { ...now, rows, more: page.length >= SUBAGENT_STEPS_PAGE, loading: false })
+      })
+    } catch (e) {
+      set((s) =>
+        putSubagentSteps(s.subagentSteps, sessionId, callId, {
+          ...(s.subagentSteps[sessionId]?.[callId] ?? cur),
+          loading: false,
+          error: (e as Error).message,
+        }),
+      )
     }
   },
   togglePanel(open) {
@@ -5818,6 +5887,24 @@ async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => P
 
 /** An instance left open that a reopened UI has closed (`syncInlineViews`) */
 const releasedOrphans = new Set<string>()
+
+/** A launch card's steps before the first read (#222) */
+const SUBAGENT_STEPS_UNREAD: SubagentSteps = { open: false, rows: [], more: false, loading: false, error: null }
+
+function putSubagentSteps(
+  all: AppState['subagentSteps'],
+  sessionId: string,
+  callId: string,
+  next: SubagentSteps,
+): Pick<AppState, 'subagentSteps'> {
+  return { subagentSteps: { ...all, [sessionId]: { ...all[sessionId], [callId]: next } } }
+}
+
+/** A live subagent step as the stored row the host would read back (#222) — the same shape `messagesToChat` draws */
+function subagentRow(sessionId: string, seq: number, step: SubagentStep): StoredMessage {
+  const kind = step.type === 'message_delta' ? 'text' : step.type === 'reasoning_delta' ? 'reasoning' : step.type
+  return { sessionId, seq, role: kind === 'text' || kind === 'reasoning' ? 'assistant' : 'system', kind, payload: step, ts: Date.now() }
+}
 
 /** Message restoration (on restart, or switching sessions) */
 export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {

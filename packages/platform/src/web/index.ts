@@ -20,6 +20,7 @@ import type {
   Unsubscribe,
   WorkspaceSnapshot,
 } from '../ports/index.js'
+import { SUBAGENT_STEPS_PAGE } from '@cc/protocol'
 import { RpcClient } from './rpc-client.js'
 
 /**
@@ -176,6 +177,9 @@ class WebAgentPort implements AgentPort {
   }
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number) {
     return this.rpc.call('messages.load', { sessionId, limit, beforeSeq })
+  }
+  loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit = SUBAGENT_STEPS_PAGE) {
+    return this.rpc.call('messages.subagent', { sessionId, parentCallId, afterSeq, limit })
   }
   commands(sessionId: string) {
     return this.rpc.call('agents.commands', { sessionId })
