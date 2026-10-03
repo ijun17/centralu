@@ -11,27 +11,54 @@ import type { NormalizedEvent } from '@cc/protocol'
 const control = vi.hoisted(() => ({
   endStream: () => {},
   failStream: (_err: Error) => {},
+  /** Hands the latest query's stream one CLI message. */
+  push: (_msg: unknown) => {},
   /** The queries created, in creation order — used to check whether close was called and which query the usage window borrows. */
   queries: [] as { closed: boolean }[],
+  /** What the next query's `supportedCommands()` answers with — the CLI's command list. */
+  commands: (async () => []) as () => Promise<{ name: string }[]>,
+  /** The texts the CLI read from the input stream, in order. */
+  inputs: [] as string[],
 }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: () => {
+  query: ({ prompt }: { prompt: AsyncIterable<{ message: { content: { text: string }[] } }> }) => {
+    void (async () => {
+      for await (const u of prompt) control.inputs.push(u.message.content[0]!.text)
+    })()
+    const commands = control.commands
     const q = {
       closed: false,
-      // eslint-disable-next-line require-yield -- a stream that ends without producing anything is exactly what this tests
       async *[Symbol.asyncIterator]() {
-        // Ends without an exception when the test tells it to (as if the process disappeared), or throws (as if the SDK turned an error result into an exception).
-        await new Promise<void>((resolve, reject) => {
-          control.endStream = resolve
-          control.failStream = reject
-        })
+        // Yields what the test pushes; ends without an exception when told to (as if the process disappeared), or throws (as if the SDK turned an error result into an exception).
+        const pending: unknown[] = []
+        let ended = false
+        let failure: Error | null = null
+        let wake = () => {}
+        control.endStream = () => {
+          ended = true
+          wake()
+        }
+        control.failStream = (err) => {
+          failure = err
+          wake()
+        }
+        control.push = (msg) => {
+          pending.push(msg)
+          wake()
+        }
+        for (;;) {
+          while (pending.length > 0) yield pending.shift()
+          if (failure) throw failure
+          if (ended) return
+          await new Promise<void>((r) => (wake = r))
+        }
       },
       interrupt: async () => {},
       close: () => {
         q.closed = true
       },
-      supportedCommands: async () => [],
+      supportedCommands: () => commands(),
       getContextUsage: async () => undefined,
     }
     control.queries.push(q)
@@ -147,31 +174,156 @@ describe('when a claude stream ends without warning', () => {
 })
 
 /**
- * /goal does not exist in the headless SDK (measured 2026-09-07, smoke-goal.mts — zero
- * `active_goal` occurrences in the raw stream). If it is sent as-is, the model just role-plays a
- * goal — this checks that it is intercepted and answered with an honest one-liner instead.
+ * /goal goes to the CLI when the CLI offers it (2026-10-03). On 2026-09-07 the headless path had no
+ * goal, and a /goal sent as text only made the model role-play the hook, so it was refused here. The
+ * installed CLI 2.1.282 runs it through query() (measured: `goal` in supportedCommands() and in the
+ * init message's slash_commands, "Goal set: …" from the CLI itself, the Stop hook keeping the turn
+ * going). The decision is by capability: an older CLI that does not list it still gets the refusal.
  */
-describe('claude /goal — an honest refusal of a feature the SDK does not have', () => {
-  it('/goal never reaches the model, and is answered with one line of guidance plus turn completion', async () => {
+describe('claude /goal — passed through when the CLI offers it, refused when it does not', () => {
+  const COND = 'the file done.txt exists'
+  const start = async (sessionId: string, extra: Record<string, unknown> = {}) => {
     const events: NormalizedEvent[] = []
-    const adapter = new ClaudeAdapter()
-    const handle = await adapter.createSession(
-      { sessionId: 's3', cwd: '/tmp', permissionPreset: 'normal' },
+    control.inputs = []
+    const handle = await new ClaudeAdapter().createSession(
+      { sessionId, cwd: '/tmp', permissionPreset: 'normal', ...extra },
       (e) => events.push(e),
     )
-
-    handle.send('/goal all tests green')
     await tick()
-    expect(events.some((e) => e.type === 'message_delta' && /interactive Claude CLI/.test(e.text ?? ''))).toBe(true)
-    expect(events.some((e) => e.type === 'turn_complete')).toBe(true)
-    // There must be no transition to working toward the model — pretending to send it would be the worst outcome.
+    return { events, handle }
+  }
+  const synthetic = (text: string) => ({
+    type: 'assistant',
+    message: { id: `local-${text.length}`, model: '<synthetic>', content: [{ type: 'text', text }] },
+  })
+  const modelCall = (id: string, text: string) => [
+    { type: 'stream_event', event: { type: 'message_start', message: { id } } },
+    { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } },
+    { type: 'assistant', message: { id, model: 'claude-haiku-4-5-20251001', content: [{ type: 'text', text }] } },
+  ]
+  const result = { type: 'result', subtype: 'success', is_error: false }
+  const goals = (events: NormalizedEvent[]) => events.flatMap((e) => (e.type === 'goal' ? [e.goal] : []))
+  const turnEnds = (events: NormalizedEvent[]) => events.filter((e) => e.type === 'turn_complete').length
+
+  it('a CLI that lists goal gets the command itself — no refusal, no turn completed on its behalf', async () => {
+    control.commands = async () => [{ name: 'compact' }, { name: 'goal' }]
+    const { events, handle } = await start('g1')
+
+    handle.send(`/goal ${COND}`)
+    await tick()
+    expect(control.inputs).toEqual([`/goal ${COND}`])
+    expect(events).toContainEqual({ type: 'state_change', sessionId: 'g1', state: 'working' })
+    expect(events.some((e) => e.type === 'message_delta')).toBe(false)
+    expect(turnEnds(events)).toBe(0)
+    await handle.dispose()
+  })
+
+  it('a CLI that does not list goal gets the honest one-liner and nothing reaches it; a message that only starts with "/goal" still goes', async () => {
+    control.commands = async () => [{ name: 'compact' }]
+    const { events, handle } = await start('g2')
+
+    handle.send(`/goal ${COND}`)
+    await tick()
+    expect(control.inputs).toEqual([])
+    expect(events.some((e) => e.type === 'message_delta' && /does not offer \/goal/.test(e.text))).toBe(true)
+    expect(turnEnds(events)).toBe(1)
     expect(events.some((e) => e.type === 'state_change' && e.state === 'working')).toBe(false)
 
-    // The match is narrow — a real message that merely starts with the letters "/goal" still goes through as-is.
     handle.send("/goal's syntax — what is it?")
     await tick()
-    expect(events.some((e) => e.type === 'state_change' && e.state === 'working')).toBe(true)
+    expect(control.inputs).toEqual(["/goal's syntax — what is it?"])
     await handle.dispose()
-    control.endStream()
+  })
+
+  it('the init message\'s slash_commands decides it too', async () => {
+    control.commands = async () => []
+    const { handle } = await start('g3')
+    control.push({ type: 'system', subtype: 'init', session_id: 'x', slash_commands: ['goal', 'usage'] })
+    await tick()
+
+    handle.send(`/goal ${COND}`)
+    await tick()
+    expect(control.inputs).toEqual([`/goal ${COND}`])
+    await handle.dispose()
+  })
+
+  it('a /goal sent before the command list answers waits for it, and what is sent after it does not overtake it', async () => {
+    let answer: (list: { name: string }[]) => void = () => {}
+    control.commands = () => new Promise((r) => (answer = r))
+    const { handle } = await start('g4')
+
+    handle.send(`/goal ${COND}`)
+    handle.send('and then this')
+    await tick()
+    expect(control.inputs).toEqual([])
+    answer([{ name: 'goal' }])
+    await tick()
+    expect(control.inputs).toEqual([`/goal ${COND}`, 'and then this'])
+    await handle.dispose()
+  })
+
+  it('a refused /goal typed mid-turn does not complete the turn the CLI is still running', async () => {
+    control.commands = async () => []
+    const { events, handle } = await start('g5')
+
+    handle.send('do the work')
+    handle.send(`/goal ${COND}`)
+    await tick()
+    expect(events.some((e) => e.type === 'message_delta' && /does not offer \/goal/.test(e.text))).toBe(true)
+    expect(turnEnds(events)).toBe(0)
+
+    control.push(result)
+    await tick()
+    expect(turnEnds(events)).toBe(1)
+    await handle.dispose()
+  })
+
+  it('the Stop hook keeping the agent going: one turn end at the one result, the badge follows set → lap → met, and a message sent meanwhile goes out', async () => {
+    control.commands = async () => [{ name: 'goal' }]
+    const { events, handle } = await start('g6')
+
+    handle.send(`/goal ${COND}`)
+    await tick()
+    control.push(synthetic(`Goal set: ${COND}`))
+    for (const m of modelCall('msg_1', 'Checked; not there yet.')) control.push(m)
+    control.push({
+      type: 'user',
+      isSynthetic: true,
+      message: { role: 'user', content: [{ type: 'text', text: `Stop hook feedback:\n[${COND}]: The file does not exist.` }] },
+    })
+    await tick()
+    expect(goals(events)).toEqual([
+      { objective: COND, status: 'active' },
+      { objective: COND, status: 'active', iterations: 1, reason: 'The file does not exist.' },
+    ])
+    // The CLI is still working on the goal: nothing says the turn is over
+    expect(turnEnds(events)).toBe(0)
+    expect(events.some((e) => e.type === 'state_change' && e.state !== 'working')).toBe(false)
+
+    handle.send('also add a newline at the end')
+    await tick()
+    expect(control.inputs).toEqual([`/goal ${COND}`, 'also add a newline at the end'])
+
+    for (const m of modelCall('msg_2', 'Created done.txt.')) control.push(m)
+    control.push(result)
+    await tick()
+    expect(turnEnds(events)).toBe(1)
+    expect(goals(events).at(-1)).toBeNull()
+    await handle.dispose()
+  })
+
+  it('a resumed process is handed the goal the host knew, so a met goal still clears the badge', async () => {
+    control.commands = async () => [{ name: 'goal' }]
+    const { events, handle } = await start('g7', {
+      resumeExternalId: 'conv-1',
+      knownGoal: { objective: COND, status: 'active', iterations: 2 },
+    })
+
+    handle.send('keep going')
+    for (const m of modelCall('msg_1', 'Created done.txt.')) control.push(m)
+    control.push(result)
+    await tick()
+    expect(goals(events)).toEqual([null])
+    await handle.dispose()
   })
 })

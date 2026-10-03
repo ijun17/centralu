@@ -4829,7 +4829,7 @@ test('The composer height returns to one line after sending a message', async ({
  * DOM event.
  */
 /*
- * The goal badge (2026-09-07 — claude /goal's active_goal, codex's thread/goal/*).
+ * The goal badge (2026-09-07 — claude's /goal, codex's thread/goal/*).
  * The goal status as judged by the tool shows in the header: iteration count and a status
  * summary, with the condition and shortfall reason on hover. It disappears once cleared
  * (including on success) — judgment belongs to the tool, and the badge is only a notification.

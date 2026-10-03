@@ -490,9 +490,13 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   }),
   /**
    * A goal status announcement (2026-09-07). Null means it was cleared (including by being
-   * achieved) — the tool makes the judgment; we only carry it. This is a live-only fact: after a
-   * restart, codex re-asks via thread/goal/get, and claude learns it again at the next Stop hook
-   * judgment.
+   * achieved) — the tool makes the judgment; we only carry it. Codex announces it
+   * (thread/goal/updated|cleared). Claude's CLI does not announce it to a headless session
+   * (2026-10-03), so its adapter reads it from the CLI's own replies to /goal, its Stop hook
+   * feedback, and the end of a turn the goal drove (adapters/claude `ClaudeGoalTracker`). This is a
+   * live-only fact: after a restart, codex re-asks via thread/goal/get; a Claude process swapped
+   * inside one host run is handed the goal the host knew, and after a host restart Claude's badge
+   * comes back once the person sends `/goal` (the CLI restores the goal itself, silently).
    */
   z.object({ ...base, type: z.literal('goal'), goal: SessionGoal.nullable() }),
   /**

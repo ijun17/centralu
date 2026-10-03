@@ -7,6 +7,7 @@ import type {
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
+  SessionGoal,
   ToolName,
   ToolDescriptor,
 } from '@cc/protocol'
@@ -387,6 +388,14 @@ export type CreateSessionOpts = {
    */
   readableDirs?: string[]
   resumeExternalId?: string
+  /**
+   * The goal the host last heard of for this conversation, when a new process resumes it (the badge's
+   * `goal` event). Codex has no use for it — it asks the thread (`thread/goal/get`). Claude does: its
+   * CLI restores the goal from the transcript and says nothing about it on the stream (measured
+   * 2026-10-03), so without this the new process would not know the goal it is running, and a met
+   * goal would leave the badge up. Absent after a host restart, since the goal is live-only.
+   */
+  knownGoal?: SessionGoal
   /** If given, this session receives app tools — each adapter attaches them its own way */
   orchestratorTools?: OrchestratorTools
   /**

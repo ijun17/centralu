@@ -83,10 +83,11 @@ export type SessionState = z.infer<typeof SessionState>
 export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
 
 /**
- * The goal set on a session (2026-09-07 — claude's `/goal` active_goal, and codex's thread/goal/*).
+ * The goal set on a session (2026-09-07 — claude's `/goal`, and codex's thread/goal/*).
  *
  * This is the union of both tools: objective/status are shared, iterations/reason are claude's
- * (the number of laps and the reason it fell short, judged each time the Stop hook runs), and
+ * (the number of laps and the reason it fell short, judged each time the Stop hook runs — read
+ * from the CLI's Stop hook feedback, since its `active_goal` does not reach a headless session), and
  * tokenBudget/tokensUsed are codex's. status carries the tool's own vocabulary as-is — claude
  * only ever has 'active' while a goal is set (achieving it arrives as a null notification), while
  * codex has active, paused, blocked, usageLimited, budgetLimited, complete. Why this is not

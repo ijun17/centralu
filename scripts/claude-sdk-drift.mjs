@@ -101,6 +101,16 @@ const TYPED = [
   'resets_at',
   // canUseTool result field (index.ts)
   'updatedInput',
+  // /goal (2026-10-03): whether the CLI offers it (the init message's command list, index.ts), the
+  // Stop hook feedback the goal tracker reads (a user message marked isSynthetic, normalize.ts), the
+  // id a model call announces so its text is a message of its own, and the goal event a CLI may send
+  // (not sent headless today). The CLI's reply wording ("Goal set: …") is not an SDK name; it lives
+  // in the CLI and no name check can see it — ClaudeGoalTracker's comment has the measured shapes.
+  'slash_commands',
+  'isSynthetic',
+  'message_start',
+  'active_goal',
+  'last_reason',
 ]
 
 /** Names that need only exist somewhere in the shipped package, types included or not. */

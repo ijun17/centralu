@@ -60,6 +60,7 @@ type NormalizedEvent =
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: human-given, never overwritten
   | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: a non-human hand changed settings
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting
+  | { type: 'goal';             sessionId, goal: SessionGoal|null }  // the badge; codex announces it, claude's is read from the CLI's /goal replies and Stop hook feedback
   | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
   | { type: 'session_deleted';  sessionId }
   // app-scoped (sessionId optional — not every fact belongs to a conversation)

@@ -61,6 +61,7 @@ type NormalizedEvent =
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: 사람이 지은 이름 — 자동 이름이 덮지 않는다
   | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: 사람 아닌 손이 설정을 바꿨다
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 충돌 감지, FR-5 하이라이트
+  | { type: 'goal';             sessionId, goal: SessionGoal|null }  // 배지; codex는 알려 주고, claude는 CLI의 /goal 답과 Stop 훅 피드백에서 읽는다
   | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
   | { type: 'session_deleted';  sessionId }
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)

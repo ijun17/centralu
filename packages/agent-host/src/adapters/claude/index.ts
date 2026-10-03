@@ -93,6 +93,11 @@ function parseQuestions(input: unknown): Question[] {
   return out
 }
 
+/** `/goal`, alone or with an argument — not a message that merely starts with those letters ("/goal's syntax?"). */
+function isGoalCommand(text: string): boolean {
+  return /^\/goal(\s|$)/.test(text.trim())
+}
+
 /**
  * Is this tool one belonging to **our own in-process server** (the judgment behind the approval
  * exception)?
@@ -234,6 +239,18 @@ class ClaudeSession implements SessionHandle {
   /** Serializes server-set changes into one line — so a later change never interleaves with one that has not finished yet. */
   private serversSync: Promise<unknown> = Promise.resolve()
   private stopAppWatch: (() => void) | null = null
+  /**
+   * Whether this session's CLI offers `/goal` — undefined until it has said (see `send`). Decided by
+   * what the CLI advertises, never by a version number: `supportedCommands()` (answered at
+   * initialization, before any message) and the init message's `slash_commands`.
+   */
+  private goalCommand: boolean | undefined
+  /** Settles once `goalCommand` is as known as it will get — the command list answered, failed, or the stream ended. */
+  private goalKnown: Promise<void> = Promise.resolve()
+  private settleGoalKnown: () => void = () => {}
+  /** Messages held behind a `/goal` that is waiting for `goalKnown` — so nothing sent after it overtakes it. */
+  private sendGate: Promise<void> | null = null
+  private notices = 0
 
   constructor(
     readonly sessionId: string,
@@ -241,6 +258,7 @@ class ClaudeSession implements SessionHandle {
     private emit: EventSink,
   ) {
     this.stream = new ClaudeStreamNormalizer(sessionId)
+    this.stream.goal.seed(opts.knownGoal)
   }
 
   async start(): Promise<void> {
@@ -465,6 +483,14 @@ class ClaudeSession implements SessionHandle {
     }))
     ClaudeAdapter.liveQueries.add(q)
 
+    this.goalKnown = new Promise<void>((resolve) => (this.settleGoalKnown = resolve))
+    q.supportedCommands()
+      .then((list) => {
+        if (this.goalCommand === undefined && Array.isArray(list)) this.goalCommand = list.some((c) => c?.name === 'goal')
+      })
+      .catch(() => {})
+      .finally(() => this.settleGoalKnown())
+
     // Follows the server set when apps come and go, and that server's list when its tools change — never restarting the session.
     this.stopAppWatch = this.opts.apps?.onChange(() => this.syncApps()) ?? null
 
@@ -487,8 +513,12 @@ class ClaudeSession implements SessionHandle {
            * own record.
            */
           if (this.closed) break
-          const m = msg as { type?: string; session_id?: string; subtype?: string }
+          const m = msg as { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
+          if (m.type === 'system' && m.subtype === 'init' && Array.isArray(m.slash_commands)) {
+            this.goalCommand = m.slash_commands.includes('goal')
+            this.settleGoalKnown()
+          }
           this.noteAppCalls(msg)
           if (m.type === 'result') this.turnOpen = false
           for (const e of this.stream.push(msg)) this.emit(e)
@@ -504,6 +534,7 @@ class ClaudeSession implements SessionHandle {
          * from `onExit(expected=false)`.
          */
         ClaudeAdapter.liveQueries.delete(q)
+        this.settleGoalKnown()
         if (!this.closed) {
           this.releaseAgents('The session process ended before this agent reported back')
           this.emit({
@@ -514,6 +545,7 @@ class ClaudeSession implements SessionHandle {
         }
       } catch (err) {
         ClaudeAdapter.liveQueries.delete(q)
+        this.settleGoalKnown()
         /*
          * **An exception from a process we ourselves closed is not a crash** (#157). Same rule as
          * the clean-exit branch above. If settings change after a stopped turn (the last result
@@ -559,23 +591,68 @@ class ClaudeSession implements SessionHandle {
 
   send(text: string): void {
     /*
-     * /goal is still exclusive to the interactive CLI (measured 2026-09-07, and remeasured on
-     * both 0.3.231 and the current 0.3.263): zero occurrences of `active_goal` or
-     * `local_command_output` in the raw headless stream, and no setting API anywhere in the
-     * types. If it is simply sent, the model reads the literal text and **role-plays** the goal
-     * ("Goal achieved!" — words with no actual hook behind them). An honest one-liner beats a
-     * quiet lie. If the SDK ever opens this path, this interception is where the wiring goes
-     * (receiving `active_goal` is the wiring already in place).
+     * `/goal` goes to the CLI when the CLI offers it (2026-10-03). On 2026-09-07 (SDK 0.3.231 and
+     * 0.3.263, the CLI of that day) the headless path had no goal at all: sent as text, the model
+     * read the literal characters and role-played the hook ("Goal achieved!" with no hook behind
+     * it), so every /goal was answered here with a refusal. The installed CLI 2.1.282 runs it
+     * through the same `query()` path we use — measured: `goal` is in `supportedCommands()` and in
+     * the init message's `slash_commands`, the CLI answers "Goal set: <condition>" itself (a
+     * synthetic message, not the model), registers its Stop hook, and keeps the turn going until the
+     * condition holds. What the stream says about it, and how the badge reads that, is in
+     * `ClaudeGoalTracker` (normalize.ts).
+     *
+     * So the decision is made by capability: a CLI that advertises `goal` gets the command, one that
+     * does not (older) still gets the honest one-liner. A `/goal` sent before the command list has
+     * answered waits for it (`goalKnown`, milliseconds after start), and whatever is sent after it
+     * waits behind it, so the order the person typed is the order the CLI reads.
      */
-    if (/^\/goal(\s|$)/.test(text.trim())) {
-      this.emit({
-        type: 'message_delta',
-        sessionId: this.sessionId,
-        role: 'assistant',
-        text: 'Goals currently need the interactive Claude CLI — the headless SDK path has no way to set one yet, and sending /goal as a message would only make the model role-play the hook.',
-      })
-      this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    const goal = isGoalCommand(text)
+    if (!this.sendGate && !(goal && this.goalCommand === undefined)) {
+      this.deliver(text)
       return
+    }
+    const gate = (this.sendGate = (this.sendGate ?? this.goalKnown).then(() => {
+      if (!this.closed) {
+        this.deliver(text)
+        return
+      }
+      // Closed while it waited: the same rule as dispose's queue — a message is never dropped silently
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: {
+          code: 'internal',
+          message: '1 message(s) were still queued when the session closed and were not delivered — please resend',
+          retryable: false,
+        },
+      })
+    }))
+    void gate.then(() => {
+      if (this.sendGate === gate) this.sendGate = null
+    })
+  }
+
+  private deliver(text: string): void {
+    if (isGoalCommand(text)) {
+      if (this.goalCommand !== true) {
+        /*
+         * A CLI that does not offer /goal: sent as text, the model would only role-play the hook. A
+         * refusal, then — but never a `turn_complete` while one of the CLI's own turns is still open
+         * (a /goal typed mid-turn): that would mark the turn done while the CLI works. The open
+         * turn's result closes it. The line carries its own message id, so it never runs into the
+         * model's text as one row.
+         */
+        this.emit({
+          type: 'message_delta',
+          sessionId: this.sessionId,
+          role: 'assistant',
+          messageId: `centralu-notice-${++this.notices}`,
+          text: "This Claude Code does not offer /goal to Centralu (it is not in the CLI's command list) — update Claude Code to use goals here. Sent as a message, the model would only pretend to keep one.",
+        })
+        if (!this.turnOpen) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+        return
+      }
+      this.stream.goal.commandSent()
     }
     this.queue.push(text)
     this.turnOpen = true
@@ -789,6 +866,8 @@ class ClaudeSession implements SessionHandle {
   async dispose(): Promise<void> {
     this.closed = true
     this.notify?.()
+    // A message held behind an unanswered /goal is reported as undelivered, like the queue below
+    this.settleGoalKnown()
     // App attachment closes along with the handle — a new handle gets its own.
     this.stopAppWatch?.()
     this.opts.apps?.close()

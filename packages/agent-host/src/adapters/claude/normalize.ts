@@ -1,4 +1,4 @@
-import type { ApprovalDetail, NormalizedEvent, ToolSummary } from '@cc/protocol'
+import type { ApprovalDetail, NormalizedEvent, SessionGoal, ToolSummary } from '@cc/protocol'
 
 /**
  * Converts Claude SDK messages into NormalizedEvent (a pure function, so contract tests are
@@ -250,6 +250,12 @@ export function normalizeMessage(
    * of null means the goal was cleared (including having been achieved), and while one is set,
    * Claude's status vocabulary has exactly one word, 'active' — the iteration count and the reason
    * it has not been reached are the actual content.
+   *
+   * **The installed CLI does not send this to us** (measured 2026-10-03, CLI 2.1.282 through SDK
+   * 0.3.263, whose runtime does pass the type through): the CLI's headless loop folds the event into
+   * its own state, and writes it to stdout only in a remote (`CLAUDE_CODE_REMOTE`) session. So the
+   * badge is driven by `ClaudeGoalTracker` below; this stays for a CLI that starts sending it, and
+   * when one does, the tracker stands down.
    */
   if (type === 'active_goal') {
     const v = (m.value ?? null) as Json | null
@@ -550,6 +556,140 @@ export function normalizeMessage(
   return out
 }
 
+/** The text of a message's content, a string or its text blocks joined. */
+function textOfContent(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return (content as Json[]).filter((b) => str(b?.type) === 'text').map((b) => str(b.text)).join('')
+}
+
+/**
+ * What a Claude session's `/goal` is doing, read from what the CLI actually puts on the stream
+ * (2026-10-03) — so a Claude goal draws the same badge a Codex goal does.
+ *
+ * The CLI's own goal event (`active_goal`) does not reach a headless session (see `normalizeMessage`),
+ * and the SDK has no goal API. What does arrive, measured through `query()` with streaming input and
+ * the installed CLI 2.1.282 (SDK 0.3.263, haiku, a temp git folder):
+ *
+ *   /goal <condition>    an assistant message with no stream deltas (model "<synthetic>"), text
+ *                        "Goal set: <condition>"; then the model works in the same turn
+ *   /goal                "Goal active: <condition> (not yet evaluated | N turn[s])" plus an optional
+ *                        "\nLast check: <reason>" line, or "No goal set. Usage: `/goal <condition>`";
+ *                        a result with num_turns 0 follows
+ *   /goal clear          "Goal cleared: <condition>" or "No goal set" (stop, off, reset, none and cancel
+ *                        are the same command)
+ *   not met at Stop      a user message with isSynthetic: true, text
+ *                        "Stop hook feedback:\n[<condition>]: <reason>"; the CLI keeps the same turn
+ *                        going by itself, and there is still exactly one result at the end
+ *   met                  **nothing** — no message between the model's last words and the turn's
+ *                        result (includeHookEvents adds nothing either: the goal hook is a prompt hook)
+ *   interrupted          the result is subtype success too, and the goal stays set ("Goal active" after)
+ *   resumed              the CLI restores the goal from its transcript and says nothing on the stream
+ *
+ * Those replies are the CLI's words, not a typed field — so a reply is only read as one while a
+ * `/goal` we passed through is waiting for its answer (`commandSent`), and Stop hook feedback only
+ * while its bracket holds the condition we know is set (a person's own prompt Stop hook has the same
+ * shape). "Met" is inferred: the goal's Stop hook blocks every stop until the condition holds, so a
+ * turn in which the model ran under the goal and that ends in success, without us interrupting it,
+ * ended because the hook let it. That is the CLI's met, its "impossible" (it gives up and clears)
+ * and its unrecoverable-error clear alike — all three clear the goal. Two endings it cannot tell
+ * apart, read in the CLI rather than measured: a check deferred while background work is still
+ * running, and an evaluator timeout. There the badge clears early; `/goal` shows the truth again.
+ */
+export class ClaudeGoalTracker {
+  private goal: SessionGoal | null = null
+  /** `/goal` commands passed to the CLI whose reply has not arrived yet. */
+  private replies = 0
+  /** A model call ran while a goal was set, since the last result — this turn's end went past the goal's Stop hook. */
+  private drove = false
+  /** The CLI announced the goal itself (`active_goal`) — its word replaces our reading for the rest of the session. */
+  private announced = false
+
+  constructor(private readonly sessionId: string) {}
+
+  /** The adapter passed a `/goal` command through to the CLI. */
+  commandSent(): void {
+    this.replies++
+  }
+
+  /**
+   * The goal the host last knew of, handed to a process that resumes the conversation. The CLI restores
+   * the goal from its transcript without a word on the stream (measured), so without this the new process
+   * would not know the goal it is running, and a met goal would leave the badge up.
+   */
+  seed(goal: SessionGoal | null | undefined): void {
+    if (goal && goal.status === 'active') this.goal = goal
+  }
+
+  /** Reads one parent-stream message. `streamed`: this assistant message's body came as deltas, i.e. a model call. */
+  push(m: Json, opts: { streamed: boolean; interrupted: boolean }): NormalizedEvent[] {
+    const type = str(m.type)
+    if (type === 'active_goal') {
+      this.announced = true
+      return []
+    }
+    if (this.announced) return []
+
+    if (type === 'stream_event' && str((m.event as Json | undefined)?.type) === 'message_start') {
+      if (this.goal) this.drove = true
+      return []
+    }
+
+    if (type === 'assistant' && this.replies > 0 && !opts.streamed) {
+      const reply = this.readReply(textOfContent((m.message as Json | undefined)?.content))
+      if (reply === undefined) return []
+      this.replies--
+      if (reply === 'other') return []
+      return this.set(reply)
+    }
+
+    if (type === 'user' && m.isSynthetic === true && this.goal) {
+      const prefix = `Stop hook feedback:\n[${this.goal.objective}]: `
+      const text = textOfContent((m.message as Json | undefined)?.content)
+      if (!text.startsWith(prefix)) return []
+      const reason = text.slice(prefix.length).trim()
+      return this.set({ ...this.goal, iterations: (this.goal.iterations ?? 0) + 1, ...(reason ? { reason } : {}) })
+    }
+
+    if (type === 'result') {
+      const drove = this.drove
+      this.drove = false
+      const success = str(m.subtype) === 'success' && m.is_error !== true
+      if (this.goal && drove && success && !opts.interrupted) return this.set(null)
+    }
+    return []
+  }
+
+  /**
+   * One synthetic reply to a `/goal` command — the goal it states (null for none), `'other'` for the
+   * command's own refusals (an untrusted folder, hooks disabled, a condition too long), and undefined
+   * for a message that is not the reply.
+   */
+  private readReply(text: string): SessionGoal | null | 'other' | undefined {
+    const set = /^Goal set: ([\s\S]+)$/.exec(text)
+    if (set) return { objective: set[1]!.trim(), status: 'active' }
+    const active = /^Goal active: ([\s\S]+?) \((not yet evaluated|(\d+) turns?)\)(?:\nLast check: ([\s\S]*))?$/.exec(text)
+    if (active) {
+      const reason = active[4]?.trim()
+      return {
+        objective: active[1]!.trim(),
+        status: 'active',
+        ...(active[3] ? { iterations: Number(active[3]) } : {}),
+        ...(reason ? { reason } : {}),
+      }
+    }
+    if (/^Goal cleared: /.test(text) || /^No goal set/.test(text)) return null
+    if (/^\/goal /.test(text) || /^Goal condition is limited to /.test(text)) return 'other'
+    return undefined
+  }
+
+  private set(goal: SessionGoal | null): NormalizedEvent[] {
+    if (goal === null && this.goal === null) return []
+    this.goal = goal
+    return [{ type: 'goal', sessionId: this.sessionId, goal }]
+  }
+}
+
 /**
  * Normalizes while following one parent stream — memory for things that cannot be decided by
  * looking at a single message alone.
@@ -597,8 +737,14 @@ export class ClaudeStreamNormalizer {
   private readonly background = new Set<string>()
   /** Agent card closures waiting for the parent's text chunk to close. */
   private deferred: NormalizedEvent[] = []
+  /** The id of the model call whose chunks are streaming now (`message_start`). */
+  private streamMessageId: string | undefined
+  /** The session's /goal, read off the stream (see `ClaudeGoalTracker`). */
+  readonly goal: ClaudeGoalTracker
 
-  constructor(private readonly sessionId: string) {}
+  constructor(private readonly sessionId: string) {
+    this.goal = new ClaudeGoalTracker(sessionId)
+  }
 
   /** The adapter interrupted the turn (see `stopping` above). */
   stopped(): void {
@@ -646,6 +792,26 @@ export class ClaudeStreamNormalizer {
       reasoningStreamed: this.reasoningStreamed,
     })
     if (subagent) return events
+    /*
+     * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in
+     * `message_start` and its chunks carry none; a message that arrives whole carries its own. Two
+     * messages with nothing recorded between them used to become one row — measured with /goal
+     * (2026-10-03): the CLI's own "Goal set: <condition>" and the model's first words, and the model's
+     * words on either side of a Stop hook that sent it back to work, read as one sentence.
+     */
+    if (type === 'stream_event') {
+      const e = (m.event ?? {}) as Json
+      if (str(e.type) === 'message_start') this.streamMessageId = str((e.message as Json | undefined)?.id) || undefined
+    }
+    const wholeId = type === 'assistant' ? str((m.message as Json | undefined)?.id) || undefined : undefined
+    const messageId = type === 'stream_event' ? this.streamMessageId : wholeId
+    if (messageId) events = events.map((e) => (e.type === 'message_delta' && !e.messageId ? { ...e, messageId } : e))
+    events.push(
+      ...this.goal.push(m, {
+        streamed: wholeId !== undefined && wholeId === this.streamMessageId,
+        interrupted: type === 'result' && this.stopping,
+      }),
+    )
     if (type === 'stream_event' && events.some((e) => e.type === 'message_delta')) this.textStreamed = true
     // Only thinking that carried text counts: encrypted thinking streams token estimates, and its block is ""
     if (type === 'stream_event' && events.some((e) => e.type === 'reasoning_delta' && !!e.text)) this.reasoningStreamed = true

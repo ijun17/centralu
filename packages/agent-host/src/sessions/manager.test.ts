@@ -996,6 +996,25 @@ describe('a settings change actually takes effect', () => {
     expect(mgr.isLive(s.id)).toBe(true)
   })
 
+  /*
+   * A Claude goal survives a process swap inside the CLI (it restores it from the transcript) but says
+   * nothing about it on the stream (measured 2026-10-03). The new process has to be told, or it would
+   * not know the goal it runs and a met goal would leave the badge up.
+   */
+  it('a swapped process is handed the goal the session had (knownGoal)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const goal = { objective: 'the file done.txt exists', status: 'active', iterations: 1 }
+    adapter.last!.emitEvent({ type: 'goal', sessionId: s.id, goal })
+
+    await rpc('agents.updateSettings', { sessionId: s.id, verbosity: 'low' })
+
+    expect(adapter.lastOpts?.resumeExternalId).toBe('ext-1')
+    expect(adapter.lastOpts?.knownGoal).toEqual(goal)
+  })
+
   it('saving the same value again does not touch the process', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', {

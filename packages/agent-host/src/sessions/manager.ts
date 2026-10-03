@@ -1925,6 +1925,8 @@ export class SessionManager {
           serviceTier: launched.serviceTier ?? undefined,
           permissionPreset: launched.permissionPreset,
           resumeExternalId: resumeId ?? undefined,
+          // The goal survives in the tool's conversation, not in a new one (see CreateSessionOpts.knownGoal)
+          ...(resumeId && m.goal ? { knownGoal: m.goal } : {}),
           /*
            * Trust is **re-read every time it wakes** (decision 3, #92). Even if trust is changed
            * while a session is running, the tool process already read its files and stays as it was
