@@ -190,7 +190,13 @@ export class Relay {
   }
 
   listen(port: number): Promise<void> {
-    return new Promise((r) => this.server.listen(port, '127.0.0.1', () => r()))
+    return new Promise((resolve, reject) => {
+      this.server.once('error', reject)
+      this.server.listen(port, '127.0.0.1', () => {
+        this.server.off('error', reject)
+        resolve()
+      })
+    })
   }
 
   /** Cuts every open connection — a dropped socket, while the host itself stays up */
