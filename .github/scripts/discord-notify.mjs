@@ -35,7 +35,7 @@ if (skip.includes(actor.toLowerCase())) {
   process.exit(0)
 }
 
-const COLOR = { open: 0x2da44e, closed: 0x8250df, comment: 0x0969da, review: 0xbf8700, push: 0x57606a }
+const COLOR = { open: 0x2da44e, closed: 0x8250df, comment: 0x0969da, review: 0xbf8700 }
 
 /** Discord rejects an embed description over 4096 characters; a notification needs far less. */
 const excerpt = (text, max = 700) => {
@@ -80,8 +80,9 @@ function describe() {
       if (event.action === 'closed') {
         return { title: `PR ${p.merged ? 'merged' : 'closed'}: ${ref(p)}`, url: p.html_url, description: '', color: COLOR.closed }
       }
-      if (event.action === 'synchronize') {
-        return { title: `New commits on PR ${ref(p)}${from}`, url: `${p.html_url}/commits`, description: '', color: COLOR.push }
+      if (event.action === 'review_requested') {
+        const who = event.requested_reviewer?.login ?? event.requested_team?.name ?? 'a reviewer'
+        return { title: `Review requested from ${who}: ${ref(p)}${from}`, url: p.html_url, description: '', color: COLOR.review }
       }
       return null
     }

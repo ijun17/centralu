@@ -17,6 +17,11 @@
 # the pull request. The checkout below is the base branch (the default for this event), and
 # the script reads the event only as JSON.
 #
+# New commits on a pull request are not announced on their own: while a contributor works they
+# arrive in bursts, and what matters is when the work is ready. That moment comes as a review
+# request, or as a comment (CONTRIBUTING.md asks contributors to leave one, because GitHub may
+# not let an author without write access re-request a review).
+#
 # Known gap: pull_request_review and pull_request_review_comment on a pull request from a
 # fork run without secrets (GitHub has no _target variant for them), so a review left on a
 # fork's PR is not announced. Reviews on this repository's own branches are.
@@ -28,7 +33,7 @@ on:
   issue_comment:
     types: [created]
   pull_request_target:
-    types: [opened, reopened, ready_for_review, synchronize, closed]
+    types: [opened, reopened, ready_for_review, review_requested, closed]
   pull_request_review:
     types: [submitted]
   pull_request_review_comment:

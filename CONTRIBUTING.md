@@ -21,6 +21,10 @@ The pull request template has one field that is easy to skip and worth filling i
 the packaged `.app`, another platform, a live model session. A reviewer reads that first,
 because it is the only part of a PR that says where to go looking themselves.
 
+When you have pushed changes that answer a review, **leave a comment on the pull request
+saying so.** Comments reach the maintainer straight away; new commits on their own do not
+announce anything, and GitHub may not let you re-request a review from a fork.
+
 ## Getting it running
 
 ```bash
