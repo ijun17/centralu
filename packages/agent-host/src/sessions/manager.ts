@@ -2618,6 +2618,10 @@ export class SessionManager {
     ) {
       return
     }
+    if (e.type === 'subagent_event') {
+      this.recordSubagentStep(e)
+      return
+    }
     let seq: number | null = null
     /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
      * itself */
@@ -2937,6 +2941,33 @@ export class SessionManager {
     this.store.appendMessages([msg])
     m.lastSeq = seq
     return seq
+  }
+
+  /**
+   * A native subagent's step (#222): kept under the card that launched it, then sent on as its card.
+   *
+   * It is **not the conversation**, so it skips everything `onEvent` does with the parent's events: it moves no state
+   * (a background agent's steps arrive while the parent waits for the person), it does not close the parent's open
+   * text row (that split the parent's paragraph mid-word, #98), it takes no conversation seq (so it is never unread),
+   * and it is not indexed. A step's text arrives whole (see `SubagentStep`), so it is one row as it comes.
+   *
+   * Two things a subagent does are still the session's: a file it edited (the adapter reports `files_touched` as the
+   * parent's) and a commit it made, which is attributed to this session like the parent's own (#50).
+   */
+  private recordSubagentStep(e: Extract<NormalizedEvent, { type: 'subagent_event' }>): void {
+    const m = this.meta.get(e.sessionId)
+    if (!m) return
+    const step = e.step
+    if (step.type === 'reasoning_delta' && !step.text) return
+    if (step.type === 'message_delta' && !step.text) return
+    const kind =
+      step.type === 'message_delta' ? ('text' as const)
+      : step.type === 'reasoning_delta' ? ('reasoning' as const)
+      : step.type
+    const role = kind === 'text' || kind === 'reasoning' ? ('assistant' as const) : ('system' as const)
+    const stepSeq = this.store.appendSubagentMessage(m.id, e.parentCallId, { role, kind, payload: step, ts: Date.now() })
+    if (step.type === 'tool_call' || step.type === 'tool_result') this.observeCommit(step, m)
+    this.emit({ ...e, stepSeq })
   }
 
   /** Writes an open stream row to disk exactly as it stands right now — indexed only once, when it closes
@@ -5624,6 +5655,15 @@ export class SessionManager {
     if (!m) return
     m.lastReadSeq = Math.max(m.lastReadSeq, seq)
     this.store.markRead(sessionId, seq)
+  }
+
+  /**
+   * The steps of the subagent one card launched (#222) — the only read of them, asked when the person opens that
+   * card's steps. As cards: a tool's `input` and `output` stay in the store, as for a history page (#221).
+   * A trashed session's cards can be opened in its read-only view, so this does not refuse the trash.
+   */
+  loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq: number | undefined, limit: number): StoredMessage[] {
+    return this.store.loadSubagentMessages(sessionId, parentCallId, { afterSeq, limit })
   }
 
   async loadMessages(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {

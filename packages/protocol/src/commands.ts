@@ -501,6 +501,13 @@ export const StoredMessage = z.object({
 export type StoredMessage = z.infer<typeof StoredMessage>
 
 /**
+ * How many of a subagent's steps one `messages.subagent` page carries (#222). A launch card's steps come as cards
+ * (`summary` only), so a page is at most a few hundred kilobytes: 251 measured subagent runs averaged 80 tool calls
+ * each, so most fit in one page.
+ */
+export const SUBAGENT_STEPS_PAGE = 500
+
+/**
  * A session in the trash (#204), as Settings lists it.
  *
  * Deleting a session moves it here instead of destroying it; only Settings deletes it for good. The list says what
@@ -1532,6 +1539,22 @@ export const RpcMethods = {
   },
   'messages.load': {
     params: z.object({ sessionId: SessionId, limit: z.number().default(200), beforeSeq: z.number().optional() }),
+    result: z.array(StoredMessage),
+  },
+  /**
+   * The steps of the native subagent one card launched (#222), oldest first, `afterSeq` paging forward. `seq` here is
+   * the step's number within that launch, not a conversation number.
+   *
+   * Only asked for when the person opens that card's steps: they are not in `messages.load`, and nothing else reads
+   * them. Tool calls and results come as their cards (`summary`), the same as a history page (#221).
+   */
+  'messages.subagent': {
+    params: z.object({
+      sessionId: SessionId,
+      parentCallId: z.string(),
+      afterSeq: z.number().optional(),
+      limit: z.number().default(SUBAGENT_STEPS_PAGE),
+    }),
     result: z.array(StoredMessage),
   },
   /**

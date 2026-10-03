@@ -990,6 +990,42 @@ export class Store {
          */
         run: () => this.rebuildIndexWithoutToolCalls(),
       },
+      {
+        to: 41,
+        /**
+         * What a native subagent did, kept under the card that launched it (#222).
+         *
+         *   parent_call_id  the parent's launch call: Claude's `Agent` tool_use id, Codex's `spawnAgent` item id
+         *   seq             the step's number within that launch — not the conversation's seq
+         *   role, kind, payload, ts   as in `messages`; payload is the step as the adapter sent it, tool `input` and
+         *                   `output` included (#221)
+         *
+         * **A table of its own, not a column on `messages`.** Every reader of a session reads `messages`: a history
+         * page, unread (`MAX(seq)`), the handoff record, `read_session`, `recall`, the orchestrator's memory, the
+         * preview, history sync. With a column, each of them would have to filter it, and the one that forgot would
+         * hand a subagent's tool output to another session's prompt (#73) or count it as unread. Here they skip it by
+         * reading what they read today, and the only way in is `loadSubagentMessages`, which names one launch card.
+         * The steps also stay out of the conversation's numbering, so a running subagent never moves `lastSeq`.
+         *
+         * Nothing is indexed: the parent's own report on what its subagent found is in the conversation, and is
+         * searchable. The rows belong to the session (FK, and `purgeSession` deletes them in chunks), so they follow
+         * it through the trash and back. Old subagent runs are not back-filled.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS subagent_messages (
+              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+              parent_call_id TEXT NOT NULL,
+              seq            INTEGER NOT NULL,
+              role           TEXT NOT NULL,
+              kind           TEXT NOT NULL,
+              payload        TEXT NOT NULL,
+              ts             INTEGER NOT NULL,
+              PRIMARY KEY (session_id, parent_call_id, seq)
+            );
+          `)
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -1809,8 +1845,8 @@ export class Store {
    * Deletes a session in the trash for good. It is the only way a session's rows leave the store, and it takes only
    * a session already in the trash: a live one has to be moved there first, so nothing skips the way back.
    *
-   * Everything that points at the session goes with it: its messages and whatever is left of their index, its
-   * approval rules, its commit links (`commit_sessions` — #96 found 57 of 304 links pointing at sessions that no
+   * Everything that points at the session goes with it: its messages and whatever is left of their index, the steps
+   * of the subagents it launched (`subagent_messages`, #222), its approval rules, its commit links (`commit_sessions` — #96 found 57 of 304 links pointing at sessions that no
    * longer existed, because deleting used to leave them behind), and the app runs it started or ran in
    * (`app_runs.session_id` / `caller_session_id`, with their kept failures).
    *
@@ -1824,7 +1860,13 @@ export class Store {
     const pick = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? LIMIT ?`)
     const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
     const dropMsg = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
+    // A subagent's steps (#222) go first, in the same chunks: they can outnumber the conversation's own rows
+    const pickSub = this.db.prepare(`SELECT rowid FROM subagent_messages WHERE session_id = ? LIMIT ?`)
+    const dropSub = this.db.prepare(`DELETE FROM subagent_messages WHERE rowid = ?`)
     const step = this.db.transaction((): boolean => {
+      const subs = pickSub.all(sessionId, chunk) as { rowid: number }[]
+      for (const { rowid } of subs) dropSub.run(rowid)
+      if (subs.length === chunk) return false
       const rows = pick.all(sessionId, chunk) as { rowid: number }[]
       for (const { rowid } of rows) {
         dropFts.run(rowid)
@@ -1896,7 +1938,10 @@ export class Store {
         `SELECT s.id, s.name, s.tool, s.deleted_at as deletedAt, s.trash as trash,
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
                 (s.external_id IS NOT NULL OR s.imported_from IS NOT NULL) as hasConversationFile,
-                COUNT(m.seq) as messages, COALESCE(SUM(LENGTH(CAST(m.payload AS BLOB))), 0) as bytes
+                COUNT(m.seq) as messages,
+                COALESCE(SUM(LENGTH(CAST(m.payload AS BLOB))), 0)
+                  /* a subagent's steps (#222) are part of what it holds, though not of its message count */
+                  + COALESCE((SELECT SUM(LENGTH(CAST(sm.payload AS BLOB))) FROM subagent_messages sm WHERE sm.session_id = s.id), 0) as bytes
          FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
          WHERE s.deleted_at IS NOT NULL GROUP BY s.id ORDER BY s.deleted_at DESC`,
       )
@@ -2170,6 +2215,49 @@ export class Store {
            payload = excluded.payload, ts = excluded.ts`,
       )
       .run(m.sessionId, m.seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
+  }
+
+  /**
+   * Keeps one step of a native subagent under the call that launched it (#222) and returns its number within that
+   * launch. Never indexed, and never in `messages`: see v41 for why the steps have a table of their own.
+   */
+  appendSubagentMessage(
+    sessionId: string,
+    parentCallId: string,
+    m: Pick<StoredMessage, 'role' | 'kind' | 'payload' | 'ts'>,
+  ): number {
+    const next = this.db.prepare(
+      `SELECT COALESCE(MAX(seq), 0) + 1 as seq FROM subagent_messages WHERE session_id = ? AND parent_call_id = ?`,
+    )
+    const put = this.db.prepare(
+      `INSERT INTO subagent_messages (session_id, parent_call_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    return this.db.transaction((): number => {
+      const { seq } = next.get(sessionId, parentCallId) as { seq: number }
+      put.run(sessionId, parentCallId, seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
+      return seq
+    })()
+  }
+
+  /**
+   * The steps of the subagent one call launched (#222), oldest first, from after `afterSeq`. `seq` in what comes back
+   * is the step's number within that launch.
+   *
+   * The only reader of `subagent_messages`, and it names one launch card: nothing reads a session's subagent steps by
+   * the way. A tool step reads as its card unless `full` is asked for, the same as `loadMessages`.
+   */
+  loadSubagentMessages(
+    sessionId: string,
+    parentCallId: string,
+    opts: ReadOpts & { afterSeq?: number; limit?: number } = {},
+  ): StoredMessage[] {
+    const raw = this.db
+      .prepare(
+        `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM subagent_messages
+         WHERE session_id = ? AND parent_call_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
+      )
+      .all(sessionId, parentCallId, opts.afterSeq ?? 0, opts.limit ?? -1) as (StoredMessage & { payload: string })[]
+    return raw.map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
   }
 
   /** Records the skill list (per tool and directory) */
@@ -2582,7 +2670,7 @@ const mb = (bytes: number): string => `${(bytes / 1048576).toFixed(1)}MB`
 const DELETE_CHUNK = 250
 
 /**
- * How a stored message is read back (`loadMessages`, `loadMessagesFrom`).
+ * How a stored message is read back (`loadMessages`, `loadMessagesFrom`, and a subagent's steps, `loadSubagentMessages`).
  *
  *   full   include a tool call's `input` and a tool result's `output` — the whole record (#221)
  *

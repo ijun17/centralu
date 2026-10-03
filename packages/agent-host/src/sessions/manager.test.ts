@@ -3898,6 +3898,146 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
 })
 
 /**
+ * What a native subagent did (#222) is kept under the card that launched it, and read by nothing but a request for that
+ * card's steps.
+ *
+ * Every reader of a session reads its conversation: a history page, unread, the handoff record and note, `read_session`,
+ * `recall`, search, `list_sessions`, the orchestrator's memory. None of them may see a subagent's steps — its tool
+ * output reaching another session's prompt is the path #73 closed — and none may count them. The subagent's words may go
+ * to the screen that opens its card (the broadcast, `messages.subagent`); its tool input and output go nowhere.
+ */
+describe("a subagent's steps are kept under its launch card and read by nothing else (#222, #73)", () => {
+  const AGENT = 'toolu_agent_launch'
+  const INPUT_SECRET = 'SUB_INPUT_SECRET_5d1e'
+  const OUTPUT_SECRET = 'SUB_OUTPUT_SECRET_0b77'
+  const WORDS = 'SUBAGENT_WORDS_e48c'
+  const THOUGHT = 'SUBAGENT_THOUGHT_a9f0'
+  const output = `${'a line of grep output\n'.repeat(40)}token=${OUTPUT_SECRET}`
+
+  const step = (sessionId: string, s: Record<string, unknown>): NormalizedEvent =>
+    ({ type: 'subagent_event', sessionId, parentCallId: AGENT, step: { sessionId, ...s } }) as NormalizedEvent
+  const subagentWork = (sessionId: string): NormalizedEvent[] => [
+    step(sessionId, { type: 'reasoning_delta', text: `first ${THOUGHT}` }),
+    step(sessionId, { type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Grep', title: 'Grep: boundaries', readOnly: true, paths: [] }, input: { pattern: INPUT_SECRET } }),
+    step(sessionId, { type: 'tool_result', callId: 'toolu_sub', ok: true, summary: output.slice(0, 300), output }),
+    step(sessionId, { type: 'message_delta', role: 'assistant', text: `The boundaries test holds. ${WORDS}` }),
+  ]
+
+  /** A parent mid-answer when its subagent's steps arrive, as a background agent's do (#98's measured ordering) */
+  const setup = async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    await rpc('agents.send', { sessionId: a.id, text: 'look into the boundaries test' })
+    const h = adapter.handleOf(a.id)!
+    h.emitEvent({ type: 'tool_call', sessionId: a.id, callId: AGENT, summary: { tool: 'Agent', title: 'Research the boundaries', readOnly: true, paths: [] } })
+    h.emitDelta('While it works, ')
+    const lastSeq = () => store.listSessions().find((s) => s.id === a.id)!.lastSeq
+    const before = lastSeq()
+    for (const e of subagentWork(a.id)) h.emitEvent(e)
+    h.emitDelta('here is what I know.')
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    return { p, a, h, before, lastSeq }
+  }
+  const leaks = (value: unknown, secrets = [INPUT_SECRET, OUTPUT_SECRET, WORDS, THOUGHT]) => {
+    const text = typeof value === 'string' ? value : JSON.stringify(value)
+    return secrets.filter((s) => text.includes(s))
+  }
+
+  it('the store keeps every step whole under the launch call, numbered within that launch', async () => {
+    const { a } = await setup()
+    const full = store.loadSubagentMessages(a.id, AGENT, { full: true })
+    expect(full.map((r) => [r.seq, r.role, r.kind])).toEqual([
+      [1, 'assistant', 'reasoning'],
+      [2, 'system', 'tool_call'],
+      [3, 'system', 'tool_result'],
+      [4, 'assistant', 'text'],
+    ])
+    expect(full.map((r) => r.payload)).toMatchObject([{}, { input: { pattern: INPUT_SECRET } }, { output }, {}])
+    // Another card's steps are another card's
+    expect(store.loadSubagentMessages(a.id, 'toolu_other')).toEqual([])
+  })
+
+  it('the conversation is the parent\'s alone: no row, no seq, and the parent\'s paragraph is not split', async () => {
+    const { a, before, lastSeq } = await setup()
+    const rows = store.loadMessages(a.id, 50, undefined, { full: true })
+    expect(leaks(rows)).toEqual([])
+    // The person's message, the fake adapter's echo of it, the Agent card, and the parent's paragraph in one row
+    expect(rows.map((r) => `${r.role}:${r.kind}`)).toEqual(['user:text', 'assistant:text', 'system:tool_call', 'assistant:text'])
+    expect((rows[3]!.payload as { text: string }).text).toBe('While it works, here is what I know.')
+    // Unread counts the conversation: the steps moved no seq, so a session read up to its last message stays read
+    expect(lastSeq()).toBe(before)
+    expect(lastSeq()).toBe(rows.at(-1)!.seq)
+  })
+
+  it('the screen gets each step as its card, numbered within its launch and never as a conversation seq', async () => {
+    const { a } = await setup()
+    const sent = events.filter((e) => e.type === 'subagent_event')
+    expect(sent.map((e) => (e as { stepSeq: number }).stepSeq)).toEqual([1, 2, 3, 4])
+    expect(sent.some((e) => 'seq' in e)).toBe(false)
+    expect(leaks(sent, [INPUT_SECRET, OUTPUT_SECRET])).toEqual([])
+    expect(sent.at(-1)).toMatchObject({ parentCallId: AGENT, step: { type: 'message_delta', text: `The boundaries test holds. ${WORDS}` } })
+
+    // Opening the card reads them, as cards
+    const page = (await rpc('messages.subagent', { sessionId: a.id, parentCallId: AGENT })) as StoredMessage[]
+    expect(page.map((r) => r.seq)).toEqual([1, 2, 3, 4])
+    expect(leaks(page, [INPUT_SECRET, OUTPUT_SECRET])).toEqual([])
+    expect(leaks(page, [WORDS, THOUGHT])).toEqual([WORDS, THOUGHT])
+    // Paging forward
+    expect(((await rpc('messages.subagent', { sessionId: a.id, parentCallId: AGENT, afterSeq: 2, limit: 1 })) as StoredMessage[]).map((r) => r.seq)).toEqual([3])
+    // A history page never carries them
+    expect(leaks(await rpc('messages.load', { sessionId: a.id, limit: 50 }))).toEqual([])
+  })
+
+  it('another session never reads them: read_session, recall, search, list_sessions, the handoff record and note, the memory', async () => {
+    const { a, h } = await setup()
+    const orc = await mgr.orchestrator()
+    const tools = adapter.lastOrchestratorTools!
+    expect(leaks(await tools.readSession(a.id, 40, { tools: true }))).toEqual([])
+    expect(leaks(await mgr.runOrchestratorTool(orc.id, 'read_session', { sessionId: a.id, tools: true }))).toEqual([])
+    for (const q of [INPUT_SECRET, OUTPUT_SECRET, WORDS, THOUGHT]) {
+      expect((await tools.recall(q)).hits).toEqual([])
+      expect(await rpc('messages.search', { query: q })).toEqual([])
+    }
+    expect(leaks(await tools.listSessions())).toEqual([])
+
+    const record = await mgr.exportHandoffRecord(a.id, 'codex')
+    expect(record.text).toContain('here is what I know.')
+    expect(leaks(record.text)).toEqual([])
+    expect(leaks(readFileSync(record.path, 'utf8'))).toEqual([])
+
+    // A handoff note is the parent's last words after the request — a subagent finishing later does not replace them
+    const asked = store.listSessions().find((s) => s.id === a.id)!.lastSeq
+    await rpc('agents.send', { sessionId: a.id, text: 'write the handoff note' })
+    h.emitDelta('NOTE: the boundaries test holds.')
+    h.finishTurn()
+    for (const e of subagentWork(a.id)) h.emitEvent(e)
+    await new Promise((r) => setTimeout(r, 0))
+    const note = (await mgr.exportHandoffNote(a.id, asked))?.text ?? ''
+    expect(note).toMatch(/NOTE: the boundaries test holds\.$/)
+    expect(leaks(note)).toEqual([])
+
+    // The orchestrator's own subagent is not carried into its next process's prompt either
+    for (const e of subagentWork(orc.id)) adapter.handleOf(orc.id)!.emitEvent(e)
+    await mgr.switchTool(orc.id, 'codex')
+    await mgr.resumeSession(orc.id)
+    expect(leaks(codexAdapter.lastOpts?.systemPromptAppend ?? '')).toEqual([])
+  })
+
+  it('they follow the session into the trash and back, and go with it for good', async () => {
+    const { a } = await setup()
+    await rpc('agents.deleteSession', { sessionId: a.id })
+    expect(leaks(await rpc('trash.read', { sessionId: a.id }))).toEqual([])
+    expect((await rpc('messages.subagent', { sessionId: a.id, parentCallId: AGENT }) as StoredMessage[]).length).toBe(4)
+    await rpc('trash.restore', { sessionId: a.id })
+    expect(store.loadSubagentMessages(a.id, AGENT).length).toBe(4)
+    await rpc('agents.deleteSession', { sessionId: a.id })
+    await rpc('trash.purge', { sessionId: a.id })
+    expect(store.loadSubagentMessages(a.id, AGENT)).toEqual([])
+  })
+})
+
+/**
  * The app layer (#81): an app's tools join through a registry, its state lives in the
  * app:<id>:* KV, and a disabled app's reach stops immediately. The control app's control_notify
  * is the first consumer.
