@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
-import { HostServer, parseAllowedOrigins } from './server.js'
+import { HostServer, parseAllowedOrigins, type HostServerOptions } from './server.js'
 import { sameSecret, type HttpRoute } from './http.js'
 
 const TOKEN = 'test-token'
@@ -14,8 +14,8 @@ afterEach(async () => {
   server = null
 })
 
-async function start(onRpc = async () => ({ ok: true })) {
-  server = new HostServer({ port: 0, token: TOKEN, onRpc })
+async function start(onRpc = async () => ({ ok: true }), extra: Partial<HostServerOptions> = {}) {
+  server = new HostServer({ port: 0, token: TOKEN, onRpc, ...extra })
   const port = await server.listen()
   return { server: server!, port }
 }
@@ -389,12 +389,15 @@ describe('reconnect restoration (docs/protocol.md §1)', () => {
 
     const c2 = connect(port)
     await c2.open()
-    c2.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, afterSeq: 2 })
+    // The cursor travels with the lifetime that issued it (#82)
+    const epoch = (c1.frames[0] as { streamEpoch: string }).streamEpoch
+    expect(epoch).toBe(srv.streamEpoch)
+    c2.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, afterSeq: 2, streamEpoch: epoch })
     await c2.wait(() => c2.frames.filter((f) => f.kind === 'event').length === 2)
 
     const replayed = c2.frames.filter((f) => f.kind === 'event')
     expect(replayed.map((f) => f.seq)).toEqual([3, 4])
-    expect(c2.frames[0]).toMatchObject({ kind: 'hello_ok', resyncRequired: false, currentSeq: 4 })
+    expect(c2.frames[0]).toMatchObject({ kind: 'hello_ok', resyncRequired: false, currentSeq: 4, streamEpoch: epoch })
     c2.ws.close()
   })
 
@@ -640,5 +643,199 @@ describe('sameSecret', () => {
     expect(sameSecret('abc', 'abd')).toBe(false)
     expect(sameSecret('ab', 'abc')).toBe(false)
     expect(sameSecret('', 'abc')).toBe(false)
+  })
+})
+
+/*
+ * #82: recovery hardening, host side. Each test was run against the code before it and failed; the
+ * failures are quoted in the pull request.
+ */
+describe('host lifetime and replay (#82)', () => {
+  const hello = (extra: Record<string, unknown> = {}) => ({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, ...extra })
+  const events = (c: ReturnType<typeof connect>) => c.frames.filter((f) => f.kind === 'event')
+
+  /** Says hello, then makes one RPC and waits for its answer — by then everything the hello caused has arrived */
+  async function greet(port: number, extra: Record<string, unknown> = {}) {
+    const c = connect(port)
+    await c.open()
+    c.send(hello(extra))
+    c.send({ kind: 'rpc', id: 'probe', method: 'x', params: {} })
+    await c.wait(() => c.frames.some((f) => f.kind === 'res' && f.id === 'probe'))
+    return c
+  }
+
+  it('a cursor issued by a host that has since restarted gets a resync and none of the new host\'s events', async () => {
+    const before = await start()
+    const epochBefore = before.server.streamEpoch
+    for (const t of ['A1', 'A2', 'A3']) before.server.broadcast(ev(t))
+    await before.server.close()
+    server = null
+    // The new lifetime has already numbered past the old cursor
+    const after = await start()
+    for (const t of ['B1', 'B2', 'B3', 'B4', 'B5']) after.server.broadcast(ev(t))
+    expect(after.server.streamEpoch).not.toBe(epochBefore)
+
+    const c = await greet(after.port, { afterSeq: 3, streamEpoch: epochBefore })
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', resyncRequired: true, currentSeq: 5, streamEpoch: after.server.streamEpoch })
+    expect(events(c)).toEqual([])
+    c.ws.close()
+  })
+
+  it('a positive cursor with no epoch gets a resync, even when that seq exists in this lifetime', async () => {
+    const { server: srv, port } = await start()
+    srv.broadcast(ev('1'))
+    srv.broadcast(ev('2'))
+    const c = await greet(port, { afterSeq: 1 })
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', resyncRequired: true, currentSeq: 2 })
+    expect(events(c)).toEqual([])
+    c.ws.close()
+  })
+
+  it('a second hello on the same socket does not replay the window again', async () => {
+    const { server: srv, port } = await start()
+    srv.broadcast(ev('1'))
+    srv.broadcast(ev('2'))
+    const c = connect(port)
+    await c.open()
+    c.send(hello({ afterSeq: 1, streamEpoch: srv.streamEpoch }))
+    c.send(hello({ afterSeq: 1, streamEpoch: srv.streamEpoch }))
+    c.send({ kind: 'rpc', id: 'probe', method: 'x', params: {} })
+    await c.wait(() => c.frames.some((f) => f.kind === 'res' && f.id === 'probe'))
+    expect(events(c).map((f) => f.seq)).toEqual([2])
+    expect(c.frames.filter((f) => f.kind === 'hello_ok')).toHaveLength(1)
+    c.ws.close()
+  })
+
+  /*
+   * The livelock the review of #91 found: a replay that starts and is cut halfway leaves the
+   * client's cursor where it was, so every reconnect asks for the same window again. The whole
+   * replay is priced first; one that does not fit is never started.
+   */
+  it.each([
+    ['one oversized event', ['x'.repeat(1_200)]],
+    ['many events that only together exceed the budget', Array.from({ length: 8 }, () => '한'.repeat(40))],
+  ])('%s: a resync instead of a replay, on every reconnect, and the socket stays usable', async (_name, texts) => {
+    const { server: srv, port } = await start(undefined, { replayBudgetBytes: 600 })
+    srv.broadcast(ev('cursor'))
+    for (const t of texts) srv.broadcast(ev(t))
+    for (const afterSeq of [1, 1, 0]) {
+      const c = await greet(port, { afterSeq, streamEpoch: srv.streamEpoch })
+      expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', resyncRequired: true, currentSeq: texts.length + 1 })
+      expect(events(c)).toEqual([])
+      expect(c.ws.readyState).toBe(WebSocket.OPEN)
+      c.ws.close()
+    }
+  })
+
+  it('prices WebSocket framing too: a replay whose payload fits but whose frames do not is a resync', async () => {
+    const { server: srv } = await start()
+    srv.broadcast(ev('cursor'))
+    for (let i = 0; i < 20; i++) srv.broadcast(ev(`e${i}`))
+    const frames = Array.from({ length: 20 }, (_, i) =>
+      JSON.stringify({ kind: 'event', seq: i + 2, event: ev(`e${i}`) }),
+    )
+    const helloOk = JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 21, streamEpoch: srv.streamEpoch })
+    // RFC 6455 §5.2: an unmasked server frame adds 2 bytes up to 125 bytes of payload, 4 up to 65,535
+    const wire = (f: string) => Buffer.byteLength(f) + (Buffer.byteLength(f) < 126 ? 2 : 4)
+    const payload = Buffer.byteLength(helloOk) + frames.reduce((n, f) => n + Buffer.byteLength(f), 0)
+    const onWire = wire(helloOk) + frames.reduce((n, f) => n + wire(f), 0)
+    // 21 frames add at least 2 header bytes each: a budget between the two numbers fits the payload only
+    expect(onWire - payload).toBeGreaterThanOrEqual(42)
+    await srv.close()
+    server = null
+
+    const tight = await start(undefined, { replayBudgetBytes: payload + 10 })
+    tight.server.broadcast(ev('cursor'))
+    for (let i = 0; i < 20; i++) tight.server.broadcast(ev(`e${i}`))
+    const c = await greet(tight.port, { afterSeq: 1, streamEpoch: tight.server.streamEpoch })
+    expect(c.frames[0]).toMatchObject({ resyncRequired: true })
+    expect(events(c)).toEqual([])
+    c.ws.close()
+  })
+
+  it('still replays a window that fits, in order', async () => {
+    const { server: srv, port } = await start(undefined, { replayBudgetBytes: 600 })
+    for (const t of ['1', '2', '3']) srv.broadcast(ev(t))
+    const c = await greet(port, { afterSeq: 1, streamEpoch: srv.streamEpoch })
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', resyncRequired: false })
+    expect(events(c).map((f) => f.seq)).toEqual([2, 3])
+    c.ws.close()
+  })
+})
+
+describe('bounded outbound work (#82)', () => {
+  it('a peer that stopped reading is cut once its backlog passes the bound; other peers keep receiving', async () => {
+    const { server: srv, port } = await start(undefined, { maxBufferedBytes: 256 * 1024 })
+    const stalled = connect(port)
+    const healthy = connect(port)
+    await Promise.all([stalled.open(), healthy.open()])
+    for (const c of [stalled, healthy]) c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await Promise.all([stalled.wait(() => stalled.frames.length > 0), healthy.wait(() => healthy.frames.length > 0)])
+    const stalledClosed = stalled.closed()
+    // The stalled peer's process stops reading its socket — a suspended WebView
+    const stalledSocket = (stalled.ws as unknown as { _socket: { pause(): void; resume(): void } })._socket
+    stalledSocket.pause()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const big = 'y'.repeat(64 * 1024)
+    for (let i = 0; i < 200; i++) {
+      srv.broadcast(ev(big))
+      await new Promise((r) => setImmediate(r))
+    }
+    expect(errors.mock.calls.some((c) => String(c[0]).includes('stopped reading'))).toBe(true)
+    errors.mockRestore()
+    await healthy.wait(() => healthy.frames.filter((f) => f.kind === 'event').length === 200, 10_000)
+    // The peer wakes up: it reads what reached it before the cut, then finds the socket gone
+    stalledSocket.resume()
+    await expect(stalledClosed).resolves.toBe(1006)
+    expect(stalled.frames.filter((f) => f.kind === 'event').length).toBeLessThan(200)
+    healthy.ws.close()
+  }, 15_000)
+
+  it('a socket that never says hello is closed after the handshake deadline', async () => {
+    const { port } = await start(undefined, { handshakeTimeoutMs: 50 })
+    const c = connect(port)
+    await c.open()
+    expect(await c.closed()).toBe(4001)
+  })
+})
+
+describe('deterministic shutdown (#82)', () => {
+  it('does not wait for a half-sent HTTP request', async () => {
+    const { createConnection } = await import('node:net')
+    const { server: srv, port } = await start()
+    const socket = createConnection({ host: '127.0.0.1', port })
+    await new Promise<void>((r) => socket.once('connect', () => r()))
+    socket.write('GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n')
+    await new Promise((r) => setTimeout(r, 20))
+    try {
+      const outcome = await Promise.race([srv.close().then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 1000))])
+      expect(outcome).toBe('closed')
+    } finally {
+      socket.destroy()
+      server = null
+    }
+  })
+
+  it('cuts a peer that never answers the close frame after the grace period', async () => {
+    const { server: srv, port } = await start(undefined, { closeGraceMs: 100 })
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+    ;(c.ws as unknown as { _socket: { pause(): void } })._socket.pause()
+    const t0 = Date.now()
+    const outcome = await Promise.race([srv.close().then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 1500))])
+    expect(outcome).toBe('closed')
+    expect(Date.now() - t0).toBeLessThan(1000)
+    server = null
+    c.ws.terminate()
+  })
+
+  it('a second close() is the same shutdown, not a new one', async () => {
+    const { server: srv } = await start()
+    const first = srv.close()
+    expect(srv.close()).toBe(first)
+    await first
+    server = null
   })
 })

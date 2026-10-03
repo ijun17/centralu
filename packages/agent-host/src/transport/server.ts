@@ -60,6 +60,58 @@ export type HostServerOptions = {
    * rule below independently of this.
    */
   http?: HttpGate
+  /**
+   * How long a socket may stay connected without a valid hello (#82). Until then it holds a
+   * socket, a timer and a slot in the http server's connection list for nothing.
+   */
+  handshakeTimeoutMs?: number
+  /**
+   * The undrained backlog a peer may leave on one socket before it is cut (#82). See
+   * `sendTo` for why the rule is "already over the bound", not "this frame would cross it".
+   */
+  maxBufferedBytes?: number
+  /**
+   * The largest replay one hello may start, counted as bytes on the wire, WebSocket framing
+   * included (#82). A bigger replay is answered with a resync instead. Clamped to
+   * `maxBufferedBytes` so that a replay can never trip the outbound bound by itself.
+   */
+  replayBudgetBytes?: number
+  /** How long a socket gets to finish the close handshake on shutdown before it is cut (#82) */
+  closeGraceMs?: number
+}
+
+/**
+ * Transport bounds (#82). These bound what one socket can make the host hold; they are not a
+ * process-wide memory quota.
+ *
+ * - The outbound bound is 64 MiB because the host legitimately sends single frames in the tens of
+ *   megabytes: a diff can be as large as the 32 MiB output buffer the host allows its VCS calls,
+ *   and an image event carries up to 8 MiB of base64-inflated data. A backlog above that is a peer
+ *   that stopped reading (a suspended WebView, a hung client), and measured on main it grew
+ *   without limit: 99.5 MB after 1,000 broadcasts of 100 kB to a paused peer.
+ * - The replay budget is 16 MiB. Above that a snapshot reload is cheaper and just as correct as a
+ *   replay, and it keeps a reconnect burst well under the outbound bound.
+ */
+export const TRANSPORT_LIMITS = {
+  handshakeTimeoutMs: 10_000,
+  maxBufferedBytes: 64 * 1024 * 1024,
+  replayBudgetBytes: 16 * 1024 * 1024,
+  closeGraceMs: 250,
+} as const
+
+/** WebSocket close codes this server uses (4001 is the token rule's own) */
+const CLOSE_GOING_AWAY = 1001
+const CLOSE_AUTH = 4001
+
+/** Bytes a server-to-client WebSocket frame adds around its payload (RFC 6455 §5.2, unmasked) */
+function frameOverhead(payloadBytes: number): number {
+  return payloadBytes < 126 ? 2 : payloadBytes < 65_536 ? 4 : 10
+}
+
+/** What a frame costs on the wire */
+function wireBytes(frame: string): number {
+  const n = Buffer.byteLength(frame)
+  return n + frameOverhead(n)
 }
 
 export class HostServer {
@@ -67,6 +119,10 @@ export class HostServer {
   private wss: WebSocketServer
   private http: Server
   private clients = new Set<WebSocket>()
+  /** Handshake deadlines of sockets that have not sent a valid hello yet */
+  private handshakeTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>()
+  private closing: Promise<void> | null = null
+  private readonly limits: { handshakeTimeoutMs: number; maxBufferedBytes: number; replayBudgetBytes: number; closeGraceMs: number }
   private listenError: ((err: Error) => void) | null = null
   private readonly allowedOrigins: ReadonlySet<string>
   /**
@@ -97,6 +153,13 @@ export class HostServer {
      */
     if (!opts.token.trim()) throw Object.assign(new Error('Host token must not be empty'), { code: 'internal' })
     this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
+    const maxBufferedBytes = opts.maxBufferedBytes ?? TRANSPORT_LIMITS.maxBufferedBytes
+    this.limits = {
+      handshakeTimeoutMs: opts.handshakeTimeoutMs ?? TRANSPORT_LIMITS.handshakeTimeoutMs,
+      maxBufferedBytes,
+      replayBudgetBytes: Math.min(opts.replayBudgetBytes ?? TRANSPORT_LIMITS.replayBudgetBytes, maxBufferedBytes),
+      closeGraceMs: opts.closeGraceMs ?? TRANSPORT_LIMITS.closeGraceMs,
+    }
     this.http = createServer(createHttpHandler(opts.http))
     this.wss = new WebSocketServer({
       server: this.http,
@@ -201,18 +264,53 @@ export class HostServer {
    * tests as a hook timeout: deliberately disabling the origin check to leave two sockets open made
    * `afterEach` take 10 seconds each, pushing the file from 644ms to 20.54s, and fixing this line
    * brought it back to 617ms under the same conditions.
+   *
+   * **Every connection gets a deadline, not just a request to leave (#82).** Two more ways to hang
+   * remained, both measured on main as still waiting after 3 seconds:
+   *   - a WebSocket peer that never answers the close frame (a suspended WebView, a hung client):
+   *     `ws` waits 30 seconds for it, far past the desktop supervisor's 3-second budget, after
+   *     which the host is SIGKILLed mid-cleanup;
+   *   - a raw HTTP connection holding a half-sent request: `http.close()` only drops idle
+   *     connections, so the callback never comes.
+   * So the close frame is sent, a peer gets `closeGraceMs` to answer it, and then the socket is
+   * cut; plain HTTP connections are dropped outright. Calling close() again returns the same
+   * promise instead of starting a second shutdown.
    */
-  async close(): Promise<void> {
-    for (const c of this.wss.clients) c.close()
+  close(): Promise<void> {
+    this.closing ??= this.shutdown()
+    return this.closing
+  }
+
+  private async shutdown(): Promise<void> {
+    for (const timer of this.handshakeTimers.values()) clearTimeout(timer)
+    this.handshakeTimers.clear()
+    const sockets = [...this.wss.clients]
+    const gone = sockets.map((c) =>
+      c.readyState === c.CLOSED ? Promise.resolve() : new Promise<void>((r) => c.once('close', () => r())),
+    )
+    for (const c of sockets) c.close(CLOSE_GOING_AWAY, 'host shutting down')
+    const cut = setTimeout(() => {
+      for (const c of sockets) c.terminate()
+    }, this.limits.closeGraceMs)
+    await Promise.all(gone)
+    clearTimeout(cut)
+    this.clients.clear()
+    const httpClosed = new Promise<void>((r) => this.http.close(() => r()))
+    this.http.closeAllConnections()
     await new Promise<void>((r) => this.wss.close(() => r()))
-    await new Promise<void>((r) => this.http.close(() => r()))
+    await httpClosed
   }
 
   /** Broadcasts an event — assigns a seq, keeps it in the ring buffer, and pushes it to connected clients */
   broadcast(event: NormalizedEvent): void {
     const entry = this.log.append(event)
     const frame = JSON.stringify({ kind: 'event', seq: entry.seq, event })
-    for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(frame)
+    for (const ws of this.clients) this.sendTo(ws, frame)
+  }
+
+  /** This host lifetime's id — sent in every `hello_ok` (#82) */
+  get streamEpoch(): string {
+    return this.log.streamEpoch
   }
 
   /**
@@ -227,11 +325,44 @@ export class HostServer {
         ? { kind: 'term', terminalId: frame.terminalId, data: frame.data }
         : { kind: 'term_exit', terminalId: frame.terminalId, exitCode: frame.exitCode ?? null }
     const json = JSON.stringify(payload)
-    for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(json)
+    for (const ws of this.clients) this.sendTo(ws, json)
+  }
+
+  /**
+   * The one way a frame leaves this server (#82).
+   *
+   * A peer whose backlog is **already** above `maxBufferedBytes` has stopped reading, and is cut
+   * (terminate, not close: a close frame would queue behind the very backlog that is the problem).
+   * It reconnects when it wakes and gets a replay or a resync; the host's agents never wait on it.
+   *
+   * Why "already above" rather than "this frame would cross it": the host sends single frames in
+   * the tens of megabytes (see TRANSPORT_LIMITS), and refusing one of those because it would cross
+   * the line would cut a perfectly healthy reader. What is bounded is the backlog plus one frame.
+   */
+  private sendTo(ws: WebSocket, frame: string): boolean {
+    if (ws.readyState !== ws.OPEN) return false
+    if (ws.bufferedAmount > this.limits.maxBufferedBytes) {
+      console.error(
+        `[agent-host] a client stopped reading (${ws.bufferedAmount} bytes waiting); dropping its socket, it will resync when it reconnects`,
+      )
+      this.clients.delete(ws)
+      ws.terminate()
+      return false
+    }
+    ws.send(frame)
+    return true
   }
 
   private onConnection(ws: WebSocket): void {
     let authed = false
+    // A socket that never says hello is closed, not kept forever (#82)
+    this.handshakeTimers.set(
+      ws,
+      setTimeout(() => {
+        this.handshakeTimers.delete(ws)
+        if (!authed) ws.close(CLOSE_AUTH, 'auth timeout')
+      }, this.limits.handshakeTimeoutMs),
+    )
 
     ws.on('message', async (raw) => {
       let parsedJson: unknown
@@ -246,8 +377,14 @@ export class HostServer {
       }
 
       if (frame.data.kind === 'hello') {
+        /*
+         * A second hello on a socket that is already in is ignored (#82). Answering it replayed
+         * the window again on the same socket — measured on main: two hellos with afterSeq 1
+         * delivered seq 2 twice — and the client has no way to tell a repeat from new work.
+         */
+        if (authed) return
         if (frame.data.token !== this.opts.token) {
-          ws.close(4001, 'bad token')
+          ws.close(CLOSE_AUTH, 'bad token')
           return
         }
         if (frame.data.protocolVersion !== PROTOCOL_VERSION) {
@@ -260,31 +397,22 @@ export class HostServer {
           return
         }
         authed = true
+        clearTimeout(this.handshakeTimers.get(ws))
+        this.handshakeTimers.delete(ws)
         this.clients.add(ws)
-
-        const { events, resyncRequired } = this.log.since(frame.data.afterSeq ?? 0)
-        ws.send(
-          JSON.stringify({
-            kind: 'hello_ok',
-            protocolVersion: PROTOCOL_VERSION,
-            resyncRequired,
-            currentSeq: this.log.currentSeq,
-          }),
-        )
-        // Resend what was missed — so that reconnecting never loses state (docs/protocol.md §1)
-        for (const e of events) ws.send(JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
+        this.greet(ws, frame.data.afterSeq ?? 0, frame.data.streamEpoch)
         return
       }
 
       if (!authed) {
-        ws.close(4001, 'not authed')
+        ws.close(CLOSE_AUTH, 'not authed')
         return
       }
 
       // RPC
       try {
         const result = await this.opts.onRpc(frame.data.method, frame.data.params)
-        ws.send(JSON.stringify({ kind: 'res', id: frame.data.id, ok: true, result }))
+        this.sendTo(ws, JSON.stringify({ kind: 'res', id: frame.data.id, ok: true, result }))
       } catch (err) {
         const e = err as Error & { code?: unknown }
         this.sendError(ws, frame.data.id, {
@@ -295,13 +423,50 @@ export class HostServer {
       }
     })
 
-    ws.on('close', () => this.clients.delete(ws))
-    ws.on('error', () => this.clients.delete(ws))
+    const forget = () => {
+      clearTimeout(this.handshakeTimers.get(ws))
+      this.handshakeTimers.delete(ws)
+      this.clients.delete(ws)
+    }
+    ws.on('close', forget)
+    ws.on('error', forget)
+  }
+
+  /**
+   * `hello_ok` and the replay of what was missed (docs/protocol.md §1) — sent in one go, so no
+   * broadcast can slip in between.
+   *
+   * **The whole replay is priced before any of it is sent (#82).** A replay that would not fit
+   * the budget is not started at all: the client gets `resyncRequired` with the current seq and
+   * reloads its snapshot. Starting it and cutting the socket halfway would leave the client's
+   * cursor where it was, and its next reconnect would ask for the same oversized window — a
+   * reconnect loop that never converges (the livelock the review of #91 found). Measured on main:
+   * a 2,000 x 50 kB history replayed to a stalled peer left 99.6 MB buffered in the host.
+   */
+  private greet(ws: WebSocket, afterSeq: number, streamEpoch: string | undefined): void {
+    const hello = (resyncRequired: boolean) =>
+      JSON.stringify({
+        kind: 'hello_ok',
+        protocolVersion: PROTOCOL_VERSION,
+        resyncRequired,
+        currentSeq: this.log.currentSeq,
+        streamEpoch: this.log.streamEpoch,
+      })
+    const window = this.log.since(afterSeq, streamEpoch)
+    const frames = window.events.map((e) => JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
+    let bytes = ws.bufferedAmount + wireBytes(hello(window.resyncRequired))
+    for (const f of frames) bytes += wireBytes(f)
+    if (bytes > this.limits.replayBudgetBytes) {
+      this.sendTo(ws, hello(true))
+      return
+    }
+    this.sendTo(ws, hello(window.resyncRequired))
+    // Resend what was missed — so that reconnecting never loses state (docs/protocol.md §1)
+    for (const f of frames) this.sendTo(ws, f)
   }
 
   private sendError(ws: WebSocket, id: string | null, error: ProtocolError): void {
-    if (ws.readyState !== ws.OPEN) return
-    ws.send(JSON.stringify({ kind: 'res', id: id ?? '0', ok: false, error }))
+    this.sendTo(ws, JSON.stringify({ kind: 'res', id: id ?? '0', ok: false, error }))
   }
 }
 

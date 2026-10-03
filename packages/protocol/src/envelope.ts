@@ -11,7 +11,12 @@ export const HelloClient = z.object({
   token: z.string(),
   protocolVersion: z.number(),
   /** Request resend of what was missed on reconnect (omit to receive everything fresh) */
-  afterSeq: z.number().optional(),
+  afterSeq: z.number().int().nonnegative().optional(),
+  /**
+   * The host lifetime that issued `afterSeq`, as received in `hello_ok` (#82). A cursor is
+   * honoured only together with the current lifetime's epoch; any other cursor gets a resync.
+   */
+  streamEpoch: z.string().min(1).max(200).optional(),
 })
 export type HelloClient = z.infer<typeof HelloClient>
 
@@ -20,7 +25,9 @@ export const HelloServer = z.object({
   protocolVersion: z.number(),
   /** True when afterSeq falls outside the buffer — the UI must reload the snapshot */
   resyncRequired: z.boolean().default(false),
-  currentSeq: z.number(),
+  currentSeq: z.number().int().nonnegative(),
+  /** Identifies this host lifetime; seq numbers restart with every new one (#82) */
+  streamEpoch: z.string().min(1).optional(),
 })
 export type HelloServer = z.infer<typeof HelloServer>
 

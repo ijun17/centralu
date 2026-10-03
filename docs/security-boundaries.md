@@ -178,6 +178,10 @@ header still needs the token; Origin is a browser defense, not native-client ide
 Literal `Origin: null` is rejected. A rejected upgrade is logged by the host, because the
 browser does not hand the 403 to the page. Development tokens should be generated per launch and shared
 only with the intended local client. Mock/demo modes do not connect to the host.
+A socket that has not sent a valid hello within 10 seconds is closed, and a socket whose undrained
+outbound backlog passes 64 MiB is cut, so a connection cannot make the host hold unbounded memory or
+an endless slot (#82; `transport/server.ts`, `TRANSPORT_LIMITS`). An authenticated socket's hello is
+answered once; a repeat is ignored.
 
 ## App servers
 
