@@ -21,14 +21,43 @@ export type RpcClientOptions = {
   maxBackoffMs?: number
   /** The response timeout for one RPC call. A last-resort safety net for when the host never responds */
   callTimeoutMs?: number
+  /** How long an open socket may go without `hello_ok` before it is dropped and retried (#82) */
+  handshakeTimeoutMs?: number
+  /** The most calls that may wait for the host at once, sent or not (#82) */
+  maxPendingCalls?: number
+  /** The most bytes of not-yet-sent frames that may wait for a connection (#82) */
+  maxQueuedBytes?: number
 }
 
 /**
- * `sent`: whether the frame actually went out over the socket.
- * On disconnect, rejects **only what went out** — what is still in the queue is sent after
+ * One call waiting for the host.
+ *
+ * `frame` is the unsent frame, or null once it went out over an authenticated socket. On
+ * disconnect, **only what went out** is rejected — what is still unsent is sent after
  * reconnecting, per the existing contract.
  */
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout>; sent: boolean }
+type Pending = {
+  resolve: (v: unknown) => void
+  reject: (e: Error) => void
+  timer: ReturnType<typeof setTimeout>
+  frame: string | null
+  bytes: number
+}
+
+/**
+ * Client-side bounds (#82). Measured on main: 100,000 calls made while disconnected were all
+ * accepted and queued, each holding its frame and a timer.
+ *
+ * 512 is far above any burst the UI makes — the largest is a resync, which reads one history page
+ * per session holding a conversation, plus a handful of list calls. 64 MiB of unsent frames
+ * leaves room for the largest single call, a pasted attachment (base64 inflates a 20 MiB file to
+ * about 27 MiB), queued while the host is away.
+ */
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
+const DEFAULT_MAX_PENDING_CALLS = 512
+const DEFAULT_MAX_QUEUED_BYTES = 64 * 1024 * 1024
+
+const rpcError = (message: string, code: string, retryable: boolean) => Object.assign(new Error(message), { code, retryable })
 
 /** The default RPC response timeout. Session creation and git operations also finish within this (measured at a few seconds) */
 const DEFAULT_CALL_TIMEOUT_MS = 30_000
@@ -75,29 +104,50 @@ const APP_CALL_TIMEOUT_MS = 15 * 60_000
 
 export class RpcClient {
   private ws: WebSocket | null = null
+  /** Every call waiting for the host, in the order they were made (the order unsent frames go out in) */
   private pending = new Map<string, Pending>()
+  /** Bytes of the frames in `pending` that have not been sent yet */
+  private queuedBytes = 0
   private eventHandlers = new Set<(e: NormalizedEvent) => void>()
   private termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
   private termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
   private nextId = 1
+  /**
+   * The last event seq handed on. Every event at or below it is a repeat and is dropped (#82):
+   * measured on main, the same seq delivered twice was dispatched twice, and a streaming delta
+   * applied twice doubles text for good.
+   *
+   * It also carries #173's first-contact rule. A hello with no cursor is a first meeting with this
+   * host, and the host replays its whole buffer — all of it finished before the screen attached.
+   * Passing that through would put up a "done" card for every finished turn, play a sound and
+   * build a conversation from old fragments on every fresh page load. So a first contact takes
+   * `hello_ok.currentSeq` as its starting point, and the replay up to it is dropped as a repeat;
+   * the list and the store (the snapshot) are the starting point instead.
+   */
   private lastSeq = 0
   /**
-   * This hello did not carry `afterSeq` — this is a first meeting with this host (#173). For a
-   * hello like that, the host replays its whole buffer, and that is all stuff that already
-   * finished before the screen was attached. Passing it through as received would mean, on
-   * every fresh page load, a "done" card standing for every finished turn, a sound playing, and
-   * old fragments building a conversation. On a first meeting with a host, the list and the
-   * store (the snapshot) are the starting point instead.
+   * The host lifetime `lastSeq` belongs to (#82), from `hello_ok.streamEpoch`. A reconnect sends
+   * both, and the host replays only when the lifetime matches; a host that restarted at the same
+   * address answers with a resync instead of another lifetime's events. Undefined until the first
+   * `hello_ok`, and again after moving to a new endpoint.
    */
-  private firstContact = false
-  /** The end number of old events replayed by a first-met host — up to here, nothing is passed through as a new event */
-  private replayedUpTo = 0
+  private hostEpoch: string | undefined
+  /** Whether `lastSeq` is a cursor into the current host — false means the next hello is a first contact */
+  private cursorValid = false
   /** Whether a handshake with a host has ever completed — a first meeting after that (a new host) means the screen has to re-read what it is holding */
   private greeted = false
+  /**
+   * The socket answered `hello_ok` (#82). Only then are calls sent and is the connection reported
+   * as connected. Measured on main: with a wrong token the client reported `connected` the moment
+   * the socket opened, flushed its queue into a socket the host was about to close, and then
+   * reported the never-run call as `connection_lost` — "it may have reached the host".
+   */
+  private ready = false
   private attempt = 0
   private closed = false
-  private queue: { id: string; frame: string }[] = []
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  private handshakeTimer: ReturnType<typeof setTimeout> | undefined
   private readonly WS: typeof WebSocket
 
   /**
@@ -109,26 +159,41 @@ export class RpcClient {
     if (this.opts.url === url && this.opts.token === token) return
     this.opts = { ...this.opts, url, token }
     this.attempt = 0
-    this.lastSeq = 0 // A new host numbers events from the start
+    // A new host numbers events from the start — the next hello is a first contact
+    this.lastSeq = 0
+    this.hostEpoch = undefined
+    this.cursorValid = false
+    this.ready = false
+    this.clearTimers()
     /*
      * **Detaches the old socket's handlers first.** close() is asynchronous, so onclose fires
      * later, and if left as is, that onclose would clear the reference to the new socket
      * (this.ws) just created and open yet another reconnect — two sockets receiving the same
      * events, applying a streaming delta twice (measured).
      */
-    const old = this.ws
-    if (old) {
-      old.onopen = null
-      old.onmessage = null
-      old.onclose = null
-      old.onerror = null
-      old.close()
-    }
+    this.detach(this.ws)
     this.ws = null
     // The response to an RPC sent to the old host will never arrive — if this does not reject
     // it, optimistic UI waits forever for confirmation, stuck at 'working' (the onclose handler was just detached)
     this.failInFlight('Host restarted')
     this.connect()
+  }
+
+  /** Takes a socket out of service: no handler of it runs again (see updateEndpoint), and it is closed */
+  private detach(ws: WebSocket | null): void {
+    if (!ws) return
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onclose = null
+    ws.onerror = null
+    ws.close()
+  }
+
+  private clearTimers(): void {
+    clearTimeout(this.reconnectTimer)
+    clearTimeout(this.handshakeTimer)
+    this.reconnectTimer = undefined
+    this.handshakeTimer = undefined
   }
 
   constructor(private opts: RpcClientOptions) {
@@ -137,35 +202,36 @@ export class RpcClient {
 
   get connectionState(): ConnectionState {
     if (this.closed) return 'disconnected'
-    return this.ws?.readyState === 1 ? 'connected' : 'connecting'
+    return this.ready ? 'connected' : 'connecting'
   }
 
   connect(): void {
     if (this.closed) return
     // Does not create one if a socket already exists — if the backoff timer and updateEndpoint overlap, this could end up with two
     if (this.ws) return
+    this.clearTimers()
+    this.ready = false
     this.emitConn('connecting')
     const ws = new this.WS(this.opts.url)
     this.ws = ws
+    /*
+     * A host that accepts the socket but never answers hello (wedged, or not ours) would otherwise
+     * hold the client in 'connecting' forever, with calls queued behind it (#82).
+     */
+    this.handshakeTimer = setTimeout(() => this.lost(ws), this.opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS)
 
     ws.onopen = () => {
-      this.attempt = 0
-      this.firstContact = this.lastSeq === 0
+      if (this.ws !== ws) return
       ws.send(
         JSON.stringify({
           kind: 'hello',
           token: this.opts.token,
           protocolVersion: PROTOCOL_VERSION,
-          ...(this.lastSeq > 0 ? { afterSeq: this.lastSeq } : {}),
+          // A cursor travels with the lifetime that issued it (#82)
+          ...(this.cursorValid ? { afterSeq: this.lastSeq, ...(this.hostEpoch ? { streamEpoch: this.hostEpoch } : {}) } : {}),
         }),
       )
-      for (const q of this.queue.splice(0)) {
-        ws.send(q.frame)
-        // From here on this is a call that is 'sent and waiting for an answer' — a candidate for rejection at the next disconnect
-        const p = this.pending.get(q.id)
-        if (p) p.sent = true
-      }
-      this.emitConn('connected')
+      // Nothing else goes out until hello_ok (#82)
     }
 
     ws.onmessage = (e: MessageEvent) => {
@@ -173,27 +239,33 @@ export class RpcClient {
       this.onFrame(String(e.data))
     }
 
-    ws.onclose = () => {
-      if (this.ws !== ws) return // If it has already been replaced, leaves the new socket alone
-      this.ws = null
-      if (this.closed) return
-      /*
-       * **An RPC that was sent but got no answer is rejected right here.** Leaving it alone
-       * would let optimistic UI wait for confirmation forever (a session stuck at 'working')
-       * and pending would grow without bound — that response will never arrive even after
-       * reconnecting (the host either never received the request or has already discarded it).
-       * A call still only in the queue (never sent) is left as is — sending it after
-       * reconnecting is the existing contract.
-       */
-      this.failInFlight('Connection lost')
-      this.emitConn('disconnected')
-      const delay = Math.min(this.opts.maxBackoffMs ?? 5000, 200 * 2 ** this.attempt++)
-      setTimeout(() => this.connect(), delay)
-    }
+    ws.onclose = () => this.lost(ws)
 
     ws.onerror = () => {
       /* Does nothing here, since onclose follows */
     }
+  }
+
+  /** The socket is gone (closed, or it never finished the handshake): reject what is unknowable and retry */
+  private lost(ws: WebSocket): void {
+    if (this.ws !== ws) return // If it has already been replaced, leaves the new socket alone
+    this.detach(ws)
+    this.ws = null
+    this.ready = false
+    this.clearTimers()
+    if (this.closed) return
+    /*
+     * **An RPC that was sent but got no answer is rejected right here.** Leaving it alone
+     * would let optimistic UI wait for confirmation forever (a session stuck at 'working')
+     * and pending would grow without bound — that response will never arrive even after
+     * reconnecting (the host either never received the request or has already discarded it).
+     * A call still only in the queue (never sent) is left as is — sending it after
+     * reconnecting is the existing contract.
+     */
+    this.failInFlight('Connection lost')
+    this.emitConn('disconnected')
+    const delay = Math.min(this.opts.maxBackoffMs ?? 5000, 200 * 2 ** this.attempt++)
+    this.reconnectTimer = setTimeout(() => this.connect(), delay)
   }
 
   private onFrame(raw: string): void {
@@ -208,35 +280,55 @@ export class RpcClient {
     const frame = parsed.data
 
     if ('kind' in frame && frame.kind === 'hello_ok') {
+      if (this.ready) return // A repeat changes nothing
+      clearTimeout(this.handshakeTimer)
+      this.handshakeTimer = undefined
+      const hadCursor = this.cursorValid
+      /*
+       * Still the lifetime our cursor came from? The host already answers `resyncRequired` for a
+       * cursor from another lifetime (#82); the client checks too, so a host that does not say so
+       * cannot hand it a stranger's numbers. `currentSeq < lastSeq` is #173's check, kept for a
+       * host that sends no epoch: the host came back up on the same address and is behind us.
+       */
+      const sameLifetime =
+        hadCursor &&
+        (frame.streamEpoch === undefined || this.hostEpoch === undefined || frame.streamEpoch === this.hostEpoch) &&
+        frame.currentSeq >= this.lastSeq
       const greeted = this.greeted
       this.greeted = true
-      if (this.firstContact) {
+      this.hostEpoch = frame.streamEpoch
+      this.cursorValid = true
+      this.ready = true
+      this.attempt = 0
+      let resync: boolean
+      if (!hadCursor) {
         // A first-met host's replay is not a new event — only its number is caught up to. If the screen was already
         // holding something (it switched to a new host), that has to be re-read
-        this.replayedUpTo = frame.currentSeq
         this.lastSeq = frame.currentSeq
-        if (greeted) this.emitConn('resync_required')
-        return
-      }
-      this.replayedUpTo = 0
-      /*
-       * The host's number is smaller than what we already received — the host came back up on
-       * the same address (#173). Holding onto the old number would keep the value from going
-       * down because of `Math.max`, so nothing would ever be replayed on any disconnect until
-       * the new host's number passed the old value. Instead, this drops down to the new host's
-       * number, and reads whatever was missed back from the snapshot.
-       */
-      if (frame.currentSeq < this.lastSeq) {
+        resync = greeted
+      } else if (frame.resyncRequired || !sameLifetime) {
+        /*
+         * The gap cannot be replayed: the cursor fell out of the buffer, the replay would not fit
+         * the host's budget, or this is another host lifetime. Start from the host's current
+         * number (holding the old one would make the duplicate filter drop a new lifetime's
+         * events) and read what was missed from the snapshot.
+         */
         this.lastSeq = frame.currentSeq
-        this.emitConn('resync_required')
-        return
+        resync = true
+      } else {
+        resync = false
       }
-      if (frame.resyncRequired) this.emitConn('resync_required')
+      // Calls made while connecting go out first, in order, then the rest of the app hears about it
+      this.flush()
+      this.emitConn('connected')
+      if (resync) this.emitConn('resync_required')
       return
     }
+    // Nothing but hello_ok counts before the handshake (#82)
+    if (!this.ready) return
     if (frame.kind === 'event') {
-      this.lastSeq = Math.max(this.lastSeq, frame.seq)
-      if (frame.seq <= this.replayedUpTo) return
+      if (frame.seq <= this.lastSeq) return // A repeat (#82), or a first-met host's old news (#173)
+      this.lastSeq = frame.seq
       for (const h of this.eventHandlers) h(frame.event)
       return
     }
@@ -278,6 +370,7 @@ export class RpcClient {
    * a different shape. This ends the call, but ends it truthfully.
    */
   private salvage(json: unknown): void {
+    if (!this.ready) return
     const f = json as { kind?: unknown; id?: unknown; error?: { message?: unknown } }
     if (f?.kind !== 'res' || typeof f.id !== 'string') return
     const p = this.take(f.id)
@@ -286,22 +379,43 @@ export class RpcClient {
     p.reject(Object.assign(new Error(message), { code: 'internal', retryable: false }))
   }
 
-  /** Takes one out of pending — "taking out" includes clearing its timer and the queue (otherwise a ghost timer stays behind) */
+  /** Takes one out of pending — "taking out" includes clearing its timer and its queued bytes (otherwise a ghost timer stays behind) */
   private take(id: string): Pending | undefined {
     const p = this.pending.get(id)
     if (!p) return undefined
     this.pending.delete(id)
     clearTimeout(p.timer)
-    this.queue = this.queue.filter((q) => q.id !== id)
+    if (p.frame !== null) this.queuedBytes -= p.bytes
     return p
   }
 
-  /** Rejects every call that was sent but got no answer (marked retryable) */
+  /** Sends every unsent call, oldest first — only over a socket that answered hello_ok (#82) */
+  private flush(): void {
+    const ws = this.ws
+    if (!this.ready || !ws) return
+    for (const p of this.pending.values()) {
+      if (p.frame === null) continue
+      const frame = p.frame
+      // From here on this is a call that is 'sent and waiting for an answer' — a candidate for rejection at the next disconnect
+      p.frame = null
+      this.queuedBytes -= p.bytes
+      ws.send(frame)
+    }
+  }
+
+  /**
+   * Rejects every call that was sent but got no answer.
+   *
+   * **Its outcome is unknown, and it is never sent again (#82, #173).** The host may have run it
+   * before the line dropped — a rename, a send, a commit — and repeating it could do it twice.
+   * So the error says exactly that, and it is not marked retryable: retrying is a decision for
+   * whoever can check the host's state first (the store does this for `agents.send`).
+   */
   private failInFlight(reason: string): void {
     for (const [id, p] of [...this.pending]) {
-      if (!p.sent) continue
+      if (p.frame !== null) continue
       this.take(id)
-      p.reject(Object.assign(new Error(reason), { code: 'connection_lost', retryable: true }))
+      p.reject(rpcError(`${reason} before an answer came — the host may or may not have done this; check before trying again`, 'connection_lost', false))
     }
   }
 
@@ -321,8 +435,23 @@ export class RpcClient {
    * Now, fixing `commands.ts` **makes the compiler point at every place that has to follow.**
    */
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    // A closed client never sends again — failing now beats waiting out the timeout for nothing (#82)
+    if (this.closed) return Promise.reject(rpcError('Connection closed', 'connection_closed', false))
     const id = String(this.nextId++)
     const frame = JSON.stringify({ kind: 'rpc', id, method, params })
+    /*
+     * Admission (#82). A call over a bound is refused **before** it is queued or sent, so its
+     * outcome is certain — nothing happened — and it is safe to try again later.
+     */
+    const maxPending = this.opts.maxPendingCalls ?? DEFAULT_MAX_PENDING_CALLS
+    if (this.pending.size >= maxPending) {
+      return Promise.reject(rpcError(`Too many requests are waiting for the host (${maxPending}); this one was not sent`, 'overloaded', true))
+    }
+    const bytes = this.ready ? 0 : new TextEncoder().encode(frame).byteLength
+    const maxQueued = this.opts.maxQueuedBytes ?? DEFAULT_MAX_QUEUED_BYTES
+    if (this.queuedBytes + bytes > maxQueued) {
+      return Promise.reject(rpcError('Too much is waiting for the host to reconnect; this request was not sent', 'overloaded', true))
+    }
     return new Promise<RpcResult<M>>((resolve, reject) => {
       /*
        * The timeout safety net. onclose catches a disconnect, but if the socket is fine and
@@ -334,10 +463,11 @@ export class RpcClient {
         if (!this.take(id)) return
         reject(Object.assign(new Error(`RPC timed out: ${method}`), { code: 'timeout', retryable: true }))
       }, this.opts.callTimeoutMs ?? (method === 'apps.invoke' ? APP_CALL_TIMEOUT_MS : LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS))
-      const sent = this.ws?.readyState === 1
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, sent })
-      if (sent) this.ws!.send(frame)
-      else this.queue.push({ id, frame }) // Sent after reconnecting
+      // Sent now if the host is ready, otherwise after the next hello_ok
+      const ws = this.ready ? this.ws : null
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, frame: ws ? null : frame, bytes })
+      this.queuedBytes += bytes
+      ws?.send(frame)
     })
   }
 
@@ -365,16 +495,22 @@ export class RpcClient {
     for (const h of this.connHandlers) h(s)
   }
 
+  /**
+   * Shuts the client down for good (#82): no reconnect timer, handshake timer or call timer is
+   * left behind, every waiting call is rejected now, and later calls fail at once. A pending
+   * reconnect timer used to survive close() (it found `closed` and did nothing, but held the
+   * process open until it fired), and a call made after close() sat for its full timeout.
+   */
   close(): void {
     this.closed = true
-    this.ws?.close()
+    this.ready = false
+    this.clearTimers()
+    this.detach(this.ws)
     this.ws = null
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer) // If the timer is not cleared, a closed client keeps the process alive
-      p.reject(new Error('Connection closed'))
+    for (const [id] of [...this.pending]) {
+      // take() clears the timer — if it is not cleared, a closed client keeps the process alive
+      this.take(id)?.reject(rpcError('Connection closed', 'connection_closed', false))
     }
-    this.pending.clear()
-    this.queue = []
   }
 }
 
