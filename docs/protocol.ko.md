@@ -45,6 +45,8 @@ type NormalizedEvent =
   | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중 / 재연결 중 (codex)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated 스냅샷
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: 실행 중 명령 출력의 꼬리 · #98: 서브에이전트의 걸음 (띄운 Agent 호출에)
+  // 네이티브 서브에이전트가 한 일 — 대화와 따로 남는다 (#222)
+  | { type: 'subagent_event';   sessionId, parentCallId, step: SubagentStep, stepSeq? }  // step: message_delta, reasoning_delta, tool_call, tool_result 중 하나
   // 사람이 답해야 하는 것
   | { type: 'approval_request'; sessionId, requestId, detail: ApprovalDetail }
   | { type: 'approval_resolved';sessionId, requestId, decision }
@@ -76,6 +78,24 @@ type NormalizedEvent =
 묻는 저장소의 독자(`Store.loadMessages(…, { full: true })`)가 이 모양을 받기 때문이다. 왜 남겨 두는지는
 [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)에 있다.
 
+**네이티브 서브에이전트의 걸음은 부모 이벤트에 붙인 표시가 아니라 감싸는 종류 하나다**
+([#222](https://github.com/ijun17/centralu/issues/222)). Claude Code의 `Agent` 도구와 Codex의 `spawn_agent`가 띄운
+서브에이전트의 글, 추론, 도구 호출과 결과는 부모의 스트림으로 host에 온다. 각각은 `subagent_event`가 된다. `step`은 부모의
+모양 그대로이고, `parentCallId`는 띄운 호출이다: Claude는 `Agent` tool_use id(서브에이전트의 `parent_tool_use_id`),
+Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드를 가리킨다). 서브에이전트가 또 띄운 것은 그
+서브에이전트의 띄운 호출로 표시된다.
+
+| 결정 | 이유 |
+|---|---|
+| `tool_call` 등에 `parentCallId`를 붙이지 않고 감싸는 종류를 둔다 | 모르는 종류는 받는 쪽이 무시한다(§4). 칸으로 붙이면 `tool_call`을 읽는 모든 곳이 그 칸을 봐야 하고, 하나라도 잊으면 서브에이전트의 호출이 부모의 대화에 다시 들어간다 — #98이 없앤 버그다. 감싸면 대화, 상태 기계, 안 읽음, 턴 처리가 한 줄도 없이 건너뛴다 |
+| `step`은 부모의 모양을 다시 쓴다 | 저장소는 부모의 행처럼 걸음을 남기고, 화면은 같은 코드(`messagesToChat`)로 그린다 |
+| 걸음 하나는 통째다 | Claude는 서브에이전트의 글을 블록 단위로 넘기고, Codex 자식 항목은 끝날 때 읽는다. 흘릴 것도 이을 것도 없다 |
+| `seq`가 아니라 `stepSeq` | 그 띄운 호출의 걸음 중 몇 번째인지이며, host가 저장할 때 붙인다. `seq`였다면 대화가 아닌 것이 세션의 안 읽음 표시를 움직인다 |
+
+선 위에서 걸음의 도구 `input`과 `output`은 부모의 것처럼 걷힌다(`withoutToolRecord`가 감싼 안을 본다). 걸음을 다시
+읽는 것은 띄운 카드 하나를 지목하는 `messages.subagent`뿐이고, `messages.load`에는 결코 없다. 실행 중인 Claude 에이전트의
+카드는 여전히 `tool_output_delta`로 걸음마다 한 줄을 받는다.
+
 `ApprovalDetail`은 인라인 배너 승인(FR-3)의 판단에 필요한 것을 담도록 **어댑터가 미리 구조화**한다:
 
 ```ts
@@ -93,6 +113,7 @@ type ApprovalDetail =
 |---|---|---|
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession`은 세션을 휴지통으로 보낸다 (FR-22) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
+| messages | `messages.load, messages.subagent, messages.search` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색 |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |

@@ -74,6 +74,15 @@ interface AdapterCapabilities {
   `tool_call.input`은 도구가 받은 입력을 받은 그대로, `tool_result.output`은 도구가 답한 글 전체를 자르지 않고 싣는다.
   이미지는 뺀다(`message_image`로 따로 나간다, #40). host가 기록을 저장소에 남기고 내보내는 모든 것에서 걷으므로
   ([protocol.md](protocol.md) §2), 어댑터는 작은 카드와 온전한 기록 사이에서 고를 필요가 없다.
+- **네이티브 서브에이전트의 걸음은 감싸서, 띄운 호출을 붙여 내보낸다** (#222). 부모 자신의 이벤트로는 결코 내보내지
+  않는다(#98): `step`이 글, 추론, 도구 호출, 도구 결과 중 하나이고 `parentCallId`가 서브에이전트를 띄운 호출인
+  `subagent_event`다. Claude: 서브에이전트의 메시지에는 `parent_tool_use_id`가 붙어 있고, `forwardSubagentText`를 켜면
+  도구 블록만이 아니라 글과 생각도 온다. normalizer는 그것을 부모의 것처럼 읽은 뒤 감싼다. Codex: 자식 스레드의 `item/*`
+  알림이 자식의 `threadId`를 달고 부모의 연결로 온다. 부모의 `spawnAgent` 항목이 `item/completed`의 `receiverThreadIds`로
+  자식을 가리키고, 그보다 먼저 온 자식의 항목(측정: 자식의 첫 알림이 같은 밀리초에, 연결보다 먼저 왔다)은 붙잡아 두었다가
+  다시 흘린다. 공식 경로만 쓴다 — SDK의 스트림과 app-server의 알림이며, 도구의 대화 파일은 읽지 않는다. 매니저는 걸음을
+  대화와 따로 `subagent_messages`에 남기고 카드로 내보낸다. 서브에이전트가 바꾼 파일은 여전히 세션의 것으로 알리고
+  (`files_touched`), 서브에이전트가 만든 커밋은 세션에 귀속한다(#50).
 - 어댑터는 상태를 갖지 않는다 — 세션 상태 추적은 `sessions/`가 이벤트를 관찰하며 수행한다. 어댑터는 변환기일 뿐이다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).

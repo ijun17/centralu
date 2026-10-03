@@ -46,6 +46,30 @@ the card does not reach and looks for them in the broadcast, the history and tra
 search, `list_sessions`, the handoff record and file, and the orchestrator's memory; `store-tool-record.test.ts` holds
 the store's default read and the index.
 
+### A subagent's steps
+
+What a native subagent did — Claude Code's `Agent` tool, Codex's `spawn_agent` — is kept too
+([#222](https://github.com/ijun17/centralu/issues/222)): its text, its readable reasoning, and its tool calls and
+results whole, the way #221 keeps the parent's. About a third of all Claude tool calls happen inside subagents
+(measured for #222: 20,107 of 59,734), so this is where most of a tool's printed output lands. The same rule applies,
+with one more layer:
+
+- **They are not the conversation.** The steps live in a table of their own (`subagent_messages`, store v41), keyed by
+  the session and the launching call, and the only reader is `Store.loadSubagentMessages`, which names one launch card.
+  Every reader listed above reads `messages`, so none of them can hand a subagent's tool output — or its words — to
+  another session's prompt, count it as unread, or take it for the parent's last answer (the handoff note).
+- **The screen gets cards.** `loadSubagentMessages` drops `input` and `output` like `loadMessages` does, and the live
+  `subagent_event` is stripped by the same `withoutToolRecord`. The subagent's text and reasoning do go to the screen
+  that opens its card: they are what it said, as the parent's text is.
+- **Not indexed, text included.** The parent's own report on what its subagent found is in the conversation, and is
+  what search and `recall` find.
+- **They go when the session goes.** The rows belong to the session, so the trash keeps them and a purge deletes them
+  (FR-22).
+
+Tests: `manager.test.ts` ("a subagent's steps are kept under its launch card and read by nothing else") looks for a
+subagent's tool secrets, words and reasoning in every reader above, and for its tool secrets in the broadcast and
+`messages.subagent`; `store-subagent.test.ts` holds the table, the default read and the index.
+
 ## Text an app sends
 
 An app's view can ask to put text into a conversation (MCP Apps `ui/message`). The person reads

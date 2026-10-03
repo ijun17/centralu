@@ -74,6 +74,17 @@ Implementation rules:
   answered, uncut, with images left out (they go out as `message_image`, #40). The host keeps the record in the store
   and strips it from everything it sends ([protocol.md](protocol.md) §2), so an adapter never has to choose between a
   small card and a complete record.
+- **A native subagent's steps go out wrapped, tagged with the launching call** (#222). Never as the parent's own events
+  (#98): a `subagent_event` whose `step` is a text, reasoning, tool call or tool result, and whose `parentCallId` is the
+  call that started the subagent. Claude: the subagent's messages carry `parent_tool_use_id`, and `forwardSubagentText`
+  makes its text and thinking arrive, not only its tool blocks; the normalizer reads them as the parent's and wraps them.
+  Codex: a child thread's `item/*` notifications arrive on the parent's connection with the child's `threadId`; the
+  parent's `spawnAgent` item names the child in `receiverThreadIds` on `item/completed`, and a child's items that arrive
+  before that (measured: the child's first notification came in the same millisecond, before the link) are held and
+  replayed. Only official routes are used — the SDK's stream and the app-server's notifications, never the tools'
+  transcript files. The manager stores the steps in `subagent_messages`, apart from the conversation, and sends them on
+  as cards. A file a subagent changed is still reported as the session's (`files_touched`), and a commit it made is
+  attributed to the session (#50).
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).

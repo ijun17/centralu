@@ -154,6 +154,7 @@ come back to the desk
 
 - 채팅 스타일 UI: 사용자 메시지 / 에이전트 응답 (스트리밍 마크다운) / 도구 호출 카드 (기본 접힘, 펼치면 상세).
 - 도구 호출 카드: 명령, 파일 경로, diff 요약을 구조화해 표시. raw 출력은 펼쳤을 때만. **접기 기본값은 도구 종류에 따라 다르다**: 읽기 중심 도구(Read/Grep/읽기 중심 Bash)는 접힘 — 연속으로 20개가 나와도 대화가 묻히지 않는다. 파일 변경(Edit/Write)은 diff 요약이 펼쳐진 상태가 기본. 설정에서 도구별로 조정 가능. (대화 뷰 가독성의 절반은 이 정책이다)
+- 네이티브 서브에이전트를 띄운 카드(Claude Code의 `Agent`, Codex의 `spawnAgent`)에는 접힌 **서브에이전트의 걸음(Subagent's steps)** 칸이 있다. 펼치면 서브에이전트가 한 일 — 그 글, 추론, 도구 카드를 대화의 것과 같은 모양으로 — 을 보여 주고, 실행 중이면 이후의 걸음이 오는 대로 붙는다. 대화 자체에는 결코 나오지 않는다: 다른 행위자의 걸음이 부모의 것 사이에 끼면 누가 무엇을 했는지 구분할 수 없었다 (#98). 걸음을 남기기 전에(#222) 돈 에이전트는 기록된 것이 없다고 말한다.
 - 세션 제어: 중단, 재시도, 새 세션, 세션 이름 변경 (자동 이름은 FR-18).
 - 메시지 입력: 여러 줄, 첨부(FR-13), 슬래시 명령 패스스루 (도구가 지원하는 경우).
 
@@ -397,6 +398,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - M1: 커맨드 팔레트(⌘K)에서 세션 이름과 프로젝트 검색.
 - M2: 대화 **내용**의 전문 검색 (SQLite FTS) — 며칠에 걸쳐 세션 4개를 굴리면 "그 얘기 어디서 했더라"는 반드시 나온다.
 - **내용은 오간 말이다**: 사람의 말, 에이전트의 답과 추론. 도구 호출과 그 출력은 검색하지 않는다 ([#221](https://github.com/ijun17/centralu/issues/221)). 그때까지는 명령이 색인됐는데, 색인 81,816행 중 55,131행이었고 236.2MiB 저장소의 124.5MiB 색인 대부분이었다 (실제 저장소의 사본, 2026-09-30). 명령의 출력은 한 번도 색인된 적이 없다. 빼도 오간 말을 찾는 검색은 잃은 것이 없고(표본 질의 397개가 모두 같은 메시지를 돌려줬다), 색인은 36.6MiB, 저장소는 145.4MiB가 됐다. 세션이 무엇을 실행했는지는 검색이 아니라 `read_session`으로 읽는다.
+- **네이티브 서브에이전트의 걸음도 검색하지 않는다, 그 글까지** ([#222](https://github.com/ijun17/centralu/issues/222)). 서브에이전트가 찾은 것에 대한 부모 자신의 보고가 대화에 있고, 검색이 찾는 것은 그것이다.
 - 휴지통의 세션(FR-22)은 사람의 검색에도 에이전트의 `recall`에도 **나오지 않는다**. 휴지통에 넣을 때 색인 행을 지우고, 되살릴 때 다시 만든다.
 
 #### FR-22. 세션 휴지통 (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
@@ -606,6 +608,7 @@ interface AgentAdapter {
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
 - `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 휴지통에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
 - `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 행이 닫히는 곳은 기록되는 이벤트, 턴의 끝, 답과 추론 사이의 전환, 그리고 열린 행과 다른 메시지를 가리키는 조각(`messageId`, #212: codex는 사이에 아무것도 기록되지 않은 채 두 말을 연달아 할 수 있다)이다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
+- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload_json, ts)` — 네이티브 서브에이전트가 한 일을 띄운 호출 아래에 남긴다 (#222, v41): 글, 읽을 수 있는 추론, 그리고 통째의 도구 호출과 결과를 `messages`와 같은 payload 모양으로. `messages`에 칸을 더하지 않고 표를 따로 둔다 — 그래야 대화를 읽는 모든 독자(기록 페이지, 안 읽음, 인계 기록과 인계 노트, `read_session`, `recall`, 오케스트레이터의 기억)가 지금 읽는 것을 읽는 것만으로 건너뛴다. 유일한 독자는 띄운 카드 하나를 지목한다. `seq`는 그 띄운 호출 안에서 센다. 그래서 서브에이전트는 대화의 안 읽음 표시를 움직이지 않는다. 색인하지 않는다. 행은 세션의 것이다: 휴지통이 지니고, 영구 삭제가 지운다. v41 전의 서브에이전트 실행은 채워 넣지 않는다.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계
 - `workspace(id, layout_json, updated_at)` — 스냅숏

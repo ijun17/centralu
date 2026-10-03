@@ -44,6 +44,8 @@ type NormalizedEvent =
   | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated snapshot
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: live command output tail; #98: a subagent's steps, on the Agent call that spawned it
+  // what a native subagent did — kept apart from the conversation (#222)
+  | { type: 'subagent_event';   sessionId, parentCallId, step: SubagentStep, stepSeq? }  // step: a message_delta, reasoning_delta, tool_call or tool_result
   // things a person must answer
   | { type: 'approval_request'; sessionId, requestId, detail: ApprovalDetail }
   | { type: 'approval_resolved';sessionId, requestId, decision }
@@ -76,6 +78,24 @@ wire the two fields are always absent. They are declared here because the stored
 the store that asks for them by name (`Store.loadMessages(…, { full: true })`) gets this shape. Why they stay behind:
 [security-boundaries.md](security-boundaries.md#tool-output-in-the-store).
 
+**A native subagent's steps are one wrapper kind, not the parent's events with a flag**
+([#222](https://github.com/ijun17/centralu/issues/222)). Claude Code's `Agent` tool and Codex's `spawn_agent` run a
+subagent whose text, reasoning, tool calls and results reach the host on the parent's stream. Each becomes a
+`subagent_event` whose `step` is one of the parent's own shapes and whose `parentCallId` is the launching call: Claude's
+`Agent` tool_use id (the subagent's `parent_tool_use_id`), Codex's `spawnAgent` collab item (whose `receiverThreadIds`
+names the child thread). A subagent that launches its own tags that one's steps with its own launch call.
+
+| Decision | Why |
+|---|---|
+| A wrapper kind, not a `parentCallId` on `tool_call` and the rest | A receiver that does not know a type ignores it (§4). With a field, every reader of `tool_call` would have to check it, and the first one that forgot would put a subagent's call back in the parent's conversation — the bug #98 removed. With a wrapper, the conversation, the state machine, unread and the turn logic skip it without a line each |
+| `step` reuses the parent's shapes | The store keeps a step as it keeps the parent's rows, and the screen draws it with the same code (`messagesToChat`) |
+| Each step is whole | Claude forwards a subagent's text a block at a time; Codex's child items are read when they complete. Nothing to stream, nothing to join |
+| `stepSeq`, not `seq` | Its number among that launch's steps, set by the host when it stores the step. A `seq` would move the session's unread marker for something that is not the conversation |
+
+On the wire a step's tool `input` and `output` are stripped like the parent's (`withoutToolRecord` looks inside the
+wrapper). The steps are read back only by `messages.subagent`, which names one launch card; they are never in
+`messages.load`. A running Claude agent's card still gets one line per step through `tool_output_delta`.
+
 `ApprovalDetail` is **structured in advance by the adapter** so it carries what is needed to judge in-place banner approval (FR-3):
 
 ```ts
@@ -93,6 +113,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 |---|---|---|
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession` moves the session to the trash (FR-22) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | the way out of the trash (FR-22). The person's alone: no agent tool or app capability reaches it |
+| messages | `messages.load, messages.subagent, messages.search` | a history page; one launch card's subagent steps, read when the person opens them (#222); search over what was said |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |

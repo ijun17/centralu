@@ -65,6 +65,7 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 - We do not hold every message of a session in memory. **Focused session**: the most recent N (200 by default) + page-loading from StorePort when scrolling up. **Unfocused sessions**: no messages at all, only a summary (last line, seq, state).
 - When focus is lost, that session's messages are trimmed to the window size.
 - A streaming `message_delta` is appended to the last message — only that row re-renders, without recreating list items (including the virtual list's measure recalculation).
+- **A launch card's subagent steps are outside the window** (#222). They are not in the conversation (`chat`) and are never paged with it: `subagentSteps[session][callId]` holds them once the person opens that card, read a page at a time from `messages.subagent`. A live `subagent_event` joins an opened card only once every earlier step is read, and touches nothing else — not the conversation, not the session's state, not unread. Whether the section is open lives in the store, not the card, because the virtual list detaches rows that scroll away and a card drawn again must come back as it was left.
 
 ## 5. Persistence and restore (FR-10)
 
