@@ -194,16 +194,31 @@ export function normalizeMessage(
    * Files are the exception — a file a subagent edited is still a file changed inside this
    * session's own working folder, so it is still reported to conflict detection and highlighting
    * (FR-2, FR-5).
+   *
+   * **What the subagent did is kept, under its launch card** (#222). Its text, readable thinking,
+   * tool calls and their results go out as `subagent_event`s tagged with that same
+   * `parent_tool_use_id`, which the host stores apart from the conversation. They are read the way
+   * the parent's own messages are read — `normalizeMessage` on the message as if it were the
+   * parent's — and only the four kinds of step are kept: usage, images and a nested agent's
+   * "launched" line are not the subagent's record. `forwardSubagentText` (index.ts) makes the
+   * text and thinking arrive for every subagent; without it only tool blocks are promised. A
+   * subagent's stream events carry no text of their own (measured: every stream_event had
+   * parent=null), so its text comes from the whole assistant message, block by block.
    */
   const parent = str(m.parent_tool_use_id)
   if (parent && (type === 'assistant' || type === 'user' || type === 'stream_event')) {
-    if (type !== 'assistant') return out
-    for (const block of ((m.message as Json | undefined)?.content ?? []) as Json[]) {
-      if (str(block.type) !== 'tool_use') continue
-      const s = toolSummary(str(block.name), (block.input ?? {}) as Json)
-      out.push({ type: 'tool_output_delta', sessionId, callId: parent, text: `${stepLine(s)}\n` })
-      const edited = editedPaths(s)
-      if (edited.length) out.push({ type: 'files_touched', sessionId, paths: edited })
+    if (type === 'stream_event') return out
+    for (const e of normalizeMessage({ ...m, parent_tool_use_id: null }, sessionId)) {
+      if (e.type === 'message_delta' || (e.type === 'reasoning_delta' && e.text)) {
+        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
+      } else if (e.type === 'tool_call') {
+        out.push({ type: 'tool_output_delta', sessionId, callId: parent, text: `${stepLine(e.summary)}\n` })
+        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
+      } else if (e.type === 'tool_result') {
+        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
+      } else if (e.type === 'files_touched') {
+        out.push(e)
+      }
     }
     return out
   }

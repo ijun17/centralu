@@ -297,6 +297,13 @@ class ClaudeSession implements SessionHandle {
          */
         effort: this.opts.effort as never,
         includePartialMessages: true,
+        /*
+         * A subagent's text and thinking, not only its tool blocks (#222). sdk.d.ts: "By default, only
+         * tool_use/tool_result blocks from subagents are emitted … When true, the full subagent conversation is
+         * forwarded so consumers can render a nested transcript." The normalizer keeps them under the launch card,
+         * out of the parent's conversation (#98).
+         */
+        forwardSubagentText: true,
         // MCP servers — the orchestrator's tools and any attached external apps (including approved MCP servers). See mcpServers().
         ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
         /*

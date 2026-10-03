@@ -27,20 +27,23 @@ import type { NormalizedEvent } from '@cc/protocol'
  * tracks whether the body already went out as deltas (`textStreamed`) lives in that loop, and this
  * ordering is exactly what trips it.
  */
-const script = vi.hoisted(() => ({ messages: [] as unknown[], release: () => {} }))
+const script = vi.hoisted(() => ({ messages: [] as unknown[], release: () => {}, options: {} as Record<string, unknown> }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: () => ({
-    async *[Symbol.asyncIterator]() {
-      for (const m of script.messages) yield m
-      // The adapter treats a closed stream as the CLI having died — this holds it open until the test closes it.
-      await new Promise<void>((r) => (script.release = r))
-    },
-    interrupt: async () => {},
-    close: () => {},
-    supportedCommands: async () => [],
-    getContextUsage: async () => undefined,
-  }),
+  query: (args: { options?: Record<string, unknown> }) => {
+    script.options = args.options ?? {}
+    return {
+      async *[Symbol.asyncIterator]() {
+        for (const m of script.messages) yield m
+        // The adapter treats a closed stream as the CLI having died — this holds it open until the test closes it.
+        await new Promise<void>((r) => (script.release = r))
+      },
+      interrupt: async () => {},
+      close: () => {},
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+    }
+  },
 }))
 
 const { ClaudeAdapter } = await import('./index.js')
@@ -443,5 +446,68 @@ describe('a foreground agent\'s result (#98)', () => {
     expect(results[0]?.summary).toContain('1 tool use')
     expect(results[0]?.summary).toContain("I'm done.")
     expect(results[0]?.summary).not.toContain('[Subagent hand-back]')
+  })
+})
+
+describe('what a subagent did is kept under the card that launched it (#222)', () => {
+  const steps = (events: NormalizedEvent[], parent = AGENT) =>
+    events.flatMap((e) => (e.type === 'subagent_event' && e.parentCallId === parent ? [e.step] : []))
+
+  it('every step is tagged with the launch call: its calls with their input, their results with their output, its text', async () => {
+    const events = await run(backgroundRun)
+    expect(steps(events)).toEqual([
+      {
+        type: 'tool_call', sessionId: 's1', callId: SUB_1,
+        summary: { tool: 'Bash', title: "sed -n '56,200p' tooling/boundaries.test.ts", readOnly: false, paths: [] },
+        input: { command: "sed -n '56,200p' tooling/boundaries.test.ts" },
+      },
+      { type: 'tool_result', sessionId: 's1', callId: SUB_1, ok: true, summary: "describe('ui layer boundary', () => {", output: "describe('ui layer boundary', () => {" },
+      { type: 'tool_call', sessionId: 's1', callId: SUB_2, summary: { tool: 'Grep', title: 'Grep: boundaries', readOnly: true, paths: [] }, input: { pattern: 'boundaries' } },
+      { type: 'tool_result', sessionId: 's1', callId: SUB_2, ok: true, summary: 'tooling/boundaries.test.ts', output: 'tooling/boundaries.test.ts' },
+      {
+        type: 'tool_call', sessionId: 's1', callId: SUB_EDIT,
+        summary: { tool: 'Edit', title: 'Edit: /repo/tooling/boundaries.test.ts', readOnly: false, paths: ['/repo/tooling/boundaries.test.ts'] },
+        input: { file_path: '/repo/tooling/boundaries.test.ts', old_string: 'a', new_string: 'b' },
+      },
+      { type: 'tool_result', sessionId: 's1', callId: SUB_EDIT, ok: true, summary: 'ok', output: 'ok' },
+      // Its encrypted thinking ("") is not a step; its closing text is
+      { type: 'message_delta', sessionId: 's1', role: 'assistant', text: REPORT },
+    ])
+  })
+
+  it('a subagent\'s readable thinking is kept as its reasoning', async () => {
+    const events = await run([
+      ...backgroundRun.slice(0, 4),
+      sub([{ type: 'thinking', thinking: 'Look at the boundaries test first.' }]),
+      result,
+    ])
+    expect(steps(events)).toEqual([{ type: 'reasoning_delta', sessionId: 's1', text: 'Look at the boundaries test first.' }])
+  })
+
+  it('an agent launched by a subagent keeps its steps under its own card, inside the first one\'s', async () => {
+    const NESTED = 'toolu_01NestedAgent0000000000'
+    const events = await run([
+      ...backgroundRun.slice(0, 4),
+      sub([{ type: 'tool_use', id: NESTED, name: 'Agent', input: { description: 'Look deeper', prompt: '…' } }]),
+      {
+        type: 'assistant',
+        parent_tool_use_id: NESTED,
+        message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_deep', name: 'Bash', input: { command: 'pwd' } }] },
+      },
+      result,
+    ])
+    expect(steps(events).map((s) => (s.type === 'tool_call' ? s.callId : s.type))).toEqual([NESTED])
+    expect(steps(events, NESTED).map((s) => (s.type === 'tool_call' ? s.callId : s.type))).toEqual(['toolu_deep'])
+  })
+
+  it('the live line per step on the card stays', async () => {
+    const events = await run(backgroundRun)
+    const at = events.findIndex((e) => e.type === 'subagent_event' && e.step.type === 'tool_call' && e.step.callId === SUB_2)
+    expect(events[at - 1]).toEqual({ type: 'tool_output_delta', sessionId: 's1', callId: AGENT, text: 'Grep: boundaries\n' })
+  })
+
+  it('asks the SDK for the subagent\'s text and thinking, not only its tool blocks', async () => {
+    await run([result])
+    expect(script.options.forwardSubagentText).toBe(true)
   })
 })
