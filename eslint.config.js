@@ -8,7 +8,10 @@ import globals from 'globals'
 export default tseslint.config(
   // tmp/: disposable probes and captures made during dogfooding. They never stay in the
   // repository, so no rule needs to check them either.
-  { ignores: ['**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', '**/*.app/**',
+  // .claude/: agents' git worktrees, each a whole checkout of this repository. Linted from
+  // here, none of the path-scoped blocks below match them (3,422 false errors on 2026-10-03,
+  // with two agents at work); each worktree runs its own lint.
+  { ignores: ['.claude/**','**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', '**/*.app/**',
     // The app template's runtime — a minified build artifact (scripts/build-app-runtime.mjs).
     'packages/agent-host/app-template/runtime/**'] },
   js.configs.recommended,
