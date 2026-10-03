@@ -29,6 +29,21 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // The whole record of a tool call (#221) — optional, so the two frames above still parse
   { type: 'tool_call', sessionId: 's1', callId: 'c2', summary: { tool: 'Write', title: 'Write: a.ts', readOnly: false, paths: ['a.ts'] }, input: { file_path: 'a.ts', content: 'export {}' } },
   { type: 'tool_result', sessionId: 's1', callId: 'c2', ok: true, summary: 'wrote', output: 'wrote a.ts' },
+  // A native subagent's step, under the call that launched it (#222)
+  {
+    type: 'subagent_event',
+    sessionId: 's1',
+    parentCallId: 'toolu_agent',
+    step: { type: 'tool_call', sessionId: 's1', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'ls', readOnly: false, paths: [] }, input: { command: 'ls' } },
+  },
+  {
+    type: 'subagent_event',
+    sessionId: 's1',
+    parentCallId: 'toolu_agent',
+    stepSeq: 2,
+    step: { type: 'tool_result', sessionId: 's1', callId: 'toolu_sub', ok: true, summary: 'a.ts', output: 'a.ts\nb.ts' },
+  },
+  { type: 'subagent_event', sessionId: 's1', parentCallId: 'toolu_agent', step: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'Done.' } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r1', detail: { kind: 'command', command: 'npm run build', cwd: '/p' } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r2', detail: { kind: 'file_edit', path: 'a.ts', diffPreview: '+x', multi: false } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r3', detail: { kind: 'other', raw: '{}' } },
@@ -198,6 +213,33 @@ describe('a tool call leaves the host as its card (#221)', () => {
     // A turn's structured answer is also called `output`, and it is the answer — it stays
     const answered = NormalizedEvent.parse({ type: 'turn_complete', sessionId: 's1', output: { summary: 'short' } })
     expect(withoutToolRecord(answered)).toEqual(answered)
+  })
+
+  it('a subagent\'s tool call and result leave the host as their cards too (#222)', () => {
+    const steps = GOLDEN_EVENTS_V1.filter((e) => (e as { type: string }).type === 'subagent_event').map((e) => NormalizedEvent.parse(e))
+    expect(steps.map(withoutToolRecord)).toEqual([
+      {
+        type: 'subagent_event',
+        sessionId: 's1',
+        parentCallId: 'toolu_agent',
+        step: { type: 'tool_call', sessionId: 's1', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'ls', readOnly: false, paths: [] } },
+      },
+      {
+        type: 'subagent_event',
+        sessionId: 's1',
+        parentCallId: 'toolu_agent',
+        stepSeq: 2,
+        step: { type: 'tool_result', sessionId: 's1', callId: 'toolu_sub', ok: true, summary: 'a.ts' },
+      },
+      // Its text is what it said, and leaves as it is
+      steps[2],
+    ])
+  })
+
+  it('a subagent step is ignored by a receiver that does not know the kind, and never parses as the parent\'s tool call', () => {
+    const e = NormalizedEvent.parse(GOLDEN_EVENTS_V1.find((x) => (x as { type: string }).type === 'subagent_event'))
+    expect(e.type).toBe('subagent_event')
+    expect('callId' in e).toBe(false)
   })
 })
 

@@ -67,41 +67,97 @@ export const APP_VIEWS_LIVE_PER_SESSION = 3
 export const AppChangeCause = z.looseObject({ kind: z.string(), instanceId: z.string().optional() })
 export type AppChangeCause = z.infer<typeof AppChangeCause>
 
+/**
+ * A chunk of the assistant's reply. `messageId` names the message the chunk belongs to, where the tool says
+ * so (codex: the agentMessage item id). The host keeps one open row per session and grows it with every
+ * chunk until a recorded event closes it, so two messages with nothing recorded between them used to become
+ * one row (#212). A chunk whose `messageId` differs from the open row's starts a new row. Absent means
+ * "the same message as before", which is what every chunk meant before this field existed.
+ */
+const MessageDelta = z.object({
+  ...base,
+  ...persistedSeq,
+  type: z.literal('message_delta'),
+  role: z.enum(['assistant']),
+  text: z.string(),
+  messageId: z.string().optional(),
+})
+
+/**
+ * Only as much of the model's reasoning as is actually visible (measured in #58, 2026-08-26).
+ *
+ * The two tools produce different things — which is why both fields are optional:
+ *   codex: a summary **text** is streamed (item/reasoning/summaryTextDelta, but only if the
+ *          thread config has model_reasoning_summary turned on) → text
+ *   claude: the thinking body is encrypted as a whole, so there is no text — thinking_delta
+ *          only ever carries estimated_tokens → estTokens (incremental)
+ * Content that does not exist is never faked: if text is present, it is even kept in the
+ * record (kind 'reasoning'); if only estTokens is present, it only lives as a "thinking ~N"
+ * progress indicator and disappears once the turn ends.
+ */
+const ReasoningDelta = z.object({
+  ...base,
+  ...persistedSeq,
+  type: z.literal('reasoning_delta'),
+  text: z.string().optional(),
+  estTokens: z.number().optional(),
+})
+
+/**
+ * A tool call and its result. `summary` is what the card shows; `input` and `output` are the whole record (#221).
+ *
+ *   input   the tool's raw input as the tool received it: a Bash command with its options, the full content of a
+ *           Write, both sides of an Edit, the arguments of an MCP call, Codex's file changes with their diffs
+ *   output  the whole text the tool answered, uncut. Images are not in it: they are kept as attachments (#40)
+ *
+ * Before #221 the card's preview was the record: a result kept its first 300 characters (Claude) or 2,000 (Codex),
+ * and a file edit kept only its path. The full text lived only in the tools' own files, which do not last (Claude
+ * Code deletes a transcript after 30 days without activity). Rows written before then have neither field.
+ *
+ * **Both are for the store only.** The host strips them from everything it sends (the live broadcast, the history
+ * pages) and from every stored message it reads back unless the reader asks for them by name
+ * (`Store.loadMessages`). Full tool output reaching another session's prompt is the privilege path #73 closed:
+ * `read_session`, `recall`, the handoff record and the orchestrator's memory read `summary` and nothing else. And
+ * an agent `cat`-ing a large file would otherwise ride every page load. Neither field is in the search index.
+ */
+const ToolCall = z.object({
+  ...base,
+  ...persistedSeq,
+  type: z.literal('tool_call'),
+  callId: z.string(),
+  summary: ToolSummary,
+  input: z.unknown().optional(),
+})
+
+const ToolResult = z.object({
+  ...base,
+  ...persistedSeq,
+  type: z.literal('tool_result'),
+  callId: z.string(),
+  ok: z.boolean(),
+  summary: z.string().default(''),
+  output: z.string().optional(),
+})
+
+/**
+ * What a native subagent did, one step of it (#222): its text, its reasoning, a tool call it made, that call's result.
+ * The shapes are the parent's own events, so the store keeps a subagent's step as it keeps the parent's and the screen
+ * draws it the same way. Each step is whole: Claude forwards a subagent's text a block at a time, and Codex's child
+ * items are read when they complete, so there are no chunks to join.
+ */
+export const SubagentStep = z.discriminatedUnion('type', [MessageDelta, ReasoningDelta, ToolCall, ToolResult])
+export type SubagentStep = z.infer<typeof SubagentStep>
+
+/**
+ * The calls that launch a native subagent (#222): Claude Code's `Agent` tool (`Task` before it was renamed) and Codex's
+ * `spawnAgent` collab call. The card of such a call is where the subagent's steps are kept and shown.
+ */
+const SUBAGENT_LAUNCH_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task', 'spawnAgent'])
+export const launchesSubagent = (tool: string): boolean => SUBAGENT_LAUNCH_TOOLS.has(tool)
+
 export const NormalizedEvent = z.discriminatedUnion('type', [
-  /**
-   * A chunk of the assistant's reply. `messageId` names the message the chunk belongs to, where the tool says
-   * so (codex: the agentMessage item id). The host keeps one open row per session and grows it with every
-   * chunk until a recorded event closes it, so two messages with nothing recorded between them used to become
-   * one row (#212). A chunk whose `messageId` differs from the open row's starts a new row. Absent means
-   * "the same message as before", which is what every chunk meant before this field existed.
-   */
-  z.object({
-    ...base,
-    ...persistedSeq,
-    type: z.literal('message_delta'),
-    role: z.enum(['assistant']),
-    text: z.string(),
-    messageId: z.string().optional(),
-  }),
-  /**
-   * Only as much of the model's reasoning as is actually visible (measured in #58, 2026-08-26).
-   *
-   * The two tools produce different things — which is why both fields are optional:
-   *   codex: a summary **text** is streamed (item/reasoning/summaryTextDelta, but only if the
-   *          thread config has model_reasoning_summary turned on) → text
-   *   claude: the thinking body is encrypted as a whole, so there is no text — thinking_delta
-   *          only ever carries estimated_tokens → estTokens (incremental)
-   * Content that does not exist is never faked: if text is present, it is even kept in the
-   * record (kind 'reasoning'); if only estTokens is present, it only lives as a "thinking ~N"
-   * progress indicator and disappears once the turn ends.
-   */
-  z.object({
-    ...base,
-    ...persistedSeq,
-    type: z.literal('reasoning_delta'),
-    text: z.string().optional(),
-    estTokens: z.number().optional(),
-  }),
+  MessageDelta,
+  ReasoningDelta,
   /**
    * The current state of a plan the agent set (measured in #58, codex turn/plan/updated).
    *
@@ -134,6 +190,35 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * callId (finding it by position would attach it to someone else's open card).
    */
   z.object({ ...base, type: z.literal('tool_output_delta'), callId: z.string(), text: z.string() }),
+  /**
+   * A step a native subagent took (#222) — Claude Code's `Agent` tool, Codex's `spawn_agent` child thread.
+   *
+   * **One wrapper kind, not a flag on the parent's events.** A subagent's tool call used to land in the parent's
+   * conversation as if the parent had made it (#98), and a field that every reader of `tool_call` has to remember to
+   * check would bring that back the first time one forgets. A reader that does not know this kind skips it (§4 of
+   * docs/protocol.md: an unknown type is ignored), so the conversation, the state machine, unread and the turn logic
+   * stay the parent's without a line of code each.
+   *
+   *   parentCallId  the call that launched the subagent: Claude's `Agent` tool_use id (`parent_tool_use_id` on the
+   *                 subagent's messages), Codex's `spawnAgent` collab item id (whose `receiverThreadIds` names the
+   *                 child thread). A subagent that launches its own is tagged with its own launch call, a card inside
+   *                 the first one's steps
+   *   step          the step, in the parent's own event shapes (`SubagentStep`), `input` and `output` included until
+   *                 it leaves the host (`withoutToolRecord`)
+   *   stepSeq       its number among this launch's steps, set by the host when it stores the step. Not a session
+   *                 `seq`: a subagent's steps are not the conversation, and never count as unread
+   *
+   * The host keeps the steps apart from the conversation (`subagent_messages`, read only by asking for one launch
+   * card's steps) and out of the search index. The one-line-per-step progress on a running Claude agent's card is
+   * still `tool_output_delta`.
+   */
+  z.object({
+    ...base,
+    type: z.literal('subagent_event'),
+    parentCallId: z.string(),
+    step: SubagentStep,
+    stepSeq: z.number().optional(),
+  }),
   /**
    * A person's message was added to the conversation.
    *
@@ -176,40 +261,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      */
     attachments: z.array(Attachment).optional(),
   }),
-  /**
-   * A tool call and its result. `summary` is what the card shows; `input` and `output` are the whole record (#221).
-   *
-   *   input   the tool's raw input as the tool received it: a Bash command with its options, the full content of a
-   *           Write, both sides of an Edit, the arguments of an MCP call, Codex's file changes with their diffs
-   *   output  the whole text the tool answered, uncut. Images are not in it: they are kept as attachments (#40)
-   *
-   * Before #221 the card's preview was the record: a result kept its first 300 characters (Claude) or 2,000 (Codex),
-   * and a file edit kept only its path. The full text lived only in the tools' own files, which do not last (Claude
-   * Code deletes a transcript after 30 days without activity). Rows written before then have neither field.
-   *
-   * **Both are for the store only.** The host strips them from everything it sends (the live broadcast, the history
-   * pages) and from every stored message it reads back unless the reader asks for them by name
-   * (`Store.loadMessages`). Full tool output reaching another session's prompt is the privilege path #73 closed:
-   * `read_session`, `recall`, the handoff record and the orchestrator's memory read `summary` and nothing else. And
-   * an agent `cat`-ing a large file would otherwise ride every page load. Neither field is in the search index.
-   */
-  z.object({
-    ...base,
-    ...persistedSeq,
-    type: z.literal('tool_call'),
-    callId: z.string(),
-    summary: ToolSummary,
-    input: z.unknown().optional(),
-  }),
-  z.object({
-    ...base,
-    ...persistedSeq,
-    type: z.literal('tool_result'),
-    callId: z.string(),
-    ok: z.boolean(),
-    summary: z.string().default(''),
-    output: z.string().optional(),
-  }),
+  ToolCall,
+  ToolResult,
   /**
    * An inline conversation app screen (M4 B-1) — a session's agent called an app tool **that has
    * a screen attached**. The screen stands under that call's card (`callId`, the same id as the
@@ -549,10 +602,15 @@ export function parseEventLenient(raw: unknown): NormalizedEvent | null {
 }
 
 /**
- * The event as it may leave the host: a tool call without its `input`, a tool result without its `output` (#221).
- * Everything else, `turn_complete`'s `output` included, is returned as it is.
+ * The event as it may leave the host: a tool call without its `input`, a tool result without its `output` (#221), and
+ * the same for a tool call or result a subagent made (#222). Everything else, `turn_complete`'s `output` included, is
+ * returned as it is.
  */
 export function withoutToolRecord(e: NormalizedEvent): NormalizedEvent {
+  if (e.type === 'subagent_event') {
+    const step = withoutToolRecord(e.step) as SubagentStep
+    return step === e.step ? e : { ...e, step }
+  }
   if (e.type === 'tool_call' && 'input' in e) {
     const { input: _input, ...card } = e
     return card
