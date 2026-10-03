@@ -4998,11 +4998,11 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
 
     The test takes itself to the bottom rather than waiting for the auto-scroll to get there,
     and waits until the height stops changing — every row measured, nothing left to follow.
-    The answer lands as one burst right behind the send, and in WebKit the auto-scroll let go
-    of the bottom on its own in 2 runs of 30: with no wheel, pointer or key on the list,
-    scrollTop dropped 54px on the frame the answer's height landed, which `decideFollow` reads
-    as the person scrolling up, and the list stopped 914px short. That is a follow race to look
-    at on its own, not what this test is about.
+    Following is not what this test is about. The answer lands as one burst right behind the
+    send, and in WebKit that burst used to make the auto-scroll let go of the bottom on its own
+    (2 runs in 30, 914px short): the virtual scroller compensated the answer row from a stale
+    offset and put the view 54px up, which read as the person scrolling up. That is fixed and
+    guarded on its own in fixtures/auto-follow.ts.
   */
   let lastHeight = -1
   await expect

@@ -42,11 +42,107 @@ export type FollowDecision = 'follow' | 'release' | 'ignore'
  *
  * Looking at position too removes that race: scrollTop stays put when content grows, but drops
  * when the person scrolls up.
+ *
+ * **But a drop is only the person's when the person did something** (`touched`, see
+ * `personIsScrolling`). Layout drops scrollTop on its own: the browser clamps it when the
+ * content shrinks under a view at the end, and a row measuring smaller than its guess does
+ * exactly that. In WebKit a large answer landing in one burst dropped it 54px with no input on
+ * the list at all; reading that as the person let go of the bottom, and the list stopped 914px
+ * short of the answer's end. This branch only exists to catch the person's own scroll before
+ * its event arrives — without their input there is nothing for it to catch, so it follows.
+ * The scroll event itself is still judged by `stickAfterScroll`, input or not.
  */
-export function decideFollow(p: { sticking: boolean; scrollTop: number; lastTop: number }): FollowDecision {
+export function decideFollow(p: {
+  sticking: boolean
+  scrollTop: number
+  lastTop: number
+  touched: boolean
+}): FollowDecision {
   if (!p.sticking) return 'ignore'
-  if (p.scrollTop < p.lastTop - MOVED_UP_SLACK) return 'release'
+  if (p.touched && p.scrollTop < p.lastTop - MOVED_UP_SLACK) return 'release'
   return 'follow'
+}
+
+/**
+ * How long after the person's last input a drop in scrollTop can still be theirs.
+ *
+ * Keyboard scrolling animates for a couple of hundred milliseconds after the key, and the
+ * follow effect can run between any of those frames and the scroll event each one fires.
+ * A held pointer or finger counts for as long as it is held, on top of this.
+ */
+export const INPUT_GRACE_MS = 500
+
+/** Whether the person is, or was a moment ago, moving the list themselves */
+export const personIsScrolling = (p: { now: number; lastInputAt: number; held: boolean }): boolean =>
+  p.held || p.now - p.lastInputAt < INPUT_GRACE_MS
+
+/**
+ * Keys that scroll a list up: PageUp, ArrowUp (also ⌘↑ and ⌥↑ on a Mac), Home, Shift+Space.
+ *
+ * Only these count — a key that scrolls down is never a reason to let go of the bottom.
+ */
+export const isScrollUpKey = (e: { key: string; shiftKey: boolean }): boolean =>
+  e.key === 'PageUp' || e.key === 'ArrowUp' || e.key === 'Home' || (e.key === ' ' && e.shiftKey)
+
+/**
+ * Whether the list still follows the bottom, judged from a scroll event.
+ *
+ * **A scroll event reports a move that already happened, against the content as it is now.**
+ * The event fires a frame after the move, and content can land in between: following wrote
+ * scrollTop to the end, a burst of answer grew the list by 900px, and only then did the event
+ * arrive — reading "not at the bottom" there let go of a view that had never moved (seen in
+ * WebKit, the same burst as in `decideFollow`). So while following, the question is not "is it
+ * at the bottom now" but "did the view move up from where it was at the bottom".
+ *
+ * `lastTop` while following is the highest scrollTop seen at the bottom, not the last one seen.
+ * Inside `BOTTOM_SLACK` the view still counts as at the bottom, so a slow trackpad moving up a
+ * pixel or two per event would otherwise reset the reference on every event and never add up to
+ * a release. At the very end the current scrollTop is taken as is: a browser clamp after the
+ * content shrank lowers the end itself.
+ *
+ * Anything else that moves the view up — a wheel, a key, the scrollbar, a script — still lets go,
+ * input or not: unlike `decideFollow`, this has the move itself in hand, not a guess at it.
+ */
+export function stickAfterScroll(p: {
+  sticking: boolean
+  lastTop: number
+  pos: ScrollPos
+}): { sticking: boolean; lastTop: number } {
+  const top = p.pos.scrollTop
+  if (isAtBottom(p.pos)) {
+    const atEnd = distanceFromBottom(p.pos) <= 1
+    return { sticking: true, lastTop: p.sticking && !atEnd ? Math.max(p.lastTop, top) : top }
+  }
+  if (p.sticking && top >= p.lastTop - MOVED_UP_SLACK) return { sticking: true, lastTop: Math.max(p.lastTop, top) }
+  return { sticking: false, lastTop: top }
+}
+
+/** The part of a scroll element the virtual scroller's writes go through */
+export type ScrollWriter = { scrollTop: number; scrollTo(options: ScrollToOptions): void }
+
+/**
+ * Every scroll write the conversation's virtual scroller makes (its `scrollToFn`).
+ *
+ * When a row above the top of the view is measured, tanstack-virtual compensates by the size
+ * change so the view holds still — but it writes **its cached offset plus the change**, and
+ * that offset is the one from the last scroll event it saw. Right after this view's own write
+ * (landing, following) the event has not been dispatched yet, so the cache is a frame stale and
+ * the "compensation" puts the view somewhere it never was. Measured in WebKit: following had put
+ * the view at the end (2350), the cache still said 1436, the answer row measured 860px taller,
+ * and the write landed on 2296 — 54px up from the end, a scroll nobody made, which the follow
+ * logic then read as the person scrolling up.
+ *
+ * So a compensation (`adjustments` set) is applied to where the view **is**, not to where the
+ * scroller last saw it. Every other write (scrollToIndex, scrollToOffset, the initial sync)
+ * carries an absolute target and goes through unchanged.
+ */
+export function writeScroll(
+  el: ScrollWriter,
+  offset: number,
+  options: { adjustments?: number; behavior?: ScrollBehavior },
+): void {
+  const top = options.adjustments ? el.scrollTop + options.adjustments : offset
+  el.scrollTo({ top, behavior: options.behavior })
 }
 
 /**

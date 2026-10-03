@@ -23,7 +23,17 @@ import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
 import { composingKey, isComposerSendKey } from './composerKeys.js'
 import { appendPath, isFileDrag, readDragPath } from '../files/dragPath.js'
-import { anchorAt, decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
+import {
+  anchorAt,
+  decideFollow,
+  isAtBottom,
+  isScrollUpKey,
+  MOVED_UP_SLACK,
+  personIsScrolling,
+  shouldFollowAgain,
+  stickAfterScroll,
+  writeScroll,
+} from './scroll.js'
 
 /** The maximum height the composer can grow to. Must match CSS's max-h-40 */
 const COMPOSER_MAX_H = 160
@@ -1458,6 +1468,15 @@ function ChatStream({
      */
     useAnimationFrameWithResizeObserver: true,
     getItemKey: (i) => chat[i]?.seq ?? i,
+    /*
+     * The scroller's size-change compensation is applied to where the view is now, not to the
+     * offset the scroller last saw in a scroll event — which is a frame stale right after our
+     * own landing or following write, and put the view 54px above the end in WebKit (see
+     * `writeScroll`).
+     */
+    scrollToFn: (offset, options, instance) => {
+      if (instance.scrollElement) writeScroll(instance.scrollElement, offset, options)
+    },
   })
 
   /*
@@ -1499,12 +1518,58 @@ function ChatStream({
   }, [chat, virtualizer, scrollRef])
 
   /**
-   * The last scroll position this component is aware of.
+   * The last scroll position this component is aware of — while following, the highest one
+   * seen at the bottom (see `stickAfterScroll`).
    *
    * The reference used to judge "did the person scroll up" by **a change in position** rather
    * than a flag: scrollTop stays put even as content grows, but drops when the person scrolls up.
    */
   const lastTop = useRef(0)
+
+  /**
+   * When the person last moved the list themselves, and whether a pointer or finger is on it.
+   *
+   * A drop in scrollTop seen by the follow effect, before its scroll event, only counts as the
+   * person's when they did something (`decideFollow`) — layout drops it too. A pointer on the
+   * list covers dragging the scrollbar; it stays held until it is released anywhere.
+   */
+  const lastInputAt = useRef(-Infinity)
+  const held = useRef(false)
+  const noteInput = () => {
+    lastInputAt.current = performance.now()
+  }
+  useEffect(() => {
+    const release = () => {
+      if (!held.current) return
+      held.current = false
+      noteInput()
+    }
+    /*
+     * A scrolling key is only the list's when it is not typed into a field — the composer's
+     * ArrowUp walks the sent history, it does not scroll the conversation — and when it lands on
+     * the list or on nothing in particular (the page itself, after a click on the conversation's
+     * text), not in another pane.
+     */
+    const onKey = (e: KeyboardEvent) => {
+      const el = scrollRef.current
+      const t = e.target
+      if (!el || !isScrollUpKey(e) || !(t instanceof Node)) return
+      if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      if (el.contains(t) || t === document.body || t === document.documentElement) noteInput()
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    window.addEventListener('touchend', release)
+    window.addEventListener('touchcancel', release)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      window.removeEventListener('touchend', release)
+      window.removeEventListener('touchcancel', release)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [scrollRef])
 
   /**
    * The row currently touching the top of the screen (#61) — updated **on every move, not on
@@ -1529,9 +1594,10 @@ function ChatStream({
    * `anchor` above — the element at the moment the cleanup function runs already belongs to the
    * next session, so it must not be measured there. The other is the reason the original
    * comment gave for "look at position, not the follow flag": the follow effect's release,
-   * below, also drops the flag when content shifts as a row is measured, but that is a judgment
-   * about a single frame, not an answer to where the person was actually looking. So this is
-   * used **only here**, and is only ever written from a scroll event.
+   * below, also drops the flag on a drop it sees before the scroll event (while the person's
+   * input is fresh), but that is a judgment about a single frame, not an answer to where the
+   * person was actually looking. So this is used **only here**, and is only ever written from a
+   * scroll event.
    */
   const wasAtBottom = useRef(true)
 
@@ -1539,9 +1605,12 @@ function ChatStream({
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
-    stickToBottom.current = isAtBottom(el)
+    // Not `isAtBottom(el)` alone: content that landed since the move makes a view that never
+    // moved look far from the bottom (see `stickAfterScroll`)
+    const next = stickAfterScroll({ sticking: stickToBottom.current, lastTop: lastTop.current, pos: el })
+    stickToBottom.current = next.sticking
     wasAtBottom.current = stickToBottom.current
-    lastTop.current = el.scrollTop
+    lastTop.current = next.lastTop
     /*
      * Not remembered while landing. That scroll was produced by this code, not by the person,
      * and recording an intermediate frame's position as "where they were reading" would send
@@ -1931,6 +2000,7 @@ function ChatStream({
       sticking: stickToBottom.current,
       scrollTop: el.scrollTop,
       lastTop: lastTop.current,
+      touched: personIsScrolling({ now: performance.now(), lastInputAt: lastInputAt.current, held: held.current }),
     })
     if (decision === 'ignore') return
     if (decision === 'release') {
@@ -1956,9 +2026,23 @@ function ChatStream({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      /* The moment a person touches the conversation, "settling at the bottom" ends right there (#31) */
-      onWheel={endLanding}
-      onPointerDown={endLanding}
+      /*
+        The moment a person touches the conversation, "settling at the bottom" ends right there
+        (#31). The same touch is what lets the follow effect read a drop as theirs — a wheel only
+        when it turns upward, a pointer (the scrollbar) or a finger for as long as it is held;
+        keys are watched on the window, above.
+      */
+      onWheel={(e) => {
+        endLanding()
+        if (e.deltaY < 0) noteInput()
+      }}
+      onPointerDown={() => {
+        endLanding()
+        held.current = true
+      }}
+      onTouchStart={() => {
+        held.current = true
+      }}
       onKeyDown={endLanding}
       /* min-h-0: even with overflow-y-auto set, this would stretch itself if it could not shrink */
       /*
