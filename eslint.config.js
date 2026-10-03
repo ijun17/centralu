@@ -134,6 +134,8 @@ export default tseslint.config(
       // Packaging tools: the npm launcher and release scripts are Node processes too.
       'packaging/**/*.mjs',
       'scripts/**/*.{mts,mjs}',
+      // Scripts that GitHub Actions workflows run.
+      '.github/scripts/**/*.mjs',
     ],
     languageOptions: { globals: globals.node },
   },

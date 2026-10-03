@@ -1,0 +1,59 @@
+# Sends repository activity to a Discord channel (2026-10-03). A contributor's reply on #82
+# sat unanswered for two weeks because nothing announced it; GitHub's own notifications were
+# not reaching anyone.
+#
+# Setup, once: create a webhook in the Discord channel (Channel settings → Integrations →
+# Webhooks) and store its URL as the repository secret DISCORD_WEBHOOK
+# (`gh secret set DISCORD_WEBHOOK`). Without the secret every run ends green with a notice.
+#
+# Whose activity is announced: everyone except bots and the logins in the repository variable
+# DISCORD_SKIP_ACTORS (comma-separated). It defaults to the owner, because the owner's agents
+# post under the owner's login dozens of times a day and would bury what other people say.
+# Set the variable to a single space to announce everyone.
+#
+# Why pull_request_target and not pull_request: a pull request from a fork gets no secrets
+# under pull_request, and pull requests from forks are the activity this exists to surface.
+# pull_request_target runs with secrets, so this workflow never checks out or runs code from
+# the pull request. The checkout below is the base branch (the default for this event), and
+# the script reads the event only as JSON.
+#
+# Known gap: pull_request_review and pull_request_review_comment on a pull request from a
+# fork run without secrets (GitHub has no _target variant for them), so a review left on a
+# fork's PR is not announced. Reviews on this repository's own branches are.
+name: discord-notify
+
+on:
+  issues:
+    types: [opened, closed, reopened]
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, closed]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+  discussion:
+    types: [created]
+  discussion_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The base branch's copy of the script, never the pull request's.
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          SKIP_ACTORS: ${{ vars.DISCORD_SKIP_ACTORS || github.repository_owner }}
+        run: node .github/scripts/discord-notify.mjs
