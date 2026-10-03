@@ -5,6 +5,9 @@ import { join } from 'node:path'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
+const EXCLUDE = ['**/node_modules/**', 'spike/**', 'e2e/**']
+const APP_RUNTIME = 'packages/agent-host/src/apps/external/**/*.test.ts'
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -17,7 +20,6 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'],
     /*
      * **Tests do not write to the person's home directory.**
      *
@@ -27,6 +29,25 @@ export default defineConfig({
      * (see `packages/agent-host/src/data-dir.ts`).
      */
     env: { CC_DATA_DIR: join(tmpdir(), 'centralu-test-data') },
-    exclude: ['**/node_modules/**', 'spike/**', 'e2e/**'],
+    exclude: EXCLUDE,
+    /*
+     * **The external-app runtime tests start real Node processes,** several per test (a start,
+     * a crash, a restart, a reload), each with an MCP handshake. On an idle machine the slowest
+     * take 2–4s; with other agents running full suites at the same time (load average 20–60,
+     * 2026-10-03) the same tests crossed the 5s default again and again: `lifecycle`, `reload`,
+     * `versions`, `check`. Run alone, every one passed. The time is spent waiting on processes the
+     * OS schedules, not on anything the test could do faster, so that folder gets a longer
+     * limit, and every other test keeps the 5s default, which still catches a real hang quickly.
+     */
+    projects: [
+      {
+        extends: true,
+        test: { name: 'unit', include: ['packages/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'], exclude: [...EXCLUDE, APP_RUNTIME] },
+      },
+      {
+        extends: true,
+        test: { name: 'app-runtime', include: [APP_RUNTIME], testTimeout: 15_000 },
+      },
+    ],
   },
 })
