@@ -2,7 +2,7 @@
 # `git push --tags`.
 #
 # Why this exists: 0.1.0-beta.2 went out by hand, in three places, in an order a person had
-# to remember (Linux from `publish-linux-npm.yml`, then macOS from a Mac, then the shim from
+# to remember (Linux from a since-removed `publish-linux-npm.yml`, then macOS from a Mac, then the shim from
 # the same Mac). The order is not a preference — the shim pins its platform packages to an
 # *exact* version, so it may only go out once every one of them is already on the registry.
 # A human keeping that straight across three sessions is a mistake waiting for a bad day,

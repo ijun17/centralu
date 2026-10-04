@@ -15,8 +15,7 @@
  * type reported by `file` — and none of those questions can be answered honestly
  * about a Linux binary from a Mac. A cross-build flag would only let us publish an
  * unverified bundle. The other host comes from CI instead — `.github/workflows/release.yml`
- * runs one job per platform (and the older single-purpose `publish-linux-npm.yml`, which it
- * replaces, still works).
+ * runs one job per platform.
  */
 import { execFileSync } from 'node:child_process'
 import {

@@ -11,10 +11,12 @@ npm에는 다섯 개의 패키지가 올라간다:
 | 패키지 | 내용 | 설치 대상 |
 |---|---|---|
 | `centralu` | 런처 스크립트, 몇 KB | 지원하는 모든 플랫폼 |
-| `centralu-darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
-| `centralu-linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
-| `centralu-linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 — 0.1.0-beta.3부터 |
+| `@centralu/darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
+| `@centralu/linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
+| `@centralu/linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 |
 | `@centralu/win32-x64` | `Centralu\` 폴더: `centralu.exe`, `resources\host\` | Windows, x86-64 — 0.1.0-beta.9부터 |
+
+**플랫폼 패키지는 0.1.0-beta.10부터 스코프 이름(`@centralu/…`)이다.** 스코프 없는 `centralu-win32-x64`를 처음 올릴 때(0.1.0-beta.8) `403 … Package name triggered spam detection`으로 거부되었다. `@centralu` 스코프는 소유자의 npm 조직 것이라 그 아래 이름은 누구도 가져가거나 선점할 수 없다. 0.1.0-beta.9까지 macOS와 Linux는 `centralu-darwin-arm64`, `centralu-linux-x64`, `centralu-linux-arm64`로 나갔고, 이 패키지들은 사용 중단 표시를 단 채 레지스트리에 남아 그것을 핀한 옛 shim이 계속 설치되게 한다. shim 자체는 사람들이 치는 이름이라 스코프 없는 `centralu`로 두고, 조직의 `developers` 팀을 통해 관리한다. 사용자는 플랫폼 패키지 이름을 칠 일이 없다.
 
 `centralu`는 나머지를 `optionalDependencies`로 선언하고 각각에 `os`/`cpu` 필드를 달아 둔다. 그래서 npm은 설치를 수행하는 머신에 맞는 번들 딱 하나만 설치한다. esbuild와 swc가 쓰는 것과 같은 구성이며, 이유는 크기다: Linux 머신에 macOS 번들을 내려받을 사람은 없다.
 
@@ -30,7 +32,6 @@ npm에는 다섯 개의 패키지가 올라간다:
 - `.github/workflows/build.yml` — 모든 push와 PR에서 모든 플랫폼을 빌드하고 번들을 아티팩트로 업로드한다. 프로젝트에 Linux 머신을 가진 사람이 없으므로, Linux 빌드가 실제로 돌아가는 곳은 여기뿐이다. 써 보려면 아티팩트를 내려받는다. GitHub 아티팩트는 zip이라 실행 비트가 사라지므로, 압축을 푼 뒤 AppImage에 `chmod +x`를 해 준다.
 - 같은 워크플로가 **windows-x64**(#14)도 빌드해 아티팩트 두 개를 올린다: 포터블 폴더 `centralu-windows-x64`(`Centralu\centralu.exe` 옆에 `Centralu\resources\host\`)와 NSIS 설치 파일 `centralu-windows-x64-setup`(사용자별 설치, 관리자 권한 불필요). 둘 다 서명되어 있지 않다. 별도의 `windows tests` 잡이 `pnpm verify`의 네 부분을 돌리며, 단위 테스트 단계만 아직 막지 않는다(#307의 W2 목록). npm 패키지 `@centralu/win32-x64`는 같은 폴더를 싣고, `release.yml`의 Windows 잡이 따로 다시 빌드한다(아래 [Windows](#windows-14-w3) 참고).
 - `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 모든 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다.
-- `.github/workflows/publish-linux-npm.yml` — 전신이다: `centralu-linux-x64` 하나만, `workflow_dispatch`로만, 기본은 dry run. `release.yml`이 이를 대체하며 엄밀히 더 많은 일을 한다. 그래도 `release.yml`이 실제 릴리스를 한 번 해낼 때까지는 동작하는 상태로 남겨 둔다 — 0.1.0-beta.2를 배포한 경로를, 후계자가 아직 아무것도 배포해 본 적 없는 시점에 지우는 것은 검증된 것을 검증 안 된 것과 맞바꾸는 일이다. 그 릴리스가 끝나면 지운다.
 
 브랜치 push나 머지는 여전히 아무것도 배포하지 않는다. **`v*` 태그는 이제 배포한다** — 태그가 존재하는 이유가 그것이다.
 
@@ -82,10 +83,10 @@ shim은 플랫폼 패키지들을 *정확한* 버전으로 핀하므로, 그 전
 
 ```bash
 pnpm release:npm                       # rehearsal: build, copy, verify, npm pack
-pnpm release:npm --publish             # publishes centralu-darwin-arm64, then centralu
+pnpm release:npm --publish             # publishes @centralu/darwin-arm64, then centralu
 ```
 
-Linux와 Windows는 먼저 CI에서 나와야 한다 (`dry_run`을 끈 `release.yml`; linux-x64 하나만이라면 `publish-linux-npm.yml`도 된다). 두 번째 명령은 핀된 플랫폼 패키지 중 하나라도 이 버전으로 레지스트리에 없는 동안에는 shim 배포를 거부하기 때문이다.
+Linux와 Windows는 먼저 CI에서 나와야 한다 (`dry_run`을 끈 `release.yml`). 두 번째 명령은 핀된 플랫폼 패키지 중 하나라도 이 버전으로 레지스트리에 없는 동안에는 shim 배포를 거부하기 때문이다.
 
 릴리스 빌드는 `.app`만 만들고, 일반 `pnpm app` 빌드가 함께 만드는 `.dmg`는 만들지 않는다. 이것은 두 겹으로 의도된 것이다: 릴리스는 배포하는 것만 빌드해야 하고, DMG 단계는 코드와 무관한 이유로 실패할 수 있는 단계다 — Tauri의 `bundle_dmg.sh`는 `osascript`로 Finder를 조작하므로, 뒤에 GUI 세션이 없는 셸(에이전트, ssh 세션)은 Automation 접근이 거부되어 64로 종료한다. 올바르게 빌드되고 서명된 `.app`이 이미 놓여 있는데 그것 때문에 릴리스를 잃는 것은 할 만한 거래가 아니다. CI는 여전히 `.dmg`를 빌드하며, DMG의 진짜 고장은 거기서 드러나야 한다.
 
@@ -115,8 +116,6 @@ Linux와 Windows는 먼저 CI에서 나와야 한다 (`dry_run`을 끈 `release.
 ## Windows (#14, W3)
 
 위의 일곱 단계는 0.1.0-beta.8을 위해 한꺼번에 들어갔다. 이유는 아래 linux-arm64 절과 같다: 핀은 그것이 가리키는 것을 배포하는 바로 그 변경에서만 추가할 수 있다.
-
-**이것만 스코프가 붙은 이유.** 다른 플랫폼 패키지는 스코프 없는 이름(`centralu-<id>`)이지만, `centralu-win32-x64`를 처음 올릴 때(0.1.0-beta.8, 2026-10-05) 레지스트리가 `403 … Package name triggered spam detection`으로 거부했다. `@centralu` 스코프는 소유자의 npm 조직 것이라 그런 식으로 거부되거나 남이 가져갈 수 없다. 사용자는 이 이름을 칠 일이 없다. 실행 스크립트가 선택 의존성으로 받아 오고, 런처는 이름으로 찾는다. CI 토큰은 `@centralu` 아래에 올릴 권한이 있어야 한다.
 
 **패키지.** `@centralu/win32-x64`(`os: win32`, `cpu: x64`)는 W1(#307)부터 `build.yml`이 올리던 포터블 폴더를 싣는다: `Centralu\centralu.exe` 옆에 `Centralu\resources\host\`. Tauri는 설치된 것이 없으면 exe 옆에서 리소스를 찾으므로, 폴더는 npm이 풀어 놓은 자리에서 그대로 실행된다. 네이티브 Node를 쓰는 ARM64 Windows는 이 패키지를 건너뛰고, 런처는 아직 지원하지 않는 플랫폼이라고 알린다. 그쪽으로는 아무것도 배포하지 않는다.
 
@@ -153,13 +152,13 @@ detached는 선택이 아니다. libuv는 detached가 아닌 모든 자식을, �
 ([GitHub changelog](https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/)),
 무료이며, private 리포지토리 GA는 2026-01-29에 뒤따랐다
 ([GitHub changelog](https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/)) —
-거기서도 쓸 수는 있지만 public 리포 사용처럼 무료는 *아니다*: 플랜에 포함된 분(minute)을 소모한 뒤에는 분당 과금된다 (Tauri의 CI 가이드도 독립적으로 같은 두 레이블을 가리킨다: <https://v2.tauri.app/distribute/pipelines/github/>). `ijun17/centralu`는 이 글을 쓰는 시점에 public 리포라 러너가 무료이므로, `build.yml`의 matrix 항목을 켰고(`bb403d1`) 빌드는 green이다(run 32381990293). 오늘의 공개 여부에 조건을 거는 무언가가 아니라 평범한 matrix 항목으로 적어 둔 이유는, `build.yml`이 사람이 매 실행을 승인하는 일 없이 모든 push와 모든 PR에서 돌기 때문이다: **리포가 다시 private으로 돌아가는 일이 생기면 먼저 그 항목을 주석 처리해야 한다** — 그것이 이 문단이 대신해 줄 수 없는 단 한 가지이고, 그러지 않으면 공개 여부 전환이 조용한 청구서로 바뀐다. `publish-linux-npm.yml`과 `release.yml`은 사정이 다르다: 배포는 이미 `npm-publish` 환경 뒤에 게이트되어 있어 사람이 이미 실행을 선택해야 하므로, `target` 입력을 `linux-arm64`까지 일반화해도 이 일이 우연히 일어날 새로운 경로가 생기지는 않는다.
+거기서도 쓸 수는 있지만 public 리포 사용처럼 무료는 *아니다*: 플랜에 포함된 분(minute)을 소모한 뒤에는 분당 과금된다 (Tauri의 CI 가이드도 독립적으로 같은 두 레이블을 가리킨다: <https://v2.tauri.app/distribute/pipelines/github/>). `ijun17/centralu`는 이 글을 쓰는 시점에 public 리포라 러너가 무료이므로, `build.yml`의 matrix 항목을 켰고(`bb403d1`) 빌드는 green이다(run 32381990293). 오늘의 공개 여부에 조건을 거는 무언가가 아니라 평범한 matrix 항목으로 적어 둔 이유는, `build.yml`이 사람이 매 실행을 승인하는 일 없이 모든 push와 모든 PR에서 돌기 때문이다: **리포가 다시 private으로 돌아가는 일이 생기면 먼저 그 항목을 주석 처리해야 한다** — 그것이 이 문단이 대신해 줄 수 없는 단 한 가지이고, 그러지 않으면 공개 여부 전환이 조용한 청구서로 바뀐다. `release.yml`은 사정이 다르다: 배포는 이미 `npm-publish` 환경 뒤에 게이트되어 있어 사람이 이미 실행을 선택해야 한다.
 
 **왜 기다렸는지, 그리고 왜 0.1.0-beta.3에서 기다림이 끝났는지.**
 `packaging/npm/centralu/package.json`의 `optionalDependencies`는 정확한 버전을 핀하고, `scripts/release-npm.mts`의 `assertPinnedPlatformsPublished`는 핀된 플랫폼 중 하나라도 릴리스 버전으로 레지스트리에 없는 동안에는 shim 배포를 거부한다. 따라서 평범한 날에 `centralu-linux-arm64`를 핀했다면, *다음* darwin/x64 릴리스가 아무것도 빌드한 적 없는 패키지 뒤에 끼어 멈췄을 것이다 — 그 가드가 막으려고 존재하는 바로 그 함정이, 사용자의 설치 대신 이 리포를 겨냥하게 되는 셈이다. 핀은 그것이 가리키는 것을 배포하는 바로 그 변경에서만 추가할 수 있고, `release.yml`이 그 하나의 변경을 가능하게 한다: arm64 잡이 패키지를 배포하고, shim 잡은 그것이 끝나기 전에는 시작하지 않는다. 그래서 아래 네 가지 수정이 beta.3에서 커밋 하나로 들어갔고, `tooling/release-workflow.test.ts`는 어떤 부분 상태에서도 실패한다.
 
 1. `packaging/npm/centralu/package.json`의 `optionalDependencies`에
-   `"centralu-linux-arm64": "<version>"` (`os`에는 이미 `linux`가 있었다).
+   `"centralu-linux-arm64": "<version>"`(지금은 `@centralu/linux-arm64`) (`os`에는 이미 `linux`가 있었다).
 2. `tooling/brand.test.ts`의 `platforms` 배열에 `{ dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage` }` —
    parked-package 테스트를 대체한다.
 3. `packaging/npm/centralu/bin/centralu.mjs`의 `TARGETS`에

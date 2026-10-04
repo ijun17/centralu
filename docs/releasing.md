@@ -10,10 +10,12 @@ Five packages go to npm:
 | Package | Contents | Installed on |
 |---|---|---|
 | `centralu` | a launcher script, a few KB | every supported platform |
-| `centralu-darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
-| `centralu-linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
-| `centralu-linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 — from 0.1.0-beta.3 |
+| `@centralu/darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
+| `@centralu/linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
+| `@centralu/linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 |
 | `@centralu/win32-x64` | a `Centralu\` folder: `centralu.exe`, `resources\host\` | Windows, x86-64 — from 0.1.0-beta.9 |
+
+**The platform packages are scoped (`@centralu/…`) from 0.1.0-beta.10.** The first publish of an unscoped `centralu-win32-x64` (0.1.0-beta.8) was refused with `403 … Package name triggered spam detection`; the `@centralu` scope belongs to the owner's npm organization, so nobody can take or squat a name under it. Up to 0.1.0-beta.9, macOS and Linux shipped as `centralu-darwin-arm64`, `centralu-linux-x64` and `centralu-linux-arm64`; those stay on the registry, marked deprecated, so older shims that pin them keep installing. The shim itself stays the unscoped `centralu`, because it is the name people type; it is managed by the organization through its `developers` team. Users never type a platform package's name.
 
 `centralu` declares the others as `optionalDependencies` and carries `os`/`cpu`
 fields on each of them, so npm installs exactly one bundle for the machine doing the
@@ -57,11 +59,6 @@ script rehearses by default and why nothing publishes automatically.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
   tag (`dry_run`, default on). See below.
-- `.github/workflows/publish-linux-npm.yml` — the predecessor: `centralu-linux-x64` alone,
-  `workflow_dispatch` only, dry run by default. `release.yml` replaces it and does strictly
-  more. It is kept, working, until `release.yml` has done one real release — deleting the
-  path that shipped 0.1.0-beta.2 before its successor has ever shipped anything would trade
-  a proven thing for an untested one. Delete it after that release.
 
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
@@ -143,11 +140,10 @@ Still supported, and still the fallback if Actions is down. On an Apple Silicon 
 
 ```bash
 pnpm release:npm                       # rehearsal: build, copy, verify, npm pack
-pnpm release:npm --publish             # publishes centralu-darwin-arm64, then centralu
+pnpm release:npm --publish             # publishes @centralu/darwin-arm64, then centralu
 ```
 
-Linux and Windows have to come from CI first (`release.yml` with `dry_run` off; for
-linux-x64 alone, also `publish-linux-npm.yml`), because the second command refuses to
+Linux and Windows have to come from CI first (`release.yml` with `dry_run` off), because the second command refuses to
 publish the shim while any pinned platform package is missing from the registry at this
 version.
 
@@ -200,8 +196,6 @@ to `false` at the same time as the 1.0 bump.
 
 All seven steps above landed together for 0.1.0-beta.8, for the reason the linux-arm64
 section below gives: a pin can only be added in the change that publishes what it points at.
-
-**Why this one is scoped.** The other platform packages are unscoped (`centralu-<id>`), but the first publish of `centralu-win32-x64` (0.1.0-beta.8, 2026-10-05) was refused by the registry with `403 … Package name triggered spam detection`. The `@centralu` scope belongs to the owner's npm organization, so a scoped name cannot be refused that way or taken by anyone else. Users never type it: the shim pulls it in as an optional dependency, and the launcher resolves it by name. The CI token must be allowed to publish under `@centralu`.
 
 **The package.** `@centralu/win32-x64` (`os: win32`, `cpu: x64`) carries the portable folder
 `build.yml` has uploaded since W1 (#307): `Centralu\centralu.exe` beside
@@ -287,10 +281,8 @@ matrix entry rather than something conditional on today's visibility, because `b
 runs on every push and every PR with no human approving each run: **if the repo ever goes
 private again, comment that entry back out first** — that is the one thing this paragraph
 cannot do for you, and a visibility flip would otherwise turn into a silent bill.
-`publish-linux-npm.yml` and `release.yml` are different: publishing is already
-gated behind the `npm-publish` environment, so a human already has to choose to run it —
-generalizing its `target` input to include `linux-arm64` does not add a new way for this
-to happen by accident.
+`release.yml` is different: publishing is already gated behind the `npm-publish`
+environment, so a human already has to choose to run it.
 
 **Why it waited, and why 0.1.0-beta.3 is when it stopped waiting.**
 `packaging/npm/centralu/package.json`'s `optionalDependencies` pin exact versions, and
@@ -304,7 +296,7 @@ change: the arm64 job publishes the package, and the shim job does not start unt
 That is why all four edits below landed in a single commit for beta.3, and why
 `tooling/release-workflow.test.ts` fails on any partial state.
 
-1. `"centralu-linux-arm64": "<version>"` in `optionalDependencies` in
+1. `"centralu-linux-arm64": "<version>"` (now `@centralu/linux-arm64`) in `optionalDependencies` in
    `packaging/npm/centralu/package.json` (`os` already listed `linux`).
 2. `{ dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage` }` in the `platforms` array in
    `tooling/brand.test.ts`, replacing the parked-package test.

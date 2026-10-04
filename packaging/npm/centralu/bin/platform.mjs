@@ -31,9 +31,9 @@ export const APP_NAME = 'Centralu'
  * is installed, so the folder runs where npm unpacked it (#14, W1 in #307).
  */
 export const TARGETS = {
-  'darwin-arm64': { pkg: 'centralu-darwin-arm64', artifact: `${APP_NAME}.app` },
-  'linux-arm64': { pkg: 'centralu-linux-arm64', artifact: `${APP_NAME}.AppImage` },
-  'linux-x64': { pkg: 'centralu-linux-x64', artifact: `${APP_NAME}.AppImage` },
+  'darwin-arm64': { pkg: '@centralu/darwin-arm64', artifact: `${APP_NAME}.app` },
+  'linux-arm64': { pkg: '@centralu/linux-arm64', artifact: `${APP_NAME}.AppImage` },
+  'linux-x64': { pkg: '@centralu/linux-x64', artifact: `${APP_NAME}.AppImage` },
   'win32-x64': { pkg: '@centralu/win32-x64', artifact: APP_NAME },
 }
 

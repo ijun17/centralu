@@ -8,7 +8,7 @@
  * attaches it, npm does not. So an npm install just opens with no warning even with an ad hoc
  * signature (docs/plans/beta-release-checklist.md §2).
  *
- * The app itself lives inside an architecture-specific package (`centralu-darwin-arm64`). This
+ * The app itself lives inside an architecture-specific package (`@centralu/darwin-arm64`). This
  * package is a thin shell that finds it and launches it — the same structure esbuild and swc
  * use.
  *

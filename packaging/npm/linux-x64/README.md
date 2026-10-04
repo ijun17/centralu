@@ -1,4 +1,4 @@
-# centralu-linux-x64
+# @centralu/linux-x64
 
 The Linux (x86-64) app bundle for [Centralu](https://github.com/ijun17/centralu),
 shipped as an AppImage.

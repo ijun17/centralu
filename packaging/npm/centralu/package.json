@@ -37,9 +37,9 @@
     "win32"
   ],
   "optionalDependencies": {
-    "centralu-darwin-arm64": "0.1.0-beta.9",
-    "centralu-linux-arm64": "0.1.0-beta.9",
-    "centralu-linux-x64": "0.1.0-beta.9",
+    "@centralu/darwin-arm64": "0.1.0-beta.9",
+    "@centralu/linux-arm64": "0.1.0-beta.9",
+    "@centralu/linux-x64": "0.1.0-beta.9",
     "@centralu/win32-x64": "0.1.0-beta.9"
   }
 }

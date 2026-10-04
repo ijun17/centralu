@@ -1,4 +1,4 @@
-# centralu-darwin-arm64
+# @centralu/darwin-arm64
 
 The macOS (Apple Silicon) app bundle for [Centralu](https://github.com/ijun17/centralu).
 

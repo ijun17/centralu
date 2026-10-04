@@ -55,12 +55,13 @@ describe('the name is decided in one place', () => {
      * literal name, so a rename that reaches `files` but not the launcher (or the reverse)
      * ships a package that installs and then cannot find its own app.
      */
+    // Scoped from 0.1.0-beta.10: the registry refused an unscoped `centralu-win32-x64` as spam,
+    // and nobody else can publish under `@centralu` (docs/releasing.md).
     const platforms = [
-      { dir: 'darwin-arm64', bundle: `${APP_NAME}.app`, name: `${APP_SLUG}-darwin-arm64` },
-      { dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage`, name: `${APP_SLUG}-linux-arm64` },
-      { dir: 'linux-x64', bundle: `${APP_NAME}.AppImage`, name: `${APP_SLUG}-linux-x64` },
-      // A folder, `Centralu\centralu.exe` beside `Centralu\resources\host\` (#14, W3). Scoped:
-      // the registry refused the unscoped `centralu-win32-x64` as spam (docs/releasing.md).
+      { dir: 'darwin-arm64', bundle: `${APP_NAME}.app`, name: `@${APP_SLUG}/darwin-arm64` },
+      { dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage`, name: `@${APP_SLUG}/linux-arm64` },
+      { dir: 'linux-x64', bundle: `${APP_NAME}.AppImage`, name: `@${APP_SLUG}/linux-x64` },
+      // A folder, `Centralu\centralu.exe` beside `Centralu\resources\host\` (#14, W3).
       { dir: 'win32-x64', bundle: APP_NAME, name: `@${APP_SLUG}/win32-x64` },
     ]
     for (const { dir, bundle, name } of platforms) {
