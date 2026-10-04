@@ -37,6 +37,34 @@ const APP_SETTINGS_DDL = `
  */
 const MIN_READER_KEY = 'min_reader_version'
 
+/**
+ * The `app_settings` key listing steps a host swap left for later (#280 step 3): a JSON array of their `to` numbers.
+ * `user_version` has moved past them, so the list is how the next open knows they still have to run.
+ */
+const DEFERRED_KEY = 'deferred_migrations'
+
+export type StoreOptions = {
+  /**
+   * Opened by a host that is taking over from another one (#280 step 3, a blue-green swap). Only the steps the
+   * previous build can still read run now; heavy and breaking steps are left for `runDeferred`, which the host calls
+   * once the swap is over. See "During a swap" above the list in `migrationSteps`.
+   */
+  swap?: boolean
+}
+
+/** What a host about to take over sees in the store, without writing to it (#280 step 3, `Store.inspect`) */
+export type StoreInspection = {
+  /** False for a store that does not exist yet */
+  exists: boolean
+  userVersion: number
+  minReaderVersion: number
+  latestKnownVersion: number
+  /** Set when this host cannot open the store: the message it would refuse with */
+  tooNew: string | null
+  /** The steps this host would run, with how a swap treats each */
+  pending: { to: number; heavy: boolean; breaksOlderReaders: boolean }[]
+}
+
 /** One step of the migration list. The rule the two flags serve is written above the list in `migrationSteps` */
 interface MigrationStep {
   to: number
@@ -92,7 +120,10 @@ export class Store {
    */
   migrationsRun = 0
 
-  constructor(private readonly dbPath = ':memory:') {
+  constructor(
+    private readonly dbPath = ':memory:',
+    private readonly opts: StoreOptions = {},
+  ) {
     const path = dbPath
     this.db = new Database(path)
     /*
@@ -158,21 +189,28 @@ export class Store {
     if (stored === null) this.writeMinReader(floor)
 
     const t0 = Date.now()
+    /*
+     * Steps an earlier swap left for later (#280 step 3) run now, in their place in the order, unless this open is
+     * itself a swap. A host that died before `runDeferred` finished leaves them here for the next one.
+     */
+    const deferred = new Set(this.storedDeferred())
+    const deferredBefore = deferred.size
+    // A swap only ever meets a store an earlier host already built; a new store has nothing heavy to do
+    const swap = this.opts.swap === true && current > 0
     for (const step of steps) {
-      if (current < step.to) {
-        /*
-         * Raised **before** the step runs. A start killed between the two then leaves a store that turns away an older
-         * host it could still have served, which costs an update; the other order leaves a store an older host opens
-         * and breaks on, which is what the record exists to prevent.
-         */
-        if (step.breaksOlderReaders && step.to > floor) {
-          floor = step.to
-          this.writeMinReader(floor)
-        }
-        step.run()
-        this.db.pragma(`user_version = ${step.to}`)
-        this.migrationsRun += 1
+      const due = current < step.to || deferred.has(step.to)
+      if (!due) continue
+      if (swap && (step.heavy || step.breaksOlderReaders)) {
+        deferred.add(step.to)
+      } else {
+        floor = this.runStep(step, floor)
+        deferred.delete(step.to)
       }
+      if (step.to > this.schemaVersion) this.db.pragma(`user_version = ${step.to}`)
+    }
+    if (deferred.size > 0 || deferredBefore > 0) this.writeDeferred([...deferred])
+    if (deferred.size > 0 && this.dbPath !== ':memory:') {
+      console.error(`[store] left for after the swap: v${[...deferred].sort((a, b) => a - b).join(', v')}`)
     }
     /*
      * If migrations ran, **say so** (a lesson from a dogfooding incident: beta.4 silently
@@ -193,6 +231,116 @@ export class Store {
           `opens it without migrating (it can be read from v${floor} on)`,
       )
     }
+  }
+
+  /**
+   * Runs one step, raising `min_reader_version` first when the step breaks older readers. Returns the new floor.
+   *
+   * Raised **before** the step runs. A start killed between the two then leaves a store that turns away an older host
+   * it could still have served, which costs an update; the other order leaves a store an older host opens and breaks
+   * on, which is what the record exists to prevent.
+   */
+  private runStep(step: MigrationStep, floor: number): number {
+    if (step.breaksOlderReaders && step.to > floor) {
+      floor = step.to
+      this.writeMinReader(floor)
+    }
+    step.run()
+    this.migrationsRun += 1
+    return floor
+  }
+
+  /** Steps a swap left for later that have not run yet (#280 step 3) */
+  get deferredSteps(): number[] {
+    return this.storedDeferred()
+  }
+
+  /**
+   * Runs the steps a swap left for later, in order (#280 step 3). Called by a host once it has taken over, when the
+   * host it replaced is gone for good: a breaking step here is what stops that build from coming back, so it must not
+   * run while the swap could still fall back to it. Returns how many ran.
+   */
+  runDeferred(): number {
+    const left = new Set(this.storedDeferred())
+    if (left.size === 0) return 0
+    const t0 = Date.now()
+    let floor = this.minReaderVersion
+    let ran = 0
+    for (const step of this.migrationSteps()) {
+      if (!left.has(step.to)) continue
+      floor = this.runStep(step, floor)
+      left.delete(step.to)
+      // One at a time, so a host that dies half way leaves exactly what is still owed
+      this.writeDeferred([...left])
+      ran += 1
+    }
+    if (this.dbPath !== ':memory:') console.error(`[store] ran ${ran} step(s) left from the swap (${Date.now() - t0}ms)`)
+    return ran
+  }
+
+  /**
+   * Reads what a host would do to this store, without writing to it (#280 step 3). A host started in standby for a
+   * swap calls this before it takes the ownership lock: it must not touch a store another host is serving from.
+   */
+  static inspect(dbPath: string): StoreInspection {
+    const empty = (known: number): StoreInspection => ({
+      exists: false,
+      userVersion: 0,
+      minReaderVersion: 0,
+      latestKnownVersion: known,
+      tooNew: null,
+      pending: [],
+    })
+    // The steps' flags are read off an object that never runs them: `run` closes over `db`, which stays unused here
+    const probe = Object.create(Store.prototype) as Store
+    const steps = probe.migrationSteps()
+    const known = steps[steps.length - 1]!.to
+    if (dbPath === ':memory:' || !existsSync(dbPath)) return empty(known)
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    try {
+      probe.db = db
+      const userVersion = db.pragma('user_version', { simple: true }) as number
+      const floor = probe.storedMinReader()
+      const deferred = new Set(probe.storedDeferred())
+      return {
+        exists: true,
+        userVersion,
+        minReaderVersion: floor ?? 0,
+        latestKnownVersion: known,
+        tooNew: floor !== null && floor > known ? storeTooNewMessage(floor, known, dbPath) : null,
+        pending: steps
+          .filter((s) => userVersion < s.to || deferred.has(s.to))
+          .map((s) => ({ to: s.to, heavy: s.heavy === true, breaksOlderReaders: s.breaksOlderReaders })),
+      }
+    } finally {
+      db.close()
+    }
+  }
+
+  private storedDeferred(): number[] {
+    const table = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get()
+    if (!table) return []
+    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(DEFERRED_KEY) as
+      | { value: string }
+      | undefined
+    if (!row) return []
+    try {
+      const v: unknown = JSON.parse(row.value)
+      return Array.isArray(v) ? v.filter((n): n is number => Number.isInteger(n) && n > 0) : []
+    } catch {
+      return []
+    }
+  }
+
+  private writeDeferred(steps: number[]): void {
+    this.db.exec(APP_SETTINGS_DDL)
+    if (steps.length === 0) {
+      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(DEFERRED_KEY)
+      return
+    }
+    this.db
+      .prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(DEFERRED_KEY, JSON.stringify([...steps].sort((a, b) => a - b)))
   }
 
   /**
@@ -257,6 +405,17 @@ export class Store {
    * 4. **Heavy steps are marked `heavy: true`**: a step that rewrites or re-indexes every message, or `VACUUM`s. On the
    *    real store these take seconds (v40: 1.9s on 137,722 messages), too long for a swap window, so a swap can run
    *    them after the switch rather than during it.
+   *
+   * **During a swap (#280 step 3).** The host taking over opens the store with `swap: true` after the previous host
+   * has drained and let go of it. It runs the expand steps now and leaves every heavy or breaking step for
+   * `runDeferred`, which runs once the swap is over: the previous build can still read an expanded store, so if the
+   * new host fails before it is ready the keeper can start the previous build again. Because `user_version` moves
+   * past a deferred step, two promises follow for such a step:
+   *    - it must still be correct when it runs **after** later steps (out of order);
+   *    - the build that ships it must work before it has run. A contract step keeps this by rule 2 (the code stopped
+   *      using what it drops a release earlier); a heavy step keeps it by only reshaping data the code reads either
+   *      way (a re-index, merged rows, a `VACUUM`).
+   * A store whose `min_reader_version` is above the new host is refused before the swap begins (`Store.inspect`).
    *
    * Measured for #280 (2026-10-04): of the first 40 steps, v13, v28 and v32 broke an older build, the last two within
    * twelve days of each other, and nothing stopped an older host from opening the store.
