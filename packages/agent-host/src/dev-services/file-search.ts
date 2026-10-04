@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { wireJoin } from '@cc/protocol'
+import { programPath } from '../tool-launch.js'
 
 const exec = promisify(execFile)
 
@@ -42,7 +44,7 @@ async function gitFiles(root: string): Promise<string[] | null> {
      * name as `"\355\225\234…"`, so `@한글` found nothing, and whatever path it did pick turned out
      * to be a file that did not exist. `-z` splits names with NUL, with no quoting at all.
      */
-    const { stdout } = await exec('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+    const { stdout } = await exec(programPath('git'), ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
       cwd: root,
       maxBuffer: 32 * 1024 * 1024,
       timeout: 10_000,
@@ -57,11 +59,17 @@ async function gitFiles(root: string): Promise<string[] | null> {
 /** The fallback for when this is not a repository. Only the common noisy directories are skipped */
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', 'target', '.next', '.venv', '__pycache__'])
 
+/**
+ * The relative path is built as a wire path (`/`) while walking, not taken from `relative()`,
+ * which answers in the OS's separator: on Windows the walk returned `src\a.ts`, against the rule
+ * that relative paths on the wire are POSIX (docs/protocol.md), and `score()` and the result's
+ * name, which cut at `/`, took the whole path for the name (#14).
+ */
 async function walk(root: string): Promise<string[]> {
   const out: string[] = []
-  const queue: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }]
+  const queue: { dir: string; rel: string; depth: number }[] = [{ dir: root, rel: '', depth: 0 }]
   while (queue.length > 0 && out.length < MAX_FILES) {
-    const { dir, depth } = queue.shift()!
+    const { dir, rel, depth } = queue.shift()!
     let entries
     try {
       entries = await readdir(dir, { withFileTypes: true })
@@ -72,13 +80,13 @@ async function walk(root: string): Promise<string[]> {
       if (e.name.startsWith('.') && e.name !== '.env') continue
       if (e.isDirectory()) {
         if (SKIP.has(e.name) || depth >= WALK_DEPTH) continue
-        queue.push({ dir: join(dir, e.name), depth: depth + 1 })
+        queue.push({ dir: join(dir, e.name), rel: wireJoin(rel, e.name), depth: depth + 1 })
       } else {
         // The macOS filesystem sometimes returns a Korean name as NFD (decomposed jamo). What an
         // IME actually types is NFC, so a substring comparison would not match (#176). A git
         // repository does not have this problem, because git itself returns NFC
         // (`core.precomposeUnicode`) — so the walk normalizes to the same shape too.
-        out.push(relative(root, join(dir, e.name)).normalize('NFC'))
+        out.push(wireJoin(rel, e.name).normalize('NFC'))
         if (out.length >= MAX_FILES) break
       }
     }

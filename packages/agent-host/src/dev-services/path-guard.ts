@@ -1,6 +1,9 @@
 import { lstatSync, realpathSync, statSync, type Stats } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, posix, relative, sep, win32, type PlatformPath } from 'node:path'
+
+/** This OS's path rules */
+const nativePath: PlatformPath = sep === '\\' ? win32 : posix
 
 export class UnsafePathError extends Error {
   override readonly name = 'UnsafePathError'
@@ -149,11 +152,19 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
  *
  * Even after folding, `..` can remain — a path leaving the root (`../outside`) is one such case,
  * and the walking side's `checkedParent` rejects it at that point.
+ *
+ * **Windows (#14):** `relative()` returns an *absolute* path when the target is on another drive
+ * or a UNC share (`D:\secret`, `\\evil\share\x`), and that split into segments (`D:`, `secret`)
+ * that were then walked *inside* the root. A drive path still failed, since `root\D:` never
+ * exists, but a UNC path passed if matching folders existed in the project. Every caller hands in
+ * a checked or constant path today, so this is hardening: such a path is refused here, by name.
+ * `p` is the path module, a parameter only so the Windows rules can be tested on any OS.
  */
-function pathParts(root: string, rel: string): readonly string[] {
-  const rootResolved = resolve(root)
-  const path = relative(rootResolved, resolve(rootResolved, rel || '.'))
-  const separator = process.platform === 'win32' ? /[/\\]+/ : '/'
+export function pathParts(root: string, rel: string, p: PlatformPath = nativePath): readonly string[] {
+  const rootResolved = p.resolve(root)
+  const path = p.relative(rootResolved, p.resolve(rootResolved, rel || '.'))
+  if (p.isAbsolute(path)) throw new UnsafePathError('Path is outside the project')
+  const separator = p.sep === '\\' ? /[/\\]+/ : '/'
   return path.split(separator).filter((part) => part.length > 0 && part !== '.')
 }
 

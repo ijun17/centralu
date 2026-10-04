@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -76,5 +76,16 @@ describe('searchFiles — Korean file names', () => {
     writeFileSync(join(d, '회의록.md'.normalize('NFD')), '')
 
     expect((await searchFiles(d, '회의록'.normalize('NFC'))).map((h) => h.path)).toEqual(['회의록.md'.normalize('NFC')])
+  })
+
+  // Relative paths on the wire are POSIX on every OS (docs/protocol.md). The walk used to take the
+  // path from `relative()`, which on Windows answers `src\deep\Widget.tsx` (#14). Only the Windows
+  // test job can see that difference; on macOS and Linux both spellings are the same.
+  it('a nested file in a folder that is not a repository comes back with / and its own name', async () => {
+    const d = tmp()
+    mkdirSync(join(d, 'src', 'deep'), { recursive: true })
+    writeFileSync(join(d, 'src', 'deep', 'Widget.tsx'), '')
+
+    expect(await searchFiles(d, 'Widget')).toEqual([{ path: 'src/deep/Widget.tsx', name: 'Widget.tsx' }])
   })
 })
