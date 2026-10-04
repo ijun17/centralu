@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 // separately here and in agent-host's apps/control.ts, and the two disagreed on whether
 // `notifies` was required.
 import type { ControlDoc } from '@cc/protocol'
+import { backgroundCount } from '@cc/core'
 import {
   answerQuestion,
   focusSession,
@@ -70,7 +71,11 @@ export function ControlRail() {
   // Tasks section's job)
   const meta = (id: string) => sessions[id]?.kind === 'orchestrator' || sessions[id]?.kind === 'coordinator'
   const mine = inbox.filter((i) => !meta(i.id))
-  const running = Object.values(sessions).filter((s) => s.state === 'working' && !meta(s.id))
+  /*
+   * A session whose turn ended but whose background work still runs is running too (#290) — its agents are working,
+   * and stopping or restarting it would end them.
+   */
+  const running = Object.values(sessions).filter((s) => (s.state === 'working' || backgroundCount(s.backgroundTasks) > 0) && !meta(s.id))
   const tasks = doc?.tasks ?? []
   const notifies = [...(doc?.notifies ?? [])].sort(
     (a, b) => Number(b.priority === 'high') - Number(a.priority === 'high') || b.ts - a.ts,
@@ -215,13 +220,26 @@ export function ControlRail() {
 function RunningRow({ s }: { s: SessionSummary }) {
   const words = useLastWords(s.id)
   const tool = useRunningTool(s.id)
+  const bg = backgroundCount(s.backgroundTasks)
   return (
     <button
       className="mt-1.5 block w-full text-left"
       onClick={() => focusSession(s.id)}
       data-testid={`rail-running-${s.id}`}
     >
-      <span className="block truncate text-[11px] text-ash">{s.name}</span>
+      <span className="flex items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-ash">{s.name}</span>
+        {/* The same mark as the sidebar row's — written here, since an app does not reach into features (#81) */}
+        {bg > 0 && (
+          <span
+            className="readout shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
+            data-testid={`rail-background-${s.id}`}
+            title={`${bg} background task${bg === 1 ? '' : 's'} running`}
+          >
+            {bg} bg
+          </span>
+        )}
+      </span>
       <span className="block truncate text-[10px] leading-snug text-slate">{words ?? s.preview ?? '…'}</span>
       {tool && <span className="readout block truncate text-[9px] text-slate/70">{tool}</span>}
     </button>

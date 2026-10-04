@@ -1251,6 +1251,10 @@ export type AppState = {
   /** Whether the answer reached the host — `false` means a toast was shown (an answer from the composer has `send` put the text back, #180) */
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<boolean>
   interrupt(sessionId: string): Promise<void>
+  /** Stops one background task (#290). A refusal or failure is a toast — silence would read as stopped */
+  stopBackgroundTask(sessionId: string, taskId: string): Promise<void>
+  /** Takes the ended background tasks off the session's list (#290) */
+  clearBackgroundTasks(sessionId: string): Promise<void>
   /** Hides from the list / brings back (the record survives) */
   /** Restarts only the agent (the conversation stays as is) */
   restartSession(sessionId: string): Promise<boolean>
@@ -1656,7 +1660,7 @@ function handoffOpening(predecessor: string, note: string, path: string): string
  */
 function liveFactsOf(
   s: SessionInfo,
-): Pick<SessionSummary, 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context'> {
+): Pick<SessionSummary, 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks'> {
   return {
     pendingApproval: s.pendingApproval,
     pendingQuestions: s.pendingQuestions,
@@ -1664,6 +1668,8 @@ function liveFactsOf(
     limit: s.limit,
     usage: s.usage,
     context: s.context,
+    // Background work (#290) lives in the host's memory too — a reconnect reads back what was running and what ended
+    backgroundTasks: s.backgroundTasks,
   }
 }
 
@@ -4385,6 +4391,23 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) {
       // Silence after failing to stop would leave someone believing it stopped and waiting — the exact kind of failure this project forbids
       set({ toast: `Could not stop: ${(err as Error).message}` })
+    }
+  },
+
+  async stopBackgroundTask(sessionId, taskId) {
+    try {
+      await get().platform!.agents.stopBackgroundTask(sessionId, taskId)
+    } catch (err) {
+      // The same rule as interrupt: a task that did not stop must not look stopped
+      set({ toast: `Could not stop the task: ${(err as Error).message}` })
+    }
+  },
+
+  async clearBackgroundTasks(sessionId) {
+    try {
+      await get().platform!.agents.clearBackgroundTasks(sessionId)
+    } catch (err) {
+      set({ toast: `Could not clear the list: ${(err as Error).message}` })
     }
   },
 

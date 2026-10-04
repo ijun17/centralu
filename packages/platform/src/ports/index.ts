@@ -79,6 +79,10 @@ export interface AgentPort {
   /** Answers the options (AskUserQuestion) — the answer goes to the model as that tool's result */
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
+  /** Stops one background task the session listed as stoppable (#290); its ending arrives as an event */
+  stopBackgroundTask(sessionId: string, taskId: string): Promise<void>
+  /** Takes the ended background tasks off the session's list (#290) */
+  clearBackgroundTasks(sessionId: string): Promise<void>
   /** Sidebar order (the person sets it by dragging). Sends the whole order at once */
   reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>
   /**

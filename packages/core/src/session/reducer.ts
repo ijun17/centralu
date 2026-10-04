@@ -1,4 +1,6 @@
+import { applyBackgroundTasks } from '@cc/protocol'
 import type {
+  BackgroundTask,
   ToolName,
   ApprovalDetail,
   NormalizedEvent,
@@ -106,6 +108,11 @@ export type SessionSummary = {
    */
   goal: SessionGoal | null
   /**
+   * The agent's background work (#290): every running task, then the ended ones still listed with how they ended.
+   * Moved only by `background_tasks` events, through the same `applyBackgroundTasks` the host runs.
+   */
+  backgroundTasks: BackgroundTask[]
+  /**
    * The running total of the estimated tokens the model spent thinking in this turn (#58 — claude's thinking
    * text is encrypted, so this number is all there is to show). Same lifetime as activity: it dies when the
    * session leaves working.
@@ -128,7 +135,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
-    permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, pr: null, goal: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
+    permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, pr: null, goal: null, backgroundTasks: [], thinkingTokens: null, plan: null, kind: 'worker' as const,
     appId: null,
     tool: 'claude' as const, ...init,
   }
@@ -252,6 +259,8 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       return { ...next, pr: event.pr }
     case 'goal':
       return { ...next, goal: event.goal }
+    case 'background_tasks':
+      return { ...next, backgroundTasks: applyBackgroundTasks(s.backgroundTasks, event) }
     case 'session_title':
       if (event.auto !== false) return s.autoNamed ? { ...next, name: event.title } : next
       return { ...next, name: event.title, autoNamed: false }

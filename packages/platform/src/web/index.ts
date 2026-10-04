@@ -118,6 +118,12 @@ class WebAgentPort implements AgentPort {
   async interrupt(sessionId: string) {
     await this.rpc.call('agents.interrupt', { sessionId })
   }
+  async stopBackgroundTask(sessionId: string, taskId: string) {
+    await this.rpc.call('agents.stopBackgroundTask', { sessionId, taskId })
+  }
+  async clearBackgroundTasks(sessionId: string) {
+    await this.rpc.call('agents.clearBackgroundTasks', { sessionId })
+  }
   restartSession(sessionId: string) {
     return this.rpc.call('agents.restartSession', {
       sessionId,

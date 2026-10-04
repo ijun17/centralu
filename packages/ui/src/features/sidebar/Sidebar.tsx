@@ -3,6 +3,7 @@ import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js'
+import { BackgroundMark } from '../session/BackgroundTasks.jsx'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { APPS } from '../../apps/registry.js'
@@ -828,6 +829,12 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                           {s.pr.state === 'closed' ? ' ✕' : ''}
                         </span>
                       )}
+                      {/*
+                        Background work still running (#290) — the header's count, on the row. A session whose turn
+                        ended can still have agents or shells running behind it; restarting or interrupting it would
+                        end them.
+                      */}
+                      <BackgroundMark tasks={s.backgroundTasks} testId={`background-mark-${s.id}`} />
                       {/*
                         An unread dot used to be here and **was removed** (dogfooding, 2026-09-02).
 

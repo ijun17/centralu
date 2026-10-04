@@ -132,7 +132,7 @@ describe('whether a session is idle (#290, for #297)', () => {
     h.emit({ type: 'approval_request', sessionId: session.id, requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
     expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'approval' })
     h.emit({ type: 'approval_resolved', sessionId: session.id, requestId: 'r1', decision: 'allow' })
-    h.emit({ type: 'question_request', sessionId: session.id, requestId: 'q1', questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A' }, { label: 'B' }] }] })
+    h.emit({ type: 'question_request', sessionId: session.id, requestId: 'q1', questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] }] })
     expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'question' })
     h.emit({ type: 'question_resolved', sessionId: session.id, requestId: 'q1' })
     h.emit({ type: 'turn_complete', sessionId: session.id })

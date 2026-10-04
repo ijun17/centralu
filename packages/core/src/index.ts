@@ -1,5 +1,6 @@
 export * from './session/state-machine.js'
 export * from './session/reducer.js'
+export * from './session/background.js'
 export * from './inbox/inbox.js'
 export * from './unread/unread.js'
 export * from './approval/approval.js'

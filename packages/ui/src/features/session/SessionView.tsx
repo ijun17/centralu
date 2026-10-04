@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent, ReactNode, Ref, RefObject } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
-import { shouldMarkRead, type SessionSummary } from '@cc/core'
+import { interruptNotice, shouldMarkRead, type SessionSummary } from '@cc/core'
 import { launchesSubagent } from '@cc/protocol'
 import {
   EMPTY_DRAFT,
@@ -25,6 +25,7 @@ import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { InlineViewSlot } from './InlineView.jsx'
 import { RunMenu } from './RunMenu.jsx'
+import { BackgroundTasksBadge } from './BackgroundTasks.jsx'
 import { CommandRunnerOverlay } from './CommandRunner.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
@@ -333,6 +334,19 @@ export function SessionPane({
           {session.goal.status !== 'active' ? ` · ${session.goal.status}` : ''}
         </span>
       )}
+
+      {/*
+        The agent's background work (#290): how many tasks run behind the turn, opening the list with a stop per task,
+        and the ones that ended with how they ended. An agent's row opens the same recorded steps (#222) its launch
+        card does.
+      */}
+      <BackgroundTasksBadge
+        sessionId={session.id}
+        tasks={session.backgroundTasks}
+        renderSteps={(callId) => (
+          <SubagentSteps sessionId={session.id} callId={callId} projectRoot={projectRoot} projectId={session.projectId} />
+        )}
+      />
 
       {/*
         Stop is not placed here — it already sits next to "waiting for a response" at the
@@ -2246,6 +2260,12 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
   // A plan snapshot (#58, Codex) — it has the same lifetime as activity, so this row (which
   // only lives while working) is the right home for it
   const plan = useStore((s) => s.sessions[sessionId]?.plan ?? null)
+  /*
+   * What Stop does to the background work (#290), said before it is pressed. On 2026-10-04 an interrupt to rephrase
+   * a message stopped two background subagents without a word; the tools differ (Claude stops a subagent and keeps a
+   * shell, Codex keeps a child agent), so the line comes from what each task says about itself.
+   */
+  const notice = useStore((s) => interruptNotice(s.sessions[sessionId]?.backgroundTasks ?? []))
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -2308,10 +2328,16 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
             {formatElapsed(seconds)}
           </span>
         )}
+        {notice && (
+          <span className="ml-auto truncate text-[11px] text-ash" data-testid="interrupt-background-note">
+            {notice}
+          </span>
+        )}
         <button
           type="button"
-          className="ml-auto rounded border border-edge px-2 py-0.5 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk"
+          className={`${notice ? '' : 'ml-auto '}shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk`}
           onClick={() => void interrupt(sessionId)}
+          title={notice ? `Stop the turn — ${notice.charAt(0).toLowerCase()}${notice.slice(1)}` : 'Stop the turn'}
           data-testid="activity-interrupt"
         >
           Stop
