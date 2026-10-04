@@ -1,4 +1,5 @@
 import type { ApprovalDetail, NormalizedEvent, SessionGoal, ToolSummary } from '@cc/protocol'
+import { UnmappedTypes } from '../unmapped.js'
 
 /**
  * Converts Claude SDK messages into NormalizedEvent (a pure function, so contract tests are
@@ -691,6 +692,34 @@ export class ClaudeGoalTracker {
 }
 
 /**
+ * Every message type the adapter handles or leaves out on purpose, keyed as `type`, or `system/<subtype>` for system
+ * messages. Anything else is said once per session in host.log (`UnmappedTypes`, #58). The groups follow the #58
+ * survey (2026-10-04, CLI 2.1.282, SDK 0.3.263, 39 `SDKMessage` members plus `active_goal`):
+ *
+ *   - mapped: a branch in `normalizeMessage`, this class, or `system/init` read in index.ts
+ *   - ignored by #58's body as progress detail
+ *   - correctly ignored: types only sent for options or features Centralu does not use (`side_question`, synchronous
+ *     plugin installs, session-state events, the remote bridge, file checkpoints, URL elicitation, prompt suggestions,
+ *     a `SessionStore`)
+ *
+ * The types the survey would show or store stay out on purpose: `system/informational`, `system/notification`,
+ * `system/api_retry`, the refusal pair, `system/permission_denied` and `conversation_reset` among them. Their log line
+ * is how a real instance gets noticed.
+ */
+const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
+  // mapped
+  'assistant', 'user', 'result', 'stream_event', 'rate_limit_event', 'active_goal', 'system/init', 'system/status',
+  'system/compact_boundary', 'system/local_command_output', 'system/task_notification',
+  // ignored by #58
+  'tool_progress', 'system/task_started', 'system/task_updated', 'system/task_progress', 'system/hook_started',
+  'system/hook_progress', 'system/hook_response', 'system/thinking_tokens', 'system/background_tasks_changed',
+  // correctly ignored
+  'system/control_request_progress', 'system/plugin_install', 'system/session_state_changed',
+  'system/worker_shutting_down', 'system/files_persisted', 'system/elicitation_complete', 'prompt_suggestion',
+  'system/mirror_error',
+])
+
+/**
  * Normalizes while following one parent stream — memory for things that cannot be decided by
  * looking at a single message alone.
  *
@@ -741,9 +770,12 @@ export class ClaudeStreamNormalizer {
   private streamMessageId: string | undefined
   /** The session's /goal, read off the stream (see `ClaudeGoalTracker`). */
   readonly goal: ClaudeGoalTracker
+  /** Message types this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
+  private readonly unmapped: UnmappedTypes
 
   constructor(private readonly sessionId: string) {
     this.goal = new ClaudeGoalTracker(sessionId)
+    this.unmapped = new UnmappedTypes('claude', sessionId, CLAUDE_KNOWN_TYPES)
   }
 
   /** The adapter interrupted the turn (see `stopping` above). */
@@ -755,6 +787,7 @@ export class ClaudeStreamNormalizer {
     const m = msg as Json
     const type = str(m.type)
     const subagent = str(m.parent_tool_use_id) !== ''
+    this.unmapped.note(type === 'system' ? `system/${str(m.subtype)}` : type)
 
     if (type === 'system' && str(m.subtype) === 'task_notification') {
       const callId = str(m.tool_use_id)

@@ -25,7 +25,16 @@ import { listCodexThreads, readCodexHistory } from './history.js'
 import { imageEventFromDisk } from './images.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
-import { approvalDetailFrom, childSteps, fileChangesOf, goalFromCodex, normalizeNotification, toCodexDecision } from './normalize.js'
+import {
+  approvalDetailFrom,
+  childSteps,
+  CODEX_KNOWN_NOTIFICATIONS,
+  fileChangesOf,
+  goalFromCodex,
+  normalizeNotification,
+  toCodexDecision,
+} from './normalize.js'
+import { UnmappedTypes } from '../unmapped.js'
 
 const exec = promisify(execFile)
 
@@ -283,6 +292,8 @@ class CodexSession implements SessionHandle {
    */
   private unlinked = new Map<string, { method: string; params?: unknown }[]>()
   private unlinkedCount = 0
+  /** Notification methods this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
+  private readonly unmapped: UnmappedTypes
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
@@ -291,6 +302,7 @@ class CodexSession implements SessionHandle {
     private emit: EventSink,
   ) {
     this.sessionId = opts.sessionId
+    this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
     this.client = new CodexClient(
       {
         onNotification: (n) => this.onNotification(n),
@@ -552,6 +564,8 @@ class CodexSession implements SessionHandle {
      */
     // Before the thread filter: a child thread's approval requests do reach us (see above), and its card needs its changes too
     this.noteFileChange(n)
+    // Also before the filter: a method nobody handles is news whichever thread it came from
+    this.unmapped.note(n.method)
     const from = (n.params as { threadId?: unknown } | undefined)?.threadId
     /*
      * A child's notification is not the parent's conversation, but what the child did is kept (#222): its items become

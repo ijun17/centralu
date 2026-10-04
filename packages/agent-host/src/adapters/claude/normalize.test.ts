@@ -2,7 +2,7 @@
  * Contract tests (T3-2): without the real SDK, this checks against fixtures of the actual message
  * shapes observed during the spike. If the SDK's format changes, this is what breaks first.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
 
 const SID = 's1'
@@ -489,5 +489,34 @@ describe('the whole record of a tool call (#221)', () => {
     }) as { summary: string; output?: string }[]
     expect(done?.summary).toBe(`2 tool uses · 9s\n\n${report}`.slice(0, 300))
     expect(done?.output).toBe(`2 tool uses · 9s\n\n${report}`)
+  })
+})
+
+describe('unmapped message types (#58)', () => {
+  const unmappedLines = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.map((c) => c.join(' ')).filter((l) => l.includes('unmapped message type'))
+
+  it('says a type nothing maps once per session in host.log, and nothing for known types', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const one = new ClaudeStreamNormalizer('aaaaaaaa-1')
+      // What /clear sends (measured, CLI 2.1.282): nothing maps it, so it is said once however often it comes
+      one.push({ type: 'conversation_reset', new_conversation_id: 'c1', trigger: 'clear' })
+      one.push({ type: 'conversation_reset', new_conversation_id: 'c2', trigger: 'clear' })
+      one.push({ type: 'system', subtype: 'informational', content: 'heads up', level: 'warning' })
+      // Mapped, and ignored on purpose: no line
+      one.push({ type: 'system', subtype: 'init', session_id: 'x' })
+      one.push({ type: 'system', subtype: 'task_started', task_id: 't' })
+      one.push({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } })
+      // Another session has not said it yet
+      new ClaudeStreamNormalizer('bbbbbbbb-2').push({ type: 'conversation_reset', new_conversation_id: 'c3' })
+      expect(unmappedLines(spy)).toEqual([
+        '[claude] aaaaaaaa unmapped message type: conversation_reset',
+        '[claude] aaaaaaaa unmapped message type: system/informational',
+        '[claude] bbbbbbbb unmapped message type: conversation_reset',
+      ])
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

@@ -142,6 +142,17 @@ vendor name — a new notification, a config key, a field — add it to the cont
 **in the same PR**. A new tool (step 4 above) starts by creating its own equivalent
 of one of these.
 
+**The other direction, at runtime: unmapped types** ([#58](https://github.com/ijun17/centralu/issues/58),
+[#270](https://github.com/ijun17/centralu/issues/270)). The checks above notice a name we use leaving the vendor's
+surface. They cannot notice a type we do not use *arriving*, and protocol.md §4 makes an adapter drop what it does not
+know. So each adapter keeps a second list, of every type it maps or leaves out on purpose
+(`CLAUDE_KNOWN_TYPES` and `CODEX_KNOWN_NOTIFICATIONS`, grouped as in the #58 survey). The first time a session
+receives a type outside that list, `adapters/unmapped.ts` writes one host.log line:
+`[claude] 1a2b3c4d unmapped message type: conversation_reset`. Nothing on screen changes. Types the survey wants shown
+but nobody has wired yet stay off the list on purpose, so their first real instance is a grep away. When you wire one,
+or decide it is noise, move it onto the list in the same PR. Server *requests* need no list: the Codex adapter already
+logs every request it answers with `{}`.
+
 ## 4. Session lifecycle and UI reconnection
 
 ```
