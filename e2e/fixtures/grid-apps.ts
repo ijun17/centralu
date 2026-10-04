@@ -1,6 +1,6 @@
 import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
-import { newSession } from './project-screen.js'
+import { expectCoveredInSight, expectFrameTakesPointer, newSession } from './project-screen.js'
 
 /**
  * Apps on the grid (#288): an app's sidebar row dropped on the grid stands there as a panel, moves and leaves like a
@@ -10,7 +10,8 @@ import { newSession } from './project-screen.js'
  *
  * A function rather than a describe in one file, because it runs twice: in Chromium (grid-apps.spec.ts) and in WebKit
  * (grid-apps-webkit.spec.ts). The view is laid over its panel by measuring the panel, and in WebKit a drag goes into a
- * frame whatever the frame's pointer-events say — both places where the desktop app (WKWebView) can differ.
+ * frame whatever the frame's pointer-events say (the panel's cover over the view answers that, dragShield.tsx) — both
+ * places where the desktop app (WKWebView) can differ.
  *
  * Grid panels are keyed by session id, or `app:<project | _user>/<appId>` for an app (core's `gridPanelKey`).
  */
@@ -133,7 +134,7 @@ async function dragGridPanel(page: Page, from: string, to: string, side: 'before
       .dispatchEvent(new DragEvent('dragstart', { dataTransfer: w.__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`grid-panel-${from}`)).toHaveClass(/opacity-40/)
-  if (view) await expect(view).toHaveCSS('visibility', 'hidden')
+  if (view) await expectCoveredInSight(view, true)
   await page.evaluate(
     ({ to, side }) => {
       const card = document.querySelector(`[data-testid="grid-panel-${to}"]`)!
@@ -165,7 +166,7 @@ async function dragGridPanel(page: Page, from: string, to: string, side: 'before
       .dispatchEvent(new DragEvent('dragend', { dataTransfer: (window as any).__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`grid-panel-${from}`)).not.toHaveClass(/opacity-40/)
-  if (view) await expect(view).toHaveCSS('visibility', 'visible')
+  if (view) await expectFrameTakesPointer(page, view)
 }
 
 export function gridAppTests(): void {
@@ -252,20 +253,13 @@ export function gridAppTests(): void {
       await v.locator('#call').click()
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
 
-      // A session row dropped on the app's panel lands beside it: the view steps aside while the row is dragged
+      // A session row dropped on the app's panel lands beside it: the panel covers its view while the row is dragged
       await dragRowToGrid(page, page.getByTestId(`session-row-${s}`), { panel: app, side: 'before' })
       await expect.poll(() => gridOrder(page)).toEqual([s, app])
-      await expect
-        .poll(() =>
-          view.evaluate((el) => [
-            (el as HTMLElement).style.pointerEvents,
-            (el as HTMLElement).style.visibility,
-          ]),
-        )
-        .toEqual(['', ''])
+      await expectFrameTakesPointer(page, view)
       await expectOverSlot(page, viewKey, page.getByTestId(`grid-slot-${app}`))
 
-      // The app's panel moves before the session, its view hidden while dragged; the view follows it in the same document
+      // The app's panel moves before the session, its view dimmed in sight while dragged; the view follows it in the same document
       await dragGridPanel(page, app, s, 'before', view)
       expect(await gridOrder(page)).toEqual([app, s])
       await expectOverSlot(page, viewKey, page.getByTestId(`grid-slot-${app}`))
@@ -279,8 +273,11 @@ export function gridAppTests(): void {
       await page.mouse.move(to.x + to.width * 0.25, to.y + to.height / 2, { steps: 8 })
       await page.mouse.move(to.x + to.width * 0.2, to.y + to.height / 2, { steps: 4 })
       await expect(panel).toHaveAttribute('data-drop', 'before')
+      // The view stays in sight under its panel's cover (#296)
+      await expectCoveredInSight(view)
       await page.mouse.up()
       await expect.poll(() => gridOrder(page)).toEqual([s, app])
+      await expectFrameTakesPointer(page, view)
       await expectOverSlot(page, viewKey, page.getByTestId(`grid-slot-${app}`))
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
       expect(await opened(page)).toBe(1)

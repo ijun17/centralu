@@ -15,6 +15,7 @@ import { SecretsPanel, missingSecrets } from './AppSecrets.jsx'
 import { ReviewAndEnable } from '../app-share/ReviewAndEnable.jsx'
 import { VersionsPanel } from '../app-share/VersionsPanel.jsx'
 import { registerSlottedView } from './slots.js'
+import { registerShieldHost } from './dragShield.jsx'
 
 /**
  * Where a pinned view is drawn.
@@ -77,6 +78,13 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     const el = section.current
     if (mode !== 'slot' || !el) return
     return registerSlottedView(pv.key, el)
+  }, [mode, pv.key])
+  // Where the panel lays its cover over this view while something is dragged (dragShield.tsx)
+  const shieldHost = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = shieldHost.current
+    if (mode !== 'slot' || !el) return
+    return registerShieldHost(pv.key, el)
   }, [mode, pv.key])
   const app = useExternalApp(pv.projectId, pv.appId)
   const frame = useRef<AppFrameHandle>(null)
@@ -363,6 +371,11 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
         {visible && secretsOpen && app && <SecretsPanel app={app} />}
         {visible && versionsOpen && app && <VersionsPanel app={app} />}
       </div>
+      {/*
+        The panel's drag cover goes in here, through a portal from the panel (dragShield.tsx). No box of its own: the
+        cover is placed against this section, over the frame and everything else in it.
+      */}
+      {mode === 'slot' && <div ref={shieldHost} className="contents" data-testid="app-drag-shield-host" />}
     </section>
   )
 }

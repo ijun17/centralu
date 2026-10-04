@@ -45,8 +45,46 @@ export const panels = (page: Page) =>
   )
 
 /**
+ * An app's view while something is dragged (#296): still in sight — not `visibility: hidden`, not `display: none`, not
+ * squeezed to nothing — with its panel's transparent cover over it (dragShield.tsx), so the drag lands on the page and
+ * not in the frame. `dimmed` for the view of the panel being dragged.
+ */
+export async function expectCoveredInSight(view: Locator, dimmed = false) {
+  await expect(view).toHaveCSS('visibility', 'visible')
+  await expect(view).not.toHaveCSS('display', 'none')
+  await expect
+    .poll(async () => {
+      const box = await view.boundingBox()
+      return !!box && box.width > 0 && box.height > 0
+    })
+    .toBe(true)
+  const shield = view.getByTestId('app-drag-shield')
+  await expect(shield).toHaveCount(1)
+  if (dimmed) await expect(shield).toHaveAttribute('data-dimmed', 'true')
+  else await expect(shield).not.toHaveAttribute('data-dimmed')
+}
+
+/**
+ * After the drop: no cover left anywhere, and the view's frame takes the pointer again — the element under the middle
+ * of the view is its frame.
+ */
+export async function expectFrameTakesPointer(page: Page, view: Locator) {
+  await expect(page.getByTestId('app-drag-shield')).toHaveCount(0)
+  await expect
+    .poll(() =>
+      view.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+        return hit === el.querySelector('[data-testid="app-frame-iframe"]')
+      }),
+    )
+    .toBe(true)
+}
+
+/**
  * Drags panel `from` to one side of panel `to` and drops it there. `view` is the app view laid over `from` when it
- * is an app's panel: the view is not inside the panel, and steps aside (hidden, not unloaded) while it is dragged (slots.ts).
+ * is an app's panel: the view is not inside the panel; it stays in sight, dimmed under its panel's cover, while it is
+ * dragged (dragShield.tsx).
  */
 export async function dragPanel(page: Page, from: string, to: string, side: 'before' | 'after', view?: Locator) {
   await page.evaluate((id) => {
@@ -57,7 +95,7 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
       .dispatchEvent(new DragEvent('dragstart', { dataTransfer: w.__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`project-panel-${from}`)).toHaveClass(/opacity-40/)
-  if (view) await expect(view).toHaveCSS('visibility', 'hidden')
+  if (view) await expectCoveredInSight(view, true)
   await page.evaluate(
     ({ to, side }) => {
       const card = document.querySelector(`[data-testid="project-panel-${to}"]`)!
@@ -89,7 +127,7 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
       .dispatchEvent(new DragEvent('dragend', { dataTransfer: (window as any).__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`project-panel-${from}`)).not.toHaveClass(/opacity-40/)
-  if (view) await expect(view).toHaveCSS('visibility', 'visible')
+  if (view) await expectFrameTakesPointer(page, view)
 }
 
 /** Where a sidebar row is dropped: one half of a panel, or the screen's own padding (the empty screen's middle) */
@@ -448,7 +486,7 @@ export function appPanelTests(): void {
       await v.locator('#call').click()
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
 
-      // The panel moves, its view hidden while it is dragged; the view follows it without being taken out of the document
+      // The panel moves, its view dimmed in sight while it is dragged; the view follows it without being taken out of the document
       await dragPanel(page, 'app:slider', `session:${s}`, 'before', pinned)
       expect(await panels(page)).toEqual(['app:slider', `session:${s}`])
       await expectOverSlot(page, key)
@@ -571,8 +609,8 @@ export function appPanelTests(): void {
 
       /*
        * A row dropped on the app's panel lands on its view, a frame laid over the panel and not inside it. For the
-       * drop to reach the panel the view steps aside while the row is dragged (slots.ts) — and comes back after, the
-       * same document, with what was done in it.
+       * drop to reach the panel, the panel covers the view while the row is dragged (dragShield.tsx) — and the frame
+       * takes the pointer again after, the same document, with what was done in it.
        */
       const v = viewOf(page, key)
       await v.locator('#call').click()
@@ -581,9 +619,7 @@ export function appPanelTests(): void {
       expect(await panels(page)).toEqual(['app:slider'])
       await dragRow(page, page.getByTestId(`session-row-${s}`), { panel: 'app:slider', side: 'before' })
       await expect.poll(() => panels(page)).toEqual([`session:${s}`, 'app:slider'])
-      await expect
-        .poll(() => pinned.evaluate((el) => [(el as HTMLElement).style.pointerEvents, (el as HTMLElement).style.visibility]))
-        .toEqual(['', ''])
+      await expectFrameTakesPointer(page, pinned)
       await expectOverSlot(page, key)
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
       expect(await opened(page)).toBe(2)
@@ -593,9 +629,10 @@ export function appPanelTests(): void {
     /*
      * #288: a session's panel carried into an app's panel from the side, not through its header. In WebKit the frame
      * took the drag whatever its pointer-events said, so the page heard nothing more and the panel could not land
-     * there; the views now step aside for a panel drag as they do for a sidebar row (slots.ts).
+     * there. The panel covers its view for the length of the drag (dragShield.tsx) — and, since #296, the view stays
+     * in sight under the cover instead of being hidden.
      */
-    test('a session panel carried sideways into an app’s view lands beside the app, and the view comes back as it was', async ({
+    test('a session panel carried sideways into an app’s view lands beside the app, the view in sight all along', async ({
       page,
     }) => {
       await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
@@ -639,10 +676,10 @@ export function appPanelTests(): void {
       await page.mouse.move(from.x + from.width / 2, to.y + to.height / 2, { steps: 6 })
       await page.mouse.move(to.x + to.width * 0.8, to.y + to.height / 2, { steps: 8 })
       await expect(page.getByTestId('project-panel-app:slider')).toHaveAttribute('data-drop', 'after')
-      await expect(pinned).toHaveCSS('visibility', 'hidden')
+      await expectCoveredInSight(pinned)
       await page.mouse.up()
       await expect.poll(() => panels(page)).toEqual(['app:slider', `session:${s}`])
-      await expect(pinned).toHaveCSS('visibility', 'visible')
+      await expectFrameTakesPointer(page, pinned)
       await expectOverSlot(page, key)
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
       expect(await opened(page)).toBe(1)

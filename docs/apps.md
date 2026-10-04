@@ -269,10 +269,12 @@ call.
   moved iframe loses its document), the view is laid over the panel's slot and only its style
   changes (`pinned-app/slots.ts`). In a panel the view has no header; the panel's Open goes to the
   app view, and hiding the panel closes the view, teardown first. The app's sidebar row dropped on
-  the screen brings a hidden panel back where it lands. While anything is dragged over the screen
-  (one of the project's rows, or one of its panels), the view is hidden, not unloaded: in WebKit a
-  drag goes into a frame whatever its pointer-events say, and the row or panel would land in the
-  app instead of beside it. The panel's slot takes the view's place in the keyboard order: Tab
+  the screen brings a hidden panel back where it lands. While anything is dragged, the panel lays a
+  transparent cover over the view (`pinned-app/dragShield.tsx`, #296), and the view stays in sight:
+  in WebKit a drag goes into a frame whatever its pointer-events say, and the row or panel would
+  land in the app instead of beside it. The cover is the panel's child in React's tree, portalled
+  into the view, so the panel's own drag handlers hear the drag; it goes on the drag's drop or
+  end, or when the drag leaves the window. The panel's slot takes the view's place in the keyboard order: Tab
   from the panel's header goes into the view, and back out to the header.
 - **On the grid** (product-spec §5.4, #288) an app placed there by hand gets **a view of its own**:
   the same hosting (opened by `home`, laid over the panel's slot, hidden rather than unloaded on

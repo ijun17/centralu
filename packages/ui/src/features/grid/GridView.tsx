@@ -183,35 +183,18 @@ export function GridView() {
   }, [appKeys, ensureGridAppView])
 
   /*
-   * A sidebar row is being dragged in. Its drag starts outside this screen, so the screen hears of it at the
-   * document: the app views laid over the panels step aside for it, as on the project screen (slots.ts) — in WebKit a
-   * drag goes into a frame whatever its pointer-events say. Its end also clears the panel it was last over: a row let
-   * go somewhere else never reaches this screen's own dragend, and a target left behind would be the next panel drag's
-   * preview before the hand has moved.
+   * Any drag's end clears the panel it was last over: a sidebar row let go somewhere else never reaches this screen's
+   * own dragend, and a target left behind would be the next panel drag's preview before the hand has moved. The app
+   * views laid over the panels need nothing here: their panels cover them for the length of any drag (dragShield.tsx).
    */
-  const [inbound, setInbound] = useState(false)
   useEffect(() => {
-    const start = (e: globalThis.DragEvent) => {
-      // One of this grid's own panels is a reorder, not a row coming in
-      if (e.target instanceof Node && ref.current?.contains(e.target)) return
-      if (e.dataTransfer && gridTakes([...e.dataTransfer.types])) setInbound(true)
-    }
-    const end = () => {
-      setInbound(false)
-      setOver(null)
-    }
-    document.addEventListener('dragstart', start)
+    const end = () => setOver(null)
     document.addEventListener('dragend', end)
-    return () => {
-      document.removeEventListener('dragstart', start)
-      document.removeEventListener('dragend', end)
-    }
+    return () => document.removeEventListener('dragend', end)
   }, [])
 
   // After every render: a panel can move without changing size (a drag's preview), and the view laid over it has to move with it
-  useLayoutEffect(() => placeSlots(dragging !== null, inbound))
-  // Leaving the grid lets the frames take the pointer again, whatever a drag left behind
-  useEffect(() => () => placeSlots(false), [])
+  useLayoutEffect(() => placeSlots())
 
   /** What a drop on the grid stands for — a session or an app that exists, or null (drop.ts) */
   const dropped = (e: DragEvent<HTMLElement>): GridPanel | null =>
@@ -428,6 +411,7 @@ export function GridView() {
                     app={appsByKey.get(appKeyOf(panel.projectId, panel.appId))}
                     appId={panel.appId}
                     viewKey={gridAppViewKey(panel.projectId, panel.appId)}
+                    dragged={dragging === id}
                     onDragStart={(e) => startDrag(id, e)}
                     onOpen={() => openApp(panel.projectId, panel.appId)}
                     // Removing takes the panel off the screen and closes its view, teardown first (the store's setGridPanels)

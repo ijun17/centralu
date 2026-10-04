@@ -90,35 +90,19 @@ export function ProjectView({ projectId }: { projectId: string }) {
   }
 
   /*
-   * One of this project's sidebar rows is being dragged. Its drag starts outside this screen, so
-   * the screen hears of it at the document: the app views laid over the panels step aside for it
-   * (slots.ts), or a row dropped on an app's view lands in the app's frame instead of beside the
-   * app. Its end also clears the panel it was last over: a row let go somewhere else never reaches
-   * this screen's own dragend, and a target left behind would be the next panel drag's preview
-   * before the hand has moved.
+   * Any drag's end clears the panel it was last over: a sidebar row let go somewhere else never reaches this screen's
+   * own dragend, and a target left behind would be the next panel drag's preview before the hand has moved. The app
+   * views laid over the panels need nothing here: their panels cover them for the length of any drag (dragShield.tsx).
    */
-  const [inbound, setInbound] = useState(false)
   useEffect(() => {
-    const start = (e: globalThis.DragEvent) => {
-      if (e.dataTransfer && dragVerdict(e.dataTransfer.types, projectId) === 'add') setInbound(true)
-    }
-    const end = () => {
-      setInbound(false)
-      setOver(null)
-    }
-    document.addEventListener('dragstart', start)
+    const end = () => setOver(null)
     document.addEventListener('dragend', end)
-    return () => {
-      document.removeEventListener('dragstart', start)
-      document.removeEventListener('dragend', end)
-    }
-  }, [projectId])
+    return () => document.removeEventListener('dragend', end)
+  }, [])
 
   // After every render: a panel can move without changing size (a drag's preview), which no
   // resize observer reports, and the app view laid over it has to move with it
-  useLayoutEffect(() => placeSlots(dragging !== null, inbound))
-  // Leaving the screen lets the frames take the pointer again, whatever a drag left behind
-  useEffect(() => () => placeSlots(false), [projectId])
+  useLayoutEffect(() => placeSlots())
 
   /*
    * Every app panel shows the app's pinned view, so every app on the screen has one. Opening it is
@@ -367,6 +351,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
                       app={appsById.get(p.id)}
                       appId={p.id}
                       viewKey={externalAppKey(projectId, p.id)}
+                      dragged={dragging === id}
                       onDragStart={(e) => startDrag(id, e)}
                       onOpen={() => openApp(projectId, p.id)}
                       remove={{ label: 'Hide from this screen (closes its view)', testId: `project-hide-${id}`, onClick: () => hide(id) }}

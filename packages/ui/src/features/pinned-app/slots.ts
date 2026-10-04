@@ -15,8 +15,10 @@
  *
  * Slots and views are keyed by the pinned view's key (`externalAppKey`, `<project>/<appId>`). The
  * grid lays its app panels' views out the same way (#288), keyed by the grid's own view of the app
- * (`gridAppViewKey`, `grid:<project>/<appId>`). Only one of the two screens is ever on show, so they
- * share the drag state below.
+ * (`gridAppViewKey`, `grid:<project>/<appId>`).
+ *
+ * A drag over a view is not this file's business: the view stays in place and in sight, and the panel lays a
+ * transparent cover over it for the length of the drag (dragShield.tsx, #296).
  *
  * A slot is also the view's place in the **keyboard** order. The view sits after every panel in the
  * document, so Tab from an app panel's header would skip its own view and land on the next panel,
@@ -27,10 +29,6 @@
 
 const slots = new Map<string, HTMLElement>()
 const views = new Map<string, HTMLElement>()
-/** Whether a panel is being dragged on the screen showing the views — see `place` */
-let panelDragged = false
-/** A drag from outside the screen that the screen takes (a sidebar row) — see `place` */
-let inbound = false
 
 /**
  * Lays one view over its slot. The two sit in different parents, so the slot is measured on
@@ -50,28 +48,6 @@ function place(key: string): void {
   view.style.top = `${(r.top - b.top) / scale - block.clientTop}px`
   view.style.width = `${r.width / scale}px`
   view.style.height = `${r.height / scale}px`
-  /*
-   * While a panel is dragged, frames stop taking the pointer. An iframe swallows `dragover`, and
-   * this one is not inside the panel it covers, so the panel under the hand would never hear
-   * where the drag is and the preview order would freeze over every app panel.
-   */
-  view.style.pointerEvents = panelDragged || inbound ? 'none' : ''
-  /*
-   * And more than that: while anything is dragged, the views are hidden until it is dropped. In
-   * WebKit a drag goes into a frame whatever the frame's pointer-events say — measured in
-   * Playwright's WebKit, a row dragged over an app's view went quiet on the page the moment it
-   * crossed the frame's edge, and its drop never arrived; with the view hidden the page heard
-   * every dragover and the drop.
-   *
-   * A panel drag was once thought to get by, because its preview moves a panel under the hand. It
-   * does only when the hand happens to reach an app panel through its header: measured again for
-   * #288, a session panel dragged sideways into an app's view went just as quiet, on the grid and
-   * on the project screen, and a drop let go over the dragged app panel's own view would be lost
-   * the same way, taking the preview with it. So a panel drag hides them too — the dragged app
-   * panel's view included, which used to be dimmed with its panel and now steps aside with the
-   * rest. Hidden is not unloaded: the documents stay, and show again when the drag ends.
-   */
-  view.style.visibility = panelDragged || inbound ? 'hidden' : ''
 }
 
 /** What can take focus, for the keyboard order around a slot */
@@ -131,18 +107,11 @@ export function registerSlottedView(key: string, el: HTMLElement): () => void {
   place(key)
   return () => {
     if (views.get(key) === el) views.delete(key)
-    for (const p of ['left', 'top', 'width', 'height', 'pointerEvents', 'visibility'] as const) el.style[p] = ''
+    for (const p of ['left', 'top', 'width', 'height'] as const) el.style[p] = ''
   }
 }
 
-/**
- * Places every slotted view again — the project screen and the grid call this after each render.
- * `panelDragged` is whether one of the screen's own panels is being dragged; `rowDragged` is a drag
- * from outside the screen that the screen takes (a sidebar row). While either is true, every view
- * steps aside (`place`).
- */
-export function placeSlots(panelDraggedNow: boolean, rowDragged = false): void {
-  panelDragged = panelDraggedNow
-  inbound = rowDragged
+/** Places every slotted view again — the project screen and the grid call this after each render */
+export function placeSlots(): void {
   for (const key of views.keys()) place(key)
 }

@@ -3,6 +3,7 @@ import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { registerSlot } from './slots.js'
+import { DragShield } from './dragShield.jsx'
 
 /**
  * An app's panel, on the project screen (#203) or the grid (#288): a header that moves the panel,
@@ -16,11 +17,15 @@ import { registerSlot } from './slots.js'
  * The header says the app's name and its status in words (`app.status.label`: running, stopped,
  * untrusted…), as the sidebar row does; why an app cannot run is said by the view itself in the
  * slot, with its reason and its button, never a blank frame.
+ *
+ * While anything is dragged the panel lays a transparent cover over its view (dragShield.tsx), so a drag over the view
+ * is the panel's to hear, not the frame's. The view stays in sight; the dragged panel's own view is dimmed with it.
  */
 export function AppPanel({
   app,
   appId,
   viewKey,
+  dragged,
   onDragStart,
   onOpen,
   remove,
@@ -32,6 +37,8 @@ export function AppPanel({
   appId: string
   /** The key of the view laid over this panel's slot: the app's pinned view, or its grid view */
   viewKey: string
+  /** This panel is the one being dragged */
+  dragged: boolean
   onDragStart: (e: DragEvent<HTMLElement>) => void
   onOpen: () => void
   remove: { label: string; testId: string; onClick: () => void }
@@ -91,6 +98,7 @@ export function AppPanel({
         aria-label={`${title} view`}
         data-testid={slotTestId}
       />
+      <DragShield viewKey={viewKey} dimmed={dragged} />
     </>
   )
 }
