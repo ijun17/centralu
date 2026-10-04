@@ -274,6 +274,7 @@ agent-host / tauri ─┴─→ NormalizedEvent stream
 | adapters | 컨트랙트 테스트: 녹화된 SDK/프로토콜 응답을 재생 → NormalizedEvent 검증 | C4. 실제 CLI 없이 CI에서 가능 |
 | ui | 핵심 플로우에만 Playwright (웹 dev 모드 + mock 플랫폼) | 브라우저에서 개발하는 것의 보너스 |
 | 의존성 규칙 | CI에서 eslint-plugin-boundaries + dependency-cruiser | §2를 문서가 아니라 기계로 강제 |
+| 키퍼 (§4.1–4.4) | 진짜 바이너리와 호스트를 `scripts/keeper-*integration.mjs`로 몰아 본다. CI에서는 macOS에서 모델 없이([agent-host.ko.md](agent-host.ko.md) §4.1) | 시작 순서, 넘겨받기, 넘겨주기는 진짜 프로세스로만 실패한다: 터미널을 쥔 재시작마다 크래시한 #329는 단위 테스트와 e2e를 모두 통과했다(#348) |
 
 ## 7. M0과의 연결
 

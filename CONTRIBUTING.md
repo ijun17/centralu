@@ -103,6 +103,8 @@ pnpm e2e         # Playwright scenarios
 ```
 
 CI runs `pnpm verify` on every pull request; run it locally anyway, all of it, before you push.
+CI also runs the keeper's end-to-end scripts on macOS, the parts that need no model and no network
+(`scripts/keeper-*integration.mjs`, the `keeper e2e` job; [docs/agent-host.md](docs/agent-host.md) §4.1).
 Run `pnpm e2e` for anything the UI shows.
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test

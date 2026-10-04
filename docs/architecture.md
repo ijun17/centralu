@@ -277,6 +277,7 @@ agent-host / tauri ─┴─→ NormalizedEvent stream
 | adapters | Contract tests: replay recorded SDK/protocol responses → verify NormalizedEvent | C4. Possible in CI without a real CLI |
 | ui | Playwright on the core flows only (web dev mode + mock platform) | The bonus of developing in a browser |
 | dependency rules | eslint-plugin-boundaries + dependency-cruiser in CI | Enforce §2 by machine, not by document |
+| keeper (§4.1–4.4) | The real binary and host, driven by `scripts/keeper-*integration.mjs`; in CI on macOS without models ([agent-host.md](agent-host.md) §4.1) | Startup order, adoption and handoff only fail with real processes: #329's crash on every restart that held a terminal passed every unit and e2e test (#348) |
 
 ## 7. The connection to M0
 

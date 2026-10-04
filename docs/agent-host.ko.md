@@ -268,6 +268,16 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 `scripts/keeper-integration.mjs`가 진짜 바이너리(`cargo build`, `/tmp`로)와 진짜 번들 호스트로 임시
 `CC_DATA_DIR`에서 이것을 전부 몰아 본다.
 
+**CI에서.** `.github/workflows/build.yml`의 `keeper e2e` 잡(macOS)이 바이너리와 호스트를 한 번 빌드하고, 세 키퍼
+스크립트 가운데 모델도 네트워크도 필요 없는 부분을 돌린다: `keeper-integration.mjs` 전부, 그리고
+`--no-claude --no-codex`를 붙인 `keeper-children-integration.mjs`와 `keeper-handoff-integration.mjs`. 이 잡이 있는
+까닭은 이 중 어느 것도 단위 테스트나 e2e에 드러나지 않기 때문이다: 서버가 생기기 전에 넣은 #329의 `await`가 터미널을
+쥔 호스트의 재시작을 모두 크래시시켰고(#348), 알아챈 것은 손으로 돌린 children 스크립트뿐이었다. claude와 codex
+턴은 손으로 돌리는 채로 남는다. 각 스크립트는 통과하든 실패하든 자기가 띄운 프로세스와 그것들이 띄운 것까지 모두
+끝낸다. 이름이 아니라 프로세스 표 하나로 찾는다(`scripts/keeper-test-processes.mjs`). 검사가 실패하면
+`keeper.log`와 `host.log`의 끝을 찍는다. Linux에서는 아직 돌리지 않는다: ubuntu-24.04에서 해 본 시도(2026-10-05)는 첫
+시나리오의 키퍼가 멈춘 직후 키퍼의 프로세스 그룹 밖에 있는 스크립트 자신에게 SIGTERM이 닿아 끝났다.
+
 ### 4.2 호스트에서 본 정문과 교체 (#280, 옵션 C 3단계)
 
 설계는 [architecture.ko.md](architecture.ko.md) §4.2에 있다. 호스트가 하는 일:
@@ -395,7 +405,7 @@ sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId
 
 `scripts/keeper-children-integration.mjs`가 실제 바이너리·호스트·claude(haiku)·codex(`gpt-5.6-luna`)로 이것을 돌린다:
 SIGKILL당한 호스트를 넘는 claude 턴, 같은 크래시를 넘는 터미널과 개발 서버(그 뒤 크기 바꾸기), 교체를 넘는 codex 턴,
-그리고 모든 자식을 끝내는 stop.
+그리고 모든 자식을 끝내는 stop. CI는 `--no-claude --no-codex`로 돌린다(§4.1).
 
 ### 4.4 호스트에서 본 키퍼 넘겨주기 (#280, 옵션 C 4단계)
 
@@ -408,7 +418,8 @@ stdout은 같은 파이프이고, `children.sock`의 제어·붙기 연결은 �
 
 `scripts/keeper-handoff-integration.mjs`가 세 빌드의 실제 바이너리, 실제 호스트, claude(haiku), codex(`gpt-5.6-luna`)로
 이것을 돌린다: 각각 도구 호출 중인 턴과 세는 터미널·개발 서버를 둔 채의 넘겨주기, 커밋 전에 죽인 넘겨주기, 키퍼를 옮기고
-이어서 호스트를 교체하는 바꾸기, 그리고 그 모든 과정을 넘는 앱 뷰와 창의 연결.
+이어서 호스트를 교체하는 바꾸기, 그리고 그 모든 과정을 넘는 앱 뷰와 창의 연결. CI는 `--no-claude --no-codex`로
+돌린다(§4.1).
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 

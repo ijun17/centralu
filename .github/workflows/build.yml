@@ -294,3 +294,73 @@ jobs:
           Write-Output "::warning title=Windows tests (non-blocking until the W2 list in PR 307 is fixed)::$($r.numFailedTests) of $($r.numTotalTests) tests fail in $($files.Count) of $(@($r.testResults).Count) files on Windows. The known list is the W2 checklist in #307; a new name in the job summary is a regression."
           $summary = @("### Windows tests: $($r.numFailedTests) failing in $($files.Count) files (non-blocking)", '') + ($files | ForEach-Object { "- ``$_``" })
           $summary -join "`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+  # The keeper end to end, with the real binary and the real host (2026-10-05). Neither the unit
+  # tests nor e2e start a keeper: when #329 put an `await` in the host's startup before the server
+  # existed, every host restart that held a terminal or a dev server crashed five times until the
+  # keeper gave up, and everything stayed green. scripts/keeper-children-integration.mjs, run by
+  # hand days later, was the first to notice (fixed in #348). These steps are the parts of the three
+  # keeper scripts that need no model and no network; the claude and codex turns stay a manual run.
+  #
+  # macOS, because that is where the packaged app always uses the keeper and where its exit watch is
+  # kqueue. Linux (pidfd) is a follow-up: a trial on ubuntu-24.04 (2026-10-05) was cut short when,
+  # right after the first scenario's keeper stopped, a SIGTERM reached the script itself and the
+  # runner cancelled the step. Something on the Linux stop path signals outside the keeper's own
+  # process group; until that is understood, these scripts are not run there. The same image as the
+  # darwin bundle above.
+  keeper:
+    name: keeper e2e
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      # The scripts build into a folder under /tmp by default. rust-cache keeps only folders under
+      # the workspace, so CI builds into the crate's own target folder and the scripts look there.
+      KEEPER_TARGET_DIR: ${{ github.workspace }}/apps/desktop/src-tauri/target
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Never the real data folder (AGENTS.md). Every keeper the scripts start gets a temporary
+      # folder of its own; this only covers anything that would otherwise fall back to the default.
+      # A step, because the job's `env` cannot read the `runner` context.
+      - name: Point CC_DATA_DIR at a temporary folder
+        run: echo "CC_DATA_DIR=$RUNNER_TEMP/centralu-data" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          # A debug build: it shares nothing with the darwin bundle's release cache.
+          key: keeper-darwin-arm64
+
+      - run: pnpm install --frozen-lockfile
+
+      # Built once here rather than by each script (they all take --no-build), so the time a build
+      # takes and the time the checks take are reported apart.
+      - name: Bundle the host
+        id: bundle
+        run: pnpm bundle:host
+
+      - name: Build the binary (debug)
+        id: build
+        run: cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      # Each script runs whatever the one before said, so one failure does not hide the next.
+      - name: keeper (start, attach, background, stop, swap, drain)
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: node scripts/keeper-integration.mjs --no-build
+
+      - name: keeper holding a terminal and a dev server across a host crash
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: node scripts/keeper-children-integration.mjs --no-build --no-claude --no-codex
+
+      - name: keeper handing itself over
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: node scripts/keeper-handoff-integration.mjs --no-build --no-claude --no-codex

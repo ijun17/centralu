@@ -306,6 +306,16 @@ starting ends too: the app that launched it died first.
 `scripts/keeper-integration.mjs` drives all of this with the real binary (`cargo build` into `/tmp`) and the
 real bundled host against a temporary `CC_DATA_DIR`.
 
+**In CI.** The `keeper e2e` job in `.github/workflows/build.yml` (macOS) builds the binary and the host once and runs
+the parts of the three keeper scripts that need no model and no network: all of `keeper-integration.mjs`, and
+`keeper-children-integration.mjs` and `keeper-handoff-integration.mjs` with `--no-claude --no-codex`. It exists
+because none of this shows in unit tests or e2e: #329's `await` before the server existed crashed every host
+restart that held a terminal (#348), and only a hand run of the children script noticed. The claude and codex
+turns stay manual. Each script ends every process it started and everything those started, pass or fail, found
+from one process table rather than by name (`scripts/keeper-test-processes.mjs`), and prints the end of
+`keeper.log` and `host.log` when a check fails. Not on Linux yet: a trial on ubuntu-24.04 (2026-10-05) ended when,
+right after the first scenario's keeper stopped, a SIGTERM reached the script itself, outside the keeper's process group.
+
 ### 4.2 The front door and the swap, seen from the host (#280, option C step 3)
 
 The design is in [architecture.md](architecture.md) §4.2. What the host does:
@@ -444,7 +454,7 @@ minutes and a crashed host is back in seconds.
 
 `scripts/keeper-children-integration.mjs` drives this with the real binary, host, claude (haiku) and codex
 (`gpt-5.6-luna`): a claude turn across a SIGKILLed host, a terminal and a dev server across the same crash (resized
-afterwards), a codex turn across a swap, and stop ending every child.
+afterwards), a codex turn across a swap, and stop ending every child. CI runs it with `--no-claude --no-codex` (§4.1).
 
 ### 4.4 The keeper's handoff, seen from the host (#280, option C step 4)
 
@@ -460,7 +470,7 @@ buffers, so a turn in progress loses and repeats nothing.
 `scripts/keeper-handoff-integration.mjs` drives this with real binaries of three builds, the real host, claude (haiku)
 and codex (`gpt-5.6-luna`): a handoff with a turn of each in a tool call, a terminal and a dev server counting; a
 handoff killed before its commit; a switch that moves the keeper and then swaps the host; and an app view and the
-window's connection across all of it.
+window's connection across all of it. CI runs it with `--no-claude --no-codex` (§4.1).
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 
