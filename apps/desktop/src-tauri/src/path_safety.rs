@@ -122,7 +122,12 @@ mod tests {
     fn rejects_parent_traversal_when_absolute_path_is_validated() {
         // Given: an absolute path string that still contains a parent traversal component.
         let temp = TempTree::new("parent-traversal");
-        let path = temp.path().join("..").join("outside.txt");
+        // Built as a string, not with `join`: on Windows `canonicalize` returns a verbatim path
+        // (`\\?\C:\…`), and pushing `..` onto a verbatim path pops the last component instead,
+        // so `join("..")` produced no traversal at all and the check below saw only a missing
+        // file (the first Windows run, #14).
+        let sep = std::path::MAIN_SEPARATOR;
+        let path = PathBuf::from(format!("{}{sep}..{sep}outside.txt", temp.path().display()));
 
         // When: the native handoff validator runs.
         let result = assert_safe_native_path(&path);
