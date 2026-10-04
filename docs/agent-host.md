@@ -177,7 +177,11 @@ Both are name checks (Claude's one shape check aside), run in both directions: t
 we use, and our source must still use every name listed (so the contract cannot
 outlive the code). They cannot catch a field that still exists but changed meaning —
 that class is guarded by runtime plausibility checks in the adapters (the
-`149,084%` context-gauge lesson).
+`149,084%` context-gauge lesson). Nor can they catch a notification that keeps its name but
+stops arriving: the Codex compaction marker came only from `thread/compacted`, which stays in
+the bindings (marked deprecated in favour of the `contextCompaction` item) while no measured
+CLI sends it, so no Codex compaction left a marker ([#303](https://github.com/ijun17/centralu/issues/303)).
+A probe against the real binary (`scripts/probe-codex-*.mts`) is the check for that class.
 
 **The rule that keeps them honest:** when adapter code starts depending on a new
 vendor name — a new notification, a config key, a field — add it to the contract
@@ -514,6 +518,16 @@ because real user speech often follows an injected block.
 Only when nothing is left after stripping is the line dropped.
 Tool calls and results are dropped, keeping only the name: the point of importing is to get the conversation back,
 not to resurrect the execution log.
+
+**Where the tool compacted is kept** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex's `thread/read`
+returns each compaction as a `{ type: 'contextCompaction', id }` item in the turn where it ran — a turn of its own for
+`/compact`, ahead of the user's message for an automatic one (measured on codex-cli 0.147.0, 0.153.4 and 0.160.0,
+`scripts/probe-codex-compaction.mts`). The reader turns it into a compaction line (`HistoryMessage` with
+`role: 'system', marker: 'compaction'`), and the host stores that as exactly the row a live `compaction` event leaves
+(kind `marker`, the event as its payload), so the screen and the handoff pivot cannot tell a read-back compaction from
+one watched live. Stored once: catching up skips as many compaction lines right after our last message as our record
+already holds there (a compaction this host saw live is in both), and attaches the rest. The Claude reader
+keeps only user and assistant messages from `getSessionMessages`, so an imported Claude conversation still shows none.
 
 ### 8.4 The identity of an imported session
 

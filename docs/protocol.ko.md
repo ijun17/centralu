@@ -52,7 +52,7 @@ type NormalizedEvent =
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: 도구가 받은 입력 그대로 (#221)
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: 결과 글 전체 (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
-  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커
+  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커: claude compact_boundary, codex 완료된 contextCompaction 항목 (#303)
   // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
   | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중 / 재연결 중 (codex)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated 스냅샷

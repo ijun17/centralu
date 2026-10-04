@@ -51,7 +51,7 @@ type NormalizedEvent =
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: the raw tool input (#221)
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: the whole result text (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
-  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker
+  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker: claude compact_boundary, codex a completed contextCompaction item (#303)
   // in-turn progress (display-only, never persisted)
   | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated snapshot
