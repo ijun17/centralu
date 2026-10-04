@@ -9,7 +9,10 @@ import {
   onHostBuild,
   quitAndStopAgents,
   restartHost,
+  swapProgressText,
+  swapRunning,
   switchHostBuild,
+  switchPlan,
   type HostBuild,
   type HostStatus,
 } from '@cc/platform/tauri'
@@ -152,12 +155,19 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
   /*
    * A window of one build attached to a host of another (#280). Happens when the app was updated
    * or rebuilt while the keeper kept the old host running in the background. The window still
-   * works against the old host; this bar says so and offers to switch, which restarts the host.
+   * works against the old host; this bar says so and offers to switch.
+   *
+   * Switching is the keeper's blue-green swap (#280 step 3): the new build starts next to the
+   * running host, which gets up to 10 seconds to finish the calls it serves itself, and the window
+   * reconnects through the same front door. The bar shows each phase, and a failure with its
+   * reason. It asks first only when something can be lost (`switchPlan`).
    */
   const [build, setBuild] = useState<HostBuild | null>(null)
   const [askSwitch, setAskSwitch] = useState(false)
   const [switchError, setSwitchError] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState(false)
+  // A failed swap stays on the bar until dismissed; this remembers which one was
+  const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
   useEffect(() => {
     void hostBuild()
       .then(setBuild)
@@ -167,7 +177,16 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       if (b.sameBuild) setDismissed(false)
     })
   }, [])
-  const otherBuild = build?.mode === 'keeper' && build.sameBuild === false && !dismissed
+  const keeper = build?.mode === 'keeper'
+  const swap = keeper ? build?.swap : undefined
+  const switching = swapRunning(swap)
+  const swapFailed = swap?.phase === 'failed' && dismissedSwap !== swap.startedAt
+  const otherBuild = keeper && build?.sameBuild === false && !dismissed
+  const plan = build ? switchPlan(build) : null
+  const startSwitch = () => {
+    setSwitchError(null)
+    void switchHostBuild().catch((e: Error) => setSwitchError(e.message))
+  }
 
   const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -226,32 +245,55 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           />
         </div>
       )}
-      {otherBuild && build && (
+      {keeper && build && (switching || swapFailed || otherBuild) && (
         <div
           className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-edge bg-pit px-4 py-1.5 text-[11px] text-ash"
           data-testid="host-other-build"
-          role="status"
+          role={swapFailed ? 'alert' : 'status'}
         >
-          <span className="min-w-0 flex-1 truncate">
-            The agent host is running {describeBuild(build.host)}. This window is {describeBuild(build.app)}.
-          </span>
+          {switching || swapFailed ? (
+            <span
+              className={`min-w-0 flex-1 truncate ${swapFailed ? 'text-del' : ''}`}
+              title={swap?.message}
+              data-testid="host-switch-progress"
+            >
+              {swapProgressText(swap)}
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 truncate">
+              The agent host is running {describeBuild(build.host)}. This window is {describeBuild(build.app)}.
+            </span>
+          )}
           {switchError && <span className="shrink-0 text-del">{switchError}</span>}
-          <button
-            className="shrink-0 rounded border border-edge px-2 py-0.5 text-chalk hover:border-graphite"
-            onClick={() => {
-              setSwitchError(null)
-              setAskSwitch(true)
-            }}
-            data-testid="host-switch-build"
-          >
-            Switch to this build
-          </button>
-          <button className="shrink-0 text-slate hover:text-chalk" onClick={() => setDismissed(true)}>
-            Not now
-          </button>
+          {!switching && otherBuild && (
+            <button
+              className="shrink-0 rounded border border-edge px-2 py-0.5 text-chalk hover:border-graphite"
+              onClick={() => {
+                setSwitchError(null)
+                if (swap) setDismissedSwap(swap.startedAt)
+                // Ask only when something can be lost; otherwise just switch
+                if (plan?.confirm) setAskSwitch(true)
+                else startSwitch()
+              }}
+              data-testid="host-switch-build"
+            >
+              {swapFailed ? 'Try again' : 'Switch to this build'}
+            </button>
+          )}
+          {!switching && (
+            <button
+              className="shrink-0 text-slate hover:text-chalk"
+              onClick={() => {
+                if (swap) setDismissedSwap(swap.startedAt)
+                setDismissed(true)
+              }}
+            >
+              {swapFailed ? 'Dismiss' : 'Not now'}
+            </button>
+          )}
         </div>
       )}
-      {askSwitch && build && (
+      {askSwitch && build && plan && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
           data-testid="confirm-switch-build"
@@ -260,14 +302,13 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Restart the agent host?"
+            aria-label="Switch the agent host to this build?"
             className="w-[380px] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="text-[13px] text-chalk">Restart the agent host on this window's build?</p>
-            <p className="mt-2 text-[11px] leading-relaxed text-ash">
-              Every running turn is cut, and agent processes stop. Conversations are saved and
-              resume on the new host. Waiting approvals have to be asked again.
+            <p className="text-[13px] text-chalk">Switch the agent host to this window's build?</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="confirm-switch-build-loses">
+              {plan.loses}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -277,14 +318,18 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
                 Cancel
               </button>
               <button
-                className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del hover:border-del/70"
+                className={
+                  build.keepsAgents
+                    ? 'rounded border border-edge px-3 py-1 text-[12px] text-chalk hover:border-graphite'
+                    : 'rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del hover:border-del/70'
+                }
                 data-testid="confirm-switch-build-yes"
                 onClick={() => {
                   setAskSwitch(false)
-                  void switchHostBuild().catch((e: Error) => setSwitchError(e.message))
+                  startSwitch()
                 }}
               >
-                Restart host
+                Switch
               </button>
             </div>
           </div>

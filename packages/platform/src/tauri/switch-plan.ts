@@ -1,0 +1,98 @@
+/**
+ * What switching the host to this window's build costs, and how to say a swap's progress (#280,
+ * option C step 3). Pure, so the wording rules are tested without a webview.
+ *
+ * Switching is a blue-green swap: the keeper starts the new build next to the running host, the
+ * running host gets up to 10 seconds to finish the calls it serves itself (orchestrator and app
+ * tools, RPCs), and the front door moves to the new host. Whether agents survive depends on the
+ * running host: with step 2 it hands them over (`keepsAgents`); before that, the swap's detach still
+ * stops them, as a quit does.
+ */
+
+/** Where a build came from, as the keeper records it */
+export type SwapBuild = { commit: string; version?: string; bundlePath?: string }
+
+export type SwapPhase = 'starting' | 'standby' | 'draining' | 'activating' | 'done' | 'failed'
+
+/** The keeper's account of the current or last swap */
+export type SwapView = {
+  phase: SwapPhase
+  target: SwapBuild
+  from?: SwapBuild
+  message?: string
+  /** Failed after the old host had drained, and the old build was started again */
+  rolledBack?: boolean
+  /** In-process calls the old host cut at the drain bound */
+  cut?: string[]
+  startedAt: number
+}
+
+export type SwitchPlan = {
+  /** Ask first: something can be lost */
+  confirm: boolean
+  /** What can be lost, for the confirmation */
+  loses: string
+}
+
+/** The keeper's drain bound, in the words the person reads */
+const DRAIN_WORDS = '10 seconds'
+
+/**
+ * Whether to ask before switching, and what to say.
+ *
+ * Asked only when something can be lost: a session working or waiting, a terminal or a command
+ * running (`busy`). Unknown counts as busy, because a confirmation too many costs a click and one
+ * too few costs a turn.
+ */
+export function switchPlan(b: { keepsAgents?: boolean; busy?: boolean }): SwitchPlan {
+  const confirm = b.busy !== false
+  if (b.keepsAgents === true) {
+    return {
+      confirm,
+      loses:
+        `Agents keep running and this window reconnects in a moment. A tool call Centralu serves itself ` +
+        `(an orchestrator or app tool) that is still running after ${DRAIN_WORDS} is stopped, and the agent ` +
+        `is told to try it again.`,
+    }
+  }
+  return {
+    confirm,
+    loses:
+      `This build cannot hand running agents over yet, so running turns stop and agent processes, ` +
+      `terminals and commands restart on the new build. Conversations are saved and resume there; ` +
+      `waiting approvals have to be asked again. Tool calls Centralu serves itself get up to ${DRAIN_WORDS} ` +
+      `to finish first.`,
+  }
+}
+
+/** One line for the bar while a swap runs, or after it failed; null when there is nothing to show */
+export function swapProgressText(s: SwapView | undefined): string | null {
+  if (!s) return null
+  switch (s.phase) {
+    case 'starting':
+      return 'Starting the new build next to the running one…'
+    case 'standby':
+      return 'The new build is ready to take over…'
+    case 'draining':
+      return `Letting running calls finish (up to ${DRAIN_WORDS})…`
+    case 'activating':
+      return 'Handing over to the new build. Reconnecting…'
+    case 'done':
+      return null
+    case 'failed': {
+      const after = s.rolledBack
+        ? ' The previous build was started again.'
+        : ' The running build was not touched and is still serving.'
+      return `Could not switch builds: ${firstLine(s.message ?? 'no reason given')}.${after}`
+    }
+  }
+}
+
+/** True while a swap is between its start and its end */
+export function swapRunning(s: SwapView | undefined): boolean {
+  return !!s && s.phase !== 'done' && s.phase !== 'failed'
+}
+
+function firstLine(text: string): string {
+  return text.split('\n')[0]!.replace(/[.\s]+$/, '')
+}

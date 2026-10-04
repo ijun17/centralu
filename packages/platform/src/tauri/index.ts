@@ -5,6 +5,9 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AlertKind, Platform, ShortcutKeys, SystemPort } from '../ports/index.js'
 import { createWebPlatform } from '../web/index.js'
+import type { SwapView } from './switch-plan.js'
+
+export { swapProgressText, swapRunning, switchPlan, type SwapView, type SwitchPlan } from './switch-plan.js'
 
 /**
  * The Tauri implementation (docs/platform-abstraction.md §5, migration playbook steps 2-3).
@@ -145,6 +148,12 @@ export type HostBuild = {
   host?: BuildSource
   sameBuild?: boolean
   background?: boolean
+  /** The current or last blue-green swap (#280 step 3) */
+  swap?: SwapView
+  /** Whether the running host hands agents over in a swap (step 2) or stops them */
+  keepsAgents?: boolean
+  /** A session working or waiting, a terminal or a command running: what a switch could cost */
+  busy?: boolean
 }
 
 export async function hostBuild(): Promise<HostBuild> {
@@ -158,8 +167,9 @@ export function onHostBuild(cb: (b: HostBuild) => void): () => void {
 }
 
 /**
- * Restarts the host from this window's build (#280). **Cuts every running turn** — the caller
- * confirms that with the person first. The new host arrives as an ordinary `host-status` ready.
+ * Switches the host to this window's build with the keeper's blue-green swap (#280 step 3). Returns
+ * once the keeper has taken the request; the swap's phases arrive in `onHostBuild` (`swap`), and the
+ * window reconnects through the same front door. What it can cost is `switchPlan`'s to say.
  */
 export async function switchHostBuild(): Promise<void> {
   await invoke('switch_host_build').catch(rethrowAsError)
