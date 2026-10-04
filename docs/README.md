@@ -23,7 +23,7 @@ Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-
 | [tech-stack.md](tech-stack.md) | Library choices with the reasoning, and the list of things not to reach for | architecture |
 | [platform-abstraction.md](platform-abstraction.md) | The Platform port — how web development turns into a Tauri app. Implementation matrix and the lint rules that enforce it | architecture |
 | [protocol.md](protocol.md) | UI ↔ agent host messages: schemas and versioning rules | architecture |
-| [agent-host.md](agent-host.md) | Inside the Node sidecar: AgentAdapter, and how to add a new tool | protocol |
+| [agent-host.md](agent-host.md) | Inside the Node sidecar: AgentAdapter, how to add a new tool, and the rule for store migrations | protocol |
 | [apps.md](apps.md) | Apps (M4): the manifest, where apps live, trust, lifecycle, the one call path, inline and pinned views and what is standard, the build loop, attaching to sessions, the broker | agent-host |
 | [state-management.md](state-management.md) | Front-end state: event → store → selector, persistence and restore | architecture, protocol |
 | [releasing.md](releasing.md) | How a version reaches users: npm package layout, CI, publish procedure | — |

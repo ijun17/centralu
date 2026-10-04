@@ -18,7 +18,7 @@
 | [tech-stack.ko.md](tech-stack.ko.md) | 라이브러리 선택과 그 이유, 그리고 손대지 말 것들의 목록 | architecture |
 | [platform-abstraction.ko.md](platform-abstraction.ko.md) | Platform 포트 — 웹으로 개발한 것이 Tauri 앱이 되는 방법. 구현 매트릭스와 이를 강제하는 lint 규칙 | architecture |
 | [protocol.ko.md](protocol.ko.md) | UI ↔ agent host 메시지: 스키마와 버전 규칙 | architecture |
-| [agent-host.ko.md](agent-host.ko.md) | Node 사이드카의 내부: AgentAdapter, 그리고 새 툴을 추가하는 방법 | protocol |
+| [agent-host.ko.md](agent-host.ko.md) | Node 사이드카의 내부: AgentAdapter, 새 툴을 추가하는 방법, 그리고 스토어 마이그레이션 규칙 | protocol |
 | [apps.ko.md](apps.ko.md) | 앱(M4): 매니페스트, 앱이 사는 자리, 신뢰, 수명, 하나의 호출 경로, 대화 안 화면과 고정 화면 그리고 무엇이 표준인가, 만들기 루프, 세션에 붙이기, 중개 | agent-host |
 | [state-management.ko.md](state-management.ko.md) | 프런트엔드 상태: 이벤트 → store → selector, 영속화와 복원 | architecture, protocol |
 | [releasing.ko.md](releasing.ko.md) | 버전이 사용자에게 도달하는 방법: npm 패키지 구성, CI, 배포 절차 | — |

@@ -22,6 +22,59 @@ function resolveSchemaPath(): string {
 
 const SCHEMA_PATH = resolveSchemaPath()
 
+/** The host's own settings (v16). Also created by the first write of `min_reader_version`, which can come before v16 */
+const APP_SETTINGS_DDL = `
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`
+
+/**
+ * The `app_settings` key that holds the lowest schema version that can still read this store (#292). A row, not a
+ * `PRAGMA`: SQLite has one integer of its own to spare (`user_version`, already the migration counter), and this sits
+ * next to the host's other settings, where an older host that has never heard of it leaves it alone.
+ */
+const MIN_READER_KEY = 'min_reader_version'
+
+/** One step of the migration list. The rule the two flags serve is written above the list in `migrationSteps` */
+interface MigrationStep {
+  to: number
+  /** A host that knows only versions below `to` cannot run against the store, or silently loses data, once this has run */
+  breaksOlderReaders: boolean
+  /** Rewrites or re-indexes every message, or `VACUUM`s the file: too long to run while another host waits (#280) */
+  heavy?: true
+  run: () => void
+}
+
+/**
+ * The store needs a newer host than this one (#292). Thrown by the constructor before anything touches the file, so
+ * the caller can refuse to start with this message rather than open the store and fail later on a missing column.
+ */
+export class StoreTooNewError extends Error {
+  constructor(
+    readonly minReaderVersion: number,
+    readonly knownVersion: number,
+    readonly dbPath: string,
+  ) {
+    super(storeTooNewMessage(minReaderVersion, knownVersion, dbPath))
+    this.name = 'StoreTooNewError'
+  }
+}
+
+/**
+ * Said on startup refusal. The phrase "written by a newer Centralu" is what the desktop supervisor matches to show
+ * this at once instead of retrying (`sidecar.rs`, `is_final_refusal`): a retry gets the same answer.
+ */
+export function storeTooNewMessage(minReaderVersion: number, knownVersion: number, dbPath: string): string {
+  return (
+    `[agent-host] This data was written by a newer Centralu.\n` +
+    `  It can be read from store version ${minReaderVersion} on; this Centralu knows store versions up to ${knownVersion}.\n` +
+    `  Update Centralu to open it. Nothing in the data was changed.\n` +
+    `  Store: ${dbPath}`
+  )
+}
+
 /**
  * The dev-only store (docs/agent-host.md §5). Replaced by rusqlite once the app moves to
  * Tauri; the schema file (protocol/src/schema/schema.sql) is shared as-is.
@@ -42,6 +95,12 @@ export class Store {
   constructor(private readonly dbPath = ':memory:') {
     const path = dbPath
     this.db = new Database(path)
+    /*
+     * Before anything writes: not the WAL switch, not schema.sql, not a migration. schema.sql alone would already
+     * recreate, empty, whatever a newer build dropped (v13's lesson), so a store this host cannot read is left exactly
+     * as the newer build wrote it.
+     */
+    this.refuseIfTooNew()
     this.db.pragma('journal_mode = WAL')
     this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
     this.migrate()
@@ -81,12 +140,132 @@ export class Store {
    * The steps below still **have to be written idempotently.** A new database starts at 0 and
    * runs all 26 steps in order in one go, and many steps run on top of tables schema.sql has
    * already created (for example v13 sees the empty table v9 made and skips it).
+   *
+   * Which builds can still read the store is kept alongside (#292): see the rule above the list in
+   * `migrationSteps`. A store newer than this host runs no step at all — the loop below only knows
+   * steps up to `latestKnownVersion` — and the constructor has already refused one this host cannot read.
    */
   private migrate(): void {
     const current = this.schemaVersion
-    const steps: { to: number; run: () => void }[] = [
+    const steps = this.migrationSteps()
+    /*
+     * A store from before #292 has no record, so it is computed once from the steps it has already run. From then on
+     * the record only goes up: a newer host may have raised it past anything this host knows, and a lower guess here
+     * must not undo that.
+     */
+    const stored = this.storedMinReader()
+    let floor = stored ?? Math.max(0, ...steps.filter((s) => s.breaksOlderReaders && s.to <= current).map((s) => s.to))
+    if (stored === null) this.writeMinReader(floor)
+
+    const t0 = Date.now()
+    for (const step of steps) {
+      if (current < step.to) {
+        /*
+         * Raised **before** the step runs. A start killed between the two then leaves a store that turns away an older
+         * host it could still have served, which costs an update; the other order leaves a store an older host opens
+         * and breaks on, which is what the record exists to prevent.
+         */
+        if (step.breaksOlderReaders && step.to > floor) {
+          floor = step.to
+          this.writeMinReader(floor)
+        }
+        step.run()
+        this.db.pragma(`user_version = ${step.to}`)
+        this.migrationsRun += 1
+      }
+    }
+    /*
+     * If migrations ran, **say so** (a lesson from a dogfooding incident: beta.4 silently
+     * reworked a 151k-message database for over ten seconds, and with neither the UI nor the
+     * log saying anything, it read as "frozen" and the person killed it with Cmd+Q). One line
+     * is enough for host.log to explain that silence. An in-memory database (tests) runs every
+     * step every time, so this would just be noise there — file databases only.
+     */
+    if (this.migrationsRun > 0 && this.dbPath !== ':memory:') {
+      console.error(
+        `[store] migrated v${current} → v${this.schemaVersion} (${this.migrationsRun} steps, ${Date.now() - t0}ms)`,
+      )
+    }
+    // An older host on a newer store is allowed (the record says so) but unusual — host.log should show it happened
+    if (current > this.latestKnownVersion && this.dbPath !== ':memory:') {
+      console.error(
+        `[store] v${current} was written by a newer Centralu; this one knows up to v${this.latestKnownVersion} and ` +
+          `opens it without migrating (it can be read from v${floor} on)`,
+      )
+    }
+  }
+
+  /**
+   * The newest version this host has a step for. A store whose `min_reader_version` is above it is refused; a store
+   * whose `user_version` is above it, but whose `min_reader_version` is not, is opened and left as it is.
+   */
+  get latestKnownVersion(): number {
+    const steps = this.migrationSteps()
+    return steps[steps.length - 1]!.to
+  }
+
+  /** The lowest schema version that can still read this store (#292) */
+  get minReaderVersion(): number {
+    return this.storedMinReader() ?? 0
+  }
+
+  private refuseIfTooNew(): void {
+    const floor = this.storedMinReader()
+    const known = this.latestKnownVersion
+    if (floor === null || floor <= known) return
+    this.db.close()
+    throw new StoreTooNewError(floor, known, this.dbPath)
+  }
+
+  /** null when nothing is recorded yet: a new store, or one last opened by a host from before #292 */
+  private storedMinReader(): number | null {
+    const table = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get()
+    if (!table) return null
+    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(MIN_READER_KEY) as
+      | { value: string }
+      | undefined
+    const n = row ? Number(row.value) : NaN
+    // Only a hand-edited store holds something else here; computing it again is better than trusting it
+    return Number.isInteger(n) && n >= 0 ? n : null
+  }
+
+  private writeMinReader(version: number): void {
+    // v13 raises it before v16 has made the table; the DDL is the same, so v16 then finds it in place
+    this.db.exec(APP_SETTINGS_DDL)
+    this.db
+      .prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(MIN_READER_KEY, String(version))
+  }
+
+  /**
+   * The migration list.
+   *
+   * **How a step may change the store (#292): expand, then contract.** Two builds meet one store more often than it
+   * looks: a person goes back to an older release, and a host swap (#280) keeps the previous host serving while the
+   * next one starts, and hands back to it if the next one fails. So:
+   *
+   * 1. **Expand.** A step may add tables, nullable or defaulted columns and indexes, or rewrite data into a form the
+   *    previous build still reads. It declares `breaksOlderReaders: false`.
+   * 2. **Contract, one release later.** A step that drops or renames a table, column or index, or leaves data an older
+   *    build cannot read or would silently lose, lands one release after the code stopped reading and writing what it
+   *    removes, and declares `breaksOlderReaders: true`. Dropping something an older schema.sql creates counts: the
+   *    older host recreates it empty and carries on (v13).
+   * 3. **A breaking step raises the store's `min_reader_version`** (an `app_settings` row) to its own `to`, before it
+   *    runs. A host whose newest step is below that refuses to start and says why (`StoreTooNewError`), instead of
+   *    opening the store and failing on the first missing column. A host older than the store but at or above it
+   *    opens it and runs nothing it does not know.
+   * 4. **Heavy steps are marked `heavy: true`**: a step that rewrites or re-indexes every message, or `VACUUM`s. On the
+   *    real store these take seconds (v40: 1.9s on 137,722 messages), too long for a swap window, so a swap can run
+   *    them after the switch rather than during it.
+   *
+   * Measured for #280 (2026-10-04): of the first 40 steps, v13, v28 and v32 broke an older build, the last two within
+   * twelve days of each other, and nothing stopped an older host from opening the store.
+   */
+  private migrationSteps(): MigrationStep[] {
+    return [
       {
         to: 2,
+        breaksOlderReaders: false,
         run: () => {
           // B-7: remember the files an agent touched, across restarts
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
@@ -97,6 +276,9 @@ export class Store {
       },
       {
         to: 3,
+        // Reads every message to backfill the new index
+        breaksOlderReaders: false,
+        heavy: true,
         run: () => {
           // E-1: full-text search over conversations. Korean words carry particles, so trigram
           //   tokenizing is used (unicode61 cannot find '승인을' when searching for '승인')
@@ -124,6 +306,7 @@ export class Store {
       },
       {
         to: 4,
+        breaksOlderReaders: false,
         run: () => {
           // FR-7: remember the model and permission per session (both can change mid-conversation)
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
@@ -137,6 +320,7 @@ export class Store {
       },
       {
         to: 5,
+        breaksOlderReaders: false,
         run: () => {
           // Which earlier conversation this one continues. external_id cannot tell us — a
           // tool can **issue a new identifier** on resume, so it differs from the original.
@@ -148,6 +332,7 @@ export class Store {
       },
       {
         to: 6,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * The slash command (skill) cache.
@@ -171,6 +356,7 @@ export class Store {
       },
       {
         to: 7,
+        breaksOlderReaders: false,
         run: () => {
           // Remember the reasoning effort per session too — the same kind of property as the
           // model, so it lives in the same place
@@ -182,6 +368,7 @@ export class Store {
       },
       {
         to: 8,
+        breaksOlderReaders: false,
         run: () => {
           // Let the person set the sidebar order (projects already had this column)
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
@@ -192,6 +379,7 @@ export class Store {
       },
       {
         to: 9,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Sessions placed on the grid.
@@ -211,6 +399,8 @@ export class Store {
       },
       {
         to: 10,
+        // Same columns, one NOT NULL relaxed: an older build reads and writes it as before. The table is tens of rows
+        breaksOlderReaders: false,
         run: () => {
           /*
            * The orchestrator **does not belong to a project.**
@@ -253,6 +443,9 @@ export class Store {
       },
       {
         to: 11,
+        // Rebuilds the whole index and vacuums. Same shape: an older build's plain INSERTs only bring the duplicates back
+        breaksOlderReaders: false,
+        heavy: true,
         run: () => {
           /*
            * Pin the index back to its message.
@@ -301,6 +494,7 @@ export class Store {
       },
       {
         to: 12,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Worktree sessions (FR-2, optional).
@@ -318,6 +512,8 @@ export class Store {
       },
       {
         to: 13,
+        // Drops the grid's old-named table: an older schema.sql recreates it empty, and the older build loses every placement
+        breaksOlderReaders: true,
         run: () => {
           /*
            * Finishing the rename: move any grid placements left in the old-named table into
@@ -348,6 +544,7 @@ export class Store {
       },
       {
         to: 14,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * The directory a session was created in. Stored, not recomputed. (issue #28)
@@ -394,6 +591,7 @@ export class Store {
       },
       {
         to: 15,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Shell commands saved on a project (issue #44).
@@ -416,6 +614,7 @@ export class Store {
       },
       {
         to: 16,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Settings that belong to the host itself (issue #43).
@@ -430,16 +629,12 @@ export class Store {
            * A key/value table rather than a column, because there is no row it belongs to —
            * this is about the install, not about a project or a session.
            */
-          this.db.exec(`
-            CREATE TABLE IF NOT EXISTS app_settings (
-              key   TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-            );
-          `)
+          this.db.exec(APP_SETTINGS_DDL)
         },
       },
       {
         to: 17,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * How full a conversation's context is (issue #48).
@@ -471,6 +666,7 @@ export class Store {
       },
       {
         to: 18,
+        breaksOlderReaders: false,
         run: () => {
           // Response length (codex's model_verbosity, #54) — the same kind of property as
           // model/effort (v4/v7), so it lives in the same place
@@ -492,6 +688,7 @@ export class Store {
       },
       {
         to: 19,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Commit attribution (#50). The other half of the decision (2026-08-23) to write
@@ -510,6 +707,7 @@ export class Store {
       },
       {
         to: 20,
+        breaksOlderReaders: false,
         run: () => {
           // Response speed (codex's service_tier) — the same kind of property as verbosity
           // (v18), so it lives in the same place
@@ -521,10 +719,14 @@ export class Store {
       },
       {
         to: 21,
+        // Rewrites every message and rebuilds the index, then vacuums. Whole messages read fine in an older build
+        breaksOlderReaders: false,
+        heavy: true,
         run: () => this.mergeDeltaRows(),
       },
       {
         to: 22,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * The session tree (#69): a worktree session hangs off its manager session.
@@ -541,6 +743,7 @@ export class Store {
       },
       {
         to: 23,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Worktree provisioning (#69): a fresh worktree is an empty workbench — no
@@ -556,6 +759,7 @@ export class Store {
       },
       {
         to: 24,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * The baseline for merge detection (#69): the HEAD sha at the moment the worktree
@@ -573,6 +777,7 @@ export class Store {
       },
       {
         to: 25,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * The last reasoning effort chosen also becomes the project default (#69 dogfooding
@@ -588,6 +793,8 @@ export class Store {
       },
       {
         to: 26,
+        // One-way, but an older build reads the cleared marker as an ordinary session
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Retiring the project orchestrator (2026-09-01, reverting #13).
@@ -608,6 +815,7 @@ export class Store {
       },
       {
         to: 27,
+        breaksOlderReaders: false,
         run: () => {
           /*
            * The worktree manager's place, and the trunk (#76).
@@ -638,6 +846,8 @@ export class Store {
       },
       {
         to: 28,
+        // Drops `sessions.archived`: the v27 build indexes and inserts that column, so it fails on start
+        breaksOlderReaders: true,
         run: () => {
           /*
            * Retiring the archive (2026-09-02 dogfooding).
@@ -663,6 +873,8 @@ export class Store {
       },
       {
         to: 29,
+        // Scans every message, but rewrites only the trampled ones, and ts is read the same way by every build
+        breaksOlderReaders: false,
         run: () => {
           /*
            * Restoring the timestamps the v21 merge trampled (real incident, 2026-09-03).
@@ -705,6 +917,7 @@ export class Store {
       },
       {
         to: 30,
+        breaksOlderReaders: false,
         /*
          * The two handles of a coordinating session (#80, #81) — a visibility allow-list
          * (JSON), and the role text fixed at creation time. There is no "task" or "lead"
@@ -724,6 +937,7 @@ export class Store {
       },
       {
         to: 31,
+        breaksOlderReaders: false,
         /**
          * The app that owns a session (#81, user request 2026-09-09). A running app shows its
          * own sessions, and the sidebar carries only projects — this one column is what that
@@ -739,6 +953,8 @@ export class Store {
       },
       {
         to: 32,
+        // Drops `projects.default_model` and `default_effort`: the v31 build selects and updates them
+        breaksOlderReaders: true,
         /**
          * The default model and effort get a tool of their own (#107).
          *
@@ -774,6 +990,7 @@ export class Store {
       },
       {
         to: 33,
+        breaksOlderReaders: false,
         /**
          * Project trust (M4 A-2, plan decision 3) — "is it fine to run this repository's code on
          * this machine".
@@ -803,6 +1020,7 @@ export class Store {
       },
       {
         to: 34,
+        breaksOlderReaders: false,
         /**
          * A run log for external apps (M4 A-6) — the local half of "record who ran what".
          *
@@ -855,6 +1073,8 @@ export class Store {
       },
       {
         to: 35,
+        // One-way, but `trusted` already exists in the build before it
+        breaksOlderReaders: false,
         /**
          * Projects already registered are trusted (M4, reversing v33's default, but only for
          * existing rows).
@@ -882,6 +1102,7 @@ export class Store {
       },
       {
         to: 36,
+        breaksOlderReaders: false,
         /**
          * The person's answer to an app's capability request (M4 D-4) — the memory of "ask once
          * on first use."
@@ -915,6 +1136,7 @@ export class Store {
       },
       {
         to: 37,
+        breaksOlderReaders: false,
         /**
          * The run log becomes a chain (M4 D-6) — what an app asked the broker for over fd 3 also
          * gets a row, nested under the run that caused it.
@@ -940,6 +1162,7 @@ export class Store {
       },
       {
         to: 38,
+        breaksOlderReaders: false,
         /**
          * Tokens spent by an agent an app requested (M4 D-5) — a run_agent row records the input
          * and output tokens the tool reported. The history screen sums these from this table
@@ -955,6 +1178,8 @@ export class Store {
       },
       {
         to: 39,
+        // An older build shows sessions in the trash as live ones; nothing is lost and nothing fails
+        breaksOlderReaders: false,
         /**
          * The trash (#204): deleting a session stops destroying it.
          *
@@ -980,6 +1205,9 @@ export class Store {
       },
       {
         to: 40,
+        // Rebuilds the whole index and vacuums. An older build's new tool-call rows in the index are harmless
+        breaksOlderReaders: false,
+        heavy: true,
         /**
          * Tool calls leave the search index, and the file gives the space back (#221).
          *
@@ -992,6 +1220,7 @@ export class Store {
       },
       {
         to: 41,
+        breaksOlderReaders: false,
         /**
          * What a native subagent did, kept under the card that launched it (#222).
          *
@@ -1027,27 +1256,6 @@ export class Store {
         },
       },
     ]
-
-    const t0 = Date.now()
-    for (const step of steps) {
-      if (current < step.to) {
-        step.run()
-        this.db.pragma(`user_version = ${step.to}`)
-        this.migrationsRun += 1
-      }
-    }
-    /*
-     * If migrations ran, **say so** (a lesson from a dogfooding incident: beta.4 silently
-     * reworked a 151k-message database for over ten seconds, and with neither the UI nor the
-     * log saying anything, it read as "frozen" and the person killed it with Cmd+Q). One line
-     * is enough for host.log to explain that silence. An in-memory database (tests) runs every
-     * step every time, so this would just be noise there — file databases only.
-     */
-    if (this.migrationsRun > 0 && this.dbPath !== ':memory:') {
-      console.error(
-        `[store] migrated v${current} → v${this.schemaVersion} (${this.migrationsRun} steps, ${Date.now() - t0}ms)`,
-      )
-    }
   }
 
   /**

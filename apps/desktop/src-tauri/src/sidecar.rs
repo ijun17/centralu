@@ -173,13 +173,13 @@ impl Supervisor {
                         // The last things the host said — if it died before ready, this is why.
                         let reason = me.take_last_output();
                         /*
-                         * If another instance is holding the data, relaunching just gets the
-                         * same answer — instead of cycling through five backoff rounds (about
-                         * 15 seconds) showing "Starting…", show the person right away exactly
-                         * the reason the host gave (what needs to be closed is spelled out in
-                         * that message).
+                         * If another instance is holding the data, or the data needs a newer
+                         * Centralu, relaunching just gets the same answer — instead of cycling
+                         * through five backoff rounds (about 15 seconds) showing "Starting…",
+                         * show the person right away exactly the reason the host gave (what to
+                         * close or update is spelled out in that message).
                          */
-                        if reason.contains("already using this data") {
+                        if is_final_refusal(&reason) {
                             me.set_error(&reason);
                             emit(&app, HostStatus::Failed { message: reason });
                             return;
@@ -703,9 +703,27 @@ fn workspace_root() -> String {
         .unwrap_or_else(|| ".".to_string())
 }
 
+/// A host that exited with one of these sentences says the same thing on every relaunch, so the
+/// supervisor reports it at once instead of retrying. The phrases are the host's own:
+/// `lockConflictMessage` (instance-lock.ts) and `storeTooNewMessage` (store.ts, #292).
+fn is_final_refusal(reason: &str) -> bool {
+    reason.contains("already using this data") || reason.contains("written by a newer Centralu")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store a newer Centralu wrote is reported at once, like a lock conflict; a plain crash is
+    /// still retried (#292).
+    #[test]
+    fn a_store_too_new_is_final_like_a_lock_conflict() {
+        assert!(is_final_refusal("[agent-host] Another Centralu is already using this data (pid 42)."));
+        assert!(is_final_refusal(
+            "[agent-host] This data was written by a newer Centralu.\n  It can be read from store version 45 on"
+        ));
+        assert!(!is_final_refusal("agent-host exited (code Some(1))\nTypeError: x is undefined"));
+    }
 
     /// Retry can relaunch a supervisor that has given up, and does not launch a second one on
     /// top of a running one (#184).

@@ -161,9 +161,47 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
   The port interface is the same, so moving it later leaves the UI unchanged.
 - **store**: better-sqlite3 + a `user_version` migration runner. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
+  The rule for migration steps is below (§5.1).
 - **fs**: lazy readdir listing + `git check-ignore` (once per directory) + path escape blocking.
 - **attachments**: saves pasted images to `~/.centralu/attachments/<sessionId>/`.
 - The `--dev-services` flag **does not exist** (the document got ahead of itself). Everything is always loaded.
+
+### 5.1 Migration steps: expand, then contract (#292)
+
+Two builds meet one `store.db` more often than it looks: a person goes back to an older release, and a host swap
+(#280) keeps the previous host serving while the next one starts, and hands back to it if the next one fails. Until
+#292 nothing stopped an older host from opening a newer store. It skipped every step it did not know and failed only
+when it touched something a later step had dropped. Measured on 2026-10-04: of the first 40 steps (v2–v41, seven
+weeks), v28 (`sessions.archived` dropped) and v32 (`projects.default_model` / `default_effort` dropped) broke the
+build before them outright, and v13 (the grid's old-named table dropped) made it silently lose every grid placement, because the
+older `schema.sql` recreated the table empty.
+
+The rule, written above the step list in `dev-services/store.ts` (`migrationSteps`), which a reviewer checks every new
+step against:
+
+1. **Expand.** A step may add tables, nullable or defaulted columns and indexes, or rewrite data into a form the
+   previous build still reads. It declares `breaksOlderReaders: false`.
+2. **Contract, one release later.** A step that drops or renames a table, column or index, or leaves data an older
+   build cannot read or would silently lose, lands one release after the code stopped reading and writing what it
+   removes, and declares `breaksOlderReaders: true`. Dropping something an older `schema.sql` creates counts (v13).
+3. **The store records the lowest schema version that can still read it:** the `min_reader_version` row in
+   `app_settings`. A breaking step raises it to its own version before it runs. A store from before #292 gets it
+   computed once from the steps it has already run (32 for every store migrated to date). On open, before `schema.sql`
+   or any step touches the file, a host whose newest step is below the record refuses to start: "This data was
+   written by a newer Centralu", naming both versions, on stderr and stdout, exit 1, the same path as a lock conflict.
+   The desktop supervisor shows it at once instead of retrying. A host older than the store but at or above the
+   record opens it and runs no step it does not know.
+4. **Heavy steps are marked `heavy: true`:** a step that rewrites or re-indexes every message, or `VACUUM`s (v3, v11,
+   v21, v40 so far; v40 held the start for 1.9s on 137,722 messages). A swap can then run them after the switch
+   rather than during it.
+
+| Steps | What they do | Older build |
+|---|---|---|
+| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39 | add a column | reads it (39: shows sessions in the trash as live ones) |
+| 3, 6, 9, 16, 19, 34, 36, 41 | add a table (3 also backfills the index: heavy) | reads it |
+| 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
+| 21, 26, 29, 35 | rewrite data one way (21 rewrites every message: heavy) | reads it, cannot be undone |
+| **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |
 
 ## 6. Usage and limits (FR-9)
 

@@ -10,7 +10,7 @@ import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
-import { Store } from './dev-services/store.js'
+import { Store, StoreTooNewError } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
 import { ExternalApps } from './apps/external/runtime.js'
@@ -161,7 +161,24 @@ if (!lock.ok) {
  */
 process.on('exit', lock.release)
 
-const store = new Store(dbPath)
+/*
+ * A store a newer Centralu wrote, past what this host can read (#292), is refused here, in the same way as a lock
+ * conflict: one plain sentence on stderr (host.log) and stdout (the supervisor), then exit 1. The supervisor shows it
+ * at once rather than retrying, since a retry gets the same answer. Any other failure to open still throws as before.
+ */
+let store: Store
+try {
+  store = new Store(dbPath)
+} catch (err) {
+  if (!(err instanceof StoreTooNewError)) throw err
+  console.error(err.message)
+  try {
+    writeSync(1, `${err.message}\n`)
+  } catch {
+    // stderr (host.log) has it
+  }
+  process.exit(1)
+}
 const adapters = createAdapters()
 
 /*
