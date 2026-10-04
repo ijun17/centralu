@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { OWNERSHIP_FILE, acquireInstanceLock, lockConflictMessage, processStartTime } from './instance-lock.js'
 
 /**
@@ -155,7 +155,7 @@ describe('single-writer ownership (#82)', () => {
     const script = join(dirname(db), `child-${Math.random().toString(36).slice(2)}.mts`)
     writeFileSync(
       script,
-      `const { acquireInstanceLock } = await import(${JSON.stringify(lockModule)})
+      `const { acquireInstanceLock } = await import(${JSON.stringify(pathToFileURL(lockModule).href)})
 const r = acquireInstanceLock(${JSON.stringify(db)})
 console.log(r.ok ? 'acquired' : 'blocked')
 if (r.ok && ${JSON.stringify(mode)} === 'crash') process.kill(process.pid, 'SIGKILL')
