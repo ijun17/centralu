@@ -35,6 +35,28 @@ describe('pickStrays', () => {
     expect(picked).toEqual([100, 200])
   })
 
+  /**
+   * A child the keeper holds for us (#280 step 2) is not our descendant — after a keeper handover
+   * (step 4) its parent is init — but it is ours: the host and keeper stop it. Without the keeper's
+   * list it looks exactly like pid 100, an agent's leftover.
+   */
+  it('never offers a child the keeper holds for this host, or what runs under it', () => {
+    const held = parsePsRows(
+      [
+        '  700     1 ??       claude --output-format stream-json', // held by the keeper, reparented
+        '  701   700 ??       node /work/proj/build.js', // its Bash tool's command
+        '  900     1 ??       node host.mjs',
+      ].join('\n'),
+    )
+    const heldCwds = new Map([
+      [700, '/work/proj'],
+      [701, '/work/proj'],
+      [900, '/work/proj'],
+    ])
+    expect(pickStrays(held, heldCwds, roots, 900, [700]).map((s) => s.pid)).toEqual([])
+    expect(pickStrays(held, heldCwds, roots, 900).map((s) => s.pid)).toEqual([700, 701])
+  })
+
   it('leaves alone what a person launched in a terminal — tty is the line', () => {
     expect(pickStrays(rows, cwds, roots, 900).some((s) => s.pid === 101)).toBe(false)
   })

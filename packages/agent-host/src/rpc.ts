@@ -47,6 +47,8 @@ export type RpcServices = {
   views?: ViewHost
   /** An app view inside a conversation (M4 B-1) — the instance a session's app call opened. Closing it also updates this side's record */
   inlineViews?: InlineViews
+  /** Pids of the children the keeper holds for this host (#280 step 2) — never offered as strays */
+  heldPids?: () => Promise<number[]>
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -58,8 +60,9 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids }: RpcServices = {},
 ) {
+  const held = async (): Promise<number[]> => (heldPids ? heldPids().catch(() => []) : [])
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
     return terminals
@@ -498,9 +501,9 @@ export function createRpcHandler(
       const saved = mgr.setGridView(panels ?? (sessionIds ?? []).map((sessionId) => ({ kind: 'session' as const, sessionId })))
       return panels ? saved : sessionIdsOf(saved)
     },
-    'processes.strays': async () => findStrays(mgr.folderRoots()),
+    'processes.strays': async () => findStrays(mgr.folderRoots(), process.pid, await held()),
     'processes.stop': async (p) =>
-      stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots()),
+      stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots(), process.pid, await held()),
     'projects.list': async () => mgr.listProjects(),
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),

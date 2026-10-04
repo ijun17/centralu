@@ -20,12 +20,12 @@ import type { StoreInspection } from './dev-services/store.js'
  */
 
 /**
- * Whether this host hands its agents over in a swap or stops them. Step 2 (the keeper holding
- * claude, codex, terminals and commands) turns this on; until then the swap's detach does what a
- * shutdown does, so a running turn still ends. Reported to the keeper once per start so the app can
- * say truthfully what a switch costs.
+ * Whether this build hands its agents over in a swap rather than stopping them. Step 2 (the keeper
+ * holding claude, codex, terminals and commands) turned it on. A host whose keeper offers no child
+ * service still spawns its own children and stops them, so what is reported (once per start, so the
+ * app can say truthfully what a switch costs) is this **and** having the child service.
  */
-export const KEEPS_AGENTS_ACROSS_SWAP = false
+export const KEEPS_AGENTS_ACROSS_SWAP = true
 
 /**
  * The address and token a Codex orchestrator bridge is started with. Under a keeper that is the
@@ -188,6 +188,8 @@ export type DrainDeps = {
   exit: (code: number) => never
   /** How long to let a cut call's error reach its agent before the hand-off; tests pass 0 */
   settleMs?: number
+  /** The detach hands agents over to the next host (step 2: the keeper holds them) */
+  keepsAgents?: boolean
 }
 
 /**
@@ -225,7 +227,7 @@ export async function runDrain(bound: number, deps: DrainDeps): Promise<DrainRep
     deps.log(`[agent-host] detach failed: ${(err as Error).stack ?? String(err)}`)
   }
   deps.release()
-  deps.write(JSON.stringify({ drained: { ...report, keptAgents: KEEPS_AGENTS_ACROSS_SWAP } }))
+  deps.write(JSON.stringify({ drained: { ...report, keptAgents: deps.keepsAgents === true } }))
   deps.log(`[agent-host] drained (pid ${process.pid})`)
   deps.exit(0)
   return report

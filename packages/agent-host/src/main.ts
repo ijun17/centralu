@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
+import { connectHeldChildren } from './keeper/held-children.js'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { ViewHost } from './views/view-host.js'
@@ -235,6 +236,14 @@ try {
 const adapters = createAdapters()
 
 /*
+ * Under the keeper, agents, terminals and project commands are spawned by the keeper, not by this
+ * host, and a restart leaves them running (#280 step 2, keeper/held-children.ts). What a previous
+ * host left there is taken over below. Without a keeper — `pnpm dev`, e2e, a debug app, Windows —
+ * this is null and everything is spawned here, exactly as before.
+ */
+const held = underKeeper ? await connectHeldChildren(dirname(dbPath)) : null
+
+/*
  * Tells the manager the host's own address — the bridge of an adapter that cannot attach a tool
  * in-process connects back through this address. Since the port is only decided after listen(),
  * this is given as a function rather than a value.
@@ -246,6 +255,7 @@ const mgr = new SessionManager(
   () => bridgeAddress(frontDoor, port, token),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
+  held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {},
 )
 /*
  * The external app runtime (M4 A). Startup **only scans** — an app process starts only the first
@@ -277,9 +287,13 @@ externalApps.refresh()
 onExternalAppListChanged(externalApps, () => server.broadcast({ type: 'external_apps_changed' }))
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
 mgr.useExternalApps(externalApps)
-const terminals = new TerminalService((f) => server.pushTerminal(f))
+const terminals = new TerminalService((f) => server.pushTerminal(f), held?.ptys)
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
-const commandRuns = new CommandRunner((f) => server.pushTerminal(f))
+const commandRuns = new CommandRunner((f) => server.pushTerminal(f), held?.ptys)
+if (held) {
+  terminals.adopt(held.kept.terminals)
+  commandRuns.adopt(held.kept.runs)
+}
 /*
  * The update check is done by **the host** — not by the launcher (issue #43).
  *
@@ -341,7 +355,15 @@ const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
   allowedOrigins,
-  onRpc: createRpcHandler(mgr, adapters, { terminals, updates, commands: commandRuns, externalApps, views, inlineViews }),
+  onRpc: createRpcHandler(mgr, adapters, {
+    terminals,
+    updates,
+    commands: commandRuns,
+    externalApps,
+    views,
+    inlineViews,
+    heldPids: held?.heldPids,
+  }),
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)
@@ -360,7 +382,7 @@ try {
 // This line is parsed by the Tauri supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
 // What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts)
-if (underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP } }))
+if (underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null } }))
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"). By the time this
  * timer fires the ready line has gone out and the keeper has pointed the front door here: the host
@@ -385,6 +407,9 @@ if (swapping && store.deferredSteps.length > 0) {
  * this app open for days at a time, the recurring check afterward is still needed.
  */
 updates.start()
+
+// The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
+if (held) void mgr.adoptKept(held.kept.agents)
 
 /*
  * The activity report the keeper's idle rule reads (#280, keeper-link.ts). Only under a keeper:
@@ -439,52 +464,79 @@ function record(kind: string, err: unknown): void {
   }
 }
 
+/**
+ * How this host leaves (#280 step 2).
+ *
+ *   stop    today's ending: agents, terminals and commands are stopped with it. Always the answer
+ *           without a keeper, and under one when the keeper itself is stopping ("Quit and stop
+ *           agents", the last window closing with background mode off, idle exit) — it says so with
+ *           `stop` on the child service.
+ *   detach  under a keeper that keeps the children: a restart, a build switch, a crash, the keeper's
+ *           pipe closing. Nothing is stopped; the next host re-attaches to all of it.
+ */
+type LeaveMode = 'stop' | 'detach'
+const onSignalMode: LeaveMode = held ? 'detach' : 'stop'
+
 process.on('unhandledRejection', (reason) => record('Unhandled rejection', reason))
 process.on('uncaughtException', (err) => {
   record('Uncaught exception', err)
-  void shutdown('stop')
+  void shutdown(onSignalMode)
 })
 
 /**
- * Stops or hands off everything this host holds, without exiting. `detach` is the swap's hook
- * (#280): with step 2 it releases keeper-held agents, terminals and commands instead of killing
- * them; until then both modes do the same thing.
+ * Stops or hands off everything this host holds, without exiting (see LeaveMode). `detach` is also
+ * the swap's hook (#280 step 3, onDrain below): the draining host lets go of keeper-held agents,
+ * terminals and commands, and the next host re-attaches to them.
  */
-async function stopServices(_mode: 'stop' | 'detach'): Promise<void> {
+async function stopServices(mode: LeaveMode): Promise<void> {
   updates.stop()
   stopActivity()
-  /*
-   * **The PTY is cut off first.** This used to come after awaiting mgr.disposeAll(), but the Tauri
-   * supervisor's budget is 3 seconds, and if this does not finish within that, the host gets
-   * SIGKILLed — meaning these two lines never run at all, and a dev server is left orphaned.
-   * Cleaning up sessions late still leaves no process behind, but a PTY does. Whichever one lingers
-   * is the one that has to go first.
-   *
-   * (A PTY child has its own session via setsid(), so even the supervisor's group kill cannot reach
-   *  it — if this does not kill it, nothing else will.)
-   */
-  terminals.disposeAll()
-  commandRuns.disposeAll()
-  // App processes are shut down **in parallel** with session cleanup — the grace period (1 second) overlaps with the session cleanup time
+  if (mode === 'detach') {
+    // Released, not killed: the keeper keeps draining them for the next host
+    await Promise.all([terminals.detachAll(), commandRuns.detachAll()])
+  } else {
+    /*
+     * **The PTY is cut off first.** This used to come after awaiting mgr.disposeAll(), but the
+     * supervisor's budget is 3 seconds, and if this does not finish within that, the host gets
+     * SIGKILLed — meaning these two lines never run at all, and a dev server is left orphaned.
+     * Cleaning up sessions late still leaves no process behind, but a PTY does. Whichever one
+     * lingers is the one that has to go first.
+     *
+     * (A PTY child has its own session via setsid(), so even the supervisor's group kill cannot
+     *  reach it — if this does not kill it, nothing else will. Under the keeper, the keeper's own
+     *  stop is the backstop.)
+     */
+    terminals.disposeAll()
+    commandRuns.disposeAll()
+  }
+  // App processes are shut down **in parallel** with session cleanup — the grace period (1 second) overlaps with the session cleanup time.
+  // They stay with the host in both modes (#280 decision 2): a new host starts them again on demand
   const appsDown = externalApps.dispose()
-  await mgr.disposeAll()
+  await (mode === 'detach' ? mgr.detachAll() : mgr.disposeAll())
   await appsDown
   appChanges.dispose()
   inlineViews.dispose()
   await views.dispose()
   await server.close()
   store.close()
+  held?.children.close()
 }
 
-const shutdown = async (mode: 'stop' | 'detach' = 'stop') => {
+let leaving: LeaveMode | null = null
+const shutdown = async (mode: LeaveMode) => {
+  // A second signal while leaving changes nothing: the first decided what happens to the children
+  if (leaving) return
+  leaving = mode
   await stopServices(mode)
   // Why it ended becomes the first line of the next investigation — it never disappears silently
-  console.error(`[agent-host] shutting down (pid ${process.pid})`)
+  console.error(`[agent-host] shutting down (pid ${process.pid}, ${mode === 'detach' ? 'agents, terminals and commands left running in the keeper' : 'stopped'})`)
   stopLog()
   process.exit(0)
 }
-process.on('SIGINT', () => void shutdown('stop'))
-process.on('SIGTERM', () => void shutdown('stop'))
+process.on('SIGINT', () => void shutdown(onSignalMode))
+process.on('SIGTERM', () => void shutdown(onSignalMode))
+// The keeper is stopping for good and asks this host to stop its children the way it always did
+held?.children.on('stop', () => void shutdown('stop'))
 
 /*
  * The keeper's drain (#280 step 3, swap-control.ts): finish or cut what the host serves itself,
@@ -493,7 +545,13 @@ process.on('SIGTERM', () => void shutdown('stop'))
 if (control) {
   onDrain(control, {
     drain: hostDrain,
-    detach: () => stopServices('detach'),
+    // With the keeper's child service, a detach really hands agents, terminals and commands over (step 2)
+    detach: async () => {
+      // A signal arriving mid-drain must not run a second, different ending
+      leaving = held ? 'detach' : 'stop'
+      await stopServices(leaving)
+    },
+    keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
     release: lock.release,
     write: (line) => void writeSync(1, `${line}\n`),
     log: (line) => console.error(line),
@@ -518,7 +576,7 @@ if (values['watch-parent']) {
   process.stdin.resume()
   const onParentGone = () => {
     console.error('[agent-host] parent process exited; shutting down')
-    void shutdown('stop')
+    void shutdown(onSignalMode)
   }
   process.stdin.on('end', onParentGone)
   process.stdin.on('close', onParentGone)

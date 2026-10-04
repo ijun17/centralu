@@ -101,12 +101,19 @@ export function pickStrays(
   cwdOf: ReadonlyMap<number, string>,
   roots: readonly string[],
   selfPid: number,
+  /**
+   * The children the keeper holds for this host (#280 step 2): agents, terminals, commands. They
+   * are ours exactly as our own children were — the keeper and the host stop them — but they are
+   * not our descendants any more, and a keeper that took them over from another keeper (step 4) is
+   * not even their parent, so the parent chain alone would call them ownerless.
+   */
+  held: readonly number[] = [],
 ): StrayProcess[] {
   // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
   const kids = new Map<number, number[]>()
   for (const r of rows) kids.set(r.ppid, [...(kids.get(r.ppid) ?? []), r.pid])
-  const ours = new Set<number>([selfPid])
-  const queue = [selfPid]
+  const ours = new Set<number>([selfPid, ...held])
+  const queue = [selfPid, ...held]
   while (queue.length > 0) {
     for (const kid of kids.get(queue.shift()!) ?? []) {
       if (ours.has(kid)) continue
@@ -188,12 +195,16 @@ async function cwdsOf(pids: readonly number[]): Promise<Map<number, string>> {
  * (only those with no terminal), then lsof is run on just those pids — a full lsof takes hundreds
  * of ms, but limited to candidates it takes tens.
  */
-export async function findStrays(roots: readonly string[], selfPid = process.pid): Promise<StrayProcess[]> {
+export async function findStrays(
+  roots: readonly string[],
+  selfPid = process.pid,
+  held: readonly number[] = [],
+): Promise<StrayProcess[]> {
   if (process.platform === 'win32' || roots.length === 0) return []
   const rows = await psRows()
   const candidates = rows.filter((r) => r.pid > 1 && noTty(r.tty)).map((r) => r.pid)
   const cwdOf = await cwdsOf(candidates)
-  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid)
+  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, held)
 }
 
 /**
@@ -229,8 +240,9 @@ export async function stopStrays(
   pids: readonly number[],
   roots: readonly string[],
   selfPid = process.pid,
+  held: readonly number[] = [],
 ): Promise<{ stopped: number }> {
-  const live = await findStrays(roots, selfPid)
+  const live = await findStrays(roots, selfPid, held)
   const allowed = new Set(live.map((s) => s.pid))
   let stopped = 0
   for (const pid of pids) {
