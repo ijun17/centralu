@@ -55,7 +55,18 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, HistoryMessage, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, HistoryMessage, ProcessSource, SessionApps, SessionHandle } from '../adapters/contract.js'
+
+/**
+ * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
+ * session's tool there; the manager hands it to the adapter as a `ProcessSource`.
+ */
+export type AgentProcessHost = {
+  spawn(sessionId: string, tool: ToolName, spec: AgentSpawnSpec): AgentProcess
+}
+
+/** A tool process a previous host left running for this session, to be re-attached at startup */
+export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess }
 import { Store } from '../dev-services/store.js'
 import {
   gitSummary,
@@ -449,6 +460,12 @@ export class SessionManager {
      * temporary directory so they never touch the user's real home.
      */
     private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),
+    private keeperOpts: {
+      /** Spawns agents outside this host (the keeper). Absent: adapters spawn their tools as our children */
+      processes?: AgentProcessHost
+      /** Sessions whose tool process a previous host left running — their live state is not reset (see below) */
+      keptSessions?: ReadonlySet<string>
+    } = {},
   ) {
     /*
      * App observation hook (#81) — intercepts broadcasts and forwards them to enabled apps. The
@@ -492,7 +509,12 @@ export class SessionManager {
      */
     const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
     for (const s of store.listSessions()) {
-      const stale = LIVE_ONLY.includes(s.state)
+      /*
+       * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
+       * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
+       * there.
+       */
+      const stale = LIVE_ONLY.includes(s.state) && !keeperOpts.keptSessions?.has(s.id)
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : s
       this.meta.set(s.id, fixed)
       if (stale) {
@@ -1413,6 +1435,7 @@ export class SessionManager {
       handle = await adapter.createSession(
         {
           sessionId: id, cwd, model: params.model, effort: params.effort,
+          ...this.processSourceFor(id, params.tool),
           verbosity: params.verbosity,
           serviceTier: params.serviceTier,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
@@ -1801,18 +1824,74 @@ export class SessionManager {
    */
   async resumeSession(
     sessionId: string,
+    adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     // If it is already being resumed, wait on that same promise — if each caller started its own, two
     // processes would come up
     const inflight = this.resuming.get(sessionId)
     if (inflight) return inflight
-    const p = this.doResumeSession(sessionId).finally(() => this.resuming.delete(sessionId))
+    const p = this.doResumeSession(sessionId, adopt).finally(() => this.resuming.delete(sessionId))
     this.resuming.set(sessionId, p)
     return p
   }
 
+  /** The keeper as a `ProcessSource` for one session, when this host runs under one (#280 step 2) */
+  private processSourceFor(sessionId: string, tool: ToolName, adopt?: AgentProcess): { processSource?: ProcessSource } {
+    const host = this.keeperOpts.processes
+    if (!host) return {}
+    return {
+      processSource: {
+        spawn: (spec) => host.spawn(sessionId, tool, spec),
+        ...(adopt ? { adopt: { process: adopt, openCalls: this.openToolCalls(sessionId) } } : {}),
+      },
+    }
+  }
+
+  /** Tool calls the store holds for this session with no result after them (the newest 200 rows) */
+  private openToolCalls(sessionId: string): { callId: string; tool: string }[] {
+    const open = new Map<string, string>()
+    for (const r of this.store.loadMessages(sessionId, 200)) {
+      const p = r.payload as { callId?: unknown; summary?: { tool?: unknown } }
+      if (typeof p?.callId !== 'string') continue
+      if (r.kind === 'tool_call' && typeof p.summary?.tool === 'string') open.set(p.callId, p.summary.tool)
+      else if (r.kind === 'tool_result') open.delete(p.callId)
+    }
+    return [...open].map(([callId, tool]) => ({ callId, tool }))
+  }
+
+  /**
+   * Re-attaches the tool processes a previous host left running in the keeper (#280 step 2), so
+   * those sessions come back live — mid-turn, with a waiting approval re-delivered by the tool —
+   * instead of interrupted. Runs through `resumeSession`, so a screen asking to wake the same session
+   * meanwhile joins this instead of starting a second process. A process with no session to go to
+   * (deleted in between, or switched tool) is stopped: nobody could ever address it.
+   */
+  async adoptKept(kept: readonly KeptAgent[]): Promise<void> {
+    await Promise.all(
+      kept.map(async (k) => {
+        const m = this.meta.get(k.sessionId)
+        if (!m || m.tool !== k.tool) {
+          console.error(`[agent-host] kept ${k.tool} process for ${k.sessionId.slice(0, 8)} has no session to go to; stopping it`)
+          k.process.kill('SIGTERM')
+          return
+        }
+        const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
+        if (!r.resumed) {
+          console.error(`[agent-host] could not re-attach ${k.sessionId.slice(0, 8)}: ${r.reason ?? 'unknown'}`)
+          if (m.state === 'working' || m.state === 'waiting_approval') {
+            m.state = 'idle'
+            m.waitingSince = null
+            this.store.upsertSession(m)
+            this.emit({ type: 'state_change', sessionId: m.id, state: 'idle', reason: 'reattach_failed' })
+          }
+        }
+      }),
+    )
+  }
+
   private async doResumeSession(
     sessionId: string,
+    adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
@@ -1835,7 +1914,8 @@ export class SessionManager {
      */
     const resumeId = m.externalId ?? m.importedFrom
 
-    if (!resumeId) {
+    // An adopted process is the conversation itself, whatever ids the store has for it
+    if (!resumeId && !adopt) {
       /*
        * **Tells apart what was actually lost from what was deliberately left behind.**
        *
@@ -1878,7 +1958,7 @@ export class SessionManager {
      */
     // If two sessions try to hold the same conversation, the tool refuses — block it first and report who
     // holds it
-    if (resumeId) {
+    if (resumeId && !adopt) {
       const holder = this.holderOf(resumeId, sessionId)
       if (holder) {
         return {
@@ -1900,7 +1980,8 @@ export class SessionManager {
      * check (listing), start (process + resume), catch-up.
      */
     const t0 = Date.now()
-    const gone = await this.externalGone(m, cwd)
+    // A running process is proof enough that its conversation exists (and asking codex would start another app-server)
+    const gone = adopt ? false : await this.externalGone(m, cwd)
     const tCheck = Date.now() - t0
     if (gone) {
       return { session: m, resumed: false, reason: externalMissingReason(this.toolLabel(m.tool), cwd) }
@@ -1932,6 +2013,7 @@ export class SessionManager {
         {
           sessionId,
           cwd,
+          ...this.processSourceFor(sessionId, tool, adopt),
           model: launched.model ?? undefined,
           effort: launched.effort ?? undefined,
           verbosity: launched.verbosity ?? undefined,
@@ -2054,19 +2136,31 @@ export class SessionManager {
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       // The identifier may only now be available — record it for the next resume
       if (handle.externalId && handle.externalId !== m.externalId) m.externalId = handle.externalId
-      m.state = 'idle'
-      m.waitingSince = null
-      this.store.upsertSession(m)
-      this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
+      if (adopt) {
+        /*
+         * A re-attached process keeps the state it had (#280 step 2): a running turn is still
+         * running, and a waiting approval has been, or is about to be, re-delivered by the tool —
+         * which sets the state itself. Forcing `idle` here would tear down that fresh card.
+         */
+        this.store.upsertSession(m)
+        this.emit({ type: 'state_change', sessionId, state: m.state, reason: 'reattached' })
+      } else {
+        m.state = 'idle'
+        m.waitingSince = null
+        this.store.upsertSession(m)
+        this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
+      }
       void this.listCommands(sessionId).catch(() => {})
 
       // Catches up on conversation continued outside (in a terminal's tool).
       // An orchestrator is a session the app manages, so there is nothing for it to catch up on
       // outside — since it has no project, this branch never fires for it in the first place
       // (an orchestrator with a project no longer exists).
+      // Not for a re-attached process: what it said meanwhile arrives from the keeper's buffer, and
+      // reading it from the transcript too would record it twice.
       let tCatchup = 0
       let added = 0
-      if (project) {
+      if (project && !adopt) {
         // Even if catch-up stalls, the session is already alive — do not block on it, leave it for next time
         const tCatchupFrom = Date.now()
         added = await withTimeout(this.syncImportedHistory(m, adapter), 10_000, 'History catch-up').catch(() => 0)
@@ -2076,7 +2170,7 @@ export class SessionManager {
       // If catchup is under a few hundred ms, it was skipped (nothing changed, so the full transcript was
       // never read)
       console.error(
-        `[agent-host] resumed ${sessionId.slice(0, 8)} tool=${m.tool} ` +
+        `[agent-host] ${adopt ? 're-attached' : 'resumed'} ${sessionId.slice(0, 8)} tool=${m.tool} ` +
           `check=${tCheck}ms start=${tStart}ms catchup=${tCatchup}ms added=${added} total=${Date.now() - t0}ms`,
       )
       return { session: m, resumed: true }
@@ -2091,6 +2185,11 @@ export class SessionManager {
       // A cap applies to this after-the-fact check too — the worst outcome would be holding the real
       // failure reason (err) but losing it because the check itself hung. The same rule as elsewhere:
       // if it cannot be determined, it does not block (false).
+      // A kept process that could not be re-attached has nobody left to address it
+      if (adopt) {
+        adopt.kill('SIGTERM')
+        return { session: m, resumed: false, reason: (err as Error).message }
+      }
       const gone = await withTimeout(this.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false)
       if (gone) {
         return { session: m, resumed: false, reason: externalMissingReason(this.toolLabel(m.tool), cwd) }
@@ -5802,6 +5901,32 @@ export class SessionManager {
     // crash — stamping the current time when the actual moment of death is unknown could swallow
     // whatever happened externally between death and discovery.
     for (const id of this.handles.keys()) this.stampExternalSynced(id)
+    this.handles.clear()
+  }
+
+  /**
+   * The host is leaving but the keeper keeps the agents (#280 step 2): a restart, a crash, a build
+   * switch — and the blue-green swap of step 3 calls this too. The opposite of `disposeAll` where it
+   * matters: no process is stopped, no waiting approval is denied, and the sessions keep their
+   * state, because the next host re-attaches to the same processes and finds them as they were.
+   *
+   * What lives in this host still ends here: app agent runs and capability questions (the app
+   * processes are restarted with the host, decision 2), and the in-process tool servers. Output that
+   * arrives while each process is being released is recorded before the streams are closed, and
+   * nothing is stamped as synced: the conversation goes on.
+   */
+  async detachAll(): Promise<void> {
+    this.watchers.close()
+    this.appsHub?.rt.attachBrokerHost(null)
+    for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))
+    for (const ask of [...this.capabilityAsks.values()]) ask.resolve(null)
+    this.capabilityAsks.clear()
+    for (const q of [...this.appQuestions.values()]) q.resolve(null)
+    this.appQuestions.clear()
+    this.appsHub?.dispose()
+    await Promise.allSettled([...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())))
+    for (const [id, run] of this.streams) this.flushStream(id, run)
+    for (const id of [...this.streams.keys()]) this.closeStream(id)
     this.handles.clear()
   }
 

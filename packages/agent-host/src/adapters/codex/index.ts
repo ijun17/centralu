@@ -337,7 +337,15 @@ class CodexSession implements SessionHandle {
           })
         },
       },
-      { cwd: opts.cwd, command: whichTool('codex') ?? 'codex' },
+      {
+        cwd: opts.cwd,
+        command: whichTool('codex') ?? 'codex',
+        // Under the keeper (#280 step 2) the app-server is spawned there, or adopted from a previous host
+        process: opts.processSource
+          ? (opts.processSource.adopt?.process ??
+            opts.processSource.spawn({ command: whichTool('codex') ?? 'codex', args: ['app-server'], cwd: opts.cwd, env: process.env }))
+          : undefined,
+      },
     )
     this.ready = this.start()
     // Registered before any send's continuation, so the flag is set by the time a send's catch runs
@@ -347,11 +355,22 @@ class CodexSession implements SessionHandle {
   }
 
   private async start(): Promise<void> {
-    await this.client.request('initialize', {
-      clientInfo: CLIENT_INFO,
-      capabilities: null,
-    })
-    this.client.notify('initialized')
+    const adopted = !!this.opts.processSource?.adopt
+    try {
+      await this.client.request('initialize', {
+        clientInfo: CLIENT_INFO,
+        capabilities: null,
+      })
+      this.client.notify('initialized')
+    } catch (err) {
+      /*
+       * An app-server adopted from a previous host (#280 step 2) is the same stdio connection, already
+       * initialized. Measured (codex-cli 0.160.0, gpt-5.6-luna, 2026-10-04): the second `initialize`
+       * is rejected with -32600 "Already initialized" and nothing else changes; `thread/resume` then
+       * answers with the running turn and re-sends a pending approval under the same request id.
+       */
+      if (!adopted || !/already initialized/i.test((err as Error).message)) throw err
+    }
 
     if (this.opts.resumeExternalId) {
       // Resume (FR-10). If it fails, the session manager guides the person through the fallback
@@ -420,6 +439,8 @@ class CodexSession implements SessionHandle {
         throw err
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
+      // An adopted thread may be mid-turn: Stop needs that turn's id (measured: `thread.turns` lists it as inProgress)
+      if (adopted) this.turnId ??= runningTurnOf(res)
       /*
        * The goal is a live field (2026-09-07) — for the badge to stay accurate after a restart,
        * we ask again on resume. Older codex has no such method: a failure lies down quietly as
@@ -1201,6 +1222,17 @@ class CodexSession implements SessionHandle {
     }
     await this.client.dispose()
   }
+
+  /**
+   * Lets go of the app-server without closing it (#280 step 2). No deny for a waiting approval —
+   * the next host's `thread/resume` gets it re-sent under the same id — and no EOF, which would make
+   * codex exit. The bridge processes codex started for this thread stay with codex.
+   */
+  async detach(): Promise<void> {
+    this.opts.apps?.close()
+    await this.client.detach()
+    this.closed = true
+  }
 }
 
 /** The approval kind named by an elicitation's `_meta` — 0.153.4 uses `codex_approval_kind`, current source uses `codex/approval_kind` */
@@ -1221,6 +1253,17 @@ function appApprovalDetail(server: string, message: unknown, meta: unknown): App
   const title = typeof m.tool_title === 'string' && m.tool_title ? m.tool_title : typeof message === 'string' ? message : ''
   const params = m.tool_params === undefined ? '' : ` ${JSON.stringify(m.tool_params).slice(0, 1000)}`
   return { kind: 'other', raw: `${server} · ${title}${params}` }
+}
+
+/** The turn `thread/resume` reports as still running, if any (`thread.turns[].status === 'inProgress'`) */
+function runningTurnOf(res: Record<string, unknown> | undefined): string | null {
+  const turns = (res?.thread as { turns?: unknown } | undefined)?.turns
+  if (!Array.isArray(turns)) return null
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i] as { id?: unknown; status?: unknown }
+    if (t?.status === 'inProgress' && typeof t.id === 'string') return t.id
+  }
+  return null
 }
 
 /** `{turn: {id}}` — the turn/started notification and the turn/start response give it in the same shape */

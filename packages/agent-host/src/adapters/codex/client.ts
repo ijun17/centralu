@@ -1,5 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { launchFor } from '../../tool-launch.js'
+import type { AgentProcess } from '../contract.js'
 
 /**
  * A JSON-RPC client for `codex app-server` (stdio, newline-delimited).
@@ -33,8 +35,15 @@ export type CodexClientHandlers = {
 }
 
 export class CodexClient {
-  private proc: ChildProcessWithoutNullStreams
+  private proc: AgentProcess
   private nextId = 1
+  /**
+   * Request ids carry a per-client prefix (#280 step 2). A client that adopts an app-server another
+   * host was talking to can receive answers to that host's requests, still in flight when it left;
+   * with plain counters both hosts would have sent `1`, `2`, … and an old answer would resolve a new
+   * request. codex echoes string ids back as given.
+   */
+  private readonly idPrefix = `${randomBytes(3).toString('hex')}-`
   private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
   private closed = false
   /** A flag to call onExit only once (both 'error' and 'exit' can fire) */
@@ -42,17 +51,30 @@ export class CodexClient {
 
   constructor(
     private handlers: CodexClientHandlers,
-    opts: { command?: string; args?: string[]; cwd?: string } = {},
+    opts: {
+      command?: string
+      args?: string[]
+      cwd?: string
+      /**
+       * The app-server's process when it does not come from this host's `spawn` — one the keeper
+       * started or already holds (#280 step 2). Same stdio, same protocol.
+       */
+      process?: AgentProcess
+    } = {},
   ) {
-    // On Windows an npm-installed codex is a `.cmd` shim, which cannot be spawned without a shell (tool-launch.ts)
-    const launch = launchFor(opts.command ?? 'codex')
-    this.proc = spawn(launch.command, [...launch.args, ...(opts.args ?? ['app-server'])], {
-      cwd: opts.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      // Kept in its own group so it gets cleaned up together if the parent dies (avoids a zombie — M1.5 defect 1 rule)
-      detached: false,
-      windowsHide: true,
-    })
+    if (opts.process) {
+      this.proc = opts.process
+    } else {
+      // On Windows an npm-installed codex is a `.cmd` shim, which cannot be spawned without a shell (tool-launch.ts)
+      const launch = launchFor(opts.command ?? 'codex')
+      this.proc = spawn(launch.command, [...launch.args, ...(opts.args ?? ['app-server'])], {
+        cwd: opts.cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // Kept in its own group so it gets cleaned up together if the parent dies (avoids a zombie — M1.5 defect 1 rule)
+        detached: false,
+        windowsHide: true,
+      })
+    }
 
     /**
      * A spawn failure (ENOENT — when the path is off because of an nvm switch or codex being
@@ -96,7 +118,7 @@ export class CodexClient {
         this.onLine(line)
       }
     })
-    this.proc.stderr.on('data', (d) => {
+    this.proc.stderr?.on('data', (d) => {
       const s = String(d).trim()
       if (s) console.error('[codex]', s.slice(0, 500))
     })
@@ -181,7 +203,7 @@ export class CodexClient {
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs = 120_000): Promise<T> {
     if (this.closed) return Promise.reject(new Error('codex app-server has already exited'))
-    const id = String(this.nextId++)
+    const id = `${this.idPrefix}${this.nextId++}`
     this.write({ id, method, params })
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
@@ -230,5 +252,19 @@ export class CodexClient {
       })
     })
     if (!exited) this.proc.kill('SIGKILL')
+  }
+
+  /**
+   * Lets go of the app-server **without** closing it (#280 step 2): a host leaving for a restart
+   * under the keeper. No EOF, no signal; frames that arrive until the keeper ends the stream are
+   * still handled. Waiting requests are rejected — their answers will go to the next host.
+   */
+  async detach(): Promise<void> {
+    if (this.closed) return
+    await this.proc.detach?.()
+    this.closed = true
+    this.finished = true
+    for (const [, p] of this.pending) p.reject(new Error('request abandoned: this host let go of codex'))
+    this.pending.clear()
   }
 }

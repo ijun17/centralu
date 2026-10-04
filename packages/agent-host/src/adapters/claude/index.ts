@@ -42,7 +42,7 @@ import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
 import { APP_MCP_PREFIX } from '../../apps/contract.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
-import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 
 const exec = promisify(execFile)
@@ -272,6 +272,11 @@ class ClaudeSession implements SessionHandle {
   /** Messages held behind a `/goal` that is waiting for `goalKnown` — so nothing sent after it overtakes it. */
   private sendGate: Promise<void> | null = null
   private notices = 0
+  /** The CLI's process when it came from a `ProcessSource` (the keeper, #280 step 2) */
+  private proc: AgentProcess | null = null
+  private adopted = false
+  /** Letting go of the process for the next host: its stream ending is not a crash */
+  private detaching = false
 
   constructor(
     readonly sessionId: string,
@@ -280,6 +285,8 @@ class ClaudeSession implements SessionHandle {
   ) {
     this.stream = new ClaudeStreamNormalizer(sessionId)
     this.stream.goal.seed(opts.knownGoal)
+    // An adopted CLI announces its id only with its next turn's init; it is the conversation we resume
+    if (opts.processSource?.adopt) this.externalId = opts.resumeExternalId ?? null
   }
 
   async start(): Promise<void> {
@@ -329,6 +336,15 @@ class ClaudeSession implements SessionHandle {
          * It behaves the same way in dev.
          */
         pathToClaudeCodeExecutable: toolExecutable('claude') ?? undefined,
+        /*
+         * Under the keeper (#280 step 2) the CLI is spawned there, or an already running one is
+         * adopted, so the process outlives this host. Measured (CLI 2.1.282, SDK 0.3.263, haiku,
+         * 2026-10-04): a new `query()` whose `spawnClaudeCodeProcess` returns the pipes of a
+         * claude another host started is accepted mid-turn — its re-`initialize` re-delivers a
+         * pending approval to the new `canUseTool` at once, and the rest of a running turn
+         * (three more Bash calls, the result) arrives through it.
+         */
+        ...(this.opts.processSource ? { spawnClaudeCodeProcess: (o: AgentSpawnSpec) => this.spawnProcess(o) as never } : {}),
         /*
          * Reasoning effort. It only matters when the model supports it, so deciding support is
          * left to whatever provides the list (supportedModels) — this just passes through the
@@ -503,6 +519,7 @@ class ClaudeSession implements SessionHandle {
       },
     }))
     ClaudeAdapter.liveQueries.add(q)
+    this.releaseLostCalls(q)
 
     this.goalKnown = new Promise<void>((resolve) => (this.settleGoalKnown = resolve))
     q.supportedCommands()
@@ -556,7 +573,8 @@ class ClaudeSession implements SessionHandle {
          */
         ClaudeAdapter.liveQueries.delete(q)
         this.settleGoalKnown()
-        if (!this.closed) {
+        // A stream that ends because this host let go of the process is not a death (#280 step 2)
+        if (!this.closed && !this.detaching) {
           this.releaseAgents('The session process ended before this agent reported back')
           this.emit({
             type: 'error',
@@ -575,7 +593,7 @@ class ClaudeSession implements SessionHandle {
          * used to surface as adapter_crashed, and the manager would treat the brand-new process it
          * had just started as dead and close it.
          */
-        if (this.closed) return
+        if (this.closed || this.detaching) return
         this.releaseAgents('The session process ended before this agent reported back')
         this.emit({
           type: 'error',
@@ -584,6 +602,63 @@ class ClaudeSession implements SessionHandle {
         })
       }
     })()
+  }
+
+  /**
+   * The CLI's process, from the keeper (#280 step 2): the first call adopts the process a previous
+   * host started, if there is one; any later call (none is expected) spawns a new one.
+   */
+  private spawnProcess(o: AgentSpawnSpec): AgentProcess {
+    const src = this.opts.processSource!
+    const adopt = src.adopt && !this.adopted ? src.adopt.process : null
+    this.adopted = true
+    this.proc = adopt ?? src.spawn({ command: o.command, args: o.args, cwd: o.cwd, env: o.env })
+    return this.proc
+  }
+
+  /**
+   * A call to one of our in-process servers (the orchestrator's tools, an app proxy) that was in
+   * flight when the previous host went away: the CLI asked that host, nobody will ever answer, and
+   * the turn would wait forever. Measured (CLI 2.1.282, SDK 0.3.263, haiku, 2026-10-04): the
+   * adopted claude sat silent for 8 s with the call open; `interrupt()` from the new owner ended
+   * the turn (`error_during_execution`), and the next turn — including a call to the same
+   * in-process tool, now served by this host — ran normally. So the call is failed out loud and the
+   * turn released, rather than left hanging; the person can send the message again.
+   */
+  private releaseLostCalls(q: QueryHandle): void {
+    const open = this.opts.processSource?.adopt?.openCalls ?? []
+    const lost = open.filter((c) => isOrchestratorTool(c.tool) || appToolOf(c.tool) !== null)
+    if (lost.length === 0) return
+    this.turnOpen = true
+    this.stream.stopped()
+    this.emit({
+      type: 'error',
+      sessionId: this.sessionId,
+      error: {
+        code: 'internal',
+        message: `Centralu restarted while ${lost.map((c) => c.tool).join(', ')} was running; that call was lost, so the turn was stopped. Send the message again to retry.`,
+        retryable: true,
+      },
+    })
+    void q.interrupt().catch((err: Error) => console.error(`[claude] could not release a lost call in ${this.sessionId.slice(0, 8)}: ${err.message}`))
+  }
+
+  /**
+   * Lets go of the CLI without stopping it (#280 step 2). Output keeps flowing through the normal
+   * path until the keeper ends the stream, so a turn's result that was already on its way is still
+   * recorded here; nothing is sent to the CLI, and an approval still waiting stays waiting for the
+   * next host, which the CLI re-delivers it to.
+   */
+  async detach(): Promise<void> {
+    this.detaching = true
+    this.stopAppWatch?.()
+    this.opts.apps?.close()
+    if (this.query) ClaudeAdapter.liveQueries.delete(this.query)
+    // An adopted process the SDK has not taken yet is let go of all the same
+    const proc = this.proc ?? (this.adopted ? null : (this.opts.processSource?.adopt?.process ?? null))
+    await proc?.detach?.()
+    this.closed = true
+    this.notify?.()
   }
 
   /**

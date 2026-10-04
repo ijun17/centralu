@@ -11,6 +11,7 @@ import type {
   ToolName,
   ToolDescriptor,
 } from '@cc/protocol'
+import type { Readable, Writable } from 'node:stream'
 
 /**
  * The adapter contract (docs/agent-host.md §2).
@@ -325,7 +326,55 @@ export type SessionApps = {
   close(): void
 }
 
+/**
+ * A tool's process as an adapter drives it — what a local `ChildProcess` and a process the keeper
+ * holds (#280 step 2, `keeper/agent-process.ts`) both are. It is also the shape the Agent SDK's
+ * `spawnClaudeCodeProcess` returns.
+ */
+export interface AgentProcess {
+  readonly stdin: Writable
+  readonly stdout: Readable
+  readonly stderr?: Readable | null
+  readonly pid?: number
+  readonly exitCode: number | null
+  readonly signalCode?: NodeJS.Signals | null
+  readonly killed: boolean
+  kill(signal?: NodeJS.Signals): boolean
+  on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
+  on(event: 'error', listener: (error: Error) => void): this
+  once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
+  once(event: 'error', listener: (error: Error) => void): this
+  off(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
+  off(event: 'error', listener: (error: Error) => void): this
+  /** Lets go of the process and leaves it running (only a process someone else holds can) */
+  detach?(): Promise<void>
+}
+
+export type AgentSpawnSpec = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined> }
+
+/**
+ * Where a session's tool process comes from, when not from the adapter's own `spawn` (#280 step 2).
+ *
+ * Under the keeper the manager passes this so the process outlives the host: `spawn` starts it
+ * in the keeper, and `adopt` hands over one a previous host started — the re-attach after a host
+ * restart, with the process possibly mid-turn.
+ */
+export type ProcessSource = {
+  spawn(spec: AgentSpawnSpec): AgentProcess
+  adopt?: {
+    process: AgentProcess
+    /**
+     * Tool calls the store recorded for this session with no result yet. A call the previous host
+     * was serving in-process died with it, and the tool would wait for that answer forever: the
+     * adapter knows which of its calls those are, and releases the turn.
+     */
+    openCalls: { callId: string; tool: string }[]
+  }
+}
+
 export type CreateSessionOpts = {
+  /** Absent: the adapter spawns its tool itself, as a child of this host */
+  processSource?: ProcessSource
   sessionId: string
   cwd: string
   model?: string
@@ -508,6 +557,14 @@ export interface SessionHandle {
    */
   stopBackgroundTask?(taskId: string): Promise<void>
   dispose(): Promise<void>
+  /**
+   * Lets go of the session **without stopping its process** (#280 step 2): a host leaving for a
+   * restart under the keeper. Nothing is sent to the tool — no deny for a waiting approval, no EOF,
+   * no signal — and the next host re-attaches and the tool re-delivers what is pending. Output that
+   * arrives while the process is being released is still emitted. Only an adapter whose process came
+   * from a `ProcessSource` can; the others leave it unimplemented.
+   */
+  detach?(): Promise<void>
 }
 
 export interface AgentAdapter {

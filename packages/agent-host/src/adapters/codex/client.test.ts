@@ -84,8 +84,9 @@ describe('CodexClient stream truncation', () => {
   it('a 24MB single-line response arrives intact', async () => {
     // A stand-in for app-server: on receiving one request line, it writes one huge response line (no real codex needed)
     const fake = [
-      `process.stdin.once('data', () => {`,
-      `  const big = JSON.stringify({ id: '1', result: { blob: 'x'.repeat(24 * 1024 * 1024) } })`,
+      `process.stdin.once('data', (d) => {`,
+      `  const id = JSON.parse(String(d).split(String.fromCharCode(10))[0]).id`,
+      `  const big = JSON.stringify({ id, result: { blob: 'x'.repeat(24 * 1024 * 1024) } })`,
       `  process.stdout.write(big + '\\n', () => setTimeout(() => process.exit(0), 200))`,
       `})`,
     ].join('\n')
@@ -116,8 +117,9 @@ describe('a broken frame', () => {
   it('a non-JSON line starting with { wakes the waiting request with a reason', async () => {
     // A stand-in that **deliberately** produces a broken frame (truncated JSON) on receiving a request
     const fake = [
-      `process.stdin.once('data', () => {`,
-      `  process.stdout.write('{"id":"1","result":{"never":"closes"' + '\\n')`,
+      `process.stdin.once('data', (d) => {`,
+      `  const id = JSON.parse(String(d).split(String.fromCharCode(10))[0]).id`,
+      `  process.stdout.write('{"id":' + JSON.stringify(id) + ',"result":{"never":"closes"' + '\\n')`,
       `  setTimeout(() => {}, 60000)`,
       `})`,
     ].join('\n')
@@ -134,9 +136,10 @@ describe('a broken frame', () => {
 
   it('stray text not starting with { does not fail the session — a banner is just a banner', async () => {
     const fake = [
-      `process.stdin.once('data', () => {`,
+      `process.stdin.once('data', (d) => {`,
+      `  const id = JSON.parse(String(d).split(String.fromCharCode(10))[0]).id`,
       `  process.stdout.write('codex banner: hello\\n')`,
-      `  process.stdout.write(JSON.stringify({ id: '1', result: { ok: true } }) + '\\n', () => setTimeout(() => process.exit(0), 200))`,
+      `  process.stdout.write(JSON.stringify({ id, result: { ok: true } }) + '\\n', () => setTimeout(() => process.exit(0), 200))`,
       `})`,
     ].join('\n')
     const client = new CodexClient(
@@ -160,8 +163,9 @@ describe('a broken frame', () => {
    */
   it('the frame stays intact even streamed one character at a time, and even with Korean text split across a boundary', async () => {
     const fake = [
-      `const msg = Buffer.from(JSON.stringify({ id: '1', result: { text: '한글과 emoji 🙂 boundary' } }) + '\\n')`,
-      `process.stdin.once('data', async () => {`,
+      `process.stdin.once('data', async (d) => {`,
+      `  const id = JSON.parse(String(d).split(String.fromCharCode(10))[0]).id`,
+      `  const msg = Buffer.from(JSON.stringify({ id, result: { text: '한글과 emoji 🙂 boundary' } }) + '\\n')`,
       `  for (let i = 0; i < msg.length; i++) {`,
       `    process.stdout.write(msg.subarray(i, i + 1))`,
       `    if (i % 7 === 0) await new Promise((r) => setTimeout(r, 1))`,
