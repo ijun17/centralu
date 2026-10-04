@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { IncomingHttpHeaders, RequestListener } from 'node:http'
 
 /**
@@ -57,7 +57,7 @@ export type HttpRoute = {
 }
 
 export type HttpGate = {
-  /** Generated fresh for every run. Since it becomes a path segment, only characters that survive intact in a URL are used */
+  /** Generated fresh for every run (under the keeper, derived from its token: `deriveHttpSecret`). Since it becomes a path segment, only characters that survive intact in a URL are used */
   secret: string
   routes: readonly HttpRoute[]
 }
@@ -69,6 +69,25 @@ export type HttpGate = {
  */
 export const SECRET_MIN_LENGTH = 32
 const SECRET_CHARS = /^[A-Za-z0-9_-]+$/
+
+/**
+ * The HTTP secret of a host started by the keeper (#280 step 4), derived from the keeper's token.
+ *
+ * Why it is not random there: a view's address carries this secret, and under the keeper that
+ * address has to survive a build switch — the iframe keeps it, and the next host behind the same
+ * front door must still accept it. The keeper hands every host it starts the same token, so a value
+ * derived from the token is the same on every one of them, with nothing new to hand over.
+ *
+ * Why this does not weaken the boundary: the two doors stay apart in the direction that matters. An
+ * HMAC is one-way, so a leaked view address (devtools, a log) still gives nothing toward the token
+ * and the RPC door stays closed, which is the reason the two are separate values at all. The other
+ * direction was never a boundary: whoever holds the token already has every RPC, including
+ * `apps.viewFrame`, which hands out this secret in its answer — the RPC door is more than the HTTP
+ * door. The label keeps the value from being reused as anything else derived from the token.
+ */
+export function deriveHttpSecret(token: string): string {
+  return createHmac('sha256', token).update('centralu http secret v1').digest('base64url')
+}
 
 /** A reason if the secret breaks the rules, null if it is fine */
 export function secretError(secret: string): string | null {

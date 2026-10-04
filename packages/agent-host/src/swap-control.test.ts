@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { Drain, DrainCut } from './drain.js'
-import { bridgeAddress, ControlChannel, runDrain, standby, type StandbyDeps } from './swap-control.js'
+import { bridgeAddress, ControlChannel, runDrain, standby, viewPort, type StandbyDeps } from './swap-control.js'
 import type { StoreInspection } from './dev-services/store.js'
 
 describe('the Codex bridge address (#280 step 3)', () => {
@@ -12,6 +12,19 @@ describe('the Codex bridge address (#280 step 3)', () => {
   it('without a keeper is the host itself, and nothing before the host listens', () => {
     expect(bridgeAddress(undefined, 52001, 'tok')).toEqual({ url: 'ws://127.0.0.1:52001', token: 'tok' })
     expect(bridgeAddress('ws://127.0.0.1:61000', undefined, 'tok')).toBeNull()
+  })
+})
+
+describe('the port an app view address points at (#280 step 4)', () => {
+  it('under a keeper is the front door’s, so the address an iframe holds still reaches the host after a swap', () => {
+    expect(viewPort('ws://127.0.0.1:61000', 52001)).toBe(61000)
+  })
+
+  it('without a keeper, or with a door that is not a loopback port, is the host’s own; nothing before the host listens', () => {
+    expect(viewPort(undefined, 52001)).toBe(52001)
+    expect(viewPort('ws://example.com:61000', 52001)).toBe(52001)
+    expect(viewPort('not a url', 52001)).toBe(52001)
+    expect(viewPort('ws://127.0.0.1:61000', undefined)).toBeNull()
   })
 })
 

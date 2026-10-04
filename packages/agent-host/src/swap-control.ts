@@ -38,6 +38,26 @@ export function bridgeAddress(frontDoor: string | undefined, port: number | unde
   return { url: frontDoor || `ws://127.0.0.1:${port}`, token }
 }
 
+/**
+ * The port an app view's address points at (#280 step 4, views/view-host.ts). Under a keeper it is
+ * the front door's, for the same reason as the bridge above: the address is handed to the UI once
+ * and loaded into an iframe that outlives this host, and the door relays the HTTP bytes to
+ * whichever host is current, so after a swap the same address still serves the view. Without a
+ * keeper, or with a door address that is not a loopback port (never what the keeper hands over),
+ * it is the host's own port. Nothing before the host listens.
+ */
+export function viewPort(frontDoor: string | undefined, port: number | undefined): number | null {
+  if (!port) return null
+  if (!frontDoor) return port
+  try {
+    const door = new URL(frontDoor)
+    const n = Number(door.port)
+    return door.hostname === '127.0.0.1' && Number.isInteger(n) && n > 0 && n < 65536 ? n : port
+  } catch {
+    return port
+  }
+}
+
 /** The longest control line accepted. The real ones are tens of bytes */
 const MAX_LINE = 64 * 1024
 

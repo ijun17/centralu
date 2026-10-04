@@ -4,7 +4,7 @@ import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
 import { PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, parseAllowedOrigins, type HostServerOptions } from './server.js'
-import { sameSecret, type HttpRoute } from './http.js'
+import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 
 const TOKEN = 'test-token'
 let server: HostServer | null = null
@@ -656,6 +656,17 @@ describe('sameSecret', () => {
     expect(sameSecret('abc', 'abd')).toBe(false)
     expect(sameSecret('ab', 'abc')).toBe(false)
     expect(sameSecret('', 'abc')).toBe(false)
+  })
+})
+
+describe('the HTTP secret under the keeper (#280 step 4)', () => {
+  it('is the same for every host given the same keeper token, differs per token, is a valid secret and is not the token', () => {
+    const token = 'a3f1c0de9b8e7d6c5b4a39281706f5e4'
+    const secret = deriveHttpSecret(token)
+    expect(deriveHttpSecret(token)).toBe(secret)
+    expect(deriveHttpSecret(`${token}x`)).not.toBe(secret)
+    expect(secretError(secret)).toBeNull()
+    expect(secret).not.toContain(token)
   })
 })
 

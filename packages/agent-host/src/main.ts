@@ -8,6 +8,7 @@ import { hostBuild, startActivityReport } from './keeper-link.js'
 import { connectHeldChildren } from './keeper/held-children.js'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
+import { deriveHttpSecret } from './transport/http.js'
 import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
@@ -29,7 +30,7 @@ import { UpdateService } from './updates.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
-import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby } from './swap-control.js'
+import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 
 /**
  * Agent Host entry point.
@@ -83,6 +84,8 @@ const control = underKeeper ? new ControlChannel(process.stdin) : null
 let movedNote: string | null = null
 
 const token = values.token || process.env.CC_HOST_TOKEN || randomBytes(16).toString('hex')
+/* The token is the keeper's only when the keeper started this host and handed it over (#280 step 4, below) */
+const keeperToken = underKeeper && !values.token && process.env.CC_HOST_TOKEN ? token : null
 /*
  * Out of the environment once read: every terminal, agent and command this host starts inherits
  * it otherwise, and a shell in a project has no business holding the key to every RPC. Under a
@@ -94,8 +97,12 @@ delete process.env.CC_HOST_TOKEN
  * this value ends up as a path segment in an iframe's address and travels around in a URL, even if
  * it leaks the RPC door must stay closed. There is no way to set it from outside. The address is
  * built by the host as part of the RPC answer, so nobody needs to know this value in advance.
+ *
+ * Under the keeper it is derived one-way from the keeper's token instead of drawn at random, so
+ * every host the keeper runs has the same one and a view's address survives a swap (#280 step 4;
+ * why that keeps the two doors apart: `deriveHttpSecret`).
  */
-const httpSecret = randomBytes(32).toString('base64url')
+const httpSecret = keeperToken ? deriveHttpSecret(keeperToken) : randomBytes(32).toString('base64url')
 const dbPath = values.memory
   ? ':memory:'
   : (values.db ?? defaultDbPath())
@@ -343,7 +350,8 @@ const views = new ViewHost({
     },
     save: (book) => store.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
   }),
-  hostPort: () => port ?? null,
+  // Under the keeper, the front door's port: the address outlives this host (swap-control.ts)
+  hostPort: () => viewPort(frontDoor, port),
 })
 /*
  * An app view inside a conversation (M4 B-1). When a session's agent calls an app tool with a view,
