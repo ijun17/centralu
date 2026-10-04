@@ -8510,7 +8510,8 @@ test('A sent image shows as itself in the bubble and zooms on click', async ({ p
     mimeType: 'image/png',
     buffer: Buffer.from(PNG_1PX, 'base64'),
   })
-  await expect(page.getByTestId('attachment-list')).toContainText('pixel.png')
+  // The composer already shows it as a thumbnail (#284)
+  await expect(page.getByTestId('attachment-thumb').locator('img')).toHaveAttribute('alt', 'pixel.png')
   await page.getByTestId('prompt-input').fill('take a look at this')
   await page.getByTestId('send').click()
 
