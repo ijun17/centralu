@@ -10,8 +10,10 @@
 #
 # The job graph encodes the order instead:
 #
-#     guard ──┬── platform (linux-x64)  ──┐
-#             └── platform (darwin-arm64) ┴── shim
+#     guard ──┬── platform (linux-x64)   ──┐
+#             ├── platform (linux-arm64) ──┤
+#             ├── platform (darwin-arm64) ─┤
+#             └── platform (win32-x64)   ──┴── shim
 #
 # `needs: platform` on a matrix job means *every* entry succeeded, so the shim cannot go out
 # while any platform is missing — and that stays true the day linux-arm64 joins the matrix
@@ -55,9 +57,10 @@ permissions:
   contents: read
 
 jobs:
-  # Everything after this is expensive (two Rust release builds) and ends in something that
-  # cannot be undone. This job is neither, so it runs first and alone: when the tag and the
-  # version in the repo disagree, nothing has been built and nothing has been published.
+  # Everything after this is expensive (a Rust release build per platform) and ends in
+  # something that cannot be undone. This job is neither, so it runs first and alone: when
+  # the tag and the version in the repo disagree, nothing has been built and nothing has
+  # been published.
   guard:
     name: check the tag against the repo
     runs-on: ubuntu-latest
@@ -119,7 +122,7 @@ jobs:
             echo "also_latest=$also_latest"
           } >> "$GITHUB_OUTPUT"
 
-          # Say out loud what the next four jobs are about to do, on the run's summary page.
+          # Say out loud what the jobs after this one are about to do, on the run's summary page.
           # Reading it off the job graph means already knowing this file.
           {
             echo "## centralu $version"
@@ -167,6 +170,13 @@ jobs:
           # public (see docs/releasing.md → "linux-arm64 (#29)" before flipping it private).
           - target: linux-arm64
             runner: ubuntu-22.04-arm
+          # Windows x64 (#14, W3). Pinned to the same image as `build.yml`'s windows-x64 job,
+          # for the same reason: `windows-latest` moves to a new Visual Studio and Windows SDK
+          # without warning. Named `win32-x64` here, not `windows-x64` as in build.yml, because
+          # this name is the npm package suffix and the host id release-npm.mts derives from
+          # Node's `process.platform` — and Node calls Windows `win32`.
+          - target: win32-x64
+            runner: windows-2022
     # The gate that actually stops an accidental publish: a required reviewer on the
     # `npm-publish` environment, holding NPM_TOKEN there rather than at repo level so no
     # other workflow can reach it. It earned its keep on the first release, catching an
@@ -236,6 +246,11 @@ jobs:
         # That expression is not a ternary: it falls through to `c` whenever `b` is falsy,
         # and an empty string is falsy — so the "leave the flag off" branch would have
         # produced `--publish`. Wrong in the one direction that cannot be undone.
+        #
+        # bash on every runner, Windows included (Git Bash is on the image), so this one
+        # script is the publish logic everywhere. Without it Windows would run PowerShell,
+        # which reads `set -euo pipefail` as an error and the `if` lines as nothing at all.
+        shell: bash
         run: |
           set -euo pipefail
           args="--platform-only"

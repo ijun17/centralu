@@ -59,6 +59,8 @@ describe('the name is decided in one place', () => {
       { dir: 'darwin-arm64', bundle: `${APP_NAME}.app` },
       { dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage` },
       { dir: 'linux-x64', bundle: `${APP_NAME}.AppImage` },
+      // A folder, `Centralu\centralu.exe` beside `Centralu\resources\host\` (#14, W3)
+      { dir: 'win32-x64', bundle: APP_NAME },
     ]
     for (const { dir, bundle } of platforms) {
       const arch = json(`packaging/npm/${dir}/package.json`)
@@ -74,9 +76,14 @@ describe('the name is decided in one place', () => {
     /*
      * npm refuses to install a package whose `os` does not list the running platform. Miss
      * one here and the shim is simply uninstallable on that platform — with an npm error
-     * about the shim, which points nowhere near this file.
+     * about the shim, which points nowhere near this file. That is what Windows got through
+     * 0.1.0-beta.7: EBADPLATFORM from `npm i -g centralu`, because `os` said darwin/linux.
+     * So every platform package's `os` has to appear in the shim's, not a fixed list.
      */
-    expect(main.os).toEqual(expect.arrayContaining(['darwin', 'linux']))
+    expect(main.os).toEqual(expect.arrayContaining(['darwin', 'linux', 'win32']))
+    for (const { dir } of platforms) {
+      expect(main.os, dir).toEqual(expect.arrayContaining(json(`packaging/npm/${dir}/package.json`).os as string[]))
+    }
     expect(Object.keys(main.optionalDependencies as object).sort()).toEqual(
       platforms.map((p) => `${APP_SLUG}-${p.dir}`).sort(),
     )
@@ -97,6 +104,14 @@ describe('the name is decided in one place', () => {
       expect(arch.os, dir).toEqual(['linux'])
       expect(arch.cpu, dir).toEqual([cpu])
     }
+  })
+
+  it('the Windows package installs only on x64 Windows (#14)', () => {
+    // An ARM64 Windows machine running native Node must skip it and get the launcher's
+    // "not supported yet" message, not an x64 folder it would have to emulate unasked.
+    const arch = json('packaging/npm/win32-x64/package.json')
+    expect(arch.os).toEqual(['win32'])
+    expect(arch.cpu).toEqual(['x64'])
   })
 
   it('the script that opens the built .app points at the real bundle name', () => {

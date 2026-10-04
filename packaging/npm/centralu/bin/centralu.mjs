@@ -16,10 +16,31 @@
  * "the app" even is — macOS hands a `.app` directory to LaunchServices, Linux runs a
  * self-contained AppImage itself — so that difference lives in one table (`TARGETS`)
  * instead of being rediscovered in every function.
+ *
+ * Windows joined in W3 of #14. Its decisions — the exe inside the folder, a detached start,
+ * where `install` copies to, the WebView2 check — live in `platform.mjs` as functions of the
+ * platform, so they are tested on macOS CI (tooling/launcher-platform.test.ts) instead of
+ * being first exercised on someone's laptop.
  */
 import { execFileSync, spawn } from 'node:child_process'
 import { copyDiffers, isNewer } from './semver.mjs'
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  busyMessage,
+  earlyExitMessage,
+  executableIn,
+  installedPaths,
+  isBusyError,
+  launchPlan,
+  npmCommand,
+  regExe,
+  shortcutCommand,
+  targetFor,
+  TARGETS,
+  webview2MissingMessage,
+  webview2Status,
+  windowsInstall,
+} from './platform.mjs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -31,28 +52,17 @@ const APP_NAME = 'Centralu'
 const BUNDLE = `${APP_NAME}.app`
 const INSTALLED = `/Applications/${BUNDLE}`
 
+const PLATFORM = process.platform
+const HOME = homedir()
+
 /** Where a menu entry for the app goes on freedesktop desktops */
-const DESKTOP_ENTRY = join(homedir(), '.local/share/applications/centralu.desktop')
+const DESKTOP_ENTRY = join(HOME, '.local/share/applications/centralu.desktop')
 
-/**
- * The arch package for this machine, and what the app is called inside it.
- *
- * `artifact` must match `scripts/release-npm.mts` exactly — that script renames what
- * Tauri produced (`Centralu_0.1.0-beta.2_amd64.AppImage`) to a fixed name precisely so
- * this file does not have to know version or architecture. If the two ever disagree the
- * symptom is "installed fine, does nothing", so keep them in one place mentally.
- *
- * Only combinations that are actually published belong here. Listing a package that was
- * never released would turn "not supported yet" into "your install is broken", which
- * sends the user off to reinstall something that can never appear.
- */
-const TARGETS = {
-  'darwin-arm64': { pkg: 'centralu-darwin-arm64', artifact: BUNDLE },
-  'linux-arm64': { pkg: 'centralu-linux-arm64', artifact: `${APP_NAME}.AppImage` },
-  'linux-x64': { pkg: 'centralu-linux-x64', artifact: `${APP_NAME}.AppImage` },
-}
+/** Where `centralu install` copies the app on Windows (see `windowsInstall`) */
+const WIN = PLATFORM === 'win32' ? windowsInstall(process.env, HOME) : null
 
-const TARGET = TARGETS[`${process.platform}-${process.arch}`]
+/** The arch package for this machine (the table lives in platform.mjs) */
+const TARGET = targetFor(PLATFORM, process.arch)
 
 /** The app inside the architecture-specific package. null if it cannot be found. */
 function bundledApp() {
@@ -64,7 +74,7 @@ function bundledApp() {
     return null // The package for this architecture is not installed — the reason is explained below.
   }
   const app = join(root, TARGET.artifact)
-  return existsSync(app) ? app : null
+  return existsSync(executableIn(PLATFORM, app)) ? app : null
 }
 
 /**
@@ -75,7 +85,7 @@ function explainMissing() {
   if (!TARGET) {
     // Kept as its own case: "not published for your machine" and "not published for
     // Intel Macs, and here is the reason" send the user to different places.
-    if (process.platform === 'darwin') {
+    if (PLATFORM === 'darwin') {
       return (
         `${APP_NAME} is Apple Silicon only for now (current architecture: ${process.arch}).\n` +
         'Intel Mac support needs native addons bundled in as well, and is tracked as separate work.'
@@ -83,7 +93,7 @@ function explainMissing() {
     }
     const supported = Object.keys(TARGETS).join(', ')
     return (
-      `${APP_NAME} does not support ${process.platform}/${process.arch} yet.\n` +
+      `${APP_NAME} does not support ${PLATFORM}/${process.arch} yet.\n` +
       `Currently supported combinations: ${supported}\n` +
       'Progress is tracked at https://github.com/ijun17/centralu/issues/14.'
     )
@@ -104,21 +114,27 @@ function requireApp() {
 }
 
 /**
- * Launches the app. If it is installed in `/Applications`, that copy is used first.
+ * Launches the app. If it is installed in `/Applications` (macOS) or
+ * `%LOCALAPPDATA%\Programs\Centralu` (Windows), that copy is used first.
  *
- * That preference is macOS-only, and not for lack of an equivalent: `centralu install`
+ * Linux has no such preference, and not for lack of an equivalent: `centralu install`
  * on Linux writes a launcher that points back at this same package, so there is never a
  * second copy to prefer.
+ *
+ * Resolves once the launcher has nothing more to wait for. Only Windows waits at all —
+ * briefly, to report an exe that dies on start (see runWindows).
  */
-function run(args) {
-  if (process.platform === 'darwin') {
+async function run(args) {
+  if (PLATFORM === 'darwin') {
     const app = existsSync(INSTALLED) ? INSTALLED : requireApp()
     // `open` goes through LaunchServices — the dock icon and single-instance behavior only
     // work correctly that way.
-    const r = spawn('open', ['-a', app, ...(args.length ? ['--args', ...args] : [])], { stdio: 'inherit' })
+    const plan = launchPlan(PLATFORM, app, args, HOME)
+    const r = spawn(plan.command, plan.args, plan.options)
     r.on('exit', (code) => process.exit(code ?? 0))
     return
   }
+  if (PLATFORM === 'win32') return runWindows(args)
   // Linux has no LaunchServices — the AppImage is its own launcher, so run it directly.
   //
   // Staying attached to the terminal is on purpose. The two usual first failures on
@@ -127,7 +143,8 @@ function run(args) {
   // missing system library from the loader. Detaching would hand back the shell prompt
   // and throw away the one line that says what to do.
   const app = requireApp()
-  const r = spawn(app, args, { stdio: 'inherit' })
+  const plan = launchPlan(PLATFORM, app, args, HOME)
+  const r = spawn(plan.command, plan.args, plan.options)
   r.on('error', (e) => {
     console.error(`Failed to run ${app}: ${e.message}`)
     // EACCES here means the executable bit did not survive the trip through npm, which
@@ -136,6 +153,68 @@ function run(args) {
     process.exit(1)
   })
   r.on('exit', (code) => process.exit(code ?? 0))
+}
+
+/** How long to watch a freshly started exe for an immediate exit */
+const EARLY_EXIT_MS = 3000
+
+/**
+ * Windows: check WebView2, start `centralu.exe` detached, and watch it for a few seconds.
+ *
+ * The app is a GUI program, so a failure to start has nowhere to print. Without WebView2
+ * the exe ends before it has a window, and the person sees nothing happen at all — the
+ * registry check turns that into a message with the download link before anything starts.
+ * The short watch afterwards catches whatever the registry cannot see (a broken runtime, a
+ * blocked exe), then lets go so the app outlives this launcher.
+ */
+async function runWindows(args) {
+  const webview = webview2Status(process.env, queryRegistry)
+  if (webview.state === 'missing') {
+    console.error(webview2MissingMessage())
+    process.exit(1)
+  }
+  const app = existsSync(WIN.exe) ? WIN.dir : requireApp()
+  const plan = launchPlan(PLATFORM, app, args, HOME)
+  const child = spawn(plan.command, plan.args, plan.options)
+  await new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer)
+      child.removeAllListeners()
+      child.unref()
+      resolve()
+    }
+    const timer = setTimeout(done, EARLY_EXIT_MS)
+    child.on('error', (e) => {
+      console.error(`Failed to start ${plan.command}: ${e.message}`)
+      process.exitCode = 1
+      done()
+    })
+    child.on('exit', (code) => {
+      // 0 is a normal answer this early: a second start hands over to the window that is
+      // already open and leaves.
+      if (code !== 0 && code !== null) {
+        console.error(earlyExitMessage(code, HOME))
+        process.exitCode = 1
+      }
+      done()
+    })
+  })
+}
+
+/**
+ * `reg query <key> /v pv`: stdout, null when the key or value does not exist (reg exits 1),
+ * undefined when reg itself could not run.
+ */
+function queryRegistry(key) {
+  try {
+    return execFileSync(regExe(process.env), ['query', key, '/v', 'pv'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    })
+  } catch (e) {
+    return typeof e?.status === 'number' ? null : undefined
+  }
 }
 
 /**
@@ -147,7 +226,8 @@ function run(args) {
  */
 function install() {
   const app = requireApp()
-  if (process.platform !== 'darwin') return installDesktopEntry(app)
+  if (PLATFORM === 'win32') return installWindows(app)
+  if (PLATFORM !== 'darwin') return installDesktopEntry(app)
   if (existsSync(INSTALLED)) {
     console.log(`Replacing the existing ${INSTALLED} with the new version.`)
     rmSync(INSTALLED, { recursive: true, force: true })
@@ -193,16 +273,78 @@ function installDesktopEntry(app) {
   console.log('It can now be found in the app list too (some desktops require logging back in before it shows up).')
 }
 
+/**
+ * The Windows answer to "copy it into /Applications": copy the folder into
+ * `%LOCALAPPDATA%\Programs\Centralu` and put a shortcut in the Start menu.
+ *
+ * A copy rather than a shortcut into the npm package (the Linux shape), because Windows
+ * will not replace a running program's files: with the app running from the package,
+ * `npm i -g centralu@newer` fails. Running from the copy leaves the package free to update.
+ *
+ * The old copy is never deleted before the new one is complete. The new folder is
+ * assembled beside it, the old one is renamed aside, and only then is the new one moved in
+ * — so a copy that fails halfway, or an app that is still running, leaves the working
+ * install untouched rather than a folder with half its files.
+ */
+function installWindows(app) {
+  const staging = `${WIN.dir}.new`
+  const aside = `${WIN.dir}.old-${Date.now()}`
+  rmSync(staging, { recursive: true, force: true })
+  mkdirSync(dirname(WIN.dir), { recursive: true })
+  cpSync(app, staging, { recursive: true })
+  writeFileSync(join(staging, 'centralu-version.txt'), `${pkg.version}\n`)
+  if (existsSync(WIN.dir)) {
+    console.log(`Replacing the existing ${WIN.dir} with the new version.`)
+    try {
+      renameSync(WIN.dir, aside)
+    } catch (e) {
+      rmSync(staging, { recursive: true, force: true })
+      if (!isBusyError(e)) throw e
+      console.error(busyMessage(WIN.dir))
+      process.exit(1)
+    }
+  }
+  renameSync(staging, WIN.dir)
+  try {
+    rmSync(aside, { recursive: true, force: true })
+  } catch {
+    // A rename can succeed while the old copy is running; its files then stay locked until
+    // it quits. Harmless — it is no longer the one anything starts — but worth a line.
+    console.log(`The previous copy is still in use and was left at ${aside}. Delete it after quitting ${APP_NAME}.`)
+  }
+  const sc = shortcutCommand(process.env, { shortcut: WIN.shortcut, target: WIN.exe, workdir: HOME })
+  try {
+    execFileSync(sc.command, sc.args, { env: sc.env, stdio: ['ignore', 'ignore', 'inherit'], windowsHide: true })
+  } catch (e) {
+    console.log(`Installed: ${WIN.dir}`)
+    console.error(`Could not create the Start menu shortcut (${e.message}). Start ${WIN.exe} directly, or run \`centralu\`.`)
+    process.exit(1)
+  }
+  console.log(`Installed: ${WIN.dir}`)
+  console.log(`Start menu: ${WIN.shortcut}`)
+  console.log('It can now be found in Start and Windows search, and `centralu` starts this copy too.')
+}
+
 function uninstall() {
-  const installed = process.platform === 'darwin' ? INSTALLED : DESKTOP_ENTRY
-  if (!existsSync(installed)) {
-    console.log(`${installed} does not exist — nothing to remove.`)
+  const paths = installedPaths(PLATFORM, process.env, HOME)
+  const present = paths.filter((p) => existsSync(p))
+  if (present.length === 0) {
+    console.log(`${paths[0]} does not exist — nothing to remove.`)
     return
   }
-  rmSync(installed, { recursive: true, force: true })
-  console.log(`Removed: ${installed}`)
+  for (const installed of present) {
+    try {
+      rmSync(installed, { recursive: true, force: true })
+    } catch (e) {
+      if (PLATFORM !== 'win32' || !isBusyError(e)) throw e
+      console.error(busyMessage(installed))
+      process.exit(1)
+    }
+    console.log(`Removed: ${installed}`)
+  }
   console.log('To remove the package itself: npm uninstall -g centralu')
-  console.log(`Conversation history is left in place (~/.centralu). Remove it yourself if you want to.`)
+  const data = PLATFORM === 'win32' ? '%USERPROFILE%\\.centralu' : '~/.centralu'
+  console.log(`Conversation history is left in place (${data}). Remove it yourself if you want to.`)
 }
 
 /**
@@ -250,15 +392,26 @@ async function update() {
     return
   }
   console.log(`Upgrading ${pkg.version} → ${latest}.`)
-  execFileSync('npm', ['i', '-g', `${pkg.name}@${latest}`], { stdio: 'inherit' })
-  // Someone with a copy in /Applications needs that updated too, or the old version stays
-  // behind.
+  const npm = npmCommand(PLATFORM, ['i', '-g', `${pkg.name}@${latest}`])
+  try {
+    execFileSync(npm.command, npm.args, npm.options)
+  } catch (e) {
+    // On Windows the usual cause is the app running from inside the package: its files are
+    // locked, and npm cannot replace them. npm's own output (above) has the details.
+    if (PLATFORM === 'win32') console.error(`\n${busyMessage('the npm package')}`)
+    process.exit(typeof e?.status === 'number' ? e.status : 1)
+  }
+  // Someone with a copy in /Applications (or %LOCALAPPDATA%\Programs) needs that updated
+  // too, or the old version stays behind.
   // On Linux the menu entry points at the package instead of a copy, so rewriting it is
   // cheap — but it is still worth doing, because the Exec path is what would go stale.
-  const installed = process.platform === 'darwin' ? INSTALLED : DESKTOP_ENTRY
+  //
+  // The *new* launcher does the refresh: this file has just been replaced on disk. It is
+  // run through `node` rather than as a script, because Windows cannot execute a `.mjs`.
+  const installed = installedPaths(PLATFORM, process.env, HOME)[0]
   if (existsSync(installed)) {
     console.log(`Updating ${installed} too.`)
-    execFileSync(process.argv[1], ['install'], { stdio: 'inherit' })
+    execFileSync(process.execPath, [process.argv[1], 'install'], { stdio: 'inherit' })
   }
   console.log('Done. If the app is open, please restart it.')
 }
@@ -270,9 +423,19 @@ async function update() {
  * to write it as XML today, and if it ever switches to a binary plist, anything reading it
  * with a regex would silently stop working. `defaults` is always present on a Mac and reads
  * both formats.
+ *
+ * On Windows it is the file `centralu install` wrote beside the copy (see `windowsInstall`
+ * for why not the exe's own version).
  */
 function installedCopyVersion() {
-  if (process.platform !== 'darwin' || !existsSync(INSTALLED)) return null
+  if (PLATFORM === 'win32') {
+    try {
+      return readFileSync(WIN.versionFile, 'utf8').trim()
+    } catch {
+      return null
+    }
+  }
+  if (PLATFORM !== 'darwin' || !existsSync(INSTALLED)) return null
   try {
     const out = execFileSync('/usr/bin/defaults', ['read', join(INSTALLED, 'Contents/Info.plist'), 'CFBundleShortVersionString'], {
       encoding: 'utf8',
@@ -300,7 +463,8 @@ function installedCopyVersion() {
 function notifyIfCopyStale() {
   const version = installedCopyVersion()
   if (!copyDiffers(pkg.version, version)) return
-  console.log(`\nThe /Applications copy is ${version} (this package is ${pkg.version}).\n  centralu install`)
+  const where = PLATFORM === 'win32' ? WIN.dir : '/Applications'
+  console.log(`\nThe ${where} copy is ${version} (this package is ${pkg.version}).\n  centralu install`)
 }
 
 /** Only announced after the app has launched — checking for updates must never delay startup. */
@@ -316,7 +480,8 @@ async function notifyIfOutdated() {
 const HELP = `${APP_NAME} ${pkg.version}
 
   centralu              Launches the app
-  centralu install      Registers it in the app list (macOS: /Applications, Linux: a menu entry)
+  centralu install      Registers it in the app list (macOS: /Applications, Linux: a menu entry,
+                        Windows: %LOCALAPPDATA%\\Programs\\Centralu and a Start menu shortcut)
   centralu uninstall    Removes that registration (conversation history is kept)
   centralu update       Upgrades if a new version is available
   centralu --version    Prints the version
@@ -343,8 +508,10 @@ switch (cmd) {
   case 'help':
     console.log(HELP)
     break
-  default:
-    run(cmd ? [cmd, ...rest] : [])
+  default: {
+    // Started before the update check, never after it: the check must not delay startup.
+    const launched = run(cmd ? [cmd, ...rest] : [])
     notifyIfCopyStale()
-    await notifyIfOutdated()
+    await Promise.all([launched, notifyIfOutdated()])
+  }
 }
