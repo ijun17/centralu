@@ -1,4 +1,4 @@
-# centralu-win32-x64
+# @centralu/win32-x64
 
 The Windows (x86-64) app for [Centralu](https://github.com/ijun17/centralu), shipped as a
 portable folder: `Centralu\centralu.exe` beside `Centralu\resources\host\`.

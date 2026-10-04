@@ -34,7 +34,7 @@ export const TARGETS = {
   'darwin-arm64': { pkg: 'centralu-darwin-arm64', artifact: `${APP_NAME}.app` },
   'linux-arm64': { pkg: 'centralu-linux-arm64', artifact: `${APP_NAME}.AppImage` },
   'linux-x64': { pkg: 'centralu-linux-x64', artifact: `${APP_NAME}.AppImage` },
-  'win32-x64': { pkg: 'centralu-win32-x64', artifact: APP_NAME },
+  'win32-x64': { pkg: '@centralu/win32-x64', artifact: APP_NAME },
 }
 
 /** The target for a platform/arch pair, or null when nothing is published for it. */

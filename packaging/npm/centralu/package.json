@@ -40,6 +40,6 @@
     "centralu-darwin-arm64": "0.1.0-beta.8",
     "centralu-linux-arm64": "0.1.0-beta.8",
     "centralu-linux-x64": "0.1.0-beta.8",
-    "centralu-win32-x64": "0.1.0-beta.8"
+    "@centralu/win32-x64": "0.1.0-beta.8"
   }
 }

@@ -36,11 +36,11 @@ const ENV = {
   APPDATA: 'C:\\Users\\Jane Doe\\AppData\\Roaming',
   SystemRoot: 'C:\\WINDOWS',
 }
-const PKG_APP = 'C:\\Users\\Jane Doe\\AppData\\Roaming\\npm\\node_modules\\centralu\\node_modules\\centralu-win32-x64\\Centralu'
+const PKG_APP = 'C:\\Users\\Jane Doe\\AppData\\Roaming\\npm\\node_modules\\centralu\\node_modules\\@centralu\\win32-x64\\Centralu'
 
 describe('which package the launcher looks for', () => {
   it('finds the Windows x64 package, and the exe inside its folder', () => {
-    expect(targetFor('win32', 'x64')).toEqual({ pkg: 'centralu-win32-x64', artifact: 'Centralu' })
+    expect(targetFor('win32', 'x64')).toEqual({ pkg: '@centralu/win32-x64', artifact: 'Centralu' })
     expect(executableIn('win32', PKG_APP)).toBe(`${PKG_APP}\\centralu.exe`)
   })
 

@@ -56,15 +56,16 @@ describe('the name is decided in one place', () => {
      * ships a package that installs and then cannot find its own app.
      */
     const platforms = [
-      { dir: 'darwin-arm64', bundle: `${APP_NAME}.app` },
-      { dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage` },
-      { dir: 'linux-x64', bundle: `${APP_NAME}.AppImage` },
-      // A folder, `Centralu\centralu.exe` beside `Centralu\resources\host\` (#14, W3)
-      { dir: 'win32-x64', bundle: APP_NAME },
+      { dir: 'darwin-arm64', bundle: `${APP_NAME}.app`, name: `${APP_SLUG}-darwin-arm64` },
+      { dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage`, name: `${APP_SLUG}-linux-arm64` },
+      { dir: 'linux-x64', bundle: `${APP_NAME}.AppImage`, name: `${APP_SLUG}-linux-x64` },
+      // A folder, `Centralu\centralu.exe` beside `Centralu\resources\host\` (#14, W3). Scoped:
+      // the registry refused the unscoped `centralu-win32-x64` as spam (docs/releasing.md).
+      { dir: 'win32-x64', bundle: APP_NAME, name: `@${APP_SLUG}/win32-x64` },
     ]
-    for (const { dir, bundle } of platforms) {
+    for (const { dir, bundle, name } of platforms) {
       const arch = json(`packaging/npm/${dir}/package.json`)
-      expect(arch.name, dir).toBe(`${APP_SLUG}-${dir}`)
+      expect(arch.name, dir).toBe(name)
       expect(arch.version, dir).toBe(APP_VERSION)
       // The shell and the contents have to be **exactly the same version** (left as a range,
       // they could drift apart).
@@ -85,7 +86,7 @@ describe('the name is decided in one place', () => {
       expect(main.os, dir).toEqual(expect.arrayContaining(json(`packaging/npm/${dir}/package.json`).os as string[]))
     }
     expect(Object.keys(main.optionalDependencies as object).sort()).toEqual(
-      platforms.map((p) => `${APP_SLUG}-${p.dir}`).sort(),
+      platforms.map((p) => p.name).sort(),
     )
   })
 

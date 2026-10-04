@@ -14,7 +14,7 @@ npm에는 다섯 개의 패키지가 올라간다:
 | `centralu-darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
 | `centralu-linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
 | `centralu-linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 — 0.1.0-beta.3부터 |
-| `centralu-win32-x64` | `Centralu\` 폴더: `centralu.exe`, `resources\host\` | Windows, x86-64 — 0.1.0-beta.8부터 |
+| `@centralu/win32-x64` | `Centralu\` 폴더: `centralu.exe`, `resources\host\` | Windows, x86-64 — 0.1.0-beta.9부터 |
 
 `centralu`는 나머지를 `optionalDependencies`로 선언하고 각각에 `os`/`cpu` 필드를 달아 둔다. 그래서 npm은 설치를 수행하는 머신에 맞는 번들 딱 하나만 설치한다. esbuild와 swc가 쓰는 것과 같은 구성이며, 이유는 크기다: Linux 머신에 macOS 번들을 내려받을 사람은 없다.
 
@@ -28,7 +28,7 @@ npm에는 다섯 개의 패키지가 올라간다:
 ## CI가 하는 일
 
 - `.github/workflows/build.yml` — 모든 push와 PR에서 모든 플랫폼을 빌드하고 번들을 아티팩트로 업로드한다. 프로젝트에 Linux 머신을 가진 사람이 없으므로, Linux 빌드가 실제로 돌아가는 곳은 여기뿐이다. 써 보려면 아티팩트를 내려받는다. GitHub 아티팩트는 zip이라 실행 비트가 사라지므로, 압축을 푼 뒤 AppImage에 `chmod +x`를 해 준다.
-- 같은 워크플로가 **windows-x64**(#14)도 빌드해 아티팩트 두 개를 올린다: 포터블 폴더 `centralu-windows-x64`(`Centralu\centralu.exe` 옆에 `Centralu\resources\host\`)와 NSIS 설치 파일 `centralu-windows-x64-setup`(사용자별 설치, 관리자 권한 불필요). 둘 다 서명되어 있지 않다. 별도의 `windows tests` 잡이 `pnpm verify`의 네 부분을 돌리며, 단위 테스트 단계만 아직 막지 않는다(#307의 W2 목록). npm 패키지 `centralu-win32-x64`는 같은 폴더를 싣고, `release.yml`의 Windows 잡이 따로 다시 빌드한다(아래 [Windows](#windows-14-w3) 참고).
+- 같은 워크플로가 **windows-x64**(#14)도 빌드해 아티팩트 두 개를 올린다: 포터블 폴더 `centralu-windows-x64`(`Centralu\centralu.exe` 옆에 `Centralu\resources\host\`)와 NSIS 설치 파일 `centralu-windows-x64-setup`(사용자별 설치, 관리자 권한 불필요). 둘 다 서명되어 있지 않다. 별도의 `windows tests` 잡이 `pnpm verify`의 네 부분을 돌리며, 단위 테스트 단계만 아직 막지 않는다(#307의 W2 목록). npm 패키지 `@centralu/win32-x64`는 같은 폴더를 싣고, `release.yml`의 Windows 잡이 따로 다시 빌드한다(아래 [Windows](#windows-14-w3) 참고).
 - `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 모든 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다.
 - `.github/workflows/publish-linux-npm.yml` — 전신이다: `centralu-linux-x64` 하나만, `workflow_dispatch`로만, 기본은 dry run. `release.yml`이 이를 대체하며 엄밀히 더 많은 일을 한다. 그래도 `release.yml`이 실제 릴리스를 한 번 해낼 때까지는 동작하는 상태로 남겨 둔다 — 0.1.0-beta.2를 배포한 경로를, 후계자가 아직 아무것도 배포해 본 적 없는 시점에 지우는 것은 검증된 것을 검증 안 된 것과 맞바꾸는 일이다. 그 릴리스가 끝나면 지운다.
 
@@ -116,7 +116,9 @@ Linux와 Windows는 먼저 CI에서 나와야 한다 (`dry_run`을 끈 `release.
 
 위의 일곱 단계는 0.1.0-beta.8을 위해 한꺼번에 들어갔다. 이유는 아래 linux-arm64 절과 같다: 핀은 그것이 가리키는 것을 배포하는 바로 그 변경에서만 추가할 수 있다.
 
-**패키지.** `centralu-win32-x64`(`os: win32`, `cpu: x64`)는 W1(#307)부터 `build.yml`이 올리던 포터블 폴더를 싣는다: `Centralu\centralu.exe` 옆에 `Centralu\resources\host\`. Tauri는 설치된 것이 없으면 exe 옆에서 리소스를 찾으므로, 폴더는 npm이 풀어 놓은 자리에서 그대로 실행된다. 네이티브 Node를 쓰는 ARM64 Windows는 이 패키지를 건너뛰고, 런처는 아직 지원하지 않는 플랫폼이라고 알린다. 그쪽으로는 아무것도 배포하지 않는다.
+**이것만 스코프가 붙은 이유.** 다른 플랫폼 패키지는 스코프 없는 이름(`centralu-<id>`)이지만, `centralu-win32-x64`를 처음 올릴 때(0.1.0-beta.8, 2026-10-05) 레지스트리가 `403 … Package name triggered spam detection`으로 거부했다. `@centralu` 스코프는 소유자의 npm 조직 것이라 그런 식으로 거부되거나 남이 가져갈 수 없다. 사용자는 이 이름을 칠 일이 없다. 실행 스크립트가 선택 의존성으로 받아 오고, 런처는 이름으로 찾는다. CI 토큰은 `@centralu` 아래에 올릴 권한이 있어야 한다.
+
+**패키지.** `@centralu/win32-x64`(`os: win32`, `cpu: x64`)는 W1(#307)부터 `build.yml`이 올리던 포터블 폴더를 싣는다: `Centralu\centralu.exe` 옆에 `Centralu\resources\host\`. Tauri는 설치된 것이 없으면 exe 옆에서 리소스를 찾으므로, 폴더는 npm이 풀어 놓은 자리에서 그대로 실행된다. 네이티브 Node를 쓰는 ARM64 Windows는 이 패키지를 건너뛰고, 런처는 아직 지원하지 않는 플랫폼이라고 알린다. 그쪽으로는 아무것도 배포하지 않는다.
 
 **릴리스 잡.** `release.yml` 플랫폼 matrix의 `win32-x64`, `windows-2022`에서, 다른 잡과 같은 `npm-publish` 게이트 뒤에서 돈다. `scripts/release-npm.mts`는 다른 타깃처럼 실행하되 세 가지가 다르며, 각각 그 자리에 주석이 있다:
 

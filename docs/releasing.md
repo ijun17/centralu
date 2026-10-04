@@ -13,7 +13,7 @@ Five packages go to npm:
 | `centralu-darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
 | `centralu-linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
 | `centralu-linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 — from 0.1.0-beta.3 |
-| `centralu-win32-x64` | a `Centralu\` folder: `centralu.exe`, `resources\host\` | Windows, x86-64 — from 0.1.0-beta.8 |
+| `@centralu/win32-x64` | a `Centralu\` folder: `centralu.exe`, `resources\host\` | Windows, x86-64 — from 0.1.0-beta.9 |
 
 `centralu` declares the others as `optionalDependencies` and carries `os`/`cpu`
 fields on each of them, so npm installs exactly one bundle for the machine doing the
@@ -52,7 +52,7 @@ script rehearses by default and why nothing publishes automatically.
   unit-test step does not yet (`continue-on-error` on that step only), so the job stays green
   and a warning annotation gives the failing count, with the failing files in the job summary.
   Its known failures are listed in #307; once they are fixed the step should block. The npm
-  package `centralu-win32-x64` ships the same folder, built again by `release.yml`'s own
+  package `@centralu/win32-x64` ships the same folder, built again by `release.yml`'s own
   Windows job (see [Windows](#windows-14-w3) below).
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
@@ -201,7 +201,9 @@ to `false` at the same time as the 1.0 bump.
 All seven steps above landed together for 0.1.0-beta.8, for the reason the linux-arm64
 section below gives: a pin can only be added in the change that publishes what it points at.
 
-**The package.** `centralu-win32-x64` (`os: win32`, `cpu: x64`) carries the portable folder
+**Why this one is scoped.** The other platform packages are unscoped (`centralu-<id>`), but the first publish of `centralu-win32-x64` (0.1.0-beta.8, 2026-10-05) was refused by the registry with `403 … Package name triggered spam detection`. The `@centralu` scope belongs to the owner's npm organization, so a scoped name cannot be refused that way or taken by anyone else. Users never type it: the shim pulls it in as an optional dependency, and the launcher resolves it by name. The CI token must be allowed to publish under `@centralu`.
+
+**The package.** `@centralu/win32-x64` (`os: win32`, `cpu: x64`) carries the portable folder
 `build.yml` has uploaded since W1 (#307): `Centralu\centralu.exe` beside
 `Centralu\resources\host\`. Tauri looks for its resources next to the exe when nothing is
 installed, so the folder runs where npm unpacked it. ARM64 Windows with native Node skips the
