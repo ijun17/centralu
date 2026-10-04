@@ -35,7 +35,10 @@ import {
   fileChangesOf,
   goalFromCodex,
   normalizeNotification,
+  threadSettingsChanged,
+  threadSettingsOf,
   toCodexDecision,
+  type CodexThreadSettings,
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
 
@@ -301,6 +304,13 @@ class CodexSession implements SessionHandle {
   private readonly children: CodexChildTracker
   /** One compaction marker per compaction, from the item, the deprecated notification, or both (#303) */
   private readonly compactions = new CompactionMarks()
+  /** What the thread said it runs with — a `thread/settings/updated` is measured against this (#304, `threadSettingsChanged`) */
+  private threadSettings: CodexThreadSettings | null = null
+  /**
+   * MCP servers whose failed start was already said (#304). Codex tries a failing server twice on one thread start
+   * (measured, codex-cli 0.160.0), and one line per server is enough; a server that starts again may fail again later.
+   */
+  private mcpFailed = new Set<string>()
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
@@ -442,6 +452,7 @@ class CodexSession implements SessionHandle {
         throw err
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
+      this.threadSettings = threadSettingsOf(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (measured: `thread.turns` lists it as inProgress)
       if (adopted) this.turnId ??= runningTurnOf(res)
       /*
@@ -496,6 +507,7 @@ class CodexSession implements SessionHandle {
         },
       })
       this.threadId = threadIdOf(res)
+      this.threadSettings = threadSettingsOf(res)
     }
     this.externalId = this.threadId
   }
@@ -631,6 +643,18 @@ class CodexSession implements SessionHandle {
       this.blockingTurn = false
       this.flushPending()
     }
+    if (n.method === 'thread/settings/updated') {
+      const { next, events } = threadSettingsChanged(this.sessionId, this.threadSettings, n.params, {
+        model: this.opts.model ?? null,
+        effort: this.opts.effort ?? null,
+        verbosity: this.opts.verbosity ?? null,
+        serviceTier: this.opts.serviceTier ?? null,
+      })
+      this.threadSettings = next
+      for (const e of events) this.emit(e)
+      return
+    }
+    if (n.method === 'mcpServer/startupStatus/updated' && !this.firstMcpFailure(n.params)) return
     for (const e of normalizeNotification(this.sessionId, n)) {
       /*
        * An image that arrived carrying only a path gets its bytes filled in here (#40). normalize
@@ -657,6 +681,17 @@ class CodexSession implements SessionHandle {
       this.unlinked.clear()
       this.unlinkedCount = 0
     }
+  }
+
+  /** Whether this MCP status is one to say: a failure not yet said since the server last started (see `mcpFailed`). */
+  private firstMcpFailure(params: unknown): boolean {
+    const p = (params ?? {}) as { name?: unknown; status?: unknown }
+    const name = typeof p.name === 'string' ? p.name : ''
+    if (p.status === 'ready') this.mcpFailed.delete(name)
+    if (p.status !== 'failed') return false
+    if (this.mcpFailed.has(name)) return false
+    this.mcpFailed.add(name)
+    return true
   }
 
   /**

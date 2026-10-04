@@ -293,8 +293,9 @@ export function goalFromCodex(g: Record<string, unknown>): SessionGoal | null {
  *     fs/watch, fuzzy search, OAuth and login flows), the server's own bookkeeping (`thread/started`, `account/updated`,
  *     `serverRequest/resolved`), deprecated or unstable shapes, and Windows-only notices
  *
- * The methods the survey would show or store stay out on purpose: `warning`, `configWarning`, `deprecationNotice`,
- * `model/rerouted` and `thread/settings/updated` among them. Their log line is how a real instance gets noticed.
+ * The methods the survey would show or store but nobody has wired yet stay out on purpose: `item/reasoning/textDelta`,
+ * `item/mcpToolCall/progress`, `skills/changed` and `thread/reverted` among them. Their log line is how a real instance
+ * gets noticed.
  */
 export const CODEX_KNOWN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   // mapped
@@ -304,8 +305,11 @@ export const CODEX_KNOWN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   'item/reasoning/summaryPartAdded', 'thread/compacted', 'account/rateLimits/updated',
   // mapped by #290 for a child thread (CodexChildTracker); the parent's own status is still not read
   'thread/status/changed',
+  // mapped by #304: notices, model switches and MCP servers that failed to start (thread/settings/updated in index.ts)
+  'warning', 'configWarning', 'deprecationNotice', 'guardianWarning', 'model/rerouted', 'thread/settings/updated',
+  'mcpServer/startupStatus/updated',
   // ignored by #58
-  'turn/diff/updated', 'mcpServer/startupStatus/updated', 'hook/started', 'hook/completed',
+  'turn/diff/updated', 'hook/started', 'hook/completed',
   'rawResponseItem/completed', 'rawResponse/completed',
   // correctly ignored
   'serverRequest/resolved', 'thread/started', 'thread/archived', 'thread/unarchived', 'thread/deleted', 'thread/closed',
@@ -653,6 +657,59 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return [{ type: 'goal', sessionId, goal: null }]
 
     /*
+     * Text Codex wants the person to read (#304). Measured (codex-cli 0.160.0, 2026-10-04): with two keys in
+     * `~/.codex/config.toml` the CLI ignores, `configWarning {summary: "Codex is ignoring 2 unrecognized configuration
+     * settings. Check for typos or deprecated settings.\n  user (…/config.toml): \`mcp_servers.plane.type\` is
+     * ignored.\n…", details: null}` arrived while `thread/start` was answered, then `warning {threadId, message: <the
+     * same text>}` for the thread. Both come again on every app-server start and every thread start or resume, saying the
+     * same thing each time: `oncePerSession` lets the host keep one line per session. `deprecationNotice` has the
+     * `configWarning` shape (generated/v2/DeprecationNoticeNotification.ts); not exercised.
+     */
+    case 'warning': {
+      const text = str(p.message).trim()
+      return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true }] : []
+    }
+    case 'configWarning':
+    case 'deprecationNotice': {
+      const text = [str(p.summary).trim(), str(p.details).trim()].filter(Boolean).join('\n')
+      return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true }] : []
+    }
+    // The auto-review guardian's warning about an action (generated/v2/GuardianWarningNotification.ts); not exercised
+    case 'guardianWarning': {
+      const text = str(p.message).trim()
+      return text ? [{ type: 'notice', sessionId, level: 'warning', text }] : []
+    }
+
+    /*
+     * Codex answered a turn with another model than the thread's (#304, not exercised): `{threadId, turnId, fromModel,
+     * toModel, reason}`, where the only reason the bindings know is `highRiskCyberActivity`. It names a turn, and the
+     * thread's own settings do not change with it (that would be `thread/settings/updated`), so this says so in the
+     * conversation and leaves the model the person picked alone.
+     */
+    case 'model/rerouted': {
+      const to = str(p.toModel)
+      if (!to) return []
+      const reason = str(p.reason) === 'highRiskCyberActivity' ? 'it was flagged as high-risk cyber activity' : str(p.reason)
+      const text = `Codex answered this turn with ${to} instead of ${str(p.fromModel) || 'the selected model'}${reason ? ` because ${reason}` : ''}`
+      return [{ type: 'notice', sessionId, level: 'warning', text }]
+    }
+
+    /*
+     * An MCP server that failed to start (#304). Measured (codex-cli 0.160.0): every server reports `starting`, then
+     * `ready` or `failed {error: "MCP client for \`<name>\` failed to start: MCP startup failed: No such file or
+     * directory (os error 2)"}`, and a failing one goes through `starting` → `failed` **twice** on one thread start.
+     * Centralu's own orchestrator and app bridges are MCP servers too, and a failed start used to be silent: the model
+     * simply had no such tools. The adapter keeps one line per server until it starts again (index.ts).
+     */
+    case 'mcpServer/startupStatus/updated': {
+      if (str(p.status) !== 'failed') return []
+      const name = str(p.name) || 'an MCP server'
+      const reauth = str(p.failureReason) === 'reauthenticationRequired' ? ' (it needs you to sign in again)' : ''
+      const text = `${str(p.error).trim() || `MCP server \`${name}\` failed to start`}${reauth}`
+      return [{ type: 'notice', sessionId, level: 'warning', text }]
+    }
+
+    /*
      * The `error` notification has the shape `{ error, willRetry, threadId, turnId }` (generated
      * binding ErrorNotification, codex-cli 0.153.4). Two cases are not left as a failure marker
      * (#168):
@@ -726,6 +783,66 @@ export function childSteps(sessionId: string, parentCallId: string, n: Notificat
     else if (e.type === 'files_touched') out.push(e)
   }
   return out
+}
+
+/** The thread settings a Codex model switch is measured against (#304) — Codex's own words for them. */
+export type CodexThreadSettings = { model: string | null; effort: string | null; serviceTier: string | null }
+
+/** The settings a `thread/start` or `thread/resume` answer says the thread runs with (top level, as answered on 0.160.0). */
+export function threadSettingsOf(res: Record<string, unknown> | undefined): CodexThreadSettings | null {
+  if (!res) return null
+  const thread = obj(res.thread)
+  const model = str(res.model) || str(thread.model)
+  if (!model) return null
+  return {
+    model,
+    effort: str(res.reasoningEffort) || str(thread.reasoningEffort) || null,
+    serviceTier: str(res.serviceTier) || null,
+  }
+}
+
+/**
+ * A thread whose settings changed under it (#304, not exercised: Centralu's own effort override per turn did not send
+ * it in #58's survey). `thread/settings/updated {threadId, threadSettings}` carries the whole of them
+ * (generated/v2/ThreadSettings.ts). They are compared with what the thread said it runs with, not with what Centralu
+ * asked for: Codex answers a default with a concrete value (no model asked → `gpt-5.6-luna`), and comparing with the
+ * request would call that a change. Only a real difference becomes a notice and a `settings_changed` the tool made,
+ * whose other fields are what the process was launched with (`launched`) — the host applies only what differs from
+ * those.
+ */
+export function threadSettingsChanged(
+  sessionId: string,
+  before: CodexThreadSettings | null,
+  params: unknown,
+  launched: { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null },
+): { next: CodexThreadSettings | null; events: NormalizedEvent[] } {
+  const s = obj(obj(params).threadSettings)
+  const next: CodexThreadSettings = {
+    model: str(s.model) || null,
+    effort: str(s.effort) || null,
+    serviceTier: str(s.serviceTier) || null,
+  }
+  if (!next.model) return { next: before, events: [] }
+  if (!before) return { next, events: [] }
+  const words = { model: 'model', effort: 'effort', serviceTier: 'speed' } as const
+  const changed = (Object.keys(words) as (keyof CodexThreadSettings)[]).filter((k) => next[k] !== before[k])
+  if (changed.length === 0) return { next, events: [] }
+  const what = changed.map((k) => `${words[k]} ${before[k] ?? 'default'} → ${next[k] ?? 'default'}`).join(' · ')
+  return {
+    next,
+    events: [
+      { type: 'notice', sessionId, level: 'warning', text: `This thread's settings were changed outside Centralu: ${what}` },
+      {
+        type: 'settings_changed',
+        sessionId,
+        model: changed.includes('model') ? next.model : launched.model,
+        effort: changed.includes('effort') ? next.effort : launched.effort,
+        verbosity: launched.verbosity,
+        serviceTier: changed.includes('serviceTier') ? next.serviceTier : launched.serviceTier,
+        by: 'tool',
+      },
+    ],
+  }
 }
 
 /** Converts an approval response into a Codex decision (only the ones we use, out of the six) */

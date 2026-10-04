@@ -88,7 +88,14 @@
     "error",
     "thread/goal/updated",
     "thread/goal/cleared",
-    "item/fileChange/patchUpdated"
+    "item/fileChange/patchUpdated",
+    "warning",
+    "configWarning",
+    "deprecationNotice",
+    "guardianWarning",
+    "model/rerouted",
+    "thread/settings/updated",
+    "mcpServer/startupStatus/updated"
   ],
   "_threadItemTypesComment": [
     "ThreadItem `type` values the adapter branches on by name (normalize.ts, history.ts, index.ts).",
