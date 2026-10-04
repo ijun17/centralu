@@ -3,7 +3,7 @@
  *
  * Measured for #280 (2026-10-04): an older host opened a newer store without complaint and failed only when it touched
  * something a later step had dropped — `sessions.archived` (v28) and `projects.default_model` / `default_effort` (v32)
- * broke it outright, and dropping `control_center` (v13) silently lost the grid placements. The store now records the
+ * broke it outright, and dropping the grid's old-named table (v13) silently lost the grid placements. The store now records the
  * lowest version that can read it, and a host below that refuses to start.
  */
 import { afterEach, describe, expect, it } from 'vitest'
