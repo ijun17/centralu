@@ -143,7 +143,7 @@ export type AppId = z.infer<typeof AppId>
  * each have an app with the same id.
  *
  * The shape says nothing about the host's tables on purpose. The grid is a way of looking, and #82
- * moves `grid_panels` to the client with the remote mode; a reference made only of the panel's
+ * moves the grid's list to the client with the remote mode; a reference made only of the panel's
  * identity is something the client can store as it is.
  *
  * The app id is not checked against the manifest's character rule here: this is a layout entry,

@@ -51,6 +51,11 @@ export type WebPlatformOptions = {
   fileManagerName?: string
 }
 
+/** A grid list from either shape `grid.get` / `grid.set` answer in: panels, or a pre-#288 host's bare session ids */
+function asPanels(list: readonly (GridPanel | string)[]): GridPanel[] {
+  return list.map((x) => (typeof x === 'string' ? { kind: 'session', sessionId: x } : x))
+}
+
 class WebAgentPort implements AgentPort {
   constructor(private rpc: RpcClient) {}
   createSession(params: CreateSessionParams) {
@@ -90,12 +95,18 @@ class WebAgentPort implements AgentPort {
   switchTool(sessionId: string, tool: ToolName) {
     return this.rpc.call('agents.switchTool', { sessionId, tool })
   }
-  grid() {
-    return this.rpc.call('grid.get', {})
+  /*
+   * The grid in panels (#288). A host from before them ignores `tagged` and answers bare session ids, and saves the
+   * `sessionIds` sent next to `panels` (it strips the field it does not know) — both read here as session panels, so a
+   * UI and a host one build apart keep working (protocol.md §3).
+   */
+  async grid() {
+    return asPanels(await this.rpc.call('grid.get', { tagged: true }))
   }
 
-  setGridView(panels: GridPanel[]) {
-    return this.rpc.call('grid.set', { panels })
+  async setGridView(panels: GridPanel[]) {
+    const sessionIds = panels.flatMap((p) => (p.kind === 'session' ? [p.sessionId] : []))
+    return asPanels(await this.rpc.call('grid.set', { panels, sessionIds }))
   }
 
   models(tool: ToolName) {

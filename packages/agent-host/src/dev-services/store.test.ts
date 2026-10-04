@@ -575,12 +575,10 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       // Take the grid back to v41: one row per session id
       const raw = new Database(file)
       raw.exec(`
-        DROP TABLE grid_panels;
-        CREATE TABLE grid_panels (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-          position INTEGER NOT NULL);
+        DROP TABLE grid_layout;
         INSERT INTO grid_panels (session_id, position) VALUES ('s3', 0), ('s1', 1), ('s2', 2);
       `)
-      // A row whose session is gone, written with the key unenforced: never shown, and it must not stop the move
+      // A row whose session is gone, written with the key unenforced: never shown, and it must not stop the copy
       raw.pragma('foreign_keys = OFF')
       raw.exec(`INSERT INTO grid_panels (session_id, position) VALUES ('vanished', 3)`)
       raw.pragma('user_version = 41')
@@ -594,6 +592,48 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       s.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
       expect(s.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
       s.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /*
+   * #292's rule: v42 only expands. A v41 host opening the same store still reads and rewrites `grid_panels` with its own
+   * statements (copied here from that build's listGridView and setGridView), and this build's list is untouched by it.
+   */
+  it('leaves grid_panels as a v41 host reads and writes it, and this build’s list apart from it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v42-old-'))
+    const file = join(dir, 'store.db')
+    try {
+      const s = new Store(file)
+      s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      for (const id of ['s1', 's2']) gridSession(s, id, 'p1')
+      s.setGridView([ap('p1', 'slider'), sp('s1')])
+      s.close()
+
+      const older = new Database(file)
+      older.pragma('foreign_keys = ON')
+      older.transaction(() => {
+        older.prepare(`DELETE FROM grid_panels`).run()
+        const ins = older.prepare(`INSERT INTO grid_panels (session_id, position) VALUES (?, ?)`)
+        ;['s2', 's1'].forEach((id, i) => ins.run(id, i))
+      })()
+      const read = older
+        .prepare(
+          `SELECT g.session_id FROM grid_panels g JOIN sessions s ON s.id = g.session_id
+           WHERE s.deleted_at IS NULL ORDER BY g.position`,
+        )
+        .all() as { session_id: string }[]
+      expect(read.map((r) => r.session_id)).toEqual(['s2', 's1'])
+      const minReader = older.prepare(`SELECT value FROM app_settings WHERE key = 'min_reader_version'`).get() as
+        | { value: string }
+        | undefined
+      expect(Number(minReader?.value ?? 0)).toBeLessThan(42)
+      older.close()
+
+      const again = new Store(file)
+      expect(again.listGridView()).toEqual([ap('p1', 'slider'), sp('s1')])
+      again.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

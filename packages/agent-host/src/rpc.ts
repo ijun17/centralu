@@ -24,7 +24,7 @@ import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { InlineViews } from './inline-views.js'
-import type { ToolName } from '@cc/protocol'
+import type { GridPanel, ToolName } from '@cc/protocol'
 
 /**
  * The optional services a host has. Without one, that feature simply does not exist on this host
@@ -47,6 +47,11 @@ export type RpcServices = {
   views?: ViewHost
   /** An app view inside a conversation (M4 B-1) — the instance a session's app call opened. Closing it also updates this side's record */
   inlineViews?: InlineViews
+}
+
+/** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
+function sessionIdsOf(panels: readonly GridPanel[]): string[] {
+  return panels.flatMap((p) => (p.kind === 'session' ? [p.sessionId] : []))
 }
 
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
@@ -471,9 +476,19 @@ export function createRpcHandler(
       const { sessionId, server, name, args, waitMs } = RpcMethods['apps.sessionCall'].params.parse(p)
       return mgr.callAppForSession(sessionId, server, name, args, waitMs)
     },
-    'grid.get': async () => mgr.grid(),
-    'grid.set': async (p) =>
-      mgr.setGridView(RpcMethods['grid.set'].params.parse(p).panels),
+    /*
+     * A request in the pre-#288 shape (no `tagged`, no `panels`) is answered in it: the sessions' ids only. An older UI
+     * that saves through `sessionIds` replaces the list with its sessions, as it always did — it cannot know the apps.
+     */
+    'grid.get': async (p) => {
+      const panels = mgr.grid()
+      return RpcMethods['grid.get'].params.parse(p).tagged ? panels : sessionIdsOf(panels)
+    },
+    'grid.set': async (p) => {
+      const { panels, sessionIds } = RpcMethods['grid.set'].params.parse(p)
+      const saved = mgr.setGridView(panels ?? (sessionIds ?? []).map((sessionId) => ({ kind: 'session' as const, sessionId })))
+      return panels ? saved : sessionIdsOf(saved)
+    },
     'processes.strays': async () => findStrays(mgr.folderRoots()),
     'processes.stop': async (p) =>
       stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots()),

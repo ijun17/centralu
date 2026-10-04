@@ -665,6 +665,43 @@ describe('loading past sessions', () => {
  * a door in (`d` in the inbox) but no door out, so to a person it looked the same as delete.
  * All that is left is delete, which makes what delete actually erases matter more.
  */
+/*
+ * #288 changed the grid's RPC from bare session ids to tagged panels, by expanding it (protocol.md §4) rather than
+ * bumping PROTOCOL_VERSION: a UI one build older still speaks the old shape to this host, and must keep working.
+ */
+describe('the grid RPC, in both shapes (#288)', () => {
+  it('a UI from before panels saves and reads bare session ids, as it always did', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
+    const b = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
+    expect(await rpc('grid.set', { sessionIds: [b.id, a.id, 'not-a-session'] })).toEqual([b.id, a.id])
+    expect(await rpc('grid.get', {})).toEqual([b.id, a.id])
+    // and this build reads the same list as panels
+    expect(await rpc('grid.get', { tagged: true })).toEqual([
+      { kind: 'session', sessionId: b.id },
+      { kind: 'session', sessionId: a.id },
+    ])
+  })
+
+  it('this build saves panels and gets panels back; the old shape sees only their sessions', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
+    const panels = [
+      { kind: 'app', projectId: p.id, appId: 'slider' },
+      { kind: 'session', sessionId: a.id },
+      { kind: 'app', projectId: null, appId: 'notes' },
+    ]
+    // `sessionIds` rides along for an older host; this one takes the panels
+    expect(await rpc('grid.set', { panels, sessionIds: [a.id] })).toEqual(panels)
+    expect(await rpc('grid.get', { tagged: true })).toEqual(panels)
+    expect(await rpc('grid.get', {})).toEqual([a.id])
+  })
+
+  it('refuses a save that names neither panels nor session ids', async () => {
+    await expect(rpc('grid.set', {})).rejects.toThrow()
+  })
+})
+
 describe('deleting a session', () => {
   /*
    * #204: deleting moves the session to the trash. This is the guard across the host's listing paths — every place a
@@ -683,7 +720,7 @@ describe('deleting a session', () => {
     expect(before.length).toBeGreaterThan(0)
     const reach = async () => ({
       sessions: ((await rpc('sessions.list', {})) as SessionInfo[]).some((x) => x.id === s.id),
-      grid: ((await rpc('grid.get', {})) as GridPanel[]).some((x) => x.kind === 'session' && x.sessionId === s.id),
+      grid: ((await rpc('grid.get', { tagged: true })) as GridPanel[]).some((x) => x.kind === 'session' && x.sessionId === s.id),
       search: ((await rpc('messages.search', { query: 'BLUEBIRD' })) as unknown[]).length > 0,
       listTool: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'list_sessions', {})).includes(s.id),
       recall: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'recall', { query: 'BLUEBIRD' })).includes(s.id),
