@@ -322,6 +322,8 @@ mod link {
 
         fn launch_keeper(&self) -> std::io::Result<()> {
             let exe = std::env::current_exe()?;
+            // The legacy folder moves before this creates the new one (keeper::prepare_default_dir).
+            let _ = crate::keeper::prepare_default_dir(&self.data, self.dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
             let _ = std::fs::create_dir_all(&self.data);
             let mut args = vec![KEEPER_FLAG.to_string(), "--data-dir".into(), self.data.to_string_lossy().to_string()];
             if let Some(dir) = &self.host_dir {

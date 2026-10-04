@@ -89,6 +89,20 @@ pub fn migrate_legacy(home: &Path, dev: bool) -> Option<(PathBuf, PathBuf)> {
     std::fs::rename(&from, &to).ok().map(|_| (from, to))
 }
 
+/// Runs `migrate_legacy` when `data` is the default folder (no `CC_DATA_DIR`), before anything
+/// creates it. Both the app (which creates the folder for `keeper.log` before launching the
+/// keeper) and the keeper call this. Returns what was moved, for the log.
+pub fn prepare_default_dir(data: &Path, dev: bool) -> Option<(PathBuf, PathBuf)> {
+    if std::env::var("CC_DATA_DIR").map(|d| !d.trim().is_empty()).unwrap_or(false) {
+        return None;
+    }
+    let home = PathBuf::from(std::env::var("HOME").ok()?);
+    if data != home.join(if dev { ".centralu-dev" } else { ".centralu" }) {
+        return None;
+    }
+    migrate_legacy(&home, dev)
+}
+
 pub fn socket_path(data: &Path) -> PathBuf {
     data.join("keeper.sock")
 }
@@ -252,6 +266,12 @@ mod tests {
         let mut i = quiet(600);
         i.stopping = true;
         assert_eq!(idle_decision(i, DEFAULT_IDLE), None);
+    }
+
+    /// A test's or a person's own CC_DATA_DIR is never treated as the default folder.
+    #[test]
+    fn only_the_default_folder_takes_part_in_the_legacy_move() {
+        assert_eq!(prepare_default_dir(Path::new("/tmp/cc-not-the-default"), false), None);
     }
 
     #[test]

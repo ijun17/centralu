@@ -189,6 +189,10 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 | `{"op":"restart"}` | Retry after the host gave up |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
 
+**The legacy folder.** Before anything creates the default data folder, the app and the keeper move the
+pre-rename folder to the new name by the same rule as `data-dir.ts`: the host leaves a legacy folder alone once
+the new one exists, so creating `~/.centralu` first (for `keeper.log` or the socket) would strand the data.
+
 **One keeper per data folder.** `flock` on `<data>/keeper.lock`, released by the OS however the keeper ends.
 A second keeper whose predecessor answers on the socket exits with code 3 and starts no host; one whose
 predecessor holds the lock but does not answer (on its way out) waits up to 15 s for it.

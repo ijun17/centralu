@@ -95,18 +95,12 @@ struct Keeper {
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
     let opts = parse_args(args);
-    let data = match opts.data_dir.clone() {
-        Some(d) => d,
-        None => {
-            if std::env::var("CC_DATA_DIR").map(|d| d.trim().is_empty()).unwrap_or(true) {
-                let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
-                if let Some((from, to)) = super::migrate_legacy(&home, std::env::var("CC_DEV").as_deref() == Ok("1")) {
-                    log(&format!("data folder moved: {} -> {}", from.display(), to.display()));
-                }
-            }
-            super::data_dir()
-        }
-    };
+    let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
+    // Before anything creates the folder: the host leaves a legacy folder alone once the new one
+    // exists, so creating it first would strand the person's data (data-dir.ts).
+    if let Some((from, to)) = super::prepare_default_dir(&data, std::env::var("CC_DEV").as_deref() == Ok("1")) {
+        log(&format!("data folder moved: {} -> {}", from.display(), to.display()));
+    }
     if let Err(e) = fs::create_dir_all(&data) {
         log(&format!("cannot create the data folder {}: {e}", data.display()));
         return 1;
