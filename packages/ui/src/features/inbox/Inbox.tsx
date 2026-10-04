@@ -72,13 +72,13 @@ export function Inbox() {
         tabIndex={-1}
         role="dialog"
         aria-label="Waiting"
-        className="cc-drop absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)] focus:outline-none"
+        className="cc-drop absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none"
         data-testid="inbox"
       >
-        <header className="flex items-baseline gap-2 border-b border-edge px-4 py-2.5">
-          <h2 className="text-[12px] font-medium text-chalk">Waiting</h2>
-          <span className="readout text-[11px] text-slate">{items.length}</span>
-          <span className="ml-auto flex items-center gap-1 text-[10px] text-slate">
+        <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
+          <h2 className="text-[12px] font-medium text-ink">Waiting</h2>
+          <span className="readout text-[11px] text-ink-faint">{items.length}</span>
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-ink-faint">
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd> Move
             <Kbd>↵</Kbd> Open
@@ -87,9 +87,9 @@ export function Inbox() {
         </header>
 
         {items.length === 0 ? (
-          <p className="px-4 py-10 text-center text-[13px] text-ash" data-testid="inbox-empty">
+          <p className="px-4 py-10 text-center text-[13px] text-ink-muted" data-testid="inbox-empty">
             Nothing waiting
-            <span className="mt-1 block text-[11px] text-slate">Finished agents collect here</span>
+            <span className="mt-1 block text-[11px] text-ink-faint">Finished agents collect here</span>
           </p>
         ) : (
           <ul className="max-h-[calc(56vh/var(--text-zoom))] overflow-y-auto">
@@ -97,7 +97,7 @@ export function Inbox() {
               <li key={it.id}>
                 <button
                   className={`flex w-full items-center gap-2.5 border-l-2 py-2 pl-3 pr-4 text-left transition-colors ${
-                    i === cursor ? 'border-l-ash bg-graphite/40' : 'border-l-transparent hover:bg-graphite/20'
+                    i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
                   }`}
                   onClick={() => {
                     focusSession(it.id, { preferGrid: true })
@@ -106,14 +106,14 @@ export function Inbox() {
                   data-testid={`inbox-item-${it.id}`}
                 >
                   <StateDot state={it.state} />
-                  <span className={`truncate text-[13px] ${it.unread ? 'text-chalk' : 'text-ash'}`}>
+                  <span className={`truncate text-[13px] ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
                     {it.name}
                   </span>
-                  <span className="truncate text-[11px] text-slate">
+                  <span className="truncate text-[11px] text-ink-faint">
                     {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
                   </span>
                   <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                    <span className="text-[11px] text-slate">
+                    <span className="text-[11px] text-ink-faint">
                       {it.state === 'waiting_approval'
                         ? 'Needs approval'
                         : it.state === 'error'

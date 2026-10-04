@@ -171,17 +171,17 @@ export function CommandPalette() {
 
   return (
     <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-void/80 pt-[calc(14vh/var(--text-zoom))] backdrop-blur-[2px]"
+      className="absolute inset-0 z-40 flex items-start justify-center bg-scrim pt-[calc(14vh/var(--text-zoom))] backdrop-blur-[2px]"
       onClick={() => toggle(false)}
       data-testid="command-palette"
     >
       <div
-        className="w-[600px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="w-[600px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
         onClick={(e) => e.stopPropagation()}
       >
         <input
           ref={inputRef}
-          className="w-full border-b border-edge bg-transparent px-4 py-3 text-[13px] text-chalk placeholder:text-slate focus:outline-none"
+          className="w-full border-b border-line bg-transparent px-4 py-3 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none"
           placeholder="Search sessions, projects, messages"
           value={query}
           onChange={(e) => {
@@ -192,7 +192,7 @@ export function CommandPalette() {
         />
         <ul className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
           {items.length === 0 ? (
-            <li className="px-4 py-6 text-center text-[12px] text-slate" data-testid="palette-empty">
+            <li className="px-4 py-6 text-center text-[12px] text-ink-faint" data-testid="palette-empty">
               No results
             </li>
           ) : (
@@ -200,22 +200,22 @@ export function CommandPalette() {
               <li key={`${item.kind}-${item.id}`}>
                 <button
                   className={`flex w-full items-baseline gap-2 border-l-2 px-3 py-1.5 text-left transition-colors ${
-                    i === cursor ? 'border-l-ash bg-graphite/40' : 'border-l-transparent hover:bg-graphite/20'
+                    i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
                   }`}
                   onClick={() => choose(item)}
                   data-testid={`palette-item-${item.kind}`}
                 >
-                  <span className="w-10 shrink-0 text-[10px] uppercase text-slate">
+                  <span className="w-10 shrink-0 text-[10px] uppercase text-ink-faint">
                     {item.kind === 'session' ? 'Session' : item.kind === 'project' ? 'Folder' : item.kind === 'message' ? 'Chat' : 'Action'}
                   </span>
-                  <span className="truncate text-[13px] text-chalk">{item.label}</span>
-                  <span className="ml-auto shrink-0 truncate text-[11px] text-slate">{item.sub}</span>
+                  <span className="truncate text-[13px] text-ink">{item.label}</span>
+                  <span className="ml-auto shrink-0 truncate text-[11px] text-ink-faint">{item.sub}</span>
                 </button>
               </li>
             ))
           )}
         </ul>
-        <footer className="flex items-center gap-1 border-t border-edge px-3 py-1.5 text-[10px] text-slate">
+        <footer className="flex items-center gap-1 border-t border-line px-3 py-1.5 text-[10px] text-ink-faint">
           <Kbd>↑</Kbd>
           <Kbd>↓</Kbd> Move
           <Kbd>↵</Kbd> Open

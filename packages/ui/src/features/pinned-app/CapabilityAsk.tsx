@@ -41,7 +41,7 @@ export function CapabilityAsk({ question, visible }: { question: AppQuestion; vi
 
   return (
     <div
-      className="absolute inset-x-3 bottom-3 z-20 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      className="absolute inset-x-3 bottom-3 z-20 shadow-(--shadow-popover)"
       role="dialog"
       aria-label={`${question.app.name} asks for a permission`}
       data-testid="pinned-capability-ask"

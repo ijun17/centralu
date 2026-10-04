@@ -83,12 +83,12 @@ export function QuestionCard({
 
   return (
     <div
-      className="overflow-hidden rounded border border-edge border-l-2 border-l-beacon bg-panel"
+      className="overflow-hidden rounded border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid="question-card"
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="beacon text-[10px] font-medium">Agent is asking</span>
-        <span className="text-[11px] text-slate">
+        <span className="signal text-[10px] font-medium">Agent is asking</span>
+        <span className="text-[11px] text-ink-faint">
           {tabbed ? `${questions.length} questions` : 'Pick an option'}
         </span>
       </div>
@@ -99,7 +99,7 @@ export function QuestionCard({
           The dot on a tab is its answered state: what still waits is legible without
           visiting every tab, which is the whole point of not stacking.
         */
-        <nav className="mt-2 flex items-center gap-0.5 border-b border-edge px-2 pb-1" data-testid="question-tabs">
+        <nav className="mt-2 flex items-center gap-0.5 border-b border-line px-2 pb-1" data-testid="question-tabs">
           {questions.map((q, qi) => (
             <button
               key={qi}
@@ -108,13 +108,13 @@ export function QuestionCard({
               data-answered={answered[qi] || undefined}
               onClick={() => setActive(qi)}
               className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] transition-colors ${
-                active === qi ? 'bg-graphite/50 text-chalk' : 'text-ash hover:text-chalk'
+                active === qi ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted hover:text-ink'
               }`}
             >
               {q.header || `Q${qi + 1}`}
               <span
                 aria-hidden
-                className={`size-1 rounded-full ${answered[qi] ? 'bg-ash' : 'bg-slate/40'}`}
+                className={`size-1 rounded-full ${answered[qi] ? 'bg-ink-muted' : 'bg-ink-faint/40'}`}
               />
             </button>
           ))}
@@ -132,11 +132,11 @@ export function QuestionCard({
             <div key={qi} className="flex flex-col gap-1.5">
               <div className="flex items-baseline gap-2">
                 {!tabbed && q.header && (
-                  <span className="shrink-0 rounded bg-edge px-1.5 py-px text-[10px] text-slate">{q.header}</span>
+                  <span className="shrink-0 rounded bg-surface-selected px-1.5 py-px text-[10px] text-ink-faint">{q.header}</span>
                 )}
-                <span className="text-[13px] leading-snug text-chalk">{q.question}</span>
+                <span className="text-[13px] leading-snug text-ink">{q.question}</span>
                 {/* That several answers are allowed must be known before pressing, not after */}
-                {q.multiSelect && <span className="shrink-0 text-[10px] text-slate">multiple allowed</span>}
+                {q.multiSelect && <span className="shrink-0 text-[10px] text-ink-faint">multiple allowed</span>}
               </div>
               <div className="flex flex-col gap-1">
                 {q.options.map((o) => {
@@ -148,13 +148,13 @@ export function QuestionCard({
                       data-testid="question-option"
                       onClick={() => toggle(qi, o.label, q.multiSelect)}
                       className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
-                        on ? 'border-beacon bg-edge' : 'border-edge hover:bg-edge/50'
+                        on ? 'border-ink-signal bg-surface-selected' : 'border-line hover:bg-surface-selected/50'
                       }`}
                     >
-                      <div className="text-[12px] text-chalk">{o.label}</div>
+                      <div className="text-[12px] text-ink">{o.label}</div>
                       {/* The description is the grounds for the choice — never folded, never cut */}
                       {o.description && (
-                        <div className="mt-0.5 text-[11px] leading-snug text-slate">{o.description}</div>
+                        <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">{o.description}</div>
                       )}
                     </button>
                   )
@@ -166,10 +166,10 @@ export function QuestionCard({
                   data-testid="question-other"
                   onClick={() => toggleOther(qi, q.multiSelect)}
                   className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
-                    otherOn[qi] ? 'border-beacon bg-edge' : 'border-edge hover:bg-edge/50'
+                    otherOn[qi] ? 'border-ink-signal bg-surface-selected' : 'border-line hover:bg-surface-selected/50'
                   }`}
                 >
-                  <div className="text-[12px] text-slate">Other — write your own</div>
+                  <div className="text-[12px] text-ink-faint">Other — write your own</div>
                 </button>
 
                 {otherOn[qi] && (
@@ -180,7 +180,7 @@ export function QuestionCard({
                     value={otherText[qi] ?? ''}
                     onChange={(e) => setOtherText((t) => ({ ...t, [qi]: e.target.value }))}
                     placeholder="Type your answer"
-                    className="w-full resize-y rounded border border-edge bg-void px-2 py-1.5 text-[12px] text-chalk outline-none focus:border-beacon"
+                    className="w-full resize-y rounded border border-line bg-surface-floor px-2 py-1.5 text-[12px] text-ink outline-none focus:border-ink-signal"
                   />
                 )}
               </div>
@@ -189,17 +189,17 @@ export function QuestionCard({
         )}
       </div>
 
-      <div className="mt-3 flex items-center gap-2 border-t border-edge px-3 py-2">
+      <div className="mt-3 flex items-center gap-2 border-t border-line px-3 py-2">
         <button
           type="button"
           data-testid="question-submit"
           disabled={!ready || sending}
           onClick={() => void submit()}
-          className="rounded border border-edge px-2.5 py-1 text-[11px] text-chalk enabled:hover:bg-edge disabled:opacity-40"
+          className="rounded border border-line px-2.5 py-1 text-[11px] text-ink enabled:hover:bg-surface-selected disabled:opacity-40"
         >
           {sending ? 'Sending…' : 'Answer'}
         </button>
-        <span className="text-[11px] text-slate">
+        <span className="text-[11px] text-ink-faint">
           {ready
             ? 'Sends your choice back to the agent'
             : tabbed

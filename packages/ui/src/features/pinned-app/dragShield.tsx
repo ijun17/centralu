@@ -155,7 +155,7 @@ export function DragShield({ viewKey, dimmed }: { viewKey: string; dimmed: boole
   return createPortal(
     <div
       aria-hidden
-      className={`absolute inset-0 z-10 ${dimmed ? 'bg-void/60' : ''}`}
+      className={`absolute inset-0 z-10 ${dimmed ? 'bg-surface-floor/60' : ''}`}
       data-testid="app-drag-shield"
       data-dimmed={dimmed || undefined}
     />,

@@ -188,7 +188,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   return (
     <section
-      className="flex min-h-0 min-w-0 flex-1 flex-col bg-void"
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-floor"
       data-testid="project-view"
       onDragOver={(e) => {
         /*
@@ -199,23 +199,23 @@ export function ProjectView({ projectId }: { projectId: string }) {
         if (dragVerdict(e.dataTransfer.types, projectId) === 'refuse') e.dataTransfer.dropEffect = 'none'
       }}
     >
-      <DragRegion className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-edge px-4 py-2">
-        <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
+      <DragRegion className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-line px-4 py-2">
+        <h1 className="truncate text-[13px] font-medium text-ink" data-testid="project-view-name">
           {project.name}
         </h1>
-        <span className="readout truncate text-[11px] text-slate">{project.path}</span>
+        <span className="readout truncate text-[11px] text-ink-faint">{project.path}</span>
         {hidden.length > 0 && (
           /*
             Hidden panels are named here, one button each, rather than behind a menu: a panel that
             left the screen with no trace is a panel nobody remembers hiding.
           */
           <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1" data-testid="project-hidden">
-            <span className="text-[11px] text-slate">Hidden</span>
+            <span className="text-[11px] text-ink-faint">Hidden</span>
             {hidden.map((id) => (
               <button
                 key={id}
                 type="button"
-                className="max-w-[160px] truncate rounded border border-edge px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk"
+                className="max-w-[160px] truncate rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
                 onClick={() => show(id)}
                 title={`Show ${labelOf(id)} on this screen again`}
                 data-testid={`project-show-${id}`}
@@ -228,7 +228,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       </DragRegion>
       <div
         ref={ref}
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-deck p-2"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-deck p-2"
         data-testid="project-grid"
         onDragOver={(e) => {
           if (takes(e)) e.preventDefault()
@@ -252,22 +252,22 @@ export function ProjectView({ projectId }: { projectId: string }) {
           <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center" data-testid="project-empty">
             {present.length === 0 ? (
               <>
-                <p className="text-[13px] text-ash">Nothing in this project yet</p>
+                <p className="text-[13px] text-ink-muted">Nothing in this project yet</p>
                 <button
                   type="button"
-                  className="flex items-center gap-1.5 rounded border border-edge px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite"
+                  className="flex items-center gap-1.5 rounded border border-line px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong"
                   onClick={() => openNewSession(projectId)}
                   data-testid="project-empty-new-session"
                 >
                   <PlusIcon size={12} /> New session
                 </button>
-                <p className="text-[11px] text-slate">Its sessions and apps appear here as panels you can arrange</p>
+                <p className="text-[11px] text-ink-faint">Its sessions and apps appear here as panels you can arrange</p>
               </>
             ) : (
               // Said the way the empty grid says it — and the names above still bring a panel back
-              <p className="text-[13px] leading-relaxed text-ash">
+              <p className="text-[13px] leading-relaxed text-ink-muted">
                 Drag this project&apos;s sessions and apps here from the sidebar
-                <span className="mt-1 block text-[11px] text-slate">
+                <span className="mt-1 block text-[11px] text-ink-faint">
                   They keep running — this is another way to look at them
                 </span>
               </p>
@@ -290,7 +290,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
                     else cards.current.delete(id)
                   }}
                   // The grid's panel, class for class — the ring (#208), the isolation and the colours are its reasons
-                  className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-graphite bg-void transition-opacity ${
+                  className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
                     isWorking ? 'cc-orbit-ring' : ''
                   } ${dragging === id ? 'opacity-40' : ''}`}
                   data-testid={`project-panel-${id}`}

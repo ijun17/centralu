@@ -99,8 +99,8 @@ export function SessionView() {
         className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
         data-testid="empty-focus"
       >
-        <p className="text-[13px] text-ash">Select a project or session</p>
-        <p className="text-[11px] text-slate">
+        <p className="text-[13px] text-ink-muted">Select a project or session</p>
+        <p className="text-[11px] text-ink-faint">
           <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you
         </p>
       </div>
@@ -289,7 +289,7 @@ export function SessionPane({
    * doubled edge from even a 1px difference. With both at h-10, that gap never has a chance to
    * appear.
    */
-  const HEADER = 'flex h-10 items-center gap-2.5 border-b border-edge px-4'
+  const HEADER = 'flex h-10 items-center gap-2.5 border-b border-line px-4'
   const header = (
     <>
       {/*
@@ -299,16 +299,16 @@ export function SessionPane({
         left of its title, marking not status but a **role**.
       */}
       {session.kind === 'orchestrator' && (
-        <span className="flex shrink-0 text-ash" data-testid="session-header-crown">
+        <span className="flex shrink-0 text-ink-muted" data-testid="session-header-crown">
           <CrownIcon size={14} />
         </span>
       )}
-      <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
+      <h1 className="truncate text-[13px] font-medium text-ink" data-testid="session-name">
         {session.name}
       </h1>
 
       {session.limit && (
-        <span className="readout text-[11px] text-ash" data-testid="limit-badge">
+        <span className="readout text-[11px] text-ink-muted" data-testid="limit-badge">
           Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
           {session.limit.resumeAt
             ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
@@ -325,7 +325,7 @@ export function SessionPane({
       */}
       {session.goal && (
         <span
-          className="readout shrink-0 rounded border border-edge px-1.5 text-[10px] text-ash"
+          className="readout shrink-0 rounded border border-line px-1.5 text-[10px] text-ink-muted"
           data-testid="goal-badge"
           title={`${session.goal.objective}${session.goal.reason ? `\n\n${session.goal.reason}` : ''}`}
         >
@@ -412,7 +412,7 @@ export function SessionPane({
        * click vanished entirely). `clip` never creates a scroll container, so there is nowhere
        * for it to scroll up to in the first place.
        */
-      className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-void ${fold ? 'overflow-clip' : ''}`}
+      className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-floor ${fold ? 'overflow-clip' : ''}`}
       data-testid="session-view"
       /*
        * The composer rises when a hand comes near the bottom. Detection uses **coordinates, not
@@ -455,7 +455,7 @@ export function SessionPane({
         if (!isFileDrag(e.dataTransfer.types)) return
         /*
          * If it is over the composer, the highlight belongs to it (the composer lights up its
-         * border in ash). If both light up at once, it says how many places would accept the
+         * border in ink-muted). If both light up at once, it says how many places would accept the
          * drop instead of where it would actually land.
          *
          * Turning it off happens here too: moving from the pane's background onto the composer
@@ -491,13 +491,13 @@ export function SessionPane({
     >
       {/*
         A way of saying this can accept a drop (#116). **The same signal** as the composer
-        lighting up its border in ash, sized to the whole pane instead — no new color, and it
+        lighting up its border in ink-muted, sized to the whole pane instead — no new color, and it
         never lights up for reordering at all. Placed below the composer (z-20) so it does not
         cover a raised card and its shadow.
       */}
       {dragOver && (
         <div
-          className="pointer-events-none absolute inset-0 z-10 rounded-lg border border-ash"
+          className="pointer-events-none absolute inset-0 z-10 rounded-lg border border-ink-muted"
           aria-hidden
           data-testid="pane-drop-target"
         />
@@ -575,7 +575,7 @@ export function SessionPane({
                * square card bottom gets cut by that curve into a sharp, broken-looking corner.
                * Drawing the same curve leaves nothing for it to be cut by.
                */
-              `absolute inset-x-0 bottom-0 z-20 rounded-t-xl rounded-b-[7px] border border-edge bg-void px-1 pt-1 transition-[translate,box-shadow] duration-300 ease-out motion-reduce:transition-none ${
+              `absolute inset-x-0 bottom-0 z-20 rounded-t-xl rounded-b-[7px] border border-line bg-surface-floor px-1 pt-1 transition-[translate,box-shadow] duration-300 ease-out motion-reduce:transition-none ${
                 composerUp
                   ? /*
                      * The shadow's job is **to separate the card from the text it covers.**
@@ -584,7 +584,7 @@ export function SessionPane({
                      * the pane's floor color #1d1d1d), only the spread distance is increased.
                      * 25px here, 18px when collapsed.
                      */
-                    'translate-y-0 shadow-[0_-19px_40px_-15px_rgb(0_0_0/0.58)]'
+                    'translate-y-0 shadow-(--shadow-dock-raised)'
                   : /*
                      * At rest, **only the top edge remains** (reported by a user on 2026-09-11:
                      * "the input is not visible").
@@ -601,7 +601,7 @@ export function SessionPane({
                      * that border above the threshold (measured). If either margin changes,
                      * this number has to change along with it.
                      *
-                     * This height is also why bg-panel could be restored on the input field —
+                     * This height is also why bg-surface-raised could be restored on the input field —
                      * the bright strip that used to peek out and look like a hole in the pane's
                      * floor is gone now.
                      *
@@ -611,7 +611,7 @@ export function SessionPane({
                      * spot as before.
                      *
                      * The background is still the same color as the pane's floor, and the
-                     * card's border is darker too (edge is darker than the pane's graphite). It
+                     * card's border is darker too (line is darker than the pane's line-strong). It
                      * is shape, not brightness, that says the card is there. A shadow is still
                      * cast here too (reported by a user on 2026-09-11). Cast short, but not
                      * faint — with only a 16px sliver showing, brightness alone cannot say it,
@@ -638,7 +638,7 @@ export function SessionPane({
                      * blur concentrates the same ink into a narrower band and darkens that
                      * point, so the alpha is lowered every time to bring it back to 12.
                      */
-                    'translate-y-[calc(100%_-_16px)] shadow-[0_-14px_32px_-12px_rgb(0_0_0/0.6)]'
+                    'translate-y-[calc(100%_-_16px)] shadow-(--shadow-dock)'
               }`
             : undefined
         }
@@ -1041,7 +1041,7 @@ const Composer = memo(function Composer({
 
   return (
     <form
-      className={`px-4 py-3 ${framed ? 'border-t border-edge' : ''}`}
+      className={`px-4 py-3 ${framed ? 'border-t border-line' : ''}`}
       onSubmit={(e) => {
         e.preventDefault()
         const t = text.trim()
@@ -1087,10 +1087,10 @@ const Composer = memo(function Composer({
          * surface for typing has to be **a different surface** from the one for reading.
          *
          * The rule that brightness marks something currently happening is still kept by the
-         * border — graphite on focus, ash when a file is dragged over it.
+         * border — line-strong on focus, ink-muted when a file is dragged over it.
          */
-        className={`relative flex items-end gap-2 rounded border bg-panel px-3 py-2 transition-colors focus-within:border-graphite ${
-          dragging ? 'border-ash' : 'border-edge'
+        className={`relative flex items-end gap-2 rounded border bg-surface-raised px-3 py-2 transition-colors focus-within:border-line-strong ${
+          dragging ? 'border-ink-muted' : 'border-line'
         }`}
         onDragEnter={(e) => {
           e.preventDefault()
@@ -1120,7 +1120,7 @@ const Composer = memo(function Composer({
         )}
         <textarea
           ref={inputRef}
-          className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
+          className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none"
           rows={1}
           value={text}
           /*
@@ -1265,7 +1265,7 @@ const Composer = memo(function Composer({
           testId="send"
           placement="top"
           align="right"
-          className="shrink-0 text-ash"
+          className="shrink-0"
         >
           <SendIcon />
         </IconButton>
@@ -1330,7 +1330,7 @@ const ComposerFooter = memo(function ComposerFooter({
         */}
       {session.worktree && (
         <span
-          className="readout truncate text-[10px] text-slate"
+          className="readout truncate text-[10px] text-ink-faint"
           title={`Runs in a git worktree: ${session.worktree.path}`}
           data-testid="worktree-badge"
         >
@@ -1352,7 +1352,7 @@ const ComposerFooter = memo(function ComposerFooter({
         */}
       <span
         className={`readout ml-auto shrink-0 text-[11px] ${
-          ctxPct === null ? 'text-slate/50' : ctxPct >= 80 ? 'text-chalk' : 'text-slate'
+          ctxPct === null ? 'text-ink-faint/50' : ctxPct >= 80 ? 'text-ink' : 'text-ink-faint'
         }`}
         data-testid="context-gauge"
         title={
@@ -2133,14 +2133,14 @@ function ChatStream({
               header" — WKWebView's backdrop-filter on a sticky element inside a scroll
               container is unreliable, and the content behind it sometimes showed through with
               no blur at all. Three repeated misreadings outweigh the nuance this was meant to
-              convey. The color replaces the composited color that graphite/55 used to produce
-              over void with a panel token instead — the visible brightness is unchanged.
+              convey. The color replaces the composited color that surface-hover/55 used to produce
+              over surface-floor with a surface-raised token instead — the visible brightness is unchanged.
             */}
             <button
               type="button"
               onClick={() => setStickyOpen((v) => !v)}
               aria-expanded={stickyOpen}
-              className="w-full cursor-pointer truncate rounded-lg rounded-br-sm border border-slate/40 bg-graphite px-3 py-2 text-left text-[13px] text-chalk shadow-[0_8px_24px_-8px_rgb(0_0_0/0.8)]"
+              className="w-full cursor-pointer truncate rounded-lg rounded-br-sm border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-[13px] text-ink shadow-(--shadow-sticky)"
             >
               {stickyText}
             </button>
@@ -2161,7 +2161,7 @@ function ChatStream({
                   reason to expand it is to read it — the conversation showing through a long
                   question would immediately defeat that purpose.
                 */
-                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-slate/40 bg-graphite px-3 py-2 text-left text-[13px] text-chalk shadow-[0_8px_24px_-8px_rgb(0_0_0/0.8)]"
+                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-[13px] text-ink shadow-(--shadow-sticky)"
               >
                 {stickyText}
               </button>
@@ -2289,7 +2289,7 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
           {plan.map((step, i) => (
             <li
               key={i}
-              className={`flex items-baseline gap-1.5 text-[11px] ${step.status === 'inProgress' ? 'text-chalk' : 'text-slate'}`}
+              className={`flex items-baseline gap-1.5 text-[11px] ${step.status === 'inProgress' ? 'text-ink' : 'text-ink-faint'}`}
               data-testid={`plan-step-${i}`}
               data-status={step.status}
             >
@@ -2304,13 +2304,13 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
         </ul>
       )}
       <div className="flex items-center gap-2">
-        <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
+        <span className="size-1.5 animate-pulse rounded-full bg-ink" aria-hidden />
         {/*
         Not the same kind of "waiting". Compacting has been measured to take up to 39 seconds,
         and with the same wording, someone waiting has no way to tell whether it has stopped or
         is just taking a while.
       */}
-        <span className="text-[12px] text-ash" data-testid="activity-label">
+        <span className="text-[12px] text-ink-muted" data-testid="activity-label">
           {activity === 'compacting'
             ? 'Compacting context'
             : activity === 'reviewing'
@@ -2324,18 +2324,18 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
         </span>
         {/* Showing a number for a one-second wait would just be noise */}
         {seconds >= 2 && (
-          <span className="readout text-[11px] text-slate" data-testid="activity-elapsed">
+          <span className="readout text-[11px] text-ink-faint" data-testid="activity-elapsed">
             {formatElapsed(seconds)}
           </span>
         )}
         {notice && (
-          <span className="ml-auto truncate text-[11px] text-ash" data-testid="interrupt-background-note">
+          <span className="ml-auto truncate text-[11px] text-ink-muted" data-testid="interrupt-background-note">
             {notice}
           </span>
         )}
         <button
           type="button"
-          className={`${notice ? '' : 'ml-auto '}shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk`}
+          className={`${notice ? '' : 'ml-auto '}shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:border-line-strong hover:text-ink`}
           onClick={() => void interrupt(sessionId)}
           title={notice ? `Stop the turn — ${notice.charAt(0).toLowerCase()}${notice.slice(1)}` : 'Stop the turn'}
           data-testid="activity-interrupt"
@@ -2443,7 +2443,7 @@ function OlderSentinel({
         type="button"
         onClick={() => void loadOlder(sessionId)}
         disabled={loading}
-        className="readout rounded border border-edge px-2 py-0.5 text-[10px] text-slate transition-colors hover:border-graphite hover:text-chalk disabled:opacity-60"
+        className="readout rounded border border-line px-2 py-0.5 text-[10px] text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60"
       >
         {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>
@@ -2471,7 +2471,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   if (error && !waking) {
     return (
       <p
-        className="flex items-center gap-2 border-t border-edge px-4 py-1.5 text-[11px] leading-relaxed text-ash"
+        className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-[11px] leading-relaxed text-ink-muted"
         data-testid="dormant-note"
       >
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
@@ -2483,7 +2483,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
          */}
         {locked && (
           <button
-            className="shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+            className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
             onClick={() => void fork(sessionId)}
             title="Continue in a copy of this conversation. The original stays untouched."
             data-testid="dormant-fork"
@@ -2492,7 +2492,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
           </button>
         )}
         <button
-          className="shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
           onClick={() => void wake(sessionId)}
           data-testid="dormant-retry"
         >
@@ -2503,7 +2503,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <p className="border-t border-edge px-4 py-1.5 text-[11px] text-slate" data-testid="dormant-note">
+    <p className="border-t border-line px-4 py-1.5 text-[11px] text-ink-faint" data-testid="dormant-note">
       {waking ? 'Waking session…' : 'Dormant — sending a message resumes it automatically'}
     </p>
   )
@@ -2566,7 +2566,7 @@ const ChatRow = memo(function ChatRow({
           (the palette rule): the distinction is made by shape, not brightness.
         */}
         {item.from && (
-          <div className="text-[11px] text-ash" data-testid="msg-user-from">
+          <div className="text-[11px] text-ink-muted" data-testid="msg-user-from">
             {item.from.name} ⤷
           </div>
         )}
@@ -2576,7 +2576,7 @@ const ChatRow = memo(function ChatRow({
           one-line source), noting that the source is an app rather than a session.
         */}
         {item.fromApp && (
-          <div className="text-[11px] text-ash" data-testid="msg-user-from-app">
+          <div className="text-[11px] text-ink-muted" data-testid="msg-user-from-app">
             {item.fromApp.name} app ⤷
           </div>
         )}
@@ -2587,9 +2587,9 @@ const ChatRow = memo(function ChatRow({
           person typed, and break-words breaks even a long chunk that otherwise could not wrap.
         */}
         {/*
-          Contrast against the background (void, #141414) is what makes "something I said"
-          visible. panel (#1d1d1d) plus edge (#292929) is only two steps apart, and was
-          effectively invisible in a dark room (found in dogfooding). This lifts it to graphite,
+          Contrast against the background (surface-floor, #141414) is what makes "something I said"
+          visible. surface-raised (#1d1d1d) plus line (#292929) is only two steps apart, and was
+          effectively invisible in a dark room (found in dogfooding). This lifts it to surface-hover,
           the same as the hover background, and gives the border one step more brightness.
         */}
         {/*
@@ -2608,8 +2608,8 @@ const ChatRow = memo(function ChatRow({
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
-            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-graphite px-3 py-2 text-chalk ${
-              item.from || item.fromApp ? 'border-dashed border-ash/50' : 'border-slate/40'
+            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-surface-hover px-3 py-2 text-ink ${
+              item.from || item.fromApp ? 'border-dashed border-ink-muted/50' : 'border-ink-faint/40'
             }`}
           >
             {item.text}
@@ -2628,12 +2628,12 @@ const ChatRow = memo(function ChatRow({
   if (item.kind === 'reasoning') {
     /*
      * A reasoning summary (#58). It is the path to the body, not the body itself, so it is
-     * dimmed one step to ash — following the ink rule exactly, where brightness signals
+     * dimmed one step to ink-muted — following the ink rule exactly, where brightness signals
      * importance. Codex's summary arrives as **bold heading** markdown, so this is still
      * rendered through Markdown, just left quiet with no background color.
      */
     return (
-      <div className="min-w-0 text-[13px] text-ash [&_strong]:text-ash" data-testid="msg-reasoning">
+      <div className="min-w-0 text-[13px] text-ink-muted [&_strong]:text-ink-muted" data-testid="msg-reasoning">
         <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} />
       </div>
     )
@@ -2643,7 +2643,7 @@ const ChatRow = memo(function ChatRow({
     // once a decision has been made
     if (!item.decision) return null
     return (
-      <p className="readout text-[11px] text-slate" data-testid="msg-approval-log">
+      <p className="readout text-[11px] text-ink-faint" data-testid="msg-approval-log">
         {item.decision === 'deny' ? 'Denied' : 'Allowed'} · {item.summary}
       </p>
     )
@@ -2666,9 +2666,9 @@ const ChatRow = memo(function ChatRow({
      */
     return (
       <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
-        <span className="h-px flex-1 bg-edge" />
-        <span className="readout min-w-0 break-words text-center text-[10px] text-slate">{item.text}</span>
-        <span className="h-px flex-1 bg-edge" />
+        <span className="h-px flex-1 bg-line" />
+        <span className="readout min-w-0 break-words text-center text-[10px] text-ink-faint">{item.text}</span>
+        <span className="h-px flex-1 bg-line" />
       </div>
     )
   }
@@ -2681,7 +2681,7 @@ const ChatRow = memo(function ChatRow({
     if (!item.data) {
       return (
         <div
-          className="rounded-lg border border-edge bg-panel px-3 py-2 text-[12px] text-slate"
+          className="rounded-lg border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink-faint"
           data-testid="msg-image-missing"
         >
           The image could not be displayed{item.note ? ` — ${item.note}` : ''}
@@ -2722,7 +2722,7 @@ function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?
         src={`data:${mime};base64,${data}`}
         alt={path ?? 'agent image'}
         /* Clipped so it never covers the whole screen vertically — the original aspect ratio is kept */
-        thumbClassName="max-h-80 max-w-full rounded-lg border border-edge"
+        thumbClassName="max-h-80 max-w-full rounded-lg border border-line"
       />
     </div>
   )
@@ -2753,7 +2753,7 @@ function ZoomableImage({
           <img
             src={src}
             alt={alt}
-            className="max-h-[calc(90vh/var(--text-zoom))] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge"
+            className="max-h-[calc(90vh/var(--text-zoom))] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line"
           />
         </Modal>
       )}
@@ -2802,7 +2802,7 @@ function AttachmentThumb({
 function AttachmentLabel({ att }: { att: ChatAttachment }) {
   return (
     <>
-      <span className="readout text-[9px] text-slate" title={att.kind === 'image' ? 'Image' : 'File'}>
+      <span className="readout text-[9px] text-ink-faint" title={att.kind === 'image' ? 'Image' : 'File'}>
         {att.kind === 'image' ? 'IMG' : 'DOC'}
       </span>
       <span className="max-w-40 truncate">{att.name}</span>
@@ -2822,10 +2822,10 @@ function UserAttachment({ att }: { att: ChatAttachment }) {
     <AttachmentThumb
       att={att}
       /* Sits next to a message bubble, so its cap is set lower than an agent image's */
-      thumbClassName="max-h-48 max-w-full rounded-lg border border-slate/40"
+      thumbClassName="max-h-48 max-w-full rounded-lg border border-ink-faint/40"
       chip={
         <span
-          className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
+          className="flex items-center gap-1.5 rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink-muted"
           data-testid="msg-user-attachment"
           title={att.name}
         >
@@ -2868,7 +2868,7 @@ const AttachmentStrip = memo(function AttachmentStrip({
       {uploading > 0 && (
         <li className="flex h-12 items-center">
           <span
-            className="flex items-center gap-1.5 rounded border border-dashed border-edge px-2 py-1 text-[11px] text-slate"
+            className="flex items-center gap-1.5 rounded border border-dashed border-line px-2 py-1 text-[11px] text-ink-faint"
             data-testid="attachment-uploading"
           >
             Attaching {uploading === 1 ? 'a file' : `${uploading} files`}…
@@ -2879,7 +2879,7 @@ const AttachmentStrip = memo(function AttachmentStrip({
         const remove = (
           <button
             type="button"
-            className="text-slate transition-colors hover:text-chalk"
+            className="text-ink-faint transition-colors hover:text-ink"
             onClick={() => onRemove(i)}
             aria-label={`Remove attachment ${a.name}`}
           >
@@ -2895,10 +2895,10 @@ const AttachmentStrip = memo(function AttachmentStrip({
                * wide screenshot and a tall one take a similar, bounded footprint. Clicking it
                * opens the same zoom as the sent bubble's thumbnail.
                */
-              thumbClassName="h-12 w-auto min-w-12 max-w-24 rounded border border-edge object-cover"
+              thumbClassName="h-12 w-auto min-w-12 max-w-24 rounded border border-line object-cover"
               chip={
                 <span
-                  className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
+                  className="flex items-center gap-1.5 rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink-muted"
                   data-testid="attachment-chip"
                   title={a.name}
                 >
@@ -2913,7 +2913,7 @@ const AttachmentStrip = memo(function AttachmentStrip({
                  */
                 <span className="relative block" data-testid="attachment-thumb">
                   {img}
-                  <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-sm bg-void/80">
+                  <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-sm bg-surface-floor/80">
                     {remove}
                   </span>
                 </span>
@@ -2947,13 +2947,13 @@ function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }
   // default sentence in that case
   const reason = item.title && !/propose_project$/.test(item.title) ? item.title : null
   return (
-    <p className="flex items-baseline gap-2 text-[12px] text-ash" data-testid="project-proposal">
+    <p className="flex items-baseline gap-2 text-[12px] text-ink-muted" data-testid="project-proposal">
       {/* Points down and to the left — the actual direction of the lit-up button */}
-      <span className="shrink-0 text-slate" aria-hidden>
+      <span className="shrink-0 text-ink-faint" aria-hidden>
         ↙
       </span>
       <span>
-        <span className="text-chalk">Add project</span> at the bottom of the sidebar
+        <span className="text-ink">Add project</span> at the bottom of the sidebar
         {reason ? ` — ${reason}` : ''}
       </span>
     </p>
@@ -2969,20 +2969,20 @@ function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }
 function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const branch = item.title && !/propose_worktree_session$/.test(item.title) ? item.title : null
   return (
-    <p className="flex items-baseline gap-2 text-[12px] text-ash" data-testid="worktree-proposal">
-      <span className="shrink-0 text-slate" aria-hidden>
+    <p className="flex items-baseline gap-2 text-[12px] text-ink-muted" data-testid="worktree-proposal">
+      <span className="shrink-0 text-ink-faint" aria-hidden>
         ↖
       </span>
       <span>
         {branch ? (
           <>
-            Branch <span className="font-mono text-chalk">{branch}</span> proposed
+            Branch <span className="font-mono text-ink">{branch}</span> proposed
           </>
         ) : (
           'A worktree session was proposed'
         )}
         {' — the '}
-        <span className="text-chalk">+</span>
+        <span className="text-ink">+</span>
         {' button on this project opens the prefilled dialog'}
       </span>
     </p>
@@ -3079,7 +3079,7 @@ function ToolCard({
       : []
 
   return (
-    <div className="rounded border border-edge bg-panel/60" data-testid="tool-card">
+    <div className="rounded border border-line bg-surface-raised/60" data-testid="tool-card">
       <button
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
         onClick={() => setOpen((o) => !o)}
@@ -3087,18 +3087,18 @@ function ToolCard({
         data-testid="tool-card-toggle"
       >
         {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
-        <span className="shrink-0 text-slate">
+        <span className="shrink-0 text-ink-faint">
           <ChevronIcon open={open} />
         </span>
-        <span className="readout shrink-0 text-[11px] text-ash">{item.tool}</span>
-        <span className="readout truncate text-[11px] text-slate">{item.title}</span>
-        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-chalk">Failed</span>}
+        <span className="readout shrink-0 text-[11px] text-ink-muted">{item.tool}</span>
+        <span className="readout truncate text-[11px] text-ink-faint">{item.title}</span>
+        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-ink">Failed</span>}
       </button>
 
       {liveTail.length > 0 && (
-        <div className="border-t border-edge px-2.5 py-1.5">
+        <div className="border-t border-line px-2.5 py-1.5">
           <pre
-            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate ${PREVIEW_CLAMP}`}
+            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ink-faint ${PREVIEW_CLAMP}`}
             data-testid="tool-card-live"
           >
             {liveTail.join('\n')}
@@ -3107,10 +3107,10 @@ function ToolCard({
       )}
 
       {lines.length > 0 && (
-        <div className="border-t border-edge px-2.5 py-1.5">
+        <div className="border-t border-line px-2.5 py-1.5">
           <pre
             ref={outRef}
-            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ash ${
+            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ink-muted ${
               open ? '' : PREVIEW_CLAMP
             }`}
             data-testid="tool-card-output"
@@ -3119,7 +3119,7 @@ function ToolCard({
           </pre>
           {!open && (hidden > 0 || clamped) && (
             <button
-              className="readout mt-1 text-[10px] text-slate transition-colors hover:text-chalk"
+              className="readout mt-1 text-[10px] text-ink-faint transition-colors hover:text-ink"
               onClick={() => setOpen(true)}
               data-testid="tool-card-more"
             >
@@ -3169,40 +3169,40 @@ function SubagentSteps({
   const open = !!steps?.open
 
   return (
-    <div className="border-t border-edge" data-testid="subagent-steps">
+    <div className="border-t border-line" data-testid="subagent-steps">
       <button
         className="flex w-full items-center gap-2 px-2.5 py-1 text-left"
         onClick={() => toggle(sessionId, callId)}
         aria-expanded={open}
         data-testid="subagent-steps-toggle"
       >
-        <span className="shrink-0 text-slate">
+        <span className="shrink-0 text-ink-faint">
           <ChevronIcon open={open} />
         </span>
-        <span className="readout text-[11px] text-slate">Subagent&apos;s steps</span>
+        <span className="readout text-[11px] text-ink-faint">Subagent&apos;s steps</span>
       </button>
       {open && (
-        <div className="flex flex-col gap-2 border-t border-edge px-2.5 py-2" data-testid="subagent-steps-list">
+        <div className="flex flex-col gap-2 border-t border-line px-2.5 py-2" data-testid="subagent-steps-list">
           {items.map((it) => (
             <ChatRow key={it.seq} item={it} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} nested />
           ))}
-          {steps?.loading && <p className="readout text-[11px] text-slate">Loading the steps…</p>}
+          {steps?.loading && <p className="readout text-[11px] text-ink-faint">Loading the steps…</p>}
           {steps?.error && (
-            <p className="text-[11px] text-chalk" data-testid="subagent-steps-error">
+            <p className="text-[11px] text-ink" data-testid="subagent-steps-error">
               Could not load the steps — {steps.error}{' '}
-              <button className="readout text-slate underline hover:text-chalk" onClick={() => void loadMore(sessionId, callId)}>
+              <button className="readout text-ink-faint underline hover:text-ink" onClick={() => void loadMore(sessionId, callId)}>
                 Try again
               </button>
             </p>
           )}
           {steps && !steps.loading && !steps.error && items.length === 0 && (
-            <p className="text-[11px] text-slate" data-testid="subagent-steps-empty">
+            <p className="text-[11px] text-ink-faint" data-testid="subagent-steps-empty">
               No steps were recorded for this agent. One that ran before Centralu kept them left only its report.
             </p>
           )}
           {steps?.more && !steps.loading && (
             <button
-              className="readout self-start text-[10px] text-slate transition-colors hover:text-chalk"
+              className="readout self-start text-[10px] text-ink-faint transition-colors hover:text-ink"
               onClick={() => void loadMore(sessionId, callId)}
               data-testid="subagent-steps-more"
             >

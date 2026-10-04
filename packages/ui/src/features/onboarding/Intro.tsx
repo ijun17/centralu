@@ -51,13 +51,13 @@ export function Intro() {
           keeping is the single reason this screen exists: **there is someone to talk to.**
           Everything else is left to the suggested-question cards on the next screen.
         */}
-        <h1 className="text-[19px] font-medium tracking-tight text-chalk" data-testid="intro-role">
-          Meet your <span className="text-chalk">orchestrator</span>.
+        <h1 className="text-[19px] font-medium tracking-tight text-ink" data-testid="intro-role">
+          Meet your <span className="text-ink">orchestrator</span>.
         </h1>
-        <p className="mt-2 text-[13px] leading-relaxed text-ash">
+        <p className="mt-2 text-[13px] leading-relaxed text-ink-muted">
           It watches every session and answers whatever you ask about this app.
         </p>
-        <p className="mt-5 text-[12px] text-slate">Run it on:</p>
+        <p className="mt-5 text-[12px] text-ink-faint">Run it on:</p>
 
         <div className="mt-2 grid grid-cols-2 gap-3">
           {cards.map((t) => {
@@ -75,20 +75,20 @@ export function Intro() {
                  */
                 className={`rounded-lg border px-4 py-4 text-left transition-colors ${
                   ok
-                    ? 'border-edge bg-panel hover:border-graphite'
-                    : 'cursor-not-allowed border-edge/60 bg-panel/40 opacity-40'
+                    ? 'border-line bg-surface-raised hover:border-line-strong'
+                    : 'cursor-not-allowed border-line/60 bg-surface-raised/40 opacity-40'
                 }`}
               >
-                <span className="block text-[14px] font-medium text-chalk">{t.label}</span>
+                <span className="block text-[14px] font-medium text-ink">{t.label}</span>
                 {ok ? (
-                  <span className="readout mt-1 block text-[11px] text-slate">{t.detail}</span>
+                  <span className="readout mt-1 block text-[11px] text-ink-faint">{t.detail}</span>
                 ) : (
                   <>
                     {/* The diagnosis at a glance, the prescription right below it — an eye that does not know a terminal comes first */}
-                    <span className="mt-1 block text-[12px] text-ash" data-testid={`intro-card-${t.name}-status`}>
+                    <span className="mt-1 block text-[12px] text-ink-muted" data-testid={`intro-card-${t.name}-status`}>
                       Not connected
                     </span>
-                    <code className="mt-1.5 block truncate rounded bg-pit px-1.5 py-1 font-mono text-[10px] text-slate">
+                    <code className="mt-1.5 block truncate rounded bg-surface-side px-1.5 py-1 font-mono text-[10px] text-ink-faint">
                       {t.installed ? t.login : t.install}
                     </code>
                   </>
@@ -99,20 +99,20 @@ export function Intro() {
         </div>
 
         {/* A low-stakes choice is what makes a click happen — this pick does not nail anything down */}
-        <p className="mt-2 text-[11px] text-slate">You can change this later in Settings.</p>
+        <p className="mt-2 text-[11px] text-ink-faint">You can change this later in Settings.</p>
 
         {tools === null ? (
-          <p className="mt-4 text-[11px] text-slate">Looking for Claude Code and Codex…</p>
+          <p className="mt-4 text-[11px] text-ink-faint">Looking for Claude Code and Codex…</p>
         ) : (
           <>
             {!anyReady && (
-              <p className="mt-4 text-[11px] leading-relaxed text-ash" data-testid="intro-blocked">
+              <p className="mt-4 text-[11px] leading-relaxed text-ink-muted" data-testid="intro-blocked">
                 No tool is ready yet — run a command above in your terminal, then check again.
               </p>
             )}
             {/* Always present — a way for someone who just installed it in the terminal and came back to re-run detection */}
             <button
-              className="mt-1.5 text-[11px] text-slate underline-offset-2 hover:text-chalk hover:underline"
+              className="mt-1.5 text-[11px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
               onClick={() => void detect()}
               data-testid="redetect"
             >

@@ -55,7 +55,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-50 flex justify-center bg-void/80 backdrop-blur-[2px] ${
+      className={`fixed inset-0 z-50 flex justify-center bg-scrim backdrop-blur-[2px] ${
         align === 'top' ? 'items-start pt-[calc(12vh/var(--text-zoom))]' : 'items-center'
       }`}
       onClick={onClose}

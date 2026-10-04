@@ -43,12 +43,12 @@ function seedMock(): Platform {
 
 if (started.error) {
   root.render(
-    <main className="flex min-h-screen items-center justify-center bg-base p-6 text-chalk">
-      <section className="max-w-xl rounded-xl border border-edge bg-panel p-5 shadow-panel" role="alert" data-testid="startup-error">
-        <p className="readout text-[11px] uppercase tracking-[0.2em] text-ash">Centralu startup blocked</p>
+    <main className="flex min-h-screen items-center justify-center bg-base p-6 text-ink">
+      <section className="max-w-xl rounded-xl border border-line bg-surface-raised p-5" role="alert" data-testid="startup-error">
+        <p className="readout text-[11px] uppercase tracking-[0.2em] text-ink-muted">Centralu startup blocked</p>
         <h1 className="mt-2 text-lg font-semibold">Host token is required</h1>
-        <p className="mt-2 text-sm text-slate">{started.error.message}</p>
-        <p className="mt-3 text-xs text-slate">Use ?mock=1 or ?demo for browser-only mock mode, or launch the UI through the host so VITE_HOST_TOKEN is set.</p>
+        <p className="mt-2 text-sm text-ink-faint">{started.error.message}</p>
+        <p className="mt-3 text-xs text-ink-faint">Use ?mock=1 or ?demo for browser-only mock mode, or launch the UI through the host so VITE_HOST_TOKEN is set.</p>
       </section>
     </main>,
   )

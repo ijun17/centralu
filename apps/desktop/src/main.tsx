@@ -234,7 +234,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
     <>
       <App platform={platform} />
       {hostFailure !== null && (
-        <div className="fixed inset-0 z-40 bg-void/95" data-testid="host-failed">
+        <div className="fixed inset-0 z-40 bg-surface-floor/95" data-testid="host-failed">
           <StartupFailure
             message={hostFailure}
             title="The agent host stopped"
@@ -247,13 +247,13 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       )}
       {keeper && build && (switching || swapFailed || otherBuild) && (
         <div
-          className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-edge bg-pit px-4 py-1.5 text-[11px] text-ash"
+          className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-line bg-surface-side px-4 py-1.5 text-[11px] text-ink-muted"
           data-testid="host-other-build"
           role={swapFailed ? 'alert' : 'status'}
         >
           {switching || swapFailed ? (
             <span
-              className={`min-w-0 flex-1 truncate ${swapFailed ? 'text-del' : ''}`}
+              className={`min-w-0 flex-1 truncate ${swapFailed ? 'text-danger' : ''}`}
               title={swap?.message}
               data-testid="host-switch-progress"
             >
@@ -264,10 +264,10 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
               The agent host is running {describeBuild(build.host)}. This window is {describeBuild(build.app)}.
             </span>
           )}
-          {switchError && <span className="shrink-0 text-del">{switchError}</span>}
+          {switchError && <span className="shrink-0 text-danger">{switchError}</span>}
           {!switching && otherBuild && (
             <button
-              className="shrink-0 rounded border border-edge px-2 py-0.5 text-chalk hover:border-graphite"
+              className="shrink-0 rounded border border-line px-2 py-0.5 text-ink hover:border-line-strong"
               onClick={() => {
                 setSwitchError(null)
                 if (swap) setDismissedSwap(swap.startedAt)
@@ -282,7 +282,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           )}
           {!switching && (
             <button
-              className="shrink-0 text-slate hover:text-chalk"
+              className="shrink-0 text-ink-faint hover:text-ink"
               onClick={() => {
                 if (swap) setDismissedSwap(swap.startedAt)
                 setDismissed(true)
@@ -295,7 +295,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       )}
       {askSwitch && build && plan && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin"
           data-testid="confirm-switch-build"
           onClick={() => setAskSwitch(false)}
         >
@@ -303,16 +303,16 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
             role="dialog"
             aria-modal="true"
             aria-label="Switch the agent host to this build?"
-            className="w-[380px] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+            className="w-[380px] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="text-[13px] text-chalk">Switch the agent host to this window's build?</p>
-            <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="confirm-switch-build-loses">
+            <p className="text-[13px] text-ink">Switch the agent host to this window's build?</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="confirm-switch-build-loses">
               {plan.loses}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+                className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink"
                 onClick={() => setAskSwitch(false)}
               >
                 Cancel
@@ -320,8 +320,8 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
               <button
                 className={
                   build.keepsAgents
-                    ? 'rounded border border-edge px-3 py-1 text-[12px] text-chalk hover:border-graphite'
-                    : 'rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del hover:border-del/70'
+                    ? 'rounded border border-line px-3 py-1 text-[12px] text-ink hover:border-line-strong'
+                    : 'rounded border border-danger/40 bg-danger-bg px-3 py-1 text-[12px] text-danger hover:border-danger/70'
                 }
                 data-testid="confirm-switch-build-yes"
                 onClick={() => {
@@ -337,7 +337,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       )}
       {askQuit && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin"
           data-testid="confirm-quit"
           onClick={() => setAskQuit(false)}
         >
@@ -347,42 +347,42 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
             role="dialog"
             aria-modal="true"
             aria-label="Quit Centralu?"
-            className="w-[360px] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)] focus:outline-none"
+            className="w-[360px] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal) focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="text-[13px] text-chalk">Quit Centralu?</p>
+            <p className="text-[13px] text-ink">Quit Centralu?</p>
             {background ? (
-              <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="confirm-quit-background">
+              <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="confirm-quit-background">
                 Agents keep running in the background. Open Centralu again to come back to them,
                 waiting approvals included.
               </p>
             ) : (
-              <p className="mt-2 text-[11px] leading-relaxed text-ash">
+              <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
                 Running agent processes stop with the app. Conversations are saved and resume when
                 you come back.
               </p>
             )}
-            {quitError && <p className="mt-2 text-[11px] text-del">{quitError}</p>}
+            {quitError && <p className="mt-2 text-[11px] text-danger">{quitError}</p>}
             {strays.length > 0 && (
-              <div className="mt-3 rounded border border-edge bg-void p-2" data-testid="quit-strays">
-                <p className="text-[11px] text-ash">
+              <div className="mt-3 rounded border border-line bg-surface-floor p-2" data-testid="quit-strays">
+                <p className="text-[11px] text-ink-muted">
                   {strays.length} process{strays.length > 1 ? 'es' : ''} started in your project
                   folders will keep running:
                 </p>
                 <ul className="mt-1 max-h-24 overflow-y-auto">
                   {strays.slice(0, 6).map((s) => (
-                    <li key={s.pid} className="readout truncate text-[10px] text-slate" title={s.cwd}>
+                    <li key={s.pid} className="readout truncate text-[10px] text-ink-faint" title={s.cwd}>
                       {s.pid} · {s.command}
                     </li>
                   ))}
                   {strays.length > 6 && (
-                    <li className="text-[10px] text-slate">…and {strays.length - 6} more</li>
+                    <li className="text-[10px] text-ink-faint">…and {strays.length - 6} more</li>
                   )}
                 </ul>
-                <label className="mt-2 flex items-center gap-1.5 text-[11px] text-ash">
+                <label className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-muted">
                   <input
                     type="checkbox"
-                    className="accent-graphite"
+                    className="accent-line-strong"
                     checked={alsoStop}
                     onChange={(e) => setAlsoStop(e.target.checked)}
                     data-testid="quit-stop-strays"
@@ -393,15 +393,15 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
             )}
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+                className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink"
                 onClick={() => setAskQuit(false)}
                 data-testid="confirm-quit-no"
               >
-                Cancel <span className="text-[10px] text-slate">esc</span>
+                Cancel <span className="text-[10px] text-ink-faint">esc</span>
               </button>
               {background && (
                 <button
-                  className="rounded border border-edge px-2 py-1 text-[12px] text-ash hover:border-graphite hover:text-chalk"
+                  className="rounded border border-line px-2 py-1 text-[12px] text-ink-muted hover:border-line-strong hover:text-ink"
                   onClick={() => void quit(true)}
                   data-testid="confirm-quit-stop"
                 >
@@ -409,7 +409,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
                 </button>
               )}
               <button
-                className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del hover:border-del/70"
+                className="rounded border border-danger/40 bg-danger-bg px-3 py-1 text-[12px] text-danger hover:border-danger/70"
                 onClick={() => void quit()}
                 data-testid="confirm-quit-yes"
               >
@@ -433,11 +433,11 @@ function describeBuild(b: HostBuild['host']): string {
 
 function Starting() {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-2 bg-void" data-testid="starting">
-      <p className="text-[13px] text-ash">Starting the agent host…</p>
+    <div className="flex h-screen flex-col items-center justify-center gap-2 bg-surface-floor" data-testid="starting">
+      <p className="text-[13px] text-ink-muted">Starting the agent host…</p>
       {/* Not "macOS may ask": it is the OS that asks, and on Linux nothing asks at all.
           Naming one OS in a message every platform sees makes it read as a bug elsewhere. */}
-      <p className="text-[11px] text-slate">On first run, your system may ask for folder access.</p>
+      <p className="text-[11px] text-ink-faint">On first run, your system may ask for folder access.</p>
     </div>
   )
 }
@@ -454,16 +454,16 @@ function StartupFailure({
   title?: string
 }) {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-void px-8 text-center">
-      <p className="text-[13px] text-chalk">{title}</p>
+    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-surface-floor px-8 text-center">
+      <p className="text-[13px] text-ink">{title}</p>
       {/* The message from the sidecar spans multiple lines (what is missing, where it looked)
           — preserve the line breaks when showing it. */}
-      <p className="max-w-md whitespace-pre-line font-mono text-[11px] leading-relaxed text-ash">{message}</p>
-      <p className="max-w-md text-[11px] leading-relaxed text-slate">
+      <p className="max-w-md whitespace-pre-line font-mono text-[11px] leading-relaxed text-ink-muted">{message}</p>
+      <p className="max-w-md text-[11px] leading-relaxed text-ink-faint">
         If restarting hits the same problem, check <span className="font-mono">~/.centralu/host.log</span>.
       </p>
       <button
-        className="mt-1 rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
+        className="mt-1 rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink hover:border-line-strong"
         onClick={onRetry}
       >
         Retry

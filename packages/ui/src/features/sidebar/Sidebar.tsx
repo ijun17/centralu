@@ -103,7 +103,7 @@ function SessionRow({
   return (
     <li
       data-nested={nested || undefined}
-      className={`group/row relative ${nested ? 'ml-4 border-l border-edge/60' : ''} ${dropLine(drop.edge)}`}
+      className={`group/row relative ${nested ? 'ml-4 border-l border-line/60' : ''} ${dropLine(drop.edge)}`}
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(SESSION_MIME, id)
@@ -136,7 +136,7 @@ function SessionRow({
  * makes the two rows' indicators land on **the same pixel**. It keeps the property of not
  * affecting box size — `absolute` does not claim space in the layout.
  */
-const DROP_LINE = 'after:pointer-events-none after:absolute after:inset-x-0 after:z-10 after:h-0.5 after:bg-ash after:content-[""]'
+const DROP_LINE = 'after:pointer-events-none after:absolute after:inset-x-0 after:z-10 after:h-0.5 after:bg-ink-muted after:content-[""]'
 
 function dropLine(edge: 'top' | 'bottom' | null): string {
   if (!edge) return ''
@@ -161,7 +161,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col overflow-y-auto border-r border-edge bg-pit"
+      className="relative flex h-full shrink-0 flex-col overflow-y-auto border-r border-line bg-surface-side"
       style={{ width }}
       data-testid="sidebar"
     >
@@ -176,10 +176,10 @@ export function Sidebar() {
       <OrchestratorButton />
       <GridButton />
       {ids.length === 0 ? (
-        <p className="px-4 py-6 text-xs leading-relaxed text-slate">
+        <p className="px-4 py-6 text-xs leading-relaxed text-ink-faint">
           No projects yet.
           <br />
-          Start with <span className="text-ash">Add project</span> below.
+          Start with <span className="text-ink-muted">Add project</span> below.
         </p>
       ) : (
         ids.map((id) => <ProjectBlock key={id} projectId={id} />)
@@ -205,13 +205,13 @@ export function Sidebar() {
            * lights up** — the app should have one door for this, and drawing a second door
            * teaches the person that "projects are something you ask the orchestrator to do." No
            * chromatic color is used (the palette rule): this button, normally muted, becoming
-           * chalk is by itself enough to make it the brightest thing on screen, and that
+           * ink is by itself enough to make it the brightest thing on screen, and that
            * brightness itself means "here."
            */
           className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors disabled:opacity-40 ${
             hint
-              ? 'breathe border-ash text-chalk'
-              : 'border-edge text-slate hover:border-graphite hover:text-chalk'
+              ? 'breathe border-ink-muted text-ink'
+              : 'border-line text-ink-faint hover:border-line-strong hover:text-ink'
           }`}
           /*
            * **There should be exactly one way to pick a folder in this app.**
@@ -264,7 +264,7 @@ export function Sidebar() {
  * harm being prevented is exactly "pressing it without knowing."
  *
  * Follows the palette rule (styles/index.css) as is: **urgency is brightness, kind is shape.**
- * The text is slate (the color reserved for background information). Making it brighter would be
+ * The text is ink-faint (the color reserved for background information). Making it brighter would be
  * a lie that it is more urgent than the grid button — "experimental" is not urgent, it is
  * **something the person should press knowingly.**
  *
@@ -285,8 +285,8 @@ function OrchestratorButton() {
       <button
         className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
           active
-            ? 'border-slate/50 bg-graphite text-chalk'
-            : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
+            ? 'border-ink-faint/50 bg-surface-hover text-ink'
+            : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
         }`}
         // The same rule as the grid: a selection, not a toggle. To leave, choose something else
         onClick={() => void open()}
@@ -313,7 +313,7 @@ function OrchestratorButton() {
       >
         <CrownIcon />
         <span className="truncate font-medium tracking-tight">Orchestrator</span>
-        <span className="shrink-0 text-[10px] text-slate" data-testid="orchestrator-experimental">
+        <span className="shrink-0 text-[10px] text-ink-faint" data-testid="orchestrator-experimental">
           Evolving
         </span>
       </button>
@@ -351,14 +351,14 @@ function HomelessSessions() {
   if (homeless.length === 0) return null
   return (
     <div className="mt-1 space-y-0.5" data-testid="homeless-sessions">
-      <p className="px-2.5 text-[10px] uppercase text-slate">No app</p>
+      <p className="px-2.5 text-[10px] uppercase text-ink-faint">No app</p>
       {homeless.map((s) => (
         <button
           key={s.id}
           className={`flex w-full items-center gap-2 rounded border-l-2 py-1 pl-2.5 pr-2 text-left text-[12px] transition-colors ${
             focused === s.id
-              ? 'border-l-ash bg-graphite/40 text-chalk'
-              : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+              ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
+              : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
           }`}
           onClick={() => focusSession(s.id)}
           data-testid={`homeless-row-${s.id}`}
@@ -403,9 +403,9 @@ function GridButton() {
       <button
         className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
           active
-            ? 'border-slate/50 bg-graphite text-chalk'
-            : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
-        } ${over ? 'shadow-[inset_0_0_0_2px_var(--color-ash)]' : ''}`}
+            ? 'border-ink-faint/50 bg-surface-hover text-ink'
+            : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
+        } ${over ? 'shadow-[inset_0_0_0_2px_var(--color-focus)]' : ''}`}
         /*
           A **selection**, not a toggle.
           Making it an on/off switch reads as "a layer briefly covering the previous screen" — it
@@ -440,7 +440,7 @@ function GridButton() {
       >
         <GridIcon />
         <span className="truncate font-medium tracking-tight">Grid</span>
-        {panels.length > 0 && <span className="readout ml-auto text-[10px] text-slate">{panels.length}</span>}
+        {panels.length > 0 && <span className="readout ml-auto text-[10px] text-ink-faint">{panels.length}</span>}
       </button>
     </div>
   )
@@ -557,9 +557,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       the row mark inside it. A row mark alone says "this row"; with several projects open in the list the eye then
       has to walk up to find whose row it is, and a folded project has no row to mark at all.
 
-      The tint is the selected Grid and Orchestrator buttons' graphite, at the strength of a row's hover rather than
+      The tint is the selected Grid and Orchestrator buttons' surface-hover, at the strength of a row's hover rather than
       a button's fill: it covers a dozen rows, and at full strength the group would outshine the row that is open in
-      it. It stays well under that row's own mark (graphite/40 plus the ash bar), which is what keeps the two layers
+      it. It stays well under that row's own mark (surface-hover/40 plus the ink-muted bar), which is what keeps the two layers
       reading as "this project, and this row in it". It is drawn only for the focus lane (openProjectOf) — the grid
       and the orchestrator light their own buttons.
 
@@ -567,7 +567,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       nothing in the list.
     */
     <section
-      className={`relative border-b border-edge/70 py-2.5 transition-colors ${open ? 'bg-graphite/20' : ''} ${dropLine(drop.edge)}`}
+      className={`relative border-b border-line/70 py-2.5 transition-colors ${open ? 'bg-surface-hover/20' : ''} ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
       data-folded={folded || undefined}
       data-selected={open || undefined}
@@ -576,8 +576,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       {/*
         Grabbed and moved by its name line — making the whole section draggable would conflict with dragging sessions.
 
-        When the project screen is open this line is marked the way an open session row is — the ash bar and the
-        graphite/40 band — so the name row and a session row say "open" in one grammar. It replaced an underline
+        When the project screen is open this line is marked the way an open session row is — the ink-muted bar and the
+        surface-hover/40 band — so the name row and a session row say "open" in one grammar. It replaced an underline
         under the name, which was too faint to find once the group around it was tinted too.
 
         **The band must not move anything.** A session row is 31.5px tall (py-1.5 around a 13px line); this line
@@ -588,7 +588,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       */}
       <header
         className={`group -my-1.5 flex items-baseline gap-2 border-l-2 py-1.5 pl-2 pr-3 transition-colors ${
-          selected ? 'border-l-ash bg-graphite/40' : 'border-l-transparent'
+          selected ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent'
         }`}
         draggable
         onDragStart={(e) => {
@@ -631,8 +631,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           testId={`project-tip-${project.name}`}
         >
           <button
-            className={`truncate text-left text-[13px] font-medium tracking-tight text-chalk transition-colors ${
-              selected ? '' : 'hover:text-beacon'
+            className={`truncate text-left text-[13px] font-medium tracking-tight text-ink transition-colors ${
+              selected ? '' : 'hover:text-ink-signal'
             }`}
             onClick={() => focusProject(projectId)}
             aria-current={selected ? 'page' : undefined}
@@ -670,7 +670,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             summary.length > 0 ? '' : 'ml-auto'
           } ${
             menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
-          } ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
+          } ${proposalHere ? 'breathe rounded text-ink' : ''}`}
           data-testid={`project-actions-${project.name}`}
           data-worktree-proposal={proposalHere || undefined}
         >
@@ -684,7 +684,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             aria-label={`Actions for ${project.name}`}
             onClick={() => setMenuOpen((v) => !v)}
             data-testid={`project-menu-${project.name}`}
-            className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
+            className="flex items-center justify-center rounded p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
           >
             <DotsIcon size={14} />
           </button>
@@ -774,7 +774,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       // The open row inside the tinted group — the same word an app row and the project's name row use
                       aria-current={focused ? 'page' : undefined}
                       /*
-                        Unread (FR-16) is stated by the name's brightness (the text-chalk on the
+                        Unread (FR-16) is stated by the name's brightness (the text-ink on the
                         truncate span below). It is also kept as an attribute so a test can see a
                         fact not otherwise present on screen — asserting a class name would break
                         the test every time the color gets adjusted.
@@ -788,8 +788,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */
                       className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-[13px] transition-colors ${
                         focused
-                          ? 'border-l-ash bg-graphite/40 text-chalk'
-                          : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+                          ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
+                          : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
                       }`}
                     >
                       {/*
@@ -798,7 +798,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         two, and blur both instead.
                       */}
                       <ToolMark tool={s.tool} state={s.state} />
-                      <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
+                      <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
                       {/*
                         Merged (#69) — this branch's work has landed on the trunk. A sign that it
                         is history, not ongoing work, and a child in this state does not block the
@@ -807,7 +807,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */}
                       {s.merged && (
                         <span
-                          className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
+                          className="shrink-0 rounded border border-line px-1 text-[9px] leading-relaxed text-ink-faint"
                           data-testid={`merged-badge-${s.id}`}
                           title="Branch merged into the trunk — safe to clean up from the delete dialog"
                         >
@@ -821,7 +821,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */}
                       {s.pr && !s.merged && (
                         <span
-                          className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
+                          className="shrink-0 rounded border border-line px-1 text-[9px] leading-relaxed text-ink-faint"
                           data-testid={`pr-badge-${s.id}`}
                           title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}
                         >
@@ -839,8 +839,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         An unread dot used to be here and **was removed** (dogfooding, 2026-09-02).
 
                         It was stating the same fact for a third time on this row: the tool mark's
-                        border already states the state (an ash ring when a turn ends), and the
-                        name's brightness already states unread (the text-chalk above). Since all
+                        border already states the state (an ink-muted ring when a turn ends), and the
+                        name's brightness already states unread (the text-ink above). Since all
                         three lit up together when a turn ended while the person was away, the dot
                         added no information, only the question "what is that now" — and that
                         question was actually asked. The determination logic (lastReadSeq, markRead)
@@ -876,7 +876,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                           setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
                         }}
                         data-testid={`session-menu-${s.id}`}
-                        className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
+                        className="flex items-center justify-center rounded p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
                       >
                         <DotsIcon size={14} />
                       </button>
@@ -1021,7 +1021,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         aria-current={active ? 'page' : undefined}
         title={app.status.reason ?? app.info.description ?? undefined}
         className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-[13px] transition-colors ${
-          active ? 'border-l-ash bg-graphite/40 text-chalk' : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+          active ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >
         {/* Same width as the tool chip (17px) — a session name and an app name start at the same vertical column */}
@@ -1031,7 +1031,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         <span className="truncate">{app.title}</span>
         {hint && (
           <span
-            className={`readout ml-auto shrink-0 text-[10px] ${asking || app.status.tone === 'alert' ? 'text-chalk' : 'text-slate'}`}
+            className={`readout ml-auto shrink-0 text-[10px] ${asking || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
             data-testid="app-row-hint"
             data-asking={asking || undefined}
           >
@@ -1060,9 +1060,9 @@ function UserApps() {
   // Import (M4 E-3) — there is one dialog for the whole app (a deep link opens the same dialog too), so the store opens it
   const openImport = useStore((s) => s.openImport)
   return (
-    <section className="border-b border-edge/70 py-2.5" data-testid="user-apps">
+    <section className="border-b border-line/70 py-2.5" data-testid="user-apps">
       <header className="flex items-center gap-2 px-3">
-        <span className={`text-[13px] font-medium tracking-tight ${apps.length ? 'text-chalk' : 'text-slate'}`}>Your apps</span>
+        <span className={`text-[13px] font-medium tracking-tight ${apps.length ? 'text-ink' : 'text-ink-faint'}`}>Your apps</span>
         <span className="-my-1 ml-auto shrink-0">
           <IconButton label="Import an app from a folder, a .zip, or a link" onClick={() => openImport()} testId="user-apps-import" align="right">
             <ImportIcon size={13} />
@@ -1100,20 +1100,20 @@ function TrustAsk({ project }: { project: ProjectInfo }) {
   const answer = useStore((s) => s.answerTrustAsk)
   return (
     <div
-      className="mx-3 mt-2 rounded border border-edge bg-panel px-2.5 py-2"
+      className="mx-3 mt-2 rounded border border-line bg-surface-raised px-2.5 py-2"
       role="group"
       aria-label={`Trust ${project.name}?`}
       data-testid={`trust-ask-${project.name}`}
     >
-      <p className="text-[12px] text-chalk">Trust this project?</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-ash">
+      <p className="text-[12px] text-ink">Trust this project?</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
         Trusting lets this project&apos;s apps run and its settings apply. Trust it only if you trust the code in this
         folder.
       </p>
       <div className="mt-2 flex justify-end gap-2">
         <button
           type="button"
-          className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:text-chalk"
+          className="rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink"
           onClick={() => void answer(false)}
           data-testid={`trust-ask-no-${project.name}`}
         >
@@ -1121,7 +1121,7 @@ function TrustAsk({ project }: { project: ProjectInfo }) {
         </button>
         <button
           type="button"
-          className="rounded border border-edge bg-void px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          className="rounded border border-line bg-surface-floor px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
           onClick={() => void answer(true)}
           data-testid={`trust-ask-yes-${project.name}`}
         >
@@ -1178,12 +1178,12 @@ function ConfirmHandoff({
   const toolLabel = useToolMeta(tool).label
   return (
     <Modal onClose={onCancel} testId="confirm-handoff">
-      <div className="w-[400px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
-        <p className="text-[13px] text-chalk">Hand off to a fresh session?</p>
-        <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
+      <div className="w-[400px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">
+        <p className="text-[13px] text-ink">Hand off to a fresh session?</p>
+        <p className="mt-1.5 truncate text-[12px] text-ink-muted">{name}</p>
 
         {/* Where the note comes from — a live session writes it itself, a dead one has the app build it from the transcript (#78) */}
-        <p className="mt-3 text-[10px] uppercase text-slate">Handoff note</p>
+        <p className="mt-3 text-[10px] uppercase text-ink-faint">Handoff note</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Handoff note source">
           {(
             [
@@ -1200,21 +1200,21 @@ function ConfirmHandoff({
               onClick={() => setMode(m.key)}
               className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
                 mode === m.key
-                  ? 'border-ash bg-graphite text-chalk'
-                  : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
+                  ? 'border-ink-muted bg-surface-hover text-ink'
+                  : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
               }`}
             >
               {m.label}
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="handoff-mode-note">
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="handoff-mode-note">
           {mode === 'agent'
             ? 'This session writes a handoff note, the app saves it outside the project, then a fresh session starts by reading it.'
             : 'The app builds the note from its stored conversation — this session is not asked. Use this when the agent cannot respond (outage, limits).'}
         </p>
         {mode === 'agent' && blocked && (
-          <p className="mt-2 text-[11px] leading-relaxed text-beacon" data-testid="handoff-blocked">
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-signal" data-testid="handoff-blocked">
             This session is waiting on {blocked === 'question' ? 'a question' : 'an approval'}. Asking for a note now would
             {blocked === 'question' ? ' answer the question with the handoff request' : ' drop the approval card'} —
             answer it first, or build the note from the record.
@@ -1222,7 +1222,7 @@ function ConfirmHandoff({
         )}
 
         {/* The receiving agent — choosing a different tool does not carry over tool-specific settings like model or reasoning effort */}
-        <p className="mt-3 text-[10px] uppercase text-slate">Hand off to</p>
+        <p className="mt-3 text-[10px] uppercase text-ink-faint">Hand off to</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Hand off to">
           {tools.map((t) => (
             <button
@@ -1234,39 +1234,39 @@ function ConfirmHandoff({
               onClick={() => setHeirTool(t.name)}
               className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
                 heirTool === t.name
-                  ? 'border-ash bg-graphite text-chalk'
-                  : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
+                  ? 'border-ink-muted bg-surface-hover text-ink'
+                  : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
               }`}
             >
               {t.label}
-              {t.name === tool && <span className="ml-1 text-[10px] text-slate">(current)</span>}
+              {t.name === tool && <span className="ml-1 text-[10px] text-ink-faint">(current)</span>}
             </button>
           ))}
         </div>
 
         {deleteOld ? (
           <p
-            className="mt-3 rounded border border-del/40 bg-del-bg px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
+            className="mt-3 rounded border border-danger/40 bg-danger-bg px-2.5 py-2 text-[11px] leading-relaxed text-ink"
             data-testid="handoff-warning"
           >
             When the new session is ready, this session moves to the trash — and{' '}
-            <span className="text-del">deleting it for good there deletes the {toolLabel} conversation file
+            <span className="text-danger">deleting it for good there deletes the {toolLabel} conversation file
             too</span>. Until then, Settings → Trash reads it and restores it.
           </p>
         ) : (
-          <p className="mt-3 text-[11px] leading-relaxed text-ash" data-testid="handoff-keep-note">
+          <p className="mt-3 text-[11px] leading-relaxed text-ink-muted" data-testid="handoff-keep-note">
             This session stays — the new one starts from the note alongside it.
           </p>
         )}
         <label
           className={`mt-2 flex cursor-pointer items-start gap-2 text-[11px] ${
-            deleteOld ? 'text-del' : 'text-ash hover:text-chalk'
+            deleteOld ? 'text-danger' : 'text-ink-muted hover:text-ink'
           }`}
           data-testid="handoff-delete-toggle"
         >
           <input
             type="checkbox"
-            className={`mt-0.5 ${deleteOld ? 'accent-del' : 'accent-ash'}`}
+            className={`mt-0.5 ${deleteOld ? 'accent-danger' : 'accent-ink-muted'}`}
             checked={deleteOld}
             onChange={(e) => setDeleteOld(e.target.checked)}
           />
@@ -1274,14 +1274,14 @@ function ConfirmHandoff({
         </label>
 
         <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
+          <button className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink" onClick={onCancel}>
             Cancel
           </button>
           <button
             className={`rounded border px-3 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               deleteOld
-                ? 'border-del/40 bg-del-bg text-del hover:border-del/70'
-                : 'border-edge bg-panel text-chalk hover:border-graphite'
+                ? 'border-danger/40 bg-danger-bg text-danger hover:border-danger/70'
+                : 'border-line bg-surface-raised text-ink hover:border-line-strong'
             }`}
             onClick={() => onConfirm(heirTool, deleteOld, mode)}
             disabled={mode === 'agent' && !!blocked}
@@ -1332,7 +1332,7 @@ function SessionNameInput({
   return (
     <input
       autoFocus
-      className="w-full border-l-2 border-l-ash bg-graphite/40 py-1.5 pl-2.5 pr-3 text-[13px] text-chalk outline-none"
+      className="w-full border-l-2 border-l-ink-muted bg-surface-hover/40 py-1.5 pl-2.5 pr-3 text-[13px] text-ink outline-none"
       value={text}
       onChange={(e) => setText(e.target.value)}
       // An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append instead)
@@ -1487,7 +1487,7 @@ function RowMenu({
       ref={ref}
       role="menu"
       data-testid={testId}
-      className="fixed z-30 w-48 rounded border border-edge bg-panel py-1 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      className="fixed z-30 w-48 rounded border border-line bg-surface-raised py-1 shadow-(--shadow-popover)"
       style={{ top: pos?.top ?? 0, right: pos?.right ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
       {children}
@@ -1513,8 +1513,8 @@ function ActionRow({
       role="menuitem"
       data-testid={testId}
       onClick={onClick}
-      className={`block w-full px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-graphite/25 ${
-        danger ? 'text-ash hover:text-beacon' : 'text-ash hover:text-chalk'
+      className={`block w-full px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-surface-hover/25 ${
+        danger ? 'text-ink-muted hover:text-ink-signal' : 'text-ink-muted hover:text-ink'
       }`}
     >
       {label}
@@ -1594,7 +1594,7 @@ function ProjectMenu({
           testId={`fold-others-${project.name}`}
         />
       )}
-      <div className="my-1 border-t border-edge" />
+      <div className="my-1 border-t border-line" />
       <ActionRow
         label="Delete project…"
         onClick={pick(onDelete)}
@@ -1656,7 +1656,7 @@ function SessionMenu({
           testId={`handoff-session-${session.id}`}
         />
       )}
-      <div className="my-1 border-t border-edge" />
+      <div className="my-1 border-t border-line" />
       <ActionRow
         label="Delete session…"
         onClick={pick(onDelete)}
@@ -1717,37 +1717,37 @@ function ConfirmDelete({
   }, [platform, sessionId])
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
-      <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
-        <p className="text-[13px] text-chalk">Move this session to the trash?</p>
-        <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
-        <p className="mt-2 text-[11px] leading-relaxed text-slate" data-testid="delete-trash-note">
+      <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">
+        <p className="text-[13px] text-ink">Move this session to the trash?</p>
+        <p className="mt-1.5 truncate text-[12px] text-ink-muted">{name}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-faint" data-testid="delete-trash-note">
           Chat history and attachments stay in Centralu’s trash, out of the sidebar, search and the agents’ reach.{' '}
-          <span className="text-chalk">Settings → Trash</span> reads it, restores it, or deletes it for good.
+          <span className="text-ink">Settings → Trash</span> reads it, restores it, or deletes it for good.
         </p>
         {deleteExternal ? (
           <p
-            className="mt-1 rounded border border-del/40 bg-del-bg px-2 py-1.5 text-[11px] leading-relaxed text-chalk"
+            className="mt-1 rounded border border-danger/40 bg-danger-bg px-2 py-1.5 text-[11px] leading-relaxed text-ink"
             data-testid="delete-external-warning"
           >
             When it is deleted for good,{' '}
-            <span className="text-del">the conversation file in {toolLabel} is deleted too</span> — there will be
+            <span className="text-danger">the conversation file in {toolLabel} is deleted too</span> — there will be
             nothing left to pull back.
           </p>
         ) : (
-          <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-muted" data-testid="delete-notice">
             The conversation stays in {toolLabel} — you can pull it back from{' '}
-            <span className="text-chalk">+ → Past conversations</span>.
+            <span className="text-ink">+ → Past conversations</span>.
           </p>
         )}
         <label
           className={`mt-2 flex cursor-pointer items-start gap-2 text-[11px] ${
-            deleteExternal ? 'text-del' : 'text-ash hover:text-chalk'
+            deleteExternal ? 'text-danger' : 'text-ink-muted hover:text-ink'
           }`}
           data-testid="delete-external-toggle"
         >
           <input
             type="checkbox"
-            className={`mt-0.5 ${deleteExternal ? 'accent-del' : 'accent-ash'}`}
+            className={`mt-0.5 ${deleteExternal ? 'accent-danger' : 'accent-ink-muted'}`}
             checked={deleteExternal}
             onChange={(e) => setDeleteExternal(e.target.checked)}
           />
@@ -1760,38 +1760,38 @@ function ConfirmDelete({
           on by hand — and to read first what would be lost.
         */}
         {wt && (
-          <div className="mt-3 rounded border border-edge bg-panel p-2.5" data-testid="delete-worktree">
-            <p className="text-[11px] text-ash">
-              This session ran in a worktree — <span className="font-mono text-chalk">{wt.branch}</span>
+          <div className="mt-3 rounded border border-line bg-surface-raised p-2.5" data-testid="delete-worktree">
+            <p className="text-[11px] text-ink-muted">
+              This session ran in a worktree — <span className="font-mono text-ink">{wt.branch}</span>
             </p>
-            <p className="mt-1 text-[11px] text-slate">It stays where it is while the session is in the trash.</p>
+            <p className="mt-1 text-[11px] text-ink-faint">It stays where it is while the session is in the trash.</p>
             {wt.dirty && (
-              <p className="mt-1 text-[11px] text-chalk" data-testid="worktree-dirty">
+              <p className="mt-1 text-[11px] text-ink" data-testid="worktree-dirty">
                 {wt.changedFiles} uncommitted {wt.changedFiles === 1 ? 'change' : 'changes'} would be lost once it is
                 deleted.
               </p>
             )}
-            <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[11px] text-ash hover:text-chalk">
+            <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[11px] text-ink-muted hover:text-ink">
               <input
                 type="checkbox"
-                className="mt-0.5 accent-ash"
+                className="mt-0.5 accent-ink-muted"
                 checked={deleteWorktree}
                 onChange={(e) => setDeleteWorktree(e.target.checked)}
                 data-testid="delete-worktree-toggle"
               />
               <span>
                 Delete the worktree too, when deleted for good
-                <span className="mt-0.5 block text-[10px] break-all text-slate">{wt.path}</span>
+                <span className="mt-0.5 block text-[10px] break-all text-ink-faint">{wt.path}</span>
               </span>
             </label>
           </div>
         )}
         <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
+          <button className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink" onClick={onCancel}>
             Cancel
           </button>
           <button
-            className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
+            className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink hover:border-line-strong"
             onClick={() => onConfirm(deleteWorktree, deleteExternal)}
             data-testid="confirm-delete-yes"
           >
@@ -1826,7 +1826,7 @@ function ProjectMarks({ project }: { project: ProjectInfo }) {
       they simply stop asking. The fewer units a bare-number mark has, the faster the answer needs
       to come.
     */
-    <span className="readout flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
+    <span className="readout flex shrink-0 items-center gap-1.5 text-[10px] text-ink-faint">
       {changed > 0 && (
         <Tooltip
           content={`${changed} uncommitted file${changed > 1 ? 's' : ''}`}
@@ -1837,7 +1837,7 @@ function ProjectMarks({ project }: { project: ProjectInfo }) {
       )}
       {denied && (
         <Tooltip content="Folder access permission required" testId={`git-denied-tip-${project.name}`}>
-          <span className="text-ash" data-testid={`git-denied-${project.name}`}>
+          <span className="text-ink-muted" data-testid={`git-denied-${project.name}`}>
             !
           </span>
         </Tooltip>
@@ -1888,7 +1888,7 @@ function StateCount({ state, count }: { state: FoldSummaryState; count: number }
       data-state={state}
     >
       <span
-        className={`readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-[3.5px] border border-graphite bg-void px-[3px] text-[9px] font-semibold leading-none text-chalk ${
+        className={`readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-[3.5px] border border-line-strong bg-surface-floor px-[3px] text-[9px] font-semibold leading-none text-ink ${
           state === 'error' ? 'opacity-50' : ''
         }`}
       >
@@ -1902,19 +1902,19 @@ function StateCount({ state, count }: { state: FoldSummaryState; count: number }
 function ProjectDetail({ project }: { project: ProjectInfo }) {
   return (
     <span className="block" data-testid={`project-detail-${project.name}`}>
-      <span className="readout block truncate text-slate">{project.path}</span>
+      <span className="readout block truncate text-ink-faint">{project.path}</span>
       <span className="mt-1 block" data-testid={`project-trust-${project.name}`}>
         {project.trusted ? 'Trusted — its apps can run' : "Not trusted — its apps don't run"}
       </span>
       <span className="mt-1 block">
         {project.git?.denied ? (
           // Showing this as "not a repo" would lead the person to the wrong conclusion — what is actually needed is granting permission
-          <span className="text-chalk" data-testid="git-denied">
+          <span className="text-ink" data-testid="git-denied">
             Folder access permission required — System Settings → Privacy & Security → Files and Folders
           </span>
         ) : project.git ? (
           <>
-            <span className="text-chalk">{project.git.branch}</span>
+            <span className="text-ink">{project.git.branch}</span>
             {project.git.changedFiles > 0 && <span> · {project.git.changedFiles} changed</span>}
           </>
         ) : (
@@ -1944,10 +1944,10 @@ function ProjectDetail({ project }: { project: ProjectInfo }) {
  */
 const RING: Record<SessionState, string> = {
   working: '', // cc-orbit takes over the background
-  waiting_approval: 'var(--color-beacon)',
-  error: 'var(--color-beacon)',
-  waiting_input: 'var(--color-ash)',
-  limited: 'var(--color-slate)',
+  waiting_approval: 'var(--color-ink-signal)',
+  error: 'var(--color-ink-signal)',
+  waiting_input: 'var(--color-ink-muted)',
+  limited: 'var(--color-ink-faint)',
   idle: 'transparent',
 }
 
@@ -1970,8 +1970,8 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
       <span
         /*
          * A dark letter on a bright chip — grabs the eye in the list at a glance, but pure white
-         * (beacon) is not used. That belongs to "something is waiting for me," and using it here
-         * would bury the real signal. One step down, chalk, is used instead. The letter is set in
+         * (ink-signal) is not used. That belongs to "something is waiting for me," and using it here
+         * would bury the real signal. One step down, ink, is used instead. The letter is set in
          * the terminal font (monospace) — a single-character glyph needs a fixed width, or the row
          * would jitter.
          */
@@ -1981,14 +1981,14 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
           the state indicator, and if the state cannot be seen, moving the mark here loses its
           point.
 
-          The sidebar background (pit) and the chip background (void) differ by only two steps, so
+          The sidebar background (surface-side) and the chip background (surface-floor) differ by only two steps, so
           a single border does not separate them well. Instead of raising the border brightness
           further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
           a shadow underneath. It reads as a separate object without spending more brightness, and
           brightness is the resource this app uses to state urgency, so spending it on decoration
           would cut into that signal by the same amount.
         */
-        className={`readout cc-chip flex size-[14px] items-center justify-center rounded-[3.5px] border border-graphite bg-void text-[9px] font-semibold leading-none text-chalk ${
+        className={`readout cc-chip flex size-[14px] items-center justify-center rounded-[3.5px] border border-line-strong bg-surface-floor text-[9px] font-semibold leading-none text-ink ${
           stalled ? 'opacity-50' : ''
         }`}
       >

@@ -58,24 +58,24 @@ export function ApprovalCard({
 
   return (
     <div
-      className="overflow-hidden rounded border border-edge border-l-2 border-l-beacon bg-panel"
+      className="overflow-hidden rounded border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid="approval-card"
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="beacon text-[10px] font-medium">
+        <span className="signal text-[10px] font-medium">
           Awaiting approval
         </span>
-        <span className="text-[11px] text-slate">Agent is blocked, waiting</span>
+        <span className="text-[11px] text-ink-faint">Agent is blocked, waiting</span>
       </div>
 
       <pre
-        className="mt-2 whitespace-pre-wrap break-words px-3 font-mono text-[12px] leading-relaxed text-chalk"
+        className="mt-2 whitespace-pre-wrap break-words px-3 font-mono text-[12px] leading-relaxed text-ink"
         data-testid="approval-detail"
       >
         {detailText(detail)}
       </pre>
 
-      <div className="mt-3 flex items-center gap-1.5 border-t border-edge bg-void/40 px-3 py-2">
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k="y" label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" disabled={busy} />
         <ActionKey k="n" label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" disabled={busy} />
         <ActionKey
@@ -86,7 +86,7 @@ export function ApprovalCard({
           title={`Hold ${sc('alt')} and click to apply to the whole project`}
           onClick={(alt) => void respond(sessionId, requestId, 'always', alt ? 'project' : 'session')}
         />
-        <span className="ml-auto text-[10px] text-slate">
+        <span className="ml-auto text-[10px] text-ink-faint">
           <Kbd alt /> <Kbd>a</Kbd> whole project
         </span>
       </div>
@@ -116,22 +116,22 @@ export function PermissionCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded border border-edge border-l-2 border-l-beacon bg-panel"
+      className="overflow-hidden rounded border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid={testId}
       data-kind="capability"
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="beacon text-[10px] font-medium">Awaiting approval</span>
-        <span className="text-[11px] text-slate">An app asks for a permission, and waits</span>
+        <span className="signal text-[10px] font-medium">Awaiting approval</span>
+        <span className="text-[11px] text-ink-faint">An app asks for a permission, and waits</span>
       </div>
-      <p className="mt-2 px-3 text-[13px] leading-relaxed text-chalk" data-testid="approval-detail">
+      <p className="mt-2 px-3 text-[13px] leading-relaxed text-ink" data-testid="approval-detail">
         {appName} wants to {text}.
       </p>
-      <p className="mt-1 px-3 text-[11px] leading-relaxed text-slate">
+      <p className="mt-1 px-3 text-[11px] leading-relaxed text-ink-faint">
         Centralu remembers your answer for this app and asks again if the app&apos;s manifest changes what it uses. You can
         change it later under Runs → Permissions.
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-edge bg-void/40 px-3 py-2">
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k="y" label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />
         <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" />
       </div>
@@ -156,7 +156,7 @@ function ActionKey({
 }) {
   return (
     <button
-      className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-50"
+      className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-50"
       onClick={(e) => onClick(e.altKey)}
       disabled={disabled}
       data-testid={testId}

@@ -136,10 +136,10 @@ function MenuRow({
       title={title}
       onClick={onPick}
       className={`flex w-full items-baseline gap-2 px-2.5 py-1 text-left transition-colors ${
-        selected ? 'text-chalk' : 'text-ash hover:bg-graphite/25'
+        selected ? 'text-ink' : 'text-ink-muted hover:bg-surface-hover/25'
       }`}
     >
-      <span className="w-2 shrink-0 text-[10px] leading-none text-ash" aria-hidden>
+      <span className="w-2 shrink-0 text-[10px] leading-none text-ink-muted" aria-hidden>
         {selected ? '✓' : ''}
       </span>
       {/*
@@ -150,18 +150,18 @@ function MenuRow({
         (min-w-0 truncate is unchanged).
       */}
       <span className="min-w-0 shrink-[0.2] truncate text-[12px]">{label}</span>
-      {hint && <span className="readout ml-auto min-w-0 truncate text-[10px] text-slate">{hint}</span>}
+      {hint && <span className="readout ml-auto min-w-0 truncate text-[10px] text-ink-faint">{hint}</span>}
     </button>
   )
 }
 
 function MenuSection({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
-    <div className="border-t border-edge py-1 first:border-t-0">
-      <p className="readout px-2.5 py-0.5 text-[10px] uppercase text-slate">{label}</p>
+    <div className="border-t border-line py-1 first:border-t-0">
+      <p className="readout px-2.5 py-0.5 text-[10px] uppercase text-ink-faint">{label}</p>
       {/* Why this group is different is written at the top of the group — repeating it on
       every row would make the list unreadable */}
-      {note && <p className="px-2.5 pb-1 text-[10px] leading-relaxed text-slate">{note}</p>}
+      {note && <p className="px-2.5 pb-1 text-[10px] leading-relaxed text-ink-faint">{note}</p>}
       {children}
     </div>
   )
@@ -299,7 +299,7 @@ export function SessionSettings({
             ? `Could not load models: ${reason}`
             : 'Model, effort, permissions — applies from the next turn'
         }
-        className="flex min-w-0 cursor-pointer items-center gap-1 rounded border border-edge bg-panel px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:text-chalk"
+        className="flex min-w-0 cursor-pointer items-center gap-1 rounded border border-line bg-surface-raised px-1.5 py-0.5 text-[11px] text-ink-muted transition-colors hover:text-ink"
       >
         <span className="min-w-0 truncate">{summary}</span>
         <ChevronIcon open={open} size={10} />
@@ -318,7 +318,7 @@ export function SessionSettings({
           onAnimationEnd={() => {
             if (!open) setClosing(false)
           }}
-          className={`absolute bottom-full left-0 z-30 mb-1 max-h-72 w-56 overflow-y-auto overflow-x-hidden rounded border border-edge bg-panel shadow-[0_-12px_32px_-8px_rgb(0_0_0/0.9)] ${
+          className={`absolute bottom-full left-0 z-30 mb-1 max-h-72 w-56 overflow-y-auto overflow-x-hidden rounded border border-line bg-surface-raised shadow-(--shadow-popover-up) ${
             open ? 'cc-hang' : 'cc-hang-out pointer-events-none'
           }`}
         >

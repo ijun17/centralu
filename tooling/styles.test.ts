@@ -18,16 +18,25 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 /** If any of these classes go missing, the screen falls apart — chosen to each represent a
  * different source. */
 const REQUIRED = [
-  { needle: '--color-void', why: '@theme token (the palette itself)' },
+  { needle: '--color-surface-floor', why: '@theme token (the palette itself)' },
   { needle: '.keycap', why: '@layer components (a signature element)' },
-  { needle: 'bg-void', why: 'a utility used by packages/ui components' },
-  { needle: 'text-ash', why: 'text hierarchy' },
-  { needle: 'border-edge', why: 'a border' },
+  { needle: 'bg-surface-floor', why: 'a utility used by packages/ui components' },
+  { needle: 'text-ink-muted', why: 'text hierarchy' },
+  { needle: 'border-line', why: 'a border' },
   // The two below check that a "color allowed as an exception" actually made it into the
   // build output. If only the token is declared and no utility is generated, a diff is drawn
   // with no background — a category that a behavior test can never catch (E2E does not look
   // at class names).
-  { needle: 'bg-add-bg', why: 'a diff addition background (chromatic exception)' },
+  { needle: 'bg-diff-add-bg', why: 'a diff addition background (chromatic exception)' },
+  /*
+   * Tailwind writes a theme variable into the build only when it sees it used somewhere. The
+   * terminal's colours are read by script alone (components/terminalTheme.ts), so if that file
+   * stopped spelling a name out, the variable would vanish and xterm would quietly paint its own
+   * defaults. Shadows are reached only through `shadow-(--shadow-…)`, the same kind of use.
+   */
+  { needle: '--color-term-bg', why: 'a token only script reads (the terminal theme)' },
+  { needle: '--color-term-bright-white', why: 'the last ANSI colour, the same' },
+  { needle: '--shadow-modal', why: 'a shadow token reached through shadow-(--shadow-modal)' },
   { needle: 'cc-orbit', why: 'the spinning working-state border (@property + @keyframes)' },
   { needle: 'cc-chip', why: 'the inner shadow on a session marker chip (@layer components)' },
 ]
@@ -90,12 +99,16 @@ describe('the built CSS actually contains styles', () => {
    * overlap with the brightness hierarchy — but the fact that it is outside this check's scope
    * still has to be known.
    *
-   *   - diff addition/deletion (add/del): judging an approval is something done at a glance,
+   *   - diff addition/deletion (diff-add/diff-del): judging an approval is something done at a glance,
    *     and green and red go past a learned convention into something close to reflex. In
    *     exchange, they never leave the body of a diff.
+   *   - danger: the deletion red, borrowed for what destroys something or failed (same values).
+   *   - the terminal's 16 ANSI colours (term-*): a program's own output, xterm's default palette.
+   *     They were always in the app inside xterm's script; they are written out as tokens so a
+   *     theme can change them, and they never leave the terminal.
    *   - the orbit ring (cc-orbit): the border that speaks "working" through rotation.
    *     Saturation is raised, but lightness is held down so it **never gets brighter than pure
-   *     white (the beacon)** — the top of the brightness scale belongs to waiting.
+   *     white (ink-signal)** — the top of the brightness scale belongs to waiting.
    *
    * A chromatic color not on this list fails the build — widening the exception means writing
    * the reason here.
@@ -109,7 +122,10 @@ describe('the built CSS actually contains styles', () => {
   it('the palette is monochrome (R=G=B) outside the allowed exceptions', () => {
     const ALLOWED = new Set([
       '7ee787', '10251a', // diff addition
-      'ffa198', '2b1517', // diff deletion
+      'ffa198', '2b1517', // diff deletion, and danger
+      // The terminal's ANSI palette (xterm's defaults, see --color-term-* in index.css)
+      '2e3436', 'cc0000', '4e9a06', 'c4a000', '3465a4', '75507b', '06989a', 'd3d7cf',
+      '555753', 'ef2929', '8ae234', 'fce94f', '729fcf', 'ad7fa8', '34e2e2', 'eeeeec',
       // The orbit ring — the border that speaks "working" through rotation.
       // It was first held down to almost pure white, then raised to a real color once the
       // color policy changed to "add conservatively". The line it keeps: **never brighter
@@ -244,7 +260,7 @@ describe('Tauri permissions', () => {
    */
   it('the top bar height agrees across the config, Rust and the screen', () => {
     const header = readFileSync(join(ROOT, 'packages/ui/src/app/App.tsx'), 'utf8')
-    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b border-edge bg-pit/.exec(header)
+    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b border-line bg-surface-side/.exec(header)
     expect(m, 'could not find the top bar\'s h-* class').toBeTruthy()
     const barPx = Number(m![1]) * 4 // tailwind h-9 = 36px
     const BUTTON = 12 // the diameter of a macOS traffic light

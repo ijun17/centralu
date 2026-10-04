@@ -172,14 +172,14 @@ function keepAlive(bridge: AppBridge, token: string | number | undefined, beats:
  * color depending on where the view sits.
  */
 const STYLE_MAP: readonly [string, string][] = [
-  ['--color-background-primary', '--color-void'],
-  ['--color-background-secondary', '--color-panel'],
-  ['--color-background-tertiary', '--color-graphite'],
-  ['--color-text-primary', '--color-chalk'],
-  ['--color-text-secondary', '--color-ash'],
-  ['--color-text-tertiary', '--color-slate'],
-  ['--color-border-primary', '--color-edge'],
-  ['--color-border-secondary', '--color-graphite'],
+  ['--color-background-primary', '--color-surface-floor'],
+  ['--color-background-secondary', '--color-surface-raised'],
+  ['--color-background-tertiary', '--color-surface-hover'],
+  ['--color-text-primary', '--color-ink'],
+  ['--color-text-secondary', '--color-ink-muted'],
+  ['--color-text-tertiary', '--color-ink-faint'],
+  ['--color-border-primary', '--color-line'],
+  ['--color-border-secondary', '--color-line-strong'],
   ['--font-sans', '--font-sans'],
   ['--font-mono', '--font-mono'],
 ]
@@ -498,12 +498,12 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
             {loading}
           </div>
         ) : (
-          <div className="px-3 py-2 text-[12px] text-ash" data-testid="app-frame-loading">
+          <div className="px-3 py-2 text-[12px] text-ink-muted" data-testid="app-frame-loading">
             Loading app view…
           </div>
         ))}
       {phase === 'error' && !onFailed && (
-        <div className="rounded-md border border-edge bg-panel px-3 py-2 text-[12px] text-ash" role="alert" data-testid="app-frame-error">
+        <div className="rounded-md border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink-muted" role="alert" data-testid="app-frame-error">
           This app view could not be shown: {error}
         </div>
       )}
@@ -512,20 +512,20 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         title={`${appId} view`}
         sandbox={PROXY_SANDBOX}
         data-testid="app-frame-iframe"
-        className={`block w-full rounded-md border border-edge ${fill ? 'min-h-0 flex-1' : ''}`}
+        className={`block w-full rounded-md border border-line ${fill ? 'min-h-0 flex-1' : ''}`}
         style={{
           ...(fill ? {} : { height }),
           display: phase === 'ready' || phase === 'loading' ? 'block' : 'none',
         }}
       />
       {linkAsk && (
-        <div className="mt-1 flex items-center gap-2 rounded-md border border-edge bg-panel px-3 py-2 text-[12px] text-chalk" data-testid="app-frame-link-ask">
+        <div className="mt-1 flex items-center gap-2 rounded-md border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink" data-testid="app-frame-link-ask">
           <span className="min-w-0 flex-1 truncate">
-            This app wants to open <span className="readout text-ash">{linkAsk.url}</span>
+            This app wants to open <span className="readout text-ink-muted">{linkAsk.url}</span>
           </span>
           <button
             type="button"
-            className="rounded border border-edge px-2 py-0.5 hover:bg-graphite"
+            className="rounded border border-line px-2 py-0.5 hover:bg-surface-hover"
             data-testid="app-frame-link-open"
             onClick={() => settleLink(true)}
           >
@@ -533,7 +533,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
           </button>
           <button
             type="button"
-            className="rounded px-2 py-0.5 text-ash hover:bg-graphite"
+            className="rounded px-2 py-0.5 text-ink-muted hover:bg-surface-hover"
             data-testid="app-frame-link-cancel"
             onClick={() => settleLink(false)}
           >

@@ -19,7 +19,7 @@ import { useStore } from '../../store/store.js'
 export function BuilderPane({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const known = useStore((s) => !!s.sessions[sessionId])
   return (
-    <aside className="flex w-[380px] min-w-0 shrink-0 flex-col border-l border-edge" data-testid="builder-pane" aria-label="Builder conversation">
+    <aside className="flex w-[380px] min-w-0 shrink-0 flex-col border-l border-line" data-testid="builder-pane" aria-label="Builder conversation">
       {known ? (
         <SessionPane
           sessionId={sessionId}
@@ -31,7 +31,7 @@ export function BuilderPane({ sessionId, onClose }: { sessionId: string; onClose
           }
         />
       ) : (
-        <p className="px-3 py-3 text-[12px] text-slate">The builder session is not loaded yet.</p>
+        <p className="px-3 py-3 text-[12px] text-ink-faint">The builder session is not loaded yet.</p>
       )}
     </aside>
   )

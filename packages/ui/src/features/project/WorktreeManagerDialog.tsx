@@ -42,7 +42,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
     <Modal onClose={onClose} testId="worktree-manager-dialog">
       <form
         /* The same shell as every other modal — if two dialogs opened side by side had different backgrounds, one would look like it belonged to a different app */
-        className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)"
         onSubmit={async (e) => {
           e.preventDefault()
           const trunk = branch.trim()
@@ -60,13 +60,13 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
           }
         }}
       >
-        <h2 className="text-[13px] font-medium text-chalk">Worktree manager · {project?.name}</h2>
-        <p className="mt-2 text-[11px] leading-relaxed text-ash">
+        <h2 className="text-[13px] font-medium text-ink">Worktree manager · {project?.name}</h2>
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
           A session that watches this project’s worktree branches — it can propose new ones, read how they are
           going, and merge when you ask it to.
         </p>
 
-        <label className="mt-3 block text-[11px] text-ash" htmlFor="worktree-trunk">
+        <label className="mt-3 block text-[11px] text-ink-muted" htmlFor="worktree-trunk">
           Branch to fork from
         </label>
         {/*
@@ -82,7 +82,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
           onChange={(e) => setBranch(e.target.value)}
           spellCheck={false}
           data-testid="worktree-trunk-input"
-          className="mt-1 w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+          className="mt-1 w-full rounded border border-line bg-surface-floor px-2 py-1.5 font-mono text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
           placeholder="main"
         />
         <datalist id="worktree-trunk-options">
@@ -90,12 +90,12 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
             <option key={b.name} value={b.name} />
           ))}
         </datalist>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-slate">
+        <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
           New worktrees branch off here, and a branch counts as merged once this one contains it.
         </p>
 
         {error && (
-          <p className="mt-2 text-[11px] text-chalk" data-testid="worktree-manager-error">
+          <p className="mt-2 text-[11px] text-ink" data-testid="worktree-manager-error">
             {error}
           </p>
         )}
@@ -104,7 +104,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
           <button
             type="button"
             onClick={onClose}
-            className="rounded px-2 py-1 text-[12px] text-slate transition-colors hover:text-chalk"
+            className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink"
           >
             Cancel
           </button>
@@ -112,7 +112,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
             type="submit"
             disabled={!branch.trim() || busy}
             data-testid="worktree-manager-confirm"
-            className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+            className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
           >
             {busy ? 'Starting…' : 'Start manager'}
           </button>

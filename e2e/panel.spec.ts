@@ -846,9 +846,9 @@ test('the open button turns white while a command is running', async ({ page }) 
   await newSession(page, 'alpha', 'claude', 'task')
 
   const open = page.getByTestId('run-open')
-  // `hover:text-chalk` is always attached, so the check anchors on a word boundary — loose matching would always pass
-  const lit = /(^|\s)text-chalk(\s|$)/
-  const dim = /(^|\s)text-slate(\s|$)/
+  // `hover:text-ink` is always attached, so the check anchors on a word boundary — loose matching would always pass
+  const lit = /(^|\s)text-ink(\s|$)/
+  const dim = /(^|\s)text-ink-faint(\s|$)/
   await expect(open).toHaveClass(dim)
 
   await open.click()

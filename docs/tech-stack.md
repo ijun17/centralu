@@ -19,6 +19,20 @@ The selection criteria are the product spec §7.1 (lightness) and the architectu
 | Date/time | **the Intl API directly** + a small helper written here | No library needed at the level of "waiting 3 minutes" | dayjs/date-fns (unnecessary dependency) |
 | WS client | **native WebSocket** + a reconnection wrapper written here (~50 lines) | The requirement is simple (reconnect + backoff + token), fewer dependencies | socket.io (protocol overhead) |
 
+**Colour tokens.** Every colour the UI paints is a token in the `@theme` block of
+`packages/ui/src/styles/index.css`, named by its role rather than its look (#312): surfaces
+(`surface-floor`, `surface-side`, `surface-raised`, `surface-selected`, `surface-hover`,
+`surface-deck`, `surface-reading`), lines (`line`, `line-strong`), ink (`ink-signal`, `ink`,
+`ink-muted`, `ink-faint`), `diff-*`, `danger`, and the effects (`focus`, `selection`, the scrollbar,
+scrims, shadows, keycap, `activity-1…5`, `term-*`). The old brightness names (`void`, `chalk`,
+`beacon`…) would read backwards in a light theme. The block is plain `@theme`, not `inline`, so
+utilities read `var(--color-…)` at run time and a theme can switch by changing variables alone; for
+the same reason shadows are used as `shadow-(--shadow-modal)`, since Tailwind copies a theme
+shadow's value into the `shadow-modal` utility. xterm takes its colours and font from the same
+variables when a terminal opens (`components/terminalTheme.ts`). A restyling that must not move a
+pixel is checked with `e2e/style-snapshot.spec.ts`, which records every element's computed colours
+on the demo scenes before and after (`scripts/style-snapshot-diff.mjs` compares the two).
+
 ## 2. Schema and validation (packages/protocol)
 
 | Area | Choice | Reasoning |

@@ -45,8 +45,8 @@ describe('weeklyWindow', () => {
 
 describe('usageTone', () => {
   it('the fuller it is, the brighter — pure white from 90% on', () => {
-    expect(usageTone(10)).toBe('text-ash')
-    expect(usageTone(70)).toBe('text-chalk')
-    expect(usageTone(93)).toBe('text-beacon')
+    expect(usageTone(10)).toBe('text-ink-muted')
+    expect(usageTone(70)).toBe('text-ink')
+    expect(usageTone(93)).toBe('text-ink-signal')
   })
 })

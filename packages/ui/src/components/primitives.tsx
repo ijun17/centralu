@@ -9,12 +9,12 @@ import { useCapability } from '../app/PlatformProvider.jsx'
  * screen is exactly what is waiting for me.
  */
 const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string }> = {
-  waiting_approval: { glyph: '●', tone: 'beacon', label: 'Awaiting approval' },
-  error: { glyph: '✕', tone: 'text-beacon', label: 'Error' },
-  waiting_input: { glyph: '○', tone: 'text-ash', label: 'Waiting for input' },
-  working: { glyph: '◆', tone: 'text-ash breathe', label: 'Working' },
-  limited: { glyph: '▬', tone: 'text-slate', label: 'Limit reached' },
-  idle: { glyph: '·', tone: 'text-slate', label: 'Idle' },
+  waiting_approval: { glyph: '●', tone: 'signal', label: 'Awaiting approval' },
+  error: { glyph: '✕', tone: 'text-ink-signal', label: 'Error' },
+  waiting_input: { glyph: '○', tone: 'text-ink-muted', label: 'Waiting for input' },
+  working: { glyph: '◆', tone: 'text-ink-muted breathe', label: 'Working' },
+  limited: { glyph: '▬', tone: 'text-ink-faint', label: 'Limit reached' },
+  idle: { glyph: '·', tone: 'text-ink-faint', label: 'Idle' },
 }
 
 /** The state's spoken name. The same wording must be used wherever a dot is not drawn (e.g. a tool marker) */
@@ -78,9 +78,9 @@ export function formatWaiting(ms: number): string {
  * alone rather than adding a new shape.
  */
 export function waitingTone(ms: number): string {
-  if (ms > 10 * 60_000) return 'text-beacon'
-  if (ms > 3 * 60_000) return 'text-chalk'
-  return 'text-slate'
+  if (ms > 10 * 60_000) return 'text-ink-signal'
+  if (ms > 3 * 60_000) return 'text-ink'
+  return 'text-ink-faint'
 }
 
 /**
@@ -173,7 +173,7 @@ export function Tooltip({
           ref={tipRef}
           role="tooltip"
           data-testid={testId}
-          className="pointer-events-none fixed z-50 w-max max-w-64 rounded border border-edge bg-panel px-2 py-1.5 text-[11px] leading-relaxed text-ash shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+          className="pointer-events-none fixed z-50 w-max max-w-64 rounded border border-line bg-surface-raised px-2 py-1.5 text-[11px] leading-relaxed text-ink-muted shadow-(--shadow-popover)"
           style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
         >
           {content}

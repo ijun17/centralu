@@ -26,11 +26,11 @@ test.use({ browserName: 'webkit', deviceScaleFactor: 1 })
  */
 const WIDTHS = [1280, 1281, 1333, 1366, 1401, 1404, 1437, 1500]
 
-/** --color-ash. The stationary ring's color; the test below also paints the spinning ring's layer this color to check only its shape */
+/** --color-ink-muted. The stationary ring's color; the test below also paints the spinning ring's layer this color to check only its shape */
 const ASH = 144
 /**
  * The threshold for a lit side. A side where the ring vanished reads as only the panel's border
- * (graphite 53) or floor (void 29); a side dimmed to a half pixel sits in between (~86). A lit
+ * (line-strong 53) or floor (surface-floor 29); a side dimmed to a half pixel sits in between (~86). A lit
  * side reads as ASH itself.
  */
 const LIT = ASH - 8

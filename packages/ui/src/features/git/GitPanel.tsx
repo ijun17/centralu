@@ -163,7 +163,7 @@ function Changes({
  * The diff view.
  *
  * This is the one place chromatic color is used (an exception to m2-plan decision 1 — see
- * --color-add/del in styles/index.css). Green for additions, red for deletions. `+`/`-` plus
+ * --color-diff-add/del in styles/index.css). Green for additions, red for deletions. `+`/`-` plus
  * brightness would still distinguish them in grayscale, but an approval decision is made by
  * scanning, and forcing it to be read line by line would break that flow. The symbols stay
  * anyway — for someone who cannot see color, leaving only the color behind would erase the
@@ -300,7 +300,7 @@ function DiffView({
   if (!path) {
     return (
       <div
-        className="flex flex-1 items-center justify-center text-[12px] text-slate"
+        className="flex flex-1 items-center justify-center text-[12px] text-ink-faint"
         data-testid="diff-empty"
       >
         {emptyHint ?? 'Select a file to see its diff'}
@@ -308,7 +308,7 @@ function DiffView({
     )
   }
   if (data?.binary) {
-    return <div className="flex flex-1 items-center justify-center text-[12px] text-slate">Binary file</div>
+    return <div className="flex flex-1 items-center justify-center text-[12px] text-ink-faint">Binary file</div>
   }
 
   /**
@@ -322,12 +322,12 @@ function DiffView({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
-      <header className="flex items-center gap-2 border-b border-edge px-3 py-1.5">
-        <span className="readout truncate text-[11px] text-ash">{path}</span>
+      <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
+        <span className="readout truncate text-[11px] text-ink-muted">{path}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {onOpenViewer && (
             <button
-              className="text-[11px] text-slate hover:text-chalk"
+              className="text-[11px] text-ink-faint hover:text-ink"
               onClick={onOpenViewer}
               data-testid="open-in-viewer"
             >
@@ -335,7 +335,7 @@ function DiffView({
             </button>
           )}
           <button
-            className="text-[11px] text-slate hover:text-chalk"
+            className="text-[11px] text-ink-faint hover:text-ink"
             onClick={() => void onOpenInIde({ file: place.file, line: place.line })}
             data-testid="open-in-ide"
           >
@@ -380,11 +380,11 @@ function DiffView({
            * content is that row in the list.
            */
           <div
-            className="sticky left-0 top-0 z-20 border-b border-edge bg-panel px-3 py-1"
+            className="sticky left-0 top-0 z-20 border-b border-line bg-surface-raised px-3 py-1"
             data-testid="diff-current-file-band"
             aria-hidden="true"
           >
-            <span className="readout text-[11px] text-chalk">{place.label}</span>
+            <span className="readout text-[11px] text-ink">{place.label}</span>
           </div>
         )}
         <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
@@ -409,10 +409,10 @@ function DiffView({
                   data-diff="file"
                   data-line={i}
                   data-testid="diff-file-band"
-                  className="absolute left-0 top-0 w-max min-w-full border-b border-edge bg-panel px-3 py-1"
+                  className="absolute left-0 top-0 w-max min-w-full border-b border-line bg-surface-raised px-3 py-1"
                   style={{ transform: `translateY(${v.start}px)` }}
                 >
-                  <span data-code className="readout text-[11px] text-chalk">
+                  <span data-code className="readout text-[11px] text-ink">
                     {label}
                   </span>
                 </div>
@@ -435,12 +435,12 @@ function DiffView({
                  */
                 className={`absolute left-0 top-0 w-max min-w-full ${
                   kind === 'add'
-                    ? 'bg-add-bg text-add'
+                    ? 'bg-diff-add-bg text-diff-add'
                     : kind === 'del'
-                      ? 'bg-del-bg text-del'
+                      ? 'bg-diff-del-bg text-diff-del'
                       : kind === 'hunk'
-                        ? 'bg-panel/60 text-ash'
-                        : 'text-ash'
+                        ? 'bg-surface-raised/60 text-ink-muted'
+                        : 'text-ink-muted'
                 }`}
                 style={{ transform: `translateY(${v.start}px)` }}
               >
@@ -458,7 +458,7 @@ function DiffView({
           })}
         </div>
         {truncated && (
-          <p className="p-2 text-[11px] text-slate" data-testid="diff-truncation">
+          <p className="p-2 text-[11px] text-ink-faint" data-testid="diff-truncation">
             {DIFF_TRUNCATED_MESSAGE}
           </p>
         )}
@@ -579,25 +579,25 @@ function Branches({ projectId }: { projectId: string }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="git-branches">
       {pending && (
-        <div className="border-b border-edge bg-panel p-3" data-testid="checkout-warning">
-          <p className="text-[12px] text-chalk">
+        <div className="border-b border-line bg-surface-raised p-3" data-testid="checkout-warning">
+          <p className="text-[12px] text-ink">
             Switching to {pending.branch} may affect the changes below.
           </p>
-          <ul className="readout mt-1.5 max-h-24 overflow-y-auto text-[11px] text-ash">
+          <ul className="readout mt-1.5 max-h-24 overflow-y-auto text-[11px] text-ink-muted">
             {pending.conflicts.slice(0, 10).map((p) => (
               <li key={p}>{p}</li>
             ))}
           </ul>
           <div className="mt-2 flex gap-1.5">
             <button
-              className="rounded border border-edge bg-panel px-2 py-1 text-[12px] text-chalk hover:border-graphite"
+              className="rounded border border-line bg-surface-raised px-2 py-1 text-[12px] text-ink hover:border-line-strong"
               onClick={() => void doCheckout(pending.branch)}
               data-testid="checkout-proceed"
             >
               Switch anyway
             </button>
             <button
-              className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+              className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink"
               onClick={() => setPending(null)}
             >
               Cancel
@@ -622,22 +622,22 @@ function BranchList({
 }) {
   if (branches.length === 0) return null
   return (
-    <div className="border-b border-edge/60" data-testid={`branches-${title.toLowerCase()}`}>
-      <h3 className="px-2.5 py-1.5 text-[10px] uppercase text-slate">{title}</h3>
+    <div className="border-b border-line/60" data-testid={`branches-${title.toLowerCase()}`}>
+      <h3 className="px-2.5 py-1.5 text-[10px] uppercase text-ink-faint">{title}</h3>
       <ul>
         {branches.map((b) => (
           <li key={b.name}>
             <button
               className={`flex w-full items-center gap-2 px-2.5 py-1 text-left text-[12px] transition-colors ${
-                b.current ? 'text-chalk' : 'text-ash hover:text-chalk'
+                b.current ? 'text-ink' : 'text-ink-muted hover:text-ink'
               }`}
               onClick={() => !b.current && onPick(b.name)}
               data-testid={`branch-${b.name}`}
             >
-              <span className="w-2.5 shrink-0 text-center text-[9px] text-slate">{b.current ? '●' : ''}</span>
+              <span className="w-2.5 shrink-0 text-center text-[9px] text-ink-faint">{b.current ? '●' : ''}</span>
               <span className="truncate">{b.name}</span>
               {b.upstream && (
-                <span className="readout ml-auto shrink-0 text-[10px] text-slate">→ {b.upstream}</span>
+                <span className="readout ml-auto shrink-0 text-[10px] text-ink-faint">→ {b.upstream}</span>
               )}
             </button>
           </li>

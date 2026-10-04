@@ -34,5 +34,5 @@ function isWeekly(w: UsageWindow): boolean {
 
 /** How full it is, expressed as brightness (the rule for a screen with no color). The more dangerous, the brighter */
 export function usageTone(percent: number): string {
-  return percent >= 90 ? 'text-beacon' : percent >= 70 ? 'text-chalk' : 'text-ash'
+  return percent >= 90 ? 'text-ink-signal' : percent >= 70 ? 'text-ink' : 'text-ink-muted'
 }

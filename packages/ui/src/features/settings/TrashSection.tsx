@@ -77,26 +77,26 @@ export function TrashSection() {
   const sessions = trash?.sessions ?? []
   return (
     <section data-testid="settings-trash">
-      <p className="text-[11px] leading-relaxed text-slate">
+      <p className="text-[11px] leading-relaxed text-ink-faint">
         Deleted sessions wait here with their conversations. Nothing is emptied on its own — a conversation leaves
         this machine only when you delete it for good here.
       </p>
 
       {loadError && (
-        <p className="mt-2 text-[12px] text-chalk" data-testid="trash-load-error">
+        <p className="mt-2 text-[12px] text-ink" data-testid="trash-load-error">
           Could not read the trash: {loadError}
         </p>
       )}
 
       <div className="mt-3 flex items-baseline gap-3">
-        <span className="readout text-[12px] text-ash" data-testid="trash-total">
+        <span className="readout text-[12px] text-ink-muted" data-testid="trash-total">
           {trash === null
             ? 'Loading…'
             : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'} · ${size(trash.bytes)}`}
         </span>
         <button
           type="button"
-          className="ml-auto rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:text-del disabled:opacity-40 disabled:hover:text-slate"
+          className="ml-auto rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-danger disabled:opacity-40 disabled:hover:text-ink-faint"
           disabled={sessions.length === 0 || busy}
           onClick={() => setConfirming('all')}
           data-testid="trash-empty"
@@ -114,37 +114,37 @@ export function TrashSection() {
         />
       )}
       {emptyReport && (
-        <p className="mt-2 text-[11px] leading-relaxed text-chalk" data-testid="trash-empty-report">
+        <p className="mt-2 text-[11px] leading-relaxed text-ink" data-testid="trash-empty-report">
           {emptyReport}
         </p>
       )}
 
       {trash !== null && sessions.length === 0 ? (
-        <p className="mt-2 text-[12px] text-slate" data-testid="trash-list-empty">
+        <p className="mt-2 text-[12px] text-ink-faint" data-testid="trash-list-empty">
           The trash is empty
         </p>
       ) : (
-        <ul className="mt-2 divide-y divide-edge/60 rounded border border-edge" data-testid="trash-list">
+        <ul className="mt-2 divide-y divide-line/60 rounded border border-line" data-testid="trash-list">
           {sessions.map((s) => (
             <li key={s.id} className="px-2.5 py-2" data-testid={`trash-row-${s.id}`}>
               <div className="flex items-baseline gap-2">
-                <span className="min-w-0 truncate text-[12px] text-chalk">{s.name}</span>
-                <span className="min-w-0 shrink truncate text-[10px] text-ash" data-testid={`trash-project-${s.id}`}>
+                <span className="min-w-0 truncate text-[12px] text-ink">{s.name}</span>
+                <span className="min-w-0 shrink truncate text-[10px] text-ink-muted" data-testid={`trash-project-${s.id}`}>
                   {s.project ? s.project.name : 'No project'}
                   {s.project && !s.project.exists && ' (project deleted)'}
                 </span>
-                <span className="readout ml-auto shrink-0 text-[10px] text-slate">
+                <span className="readout ml-auto shrink-0 text-[10px] text-ink-faint">
                   {new Date(s.deletedAt).toLocaleDateString('en-US')}
                 </span>
               </div>
-              <div className="mt-0.5 text-[10px] text-slate" data-testid={`trash-holds-${s.id}`}>
+              <div className="mt-0.5 text-[10px] text-ink-faint" data-testid={`trash-holds-${s.id}`}>
                 {s.messages} {s.messages === 1 ? 'message' : 'messages'} · {size(s.bytes)}
                 <GoesWith session={s} />
               </div>
               <div className="mt-1.5 flex gap-3 text-[11px]">
                 <button
                   type="button"
-                  className="text-slate hover:text-chalk"
+                  className="text-ink-faint hover:text-ink"
                   onClick={() => setReading(s)}
                   data-testid={`trash-read-${s.id}`}
                 >
@@ -152,7 +152,7 @@ export function TrashSection() {
                 </button>
                 <button
                   type="button"
-                  className="text-slate hover:text-chalk disabled:opacity-40"
+                  className="text-ink-faint hover:text-ink disabled:opacity-40"
                   disabled={busy}
                   onClick={() => void act(s.id, () => restoreFromTrash(s.id))}
                   data-testid={`trash-restore-${s.id}`}
@@ -161,7 +161,7 @@ export function TrashSection() {
                 </button>
                 <button
                   type="button"
-                  className="text-slate hover:text-del disabled:opacity-40"
+                  className="text-ink-faint hover:text-danger disabled:opacity-40"
                   disabled={busy}
                   onClick={() => setConfirming(s)}
                   data-testid={`trash-purge-${s.id}`}
@@ -170,7 +170,7 @@ export function TrashSection() {
                 </button>
               </div>
               {rowError?.id === s.id && (
-                <p className="mt-1.5 text-[11px] leading-relaxed text-chalk" data-testid={`trash-error-${s.id}`}>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-ink" data-testid={`trash-error-${s.id}`}>
                   {rowError.text}
                 </p>
               )}
@@ -195,10 +195,10 @@ function GoesWith({ session: s }: { session: TrashedSession }) {
   const tool = useToolMeta(s.tool).label
   return (
     <>
-      {s.conversationFile === 'remove' && <span className="text-del"> · the {tool} conversation file goes too</span>}
+      {s.conversationFile === 'remove' && <span className="text-danger"> · the {tool} conversation file goes too</span>}
       {s.conversationFile === 'keep' && <span> · the {tool} conversation file stays</span>}
       {s.worktree && (
-        <span className={s.worktree.remove ? 'text-del' : undefined}>
+        <span className={s.worktree.remove ? 'text-danger' : undefined}>
           {' '}
           · worktree <span className="font-mono">{s.worktree.branch}</span> {s.worktree.remove ? 'goes too' : 'stays'}
         </span>
@@ -216,15 +216,15 @@ function goesWithText(s: TrashedSession): string {
 
 function Confirm({ text, busy, onYes, onNo }: { text: string; busy: boolean; onYes: () => void; onNo: () => void }) {
   return (
-    <div className="mt-2 rounded border border-del/40 bg-del-bg px-2.5 py-2" data-testid="trash-confirm">
-      <p className="text-[11px] leading-relaxed text-chalk">{text}</p>
+    <div className="mt-2 rounded border border-danger/40 bg-danger-bg px-2.5 py-2" data-testid="trash-confirm">
+      <p className="text-[11px] leading-relaxed text-ink">{text}</p>
       <div className="mt-2 flex justify-end gap-2">
-        <button type="button" className="rounded px-2 py-0.5 text-[11px] text-slate hover:text-chalk" onClick={onNo}>
+        <button type="button" className="rounded px-2 py-0.5 text-[11px] text-ink-faint hover:text-ink" onClick={onNo}>
           Cancel
         </button>
         <button
           type="button"
-          className="rounded border border-del/40 px-2 py-0.5 text-[11px] text-del hover:border-del/70 disabled:opacity-40"
+          className="rounded border border-danger/40 px-2 py-0.5 text-[11px] text-danger hover:border-danger/70 disabled:opacity-40"
           disabled={busy}
           onClick={onYes}
           data-testid="trash-confirm-yes"
@@ -270,20 +270,20 @@ function TrashReader({ session, onBack }: { session: TrashedSession; onBack: () 
       <div className="flex items-baseline gap-2">
         <button
           type="button"
-          className="text-[11px] text-slate hover:text-chalk"
+          className="text-[11px] text-ink-faint hover:text-ink"
           onClick={onBack}
           data-testid="trash-reader-back"
         >
           ← Trash
         </button>
-        <span className="min-w-0 truncate text-[12px] text-chalk">{session.name}</span>
-        <span className="ml-auto shrink-0 text-[10px] text-slate">read-only</span>
+        <span className="min-w-0 truncate text-[12px] text-ink">{session.name}</span>
+        <span className="ml-auto shrink-0 text-[10px] text-ink-faint">read-only</span>
       </div>
-      {error && <p className="mt-2 text-[12px] text-chalk">Could not read it: {error}</p>}
+      {error && <p className="mt-2 text-[12px] text-ink">Could not read it: {error}</p>}
       {more && oldest !== null && (
         <button
           type="button"
-          className="mt-2 text-[11px] text-slate hover:text-chalk"
+          className="mt-2 text-[11px] text-ink-faint hover:text-ink"
           onClick={() => page(oldest)}
           data-testid="trash-reader-older"
         >
@@ -291,7 +291,7 @@ function TrashReader({ session, onBack }: { session: TrashedSession; onBack: () 
         </button>
       )}
       <ol className="mt-2 space-y-2" data-testid="trash-reader-messages">
-        {items?.length === 0 && <li className="text-[12px] text-slate">Nothing was said in this session</li>}
+        {items?.length === 0 && <li className="text-[12px] text-ink-faint">Nothing was said in this session</li>}
         {items?.map((it, i) => <ReaderItem key={`${it.storedSeq ?? 'x'}-${i}`} item={it} />)}
       </ol>
     </section>
@@ -302,11 +302,11 @@ function ReaderItem({ item }: { item: ChatItem }) {
   switch (item.kind) {
     case 'user':
       return (
-        <li className="rounded bg-panel px-2.5 py-1.5 text-[12px] whitespace-pre-wrap text-chalk">
-          {item.from && <span className="mr-1.5 text-[10px] text-slate">from {item.from.name}</span>}
+        <li className="rounded bg-surface-raised px-2.5 py-1.5 text-[12px] whitespace-pre-wrap text-ink">
+          {item.from && <span className="mr-1.5 text-[10px] text-ink-faint">from {item.from.name}</span>}
           {item.text}
           {item.attachments?.length ? (
-            <span className="ml-1.5 text-[10px] text-slate">
+            <span className="ml-1.5 text-[10px] text-ink-faint">
               +{item.attachments.length} {item.attachments.length === 1 ? 'attachment' : 'attachments'}
             </span>
           ) : null}
@@ -319,18 +319,18 @@ function ReaderItem({ item }: { item: ChatItem }) {
         </li>
       )
     case 'tool':
-      return <li className="font-mono text-[10px] text-slate">▸ {item.title || item.tool}</li>
+      return <li className="font-mono text-[10px] text-ink-faint">▸ {item.title || item.tool}</li>
     case 'approval':
       return (
-        <li className="text-[10px] text-slate">
+        <li className="text-[10px] text-ink-faint">
           Approval · {item.summary}
           {item.decision ? ` — ${item.decision}` : ''}
         </li>
       )
     case 'mark':
-      return <li className="border-t border-edge/60 pt-1 text-center text-[10px] text-slate">{item.text}</li>
+      return <li className="border-t border-line/60 pt-1 text-center text-[10px] text-ink-faint">{item.text}</li>
     case 'image':
-      return <li className="text-[10px] text-slate">[image]</li>
+      return <li className="text-[10px] text-ink-faint">[image]</li>
     case 'reasoning':
       return null
   }

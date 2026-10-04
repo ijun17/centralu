@@ -87,7 +87,7 @@ function Harness() {
     () => frames,
   )
   return (
-    <main className="min-h-screen bg-void p-4 text-chalk">
+    <main className="min-h-screen bg-surface-floor p-4 text-ink">
       {list.map((f) => (
         <section key={f.key} data-testid={`frame-${f.key}`} className="mb-4">
           <AppFrame

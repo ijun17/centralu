@@ -76,7 +76,7 @@ export function ResizeHandle({
         side === 'top'
           ? 'left-0 top-0 h-1 w-full cursor-row-resize'
           : `top-0 h-full w-1 cursor-col-resize ${side === 'left' ? 'left-0' : 'right-0'}`
-      } ${dragging ? 'bg-graphite' : 'hover:bg-graphite/60'}`}
+      } ${dragging ? 'bg-surface-hover' : 'hover:bg-surface-hover/60'}`}
       onMouseDown={(e) => {
         e.preventDefault()
         setDragging(true)

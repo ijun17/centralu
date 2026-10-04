@@ -663,7 +663,7 @@ export type AppState = {
    * Still a toggle rather than always-on, because of *what* is behind it: not a curiosity
    * or two but `node_modules`, `dist`, `.next` — thousands of entries that sort in among
    * `src`. Whoever finds that unusable turns it off once, and it stays off. Shown rows read
-   * in slate, since "the repo does not track this" is background information, not urgency.
+   * in ink-faint, since "the repo does not track this" is background information, not urgency.
    *
    * **Global, and remembered** — unlike expanded folders, which belong to their project.
    * That difference is the point: an open folder is a fact about a repo, while this is a

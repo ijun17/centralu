@@ -66,17 +66,17 @@ export function CommitGraph({
       {row.above.map((l) =>
         l === row.lane ? (
           // My own trunk comes down from above and reaches the dot
-          <line key={`a${l}`} x1={x(l)} y1={0} x2={x(l)} y2={DOT_Y} stroke="var(--color-graphite)" strokeWidth="1.5" />
+          <line key={`a${l}`} x1={x(l)} y1={0} x2={x(l)} y2={DOT_Y} stroke="var(--color-line-strong)" strokeWidth="1.5" />
         ) : row.below.includes(l) ? (
           // A branch passing through, unrelated to this commit
-          <line key={`a${l}`} x1={x(l)} y1={0} x2={x(l)} y2={ROW_H} stroke="var(--color-graphite)" strokeWidth="1.5" />
+          <line key={`a${l}`} x1={x(l)} y1={0} x2={x(l)} y2={ROW_H} stroke="var(--color-line-strong)" strokeWidth="1.5" />
         ) : (
           // A branch that ends here — it was waiting for this commit as its parent
           <path
             key={`a${l}`}
             d={curve(x(l), 0, x(row.lane), DOT_Y)}
             fill="none"
-            stroke="var(--color-graphite)"
+            stroke="var(--color-line-strong)"
             strokeWidth="1.5"
           />
         ),
@@ -84,13 +84,13 @@ export function CommitGraph({
 
       {row.edges.map((e) =>
         e === row.lane ? (
-          <line key={`e${e}`} x1={x(e)} y1={DOT_Y} x2={x(e)} y2={ROW_H} stroke="var(--color-graphite)" strokeWidth="1.5" />
+          <line key={`e${e}`} x1={x(e)} y1={DOT_Y} x2={x(e)} y2={ROW_H} stroke="var(--color-line-strong)" strokeWidth="1.5" />
         ) : (
           <path
             key={`e${e}`}
             d={curve(x(row.lane), DOT_Y, x(e), ROW_H)}
             fill="none"
-            stroke="var(--color-graphite)"
+            stroke="var(--color-line-strong)"
             strokeWidth="1.5"
           />
         ),
@@ -100,13 +100,13 @@ export function CommitGraph({
         The dot's shape tells the kind (the achromatic rule — told apart by shape, not color):
           large filled dot = HEAD, here now   ·   empty dot = merge   ·   small dot = ordinary commit
       */}
-      {head && <circle cx={x(row.lane)} cy={DOT_Y} r={5} fill="none" stroke="var(--color-ash)" strokeWidth="1" />}
+      {head && <circle cx={x(row.lane)} cy={DOT_Y} r={5} fill="none" stroke="var(--color-ink-muted)" strokeWidth="1" />}
       <circle
         cx={x(row.lane)}
         cy={DOT_Y}
         r={merge ? 3.5 : 2.5}
-        fill={merge ? 'var(--color-pit)' : head ? 'var(--color-chalk)' : 'var(--color-slate)'}
-        stroke={merge ? 'var(--color-ash)' : 'none'}
+        fill={merge ? 'var(--color-surface-side)' : head ? 'var(--color-ink)' : 'var(--color-ink-faint)'}
+        stroke={merge ? 'var(--color-ink-muted)' : 'none'}
         strokeWidth="1.5"
       />
     </svg>

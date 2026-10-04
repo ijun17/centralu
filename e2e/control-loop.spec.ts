@@ -552,7 +552,7 @@ test('The global counter counts everything waiting as one, and brightness signal
   const count = page.getByTestId('count-waiting')
   await expect(count).toContainText('02')
   // Pure white if even one approval is pending — pure white is reserved for what is blocking the person
-  await expect(count).toHaveClass(/beacon/)
+  await expect(count).toHaveClass(/(^|\s)signal(\s|$)/)
 })
 
 test('Control loop: clearing five waiting items using only the keyboard (T5-5 core scenario)', async ({
@@ -598,7 +598,7 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
    * immediately starts waiting for the next reply, it gets counted again, and that is not the
    * fact this test is checking (whether anything urgent remains).
    */
-  await expect(page.getByTestId('count-waiting')).not.toHaveClass(/beacon/)
+  await expect(page.getByTestId('count-waiting')).not.toHaveClass(/(^|\s)signal(\s|$)/)
 
   /*
     Clear the remaining 3 items waiting for a reply by **actually replying**.
@@ -1451,7 +1451,7 @@ test('hiding ignored files is remembered — it is a way of looking, not a per-v
   await newSession(page, 'alpha', 'work')
   await page.getByTestId('evidence-tab-files').click()
 
-  // Shown without being asked for — and still ignored: slate says "the repo does not
+  // Shown without being asked for — and still ignored: ink-faint says "the repo does not
   // track this" without shouting it
   await expect(page.getByTestId('toggle-ignored')).toBeChecked()
   await expect(page.getByTestId('dir-node_modules')).toBeVisible()
@@ -1676,7 +1676,7 @@ test('Viewer: the row background still covers the visible width even after scrol
   // short line used to end within the visible width and drag the line number out with it
   // (measured: right edge at -1,500, line number at -848)
   await page.getByTestId('viewer-search').fill('short')
-  await expect(page.locator('[data-line="2"]')).toHaveClass(/bg-graphite/)
+  await expect(page.locator('[data-line="2"]')).toHaveClass(/bg-surface-hover/)
 
   const seen = await page.evaluate((sel) => {
     const root = document.querySelector<HTMLElement>(sel)!
@@ -1874,11 +1874,11 @@ test('Top bar: the count is the signal, not a shortcut chip (#33)', async ({ pag
 
   // Lighting up remains the count's job (an approval waiting = pure white)
   await expect(page.getByTestId('count-waiting')).toContainText('01')
-  await expect(page.getByTestId('count-waiting')).toHaveClass(/beacon/)
+  await expect(page.getByTestId('count-waiting')).toHaveClass(/(^|\s)signal(\s|$)/)
 
   /*
    * The glow belongs to the number alone (pointed out by the person, 2026-09-12). Because
-   * `beacon`'s text-shadow is inherited, the label — which only overrides color — was wearing a
+   * `signal`'s text-shadow is inherited, the label — which only overrides color — was wearing a
    * white halo on its dark text as well. Instead of looking luminous, it just looked out of
    * focus.
    */
@@ -2533,11 +2533,11 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
 
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
-  // The same chip shape as the session row marker — an approval is a pure-white (beacon) ring,
+  // The same chip shape as the session row marker — an approval is a pure-white (ink-signal) ring,
   // with a count where the label would be
   const mark = page.getByTestId('fold-summary-alpha').locator('[data-state="waiting_approval"]')
   await expect(mark).toHaveText('1')
-  await expect(mark).toHaveAttribute('style', /--color-beacon/)
+  await expect(mark).toHaveAttribute('style', /--color-ink-signal/)
   await page.getByTestId('fold-summary-alpha').hover()
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
   // An expanded project has no summary — each row's own marker already says it
@@ -8615,8 +8615,8 @@ test('Deleting a project: unlocks only by typing the name, and the file checkbox
   await expect(page.getByTestId('delete-project-note')).toHaveCount(0)
   await expect(page.getByTestId('delete-project-warning')).toContainText('/tmp/alpha')
   await expect(confirm).toHaveText('Delete and trash folder')
-  // The warning uses the delete palette (dogfooding: dangerous spots are red) — the same color as
-  // a diff's deletion
+  // The warning uses the danger palette (dogfooding: dangerous spots are red) — today the same
+  // values as a diff's deletion
   await expect(page.getByTestId('delete-project-warning')).toHaveCSS('background-color', 'rgb(43, 21, 23)')
   await expect(confirm).toHaveCSS('color', 'rgb(255, 161, 152)')
 

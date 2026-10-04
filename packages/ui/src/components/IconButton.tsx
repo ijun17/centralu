@@ -39,7 +39,7 @@ export function IconButton({
    * On — the icon stands in white (gray otherwise).
    *
    * Why this is taken as a prop instead of overriding the color through className: in Tailwind,
-   * when `text-slate` and `text-chalk` are both attached, which one wins is decided by the order
+   * when `text-ink-faint` and `text-ink` are both attached, which one wins is decided by the order
    * of the generated CSS, not the order of the class attribute — a visible state cannot be pinned
    * to something that can shift between builds. Here, only one of the two is ever attached.
    */
@@ -50,8 +50,8 @@ export function IconButton({
     <Tooltip content={label} placement={placement} align={align}>
       <button
         type={type}
-        className={`flex items-center justify-center rounded p-1 transition-colors hover:bg-graphite/60 hover:text-chalk disabled:opacity-40 ${
-          lit ? 'text-chalk' : 'text-slate'
+        className={`flex items-center justify-center rounded p-1 transition-colors hover:bg-surface-hover/60 hover:text-ink disabled:opacity-40 ${
+          lit ? 'text-ink' : 'text-ink-faint'
         } ${className}`}
         onClick={onClick}
         disabled={disabled}

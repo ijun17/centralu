@@ -8,7 +8,7 @@ import { Modal } from '../../components/Modal.jsx'
 
 /** What one field looks like. All three must share a shape to read as "the same kind of answer" */
 const inputClass =
-  'w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none'
+  'w-full rounded border border-line bg-surface-floor px-2 py-1.5 font-mono text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
 /**
  * The state of the past sessions list.
@@ -270,7 +270,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   return (
     <Modal onClose={onClose} testId="new-session-dialog" align="top">
       <form
-        className="flex max-h-[calc(82vh/var(--text-zoom))] w-[480px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="flex max-h-[calc(82vh/var(--text-zoom))] w-[480px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
         onKeyDown={(e) => {
           if (e.key === 'Escape') return onClose()
           /*
@@ -340,10 +340,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           chips and grow the dialog off screen. The start button is pinned at the bottom, so it stays
           within reach no matter how far the scroll has gone.
         */}
-        <header className="shrink-0 border-b border-edge px-4 py-2.5">
-          <h2 className="text-[13px] font-medium text-chalk">
-            New session <span className="text-slate">·</span>{' '}
-            <span className="text-ash">{project?.name}</span>
+        <header className="shrink-0 border-b border-line px-4 py-2.5">
+          <h2 className="text-[13px] font-medium text-ink">
+            New session <span className="text-ink-faint">·</span>{' '}
+            <span className="text-ink-muted">{project?.name}</span>
           </h2>
           {/* The tool — two buttons need no subheading to make their meaning clear. Model and permissions are set from the header after creation */}
           <div className="mt-2.5 flex gap-1.5">
@@ -356,8 +356,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 title={info(t.name)?.detail}
                 className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
                   tool === t.name
-                    ? 'border-ash bg-graphite/40 text-chalk'
-                    : 'border-edge text-ash hover:border-graphite hover:text-chalk'
+                    ? 'border-ink-muted bg-surface-hover/40 text-ink'
+                    : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
                 } ${tools && !usable(t.name) ? 'opacity-50' : ''}`}
               >
                 {t.label}
@@ -366,7 +366,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           </div>
           {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
           {blocked && (
-            <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="tool-blocked">
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="tool-blocked">
               {info(tool)?.installed
                 ? `${toolMeta.label} needs a login — run ${toolMeta.login} in a terminal`
                 : `${toolMeta.label} not found (${info(tool)?.detail ?? 'not installed'})`}
@@ -381,7 +381,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         */}
           <div
             ref={listRef}
-            className="max-h-64 overflow-y-auto rounded border border-edge bg-panel"
+            className="max-h-64 overflow-y-auto rounded border border-line bg-surface-raised"
             data-testid="past-sessions"
           >
             <PastRow
@@ -392,21 +392,21 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               meta=""
             />
             {past.status === 'loading' && (
-              <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-loading">
+              <p className="px-2.5 py-2 text-[11px] text-ink-faint" data-testid="past-loading">
                 Looking for past conversations…
               </p>
             )}
             {/* Using an older tool version does not block a new session too — only the reason is quietly stated */}
             {past.status === 'unsupported' && (
               <p
-                className="px-2.5 py-2 text-[11px] leading-relaxed text-slate"
+                className="px-2.5 py-2 text-[11px] leading-relaxed text-ink-faint"
                 data-testid="past-unsupported"
               >
                 Could not load past conversations — {past.reason}
               </p>
             )}
             {past.status === 'ok' && past.sessions.length === 0 && (
-              <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-empty">
+              <p className="px-2.5 py-2 text-[11px] text-ink-faint" data-testid="past-empty">
                 No past conversations in this folder.
               </p>
             )}
@@ -453,25 +453,25 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           explaining an option that cannot even be used is noise for the task of creating a session.
         */}
           {running.length > 0 && (
-            <p className="mt-2.5 text-[11px] leading-relaxed text-ash" data-testid="concurrent-warning">
+            <p className="mt-2.5 text-[11px] leading-relaxed text-ink-muted" data-testid="concurrent-warning">
               {running.length} sessions are already running in this directory. Editing the same files can lose
               changes.
             </p>
           )}
           {isRepo && (
             <label
-              className="mt-2.5 flex cursor-pointer items-center gap-2 text-[11px] text-ash hover:text-chalk"
+              className="mt-2.5 flex cursor-pointer items-center gap-2 text-[11px] text-ink-muted hover:text-ink"
               data-testid="worktree-toggle"
             >
               <input
                 type="checkbox"
-                className="accent-ash"
+                className="accent-ink-muted"
                 checked={worktree}
                 onChange={(e) => setWorktree(e.target.checked)}
               />
               <span>
                 Run in a git worktree
-                <span className="text-slate"> — own branch and directory, can’t touch the others’ files</span>
+                <span className="text-ink-faint"> — own branch and directory, can’t touch the others’ files</span>
               </span>
             </label>
           )}
@@ -485,7 +485,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         */}
           {isRepo && worktree && (
             <div
-              className="mt-2 space-y-2.5 rounded border border-edge bg-panel p-2.5"
+              className="mt-2 space-y-2.5 rounded border border-line bg-surface-raised p-2.5"
               data-testid="worktree-options"
             >
               {/*
@@ -576,13 +576,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                                   }}
                                   className={`rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
                                     picked
-                                      ? 'border-ash bg-graphite/40 text-chalk'
-                                      : 'border-edge text-slate hover:border-graphite hover:text-ash'
+                                      ? 'border-ink-muted bg-surface-hover/40 text-ink'
+                                      : 'border-line text-ink-faint hover:border-line-strong hover:text-ink-muted'
                                   }`}
                                 >
                                   {e.path}
                                   {e.bytes !== null && (
-                                    <span className="ml-1 text-slate">{fmtBytes(e.bytes)}</span>
+                                    <span className="ml-1 text-ink-faint">{fmtBytes(e.bytes)}</span>
                                   )}
                                 </button>
                               </li>
@@ -596,10 +596,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                         after the worktree is already created.
                       */}
                         {picks.length > 0 && (
-                          <p className="mt-1.5 text-[10px] text-slate" data-testid="copy-total">
+                          <p className="mt-1.5 text-[10px] text-ink-faint" data-testid="copy-total">
                             {picks.length} to copy{pickedBytes > 0 ? ` · ~${fmtBytes(pickedBytes)}` : ''}
                             {pickedBytes > 1024 ** 3 && (
-                              <span className="text-ash"> — every worktree pays this again</span>
+                              <span className="text-ink-muted"> — every worktree pays this again</span>
                             )}
                           </p>
                         )}
@@ -612,7 +612,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   type="button"
                   data-testid="worktree-setup-summary"
                   onClick={() => setSetupOpen(true)}
-                  className="block w-full truncate rounded border border-edge px-2 py-1 text-left font-mono text-[10px] text-slate hover:border-graphite hover:text-ash"
+                  className="block w-full truncate rounded border border-line px-2 py-1 text-left font-mono text-[10px] text-ink-faint hover:border-line-strong hover:text-ink-muted"
                   title="Edit worktree setup"
                 >
                   {savedSetup?.command ? `setup: ${savedSetup.command}` : 'setup: (none)'}
@@ -624,7 +624,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
           {error && (
             <p
-              className="mt-3 rounded border border-edge bg-panel px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
+              className="mt-3 rounded border border-line bg-surface-raised px-2.5 py-2 text-[11px] leading-relaxed text-ink"
               data-testid="create-session-error"
             >
               {error}
@@ -637,10 +637,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           already knows in any dialog with a list, and the value is too small for a spot that gets
           read every time. The behavior is unchanged: only the hint text is gone.
         */}
-        <footer className="flex shrink-0 justify-end gap-2 border-t border-edge px-4 py-2.5">
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-2.5">
           <button
             type="button"
-            className="rounded px-2 py-1 text-[12px] text-slate transition-colors hover:text-chalk"
+            className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink"
             onClick={onClose}
           >
             Cancel
@@ -648,7 +648,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           <button
             /* Since the input field is gone, Enter means start — this needs to hold the default focus */
             autoFocus
-            className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+            className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
             disabled={busy || blocked}
             data-testid="create-session-confirm"
           >
@@ -676,9 +676,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div>
-      <p className="mb-1 text-[10px] text-ash">
+      <p className="mb-1 text-[10px] text-ink-muted">
         {label}
-        {hint && <span className="text-slate"> · {hint}</span>}
+        {hint && <span className="text-ink-faint"> · {hint}</span>}
       </p>
       {children}
     </div>
@@ -710,12 +710,12 @@ function PastRow({
       aria-pressed={selected}
       className={`flex w-full flex-col gap-0.5 border-l-2 px-2.5 py-1.5 text-left transition-colors ${
         selected
-          ? 'border-l-ash bg-graphite/40 text-chalk'
-          : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+          ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
+          : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
       }`}
     >
       <span className="truncate text-[12px] leading-snug">{title}</span>
-      {meta && <span className="readout truncate text-[10px] text-slate">{meta}</span>}
+      {meta && <span className="readout truncate text-[10px] text-ink-faint">{meta}</span>}
     </button>
   )
 }

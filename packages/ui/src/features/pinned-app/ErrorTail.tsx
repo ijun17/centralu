@@ -103,24 +103,24 @@ export function ErrorTail({
     const here = denied.appId === app.appId && (denied.projectId ?? null) === (app.projectId ?? null)
     return (
       <section
-        className="mt-2 shrink-0 rounded border border-edge bg-panel px-3 py-2 text-[12px]"
+        className="mt-2 shrink-0 rounded border border-line bg-surface-raised px-3 py-2 text-[12px]"
         role="status"
         data-testid="error-tail"
         data-kind={bundle.kind}
         data-denied="true"
       >
         <header className="flex items-center gap-2">
-          <span className="min-w-0 truncate text-chalk" data-testid="error-tail-title">
+          <span className="min-w-0 truncate text-ink" data-testid="error-tail-title">
             {`${bundle.tool ?? 'A tool'} stopped: you did not allow it`}
           </span>
-          <time className="readout shrink-0 text-[10px] text-slate" dateTime={new Date(bundle.at).toISOString()}>
+          <time className="readout shrink-0 text-[10px] text-ink-faint" dateTime={new Date(bundle.at).toISOString()}>
             {new Date(bundle.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </time>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {here && (
               <button
                 type="button"
-                className="rounded border border-edge bg-void px-2.5 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+                className="rounded border border-line bg-surface-floor px-2.5 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
                 onClick={onShowRuns}
                 data-testid="error-tail-open-runs"
               >
@@ -132,7 +132,7 @@ export function ErrorTail({
             </IconButton>
           </span>
         </header>
-        <p className="mt-1 whitespace-pre-wrap break-words text-ash" data-testid="error-tail-denied">
+        <p className="mt-1 whitespace-pre-wrap break-words text-ink-muted" data-testid="error-tail-denied">
           {`You did not allow ${denied.name} to ${denied.text}. This is your decision, not a bug in the app. `}
           {here
             ? 'To change it, open Runs, find it under Permissions and choose Forget. Centralu asks again the next time.'
@@ -143,26 +143,26 @@ export function ErrorTail({
   }
 
   return (
-    <section className="mt-2 shrink-0 rounded border border-edge bg-panel px-3 py-2 text-[12px]" role="alert" data-testid="error-tail" data-kind={bundle.kind}>
+    <section className="mt-2 shrink-0 rounded border border-line bg-surface-raised px-3 py-2 text-[12px]" role="alert" data-testid="error-tail" data-kind={bundle.kind}>
       <header className="flex items-center gap-2">
-        <span className="min-w-0 truncate text-chalk" data-testid="error-tail-title">
+        <span className="min-w-0 truncate text-ink" data-testid="error-tail-title">
           {titleOf(bundle)}
         </span>
-        <time className="readout shrink-0 text-[10px] text-slate" dateTime={new Date(bundle.at).toISOString()}>
+        <time className="readout shrink-0 text-[10px] text-ink-faint" dateTime={new Date(bundle.at).toISOString()}>
           {new Date(bundle.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </time>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {bundle.sentAt !== null ? (
-            <span className="flex items-center gap-2 text-[11px] text-slate" data-testid="error-tail-sent">
+            <span className="flex items-center gap-2 text-[11px] text-ink-faint" data-testid="error-tail-sent">
               Sent to the builder.
-              <button type="button" className="text-ash underline-offset-2 hover:text-chalk hover:underline" onClick={onShowBuilder}>
+              <button type="button" className="text-ink-muted underline-offset-2 hover:text-ink hover:underline" onClick={onShowBuilder}>
                 Show
               </button>
             </span>
           ) : builder.id ? (
             <button
               type="button"
-              className="rounded border border-edge bg-void px-2.5 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+              className="rounded border border-line bg-surface-floor px-2.5 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
               onClick={() => void send()}
               disabled={busy}
               title="Hand this error to the app's builder session, once"
@@ -171,26 +171,26 @@ export function ErrorTail({
               {busy ? 'Sending…' : 'Send to builder'}
             </button>
           ) : (
-            <span className="text-[11px] text-slate">Start a builder to send it.</span>
+            <span className="text-[11px] text-ink-faint">Start a builder to send it.</span>
           )}
           <IconButton label="Hide this error" onClick={() => setDismissed(bundle.at)} testId="error-tail-dismiss" align="right">
             <CloseIcon size={12} />
           </IconButton>
         </span>
       </header>
-      <p className="mt-1 whitespace-pre-wrap break-words text-ash" data-testid="error-tail-message">
+      <p className="mt-1 whitespace-pre-wrap break-words text-ink-muted" data-testid="error-tail-message">
         {bundle.message}
       </p>
       {tail.length > 0 && (
         <pre
-          className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-edge bg-void px-2 py-1 font-mono text-[11px] leading-relaxed text-ash"
+          className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-line bg-surface-floor px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-muted"
           data-testid="error-tail-stderr"
         >
           {tail.join('\n')}
         </pre>
       )}
       {error && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-ash" data-testid="error-tail-error">
+        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-ink-muted" data-testid="error-tail-error">
           {error}
         </p>
       )}

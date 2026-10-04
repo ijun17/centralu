@@ -55,28 +55,28 @@ export function AppPanel({
   return (
     <>
       <div
-        className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b border-edge px-4 active:cursor-grabbing"
+        className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b border-line px-4 active:cursor-grabbing"
         draggable
         onDragStart={onDragStart}
         data-testid="pane-header"
       >
-        <span className="text-ash">
+        <span className="text-ink-muted">
           <AppIcon />
         </span>
         <span
-          className="truncate text-[13px] font-medium tracking-tight text-chalk"
+          className="truncate text-[13px] font-medium tracking-tight text-ink"
           data-testid="app-panel-title"
         >
           {title}
         </span>
         {app && (
-          <span className="readout shrink-0 text-[10px] text-slate" data-testid="app-panel-status">
+          <span className="readout shrink-0 text-[10px] text-ink-faint" data-testid="app-panel-status">
             {app.status.label}
           </span>
         )}
         <button
           type="button"
-          className="ml-auto shrink-0 rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
+          className="ml-auto shrink-0 rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
           onClick={onOpen}
           title="Open this app on its own, with its runs, secrets and versions"
           data-testid={openTestId}

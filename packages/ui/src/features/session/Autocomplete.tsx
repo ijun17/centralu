@@ -288,13 +288,13 @@ export function AutocompleteMenu({
 
   return (
     <div
-      className="absolute bottom-full left-0 z-30 mb-1 w-full overflow-hidden rounded border border-edge bg-panel shadow-[0_-12px_32px_-8px_rgb(0_0_0/0.9)]"
+      className="absolute bottom-full left-0 z-30 mb-1 w-full overflow-hidden rounded border border-line bg-surface-raised shadow-(--shadow-popover-up)"
       data-testid="autocomplete"
     >
       {loading && items.length === 0 ? (
         // This is "not yet", not "none" — right after a session starts, it must not look as
         // though it has no skills
-        <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="autocomplete-loading">
+        <p className="px-2.5 py-2 text-[11px] text-ink-faint" data-testid="autocomplete-loading">
           {kind === 'command' ? 'Loading skills…' : 'Searching…'}
         </p>
       ) : (
@@ -310,12 +310,12 @@ export function AutocompleteMenu({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onPick(item)}
                 className={`flex w-full items-baseline gap-2 px-2.5 py-1 text-left transition-colors ${
-                  i === index ? 'bg-graphite/50 text-chalk' : 'text-ash hover:bg-graphite/25'
+                  i === index ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted hover:bg-surface-hover/25'
                 }`}
               >
                 <span className="shrink-0 truncate text-[12px]">{item.label}</span>
                 {item.hint && (
-                  <span className="readout ml-auto truncate text-[10px] text-slate">{item.hint}</span>
+                  <span className="readout ml-auto truncate text-[10px] text-ink-faint">{item.hint}</span>
                 )}
               </button>
             </li>
@@ -325,7 +325,7 @@ export function AutocompleteMenu({
           {loading && (
             <li>
               <p
-                className="border-t border-edge px-2.5 py-1.5 text-[11px] text-slate"
+                className="border-t border-line px-2.5 py-1.5 text-[11px] text-ink-faint"
                 data-testid="autocomplete-loading"
               >
                 Loading skills…

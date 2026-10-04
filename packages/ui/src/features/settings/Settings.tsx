@@ -43,7 +43,7 @@ function RuleOwner({ rule }: { rule: Rule }) {
   const known = rule.scope === 'project' ? rule.projectId : rule.sessionId
   if (!known) return null
   return (
-    <span className="min-w-0 truncate text-[10px] text-ash" data-testid={`rule-owner-${rule.id}`}>
+    <span className="min-w-0 truncate text-[10px] text-ink-muted" data-testid={`rule-owner-${rule.id}`}>
       {name ?? (rule.scope === 'project' ? 'removed project' : 'removed session')}
     </span>
   )
@@ -180,17 +180,17 @@ export function Settings() {
 
   return (
     <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-void/80 pt-[calc(8vh/var(--text-zoom))] backdrop-blur-[2px]"
+      className="absolute inset-0 z-40 flex items-start justify-center bg-scrim pt-[calc(8vh/var(--text-zoom))] backdrop-blur-[2px]"
       onClick={() => toggle(false)}
       data-testid="settings"
     >
       <div
-        className="flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-baseline gap-2 border-b border-edge px-4 py-2.5">
-          <h2 className="text-[13px] font-medium text-chalk">Settings</h2>
-          <span className="ml-auto text-[10px] text-slate">
+        <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
+          <h2 className="text-[13px] font-medium text-ink">Settings</h2>
+          <span className="ml-auto text-[10px] text-ink-faint">
             <Kbd>esc</Kbd> Close
           </span>
         </header>
@@ -201,7 +201,7 @@ export function Settings() {
             which a scroll can only do by being short — and it will not stay short.
           */}
           <nav
-            className="w-[132px] shrink-0 space-y-0.5 border-r border-edge p-2"
+            className="w-[132px] shrink-0 space-y-0.5 border-r border-line p-2"
             data-testid="settings-nav"
             aria-label="Settings categories"
           >
@@ -213,7 +213,7 @@ export function Settings() {
                 aria-current={c.id === category ? 'page' : undefined}
                 onClick={() => setCategory(c.id)}
                 className={`w-full rounded px-2 py-1 text-left text-[12px] transition-colors ${
-                  c.id === category ? 'bg-edge text-chalk' : 'text-ash hover:text-chalk'
+                  c.id === category ? 'bg-surface-selected text-ink' : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 {c.label}
@@ -232,7 +232,7 @@ export function Settings() {
             {/* E-5 notification policy */}
             {category === 'notifications' && (
               <section>
-                <p className="text-[11px] leading-relaxed text-slate">
+                <p className="text-[11px] leading-relaxed text-ink-faint">
                   Notifications are the only way to force attention, so use them sparingly.
                 </p>
                 <ul className="mt-2 space-y-1.5">
@@ -247,10 +247,10 @@ export function Settings() {
                     ] as [keyof NotifyPolicy, string][]
                   ).map(([key, label]) => (
                     <li key={key}>
-                      <label className="flex items-center gap-2 text-[12px] text-ash">
+                      <label className="flex items-center gap-2 text-[12px] text-ink-muted">
                         <input
                           type="checkbox"
-                          className="accent-graphite"
+                          className="accent-line-strong"
                           checked={policy[key]}
                           onChange={(e) => setPolicy({ ...policy, [key]: e.target.checked })}
                           data-testid={`notify-${key}`}
@@ -262,7 +262,7 @@ export function Settings() {
                 </ul>
                 <div className="mt-2 flex items-center gap-3">
                   <button
-                    className="text-[11px] text-slate underline-offset-2 hover:text-chalk hover:underline"
+                    className="text-[11px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
                     onClick={() => setPolicy(DEFAULT_NOTIFY_POLICY)}
                   >
                     Reset to defaults
@@ -278,30 +278,30 @@ export function Settings() {
             {/* E-4 approval rules */}
             {category === 'permissions' && (
               <section>
-                <p className="text-[11px] leading-relaxed text-slate">
+                <p className="text-[11px] leading-relaxed text-ink-faint">
                   Pressing <Kbd>a</Kbd> on an approval adds an always-allow rule here. Delete any of them
                   anytime.
                 </p>
                 {rules === null ? (
-                  <p className="mt-2 text-[12px] text-slate">Loading…</p>
+                  <p className="mt-2 text-[12px] text-ink-faint">Loading…</p>
                 ) : rules.length === 0 ? (
-                  <p className="mt-2 text-[12px] text-slate" data-testid="rules-empty">
+                  <p className="mt-2 text-[12px] text-ink-faint" data-testid="rules-empty">
                     No saved rules
                   </p>
                 ) : (
-                  <ul className="mt-2 divide-y divide-edge/60 rounded border border-edge" data-testid="rules-list">
+                  <ul className="mt-2 divide-y divide-line/60 rounded border border-line" data-testid="rules-list">
                     {rules.map((r) => (
                       <li key={r.id} className="flex items-center gap-2 px-2.5 py-1.5">
-                        <code className="truncate font-mono text-[12px] text-chalk">{r.matcher}</code>
-                        <span className="shrink-0 text-[10px] text-slate">
+                        <code className="truncate font-mono text-[12px] text-ink">{r.matcher}</code>
+                        <span className="shrink-0 text-[10px] text-ink-faint">
                           {r.scope === 'project' ? 'Project' : 'Session'}
                         </span>
                         <RuleOwner rule={r} />
-                        <span className="readout ml-auto shrink-0 text-[10px] text-slate">
+                        <span className="readout ml-auto shrink-0 text-[10px] text-ink-faint">
                           {new Date(r.createdAt).toLocaleDateString('en-US')}
                         </span>
                         <button
-                          className="shrink-0 text-[11px] text-slate hover:text-chalk"
+                          className="shrink-0 text-[11px] text-ink-faint hover:text-ink"
                           data-testid={`delete-rule-${r.id}`}
                           onClick={async () => {
                             await platform.rules.remove(r.id)
@@ -324,7 +324,7 @@ export function Settings() {
               <section>
                 <ul className="grid grid-cols-2 gap-x-6 gap-y-1" data-testid="shortcut-list">
                   {SHORTCUTS.map(([keys, label]) => (
-                    <li key={label} className="flex items-baseline gap-2 text-[12px] text-ash">
+                    <li key={label} className="flex items-baseline gap-2 text-[12px] text-ink-muted">
                       <Kbd>{sc(...keys)}</Kbd>
                       <span className="truncate">{label}</span>
                     </li>
@@ -363,25 +363,25 @@ function AppsSettings() {
   const projectIds = Object.keys(catalog.byProject)
   return (
     <section data-testid="settings-apps">
-      <p className="text-[11px] leading-relaxed text-slate">
+      <p className="text-[11px] leading-relaxed text-ink-faint">
         Experimental surfaces built on the app layer. Turning one off hides its UI and tools —
         its data stays until the app itself is removed.
       </p>
       <ul className="mt-3 space-y-2">
         {catalog.builtin.map(({ module: a, enabled }) => (
-          <li key={a.id} className="rounded border border-edge bg-panel px-3 py-2">
-            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-chalk" data-testid={`app-toggle-${a.id}`}>
+          <li key={a.id} className="rounded border border-line bg-surface-raised px-3 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-ink" data-testid={`app-toggle-${a.id}`}>
               <input
                 type="checkbox"
-                className="accent-ash"
+                className="accent-ink-muted"
                 checked={enabled}
                 onChange={(e) => void setEnabled(a.id, e.target.checked)}
               />
               <span>{a.title}</span>
-              <span className="readout ml-auto text-[10px] text-slate">{a.id}</span>
+              <span className="readout ml-auto text-[10px] text-ink-faint">{a.id}</span>
             </label>
             {enabled && a.settingsPanel && (
-              <div className="mt-2 border-t border-edge pt-2">
+              <div className="mt-2 border-t border-line pt-2">
                 <a.settingsPanel />
               </div>
             )}
@@ -389,11 +389,11 @@ function AppsSettings() {
         ))}
       </ul>
       {catalog.external.length > 0 && (
-        <div className="mt-5 border-t border-edge pt-3" data-testid="settings-external-apps">
+        <div className="mt-5 border-t border-line pt-3" data-testid="settings-external-apps">
           {projectIds.map((pid) => (
             <div key={pid} className="mb-4">
               {/* The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up */}
-              <p className="readout text-[10px] uppercase text-slate">{projects[pid]?.name ?? 'Project'}</p>
+              <p className="readout text-[10px] uppercase text-ink-faint">{projects[pid]?.name ?? 'Project'}</p>
               <ul className="mt-2 space-y-2">
                 {catalog.byProject[pid]!.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
@@ -403,7 +403,7 @@ function AppsSettings() {
           ))}
           {catalog.user.length > 0 && (
             <div>
-              <p className="readout text-[10px] uppercase text-slate">Your apps</p>
+              <p className="readout text-[10px] uppercase text-ink-faint">Your apps</p>
               <ul className="mt-2 space-y-2">
                 {catalog.user.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
@@ -437,26 +437,26 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const removeUserApp = useStore((s) => s.removeUserApp)
   const [confirming, setConfirming] = useState(false)
   return (
-    <li className="rounded border border-edge bg-panel px-3 py-2" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
-      <div className="flex items-center gap-2 text-[12px] text-chalk">
+    <li className="rounded border border-line bg-surface-raised px-3 py-2" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
+      <div className="flex items-center gap-2 text-[12px] text-ink">
         <span className="truncate">{app.title}</span>
-        <span className="readout text-[10px] text-slate">{app.appId}</span>
+        <span className="readout text-[10px] text-ink-faint">{app.appId}</span>
         <span
-          className={`readout ml-auto shrink-0 text-[10px] ${status.tone === 'alert' ? 'text-chalk' : 'text-slate'}`}
+          className={`readout ml-auto shrink-0 text-[10px] ${status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
           data-testid="external-app-status"
         >
           {status.label}
         </span>
       </div>
       {status.reason && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ash" data-testid="external-app-reason">
+        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ink-muted" data-testid="external-app-reason">
           {status.reason}
         </p>
       )}
       {app.info.status === 'untrusted' && app.projectId && (
         <button
           type="button"
-          className="mt-1.5 rounded border border-edge bg-void px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          className="mt-1.5 rounded border border-line bg-surface-floor px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
           onClick={() => void trustProject(app.projectId!, true)}
           data-testid="external-app-trust"
         >
@@ -465,14 +465,14 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       )}
       {/* An imported app (M4 E-3) — where it came from, and, if it is waiting on the person's confirmation, the path to that confirmation */}
       {app.info.imported && (
-        <p className="mt-1 break-words text-[11px] text-slate" data-testid="external-app-imported">
+        <p className="mt-1 break-words text-[11px] text-ink-faint" data-testid="external-app-imported">
           Imported from {app.info.imported.source}
         </p>
       )}
       {app.info.status === 'unconfirmed' && (
         <button
           type="button"
-          className="mt-1.5 rounded border border-edge bg-void px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          className="mt-1.5 rounded border border-line bg-surface-floor px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
           onClick={() => {
             toggleSettings(false)
             openApp(app.projectId, app.appId)
@@ -485,14 +485,14 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       <SecretsLine app={app} />
       {app.projectId === null &&
         (confirming ? (
-          <div className="mt-2 rounded border border-edge bg-void px-2.5 py-2" data-testid="external-app-remove-confirm">
-            <p className="text-[11px] leading-relaxed text-ash">
+          <div className="mt-2 rounded border border-line bg-surface-floor px-2.5 py-2" data-testid="external-app-remove-confirm">
+            <p className="text-[11px] leading-relaxed text-ink-muted">
               Remove {app.title}? Its folder moves to the app trash and agents lose its tools. Its run records stay.
             </p>
             <div className="mt-1.5 flex justify-end gap-2">
               <button
                 type="button"
-                className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:text-chalk"
+                className="rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink"
                 onClick={() => setConfirming(false)}
                 data-testid="external-app-remove-cancel"
               >
@@ -500,7 +500,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
               </button>
               <button
                 type="button"
-                className="rounded border border-edge bg-panel px-2 py-0.5 text-[11px] text-chalk transition-colors hover:text-beacon"
+                className="rounded border border-line bg-surface-raised px-2 py-0.5 text-[11px] text-ink transition-colors hover:text-ink-signal"
                 onClick={() => void removeUserApp(app.appId).then((ok) => ok || setConfirming(false))}
                 data-testid="external-app-remove-yes"
               >
@@ -511,7 +511,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         ) : (
           <button
             type="button"
-            className="mt-1.5 rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:text-beacon"
+            className="mt-1.5 rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink-signal"
             onClick={() => setConfirming(true)}
             data-testid="external-app-remove"
           >
@@ -537,7 +537,7 @@ function SecretsLine({ app }: { app: ExternalCatalogApp }) {
     <div className="mt-1.5">
       <button
         type="button"
-        className={`rounded px-1 py-0.5 text-[11px] transition-colors hover:text-chalk ${missing ? 'text-chalk' : 'text-slate'}`}
+        className={`rounded px-1 py-0.5 text-[11px] transition-colors hover:text-ink ${missing ? 'text-ink' : 'text-ink-faint'}`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         data-testid="external-app-secrets-toggle"
@@ -573,16 +573,16 @@ function OrchestratorSkills() {
 
   if (skills.length === 0) return null
   return (
-    <div className="mt-5 border-t border-edge pt-3" data-testid="orchestrator-skills">
-      <p className="readout text-[10px] uppercase text-slate">Approved skills</p>
+    <div className="mt-5 border-t border-line pt-3" data-testid="orchestrator-skills">
+      <p className="readout text-[10px] uppercase text-ink-faint">Approved skills</p>
       <ul className="mt-2 space-y-2">
         {skills.map((s) => (
-          <li key={s.name} className="rounded border border-edge p-2.5" data-testid={`orchestrator-skill-${s.name}`}>
+          <li key={s.name} className="rounded border border-line p-2.5" data-testid={`orchestrator-skill-${s.name}`}>
             <div className="flex items-center gap-2">
-              <span className="readout text-[11px] text-chalk">{s.name}</span>
+              <span className="readout text-[11px] text-ink">{s.name}</span>
               <button
                 type="button"
-                className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-slate transition-colors hover:text-beacon"
+                className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink-signal"
                 data-testid={`delete-skill-${s.name}`}
                 onClick={() => {
                   void platform.agents
@@ -594,7 +594,7 @@ function OrchestratorSkills() {
                 Delete
               </button>
             </div>
-            <pre className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed text-ash">
+            <pre className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed text-ink-muted">
               {s.content}
             </pre>
           </li>
@@ -669,7 +669,7 @@ function OrchestratorSettings() {
 
   return (
     <section data-testid="settings-orchestrator">
-      <p className="text-[11px] leading-relaxed text-slate">
+      <p className="text-[11px] leading-relaxed text-ink-faint">
         The orchestrator is the one session that belongs to the app rather than a project. Pick
         which agent it runs on.
       </p>
@@ -683,7 +683,7 @@ function OrchestratorSettings() {
             data-testid={`orchestrator-tool-${t.name}`}
             onClick={() => t.name !== current && setAsking(t)}
             className={`flex w-full items-baseline gap-2 rounded border px-3 py-2 text-left transition-colors ${
-              t.name === current ? 'border-ash text-chalk' : 'border-edge text-ash hover:border-graphite hover:text-chalk'
+              t.name === current ? 'border-ink-muted text-ink' : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
             }`}
           >
             <span className="w-2 shrink-0 text-[10px] leading-none" aria-hidden>
@@ -698,8 +698,8 @@ function OrchestratorSettings() {
 
       {asking && (
         <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
-          <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4">
-            <h2 className="text-[13px] font-medium text-chalk">
+          <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4">
+            <h2 className="text-[13px] font-medium text-ink">
               Run the orchestrator on {asking.label}?
             </h2>
             {/*
@@ -709,25 +709,25 @@ function OrchestratorSettings() {
               person needs to know before clicking confirm is not what stays, but **what can
               disappear**.
             */}
-            <p className="mt-2 text-[12px] leading-relaxed text-ash">
+            <p className="mt-2 text-[12px] leading-relaxed text-ink-muted">
               The current agent process ends and a new one starts.{' '}
-              <b className="text-chalk">Details it remembers may be lost</b> — each tool keeps its
+              <b className="text-ink">Details it remembers may be lost</b> — each tool keeps its
               own memory, and none of it carries over.
             </p>
-            <p className="mt-1.5 text-[12px] leading-relaxed text-slate">
-              Your transcript stays here. The new agent is handed a <b className="text-ash">summary</b> of
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">
+              Your transcript stays here. The new agent is handed a <b className="text-ink-muted">summary</b> of
               your recent turns, so it knows what you were discussing — but not every detail of it.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+                className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink"
                 onClick={() => setAsking(null)}
                 data-testid="orchestrator-switch-cancel"
               >
                 Cancel
               </button>
               <button
-                className="rounded border border-graphite px-2.5 py-1 text-[12px] text-chalk hover:bg-graphite/50"
+                className="rounded border border-line-strong px-2.5 py-1 text-[12px] text-ink hover:bg-surface-hover/50"
                 onClick={() => {
                   void apply(asking.name)
                   setAsking(null)
@@ -765,7 +765,7 @@ function AppearanceSection() {
   const setSpinIcon = useStore((s) => s.setSpinSessionIcon)
   return (
     <section>
-      <p className="text-[11px] leading-relaxed text-slate">Text size for the whole app.</p>
+      <p className="text-[11px] leading-relaxed text-ink-faint">Text size for the whole app.</p>
       <div className="mt-3 flex items-end gap-2" role="radiogroup" aria-label="Text size">
         {TEXT_SCALES.map((factor, i) => (
           <button
@@ -777,8 +777,8 @@ function AppearanceSection() {
             onClick={() => setScale(i)}
             className={`rounded border px-2.5 py-1 leading-none transition-colors ${
               i === scale
-                ? 'border-ash bg-graphite/40 text-chalk'
-                : 'border-edge text-ash hover:bg-graphite/25 hover:text-chalk'
+                ? 'border-ink-muted bg-surface-hover/40 text-ink'
+                : 'border-line text-ink-muted hover:bg-surface-hover/25 hover:text-ink'
             }`}
             title={i === TEXT_SCALE_DEFAULT ? 'Default' : `${Math.round(factor * 100)}%`}
           >
@@ -786,7 +786,7 @@ function AppearanceSection() {
           </button>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-slate">Applies immediately and is remembered.</p>
+      <p className="mt-2 text-[11px] text-ink-faint">Applies immediately and is remembered.</p>
 
       {/*
         Folding the composer in a grid panel (user request, 2026-09-10). The setting came from
@@ -795,18 +795,18 @@ function AppearanceSection() {
         to unfold it again every time.
         The project screen's panels (#203) are the grid's panels at the grid's sizes, so it applies there too.
       */}
-      <div className="mt-6 border-t border-edge pt-4">
-        <label className="flex items-start gap-2 text-[12px] text-ash">
+      <div className="mt-6 border-t border-line pt-4">
+        <label className="flex items-start gap-2 text-[12px] text-ink-muted">
           <input
             type="checkbox"
-            className="mt-0.5 accent-graphite"
+            className="mt-0.5 accent-line-strong"
             checked={fold}
             onChange={(e) => setFold(e.target.checked)}
             data-testid="settings-fold-composer"
           />
           <span>
             Fold the message box in the grid and on project screens
-            <span className="mt-1 block text-[11px] leading-relaxed text-slate">
+            <span className="mt-1 block text-[11px] leading-relaxed text-ink-faint">
               It rests as a card peeking from the bottom and rises over the conversation when you
               reach for it. Off keeps it open, as before.
             </span>
@@ -825,18 +825,18 @@ function AppearanceSection() {
         send is the chat-box convention, and silently moving it out from under someone already
         used to it would be worse than never offering the option at all.
       */}
-      <div className="mt-6 border-t border-edge pt-4">
-        <label className="flex items-center gap-2 text-[12px] text-ash">
+      <div className="mt-6 border-t border-line pt-4">
+        <label className="flex items-center gap-2 text-[12px] text-ink-muted">
           <input
             type="checkbox"
-            className="accent-graphite"
+            className="accent-line-strong"
             data-testid="settings-send-with-mod-enter"
             checked={modEnter}
             onChange={(e) => void setPrefs({ sendWithModifierEnter: e.target.checked })}
           />
           Send with {sc('mod', 'Enter')}
         </label>
-        <p className="mt-1 text-[11px] leading-relaxed text-slate">
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
           Enter then writes a new line instead of sending, which is what you want when a prompt
           runs to several paragraphs. Shift+Enter writes a new line either way.
         </p>
@@ -851,27 +851,27 @@ function AppearanceSection() {
         people about each is different: the panel border is large and catches the corner of the
         eye, while the sidebar icon is small but always visible.
       */}
-      <div className="mt-6 border-t border-edge pt-4">
-        <p className="text-[12px] text-ash">Spinning mark while a session is working</p>
-        <p className="mt-1 text-[11px] leading-relaxed text-slate">
+      <div className="mt-6 border-t border-line pt-4">
+        <p className="text-[12px] text-ink-muted">Spinning mark while a session is working</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
           Turning it off does not hide the mark — it stops moving and stays a bright grey. Motion
           that never stops holds the display at full refresh: measured, turning both off took this
           app from 7.0% to 2.9% CPU while one session was running.
         </p>
-        <label className="mt-2.5 flex items-start gap-2 text-[12px] text-ash">
+        <label className="mt-2.5 flex items-start gap-2 text-[12px] text-ink-muted">
           <input
             type="checkbox"
-            className="mt-0.5 accent-graphite"
+            className="mt-0.5 accent-line-strong"
             checked={spinGrid}
             onChange={(e) => setSpinGrid(e.target.checked)}
             data-testid="settings-spin-grid"
           />
           <span>Panel border in the grid and on project screens</span>
         </label>
-        <label className="mt-1.5 flex items-start gap-2 text-[12px] text-ash">
+        <label className="mt-1.5 flex items-start gap-2 text-[12px] text-ink-muted">
           <input
             type="checkbox"
-            className="mt-0.5 accent-graphite"
+            className="mt-0.5 accent-line-strong"
             checked={spinIcon}
             onChange={(e) => setSpinIcon(e.target.checked)}
             data-testid="settings-spin-icon"
@@ -907,10 +907,10 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
 
   return (
     <section data-testid="settings-background">
-      <label className="flex items-start gap-2 text-[12px] text-ash">
+      <label className="flex items-start gap-2 text-[12px] text-ink-muted">
         <input
           type="checkbox"
-          className="mt-0.5 accent-graphite"
+          className="mt-0.5 accent-line-strong"
           data-testid="settings-background-toggle"
           checked={on ?? false}
           disabled={on === null}
@@ -925,20 +925,20 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
         />
         <span>
           Keep agents running after Centralu quits
-          <span className="mt-1 block text-[11px] leading-relaxed text-slate">
+          <span className="mt-1 block text-[11px] leading-relaxed text-ink-faint">
             Closing the window leaves the agent host and its running sessions going. Opening
             Centralu again picks them up where they are, waiting approvals included. Off, quitting
             stops them, as before.
           </span>
         </span>
       </label>
-      <p className="mt-3 text-[11px] leading-relaxed text-slate">
-        To stop everything anyway, choose <span className="text-ash">Quit and stop agents</span>{' '}
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
+        To stop everything anyway, choose <span className="text-ink-muted">Quit and stop agents</span>{' '}
         when you quit. With no window open and nothing running for 30 minutes, the background host
         stops by itself.
       </p>
       {error && (
-        <p className="mt-2 text-[11px] text-del" data-testid="settings-background-error">
+        <p className="mt-2 text-[11px] text-danger" data-testid="settings-background-error">
           {error}
         </p>
       )}
@@ -978,22 +978,22 @@ function UpdatesSection() {
 
   return (
     <section>
-      <p className="text-[11px] leading-relaxed text-slate">
+      <p className="text-[11px] leading-relaxed text-ink-faint">
         Centralu updates through npm, the same way it was installed. Checking only asks the
         registry which version is newest; installing happens when you ask for it, and never
         restarts the app for you.
       </p>
 
-      <p className="mt-3 text-[12px] text-ash" data-testid="update-current">
+      <p className="mt-3 text-[12px] text-ink-muted" data-testid="update-current">
         Running {current}
       </p>
-      <p className="mt-1 text-[12px] text-slate" data-testid="update-state">
+      <p className="mt-1 text-[12px] text-ink-faint" data-testid="update-state">
         {describe(update)}
       </p>
 
       <div className="mt-2 flex items-center gap-3">
         <button
-          className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk disabled:opacity-50"
+          className="rounded border border-line px-2 py-1 text-[11px] text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink disabled:opacity-50"
           data-testid="update-check-now"
           disabled={busy}
           onClick={() => void checkUpdate(true)}
@@ -1002,7 +1002,7 @@ function UpdatesSection() {
         </button>
         {update?.newer && update.latest && update.phase !== 'restart_required' && (
           <button
-            className="rounded border border-edge px-2 py-1 text-[11px] text-chalk transition-colors hover:bg-graphite/50 disabled:opacity-50"
+            className="rounded border border-line px-2 py-1 text-[11px] text-ink transition-colors hover:bg-surface-hover/50 disabled:opacity-50"
             data-testid="update-apply"
             disabled={busy}
             onClick={() => void applyUpdate()}
@@ -1012,10 +1012,10 @@ function UpdatesSection() {
         )}
       </div>
 
-      <label className="mt-3 flex items-center gap-2 text-[12px] text-ash">
+      <label className="mt-3 flex items-center gap-2 text-[12px] text-ink-muted">
         <input
           type="checkbox"
-          className="accent-graphite"
+          className="accent-line-strong"
           data-testid="update-auto"
           checked={update?.auto ?? true}
           onChange={(e) => void setUpdateAuto(e.target.checked)}
@@ -1027,7 +1027,7 @@ function UpdatesSection() {
         know what they are turning off, and someone leaving it on needs to know what goes out —
         there is no request that goes out silently.
       */}
-      <p className="mt-1 text-[11px] leading-relaxed text-slate">
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
         Once at startup and every six hours while the app is open. It asks the public npm
         registry for one version number and nothing else; if it cannot reach it, nothing
         happens and nothing interrupts you.

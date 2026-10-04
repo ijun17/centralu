@@ -30,7 +30,7 @@ export const Markdown = memo(function Markdown({
   projectId?: string | null
 }) {
   return (
-    <div className="cc-md max-w-[80ch] text-chalk/90" data-testid="markdown">
+    <div className="cc-md max-w-[80ch] text-ink/90" data-testid="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -129,7 +129,7 @@ function FileLink({
   return (
     <button
       type="button"
-      className="cursor-pointer underline decoration-slate underline-offset-2 hover:decoration-chalk"
+      className="cursor-pointer underline decoration-ink-faint underline-offset-2 hover:decoration-ink"
       title={`Open ${refInfo.path}${refInfo.line === null ? '' : ` at line ${refInfo.line}`} · Right-click: Reveal in Finder`}
       data-testid="file-link"
       onClick={() => {

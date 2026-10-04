@@ -57,12 +57,12 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
   const nameOf = (r: AppRun) => apps.find((a) => a.appId === r.appId && a.projectId === r.projectId)?.name ?? r.appId
 
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col border-l border-edge bg-pit" data-testid="runs-panel" aria-label="Runs">
-      <header className="flex h-8 shrink-0 items-center gap-2 border-b border-edge px-3">
-        <span className="readout text-[10px] uppercase text-slate">Runs</span>
+    <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="runs-panel" aria-label="Runs">
+      <header className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3">
+        <span className="readout text-[10px] uppercase text-ink-faint">Runs</span>
         <button
           type="button"
-          className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-slate transition-colors hover:text-chalk"
+          className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink"
           onClick={() => void load()}
           data-testid="runs-refresh"
         >
@@ -73,11 +73,11 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
         <Permissions appId={appId} projectId={projectId} changed={changed} />
         <AgentUseSection appId={appId} projectId={projectId} runs={runs} />
         {error && (
-          <p className="px-3 py-2 text-[11px] text-ash" role="alert">
+          <p className="px-3 py-2 text-[11px] text-ink-muted" role="alert">
             Could not read runs: {error}
           </p>
         )}
-        {runs && runs.length === 0 && <p className="px-3 py-3 text-[11px] text-slate">No runs yet.</p>}
+        {runs && runs.length === 0 && <p className="px-3 py-3 text-[11px] text-ink-faint">No runs yet.</p>}
         <ol>
           {runs &&
             chainRuns(runs).map(({ run: r, depth }) => (
@@ -133,20 +133,20 @@ function Permissions({ appId, projectId, changed }: { appId: string; projectId: 
   }
   if (!list || list.length === 0) return null
   return (
-    <section className="border-b border-edge px-3 py-2" data-testid="runs-permissions">
-      <p className="readout text-[10px] uppercase text-slate">Permissions</p>
+    <section className="border-b border-line px-3 py-2" data-testid="runs-permissions">
+      <p className="readout text-[10px] uppercase text-ink-faint">Permissions</p>
       <ul className="mt-1 space-y-1">
         {list.map((p) => (
           <li key={p.capability} className="flex items-baseline gap-2 text-[11px]" data-testid="permission-row" data-capability={p.capability} data-decision={p.decision}>
-            <span className={`min-w-0 flex-1 break-words ${p.current ? 'text-ash' : 'text-slate line-through'}`} title={p.capability}>
+            <span className={`min-w-0 flex-1 break-words ${p.current ? 'text-ink-muted' : 'text-ink-faint line-through'}`} title={p.capability}>
               {p.text}
             </span>
-            <span className={`readout shrink-0 ${p.decision === 'deny' ? 'text-chalk' : 'text-slate'}`} data-testid="permission-decision">
+            <span className={`readout shrink-0 ${p.decision === 'deny' ? 'text-ink' : 'text-ink-faint'}`} data-testid="permission-decision">
               {p.current ? (p.decision === 'allow' ? 'allowed' : 'denied') : 'outdated'}
             </span>
             <button
               type="button"
-              className="shrink-0 rounded px-1 text-[10px] text-slate transition-colors hover:text-chalk"
+              className="shrink-0 rounded px-1 text-[10px] text-ink-faint transition-colors hover:text-ink"
               onClick={() => void forget(p)}
               data-testid="permission-forget"
             >
@@ -183,8 +183,8 @@ function AgentUseSection({ appId, projectId, runs }: { appId: string; projectId:
   }, [platform, appId, projectId, runs])
   if (!use || use.month.runs === 0) return null
   return (
-    <section className="border-b border-edge px-3 py-2" data-testid="runs-agent-use">
-      <p className="readout text-[10px] uppercase text-slate">Agent use</p>
+    <section className="border-b border-line px-3 py-2" data-testid="runs-agent-use">
+      <p className="readout text-[10px] uppercase text-ink-faint">Agent use</p>
       <dl className="mt-1 space-y-0.5 text-[11px]">
         <UseLine label="24 h" use={use.day} testId="agent-use-day" />
         <UseLine label="30 days" use={use.month} testId="agent-use-month" />
@@ -198,8 +198,8 @@ function UseLine({ label, use, testId }: { label: string; use: AgentUse; testId:
   if (use.tokens) parts.push(`${tokenCount(use.tokens.input + use.tokens.output)} tokens`)
   return (
     <div className="flex items-baseline gap-2">
-      <dt className="readout w-12 shrink-0 text-slate">{label}</dt>
-      <dd className="min-w-0 truncate text-ash" data-testid={testId} title={use.tokens ? `in ${use.tokens.input} · out ${use.tokens.output}` : undefined}>
+      <dt className="readout w-12 shrink-0 text-ink-faint">{label}</dt>
+      <dd className="min-w-0 truncate text-ink-muted" data-testid={testId} title={use.tokens ? `in ${use.tokens.input} · out ${use.tokens.output}` : undefined}>
         {parts.join(' · ')}
       </dd>
     </div>
@@ -297,7 +297,7 @@ function RunRow({
   const tool = !broker && !own ? `${appName} · ${run.tool}` : run.tool
   return (
     <li
-      className={`border-b border-l-2 border-edge/60 py-1.5 pr-3 text-[11px] ${failed ? 'border-l-chalk' : 'border-l-transparent'}`}
+      className={`border-b border-l-2 border-line/60 py-1.5 pr-3 text-[11px] ${failed ? 'border-l-ink' : 'border-l-transparent'}`}
       style={{ paddingLeft: 12 + depth * 14 }}
       data-testid="run-row"
       data-status={run.status}
@@ -307,21 +307,21 @@ function RunRow({
     >
       <div className="flex items-baseline gap-2">
         {depth > 0 && (
-          <span className="-ml-3 w-2 shrink-0 text-slate" aria-hidden="true">
+          <span className="-ml-3 w-2 shrink-0 text-ink-faint" aria-hidden="true">
             ↳
           </span>
         )}
-        <time className="readout shrink-0 text-slate" dateTime={when.toISOString()} data-testid="run-time">
+        <time className="readout shrink-0 text-ink-faint" dateTime={when.toISOString()} data-testid="run-time">
           {when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </time>
-        <span className="min-w-0 truncate font-mono text-chalk" data-testid="run-tool">
+        <span className="min-w-0 truncate font-mono text-ink" data-testid="run-tool">
           {tool}
         </span>
-        <span className={`readout ml-auto shrink-0 ${failed ? 'text-chalk' : 'text-slate'}`} data-testid="run-status">
+        <span className={`readout ml-auto shrink-0 ${failed ? 'text-ink' : 'text-ink-faint'}`} data-testid="run-status">
           {STATUS[run.status]}
         </span>
       </div>
-      <div className="mt-0.5 flex items-baseline gap-2 text-slate">
+      <div className="mt-0.5 flex items-baseline gap-2 text-ink-faint">
         <span className="truncate" data-testid="run-caller">
           {caller}
         </span>
@@ -333,7 +333,7 @@ function RunRow({
         {onOpenSession && (
           <button
             type="button"
-            className="shrink-0 rounded px-1 text-[10px] text-slate underline-offset-2 transition-colors hover:text-chalk hover:underline"
+            className="shrink-0 rounded px-1 text-[10px] text-ink-faint underline-offset-2 transition-colors hover:text-ink hover:underline"
             onClick={onOpenSession}
             data-testid="run-open-session"
           >
@@ -345,7 +345,7 @@ function RunRow({
         </span>
       </div>
       {failed && run.error && (
-        <p className="mt-0.5 line-clamp-2 break-words text-ash" title={run.error} data-testid="run-error">
+        <p className="mt-0.5 line-clamp-2 break-words text-ink-muted" title={run.error} data-testid="run-error">
           {run.error}
         </p>
       )}

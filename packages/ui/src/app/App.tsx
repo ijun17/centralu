@@ -203,7 +203,7 @@ export function App({ platform }: { platform: Platform }) {
       */}
       <ErrorBoundary>
         {/* h-full, not h-screen (100vh) — vh does not know about zoom (--text-zoom comment in index.css) */}
-        <div className="relative flex h-full flex-col bg-void text-chalk">
+        <div className="relative flex h-full flex-col bg-surface-floor text-ink">
           <TopBar />
           <Body />
           <CommandPalette />
@@ -341,7 +341,7 @@ function Body() {
  * Keeping the two separate on the dashboard just made the reader do the addition in their head
  * every time.
  *
- * Instead, brightness carries the urgency: pure white (beacon) if there is even one approval or
+ * Instead, brightness carries the urgency: pure white (ink-signal) if there is even one approval or
  * error, gray if only waiting-for-input. The rule that pure white is reserved for whatever is
  * blocking me still holds.
  */
@@ -379,7 +379,7 @@ function TopBar() {
    */
   return (
     <DragRegion
-      className="flex h-9 shrink-0 items-center gap-4 border-b border-edge bg-pit pr-4"
+      className="flex h-9 shrink-0 items-center gap-4 border-b border-line bg-surface-side pr-4"
       /*
        * Inset is 0 wherever there are no traffic lights (web and mock report it that way —
        * correct, since there is no button to make room for). But using it as-is would remove the
@@ -402,7 +402,7 @@ function TopBar() {
          * shape, and this one is read least of anything here — you already opened the app.
          * Set flush it stops being spelled out and just sits there being the title.
          */
-        className="pointer-events-none text-[12px] font-semibold text-chalk"
+        className="pointer-events-none text-[12px] font-semibold text-ink"
         data-testid="app-title"
       >
         CENTRALU
@@ -418,7 +418,7 @@ function TopBar() {
       {/* flex, not inline — an inline span's box is a text line, so top-full lands wrong */}
       <span className="relative flex">
         <button
-          className="group flex items-center gap-2.5 rounded px-2 py-0.5 transition-colors hover:bg-graphite/50"
+          className="group flex items-center gap-2.5 rounded px-2 py-0.5 transition-colors hover:bg-surface-hover/50"
           onClick={() => toggleInbox()}
           data-testid="counter"
           title={`Waiting (${sc('mod', 'I')})`}
@@ -427,9 +427,9 @@ function TopBar() {
             label="Waiting for input"
             value={counts.approval + counts.input + counts.error}
             tone={
-              counts.approval + counts.error > 0 ? 'beacon'
-              : counts.input > 0 ? 'text-ash'
-              : 'text-slate'
+              counts.approval + counts.error > 0 ? 'signal'
+              : counts.input > 0 ? 'text-ink-muted'
+              : 'text-ink-faint'
             }
             testId="count-waiting"
           />
@@ -447,7 +447,7 @@ function TopBar() {
         that speaks state.
 
         Brightening stays the number's job. The chip's on-condition was just `waiting > 0`, while
-        the number already has its own brightness by kind (beacon for approvals, ash for
+        the number already has its own brightness by kind (ink-signal for approvals, ink-muted for
         waiting-for-input) — a more accurate signal was already there, and the chip was just
         riding along with it.
 
@@ -484,7 +484,7 @@ function TopBar() {
           a flow is different from hiding the entrance.
         */}
         <button
-          className="rounded px-2 py-1 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
+          className="rounded px-2 py-1 text-[11px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
           onClick={() => useStore.getState().toggleSettings(true)}
           data-testid="open-settings"
           title="Settings (shortcuts · notifications · approval rules)"
@@ -519,15 +519,15 @@ function Metric({
       {/*
         The glow belongs to the number (user's observation, 2026-09-12: "it looks smeared").
 
-        `beacon` sets both a color and `text-shadow: 0 0 6px rgb(255 255 255 / .45)`. The color
-        gets overridden here by text-slate, but the shadow is inherited — so the #5c5c5c label
+        `signal` sets both a color and `text-shadow: 0 0 6px var(--color-signal-glow)`. The color
+        gets overridden here by text-ink-faint, but the shadow is inherited — so the #5c5c5c label
         text was wearing a white glow. A bright halo on dark text does not look luminous, it looks
         out of focus. A glow is only a glow on pure white text.
 
-        Since the label sits out of the brightness competition (always slate), only the
+        Since the label sits out of the brightness competition (always ink-faint), only the
         inheritance is cut off.
       */}
-      <span className="text-[10px] text-slate [text-shadow:none]">{label}</span>
+      <span className="text-[10px] text-ink-faint [text-shadow:none]">{label}</span>
       <span className="readout text-[13px] leading-none">{String(value).padStart(2, '0')}</span>
     </span>
   )
@@ -629,7 +629,7 @@ function Toast() {
       what it covers up is the app's whole answer to "that didn't work".
     */
     <div
-      className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded border border-edge bg-panel px-3 py-2 text-[12px] text-chalk shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink shadow-(--shadow-popover)"
       data-testid="toast"
       role="status"
     >

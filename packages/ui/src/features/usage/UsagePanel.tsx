@@ -34,7 +34,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
 
   if (state.loading) {
     return (
-      <p className="px-4 py-6 text-center text-[12px] text-slate" data-testid="usage-loading">
+      <p className="px-4 py-6 text-center text-[12px] text-ink-faint" data-testid="usage-loading">
         Loading usage…
       </p>
     )
@@ -43,9 +43,9 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
   // Failing to read it and there being none are different — the reason is shown as is
   if (!state.usage || state.usage.windows.length === 0) {
     return (
-      <p className="px-4 py-6 text-center text-[12px] leading-relaxed text-ash" data-testid="usage-unavailable">
+      <p className="px-4 py-6 text-center text-[12px] leading-relaxed text-ink-muted" data-testid="usage-unavailable">
         Usage unavailable
-        {state.reason && <span className="mt-1 block text-[11px] text-slate">{state.reason}</span>}
+        {state.reason && <span className="mt-1 block text-[11px] text-ink-faint">{state.reason}</span>}
       </p>
     )
   }
@@ -55,7 +55,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
   return (
     <div className="px-4 py-4" data-testid="usage-panel">
       {plan && (
-        <p className="readout mb-3 text-[11px] text-slate" data-testid="usage-plan">
+        <p className="readout mb-3 text-[11px] text-ink-faint" data-testid="usage-plan">
           {plan} plan
         </p>
       )}
@@ -83,25 +83,25 @@ function Donut({ window: w }: { window: UsageWindow }) {
   const R = 26
   const C = 2 * Math.PI * R
   const filled = (Math.max(0, Math.min(100, w.percent)) / 100) * C
-  const tone = w.percent >= 90 ? 'text-beacon' : w.percent >= 70 ? 'text-chalk' : 'text-ash'
+  const tone = w.percent >= 90 ? 'text-ink-signal' : w.percent >= 70 ? 'text-ink' : 'text-ink-muted'
 
   return (
     <Tooltip
       testId={`usage-tip-${w.id}`}
       content={
         <span className="block">
-          <span className="block text-chalk">
+          <span className="block text-ink">
             {w.label}
             {w.scope && ` · ${w.scope}`}
           </span>
           <span className="readout mt-1 block">{w.percent}% used</span>
-          <span className="readout block text-slate">{resetText(w.resetsAt)}</span>
+          <span className="readout block text-ink-faint">{resetText(w.resetsAt)}</span>
         </span>
       }
     >
       <span className="flex flex-col items-center gap-1" data-testid={`usage-window-${w.id}`}>
         <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
-          <circle cx="32" cy="32" r={R} fill="none" stroke="currentColor" strokeWidth="6" className="text-edge" />
+          <circle cx="32" cy="32" r={R} fill="none" stroke="currentColor" strokeWidth="6" className="text-line" />
           <circle
             cx="32"
             cy="32"
@@ -123,7 +123,7 @@ function Donut({ window: w }: { window: UsageWindow }) {
           two 74% weekly donuts standing side by side gave no way to read on screen which was
           whose limit — that is what "per model seems to be missing" meant.
         */}
-        <span className="max-w-[92px] truncate text-[10px] text-slate" title={w.scope ?? undefined}>
+        <span className="max-w-[92px] truncate text-[10px] text-ink-faint" title={w.scope ?? undefined}>
           {w.label}
           {w.scope ? ` · ${w.scope}` : ''}
         </span>
@@ -152,24 +152,24 @@ function DailyTokens({ daily }: { daily: { date: string; tokens: number }[] }) {
   const today = recent.at(-1)
 
   return (
-    <section className="mt-5 border-t border-edge pt-3" data-testid="usage-daily">
+    <section className="mt-5 border-t border-line pt-3" data-testid="usage-daily">
       <div className="flex items-baseline gap-2">
-        <span className="text-[11px] uppercase text-slate">Daily tokens</span>
+        <span className="text-[11px] uppercase text-ink-faint">Daily tokens</span>
         {today && (
-          <span className="readout ml-auto text-[11px] text-chalk">Today {formatTokens(today.tokens)}</span>
+          <span className="readout ml-auto text-[11px] text-ink">Today {formatTokens(today.tokens)}</span>
         )}
       </div>
       <ul className="mt-2 space-y-1">
         {recent.map((d) => (
           <li key={d.date} className="flex items-center gap-2">
-            <span className="readout w-12 shrink-0 text-[10px] text-slate">{d.date.slice(5)}</span>
-            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-edge">
+            <span className="readout w-12 shrink-0 text-[10px] text-ink-faint">{d.date.slice(5)}</span>
+            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
               <span
-                className="block h-full rounded-full bg-ash"
+                className="block h-full rounded-full bg-ink-muted"
                 style={{ width: `${Math.round((d.tokens / peak) * 100)}%` }}
               />
             </span>
-            <span className="readout w-14 shrink-0 text-right text-[10px] text-slate">
+            <span className="readout w-14 shrink-0 text-right text-[10px] text-ink-faint">
               {formatTokens(d.tokens)}
             </span>
           </li>

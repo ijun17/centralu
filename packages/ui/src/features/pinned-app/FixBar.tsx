@@ -64,18 +64,18 @@ export function FixBar({
 
   if (builder.id === null) {
     return (
-      <div className="mt-2 flex items-center gap-3 rounded border border-dashed border-edge px-3 py-1.5 text-[12px]" data-testid="fix-bar-no-builder">
-        <p className="min-w-0 flex-1 text-ash">
+      <div className="mt-2 flex items-center gap-3 rounded border border-dashed border-line px-3 py-1.5 text-[12px]" data-testid="fix-bar-no-builder">
+        <p className="min-w-0 flex-1 text-ink-muted">
           {app.title} has no builder session, so there is no one to ask for changes.
           {builder.error && (
-            <span className="block whitespace-pre-wrap break-words text-slate" role="alert" data-testid="fix-bar-error">
+            <span className="block whitespace-pre-wrap break-words text-ink-faint" role="alert" data-testid="fix-bar-error">
               {builder.error}
             </span>
           )}
         </p>
         <button
           type="button"
-          className="shrink-0 rounded border border-edge bg-void px-2.5 py-0.5 text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+          className="shrink-0 rounded border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong disabled:opacity-40"
           onClick={() => void builder.start()}
           disabled={builder.starting}
           data-testid="fix-bar-start-builder"
@@ -132,12 +132,12 @@ export function FixBar({
       {attachments.length > 0 && (
         <ul className="mb-1 flex flex-wrap gap-1.5" data-testid="fix-bar-attachments">
           {attachments.map((a, i) => (
-            <li key={`${a.path}-${i}`} className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-0.5 text-[11px] text-ash">
-              <span className="readout text-[9px] text-slate">{a.kind === 'image' ? 'IMG' : 'DOC'}</span>
+            <li key={`${a.path}-${i}`} className="flex items-center gap-1.5 rounded border border-line bg-surface-raised px-2 py-0.5 text-[11px] text-ink-muted">
+              <span className="readout text-[9px] text-ink-faint">{a.kind === 'image' ? 'IMG' : 'DOC'}</span>
               <span className="max-w-40 truncate">{a.name}</span>
               <button
                 type="button"
-                className="text-slate transition-colors hover:text-chalk"
+                className="text-ink-faint transition-colors hover:text-ink"
                 onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
                 aria-label={`Remove attachment ${a.name}`}
               >
@@ -147,7 +147,7 @@ export function FixBar({
           ))}
         </ul>
       )}
-      <div className="flex items-end gap-1.5 rounded border border-edge bg-panel px-2.5 py-1 transition-colors focus-within:border-graphite">
+      <div className="flex items-end gap-1.5 rounded border border-line bg-surface-raised px-2.5 py-1 transition-colors focus-within:border-line-strong">
         <textarea
           ref={inputRef}
           rows={1}
@@ -173,27 +173,27 @@ export function FixBar({
           }}
           placeholder={`Ask ${builderName ?? 'the builder'} to change this app…`}
           aria-label={`Ask the builder of ${app.title} to change it`}
-          className="max-h-24 min-h-[20px] flex-1 resize-none bg-transparent py-0.5 text-[12px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
+          className="max-h-24 min-h-[20px] flex-1 resize-none bg-transparent py-0.5 text-[12px] leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none"
           data-testid="fix-bar-input"
         />
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void takeFiles(e.target.files)} />
         <IconButton label="Attach a screenshot" onClick={() => fileRef.current?.click()} testId="fix-bar-attach" placement="top" className="shrink-0">
           <PlusIcon size={13} />
         </IconButton>
-        <IconButton type="submit" label="Send to the builder" disabled={!canSend} testId="fix-bar-send" placement="top" align="right" className="shrink-0 text-ash">
+        <IconButton type="submit" label="Send to the builder" disabled={!canSend} testId="fix-bar-send" placement="top" align="right" className="shrink-0">
           <SendIcon size={14} />
         </IconButton>
       </div>
       {sent && !error && (
-        <p className="mt-1 flex items-center gap-2 text-[11px] text-slate" role="status" data-testid="fix-bar-sent">
+        <p className="mt-1 flex items-center gap-2 text-[11px] text-ink-faint" role="status" data-testid="fix-bar-sent">
           <span className="truncate">Sent to {sent}.</span>
-          <button type="button" className="shrink-0 text-ash underline-offset-2 hover:text-chalk hover:underline" onClick={onShowBuilder} data-testid="fix-bar-show-builder">
+          <button type="button" className="shrink-0 text-ink-muted underline-offset-2 hover:text-ink hover:underline" onClick={onShowBuilder} data-testid="fix-bar-show-builder">
             Show the conversation
           </button>
         </p>
       )}
       {error && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-ash" role="alert" data-testid="fix-bar-error">
+        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-ink-muted" role="alert" data-testid="fix-bar-error">
           {error}
         </p>
       )}

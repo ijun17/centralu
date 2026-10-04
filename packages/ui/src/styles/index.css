@@ -10,9 +10,16 @@
 
 /*
  * ── Design tokens ────────────────────────────────────────────────
- * Fully achromatic. There is not a single hue, so hierarchy is built entirely by brightness.
+ * Named by role, not by how they look (#312). The old names (void, chalk, beacon…) described
+ * brightness, which reads backwards the moment a light theme exists; a role name says what the
+ * colour is for, so a theme can give it any value. Every colour the UI paints is one of these —
+ * use a token, not a hex value or an arbitrary `shadow-[…]`, so a theme reaches it.
  *
- * So the rule holds literally:
+ * This stays plain `@theme`, not `@theme inline`: every utility then reads `var(--color-…)` at
+ * run time, which is what lets a theme switch by changing variables alone.
+ *
+ * The default theme is fully achromatic. There is not a single hue in the chrome, so hierarchy is
+ * built entirely by brightness. So the rule holds literally:
  *   the brightest thing on screen = what is waiting for me right now (product-spec FR-12).
  *
  * Urgency is told by brightness, kind by shape (reads the same for color-blind viewers and on a
@@ -21,34 +28,44 @@
  *   ○ empty circle  = done, not urgent       ◆ = in progress (breathing)   ▬ = stopped
  */
 @theme {
-  /* Ground — 5 steps on the dark side */
-  --color-void: #141414; /* app floor */
-  --color-pit: #171717; /* sidebar */
-  --color-panel: #1d1d1d; /* floating surface */
-  --color-edge: #292929; /* hairline */
-  --color-graphite: #353535; /* hover / pressed */
+  /*
+   * Surfaces — what things sit on, named by position. In the default theme they climb in
+   * brightness from the floor up.
+   */
+  --color-surface-floor: #141414; /* the app floor */
+  --color-surface-side: #171717; /* the sidebar */
+  --color-surface-raised: #1d1d1d; /* what floats: cards, menus, dialogs, inputs */
+  --color-surface-selected: #292929; /* a picked tab or option, and the quiet hover on a raised card */
+  --color-surface-hover: #353535; /* hover and pressed; also my own message bubble */
   /*
    * The control tower's floor — the plate the panels sit on.
    *
    * This is the one place where the brightness is inverted. On every other screen the ground is
    * dark and the surface is bright, but in the grid the inside of a panel is the session screen
-   * itself, so the inside has to be void for text to read. So the outside is brightened instead,
-   * to make the panels look carved out —
-   * with inside and outside both the same void, the boundary was a single border line, and that
+   * itself, so the inside has to be the floor for text to read. So the outside is brightened
+   * instead, to make the panels look carved out —
+   * with inside and outside both the same floor, the boundary was a single border line, and that
    * made it hard to see by eye where one panel ended (dogfooding: "the panel background and the
    * outside look the same, it's confusing"). What is actually visible is only the gaps between
    * panels and the edges, so it does not brighten a large area.
    */
-  --color-deck: #272727; /* grid floor */
+  --color-surface-deck: #272727; /* the grid's and the project screen's floor */
+  /* The conversation's own surfaces — see the session-view block below for why they exist */
+  --color-surface-reading: #1d1d1d;
+  --color-surface-reading-raised: #2a2a2a;
 
-  /* Ink — 4 steps on the bright side. Brightness is urgency */
-  --color-beacon: #ffffff; /* what is waiting for me. The only pure white on screen */
-  --color-chalk: #e9e9e9; /* body text */
-  --color-ash: #909090; /* secondary */
-  --color-slate: #5c5c5c; /* background information */
+  /* Lines */
+  --color-line: #292929; /* hairline: borders, dividers, meter tracks */
+  --color-line-strong: #353535; /* a border that has to show: focused inputs, checkboxes, graph lanes */
+
+  /* Ink — 4 steps. Brightness is urgency */
+  --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
+  --color-ink: #e9e9e9; /* body text */
+  --color-ink-muted: #909090; /* secondary */
+  --color-ink-faint: #5c5c5c; /* background information */
 
   /*
-   * Colors reserved for diffs — the only place in the app that uses hue at all.
+   * Colors reserved for diffs — with danger below, the only places in the chrome that use hue.
    *
    * Why the achromatic rule is relaxed only here: the green and red of additions and deletions
    * are close to reflex, not a learned convention. At the spot where an approval decision gets
@@ -56,10 +73,110 @@
    * Instead, it never leaves the body of the diff — state and urgency are still spoken by
    * brightness alone.
    */
-  --color-add: #7ee787;
-  --color-add-bg: #10251a;
-  --color-del: #ffa198;
-  --color-del-bg: #2b1517;
+  --color-diff-add: #7ee787;
+  --color-diff-add-bg: #10251a;
+  --color-diff-del: #ffa198;
+  --color-diff-del-bg: #2b1517;
+  /*
+   * Danger — what is about to destroy something (deleting a project with its folder, purging
+   * the trash) and an action that failed (a quit or a switch that did not go through). It
+   * borrowed the diff's deletion red (dogfooding: dangerous spots are red; red already means
+   * "this is disappearing" here), so the values are the same today. It is its own token because
+   * the two answer different questions: a theme may want the diff's red softer for reading while
+   * keeping a warning loud.
+   */
+  --color-danger: #ffa198;
+  --color-danger-bg: #2b1517;
+
+  /*
+   * Interaction. Focus is the keyboard focus ring and the inset line that marks a drop target —
+   * both say "this is where it goes". Selection is translucent, see ::selection below.
+   */
+  --color-focus: #909090;
+  --color-selection: rgb(255 255 255 / 0.24);
+  /*
+   * The scrollbar is part of the theme: its colours and its shape. The thumb is drawn inset from
+   * its 10px track by a transparent border, which is what makes it read as a thin pill rather
+   * than a bar.
+   */
+  --color-scrollbar-track: transparent;
+  --color-scrollbar-thumb: #292929;
+  --color-scrollbar-thumb-hover: #353535;
+  --scrollbar-size: 10px;
+  --scrollbar-thumb-inset: 3px;
+  --scrollbar-radius: 999px;
+  /*
+   * Scrims — what lies between a dialog and the screen under it. The heavier one goes with a
+   * blur (Modal, Settings, the command palette); the thinner one is used by the dialogs that do
+   * not blur (the desktop shell's dialogs, the control app). Two values because they differ today.
+   */
+  --color-scrim: color-mix(in oklab, var(--color-surface-floor) 80%, transparent);
+  --color-scrim-thin: color-mix(in oklab, #000 50%, transparent);
+
+  /* The keycap's face and rim, see .keycap */
+  --color-keycap-top: #222222;
+  --color-keycap-bottom: #151515;
+  --color-keycap-border: #0a0a0a;
+  /* The light around the signal, see .signal */
+  --color-signal-glow: rgb(255 255 255 / 0.45);
+
+  /*
+   * Activity — the galaxy palette of the orbit (something is working) and the gust (it just
+   * finished), see .cc-orbit and .cc-gust. The one place where colour speaks state, and still
+   * never brighter than pure white.
+   */
+  --color-activity-1: #2d6cf0;
+  --color-activity-2: #7b3fe4;
+  --color-activity-3: #d63aa8;
+  --color-activity-4: #ff8a3d;
+  --color-activity-5: #4ad6d0;
+
+  /*
+   * The terminal (xterm). xterm paints with its own theme object, read from these when a terminal
+   * opens (components/terminalTheme.ts). The shell sits on the side surface with a visible cursor;
+   * a command's log sits on a raised surface. The 16 ANSI colours are xterm's own defaults, written
+   * out so a theme can change them: the achromatic rule belongs to our screens, it does not take
+   * colour away from a program's output.
+   */
+  --color-term-bg: #171717;
+  --color-term-log-bg: #1d1d1d;
+  --color-term-fg: #e9e9e9;
+  --color-term-cursor: #e9e9e9;
+  --color-term-selection: #353535;
+  --color-term-black: #2e3436;
+  --color-term-red: #cc0000;
+  --color-term-green: #4e9a06;
+  --color-term-yellow: #c4a000;
+  --color-term-blue: #3465a4;
+  --color-term-magenta: #75507b;
+  --color-term-cyan: #06989a;
+  --color-term-white: #d3d7cf;
+  --color-term-bright-black: #555753;
+  --color-term-bright-red: #ef2929;
+  --color-term-bright-green: #8ae234;
+  --color-term-bright-yellow: #fce94f;
+  --color-term-bright-blue: #729fcf;
+  --color-term-bright-magenta: #ad7fa8;
+  --color-term-bright-cyan: #34e2e2;
+  --color-term-bright-white: #eeeeec;
+
+  /*
+   * Shadows. Used as `shadow-(--shadow-modal)`, not `shadow-modal`: Tailwind copies a theme
+   * shadow's value into the utility, so only the var() form follows a theme that changes it.
+   * Each value is one that was written out at its call sites before; where two looked alike but
+   * differed, they stay two tokens rather than changing what is on screen.
+   */
+  --shadow-popover: 0 12px 32px -8px rgb(0 0 0 / 0.9); /* menus, popovers, the toast */
+  --shadow-popover-up: 0 -12px 32px -8px rgb(0 0 0 / 0.9); /* the same, opening upward */
+  --shadow-dropdown: 0 16px 48px -8px rgb(0 0 0 / 0.9); /* the run-command window */
+  --shadow-notice: 0 12px 32px -12px rgb(0 0 0 / 0.9);
+  --shadow-modal: 0 24px 60px -12px rgb(0 0 0 / 0.9);
+  --shadow-sticky: 0 8px 24px -8px rgb(0 0 0 / 0.8); /* my pinned question over the conversation */
+  /* The collapsed composer at rest and raised — tuned by measuring, see SessionView */
+  --shadow-dock: 0 -14px 32px -12px rgb(0 0 0 / 0.6);
+  --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.58);
+  --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 0 rgb(0 0 0 / 0.7);
+  --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.06), inset 0 -1px 2px rgb(0 0 0 / 0.5), 0 1px 0 rgb(0 0 0 / 0.6);
 
   /* Text a machine wrote (commands, paths, numbers) is mono; what a person or a model says is
      sans. Korean breaks the mono fallback, so sans handles it. */
@@ -67,26 +184,30 @@
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard,
     system-ui, sans-serif;
+  /* The terminal's stack is xterm's current one, kept apart so this change moves nothing; the
+     font settings (#312 step 5) will bring it together with --font-mono. */
+  --font-term: ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 /*
  * The conversation reads as the front-most surface, not the floor.
  *
- * Depth in this palette is named by position — void is the app floor, pit the sidebar,
- * panel what floats. The conversation was sitting on `void`, which made the thing you
- * actually read the darkest thing on screen while its own composer and tool cards floated
- * brighter above it. Backwards, and measurable: the reader reported the conversation and
- * the sidebar as "the same colour", and they were three steps apart — invisible at this
- * end of the scale.
+ * Depth in this palette is named by position — the floor is the app floor, the side surface the
+ * sidebar, raised what floats. The conversation was sitting on the floor, which made the thing
+ * you actually read the darkest thing on screen while its own composer and tool cards floated
+ * brighter above it. Backwards, and measurable: the reader reported the conversation and the
+ * sidebar as "the same colour", and they were three steps apart — invisible at this end of the
+ * scale.
  *
  * So inside the session view the two tokens are redefined rather than swapped at 11 call
- * sites: `void` becomes the reading surface and `panel` the things resting on it, keeping
- * every component's existing class correct. The surface stays 6 steps clear of the sidebar;
- * its cards now sit 13 steps above it, because the former 8-step gap let the input and the
- * conversation merge at a glance. That second number is the one that matters: an approval
- * card needs enough lift to be a component without becoming a signal. A candidate that
- * lifted the surface to within 2 steps of the approval card was rejected for making the
- * card disappear.
+ * sites: `surface-floor` becomes the reading surface and `surface-raised` the things resting on
+ * it, keeping every component's existing class correct. The values live in their own tokens
+ * (`surface-reading`, `surface-reading-raised`) so a theme sets them like any other. The surface
+ * stays 6 steps clear of the sidebar; its cards now sit 13 steps above it, because the former
+ * 8-step gap let the input and the conversation merge at a glance. That second number is the one
+ * that matters: an approval card needs enough lift to be a component without becoming a signal.
+ * A candidate that lifted the surface to within 2 steps of the approval card was rejected for
+ * making the card disappear.
  *
  * A brighter variant (#161616 / #1f1f1f) was built and looked at first. It cleared the
  * sidebar by 10 rather than 6, and read as not belonging to the rest of the app — far
@@ -95,8 +216,8 @@
  * replaced, was not visible at all.
  */
 [data-testid='session-view'] {
-  --color-void: #1d1d1d;
-  --color-panel: #2a2a2a;
+  --color-surface-floor: var(--color-surface-reading);
+  --color-surface-raised: var(--color-surface-reading-raised);
 }
 
 @layer base {
@@ -119,8 +240,8 @@
     overflow: hidden;
   }
   body {
-    background: var(--color-void);
-    color: var(--color-chalk);
+    background: var(--color-surface-floor);
+    color: var(--color-ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
@@ -164,7 +285,7 @@
     font-family: inherit;
   }
   :focus-visible {
-    outline: 1px solid var(--color-ash);
+    outline: 1px solid var(--color-focus);
     outline-offset: 1px;
   }
   /*
@@ -175,34 +296,34 @@
    * — accent-color cannot override that rule (the inactive gray is a semantic color with no room
    * to override). Taking over drawing with appearance: none makes both states the same pixels.
    *
-   * Color splits across two variables. The existing accent-ash class can no longer do anything
-   * through accent-color, but it stays as a marker meaning "this check is the bright kind" — the
-   * mapping below reads that marker and leaves the six call sites untouched. Removing it would
-   * let the mapping fall back to the default (graphite).
+   * Color splits across two variables. The existing accent-ink-muted class can no longer do
+   * anything through accent-color, but it stays as a marker meaning "this check is the bright
+   * kind" — the mapping below reads that marker and leaves the six call sites untouched. Removing
+   * it would let the mapping fall back to the default (line-strong: the box is drawn as an
+   * outline, and checking it fills the outline with its own colour so the box stays one shape).
    */
   input[type='checkbox'] {
-    --cc-check-bg: var(--color-graphite);
-    --cc-check-mark: var(--color-chalk);
+    --cc-check-bg: var(--color-line-strong);
+    --cc-check-mark: var(--color-ink);
     appearance: none;
     position: relative;
     width: 13px;
     height: 13px;
     flex-shrink: 0;
-    border: 1px solid var(--color-graphite);
+    border: 1px solid var(--color-line-strong);
     border-radius: 3px;
     background: transparent;
     cursor: inherit;
   }
-  input[type='checkbox'].accent-ash {
-    --cc-check-bg: var(--color-ash);
-    --cc-check-mark: var(--color-void);
+  input[type='checkbox'].accent-ink-muted {
+    --cc-check-bg: var(--color-ink-muted);
+    --cc-check-mark: var(--color-surface-floor);
   }
-  /* The check that turns on something dangerous (project deletion's "including the folder") —
-     reuses the diff-deletion palette as-is */
-  input[type='checkbox'].accent-del {
-    border-color: var(--color-del);
-    --cc-check-bg: var(--color-del);
-    --cc-check-mark: var(--color-del-bg);
+  /* The check that turns on something dangerous (project deletion's "including the folder") */
+  input[type='checkbox'].accent-danger {
+    border-color: var(--color-danger);
+    --cc-check-bg: var(--color-danger);
+    --cc-check-mark: var(--color-danger-bg);
   }
   input[type='checkbox']:checked {
     background: var(--cc-check-bg);
@@ -228,30 +349,30 @@
   /*
    * The selection highlight is translucent white.
    *
-   * It used to be solid graphite, but my own message bubble's background is the same graphite,
+   * It used to be solid #353535, but my own message bubble's background is the same colour,
    * so selecting text on it produced no visible change (caught in dogfooding). Using alpha
    * brightens whatever is underneath by the same amount no matter what it is, so the same problem
    * cannot recur even if more backgrounds get added later. Pure white itself belongs to "what is
    * waiting for me", so opacity keeps it dimmed.
    */
   ::selection {
-    background: rgb(255 255 255 / 0.24);
+    background: var(--color-selection);
   }
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
   }
   ::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--color-scrollbar-track);
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-edge);
-    border: 3px solid transparent;
+    background: var(--color-scrollbar-thumb);
+    border: var(--scrollbar-thumb-inset) solid transparent;
     background-clip: content-box;
-    border-radius: 999px;
+    border-radius: var(--scrollbar-radius);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-graphite);
+    background: var(--color-scrollbar-thumb-hover);
     background-clip: content-box;
   }
 }
@@ -260,9 +381,9 @@
   /*
    * The session marker chip.
    *
-   * Bright text on a dark background, but the sidebar background (pit #171717) and the chip
-   * background (void #141414) are only two steps apart, so a single border did not separate them
-   * well.
+   * Bright text on a dark background, but the sidebar background (surface-side #171717) and the
+   * chip background (surface-floor #141414) are only two steps apart, so a single border did not
+   * separate them well.
    *
    * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
    * highlight on top and a shadow underneath. It reads as a distinct object without spending any
@@ -275,10 +396,7 @@
    * orbit to sit in front of it.
    */
   .cc-chip {
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.06),
-      inset 0 -1px 2px rgb(0 0 0 / 0.5),
-      0 1px 0 rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-chip);
   }
 
   /* The signature: the keycap.
@@ -293,16 +411,14 @@
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     line-height: 1.2;
-    color: var(--color-ash);
-    background: linear-gradient(180deg, #222222 0%, #151515 100%);
-    border: 1px solid #0a0a0a;
+    color: var(--color-ink-muted);
+    background: linear-gradient(180deg, var(--color-keycap-top) 0%, var(--color-keycap-bottom) 100%);
+    border: 1px solid var(--color-keycap-border);
     border-radius: 4px;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.07),
-      0 1px 0 rgb(0 0 0 / 0.7);
+    box-shadow: var(--shadow-key);
   }
   .keycap-live {
-    color: var(--color-chalk);
+    color: var(--color-ink);
   }
 
   /* Dashboard figures: the position does not shift when the digit count changes */
@@ -315,9 +431,9 @@
   /* With no color to spend, "waiting" is spoken by light instead.
      A very faint glow is laid over pure white, so even among the same white the signal draws
      the eye first. */
-  .beacon {
-    color: var(--color-beacon);
-    text-shadow: 0 0 6px rgb(255 255 255 / 0.45);
+  .signal {
+    color: var(--color-ink-signal);
+    text-shadow: 0 0 6px var(--color-signal-glow);
   }
 }
 
@@ -545,7 +661,7 @@
   .cc-md h2,
   .cc-md h3,
   .cc-md h4 {
-    color: var(--color-chalk);
+    color: var(--color-ink);
     font-weight: 600;
     line-height: 1.3;
     margin-top: 1.1em;
@@ -553,13 +669,13 @@
   .cc-md h1 { font-size: 1.25em; }
   .cc-md h2 { font-size: 1.15em; }
   .cc-md h3 { font-size: 1.05em; }
-  .cc-md strong { color: var(--color-beacon); font-weight: 600; }
+  .cc-md strong { color: var(--color-ink-signal); font-weight: 600; }
   .cc-md em { font-style: italic; }
   .cc-md a {
-    color: var(--color-chalk);
+    color: var(--color-ink);
     text-decoration: underline;
     text-underline-offset: 2px;
-    text-decoration-color: var(--color-slate);
+    text-decoration-color: var(--color-ink-faint);
   }
   .cc-md ul,
   .cc-md ol {
@@ -567,19 +683,19 @@
   }
   .cc-md ul { list-style: disc; }
   .cc-md ol { list-style: decimal; }
-  .cc-md li::marker { color: var(--color-slate); }
+  .cc-md li::marker { color: var(--color-ink-faint); }
   .cc-md li + li { margin-top: 0.25em; }
   .cc-md code {
     font-family: var(--font-mono);
     font-size: 0.92em;
-    background: var(--color-panel);
-    border: 1px solid var(--color-edge);
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-line);
     border-radius: 3px;
     padding: 0.05em 0.3em;
   }
   .cc-md pre {
-    background: var(--color-panel);
-    border: 1px solid var(--color-edge);
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-line);
     border-radius: 4px;
     padding: 0.6em 0.7em;
     overflow-x: auto;
@@ -592,13 +708,13 @@
     line-height: 1.5;
   }
   .cc-md blockquote {
-    border-left: 2px solid var(--color-graphite);
+    border-left: 2px solid var(--color-line-strong);
     padding-left: 0.8em;
-    color: var(--color-ash);
+    color: var(--color-ink-muted);
   }
   .cc-md hr {
     border: 0;
-    border-top: 1px solid var(--color-edge);
+    border-top: 1px solid var(--color-line);
     margin: 1.2em 0;
   }
   .cc-md table {
@@ -609,12 +725,12 @@
   }
   .cc-md th,
   .cc-md td {
-    border: 1px solid var(--color-edge);
+    border: 1px solid var(--color-line);
     padding: 0.3em 0.6em;
     text-align: left;
   }
-  .cc-md th { color: var(--color-chalk); font-weight: 600; background: var(--color-panel); }
-  .cc-md td { color: var(--color-ash); }
+  .cc-md th { color: var(--color-ink); font-weight: 600; background: var(--color-surface-raised); }
+  .cc-md td { color: var(--color-ink-muted); }
   /* Drawing is left to the global checkbox rule (base) — this only handles inline placement */
   .cc-md input[type='checkbox'] { margin-right: 0.4em; vertical-align: -2px; }
 }
@@ -683,11 +799,11 @@
   background: conic-gradient(
     from 0deg,
     transparent 0deg,
-    #2d6cf0 45deg,
-    #7b3fe4 95deg,
-    #d63aa8 140deg,
-    #ff8a3d 180deg,
-    #4ad6d0 225deg,
+    var(--color-activity-1) 45deg,
+    var(--color-activity-2) 95deg,
+    var(--color-activity-3) 140deg,
+    var(--color-activity-4) 180deg,
+    var(--color-activity-5) 225deg,
     transparent 300deg
   );
   animation: cc-orbit-spin 1.4s linear infinite;
@@ -780,10 +896,10 @@
 @media (prefers-reduced-motion: reduce) {
   .cc-orbit::before {
     animation: none;
-    background: var(--color-ash);
+    background: var(--color-ink-muted);
   }
   .cc-orbit-ring {
-    border-color: var(--color-ash);
+    border-color: var(--color-ink-muted);
   }
   .cc-orbit-ring-layer {
     display: none;
@@ -792,11 +908,11 @@
 
 [data-spin-icon='off'] .cc-orbit::before {
   animation: none;
-  background: var(--color-ash);
+  background: var(--color-ink-muted);
 }
 
 [data-spin-grid='off'] .cc-orbit-ring {
-  border-color: var(--color-ash);
+  border-color: var(--color-ink-muted);
 }
 
 [data-spin-grid='off'] .cc-orbit-ring-layer {
@@ -859,11 +975,11 @@
   background: linear-gradient(
     100deg,
     transparent 0%,
-    #2d6cf0 20%,
-    #7b3fe4 36%,
-    #d63aa8 50%,
-    #ff8a3d 64%,
-    #4ad6d0 80%,
+    var(--color-activity-1) 20%,
+    var(--color-activity-2) 36%,
+    var(--color-activity-3) 50%,
+    var(--color-activity-4) 64%,
+    var(--color-activity-5) 80%,
     transparent 100%
   );
   /* The blur is also part of the spread — the band's edges fade all the way to the screen edge

@@ -60,21 +60,21 @@ export function OrchestratorView() {
       {skillProposals.map((p) => (
         <div
           key={p.name}
-          className="flex items-start gap-3 border-b border-edge bg-panel px-4 py-2.5"
+          className="flex items-start gap-3 border-b border-line bg-surface-raised px-4 py-2.5"
           data-testid={`skill-proposal-${p.name}`}
         >
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] text-chalk">
+            <p className="text-[12px] text-ink">
               Orchestrator proposes skill <span className="readout">{p.name}</span>
-              {p.why && <span className="text-ash"> — {p.why}</span>}
+              {p.why && <span className="text-ink-muted"> — {p.why}</span>}
             </p>
-            <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded border border-edge bg-void px-2 py-1.5 font-sans text-[11px] leading-relaxed text-ash">
+            <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded border border-line bg-surface-floor px-2 py-1.5 font-sans text-[11px] leading-relaxed text-ink-muted">
               {p.content}
             </pre>
           </div>
           <button
             type="button"
-            className="shrink-0 rounded border border-ash/50 bg-graphite px-2.5 py-1 text-[11px] text-chalk transition-colors hover:border-ash"
+            className="shrink-0 rounded border border-ink-muted/50 bg-surface-hover px-2.5 py-1 text-[11px] text-ink transition-colors hover:border-ink-muted"
             onClick={() => void resolveSkillProposal(p.name, true)}
             data-testid={`skill-approve-${p.name}`}
           >
@@ -82,7 +82,7 @@ export function OrchestratorView() {
           </button>
           <button
             type="button"
-            className="shrink-0 rounded px-2 py-1 text-[11px] text-slate transition-colors hover:text-chalk"
+            className="shrink-0 rounded px-2 py-1 text-[11px] text-ink-faint transition-colors hover:text-ink"
             onClick={() => void resolveSkillProposal(p.name, false)}
             data-testid={`skill-dismiss-${p.name}`}
           >
@@ -93,21 +93,21 @@ export function OrchestratorView() {
       {mcpProposals.map((p) => (
         <div
           key={p.name}
-          className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-2.5"
+          className="flex items-center gap-3 border-b border-line bg-surface-raised px-4 py-2.5"
           data-testid={`mcp-proposal-${p.name}`}
         >
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] text-chalk">
+            <p className="text-[12px] text-ink">
               Orchestrator asks to install MCP server <span className="readout">{p.name}</span>
-              {p.why && <span className="text-ash"> — {p.why}</span>}
+              {p.why && <span className="text-ink-muted"> — {p.why}</span>}
             </p>
-            <p className="readout mt-0.5 truncate text-[10px] text-slate">
+            <p className="readout mt-0.5 truncate text-[10px] text-ink-faint">
               {p.command} {p.args.join(' ')}
             </p>
           </div>
           <button
             type="button"
-            className="shrink-0 rounded border border-ash/50 bg-graphite px-2.5 py-1 text-[11px] text-chalk transition-colors hover:border-ash"
+            className="shrink-0 rounded border border-ink-muted/50 bg-surface-hover px-2.5 py-1 text-[11px] text-ink transition-colors hover:border-ink-muted"
             onClick={() => void resolveMcpProposal(p.name, true)}
             data-testid={`mcp-approve-${p.name}`}
           >
@@ -115,7 +115,7 @@ export function OrchestratorView() {
           </button>
           <button
             type="button"
-            className="shrink-0 rounded px-2 py-1 text-[11px] text-slate transition-colors hover:text-chalk"
+            className="shrink-0 rounded px-2 py-1 text-[11px] text-ink-faint transition-colors hover:text-ink"
             onClick={() => void resolveMcpProposal(p.name, false)}
             data-testid={`mcp-dismiss-${p.name}`}
           >
@@ -172,7 +172,7 @@ function AppRails() {
    */
   return (
     <div
-      className="relative flex shrink-0 border-l border-edge"
+      className="relative flex shrink-0 border-l border-line"
       style={{ width: `${railWidth}px` }}
       data-testid="app-rails"
     >
@@ -228,8 +228,8 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
 
   return (
     <div className="w-full max-w-md px-6" data-testid="orchestrator-suggestions">
-      <p className="text-[13px] text-ash">
-        This is your <span className="text-chalk">orchestrator</span>. Ask it anything about this
+      <p className="text-[13px] text-ink-muted">
+        This is your <span className="text-ink">orchestrator</span>. Ask it anything about this
         app or your sessions — try one:
       </p>
       <div className="mt-3 space-y-2">
@@ -239,19 +239,19 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
             data-testid={`suggest-${q.key}`}
             disabled={waking || offline}
             onClick={() => ask(q.text)}
-            className="block w-full rounded-lg border border-edge bg-panel px-4 py-3 text-left text-[13px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+            className="block w-full rounded-lg border border-line bg-surface-raised px-4 py-3 text-left text-[13px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
           >
             {q.text}
           </button>
         ))}
       </div>
       {waking && !offline && (
-        <p className="mt-2 text-[11px] text-slate" data-testid="orchestrator-waking">
+        <p className="mt-2 text-[11px] text-ink-faint" data-testid="orchestrator-waking">
           Starting the orchestrator…
         </p>
       )}
       {offline && (
-        <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="orchestrator-offline">
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="orchestrator-offline">
           {connection === 'connecting'
             ? 'Connecting to the agent host…'
             : 'Not connected to the agent host — nothing can start until it is back.'}
@@ -263,7 +263,7 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
         through to the new-session window.
       */}
       <button
-        className="mt-3 text-[12px] text-slate underline-offset-2 hover:text-chalk hover:underline disabled:opacity-40"
+        className="mt-3 text-[12px] text-ink-faint underline-offset-2 hover:text-ink hover:underline disabled:opacity-40"
         data-testid="orchestrator-pick-folder"
         disabled={picking || offline}
         onClick={async () => {
@@ -332,7 +332,7 @@ function OrchestratorEmpty() {
             }
           }}
           placeholder="Ask the orchestrator anything…"
-          className="w-full resize-none rounded-lg border border-edge bg-panel px-3 py-2.5 text-[13px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none disabled:opacity-40"
+          className="w-full resize-none rounded-lg border border-line bg-surface-raised px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-40"
           data-testid="orchestrator-input"
         />
       </div>

@@ -26,7 +26,7 @@ export function UpdateLine() {
 
   if (update.phase === 'updating') {
     return (
-      <span className={`${tone} text-slate`} data-testid="update-line" role="status">
+      <span className={`${tone} text-ink-faint`} data-testid="update-line" role="status">
         Updating…
       </span>
     )
@@ -34,9 +34,9 @@ export function UpdateLine() {
 
   if (update.phase === 'restart_required') {
     return (
-      // ash, not slate: this one is asking for something. Not beacon either — nothing is
+      // ink-muted, not ink-faint: this one is asking for something. Not ink-signal either — nothing is
       // blocked, and the brightest thing on screen stays reserved for what waits on me.
-      <span className={`${tone} text-ash`} data-testid="update-line" role="status">
+      <span className={`${tone} text-ink-muted`} data-testid="update-line" role="status">
         Restart Centralu to finish updating{update.latest ? ` to ${update.latest}` : ''}
       </span>
     )
@@ -53,7 +53,7 @@ export function UpdateLine() {
      */
     return (
       <Tooltip content={update.error ?? 'Something went wrong'} testId="update-error" align="right">
-        <span className={`${tone} text-beacon`} data-testid="update-line">
+        <span className={`${tone} text-ink-signal`} data-testid="update-line">
           Update failed
         </span>
       </Tooltip>
@@ -65,7 +65,7 @@ export function UpdateLine() {
   return (
     <button
       type="button"
-      className={`rounded px-2 py-1 ${tone} text-slate transition-colors hover:bg-graphite/50 hover:text-chalk`}
+      className={`rounded px-2 py-1 ${tone} text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink`}
       data-testid="update-line"
       onClick={() => void applyUpdate()}
       title={`Install ${update.latest} (you will be asked to restart, never restarted for you)`}

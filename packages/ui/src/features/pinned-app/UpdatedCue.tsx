@@ -25,7 +25,7 @@ export function UpdatedCue({ at, testId }: { at: number; testId: string }) {
   }, [at])
   if (!shown) return null
   return (
-    <span className="readout shrink-0 text-[10px] text-slate" data-testid={testId} title="The app now runs new code, so this view was opened again">
+    <span className="readout shrink-0 text-[10px] text-ink-faint" data-testid={testId} title="The app now runs new code, so this view was opened again">
       Updated
     </span>
   )

@@ -119,8 +119,8 @@ export function UsageDonuts() {
    */
   if (offline) {
     return (
-      <span className="flex items-center gap-1.5 text-[11px] text-beacon" data-testid="connection">
-        <span className="size-1.5 rounded-full bg-beacon breathe" aria-hidden />
+      <span className="flex items-center gap-1.5 text-[11px] text-ink-signal" data-testid="connection">
+        <span className="size-1.5 rounded-full bg-ink-signal breathe" aria-hidden />
         {connection === 'connecting' ? 'Connecting' : 'Disconnected'}
       </span>
     )
@@ -138,12 +138,12 @@ export function UsageDonuts() {
         testId="usage-no-agent-tip"
         content={
           <span className="block">
-            <span className="block text-chalk">No agent connected</span>
-            <span className="mt-1 block text-slate">Install or sign in to Claude Code or Codex</span>
+            <span className="block text-ink">No agent connected</span>
+            <span className="mt-1 block text-ink-faint">Install or sign in to Claude Code or Codex</span>
           </span>
         }
       >
-        <span className="text-[11px] text-ash" data-testid="usage-no-agent">
+        <span className="text-[11px] text-ink-muted" data-testid="usage-no-agent">
           No agent
         </span>
       </Tooltip>
@@ -167,12 +167,12 @@ export function UsageDonuts() {
           {/* Clicking outside closes it — covers the screen without dimming it (same rule as the inbox) */}
           <div className="fixed inset-0 z-30" onClick={() => show(null)} data-testid="usage-backdrop" />
           <div
-            className="cc-drop absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+            className="cc-drop absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
             data-testid="usage-drop"
           >
-            <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
-              <h2 className="text-[13px] font-medium text-chalk">Usage</h2>
-              <span className="readout text-[11px] text-slate">{openMeta.label}</span>
+            <header className="flex items-center gap-2 border-b border-line px-4 py-2">
+              <h2 className="text-[13px] font-medium text-ink">Usage</h2>
+              <span className="readout text-[11px] text-ink-faint">{openMeta.label}</span>
             </header>
             <div className="max-h-[calc(60vh/var(--text-zoom))] overflow-y-auto">
               <UsagePanel tool={open} />
@@ -209,14 +209,14 @@ function Donut({
   const R = 9
   const C = 2 * Math.PI * R
   const filled = (Math.max(0, Math.min(100, percent)) / 100) * C
-  const tone = known ? usageTone(percent) : 'text-slate'
+  const tone = known ? usageTone(percent) : 'text-ink-faint'
 
   return (
     <Tooltip
       testId={`usage-donut-tip-${tool}`}
       content={
         <span className="block">
-          <span className="block text-chalk">{meta.label}</span>
+          <span className="block text-ink">{meta.label}</span>
           <span className="readout mt-1 block">
             {known ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used` : 'Weekly usage unknown'}
           </span>
@@ -239,8 +239,8 @@ function Donut({
          * where a ring is drawn, whether the hand touched the donut or the panel behind it would
          * look mismatched — the shape that lights up has to be the shape of the button.
          */
-        className={`relative z-40 flex items-center rounded-full p-0.5 transition-colors hover:bg-graphite/50 ${
-          active ? 'bg-graphite/50' : ''
+        className={`relative z-40 flex items-center rounded-full p-0.5 transition-colors hover:bg-surface-hover/50 ${
+          active ? 'bg-surface-hover/50' : ''
         }`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
@@ -251,7 +251,7 @@ function Donut({
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
-            className="text-edge"
+            className="text-line"
             {...(known ? {} : { strokeDasharray: '2 3' })}
           />
           {known && (
@@ -279,7 +279,7 @@ function Donut({
             y="12"
             textAnchor="middle"
             dominantBaseline="central"
-            className={`fill-current font-mono ${known ? 'text-chalk' : 'text-slate'}`}
+            className={`fill-current font-mono ${known ? 'text-ink' : 'text-ink-faint'}`}
             style={{ fontSize: '9px' }}
           >
             {meta.mark}

@@ -240,7 +240,7 @@ export function GridView() {
         Does not scroll. If there might be more below, that makes it a list, not a control
         room — "seeing it all at a glance" only holds if what is on screen is everything there is.
       */
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-deck p-2"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-deck p-2"
       data-testid="grid"
       onDragOver={(e) => {
         if (gridTakes(e.dataTransfer.types)) e.preventDefault()
@@ -266,9 +266,9 @@ export function GridView() {
     >
       {visible.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-center" data-testid="grid-empty">
-          <p className="text-[13px] leading-relaxed text-ash">
+          <p className="text-[13px] leading-relaxed text-ink-muted">
             Drag sessions and apps here from the sidebar
-            <span className="mt-1 block text-[11px] text-slate">
+            <span className="mt-1 block text-[11px] text-ink-faint">
               They keep running — this is another way to look at them
             </span>
           </p>
@@ -316,10 +316,10 @@ export function GridView() {
               */
                 /*
                 The panel's border is brighter than any line inside the panel (user's
-                observation, 2026-09-11). Before, the panel was `edge` and the folded input card
-                was `graphite`, so **what was inside was brighter than the vessel holding it**,
+                observation, 2026-09-11). Before, the panel was `line` and the folded input card
+                was `line-strong`, so **what was inside was brighter than the vessel holding it**,
                 and the eye went to the card's curve before the panel's boundary. The two are
-                swapped — the panel goes up to `graphite` and the card goes down to `edge`.
+                swapped — the panel goes up to `line-strong` and the card goes down to `line`.
               */
                 /*
                 isolate: the panel contains its own stacking layer.
@@ -331,7 +331,7 @@ export function GridView() {
                 "highest within the panel" to actually be true, the panel has to be a fence —
                 exactly the method .cc-orbit in the same file uses for the badge.
               */
-                className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-graphite bg-void transition-opacity ${
+                className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
                   isWorking ? 'cc-orbit-ring' : ''
                 } ${dragging === id ? 'opacity-40' : ''}`}
                 data-focused={(panel.kind === 'session' && focusedSessionId === id) || undefined}

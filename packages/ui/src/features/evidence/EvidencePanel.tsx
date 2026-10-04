@@ -114,7 +114,7 @@ export function EvidencePanel() {
    */
   return (
     <aside
-      className={`relative flex h-full shrink-0 flex-col overflow-hidden border-l border-edge bg-pit ${
+      className={`relative flex h-full shrink-0 flex-col overflow-hidden border-l border-line bg-surface-side ${
         resizing ? '' : 'transition-[width] duration-200 ease-out motion-reduce:transition-none'
       }`}
       style={{ width: open ? width : RAIL_W }}
@@ -158,13 +158,13 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
    * even when their contents change.
    */
   return (
-    <DragRegion className="flex h-10 items-center gap-2 border-b border-edge px-3">
-      <span className="readout truncate text-[11px] text-ash" data-testid="evidence-project">
+    <DragRegion className="flex h-10 items-center gap-2 border-b border-line px-3">
+      <span className="readout truncate text-[11px] text-ink-muted" data-testid="evidence-project">
         {projectName}
       </span>
       {branch && (
         <button
-          className="readout truncate text-[10px] text-slate transition-colors hover:text-chalk"
+          className="readout truncate text-[10px] text-ink-faint transition-colors hover:text-ink"
           onClick={openBranches}
           data-testid="evidence-branch"
           title="Switch branch"
@@ -305,7 +305,7 @@ function TabGroup({
     <>
       <nav
         ref={stripRef}
-        className={`relative flex items-center gap-0.5 border-b border-edge px-2 py-1 ${gi > 0 ? 'border-t' : ''}`}
+        className={`relative flex items-center gap-0.5 border-b border-line px-2 py-1 ${gi > 0 ? 'border-t' : ''}`}
         data-testid={gi === 0 ? 'evidence-tabs' : `evidence-tabs-${gi}`}
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(PANEL_TAB_MIME)) return
@@ -436,11 +436,11 @@ function TabGroup({
           <div
             /*
               The boundary is the meaning ("this half becomes the split"), so it wears
-              the same ash landing line as every other drop indicator — border-edge was
+              the same focus-coloured landing line as every other drop indicator — border-line was
               measured too faint against the tinted half to read as a boundary at all.
             */
-            className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-graphite/30 ${
-              groups.length === 1 ? 'top-1/2 shadow-[inset_0_2px_0_0_var(--color-ash)]' : 'top-0'
+            className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-surface-hover/30 ${
+              groups.length === 1 ? 'top-1/2 shadow-[inset_0_2px_0_0_var(--color-focus)]' : 'top-0'
             }`}
             data-testid="evidence-split-hint"
           />
@@ -487,8 +487,8 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
         data-testid={gi === 0 ? 'evidence-tabs-more' : `evidence-tabs-more-${gi}`}
         aria-label={`${hidden.length} more tabs`}
         title={hidden.map((t) => TAB_LABELS[t]).join(' · ')}
-        className={`rounded px-1.5 py-0.5 text-[11px] transition-colors hover:bg-graphite/50 hover:text-chalk ${
-          open ? 'bg-graphite/50 text-chalk' : 'text-ash'
+        className={`rounded px-1.5 py-0.5 text-[11px] transition-colors hover:bg-surface-hover/50 hover:text-ink ${
+          open ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted'
         }`}
       >
         …
@@ -498,7 +498,7 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
           {/* Closes when clicked outside — the menu itself sits at a higher z below */}
           <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />
           <div
-            className="cc-drop absolute left-0 top-full z-50 mt-1 min-w-28 overflow-hidden rounded border border-edge bg-panel py-0.5 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+            className="cc-drop absolute left-0 top-full z-50 mt-1 min-w-28 overflow-hidden rounded border border-line bg-surface-raised py-0.5 shadow-(--shadow-popover)"
             data-testid={gi === 0 ? 'evidence-tabs-overflow' : `evidence-tabs-overflow-${gi}`}
           >
             {hidden.map((id) => (
@@ -510,7 +510,7 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
                   onPick(id)
                   setOpen(false)
                 }}
-                className="block w-full px-3 py-1 text-left text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
+                className="block w-full px-3 py-1 text-left text-[11px] text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
               >
                 {TAB_LABELS[id]}
               </button>
@@ -589,13 +589,13 @@ function TabButton({
         onLayout(moveTab(groups, dragged, id, dropsLeft(e.currentTarget.getBoundingClientRect(), e.clientX)))
       }}
       className={`rounded px-2 py-0.5 text-[12px] transition-colors disabled:opacity-40 ${
-        active ? 'bg-graphite/50 text-chalk' : 'text-ash hover:text-chalk'
+        active ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted hover:text-ink'
       } ${dropLine(edge)}`}
     >
       {TAB_LABELS[id]}
       {running && (
         <span
-          className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-chalk align-middle"
+          className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-ink align-middle"
           data-testid="terminal-tab-running"
           aria-label="a command is running"
         />
@@ -612,8 +612,8 @@ function TabButton({
 function dropLine(edge: 'left' | 'right' | null): string {
   if (!edge) return ''
   return edge === 'left'
-    ? 'shadow-[inset_2px_0_0_0_var(--color-ash)]'
-    : 'shadow-[inset_-2px_0_0_0_var(--color-ash)]'
+    ? 'shadow-[inset_2px_0_0_0_var(--color-focus)]'
+    : 'shadow-[inset_-2px_0_0_0_var(--color-focus)]'
 }
 
 /** What one tab shows. The active tab of every group renders through here. */
@@ -640,7 +640,7 @@ function TabBody({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {tab !== 'files' && !isRepo && (
-          <p className="px-3 py-2 text-[11px] text-slate" data-testid="evidence-not-repo">
+          <p className="px-3 py-2 text-[11px] text-ink-faint" data-testid="evidence-not-repo">
             Not a git repository
           </p>
         )}
@@ -697,7 +697,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       data-testid="evidence-rail"
     >
       <button
-        className="rounded px-1 py-0.5 text-[12px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
+        className="rounded px-1 py-0.5 text-[12px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
         onClick={() => togglePanel(true)}
         data-testid="evidence-open"
         title={`Expand evidence panel (${sc('mod', 'B')})`}
@@ -706,7 +706,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       </button>
       {count !== null && count > 0 && (
         <button
-          className="readout rounded px-1 text-[10px] text-ash transition-colors hover:text-chalk"
+          className="readout rounded px-1 text-[10px] text-ink-muted transition-colors hover:text-ink"
           onClick={() => togglePanel(true)}
           data-testid="evidence-rail-count"
           title={`${count} changed files`}
@@ -721,12 +721,12 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
           data-testid="evidence-rail-running"
           title="A command is running — open the terminal tab"
         >
-          <span className="size-1.5 animate-pulse rounded-full bg-chalk" />
+          <span className="size-1.5 animate-pulse rounded-full bg-ink" />
         </button>
       )}
       {/* Vertical text — states what the collapsed strip is a strip of */}
       <span
-        className="mt-1 text-[10px] text-slate"
+        className="mt-1 text-[10px] text-ink-faint"
         style={{ writingMode: 'vertical-rl' }}
         aria-hidden
       >
@@ -792,15 +792,15 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col border-b border-edge" data-testid="evidence-git">
+    <section className="flex min-h-0 flex-1 flex-col border-b border-line" data-testid="evidence-git">
       {/* The label 'Changes' was dropped since the tab already says it — only the count and buttons go to the right of the strip */}
       {files && files.length > 0 && (
         <TabActions>
-          <span className="readout text-[10px] text-ash" data-testid="evidence-change-count">
+          <span className="readout text-[10px] text-ink-muted" data-testid="evidence-change-count">
             {files.length}
           </span>
           <button
-            className="rounded px-1.5 py-0.5 text-[10px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
+            className="rounded px-1.5 py-0.5 text-[10px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
             onClick={() => openGit()}
             data-testid="evidence-git-full"
             title="Open in wide view"
@@ -811,13 +811,13 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
       )}
 
       {denied ? (
-        <p className="px-3 pb-2 text-[11px] leading-relaxed text-ash" data-testid="evidence-git-denied">
+        <p className="px-3 pb-2 text-[11px] leading-relaxed text-ink-muted" data-testid="evidence-git-denied">
           Folder access permission required — System Settings → Privacy & Security → Files and Folders
         </p>
       ) : files === null ? (
-        <p className="px-3 pb-2 text-[11px] text-slate">Loading…</p>
+        <p className="px-3 pb-2 text-[11px] text-ink-faint">Loading…</p>
       ) : files.length === 0 ? (
-        <p className="px-3 pb-2 text-[11px] text-slate" data-testid="evidence-clean">
+        <p className="px-3 pb-2 text-[11px] text-ink-faint" data-testid="evidence-clean">
           No changes
         </p>
       ) : (
@@ -865,9 +865,9 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
          * the moment everything got committed and the state became "No changes," Push disappeared
          * along with it — there was no way left in the app to push the commit just made.
          */
-        <div className="mt-auto border-t border-edge px-3 py-2">
+        <div className="mt-auto border-t border-line px-3 py-2">
           <input
-            className="w-full rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+            className="w-full rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
             placeholder="Commit message"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -875,7 +875,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
           />
           <div className="mt-1.5 flex gap-1.5">
             <button
-              className="flex-1 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+              className="flex-1 rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
               disabled={busy || !message.trim() || staged.length === 0}
               data-testid="evidence-commit"
               onClick={() =>
@@ -889,7 +889,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
               Commit
             </button>
             <button
-              className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
+              className="rounded border border-line px-2 py-1 text-[11px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
               disabled={busy}
               data-testid="evidence-push"
               onClick={() =>
@@ -925,11 +925,11 @@ function ChangeGroup({
   if (files.length === 0) return null
   return (
     <section data-testid={`evidence-group-${title.toLowerCase()}`}>
-      <header className="sticky top-0 flex items-center gap-1.5 bg-pit px-3 py-1">
-        <h4 className="text-[10px] uppercase text-slate">{title}</h4>
-        <span className="readout text-[10px] text-slate">{files.length}</span>
+      <header className="sticky top-0 flex items-center gap-1.5 bg-surface-side px-3 py-1">
+        <h4 className="text-[10px] uppercase text-ink-faint">{title}</h4>
+        <span className="readout text-[10px] text-ink-faint">{files.length}</span>
         <button
-          className="ml-auto text-[10px] text-slate transition-colors hover:text-chalk disabled:opacity-40"
+          className="ml-auto text-[10px] text-ink-faint transition-colors hover:text-ink disabled:opacity-40"
           disabled={busy}
           onClick={() => void action.run(files.map((f) => f.path))}
           data-testid={`evidence-${action.id}-all`}
@@ -972,14 +972,14 @@ function ChangeRow({
   return (
     <li className="group/file relative">
       <button
-        className="flex w-full items-center gap-2 px-3 py-1 pr-12 text-left transition-colors hover:bg-graphite/25"
+        className="flex w-full items-center gap-2 px-3 py-1 pr-12 text-left transition-colors hover:bg-surface-hover/25"
         onClick={onOpen}
         data-testid={`evidence-file-${file.path}`}
         title={`${file.path} — view diff`}
       >
         {/* The kind is told apart by a letter, not a color (strict grayscale) */}
-        <span className="readout w-3 shrink-0 text-[10px] text-ash">{statusMark(file.status)}</span>
-        <span className="truncate text-[12px] text-ash" dir="rtl">
+        <span className="readout w-3 shrink-0 text-[10px] text-ink-muted">{statusMark(file.status)}</span>
+        <span className="truncate text-[12px] text-ink-muted" dir="rtl">
           {file.path}
         </span>
       </button>
@@ -989,7 +989,7 @@ function ChangeRow({
         it was being reviewed.
       */}
       <button
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-slate opacity-0 transition-opacity hover:text-chalk focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-40"
+        className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-40"
         disabled={busy}
         onClick={onAction}
         data-testid={`evidence-${actionId}-${file.path}`}
@@ -1046,14 +1046,14 @@ function CommitHistory({ projectId }: { projectId: string }) {
 
   if (commits === null) {
     return (
-      <p className="px-3 py-2 text-[11px] text-slate" data-testid="evidence-history">
+      <p className="px-3 py-2 text-[11px] text-ink-faint" data-testid="evidence-history">
         Loading…
       </p>
     )
   }
   if (commits.length === 0) {
     return (
-      <p className="px-3 py-2 text-[11px] text-slate" data-testid="evidence-history-empty">
+      <p className="px-3 py-2 text-[11px] text-ink-faint" data-testid="evidence-history-empty">
         No commits yet
       </p>
     )
@@ -1066,7 +1066,7 @@ function CommitHistory({ projectId }: { projectId: string }) {
           <li key={c.sha}>
             <button
               /* Fixed height — if rows had different heights, the lines would misalign at row boundaries and look broken */
-              className="flex w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-graphite/25"
+              className="flex w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-surface-hover/25"
               style={{ height: ROW_H }}
               onClick={() => openCommit(c.sha)}
               data-testid={`history-commit-${c.shortSha}`}
@@ -1075,8 +1075,8 @@ function CommitHistory({ projectId }: { projectId: string }) {
               {/* The left padding is the graph's own job (PAD_L) — stacking px-3 on top would push the dot twice as far from the wall */}
               <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12px] text-ash">{c.subject}</span>
-                <span className="readout block truncate text-[10px] text-slate">
+                <span className="block truncate text-[12px] text-ink-muted">{c.subject}</span>
+                <span className="readout block truncate text-[10px] text-ink-faint">
                   {[
                     c.shortSha,
                     commitAgo(c.when, now),
@@ -1094,7 +1094,7 @@ function CommitHistory({ projectId }: { projectId: string }) {
       {/* A list that cuts off silently is a list lying that there are no older commits */}
       {commits.length >= COMMIT_LIMIT && (
         <p
-          className="shrink-0 border-t border-edge px-3 py-1.5 text-[10px] text-slate"
+          className="shrink-0 border-t border-line px-3 py-1.5 text-[10px] text-ink-faint"
           data-testid="evidence-history-cap"
         >
           Newest {COMMIT_LIMIT} commits — older ones are not listed

@@ -118,12 +118,12 @@ export function FileTree({ projectId }: { projectId: string }) {
         <TabActions>
           {/* 'Ignored' alone read as a state, not an action — it is the showing that is optional */}
           <label
-            className="flex shrink-0 items-center gap-1.5 text-[11px] text-slate"
+            className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-faint"
             title="Show what .gitignore hides — node_modules, build output, local files"
           >
             <input
               type="checkbox"
-              className="accent-graphite"
+              className="accent-line-strong"
               checked={showIgnored}
               onChange={(e) => setShowIgnored(e.target.checked)}
               data-testid="toggle-ignored"
@@ -149,7 +149,7 @@ function TreeRoot({ projectId, showIgnored }: { projectId: string; showIgnored: 
   const drop = useDropTarget('')
   return (
     <div
-      className={`min-h-0 flex-1 overflow-auto py-1 ${drop.over ? 'bg-graphite/15' : ''}`}
+      className={`min-h-0 flex-1 overflow-auto py-1 ${drop.over ? 'bg-surface-hover/15' : ''}`}
       data-testid="file-drop-root"
       {...drop.handlers}
     >
@@ -368,7 +368,7 @@ function Dir({
           <FileRow key={e.path} entry={e} depth={depth} />
         ),
       )}
-      {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-[12px] text-slate">Empty</li>}
+      {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-[12px] text-ink-faint">Empty</li>}
     </ul>
   )
 }
@@ -405,8 +405,8 @@ function DirRow({
   return (
     <li data-testid={`file-drop-${entry.path}`} {...drop.handlers}>
       <button
-        className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] transition-colors hover:text-chalk ${
-          drop.over ? 'bg-graphite/40 text-chalk' : 'text-ash'
+        className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] transition-colors hover:text-ink ${
+          drop.over ? 'bg-surface-hover/40 text-ink' : 'text-ink-muted'
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => toggleDir(projectId, entry.path)}
@@ -420,10 +420,10 @@ function DirRow({
         onDragStart={(e) => setDragPath(e.dataTransfer, entry.path)}
       >
         {/* Same width as a file's extension column — so folder names and file names line up */}
-        <span className="flex w-7 shrink-0 justify-center text-slate">
+        <span className="flex w-7 shrink-0 justify-center text-ink-faint">
           <ChevronIcon open={open} />
         </span>
-        <span className={`truncate ${entry.ignored ? 'text-slate' : ''}`}>{entry.name}</span>
+        <span className={`truncate ${entry.ignored ? 'text-ink-faint' : ''}`}>{entry.name}</span>
       </button>
       {open && <Dir projectId={projectId} path={entry.path} depth={depth + 1} showIgnored={showIgnored} defaultOpen />}
     </li>
@@ -440,7 +440,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
     <li>
       <button
         className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] transition-colors ${
-          current === entry.path ? 'bg-graphite/40 text-chalk' : entry.ignored ? 'text-slate' : 'text-ash hover:text-chalk'
+          current === entry.path ? 'bg-surface-hover/40 text-ink' : entry.ignored ? 'text-ink-faint' : 'text-ink-muted hover:text-ink'
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => openFile(entry.path)}
@@ -459,7 +459,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
         <span className="truncate">{entry.name}</span>
         {/* A file the agent just touched (FR-5) — a symbol, not a color */}
         {touched.has(entry.path) && (
-          <span className="ml-auto shrink-0 text-[9px] text-slate" title="Edited by agent">
+          <span className="ml-auto shrink-0 text-[9px] text-ink-faint" title="Edited by agent">
             ◆
           </span>
         )}
@@ -524,7 +524,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
       ref={rootRef}
       role="menu"
       data-testid="file-menu"
-      className="fixed z-40 w-56 overflow-hidden rounded border border-edge bg-panel shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      className="fixed z-40 w-56 overflow-hidden rounded border border-line bg-surface-raised shadow-(--shadow-popover)"
       // Opening it near the edge of the screen would push the menu off the window — pulled back inward
       style={{
         left: Math.min(state.x / zoom, window.innerWidth / zoom - 232),
@@ -536,7 +536,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         role="menuitem"
         data-testid="file-menu-reveal"
         title={`Show ${target.name} in ${fileManager}`}
-        className="block w-full truncate px-2.5 py-1.5 text-left text-[12px] text-ash transition-colors hover:bg-graphite/25 hover:text-chalk"
+        className="block w-full truncate px-2.5 py-1.5 text-left text-[12px] text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
         onClick={() => {
           close()
           void ops.reveal(target)
@@ -554,7 +554,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         role="menuitem"
         data-testid="file-menu-trash"
         title="Moves it to the Trash — you can put it back from there"
-        className="block w-full truncate border-t border-edge px-2.5 py-1.5 text-left text-[12px] text-ash transition-colors hover:bg-graphite/25 hover:text-chalk"
+        className="block w-full truncate border-t border-line px-2.5 py-1.5 text-left text-[12px] text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
         onClick={() => {
           close()
           void ops.trash(target)

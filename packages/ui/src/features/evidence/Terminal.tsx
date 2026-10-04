@@ -7,6 +7,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
+import { terminalStyle } from '../../components/terminalTheme.js'
 import { useStore } from '../../store/store.js'
 import { TabActions } from './tabActions.jsx'
 
@@ -100,7 +101,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       </TabActions>
 
       {error && (
-        <p className="px-3 py-2 text-[11px] leading-relaxed text-ash" data-testid="terminal-error">
+        <p className="px-3 py-2 text-[11px] leading-relaxed text-ink-muted" data-testid="terminal-error">
           Could not open terminal — {error}
         </p>
       )}
@@ -136,13 +137,13 @@ function CommandTerminal({ projectId, run }: { projectId: string; run: CommandRu
   const label = useStore((s) => s.projects[projectId]?.commands.find((c) => c.command === run.command)?.label)
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col border-b border-edge last:border-b-0"
+      className="flex min-h-0 flex-1 flex-col border-b border-line last:border-b-0"
       data-testid={`cmd-term-${run.command}`}
     >
       <div className="flex items-center gap-1.5 px-2 py-0.5">
-        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-chalk" aria-label="running" />
-        {label && <span className="truncate text-[10px] text-ash">{label}</span>}
-        <span className="readout truncate text-[10px] text-slate" title={run.command}>
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-ink" aria-label="running" />
+        {label && <span className="truncate text-[10px] text-ink-muted">{label}</span>}
+        <span className="readout truncate text-[10px] text-ink-faint" title={run.command}>
           {run.command}
         </span>
         <span className="ml-auto">
@@ -179,8 +180,8 @@ function CommandLog({ projectId, command, runId }: { projectId: string; command:
 
     const term = new Xterm({
       fontSize: 11,
-      fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-      theme: { background: '#1d1d1d', foreground: '#e9e9e9', cursor: '#1d1d1d', selectionBackground: '#353535' },
+      // Colours and font come from the theme (styles/index.css, --color-term-*)
+      ...terminalStyle(el, 'log'),
       disableStdin: true,
       scrollback: 5000,
       allowProposedApi: true,
@@ -297,10 +298,9 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
 
     const term = new Xterm({
       fontSize: 11,
-      fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
       // The strict-grayscale rule belongs to our own screens; it does not take color away from a
-      // shell's own output. Only the background and cursor are matched to the app.
-      theme: { background: '#171717', foreground: '#e9e9e9', cursor: '#e9e9e9', selectionBackground: '#353535' },
+      // shell's own output. Colours and font come from the theme (styles/index.css, --color-term-*).
+      ...terminalStyle(el, 'shell'),
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: true,
@@ -374,14 +374,14 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col border-b border-edge last:border-b-0"
+      className="flex min-h-0 flex-1 flex-col border-b border-line last:border-b-0"
       data-testid={`terminal-${info.terminalId}`}
     >
       <div className="flex items-center gap-1.5 px-2 py-0.5">
-        <span className="readout truncate text-[10px] text-slate">{info.title}</span>
+        <span className="readout truncate text-[10px] text-ink-faint">{info.title}</span>
         {dead && (
           <button
-            className="rounded px-1 text-[10px] text-ash transition-colors hover:text-chalk"
+            className="rounded px-1 text-[10px] text-ink-muted transition-colors hover:text-ink"
             data-testid={`terminal-restart-${info.terminalId}`}
             onClick={async () => {
               const term = termRef.current

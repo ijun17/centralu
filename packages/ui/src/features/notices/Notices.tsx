@@ -88,9 +88,9 @@ export function Notices() {
 
 /** What happened — since this screen barely uses color, a single line on the left distinguishes it */
 const LOOK: Record<Notice['kind'], { label: string; edge: string }> = {
-  approval: { label: 'Awaiting approval', edge: 'border-l-beacon' },
-  error: { label: 'Error', edge: 'border-l-[var(--color-del)]' },
-  done: { label: 'Finished', edge: 'border-l-graphite' },
+  approval: { label: 'Awaiting approval', edge: 'border-l-ink-signal' },
+  error: { label: 'Error', edge: 'border-l-[var(--color-danger)]' },
+  done: { label: 'Finished', edge: 'border-l-line-strong' },
 }
 
 function NoticeCard({
@@ -105,7 +105,7 @@ function NoticeCard({
   const look = LOOK[notice.kind]
   return (
     <div
-      className={`flex items-start gap-2 rounded border border-edge ${look.edge} border-l-2 bg-panel py-2 pl-2.5 pr-1.5 shadow-[0_12px_32px_-12px_rgb(0_0_0/0.9)]`}
+      className={`flex items-start gap-2 rounded border border-line ${look.edge} border-l-2 bg-surface-raised py-2 pl-2.5 pr-1.5 shadow-(--shadow-notice)`}
       data-testid="notice"
       data-kind={notice.kind}
       data-session={notice.sessionId}
@@ -118,12 +118,12 @@ function NoticeCard({
         onClick={onOpen}
         title="Open this session"
       >
-        <div className="truncate text-[12px] text-chalk">{notice.name}</div>
-        <div className="mt-0.5 text-[10px] uppercase text-slate">{look.label}</div>
+        <div className="truncate text-[12px] text-ink">{notice.name}</div>
+        <div className="mt-0.5 text-[10px] uppercase text-ink-faint">{look.label}</div>
       </button>
       <button
         type="button"
-        className="shrink-0 rounded px-1.5 py-0.5 text-[12px] leading-none text-slate hover:bg-edge hover:text-chalk"
+        className="shrink-0 rounded px-1.5 py-0.5 text-[12px] leading-none text-ink-faint hover:bg-surface-selected hover:text-ink"
         data-testid="notice-close"
         onClick={onClose}
         aria-label="Dismiss"

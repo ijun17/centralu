@@ -298,8 +298,8 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   if (!path) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2" data-testid="viewer-empty">
-        <p className="text-[13px] text-ash">Select a file</p>
-        <p className="text-[11px] text-slate">
+        <p className="text-[13px] text-ink-muted">Select a file</p>
+        <p className="text-[11px] text-ink-faint">
           <Kbd>{sc('mod', '⇧2')}</Kbd> pick a file in the tree to open it here
         </p>
       </div>
@@ -308,14 +308,14 @@ export function CodeViewer({ projectId }: { projectId: string }) {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="code-viewer">
-      <header className="flex items-center gap-2 border-b border-edge px-3 py-1.5">
-        <span className="readout truncate text-[11px] text-ash" data-testid="viewer-path">
+      <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
+        <span className="readout truncate text-[11px] text-ink-muted" data-testid="viewer-path">
           {path}
         </span>
         {!showingImage && (
           <>
             <input
-              className="ml-2 w-40 rounded border border-edge bg-panel px-2 py-0.5 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+              className="ml-2 w-40 rounded border border-line bg-surface-raised px-2 py-0.5 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
               placeholder="Search in file"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -327,18 +327,18 @@ export function CodeViewer({ projectId }: { projectId: string }) {
               data-testid="viewer-search"
             />
             {query && (
-              <span className="readout text-[10px] text-slate" data-testid="viewer-match-count">
+              <span className="readout text-[10px] text-ink-faint" data-testid="viewer-match-count">
                 {matchAt >= 0 ? `${matchAt + 1}/${matchLines.length}` : `${matches.size} lines`}
               </span>
             )}
           </>
         )}
         {isSvg && (
-          <span className="ml-2 flex overflow-hidden rounded border border-edge text-[10px]" data-testid="viewer-svg-mode">
+          <span className="ml-2 flex overflow-hidden rounded border border-line text-[10px]" data-testid="viewer-svg-mode">
             <button
               type="button"
               className={`px-2 py-0.5 transition-colors ${
-                !svgPreview ? 'bg-graphite text-chalk' : 'text-slate hover:text-chalk'
+                !svgPreview ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:text-ink'
               }`}
               onClick={() => setSvgPreview(false)}
               data-testid="viewer-svg-text"
@@ -347,8 +347,8 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             </button>
             <button
               type="button"
-              className={`border-l border-edge px-2 py-0.5 transition-colors ${
-                svgPreview ? 'bg-graphite text-chalk' : 'text-slate hover:text-chalk'
+              className={`border-l border-line px-2 py-0.5 transition-colors ${
+                svgPreview ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:text-ink'
               }`}
               onClick={() => setSvgPreview(true)}
               data-testid="viewer-svg-preview"
@@ -358,7 +358,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           </span>
         )}
         <button
-          className="ml-auto shrink-0 text-[11px] text-slate hover:text-chalk"
+          className="ml-auto shrink-0 text-[11px] text-ink-faint hover:text-ink"
           onClick={() => {
             void platform.fs
               .resolve(projectId, path)
@@ -373,13 +373,13 @@ export function CodeViewer({ projectId }: { projectId: string }) {
 
       {error !== null ? (
         <div className="p-3">
-          <p className="text-[12px] text-ash" data-testid="viewer-error">
+          <p className="text-[12px] text-ink-muted" data-testid="viewer-error">
             Could not open this file — {error}
           </p>
           {candidates.length > 0 && (
             <div className="mt-2" data-testid="viewer-candidates">
-              <p className="text-[11px] text-slate">
-                Files ending in <span className="readout text-ash">{path}</span> — did you mean:
+              <p className="text-[11px] text-ink-faint">
+                Files ending in <span className="readout text-ink-muted">{path}</span> — did you mean:
               </p>
               <ul className="mt-1 flex flex-col gap-0.5">
                 {candidates.map((c) => (
@@ -392,7 +392,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
                         if (jumpNow?.path === path) requestViewerJump(c, jumpNow.line)
                         useStore.getState().openFile(c)
                       }}
-                      className="readout rounded px-1 py-0.5 text-left text-[11px] text-chalk underline decoration-slate underline-offset-2 hover:decoration-chalk"
+                      className="readout rounded px-1 py-0.5 text-left text-[11px] text-ink underline decoration-ink-faint underline-offset-2 hover:decoration-ink"
                     >
                       {c}
                     </button>
@@ -403,10 +403,10 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           )}
         </div>
       ) : file === null ? (
-        <p className="p-3 text-[12px] text-slate">Loading…</p>
+        <p className="p-3 text-[12px] text-ink-faint">Loading…</p>
       ) : showingImage && image ? (
         <div
-          className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto bg-void p-4"
+          className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto bg-surface-floor p-4"
           data-testid="viewer-image"
         >
           <img
@@ -415,10 +415,10 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             className="max-h-full max-w-full object-contain"
             data-testid="viewer-image-content"
           />
-          <p className="readout shrink-0 text-[10px] text-slate">{(file.bytes / 1024).toFixed(0)}KB</p>
+          <p className="readout shrink-0 text-[10px] text-ink-faint">{(file.bytes / 1024).toFixed(0)}KB</p>
         </div>
       ) : file.binary ? (
-        <p className="p-3 text-[12px] text-slate" data-testid="viewer-binary">
+        <p className="p-3 text-[12px] text-ink-faint" data-testid="viewer-binary">
           {file.previewError ?? `Binary file (${(file.bytes / 1024).toFixed(0)}KB)`}
         </p>
       ) : (
@@ -461,21 +461,21 @@ export function CodeViewer({ projectId }: { projectId: string }) {
                 data-current-match={(matchAt >= 0 && v.index === matchLines[matchAt]) || undefined}
                 className={`absolute left-0 flex w-full ${
                   matchAt >= 0 && v.index === matchLines[matchAt]
-                    ? 'bg-graphite'
+                    ? 'bg-surface-hover'
                     : matches.has(v.index) || v.index === landedIndex
-                      ? 'bg-graphite/50'
+                      ? 'bg-surface-hover/50'
                       : ''
                 }`}
                 style={{ top: `${v.start}px`, height: `${v.size}px` }}
               >
-                <span className="sticky left-0 w-12 shrink-0 select-none bg-void pr-2 text-right text-slate">
+                <span className="sticky left-0 w-12 shrink-0 select-none bg-surface-floor pr-2 text-right text-ink-faint">
                   {v.index + 1}
                 </span>
-                <span data-code className="whitespace-pre text-ash">{lines[v.index]}</span>
+                <span data-code className="whitespace-pre text-ink-muted">{lines[v.index]}</span>
               </div>
             ))}
           </div>
-          {file.truncated && <p className="p-2 text-[11px] text-slate">{TRUNCATED_NOTICE}</p>}
+          {file.truncated && <p className="p-2 text-[11px] text-ink-faint">{TRUNCATED_NOTICE}</p>}
         </div>
       )}
     </section>
