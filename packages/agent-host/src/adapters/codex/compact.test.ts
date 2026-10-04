@@ -228,6 +228,45 @@ describe('codex compact/review — messages are not sent to the spot that drops 
 })
 
 /**
+ * The compaction marker reaches the conversation once per compaction (#303). The notifications are the ones
+ * codex-cli 0.160.0 sent for a `/compact` (scripts/probe-codex-compaction.mts, 2026-10-04): the item started and
+ * completed inside a turn of its own, and no `thread/compacted`.
+ */
+describe('codex compaction — one marker per compaction', () => {
+  const compactionTurn = (turnId: string, legacy: 'none' | 'after' | 'before') => {
+    const item = { type: 'contextCompaction', id: `item-${turnId}` }
+    const notice = { method: 'thread/compacted', params: { threadId: 't1', turnId } }
+    return [
+      { method: 'turn/started', params: { threadId: 't1', turn: { id: turnId, items: [], status: 'inProgress' } } },
+      { method: 'item/started', params: { threadId: 't1', turnId, item } },
+      ...(legacy === 'before' ? [notice] : []),
+      { method: 'item/completed', params: { threadId: 't1', turnId, item } },
+      ...(legacy === 'after' ? [notice] : []),
+      { method: 'turn/completed', params: { threadId: 't1', turn: { id: turnId, items: [], status: 'completed' } } },
+    ]
+  }
+  const markers = async (legacy: 'none' | 'after' | 'before') => {
+    const events: { type: string }[] = []
+    await session((e) => events.push(e as { type: string }))
+    for (const n of [...compactionTurn('u1', legacy), ...compactionTurn('u2', legacy)]) state.handlers!.onNotification(n)
+    await tick()
+    return events.filter((e) => e.type === 'compaction')
+  }
+
+  it('codex-cli 0.160.0 (the item only) leaves one marker per compaction', async () => {
+    expect(await markers('none')).toEqual([
+      { type: 'compaction', sessionId: 's1', failed: false },
+      { type: 'compaction', sessionId: 's1', failed: false },
+    ])
+  })
+
+  it('a CLI that also sends thread/compacted, after or before the item, still leaves one per compaction', async () => {
+    expect(await markers('after')).toHaveLength(2)
+    expect(await markers('before')).toHaveLength(2)
+  })
+})
+
+/**
  * /goal is the same kind of thing (2026-09-07 — #58: sending a function as a message makes the
  * model read the literal characters). This checks whether it is intercepted by the three RPCs
  * (set, get, clear), whether the check is not too broad, and whether a one-line confirmation is

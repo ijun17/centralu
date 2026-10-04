@@ -31,6 +31,7 @@ import {
   childSteps,
   CodexChildTracker,
   CODEX_KNOWN_NOTIFICATIONS,
+  CompactionMarks,
   fileChangesOf,
   goalFromCodex,
   normalizeNotification,
@@ -298,6 +299,8 @@ class CodexSession implements SessionHandle {
   private readonly unmapped: UnmappedTypes
   /** The child agents running in the background (#290, see `CodexChildTracker`). */
   private readonly children: CodexChildTracker
+  /** One compaction marker per compaction, from the item, the deprecated notification, or both (#303) */
+  private readonly compactions = new CompactionMarks()
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
@@ -639,6 +642,7 @@ class CodexSession implements SessionHandle {
         void imageEventFromDisk(this.sessionId, e.path).then((filled) => this.emit(filled))
         continue
       }
+      if (e.type === 'compaction' && !this.compactions.admit(n)) continue
       if (e.type === 'activity') {
         // Each attempt sends its own notice; one indication is enough
         if (e.activity === 'retrying' && this.retrying) continue
@@ -855,8 +859,9 @@ class CodexSession implements SessionHandle {
          * handler — sending it through turn/start makes the model **read the literal characters**
          * "/compact". There is a dedicated RPC instead: thread/compact/start
          * (generated/ClientRequest.ts). Measured: it answers {} immediately and proceeds
-         * turn/started -> contextCompaction item -> thread/compacted, which our existing normalize
-         * plumbing (the compacting indicator, the completion marker) already receives as-is.
+         * turn/started -> contextCompaction item started -> completed -> turn/completed, which our
+         * existing normalize plumbing (the compacting indicator, the completion marker) already
+         * receives as-is. (No `thread/compacted` on 0.147.0, 0.153.4 or 0.160.0 — #303.)
          */
         if (text.trim() === '/compact') {
           this.blockingTurn = true

@@ -323,6 +323,38 @@ export const CODEX_KNOWN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   'thread/realtime/sdp', 'thread/realtime/error', 'thread/realtime/closed',
 ])
 
+/**
+ * One marker per compaction, whichever of its two signs arrive (#303).
+ *
+ * A compaction can be announced twice: by the completed `contextCompaction` item and by the deprecated
+ * `thread/compacted` notification, both carrying the turn they belong to. Every measured CLI (0.147.0, 0.153.4,
+ * 0.160.0) sent only the item, but the adapter's own notes from earlier dogfooding record the sequence "item, then
+ * `thread/compacted`", so a CLI that sends both must not leave two markers in the same spot. Pairing is per turn and
+ * does not depend on order: a sign is admitted unless the other kind of sign for the same turn is still waiting for
+ * its partner, in which case the two are one compaction. Two compactions in one turn that each send only the item
+ * still leave two markers.
+ */
+export class CompactionMarks {
+  /** Per turn: which kind of sign was admitted without a partner yet, and how many */
+  private readonly open = new Map<string, { kind: 'item' | 'notice'; count: number }>()
+
+  /** Whether this notification's compaction marker should be emitted */
+  admit(n: Notification): boolean {
+    const kind = n.method === 'thread/compacted' ? 'notice' : 'item'
+    const turn = str(obj(n.params).turnId)
+    const waiting = this.open.get(turn)
+    if (waiting && waiting.kind !== kind) {
+      if (--waiting.count === 0) this.open.delete(turn)
+      return false
+    }
+    this.open.delete(turn) // re-inserted last, so the oldest turn is the one let go below
+    this.open.set(turn, { kind, count: (waiting?.count ?? 0) + 1 })
+    // A CLI that sends only one kind leaves every turn open; the partner of an old turn is not coming
+    if (this.open.size > 32) this.open.delete(this.open.keys().next().value!)
+    return true
+  }
+}
+
 /** The message a chunk belongs to — left out rather than empty, since absent means "the same message as before" */
 const messageIdOf = (id: unknown): { messageId?: string } => (typeof id === 'string' && id ? { messageId: id } : {})
 
@@ -425,8 +457,22 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         return str(item.text) ? [{ type: 'message_delta', sessionId, role: 'assistant', text: '', ...messageIdOf(item.id) }] : []
       }
       if (type === 'userMessage' || type === 'reasoning') return []
-      // The marker is emitted by thread/compacted — emitting it again here would put two lines in the same spot
-      if (type === 'contextCompaction') return [{ type: 'activity', sessionId, activity: null }]
+      /*
+       * The compaction marker (FR-14, #303). The completed item is the only sign of a finished compaction that Codex
+       * still sends: measured with gpt-5.6-luna on codex-cli 0.147.0, 0.153.4 and 0.160.0 (2026-10-04,
+       * scripts/probe-codex-compaction.mts), a manual compaction (`thread/compact/start`) and an automatic one both
+       * arrive as `item/started` then `item/completed` of `{ type: 'contextCompaction', id }`, with no
+       * `thread/compacted` at all; 0.160.0's binding marks that notification deprecated in favour of this item. The
+       * marker used to come only from `thread/compacted`, so no Codex compaction left one. That notification is still
+       * mapped below for a CLI that sends it, and the adapter pairs the two (`CompactionMarks`) so that one compaction
+       * is one marker either way.
+       */
+      if (type === 'contextCompaction') {
+        return [
+          { type: 'activity', sessionId, activity: null },
+          { type: 'compaction', sessionId, failed: false },
+        ]
+      }
       /*
        * The end of a review. item.review carries the full result text, but we do not emit it —
        * the same text has already streamed as agentMessage (measured). Emitting it again here
@@ -589,6 +635,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       // This is a name the tool made up on its own -> auto:true. A name the person set is not overwritten by this (issue #5)
       return [{ type: 'session_title', sessionId, title: str(p.name), auto: true }]
 
+    // Deprecated (0.160.0's binding) and not sent in any measured run — kept for a CLI that still does (#303)
     case 'thread/compacted':
       return [{ type: 'compaction', sessionId, failed: false }]
 

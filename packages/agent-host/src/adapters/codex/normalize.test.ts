@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { __resetWarningsForTest, approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
+import { __resetWarningsForTest, approvalDetailFrom, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
 
 /**
  * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually
@@ -404,8 +404,7 @@ describe('state and gauges', () => {
   /*
    * Codex streams compaction as a ThreadItem (generated/v2/ThreadItem.ts: `contextCompaction`).
    * Without filtering it out, it flows through itemSummary and creates a **fake tool-call line**
-   * in the conversation. Note: this wiring was inferred from the generated type and has not been
-   * confirmed by actually running it (the Claude side has been confirmed).
+   * in the conversation. Measured on codex-cli 0.147.0, 0.153.4 and 0.160.0 (#303).
    */
   it('a compaction item is an activity, not a tool call', () => {
     expect(n('item/started', { item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
@@ -413,9 +412,14 @@ describe('state and gauges', () => {
     ])
   })
 
-  it('clears the activity once compaction ends (the marker is emitted by thread/compacted — must not become two lines)', () => {
-    expect(n('item/completed', { item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
+  /*
+   * #303: the completed item is the only sign of a finished compaction Codex sends (no `thread/compacted` on 0.147.0,
+   * 0.153.4 or 0.160.0). The marker used to come only from that notification, so no Codex compaction left one.
+   */
+  it('a completed compaction item clears the activity and leaves the compaction marker', () => {
+    expect(n('item/completed', { threadId: 't', turnId: 'u1', item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
       { type: 'activity', sessionId: S, activity: null },
+      { type: 'compaction', sessionId: S, failed: false },
     ])
   })
 
@@ -458,7 +462,7 @@ describe('state and gauges', () => {
     })
   })
 
-  it('thread/compacted → the compaction marker (FR-14)', () => {
+  it('thread/compacted → the compaction marker (FR-14), for a CLI that still sends it', () => {
     expect(n('thread/compacted', {})).toEqual([{ type: 'compaction', sessionId: S, failed: false }])
   })
 
@@ -489,6 +493,35 @@ describe('state and gauges', () => {
   it('drops an unknown notification silently (does not break as the protocol grows)', () => {
     expect(n('thread/realtime/audioDelta', { blob: 'x' })).toEqual([])
     expect(n('totally/new/method', {})).toEqual([])
+  })
+})
+
+/*
+ * #303: a compaction can have two signs, the completed item and the deprecated `thread/compacted`. Every measured CLI
+ * sent only the item, but one that sends both must still leave one marker, in either order.
+ */
+describe('one compaction marker per compaction (CompactionMarks)', () => {
+  const item = (turnId: string) => ({ method: 'item/completed', params: { turnId, item: { type: 'contextCompaction', id: 'c' } } })
+  const notice = (turnId: string) => ({ method: 'thread/compacted', params: { threadId: 't', turnId } })
+
+  it('admits the item alone (0.160.0) and the notice alone (a CLI that only sends that)', () => {
+    const marks = new CompactionMarks()
+    expect([marks.admit(item('u1')), marks.admit(notice('u2'))]).toEqual([true, true])
+  })
+
+  it('pairs the item and the notice of one turn, in either order', () => {
+    const marks = new CompactionMarks()
+    expect([marks.admit(item('u1')), marks.admit(notice('u1'))]).toEqual([true, false])
+    expect([marks.admit(notice('u2')), marks.admit(item('u2'))]).toEqual([true, false])
+  })
+
+  it('keeps two compactions of one turn that each send only the item, and pairs per turn', () => {
+    const marks = new CompactionMarks()
+    expect([marks.admit(item('u1')), marks.admit(item('u1')), marks.admit(notice('u1')), marks.admit(notice('u1'))]).toEqual([
+      true, true, false, false,
+    ])
+    // A notice for a turn whose item already found its partner is a compaction of its own
+    expect(marks.admit(notice('u1'))).toBe(true)
   })
 })
 
