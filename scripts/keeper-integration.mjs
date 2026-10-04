@@ -267,7 +267,7 @@ async function scenarioBackgroundOff() {
   check(gone, 'killing the attached client stops the host and the keeper', `host alive ${alive(hostPid)}, keeper alive ${alive(k1.pid)}`)
   // Stopped through its own shutdown() (sessions, store, WAL checkpoint), not killed outright
   check(
-    readFileSync(join(data, 'host.log'), 'utf8').includes(`[agent-host] shutting down (pid ${hostPid})`),
+    readFileSync(join(data, 'host.log'), 'utf8').includes(`[agent-host] shutting down (pid ${hostPid}, stopped)`),
     'the host shut down through its own shutdown path',
   )
   check(!existsSync(sock), 'the socket is removed on the way out')
