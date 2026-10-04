@@ -254,7 +254,8 @@ jobs:
         run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$env:RUNNER_TEMP/vitest.json"
 
       # What the step above hides, said where people look: a warning annotation on the run and
-      # the PR, and the failing files in the job summary.
+      # the PR, and the failing files in the job summary. No comma in the title: a comma ends a
+      # workflow command's property, and the rest of the title was dropped.
       - name: Report failing Windows tests
         if: ${{ !cancelled() && steps.tests.outcome == 'failure' }}
         shell: pwsh
@@ -267,6 +268,6 @@ jobs:
           $r = Get-Content $report -Raw | ConvertFrom-Json
           $root = (Get-Location).Path
           $files = @($r.testResults | Where-Object { $_.status -eq 'failed' } | ForEach-Object { $_.name.Replace($root, '').TrimStart('\', '/').Replace('\', '/') } | Sort-Object)
-          Write-Output "::warning title=Windows tests (non-blocking, #14)::$($r.numFailedTests) of $($r.numTotalTests) tests fail in $($files.Count) of $(@($r.testResults).Count) files on Windows. The known list is the W2 checklist in #307; a new name in the job summary is a regression."
+          Write-Output "::warning title=Windows tests (non-blocking until the W2 list in PR 307 is fixed)::$($r.numFailedTests) of $($r.numTotalTests) tests fail in $($files.Count) of $(@($r.testResults).Count) files on Windows. The known list is the W2 checklist in #307; a new name in the job summary is a regression."
           $summary = @("### Windows tests: $($r.numFailedTests) failing in $($files.Count) files (non-blocking)", '') + ($files | ForEach-Object { "- ``$_``" })
           $summary -join "`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
