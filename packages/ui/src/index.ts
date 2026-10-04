@@ -6,3 +6,4 @@ export { AppFrame, CHANGED_NOTIFICATION, TEARDOWN_WAIT_MS } from './features/app
 export type { AppFrameHandle, AppFrameMessage, AppFrameProps, AppFrameTeardown } from './features/app-frame/AppFrame.js'
 export { confirmKeyAction } from './app/keys.js'
 export { applyCachedTheme } from './app/theme.js'
+export { ShellBanner } from './components/ShellBanner.js'

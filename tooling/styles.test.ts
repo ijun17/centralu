@@ -337,6 +337,22 @@ describe('Tauri permissions', () => {
     expect(Number(x![1]), 'if the config and Rust disagree on x, it jumps sideways on the first frame').toBe(pos!.x)
   })
 
+  /**
+   * The desktop shell's bars go through App's banner slot, not over the window (#326).
+   *
+   * Laid over the window at top 0, the keeper's "other build" bar put its text under the
+   * traffic lights and its button on the top bar's controls. e2e/shell-banner*.spec.ts measures
+   * the slot and ShellBanner in a browser, but the desktop entry only runs inside Tauri with a
+   * keeper, so whether main.tsx actually uses them is checked here, in its source.
+   */
+  it('the desktop shell hands its build bar to App instead of laying it over the top bar', () => {
+    const main = readFileSync(join(ROOT, 'apps/desktop/src/main.tsx'), 'utf8')
+    expect(main, 'the build bar is not handed to App').toMatch(/<App platform=\{platform\} banner=\{buildBar\} \/>/)
+    expect(main, 'the build bar is not a ShellBanner').toMatch(/<ShellBanner testId="host-other-build"/)
+    // Anything fixed to the top edge lands on the traffic lights and the header
+    expect(main, 'something in the desktop shell is fixed to the top edge').not.toMatch(/\bfixed\b[^"]*\btop-0\b/)
+  })
+
   it('the webview does not intercept an OS drop (kills file attachments)', () => {
     const conf = JSON.parse(
       readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),

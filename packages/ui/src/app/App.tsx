@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { parseAppLink } from '@cc/protocol'
 import type { Platform } from '@cc/platform/ports'
@@ -42,7 +42,17 @@ import { storeAppHost } from '../store/app-host.js'
  */
 attachAppHost(storeAppHost)
 
-export function App({ platform }: { platform: Platform }) {
+export function App({
+  platform,
+  banner,
+}: {
+  platform: Platform
+  /**
+   * A line the shell (not the app) has to say, drawn **between the top bar and the lanes** —
+   * today the desktop keeper's "other build" bar (#280). See the note where it is placed.
+   */
+  banner?: ReactNode
+}) {
   const attach = useStore((s) => s.attach)
   const setAppFocused = useStore((s) => s.setAppFocused)
 
@@ -250,6 +260,26 @@ export function App({ platform }: { platform: Platform }) {
         {/* h-full, not h-screen (100vh) — vh does not know about zoom (--text-zoom comment in index.css) */}
         <div className="relative flex h-full flex-col bg-surface-floor text-ink">
           <TopBar />
+          {/*
+            The shell's banner sits in the flow, below the top bar (#326). It used to be laid over
+            the window by the desktop shell (fixed, top 0), which put its text under the macOS
+            traffic lights and its button on top of the header's own controls. Above the top bar
+            would not do either: the traffic lights are pinned at a fixed spot in the window
+            (trafficLightPosition, traffic_lights.rs), so they would land on the banner instead,
+            and the top bar would stop being the strip they are centred on. Here the top bar stays
+            the drag handle it is, and the lanes give up the banner's height — flex-1 and
+            min-h-0 on Body take that out of the lanes rather than pushing the composer off the
+            bottom.
+
+            Taking room does shift the lanes when it comes and goes, the cost that got the global
+            approval banner removed (product-spec.md, "Approval requests from unfocused
+            sessions"). That banner came and went with every request, in the middle of reading;
+            this one shows once per build mismatch and stays until the person dismisses it or the
+            switch they asked for finishes, and it holds one height through all its states
+            (ShellBanner). Laid over the lanes instead, it would hide the top of the sidebar and
+            the pane header for as long as it stands.
+          */}
+          {banner}
           <Body />
           <CommandPalette />
           <Settings />

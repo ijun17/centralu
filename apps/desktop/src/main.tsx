@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App, applyCachedTheme, confirmKeyAction } from '@cc/ui'
+import { App, ShellBanner, applyCachedTheme, confirmKeyAction } from '@cc/ui'
 import {
   createTauriPlatform,
   focusWindow,
@@ -239,9 +239,66 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       if (before && document.contains(before)) before.focus()
     }
   }, [askQuit, quit])
+  /*
+   * Handed to App, which draws it between its top bar and the lanes (#326). Laid over the window
+   * here (fixed, top 0) it covered the macOS traffic lights and the header's controls.
+   */
+  const buildBar =
+    keeper && build && (switching || swapFailed || swapNotice || otherBuild) ? (
+      <ShellBanner testId="host-other-build" role={swapFailed ? 'alert' : 'status'}>
+        {switching || swapFailed || swapNotice ? (
+          <span
+            className={`min-w-0 flex-1 truncate ${swapFailed ? 'text-danger' : ''}`}
+            title={swap?.message}
+            data-testid="host-switch-progress"
+          >
+            {swapProgressText(swap)}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">
+            {build.sameBuild === false
+              ? `The agent host is running ${describeBuild(build.host)}.`
+              : `The background keeper is running ${describeBuild(build.keeper)}.`}{' '}
+            This window is {describeBuild(build.app)}.
+          </span>
+        )}
+        {/* Truncates too: a long error must not push the buttons out of the window */}
+        {switchError && (
+          <span className="min-w-0 max-w-[40%] truncate text-danger" title={switchError}>
+            {switchError}
+          </span>
+        )}
+        {!switching && otherBuild && (
+          <button
+            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-ink hover:border-line-strong"
+            onClick={() => {
+              setSwitchError(null)
+              if (swap) setDismissedSwap(swap.startedAt)
+              // Ask only when something can be lost; otherwise just switch
+              if (plan?.confirm) setAskSwitch(true)
+              else startSwitch()
+            }}
+            data-testid="host-switch-build"
+          >
+            {swapFailed ? 'Try again' : 'Switch to this build'}
+          </button>
+        )}
+        {!switching && (
+          <button
+            className="shrink-0 text-ink-faint hover:text-ink"
+            onClick={() => {
+              if (swap) setDismissedSwap(swap.startedAt)
+              setDismissed(true)
+            }}
+          >
+            {swapFailed || swapNotice ? 'Dismiss' : 'Not now'}
+          </button>
+        )}
+      </ShellBanner>
+    ) : null
   return (
     <>
-      <App platform={platform} />
+      <App platform={platform} banner={buildBar} />
       {hostFailure !== null && (
         <div className="fixed inset-0 z-40 bg-surface-floor/95" data-testid="host-failed">
           <StartupFailure
@@ -252,57 +309,6 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
               void restartHost().catch(() => false)
             }}
           />
-        </div>
-      )}
-      {keeper && build && (switching || swapFailed || swapNotice || otherBuild) && (
-        <div
-          className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-line bg-surface-side px-4 py-1.5 text-xs text-ink-muted"
-          data-testid="host-other-build"
-          role={swapFailed ? 'alert' : 'status'}
-        >
-          {switching || swapFailed || swapNotice ? (
-            <span
-              className={`min-w-0 flex-1 truncate ${swapFailed ? 'text-danger' : ''}`}
-              title={swap?.message}
-              data-testid="host-switch-progress"
-            >
-              {swapProgressText(swap)}
-            </span>
-          ) : (
-            <span className="min-w-0 flex-1 truncate">
-              {build.sameBuild === false
-                ? `The agent host is running ${describeBuild(build.host)}.`
-                : `The background keeper is running ${describeBuild(build.keeper)}.`}{' '}
-              This window is {describeBuild(build.app)}.
-            </span>
-          )}
-          {switchError && <span className="shrink-0 text-danger">{switchError}</span>}
-          {!switching && otherBuild && (
-            <button
-              className="shrink-0 rounded-md border border-line px-2 py-0.5 text-ink hover:border-line-strong"
-              onClick={() => {
-                setSwitchError(null)
-                if (swap) setDismissedSwap(swap.startedAt)
-                // Ask only when something can be lost; otherwise just switch
-                if (plan?.confirm) setAskSwitch(true)
-                else startSwitch()
-              }}
-              data-testid="host-switch-build"
-            >
-              {swapFailed ? 'Try again' : 'Switch to this build'}
-            </button>
-          )}
-          {!switching && (
-            <button
-              className="shrink-0 text-ink-faint hover:text-ink"
-              onClick={() => {
-                if (swap) setDismissedSwap(swap.startedAt)
-                setDismissed(true)
-              }}
-            >
-              {swapFailed || swapNotice ? 'Dismiss' : 'Not now'}
-            </button>
-          )}
         </div>
       )}
       {askSwitch && build && plan && (
