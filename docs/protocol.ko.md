@@ -54,7 +54,8 @@ type NormalizedEvent =
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커: claude compact_boundary, codex 완료된 contextCompaction 항목 (#303)
   | { type: 'conversation_reset'; sessionId, trigger? }       // #304: 도구가 새 대화를 시작했다(Claude의 /clear). 마커이며 게이지가 비워진다
-  | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession? }  // #304: 도구가 읽히길 바라는 글, 한 줄
+  | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession?,
+      from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: 도구가 읽히길 바라는 글, 한 줄. #342: 읽기 쉽게
   // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
   | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중 / 재시도 중 (codex 재연결, claude api_retry)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated 스냅샷
@@ -124,6 +125,10 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
   단어는 `info`로 읽는다). `oncePerSession`은 도구가 시작할 때마다 되풀이하는 글을 표시한다. 호스트는 그 세션에 같은 글의
   알림이 아직 저장돼 있지 않을 때만 저장하고 보낸다. Codex는 app-server가 시작할 때마다, 스레드를 시작하거나 재개할
   때마다 설정 경고를 두 번씩(`configWarning`, 이어서 `warning`) 보낸다.
+- 알림은 **누가 말하는지와 어떤 종류인지**(`from`, `label`: "Codex · config warning"), **누가 움직여야 하는지**(`audience`:
+  사람 자신의 설정이면 `you`, Centralu가 도구를 쓰는 방식이면 `centralu`, 호스트가 가릴 수 없으면 없음)도 말하고, 호스트가 아는
+  알림이면 쉬운 설명(`summary`, 한 줄에 하나씩인 `items`, `hint`)을 먼저 보이고 `text`는 한 번 눌러 펼친다(#342). 여섯 모두
+  선택이다. #342 이전에 저장된 알림이나 호스트가 가리지 못한 알림은 `text`만으로 그린다. 모르는 `audience` 단어는 없음으로 읽는다.
 - `by: 'tool'`인 `settings_changed`는 도구가 스스로 바꾼 것이다 — Claude Code의 거절 폴백, 다른 Codex 클라이언트가 스레드를
   바꾼 경우. 대화의 알림이 무엇이 왜 바뀌었는지 말하고, 이벤트는 표시된 모델을 갱신한다.
 
@@ -131,6 +136,9 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
 |---|---|
 | 알림은 저장되는 마커이지 살아 있는 토스트가 아니다 | 알림이 올 때 사람이 보고 있지 않을 수 있고, 턴에 답이 오지 않은 이유는 돌아왔을 때도 거기 있어야 한다. 토스트는 사람에게 아무것도 요구하지 않는 일로 끼어들기도 한다 |
 | 도구의 문장 그대로 | 오류 마커와 같은 규칙: 고쳐 쓰면 원인이 사라진다 |
+| …호스트가 아는 알림에는 쉬운 설명을 먼저 (#342) | 오너는 `config.toml` 경고와 Centralu에게 하는 지원 중단 알림을 위아래로 보았고, 둘이 같은 종류의 문제로 읽혔다. 설명은 누구의 일인지 말하고, 도구의 말은 펼치면 보이므로 잃는 것이 없다 |
+| 설명은 호스트가 쓰고 화면은 그리기만 한다 | 알림을 알아보려면 도구의 문구를 알아야 하고, 그것은 어댑터의 지식이다(`adapters/codex/notices.ts`). UI는 도구를 모르는 채로 남고, 저장된 알림은 나중의 어떤 창에서도 똑같이 읽힌다 |
+| Centralu에게 하는 알림도 대화에 남기고 `for Centralu`로 표시한다 | host.log로 보내는 대신 오너가 정했다(#342, 2026-10-05): 사람은 도구가 한 말을 보고, 표시가 그것을 고쳐야 할 문제로 보이지 않게 한다 |
 | `oncePerSession`은 호스트가 저장소를 보고 정한다 | 되풀이는 프로세스 수명을 넘나든다(Codex 세션은 깨어날 때마다 되풀이한다). 그 사이를 기억하는 것은 저장소뿐이다 |
 | `by: 'tool'` 전환은 적용하지 않고 기록한다 | 프로세스는 이미 새 값으로 돈다. 호스트는 자신이 띄운 값과 다른 필드만 받아들이고, 띄운 기록을 함께 옮겨(아직 할 변경으로 읽히지 않게) 사람이 턴 도중 저장한 선택은 지키며, 프로젝트가 기억하는 기본값은 건드리지 않는다. `by`가 없으면 예전처럼 오케스트레이터를 뜻한다 |
 | 시작 중인 세션이 보낸 이벤트는 등록될 때까지 붙잡아 둔다 | 새 세션은 어댑터가 답한 뒤에야 등록되는데, Codex의 `configWarning`은 `thread/start`가 답해지는 동안 도착한다(측정). 예전에는 번호 없이 저장되지 않은 채 나갔다 |

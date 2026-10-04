@@ -53,7 +53,8 @@ type NormalizedEvent =
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker: claude compact_boundary, codex a completed contextCompaction item (#303)
   | { type: 'conversation_reset'; sessionId, trigger? }       // #304: the tool started a fresh conversation (Claude's /clear); a marker, and the gauge empties
-  | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession? }  // #304: text the tool wants read, one line
+  | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession?,
+      from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: text the tool wants read, one line; #342: made readable
   // in-turn progress (display-only, never persisted)
   | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting, claude api_retry)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated snapshot
@@ -124,6 +125,11 @@ reached nobody. Three shapes carry them:
   word from a newer host reads as `info`). `oncePerSession` marks text the tool repeats on every start: the host stores
   and sends it only if the session has no stored notice with the same text. Codex sends its configuration warning on
   every app-server start and every thread start or resume, twice each time (`configWarning`, then `warning`).
+- A notice also says **who is speaking and what kind it is** (`from`, `label`: "Codex · config warning"), **who has to
+  act** (`audience`: `you` for the person's own setup, `centralu` for how Centralu uses the tool; absent when the host
+  cannot tell), and for a notice the host recognizes, a plain explanation (`summary`, with `items` one per line and a
+  `hint`) that the screen shows first, with `text` one click away (#342). All six are optional: a notice stored before
+  #342, or one the host cannot place, is drawn from `text` alone. An unknown `audience` word reads as absent.
 - `settings_changed` with `by: 'tool'` is a switch the tool made by itself — Claude Code's refusal fallback, another
   Codex client changing the thread. A notice in the conversation says what and why; the event updates the model shown.
 
@@ -131,6 +137,9 @@ reached nobody. Three shapes carry them:
 |---|---|
 | A notice is a stored marker, not a live toast | The person may not be looking when it arrives, and the reason a turn went unanswered must still be there when they come back. A toast would also interrupt for something that needs nothing from them |
 | The tool's sentence as is | The same rule as an error marker: rewording it loses the cause |
+| …with a plain explanation first, for the notices the host knows (#342) | The owner saw a `config.toml` warning and a deprecation addressed to Centralu one under the other, and they read as the same kind of problem. The explanation says whose it is; the tool's words stay on demand, so nothing is lost |
+| The host writes the explanation, the screen only draws it | Recognizing a notice means knowing the tool's wording, which is adapter knowledge (`adapters/codex/notices.ts`). The UI stays tool-agnostic, and a stored notice reads the same in any later window |
+| A notice addressed to Centralu stays in the conversation, marked `for Centralu` | The owner's decision (#342, 2026-10-05) over sending it to host.log: the person sees what the tool said, and the marker keeps it from looking like something they must fix |
 | `oncePerSession` is decided by the host, against the store | The repetition crosses process lifetimes (every wake of a Codex session repeats it); only the store remembers across them |
 | A `by: 'tool'` switch is recorded, not applied | The process already runs with the new value. The host takes only the fields that differ from what it launched, moves its launch record along (so it is not read as a change still to make), keeps a choice the person saved mid-turn, and leaves the project's remembered default alone. Without `by`, the event means the orchestrator, as before |
 | Events a starting session sends are held until it is registered | A new session is registered only once its adapter answers, and Codex's `configWarning` arrives while `thread/start` is answered (measured). It used to go out unnumbered and unstored |

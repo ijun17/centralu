@@ -317,6 +317,10 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
   each in the conversation's marker style, in the tool's own words; nothing interrupts (no toast, no dialog). A warning
   the tool repeats on every start is shown once per session. A model switch the tool made updates the model shown. While
   the tool retries a failed API call, the session shows "retrying".
+- **Each such line says who is speaking, what kind it is, and whose it is to act on** (#342): "Codex · config warning ·
+  for you". For a notice Centralu recognizes, a plain one-line explanation comes first (the settings Codex ignored, one
+  per line, and how to silence it) and the tool's own words open on demand. A notice addressed to Centralu rather than
+  the person (an API it is moving off) stays in the conversation, marked "for Centralu", with nothing for them to do.
 
 ### 4.2 Requirements added by the usability review (FR-15 ~ FR-19)
 

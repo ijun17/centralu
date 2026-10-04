@@ -124,13 +124,29 @@ interface AdapterCapabilities {
   | Claude | `system/api_retry {attempt, max_retries, retry_delay_ms, error_status, error}` — 529가 두 번 답한 뒤 합성 "API Error" 메시지와 오류 결과 | 한 번의 재시도 구간에 `retrying` 한 번과 시도마다 host.log 한 줄. 다음 스트림 이벤트나 assistant 메시지에서 이전 활동이 돌아온다 |
   | Claude | `system/model_refusal_fallback` (실행하지 못함, sdk.d.ts) | scope가 `session`이거나 없으면 알림과 폴백 모델을 실은 `settings_changed`. scope `local`(서브에이전트)은 host.log만. `retracted_message_uuids`는 처리하지 않는다 |
   | Claude | `system/model_refusal_no_fallback` (실행하지 못함, CLI는 메인 스레드 경로에서 `content: ""`로 보낸다) | 결과까지 붙잡았다가 실패한 턴의 오류 메시지로, 턴이 실패하지 않았으면 알림으로. 글은 `content`, 없으면 거절 설명, 없으면 분류 |
-  | Codex | `thread/start`가 답해지는 동안 `configWarning {summary, details}`, 이어서 같은 글의 `warning {threadId, message}`, 시작·재개 때마다 | `oncePerSession` 붙은 `notice` |
-  | Codex | `deprecationNotice {summary, details}`, `guardianWarning {threadId, message}` (실행하지 못함) | `notice` (앞의 것은 세션당 한 번) |
+  | Codex | `thread/start`가 답해지는 동안 `configWarning {summary, details}`, 이어서 같은 글의 `warning {threadId, message}`, 시작·재개 때마다 | `oncePerSession` 붙은 `notice`. 모르는 키 경고는 "Codex ignored N settings in `~/.codex/config.toml`"과 한 줄에 하나씩인 키, `for you` |
+  | Codex | `deprecationNotice {summary, details}`: 오너가 "Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`…"를 보았다(#342). `guardianWarning {threadId, message}` (실행하지 못함) | `notice` (앞의 것은 세션당 한 번). 전체 기록 불러오기 알림은 "Codex says Centralu loads thread history in an outdated way", `for Centralu` |
   | Codex | `mcpServer/startupStatus/updated` — 실패하는 서버는 스레드 시작 한 번에 `starting` → `failed {error}`를 두 번 거친다 | 서버마다 Codex의 말로 된 `notice` 하나(`MCP client for \`x\` failed to start: …`). 그 사이에 한 번 시작된 뒤에야 다시 |
   | Codex | `model/rerouted {turnId, fromModel, toModel, reason}` (실행하지 못함) | `notice`만. 턴 하나를 가리키고 스레드 설정은 바뀌지 않는다 |
   | Codex | `thread/settings/updated {threadSettings}` (실행하지 못함) | `thread/start`·`thread/resume`이 답한 값과 비교한다(Codex는 기본값을 구체적인 모델로 답한다). 실제 차이만 알림과 `settings_changed`가 된다 |
 
   자식 스레드의 알림은 예전처럼 부모의 대화에 들어오지 않는다.
+
+  모든 알림은 누가 말하는지와 어떤 종류인지(`from`, `label`)를, 어댑터가 가릴 수 있으면 누가 움직여야 하는지(`audience`,
+  #342)도 싣는다. Codex의 문구는 `adapters/codex/notices.ts`에 있다.
+
+  | Codex 알림 | 줄 | 누구의 일 |
+  |---|---|---|
+  | 모르는 `config.toml` 키 (`configWarning`과 쌍둥이 `warning`) | "Codex ignored 2 settings in `~/.codex/config.toml`", 한 줄에 하나씩인 키, "Codex already runs without them; removing them from the file only silences this notice." | `you` |
+  | 그 밖의 `configWarning` | Codex의 글 | `you` |
+  | 전체 기록 불러오기 (`deprecationNotice`, 0.160.0 바이너리의 두 문구 모두) | "Codex says Centralu loads thread history in an outdated way", "Nothing to do on your side; Centralu will switch to the paginated API (#342)." | `centralu` |
+  | 그 밖의 `deprecationNotice` | Codex의 글 | app-server 메서드(`thread/…`, `turn/…`, `review/…`)를 말하면 `centralu`, `config.toml`이나 `[features…]`를 말하면 `you`, 아니면 말하지 않는다 |
+  | MCP 시작 실패 | Codex의 글 | Centralu의 오케스트레이터 브리지는 `centralu`, 앱의 브리지(`app-<id>`, 앱 자체 이유로 실패할 수 있다)는 말하지 않고, 그 밖의 서버는 `you` |
+  | `warning`, `guardianWarning`, `model/rerouted`, 스레드 설정 변경 | Codex의 글(뒤의 둘은 우리 글) | 말하지 않는다 |
+
+  Claude Code의 알림은 `from: 'Claude Code'`와 라벨(`hook` — `for you`, `notice`, `model switch`, `refusal`)을 싣는다.
+  설명을 호스트가 쓰는 것은 알림을 알아보려면 도구의 문구를 알아야 하기 때문이다. 화면은 받은 것을 그리기만 하고, Codex
+  자신의 말은 한 번 눌러 펼친다.
 - 어댑터는 상태를 갖지 않는다 — 세션 상태 추적은 `sessions/`가 이벤트를 관찰하며 수행한다. 어댑터는 변환기일 뿐이다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).
