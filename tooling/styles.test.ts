@@ -308,6 +308,52 @@ describe('Linux bundle configuration', () => {
 })
 
 /**
+ * Windows (#14). tauri-build embeds the first `.ico` in `bundle.icon` (or `icons/icon.ico`)
+ * into the executable and fails the build outright when it is missing, `tauri dev` included —
+ * it never converts from PNG. And the bundler keeps only msi/nsis on Windows, so the base
+ * `["app", "dmg"]` would filter to nothing: no error, no installer.
+ */
+describe('Windows bundle configuration', () => {
+  const windows = JSON.parse(
+    readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.windows.conf.json'), 'utf8'),
+  ) as { bundle: { targets: string[]; icon: string[] } }
+
+  it('builds an NSIS installer', () => {
+    expect(windows.bundle.targets).toEqual(['nsis'])
+  })
+
+  it('names an .ico that exists', () => {
+    const ico = windows.bundle.icon.find((icon) => icon.endsWith('.ico'))
+    expect(ico, 'no .ico in bundle.icon').toBeDefined()
+    for (const icon of windows.bundle.icon) {
+      expect(existsSync(join(ROOT, 'apps/desktop/src-tauri', icon)), `${icon} is missing`).toBe(true)
+    }
+  })
+})
+
+/**
+ * `pnpm icon` regenerates the icons through `tauri icon` and deletes what no build uses. It used
+ * to delete `icon.ico` and the Linux PNGs too, back when the app was macOS-only, so the next
+ * Windows or Linux build after running it failed on a missing icon (#14).
+ */
+describe('icon script', () => {
+  it('never deletes an icon a platform config names', () => {
+    const script = readFileSync(join(ROOT, 'scripts/render-icon.mts'), 'utf8')
+    const list = /for \(const junk of \[([^\]]*)\]\)/.exec(script)
+    expect(list, 'the junk list in render-icon.mts moved; update this test').not.toBeNull()
+    const deleted = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1])
+    for (const conf of ['tauri.conf.json', 'tauri.linux.conf.json', 'tauri.windows.conf.json']) {
+      const icons = (
+        JSON.parse(readFileSync(join(ROOT, 'apps/desktop/src-tauri', conf), 'utf8')) as { bundle: { icon: string[] } }
+      ).bundle.icon
+      for (const icon of icons) {
+        expect(deleted, `${conf} names ${icon}`).not.toContain(icon.replace(/^icons\//, ''))
+      }
+    }
+  })
+})
+
+/**
  * ui must not know which OS it is running on (docs/platform-abstraction.md).
  *
  * The point is not tidiness. ui is the one package with no platform implementation

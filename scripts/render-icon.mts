@@ -98,11 +98,17 @@ if (preview) {
   })
 
   /*
-   * The generator also produces Android, iOS and Windows assets. This app is macOS-only, so
-   * there is no reason to keep them in the repository — unused files pile up, and the next
-   * person to find them ends up wondering why they exist.
+   * The generator also produces Android, iOS and Windows Store assets, which no build here
+   * uses — unused files pile up, and the next person to find them ends up wondering why they
+   * exist.
+   *
+   * What is kept is what a desktop build reads. `icon.ico` is required on Windows: tauri-build
+   * embeds it into the executable and **fails the build** when it is missing (it never converts
+   * from PNG; tauri-build 2.6.3 lib.rs). `32x32.png`, `128x128.png` and `128x128@2x.png` are
+   * listed in `tauri.linux.conf.json`, and the Linux build panics in codegen without them
+   * (#14). This list used to delete all four, back when the app was macOS-only.
    */
-  for (const junk of ['android', 'ios', 'icon.ico', 'StoreLogo.png', '32x32.png', '64x64.png', '128x128.png', '128x128@2x.png']) {
+  for (const junk of ['android', 'ios', 'StoreLogo.png', '64x64.png']) {
     rmSync(join(ICONS, junk), { recursive: true, force: true })
   }
   for (const f of readdirSync(ICONS)) if (f.startsWith('Square')) rmSync(join(ICONS, f))
