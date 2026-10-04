@@ -6,13 +6,16 @@
 //! to a new program (#220). `main()` branches into it before the Tauri app is built, so keeper
 //! mode never creates a window, loads the webview or registers with the window server.
 //!
-//! What it does in step 1, and nothing more:
+//! What it does:
 //!   - holds the host: launches it, restarts it by the same rules the app used, stops it;
 //!   - runs every host from a per-build copy under the data folder (`source.rs`);
 //!   - answers a user-only control socket (`server.rs`) through which the app attaches, learns
 //!     the host's port, token and build, and asks to stop or switch builds;
 //!   - applies background mode: with it off (the default) the keeper and host stop when the last
-//!     window detaches, as quitting the app always did; with it on they keep running.
+//!     window detaches, as quitting the app always did; with it on they keep running;
+//!   - holds the host's long-lived children — claude, codex app-server, terminals and project
+//!     commands — on a second user-only socket (`children/`, step 2), so a host restart, crash or
+//!     build switch no longer ends them and the next host re-attaches mid-turn.
 //!
 //! Step 3 adds two things:
 //!   - **the front door** (`front_door.rs`): one loopback port and one token for the keeper's whole
@@ -21,9 +24,8 @@
 //!   - **the blue-green swap** (`swap.rs`): `switch` starts the next build in standby next to the
 //!     running host, drains the running one, and hands the front door over, instead of stopping
 //!     the host and cutting every turn.
-//!
-//! It holds no agents, terminals or commands yet (step 2).
 
+pub mod children;
 pub mod client;
 pub mod front_door;
 pub mod server;

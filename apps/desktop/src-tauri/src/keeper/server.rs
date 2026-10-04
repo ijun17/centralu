@@ -32,6 +32,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+use super::children::{self, Children};
 use super::client::{self, read_line};
 use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
@@ -102,6 +103,8 @@ struct Keeper {
     sup: Supervisor,
     /// Where every client connects, whichever host is current (#280 step 3).
     door: FrontDoor,
+    /// Agents, terminals and commands the keeper holds for its hosts (step 2, `children/`).
+    children: Children,
     state: Mutex<State>,
     idle: Duration,
     started: Instant,
@@ -168,6 +171,13 @@ pub fn run(args: &[String]) -> i32 {
     };
     let _ = fs::set_permissions(&sock, fs::Permissions::from_mode(0o600));
 
+    // Bound here, while the keeper is still single-threaded (the socket is born under umask 077).
+    // Without it the host spawns its own children, exactly as before step 2.
+    let children = Children::start(&data).unwrap_or_else(|e| {
+        log(&format!("child service unavailable ({e}); the host keeps its own children"));
+        Children::disabled()
+    });
+
     let desired = match &opts.host_source {
         Some(dir) => BuildSource::from_host_dir(
             dir,
@@ -198,6 +208,7 @@ pub fn run(args: &[String]) -> i32 {
         sock,
         sup: Supervisor::new(),
         door,
+        children,
         state: Mutex::new(State {
             status: HostStatus::Starting,
             source: None,
@@ -458,7 +469,12 @@ impl Keeper {
         // Nobody new reaches a keeper on its way out. A new keeper waits for our lock, which
         // goes when this process does.
         let _ = fs::remove_file(&self.sock);
+        // A stop, unlike a host restart, ends the agents, terminals and commands. The host stops
+        // them first, the way it always did; whatever it could not (a host that hung or had
+        // already died) the keeper ends itself once the host is gone.
+        self.children.ask_host_to_stop(children::HOST_STOP_WAIT);
         self.sup.shutdown();
+        self.children.stop_all(children::STOP_GRACE);
         let _ = fs::remove_file(self.data.join("keeper.json"));
         log(&format!("stopped (pid {})", self.info.pid));
         std::process::exit(0);
