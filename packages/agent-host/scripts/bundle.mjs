@@ -95,11 +95,18 @@ await build({
   logLevel: 'warning',
 })
 // The bridge has to start from the bundle alone: run it with no environment and expect its own
-// "required" message, not a module error
+// "required" message, not a module error.
+//
+// "No environment" still keeps what Windows itself needs to start a process (#14): without
+// SystemRoot, Node there fails before it runs a line (its crypto and socket setup read it), which
+// would look exactly like a broken bundle. Nothing on this list can make a module resolvable, so
+// a missing `ws` still fails here.
 {
+  const keep = ['PATH', 'SystemRoot', 'SystemDrive', 'windir', 'TEMP', 'TMP']
+  const env = Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]))
   const r = spawnSync(process.execPath, [join(OUT, 'codex-orchestrator-bridge.mjs')], {
     cwd: OUT,
-    env: { PATH: process.env.PATH ?? '' },
+    env,
     encoding: 'utf8',
     timeout: 10_000,
   })
