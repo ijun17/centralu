@@ -1,0 +1,385 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Centralu theme",
+  "description": "A custom theme for Centralu. Tokens left out keep the value of the preset for the same side (base). See docs/themes.md.",
+  "type": "object",
+  "required": [
+    "name",
+    "base"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "Shown in Settings → Appearance"
+    },
+    "base": {
+      "enum": [
+        "dark",
+        "light"
+      ],
+      "description": "Which side this theme is for, and whose values fill the tokens left out"
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "surface-floor": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Floor. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "surface-side": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Sidebar. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "surface-raised": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Raised: cards, menus, dialogs, inputs. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "surface-selected": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Selected. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "surface-hover": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Hover. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "surface-deck": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Grid floor. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "surface-reading": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Conversation. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "surface-reading-raised": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Conversation, raised. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "line": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Lines: Line. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "line-strong": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Lines: Strong line. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "ink-signal": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Ink: Signal: waiting for you. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "ink": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Ink: Text. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "ink-muted": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Ink: Secondary. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "ink-faint": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Ink: Background information. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "diff-add": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Diff and danger: Added. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "diff-add-bg": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Diff and danger: Added, background. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "diff-del": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Diff and danger: Deleted. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "diff-del-bg": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Diff and danger: Deleted, background. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "danger": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Diff and danger: Danger. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "danger-bg": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Diff and danger: Danger, background. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "focus": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Interaction: Focus. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "selection": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Interaction: Selection. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "scrim": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Interaction: Scrim. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "scrim-thin": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Interaction: Thin scrim. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "signal-glow": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Interaction: Signal glow. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "scrollbar-track": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Scrollbar: Track. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "scrollbar-thumb": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Scrollbar: Thumb. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "scrollbar-thumb-hover": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Scrollbar: Thumb, hover. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "scrollbar-size": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Scrollbar: Size. A CSS length, such as 10px"
+        },
+        "scrollbar-thumb-inset": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Scrollbar: Thumb inset. A CSS length, such as 10px"
+        },
+        "scrollbar-radius": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Scrollbar: Radius. A CSS length, such as 10px"
+        },
+        "keycap-top": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Keycap: Top. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "keycap-bottom": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Keycap: Bottom. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "keycap-border": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Keycap: Border. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "activity-1": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Activity: Activity 1. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "activity-2": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Activity: Activity 2. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "activity-3": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Activity: Activity 3. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "activity-4": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Activity: Activity 4. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "activity-5": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Activity: Activity 5. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bg": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Background. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-log-bg": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Log background. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-fg": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Text. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-cursor": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Cursor. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-selection": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Selection. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-black": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Black. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-red": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Red. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-green": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Green. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-yellow": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Yellow. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-blue": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Blue. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-magenta": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Magenta. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-cyan": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Cyan. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-white": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: White. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-black": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright black. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-red": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright red. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-green": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright green. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-yellow": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright yellow. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-blue": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright blue. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-magenta": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright magenta. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-cyan": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright cyan. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "term-bright-white": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Terminal: Bright white. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "shadow-popover": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Popover. A CSS box-shadow"
+        },
+        "shadow-popover-up": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Popover, upward. A CSS box-shadow"
+        },
+        "shadow-dropdown": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Dropdown. A CSS box-shadow"
+        },
+        "shadow-notice": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Notice. A CSS box-shadow"
+        },
+        "shadow-modal": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Dialog. A CSS box-shadow"
+        },
+        "shadow-sticky": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Pinned question. A CSS box-shadow"
+        },
+        "shadow-dock": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Folded composer. A CSS box-shadow"
+        },
+        "shadow-dock-raised": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Folded composer, raised. A CSS box-shadow"
+        },
+        "shadow-key": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Keycap. A CSS box-shadow"
+        },
+        "shadow-chip": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Shadows: Session chip. A CSS box-shadow"
+        }
+      }
+    }
+  }
+}

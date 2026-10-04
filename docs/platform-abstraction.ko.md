@@ -22,7 +22,8 @@ export interface Platform {
   fs: FsPort             // lazy tree listing, read file, watch
   store: StorePort       // persist workspace, sessions, messages, rules
   usage: UsagePort       // query weekly aggregation (calculation in core, raw parsing in the host)
-  system: SystemPort     // notifications, badge, global shortcuts, open in IDE, file dialogs
+  system: SystemPort     // notifications, badge, global shortcuts, open in IDE, file dialogs, window appearance
+  themes: ThemesPort     // custom theme files in <data>/themes: list, save, import, trash, reveal (#312)
   capabilities: PlatformCapabilities
   dispose(): Promise<void>
 }

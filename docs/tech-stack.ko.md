@@ -21,7 +21,7 @@
 | 날짜/시간 | **Intl API 직접 사용** + 직접 작성한 작은 헬퍼 | "3분째 대기 중" 수준에는 라이브러리가 필요 없다 | dayjs/date-fns (불필요한 의존성) |
 | WS 클라이언트 | **native WebSocket** + 직접 작성한 재연결 래퍼(~50줄) | 요구사항이 단순하고(재연결 + backoff + token) 의존성이 줄어든다 | socket.io (프로토콜 오버헤드) |
 
-**색 토큰.** UI가 칠하는 모든 색은 `packages/ui/src/styles/index.css`의 `@theme` 블록에 있는
+**색 토큰.** (이 토큰들을 정하는 테마는 [themes.ko.md](themes.ko.md)에 있다.) UI가 칠하는 모든 색은 `packages/ui/src/styles/index.css`의 `@theme` 블록에 있는
 토큰이고, 생김새가 아니라 역할로 이름 붙는다(#312): 면(`surface-floor`, `surface-side`,
 `surface-raised`, `surface-selected`, `surface-hover`, `surface-deck`, `surface-reading`), 선(`line`,
 `line-strong`), 잉크(`ink-signal`, `ink`, `ink-muted`, `ink-faint`), `diff-*`, `danger`, 그리고

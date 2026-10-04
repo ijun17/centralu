@@ -80,6 +80,7 @@ type NormalizedEvent =
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
   | { type: 'update_status';    status: UpdateStatus }          // #43
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
+  | { type: 'themes_changed' }                                // #312: <data>/themes의 파일이 바뀌었다 — themes.list를 다시 읽는다
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
 

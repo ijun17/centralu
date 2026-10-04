@@ -79,6 +79,7 @@ type NormalizedEvent =
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
   | { type: 'update_status';    status: UpdateStatus }          // #43
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
+  | { type: 'themes_changed' }                                // #312: a file in <data>/themes changed — re-read themes.list
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
 

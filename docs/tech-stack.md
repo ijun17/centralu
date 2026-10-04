@@ -19,7 +19,7 @@ The selection criteria are the product spec §7.1 (lightness) and the architectu
 | Date/time | **the Intl API directly** + a small helper written here | No library needed at the level of "waiting 3 minutes" | dayjs/date-fns (unnecessary dependency) |
 | WS client | **native WebSocket** + a reconnection wrapper written here (~50 lines) | The requirement is simple (reconnect + backoff + token), fewer dependencies | socket.io (protocol overhead) |
 
-**Colour tokens.** Every colour the UI paints is a token in the `@theme` block of
+**Colour tokens.** (Themes, which set these tokens, are in [themes.md](themes.md).) Every colour the UI paints is a token in the `@theme` block of
 `packages/ui/src/styles/index.css`, named by its role rather than its look (#312): surfaces
 (`surface-floor`, `surface-side`, `surface-raised`, `surface-selected`, `surface-hover`,
 `surface-deck`, `surface-reading`), lines (`line`, `line-strong`), ink (`ink-signal`, `ink`,
