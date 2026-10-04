@@ -26,7 +26,6 @@
  */
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { APP_SLUG } from '../packages/protocol/src/brand.js'
 
 const WORKFLOW = '.github/workflows/release.yml'
 const lines = readFileSync(new URL(`../${WORKFLOW}`, import.meta.url), 'utf8').split('\n')
@@ -62,7 +61,17 @@ describe('the release workflow publishes exactly what the shim pins', () => {
       .filter((t): t is string => t !== undefined)
 
     expect(matrix.length, 'no live matrix entries found — did the matrix change shape?').toBeGreaterThan(0)
-    expect(matrix.map((t) => `${APP_SLUG}-${t}`).sort()).toEqual(shimPins.sort())
+    // Each target publishes `packaging/npm/<target>/`, under the name that package.json gives.
+    // Not `centralu-<target>`: Windows is scoped (`@centralu/win32-x64`, docs/releasing.md).
+    const published = matrix.map(
+      (t) =>
+        (
+          JSON.parse(readFileSync(new URL(`../packaging/npm/${t}/package.json`, import.meta.url), 'utf8')) as {
+            name: string
+          }
+        ).name,
+    )
+    expect(published.sort()).toEqual(shimPins.sort())
   })
 
   it('the shim job waits for every platform job', () => {
