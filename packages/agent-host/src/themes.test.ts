@@ -23,7 +23,9 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const waitFor = async (check: () => boolean, ms = 3000) => {
+// 10 s, not 3: a file-system event can arrive seconds late on a loaded machine. The full
+// suite timed out at 3 s on 2026-10-05 while the same test passed alone every time.
+const waitFor = async (check: () => boolean, ms = 10_000) => {
   const until = Date.now() + ms
   while (!check()) {
     if (Date.now() > until) throw new Error('timed out')
