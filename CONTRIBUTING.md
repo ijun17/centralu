@@ -102,6 +102,16 @@ pnpm verify      # lint + dependency rules + types + unit/integration tests
 pnpm e2e         # Playwright scenarios
 ```
 
+CI runs `pnpm verify` on every pull request; run it locally anyway, all of it, before you push.
+Run `pnpm e2e` for anything the UI shows.
+
+**A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
+fail, quote the failure in the commit or the PR, then restore it. A test that still passes
+with the fix removed is not testing the fix.
+
+The desktop app is WKWebView. If a UI bug does not reproduce in Chromium, try
+`test.use({ browserName: 'webkit' })`.
+
 If you touched Rust:
 
 ```bash
@@ -111,6 +121,32 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 **Some defects only reproduce in the packaged app.** If you changed anything to do with
 PATH, bundling or native modules, run `pnpm app` and check the real `.app` — dev mode
 inherits PATH from your terminal, so it will never reproduce that class of bug.
+
+## Commits and pull requests
+
+- Commit messages follow [docs/commit-conventions.md](docs/commit-conventions.md):
+  Conventional Commits, `<type>(<scope>): <description>`, with a body when the reason does not
+  fit the subject.
+- Pull requests use the template (Why / What changed / Verified / Not exercised / Closes).
+  **Not exercised** names the surfaces you did not run: the packaged app, another platform, a
+  live model session, a logged-out tool.
+
+## Running things safely
+
+Development here starts real hosts, agents and apps on a machine where Centralu itself may be
+running, possibly the very session doing the work.
+
+- **Never touch real data.** Tests and scripts point `CC_DATA_DIR` at a temporary folder, never
+  `~/.centralu`. When a host is started with `--db`, set `CC_DATA_DIR` too, or user-folder
+  apps, attachments and worktrees still land in the real folder.
+- **Never stop what you did not start.** Signal only process ids you started yourself. No
+  `pkill`/`killall` by name: the installed app, its keeper and its host match the same names.
+- **One `pnpm e2e` per machine at a time**; parallel runs share ports and fail each other.
+  `until mkdir /tmp/centralu-e2e.lock 2>/dev/null; do sleep 20; done; CI=1 pnpm e2e; rmdir /tmp/centralu-e2e.lock`
+- **Several agents on one machine:** limit test workers (`pnpm exec vitest run --maxWorkers=4`).
+  Unlimited, each run takes every core, and timing-sensitive tests fail for load, not for bugs.
+- **Ask before anything that raises an OS permission prompt** (screen capture, camera,
+  protected folders). A tool started under Centralu asks in Centralu's name.
 
 ## What is expected of code
 
