@@ -34,9 +34,22 @@ describe('single-instance lock for the host', () => {
     const db = dbIn()
     // A pid guaranteed to be alive: the parent (the process that launched this test)
     writeFileSync(join(db, '..', 'host.lock'), String(process.ppid))
-    const r = acquireInstanceLock(db)
+    const r = acquireInstanceLock(db, processStartTime, true)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.heldByPid).toBe(process.ppid)
+  })
+
+  /*
+   * Windows (#14): no host older than #82 ever ran there, so the file is only a description, and
+   * a start time cannot be read to tell a reused pid apart. A file naming a live, unrelated process
+   * (Windows reuses pids quickly) must not refuse a host that holds the ownership lock.
+   */
+  it('on Windows a live pid left in host.lock does not refuse a host that holds ownership', () => {
+    const db = dbIn()
+    writeFileSync(join(db, '..', 'host.lock'), String(process.ppid))
+    const r = acquireInstanceLock(db, () => null, false)
+    expect(r.ok).toBe(true)
+    if (r.ok) r.release()
   })
 
   it('a lock left by a dead owner is taken over (the app was force-quit)', () => {
@@ -65,7 +78,8 @@ describe('single-instance lock for the host', () => {
     expect(JSON.parse(readFileSync(join(db, '..', 'host.lock'), 'utf8')).pid).toBe(process.pid)
   })
 
-  it('blocked when both pid and start time match, and reports the lock file\'s location', () => {
+  // `ps` reads the start time; Windows has neither, and skips the file check (above)
+  it.skipIf(process.platform === 'win32')('blocked when both pid and start time match, and reports the lock file\'s location', () => {
     const db = dbIn()
     const started = processStartTime(process.ppid)
     expect(started).not.toBeNull()
@@ -77,7 +91,7 @@ describe('single-instance lock for the host', () => {
   it('blocked when that pid\'s current start time cannot be read — stealing the lock when in doubt is the riskier choice', () => {
     const db = dbIn()
     writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: process.ppid, started: 'Thu Jan  1 00:00:00 1970' }))
-    expect(acquireInstanceLock(db, () => null).ok).toBe(false)
+    expect(acquireInstanceLock(db, () => null, true).ok).toBe(false)
   })
 
   it('releasing it removes the lock file, and the next host can acquire it', () => {

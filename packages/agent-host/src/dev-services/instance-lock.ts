@@ -113,9 +113,18 @@ function stillHeld(holder: Holder, startOf: (pid: number) => string | null): boo
   return now === null || now === holder.started
 }
 
+/**
+ * `legacyFile`: whether a live owner named in `host.lock` refuses the start, for hosts from before
+ * #82 that know only that file. **Off on Windows (#14)**: no Windows host ever predates #82, so
+ * there is nobody the check protects, and Windows cannot read a start time to tell a reused pid
+ * from the owner (`processStartTime` is null there). Windows reuses pids quickly, so a `host.lock`
+ * left by a host that was hard-killed would name a live, unrelated process soon enough and refuse
+ * every start, while the ownership lock itself was free.
+ */
 export function acquireInstanceLock(
   dbPath: string,
   startOf: (pid: number) => string | null = processStartTime,
+  legacyFile: boolean = process.platform !== 'win32',
 ): LockResult {
   // an in-memory database is never shared
   if (dbPath === ':memory:') return { ok: true, release: () => {} }
@@ -138,7 +147,7 @@ export function acquireInstanceLock(
 
   const holder = readHolder()
   // An older host that knows only the file. A file left by a dead owner (or someone else who just shares the number) is simply taken over (when the app was force-quit)
-  if (holder && stillHeld(holder, startOf)) {
+  if (legacyFile && holder && stillHeld(holder, startOf)) {
     giveUp(owner)
     return { ok: false, heldByPid: holder.pid, lockPath }
   }
