@@ -125,18 +125,24 @@ describe('single-instance lock for the host', () => {
 describe('the lock-conflict message reaches the supervisor', () => {
   it('a blocked host also writes the reason to stdout, and exits with 1', () => {
     const db = dbIn()
-    // This test process is the owner — it is alive and its start time matches
-    writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: process.pid, started: processStartTime(process.pid) }))
+    // This test process is the owner: it holds the ownership lock itself, which refuses the host
+    // on every OS (a host.lock alone no longer refuses on Windows, #14)
+    const held = acquireInstanceLock(db)
+    expect(held.ok).toBe(true)
     const root = fileURLToPath(new URL('../../../../', import.meta.url))
-    const r = spawnSync(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--db', db, '--port', '0'], {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 60_000,
-      env: { ...process.env, CI: '1' },
-    })
-    expect(r.status).toBe(1)
-    expect(r.stdout).toContain('Another Centralu is already using this data')
-    expect(r.stdout).toContain(`Lock file: ${join(db, '..', 'host.lock')}`)
+    try {
+      const r = spawnSync(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--db', db, '--port', '0'], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: { ...process.env, CI: '1' },
+      })
+      expect(r.status).toBe(1)
+      expect(r.stdout).toContain('Another Centralu is already using this data')
+      expect(r.stdout).toContain(`Lock file: ${join(db, '..', 'host.lock')}`)
+    } finally {
+      if (held.ok) held.release()
+    }
   }, 60_000)
 })
 
