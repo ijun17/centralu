@@ -12,7 +12,7 @@
 //! host says another owner holds the data folder (#184). Only where the status goes differs, and
 //! that is the `StatusSink`.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -71,6 +71,18 @@ pub enum LaunchError {
 /// which build the next attempt runs (a switch) without restarting the supervisor.
 pub type Launcher = Arc<dyn Fn() -> Result<HostLaunch, LaunchError> + Send + Sync>;
 
+/// A host's stdout, one line at a time: a blocking reader for a host the supervisor started, or a
+/// channel for one the keeper started itself and then handed over (#280 step 3, `adopt`).
+pub type Lines = Box<dyn Iterator<Item = String> + Send>;
+
+/// A host that is already running and has said it is ready, handed to `Supervisor::adopt`.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub struct Adopted {
+    pub child: Child,
+    pub lines: Lines,
+    pub info: HostInfo,
+}
+
 #[derive(Default)]
 struct Inner {
     child: Option<Child>,
@@ -84,6 +96,10 @@ struct Inner {
     /// The host about to exit was stopped on purpose to start another one (the keeper's build
     /// switch). Its exit is not a crash: no backoff, no attempt counted.
     bouncing: bool,
+    /// The host about to exit is draining for a blue-green swap (#280 step 3): its exit ends this
+    /// watcher without a restart or a status, because the keeper hands the supervisor the next
+    /// host itself (`adopt`).
+    handing_over: bool,
     /// The last things the host said before it died (dogfooding: an installed build looked
     /// stuck on "Starting…" forever, and the real reason — another instance was holding the
     /// data — was something the host had spelled out plainly on stdout the whole time. The
@@ -185,7 +201,7 @@ impl Supervisor {
     /// Launches the host and starts the watcher thread. Returns false if one is already running.
     pub fn start(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) -> bool {
         if self.claim(false) {
-            self.watch(sink, launcher);
+            self.watch(sink, launcher, None);
             true
         } else {
             false
@@ -207,8 +223,68 @@ impl Supervisor {
         if !self.claim(true) {
             return false;
         }
-        self.watch(sink, launcher);
+        self.watch(sink, launcher, None);
         true
+    }
+
+    /**
+     * Takes over a host the keeper started and brought to ready itself: the new host of a
+     * blue-green swap (#280 step 3). From here on it is supervised exactly like one this supervisor
+     * launched: its ready status goes out now, its later lines reach the sink, and if it dies it is
+     * restarted with `launcher` by the usual rules. Hands `host` back if a watcher is still running.
+     */
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn adopt(&self, host: Adopted, sink: Arc<dyn StatusSink>, launcher: Launcher) -> Result<(), Adopted> {
+        if !self.claim(true) {
+            return Err(host);
+        }
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_output.clear();
+            inner.child = Some(host.child);
+            inner.info = Some(host.info.clone());
+        }
+        self.watch(sink, launcher, Some((host.lines, host.info)));
+        Ok(())
+    }
+
+    /**
+     * Marks the running host as draining for a swap (#280 step 3): when it exits, the watcher ends
+     * quietly instead of restarting it. Returns its pid, or None when no host is running.
+     */
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn hand_over(&self) -> Option<u32> {
+        let mut inner = self.inner.lock().ok()?;
+        let pid = inner.child.as_ref().map(|c| c.id())?;
+        inner.handing_over = true;
+        Some(pid)
+    }
+
+    /// Writes one line to the running host's stdin: the keeper's control lines (#280 step 3).
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn send_line(&self, line: &str) -> std::io::Result<()> {
+        let mut inner = self.inner.lock().map_err(|_| std::io::Error::other("supervisor lock poisoned"))?;
+        let stdin = inner
+            .child
+            .as_mut()
+            .and_then(|c| c.stdin.as_mut())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotConnected, "no host is running"))?;
+        stdin.write_all(format!("{line}\n").as_bytes())?;
+        stdin.flush()
+    }
+
+    /// Stops the running host the usual way (TERM, a grace period, then its group) without telling
+    /// the watcher anything: for a host already handed over that did not exit on its own.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn stop_current(&self) -> bool {
+        let Some(pid) = self.pid() else { return false };
+        stop_pid_gracefully(pid, || self.pid() != Some(pid));
+        true
+    }
+
+    /// Whether a watcher thread is running: a host is up, starting, or between restarts.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn is_running(&self) -> bool {
+        self.inner.lock().map(|i| i.running).unwrap_or(false)
     }
 
     /// Claims the right to launch a watcher thread. Returns false if one is already running or
@@ -228,7 +304,7 @@ impl Supervisor {
         true
     }
 
-    fn watch(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) {
+    fn watch(&self, sink: Arc<dyn StatusSink>, launcher: Launcher, mut adopted: Option<(Lines, HostInfo)>) {
         let me = self.clone();
         thread::spawn(move || {
             // Clear the running flag no matter which path this ends on — otherwise Retry could
@@ -239,30 +315,41 @@ impl Supervisor {
                 if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
                     return;
                 }
-                sink.status(&if attempt == 0 { HostStatus::Starting } else { HostStatus::Restarting { attempt } });
+                let started = Instant::now();
+                let outcome = if let Some((lines, info)) = adopted.take() {
+                    // Handed over by a swap, already up: report it and follow it to its end
+                    sink.status(&HostStatus::Ready(info));
+                    Ok(me.pump(&*sink, lines))
+                } else {
+                    sink.status(&if attempt == 0 { HostStatus::Starting } else { HostStatus::Restarting { attempt } });
 
-                let launch = match launcher() {
-                    Ok(l) => l,
-                    Err(LaunchError::Fatal(message)) => {
-                        me.give_up(&*sink, message);
-                        return;
-                    }
-                    Err(LaunchError::Retry(message)) => {
-                        attempt += 1;
-                        if attempt > MAX_RESTARTS {
+                    let launch = match launcher() {
+                        Ok(l) => l,
+                        Err(LaunchError::Fatal(message)) => {
                             me.give_up(&*sink, message);
                             return;
                         }
-                        thread::sleep(backoff(attempt));
-                        continue;
-                    }
+                        Err(LaunchError::Retry(message)) => {
+                            attempt += 1;
+                            if attempt > MAX_RESTARTS {
+                                me.give_up(&*sink, message);
+                                return;
+                            }
+                            thread::sleep(backoff(attempt));
+                            continue;
+                        }
+                    };
+                    me.spawn_once(&*sink, &launch)
                 };
 
-                let started = Instant::now();
-                match me.spawn_once(&*sink, &launch) {
+                match outcome {
                     Ok(code) => {
                         // A clean exit (the owner itself requested it) ends the watcher.
                         if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
+                            return;
+                        }
+                        // Drained for a swap: the keeper adopts the next host itself
+                        if me.inner.lock().map(|mut i| std::mem::take(&mut i.handing_over)).unwrap_or(false) {
                             return;
                         }
                         let bounced = me.inner.lock().map(|mut i| std::mem::take(&mut i.bouncing)).unwrap_or(false);
@@ -305,51 +392,23 @@ impl Supervisor {
         if let Ok(mut inner) = self.inner.lock() {
             inner.last_output.clear();
         }
-        let mut cmd = Command::new(&launch.program);
-        // Keeping stdin open as a pipe is **the whole trick that prevents orphans.**
-        // Whatever reason the parent dies for (including a crash or SIGKILL), this pipe closes,
-        // and the host sees EOF and exits on its own (`--watch-parent`). Relying only on a
-        // shutdown hook leaves a zombie behind when the parent is force-quit. Under a keeper the
-        // parent is the keeper, so the host's life is tied to the keeper, not to the app.
-        cmd.args(&launch.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-        for (k, v) in &launch.env {
-            cmd.env(k, v);
-        }
-
-        // Puts the child in a **process group where it is its own leader**.
-        // The node launcher (tsx) spawns children of its own, so killing only the direct child
-        // and not the whole group leaves the grandchild orphaned.
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.process_group(0);
-        }
-
-        let mut child = cmd.spawn().map_err(|e| format!("failed to run {}: {e}", launch.program))?;
-
+        let mut child = spawn_host(launch)?;
         let stdout = child.stdout.take().ok_or("could not open stdout")?;
 
         if let Ok(mut inner) = self.inner.lock() {
             inner.child = Some(child);
         }
+        Ok(self.pump(sink, Box::new(BufReader::new(stdout).lines().map_while(Result::ok))))
+    }
 
-        // Waits for the ready line. On startup the host prints one line of
-        // {"ready":true,"port":..,"token":".."}.
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => break,
-            };
+    /// Follows a running host's stdout to its end, then reaps it and returns its exit code.
+    ///
+    /// Waits for the ready line: on startup the host prints one line of
+    /// {"ready":true,"port":..,"token":".."}.
+    fn pump(&self, sink: &dyn StatusSink, lines: Lines) -> Option<i32> {
+        for line in lines {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                if v.get("ready").and_then(|r| r.as_bool()) == Some(true) {
-                    let info = HostInfo {
-                        port: v.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
-                        token: v.get("token").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                    };
+                if let Some(info) = parse_ready(&v) {
                     if let Ok(mut inner) = self.inner.lock() {
                         inner.info = Some(info.clone());
                         inner.status_text = None;
@@ -378,12 +437,11 @@ impl Supervisor {
         // wait() blocks — waiting while holding the lock would stall IPC (info queries) and
         // shutdown at the same time. Take the child out, release the lock, then wait.
         let mut child = {
-            let mut guard = self.inner.lock().map_err(|_| "lock failed")?;
+            let mut guard = self.inner.lock().ok()?;
             guard.info = None;
             guard.child.take()
         };
-        let code = child.as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code());
-        Ok(code)
+        child.as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code())
     }
 
     fn set_error(&self, msg: &str) {
@@ -445,6 +503,57 @@ impl Supervisor {
             let _ = child.wait();
         }
     }
+}
+
+/// The ready line `{"ready":true,"port":..,"token":".."}`, if this is it.
+pub fn parse_ready(v: &serde_json::Value) -> Option<HostInfo> {
+    if v.get("ready").and_then(|r| r.as_bool()) != Some(true) {
+        return None;
+    }
+    Some(HostInfo {
+        port: v.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+        token: v.get("token").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+    })
+}
+
+/// Starts one host process the way every host is started: stdin and stdout piped, stderr to ours,
+/// its own process group. Shared by the supervisor and the keeper's swap (#280 step 3), so a host
+/// started for a swap is tied to the keeper and stopped exactly like any other.
+pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
+    let mut cmd = Command::new(&launch.program);
+    // Keeping stdin open as a pipe is **the whole trick that prevents orphans.**
+    // Whatever reason the parent dies for (including a crash or SIGKILL), this pipe closes,
+    // and the host sees EOF and exits on its own (`--watch-parent`). Relying only on a
+    // shutdown hook leaves a zombie behind when the parent is force-quit. Under a keeper the
+    // parent is the keeper, so the host's life is tied to the keeper, not to the app.
+    cmd.args(&launch.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    for (k, v) in &launch.env {
+        cmd.env(k, v);
+    }
+
+    // Puts the child in a **process group where it is its own leader**.
+    // The node launcher (tsx) spawns children of its own, so killing only the direct child
+    // and not the whole group leaves the grandchild orphaned.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
+    cmd.spawn().map_err(|e| format!("failed to run {}: {e}", launch.program))
+}
+
+/// Stops a host the supervisor does not hold (a swap's standby that failed its check, #280 step 3)
+/// the same way the supervisor stops its own, and reaps it.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn stop_child(child: &mut Child) {
+    let pid = child.id();
+    stop_pid_gracefully(pid, || matches!(child.try_wait(), Ok(Some(_))));
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /**

@@ -14,12 +14,21 @@
 //!   - applies background mode: with it off (the default) the keeper and host stop when the last
 //!     window detaches, as quitting the app always did; with it on they keep running.
 //!
-//! It holds no agents, terminals or commands yet (step 2), and swaps nothing without a restart
-//! (step 3).
+//! Step 3 adds two things:
+//!   - **the front door** (`front_door.rs`): one loopback port and one token for the keeper's whole
+//!     life, relayed byte for byte to whichever host is current, so clients and Codex bridges never
+//!     learn a host's own port;
+//!   - **the blue-green swap** (`swap.rs`): `switch` starts the next build in standby next to the
+//!     running host, drains the running one, and hands the front door over, instead of stopping
+//!     the host and cutting every turn.
+//!
+//! It holds no agents, terminals or commands yet (step 2).
 
 pub mod client;
+pub mod front_door;
 pub mod server;
 pub mod source;
+pub mod swap;
 pub mod sys;
 
 use std::path::{Path, PathBuf};
@@ -29,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::host_proc::HostStatus;
 use source::BuildSource;
+use swap::SwapView;
 
 /// The control socket's protocol version. An app refuses a keeper that speaks another one
 /// rather than guessing at its answers.
@@ -124,6 +134,13 @@ pub struct KeeperView {
     pub attached: usize,
     /// The host's last activity report: a session working or waiting, a terminal, a command run.
     pub busy: bool,
+    /// The current or last blue-green swap (#280 step 3), with its phase, so the app can show it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap: Option<SwapView>,
+    /// Whether the current host hands its agents over in a swap (step 2) or stops them. Unknown
+    /// until the host says, and for a host from before step 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keeps_agents: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

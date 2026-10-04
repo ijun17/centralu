@@ -42,6 +42,16 @@ pub struct HostBuild {
     pub same_build: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background: Option<bool>,
+    /// The current or last blue-green swap (#280 step 3), as the keeper reports it.
+    #[cfg(unix)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swap: Option<crate::keeper::swap::SwapView>,
+    /// Whether a swap hands agents over (step 2) or stops them, as the running host says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keeps_agents: Option<bool>,
+    /// A session working or waiting, a terminal or a command running: what a switch could cost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub busy: Option<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -191,7 +201,8 @@ impl Supervisor {
         }
     }
 
-    /// Restarts the host from this window's build. Running turns are cut; the UI says so first.
+    /// Switches the host to this window's build with the keeper's blue-green swap (#280 step 3).
+    /// Progress and failure arrive in `host-build` (`swap`).
     pub fn switch_build(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]
@@ -325,6 +336,9 @@ mod link {
                 host: st.view.as_ref().and_then(|v| v.source.clone()),
                 same_build: st.view.as_ref().and_then(|v| v.source.as_ref()).map(|s| s.same_build(&self.app_build)).or(st.same_build),
                 background: st.view.as_ref().map(|v| v.background),
+                swap: st.view.as_ref().and_then(|v| v.swap.clone()),
+                keeps_agents: st.view.as_ref().and_then(|v| v.keeps_agents),
+                busy: st.view.as_ref().map(|v| v.busy),
             }
         }
 
@@ -445,7 +459,18 @@ mod link {
             let status = view.status.clone();
             let changed = {
                 let Ok(mut st) = self.state.lock() else { return };
-                let changed = st.view.as_ref().map(|v| v.status != view.status || v.source != view.source || v.background != view.background).unwrap_or(true);
+                let changed = st
+                    .view
+                    .as_ref()
+                    .map(|v| {
+                        v.status != view.status
+                            || v.source != view.source
+                            || v.background != view.background
+                            || v.swap != view.swap
+                            || v.keeps_agents != view.keeps_agents
+                            || v.busy != view.busy
+                    })
+                    .unwrap_or(true);
                 match &status {
                     HostStatus::Ready(info) => {
                         st.info = Some(info.clone());

@@ -5,11 +5,11 @@
 //!
 //! | request | answer |
 //! |---|---|
-//! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, port and token, build source |
+//! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and token, build source, the last swap |
 //! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open |
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
-//! | `{"op":"switch","source":BuildSource}` | `{"ok":true}`, then the host restarts from that build |
-//! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up |
+//! | `{"op":"switch","source":BuildSource}` | `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start |
+//! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up (refused during a swap) |
 //! | `{"op":"settings"}` | `{"ok":true,"background":bool}` |
 //! | `{"op":"set_background","on":bool}` | `{"ok":true,"background":bool}` |
 //!
@@ -17,6 +17,9 @@
 //! every connection's peer uid must be ours: only this user's processes can attach, read the
 //! host token, or stop and switch the host. That is the same trust as the token itself, which
 //! only this user can read today.
+//!
+//! The port and token in `status` are the **front door's** (#280 step 3, `front_door.rs`), not a
+//! host's: the same for as long as this keeper lives, whichever host is behind them.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Write};
@@ -30,9 +33,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use super::client::{self, read_line};
+use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
+use super::swap::{self, Phase, SwapView};
 use super::{idle_decision, idle_limit, socket_path, sys, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING, KEEPER_PROTOCOL};
-use crate::host_proc::{self, HostLaunch, HostStatus, LaunchError, Launcher, StatusSink, Supervisor};
+use crate::host_proc::{self, HostInfo, HostLaunch, HostStatus, LaunchError, Launcher, StatusSink, Supervisor};
 
 /// Command-line options. The app passes all of them; a person starting a keeper by hand can
 /// leave them out (it then runs the host from source, as a debug build would).
@@ -80,6 +85,14 @@ struct State {
     last_busy: Instant,
     settings: Settings,
     stopping: bool,
+    /// The current or last swap, as the windows are shown it.
+    swap: Option<SwapView>,
+    /// A swap is running: a second `switch` and `restart` are refused until it ends.
+    swapping: bool,
+    /// The draining host's `{"drained":..}` report.
+    drained: Option<Value>,
+    /// The current host's `{"swap":{"keepsAgents":..}}` report.
+    keeps_agents: Option<bool>,
 }
 
 struct Keeper {
@@ -87,6 +100,8 @@ struct Keeper {
     sock: PathBuf,
     info: KeeperInfo,
     sup: Supervisor,
+    /// Where every client connects, whichever host is current (#280 step 3).
+    door: FrontDoor,
     state: Mutex<State>,
     idle: Duration,
     started: Instant,
@@ -162,6 +177,14 @@ pub fn run(args: &[String]) -> i32 {
         None => BuildSource::dev(),
     };
     let settings = source::load_settings(&data);
+    // The front door: one port and one token for this keeper's whole life (front_door.rs)
+    let door = match front_door::new_token().and_then(|t| FrontDoor::open(0, t)) {
+        Ok(d) => d,
+        Err(e) => {
+            log(&format!("cannot open the front door: {e}"));
+            return 6;
+        }
+    };
     let now = Instant::now();
     let keeper = Arc::new(Keeper {
         info: KeeperInfo {
@@ -174,6 +197,7 @@ pub fn run(args: &[String]) -> i32 {
         data,
         sock,
         sup: Supervisor::new(),
+        door,
         state: Mutex::new(State {
             status: HostStatus::Starting,
             source: None,
@@ -187,15 +211,20 @@ pub fn run(args: &[String]) -> i32 {
             last_busy: now,
             settings,
             stopping: false,
+            swap: None,
+            swapping: false,
+            drained: None,
+            keeps_agents: None,
         }),
         idle: idle_limit(),
         started: now,
     });
     log(&format!(
-        "keeper {} started (pid {}, data {}, background {}, idle limit {}s)",
+        "keeper {} started (pid {}, data {}, front door {}, background {}, idle limit {}s)",
         keeper.info.version,
         keeper.info.pid,
         keeper.data.display(),
+        keeper.door.url(),
         keeper.state.lock().map(|s| s.settings.background).unwrap_or(false),
         keeper.idle.as_secs()
     ));
@@ -235,11 +264,27 @@ struct KeeperSink(Arc<Keeper>);
 impl StatusSink for KeeperSink {
     fn status(&self, status: &HostStatus) {
         let k = &self.0;
+        // Clients only ever see the front door (#280 step 3): a ready host becomes the door's
+        // target, and what the windows are told is the door's port and token, not the host's.
+        let shown = match status {
+            HostStatus::Ready(host) => {
+                if host.token != k.door.token() {
+                    log("the host's token is not the front door's; clients will be refused");
+                }
+                k.door.point_at(Some(host.port));
+                HostStatus::Ready(HostInfo { port: k.door.port(), token: k.door.token().to_string() })
+            }
+            other => {
+                k.door.point_at(None);
+                other.clone()
+            }
+        };
         let ready_copy = {
             let Ok(mut st) = k.state.lock() else { return };
-            st.status = status.clone();
+            st.status = shown.clone();
             if !matches!(status, HostStatus::Ready(_)) {
                 st.busy = false;
+                st.keeps_agents = None;
             }
             k.broadcast(&mut st);
             match status {
@@ -249,7 +294,7 @@ impl StatusSink for KeeperSink {
         };
         k.write_state_file();
         match status {
-            HostStatus::Ready(info) => log(&format!("host ready on port {} (pid {:?})", info.port, k.sup.pid())),
+            HostStatus::Ready(info) => log(&format!("host ready on port {} behind {} (pid {:?})", info.port, k.door.url(), k.sup.pid())),
             HostStatus::Failed { message } => log(&format!("host gave up: {message}")),
             HostStatus::Restarting { attempt } => log(&format!("host restarting (attempt {attempt})")),
             HostStatus::Starting => {}
@@ -269,6 +314,22 @@ impl StatusSink for KeeperSink {
     /// The host's activity report, `{"activity":{"busy":bool}}` on its stdout — the one thing
     /// the keeper reads from the host besides the ready line. It feeds the idle rule.
     fn json_line(&self, line: &Value) -> bool {
+        // The swap's two reports (#280 step 3, swap-control.ts): what a swap costs with this host,
+        // and what a draining host finished or cut
+        if let Some(keeps) = line.pointer("/swap/keepsAgents").and_then(Value::as_bool) {
+            if let Ok(mut st) = self.0.state.lock() {
+                st.keeps_agents = Some(keeps);
+                self.0.broadcast(&mut st);
+            }
+            return true;
+        }
+        if let Some(report) = line.get("drained") {
+            log(&format!("old host drained: {report}"));
+            if let Ok(mut st) = self.0.state.lock() {
+                st.drained = Some(report.clone());
+            }
+            return true;
+        }
         let Some(busy) = line.pointer("/activity/busy").and_then(Value::as_bool) else {
             return false;
         };
@@ -300,10 +361,7 @@ fn launcher(k: &Arc<Keeper>) -> Launcher {
         } else {
             host_proc::source_launch(&extra)
         };
-        launch.env.push(("CC_DATA_DIR".into(), k.data.to_string_lossy().to_string()));
-        // Turns on the host's activity report, which only the keeper reads.
-        launch.env.push(("CC_KEEPER".into(), "1".into()));
-        launch.env.push(("CC_HOST_SOURCE".into(), serde_json::to_string(&running).unwrap_or_default()));
+        launch.env.extend(host_env(&k, &running));
         log(&format!("starting host {} from {}", running.key(), running.copy_dir.as_deref().unwrap_or("source")));
         if let Ok(mut st) = k.state.lock() {
             st.source = Some(running);
@@ -311,6 +369,25 @@ fn launcher(k: &Arc<Keeper>) -> Launcher {
         k.write_state_file();
         Ok(launch)
     })
+}
+
+/**
+ * The environment every host this keeper starts gets, normal start or swap alike:
+ *   - `CC_DATA_DIR`: the folder, so user-folder apps, attachments and worktrees land in it;
+ *   - `CC_KEEPER`: turns on the reports only the keeper reads (activity, swap);
+ *   - `CC_HOST_SOURCE`: the build record its `hello_ok` repeats;
+ *   - `CC_HOST_TOKEN`: the front door's token, so every host checks the one token clients hold
+ *     (#280 step 3). The host deletes it from its environment once read;
+ *   - `CC_FRONT_DOOR`: the address the host gives the Codex bridge instead of its own port.
+ */
+fn host_env(k: &Keeper, running: &BuildSource) -> Vec<(String, String)> {
+    vec![
+        ("CC_DATA_DIR".into(), k.data.to_string_lossy().to_string()),
+        ("CC_KEEPER".into(), "1".into()),
+        ("CC_HOST_SOURCE".into(), serde_json::to_string(running).unwrap_or_default()),
+        ("CC_HOST_TOKEN".into(), k.door.token().to_string()),
+        ("CC_FRONT_DOOR".into(), k.door.url()),
+    ]
 }
 
 impl Keeper {
@@ -323,6 +400,8 @@ impl Keeper {
             background: st.settings.background,
             attached: st.attached,
             busy: st.busy,
+            swap: st.swap.clone(),
+            keeps_agents: st.keeps_agents,
         }
     }
 
@@ -359,6 +438,8 @@ impl Keeper {
                 "pid": self.sup.pid(),
                 "source": st.source,
             },
+            // The address clients use; the token is not written down
+            "frontDoor": self.door.url(),
         });
         drop(st);
         let _ = source::write_private(&self.data.join("keeper.json"), &serde_json::to_vec_pretty(&body).unwrap_or_default());
@@ -449,6 +530,9 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream) {
         }
         "switch" => switch(k, &mut stream, &req),
         "restart" => {
+            if k.state.lock().map(|st| st.swapping).unwrap_or(false) {
+                return reply(&mut stream, &json!({ "ok": false, "error": "a build switch is in progress" }));
+            }
             let started = k.sup.restart(sink(&k), launcher(&k));
             reply(&mut stream, &json!({ "ok": true, "started": started }));
         }
@@ -539,16 +623,111 @@ fn switch(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
         None => return reply(stream, &json!({ "ok": false, "error": "switch needs a host folder" })),
     };
     log(&format!("switching the host to {} (from {})", next.key(), next.bundle_path.as_deref().unwrap_or("?")));
-    if let Ok(mut st) = k.state.lock() {
-        st.desired = next;
-    }
+    let blue_green = {
+        let Ok(mut st) = k.state.lock() else { return };
+        if st.swapping {
+            drop(st);
+            return reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+        }
+        // Only a host that is up has anything to hand over; otherwise the next start simply runs
+        // the new build
+        let up = matches!(st.status, HostStatus::Ready(_)) && k.sup.is_running() && next.host_dir.is_some();
+        if up {
+            st.swapping = true;
+        } else {
+            st.desired = next.clone();
+        }
+        up
+    };
     reply(stream, &json!({ "ok": true }));
-    // A running host is bounced (its watcher starts the new build at once); a host that had given
-    // up is started fresh.
-    if !k.sup.bounce() {
+    if blue_green {
+        thread::spawn(move || swap_to(k, next));
+    } else if !k.sup.bounce() {
+        // A host still starting is bounced into the new build; one that had given up starts fresh
         k.sup.restart(sink(&k), launcher(&k));
     }
 }
+
+/// Runs a blue-green swap (`swap.rs`) and applies its outcome to the keeper's state.
+fn swap_to(k: Arc<Keeper>, next: BuildSource) {
+    let (from, current_copy) = match k.state.lock() {
+        Ok(mut st) => {
+            st.drained = None;
+            (st.source.clone(), st.source.as_ref().and_then(|s| s.copy_dir.clone()).map(PathBuf::from))
+        }
+        Err(_) => return,
+    };
+    let started_at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let view = |phase: Phase| SwapView {
+        phase,
+        target: next.clone(),
+        from: from.clone(),
+        message: None,
+        rolled_back: false,
+        cut: Vec::new(),
+        started_at,
+    };
+    let show = |v: SwapView| {
+        log(&format!(
+            "swap to {}: {:?}{}",
+            v.target.key(),
+            v.phase,
+            v.message.as_deref().map(|m| format!(" ({m})")).unwrap_or_default()
+        ));
+        if let Ok(mut st) = k.state.lock() {
+            st.swap = Some(v);
+            k.broadcast(&mut st);
+        }
+    };
+    let env_for = |b: &BuildSource| host_env(&k, b);
+    let drained = || k.state.lock().ok().and_then(|st| st.drained.clone());
+    let progress = |phase: Phase| show(view(phase));
+    let adopt = |host: host_proc::Adopted, running: BuildSource| -> Result<(), String> {
+        if let Ok(mut st) = k.state.lock() {
+            st.source = Some(running.clone());
+            st.desired = running;
+        }
+        k.write_state_file();
+        k.sup.adopt(host, sink(&k), launcher(&k)).map_err(|mut h| {
+            host_proc::stop_child(&mut h.child);
+            "the keeper was still supervising another host".to_string()
+        })
+    };
+    let outcome = swap::run(&swap::Plan {
+        data: &k.data,
+        next: next.clone(),
+        current_copy,
+        sup: &k.sup,
+        door: &k.door,
+        drain_bound: swap::drain_bound(),
+        env_for: &env_for,
+        drained: &drained,
+        progress: &progress,
+        adopt: &adopt,
+    });
+    match outcome {
+        swap::Outcome::Done { cut } => show(SwapView { cut, ..view(Phase::Done) }),
+        // The running host was never touched
+        swap::Outcome::NotStarted(message) => show(SwapView { message: Some(message), ..view(Phase::Failed) }),
+        swap::Outcome::FailedAfterDrain { message, cut } => {
+            // The old host is gone and its lock released: start its build again (swap.rs)
+            if let Ok(mut st) = k.state.lock() {
+                if let Some(prev) = from.clone() {
+                    st.desired = prev.clone();
+                    st.source = Some(prev);
+                }
+            }
+            show(SwapView { message: Some(message), rolled_back: true, cut, ..view(Phase::Failed) });
+            k.sup.restart(sink(&k), launcher(&k));
+        }
+    }
+    if let Ok(mut st) = k.state.lock() {
+        st.swapping = false;
+        k.broadcast(&mut st);
+    }
+    k.write_state_file();
+}
+
 
 #[cfg(test)]
 mod tests {
