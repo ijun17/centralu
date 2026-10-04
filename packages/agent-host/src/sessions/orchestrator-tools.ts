@@ -249,6 +249,11 @@ export const BUILDER_INSTRUCTIONS = [
   "You are the session that builds one Centralu app. This server's check inspects your app.",
   'After changing an app file, call check to confirm the result — do not leave testing to the person.',
   'If there is a problem, fix it and call check again. Once it passes, tell the person in one line what you changed.',
+  /*
+   * The theme (#312 step 6). Recommended, never checked (owner decision 7): a screen that ignores
+   * it still works, it only stops matching the person's theme.
+   */
+  "Style the screen with the theme Centralu sends (the MCP Apps style variables and Centralu's own, applied by the template's applyTheme), each with a fallback, instead of fixed colours, so it follows the person's light or dark theme. Keep the template's scrollbar stylesheet. Use --color-text-warning only for what waits on the person.",
 ].join('\n')
 
 /** The guide given to the manager — worktree-management context (including the #69 design's three-tier rule) */

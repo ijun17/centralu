@@ -222,7 +222,11 @@ test('theme and font size go out in the host context, and changing font size sen
   expect(connected.hostContext.styles.variables['--color-text-primary']).toBe('#e9e9e9')
 
   await page.evaluate(() => (window as any).__store.setState({ textScale: 4 }))
-  expect(await entry(v, 'host-context-changed')).toEqual({ centralu: { fontScale: 1.25 } })
+  // Only the extension changed; it carries Centralu's own variables along with the scale (#312)
+  const changed = (await entry(v, 'host-context-changed')) as { centralu: { fontScale: number; variables: Record<string, string> } }
+  expect(Object.keys(changed)).toEqual(['centralu'])
+  expect(changed.centralu.fontScale).toBe(1.25)
+  expect(changed.centralu.variables).toEqual(connected.hostContext.centralu.variables)
 })
 
 test('teardown is sent before taking a view down, and its answer is awaited — a view that does not answer is waited on only briefly', async ({ page }) => {

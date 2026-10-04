@@ -2,11 +2,15 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <!-- Until Centralu says which theme shows, follow the system's (Centralu's window follows it too). -->
+    <meta name="color-scheme" content="light dark" />
     <title>Project board</title>
     <style>
       /*
-       * Centralu's palette, achromatic: brightness is urgency. The host sends its colours under the
-       * MCP Apps variable names (applied below); these fallbacks are the same values.
+       * Centralu's palette, whichever theme shows: the host sends its colours under the MCP Apps
+       * variable names (applied below), so the board follows light and dark. The fallbacks are the
+       * dark theme's values. Contrast is urgency: the signal colour (the standard's warning text,
+       * pure white in dark and pure black in light) marks only what waits on the owner.
        */
       :root {
         --bg: var(--color-background-primary, #141414);
@@ -16,8 +20,7 @@
         --ink-2: var(--color-text-secondary, #909090);
         --ink-3: var(--color-text-tertiary, #5c5c5c);
         --edge: var(--color-border-primary, #292929);
-        --beacon: #ffffff;
-        color-scheme: dark;
+        --beacon: var(--color-text-warning, #ffffff);
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
@@ -121,6 +124,24 @@
       .p-Medium { color: var(--ink-2); }
       .p-Low { color: var(--ink-3); }
       .move { margin-left: auto; font-size: 12px; padding: 1px 4px; color: var(--ink-2); max-width: 118px; }
+
+      /*
+       * Centralu's scrollbar (the app template's block): drawn the way Centralu draws its own, from
+       * the theme's scrollbar variables, with its dark values as fallbacks.
+       */
+      ::-webkit-scrollbar { width: var(--centralu-scrollbar-size, 10px); height: var(--centralu-scrollbar-size, 10px); }
+      ::-webkit-scrollbar-track { background: var(--centralu-scrollbar-track, transparent); }
+      ::-webkit-scrollbar-thumb {
+        background: var(--centralu-scrollbar-thumb, #292929);
+        border: var(--centralu-scrollbar-inset, 3px) solid transparent;
+        background-clip: content-box;
+        border-radius: var(--centralu-scrollbar-radius, 999px);
+      }
+      ::-webkit-scrollbar-thumb:hover { background: var(--centralu-scrollbar-thumb-hover, #353535); background-clip: content-box; }
+      /* Only where ::-webkit-scrollbar does not exist: elsewhere scrollbar-color would switch it off */
+      @supports not selector(::-webkit-scrollbar) {
+        * { scrollbar-color: var(--centralu-scrollbar-thumb, #292929) var(--centralu-scrollbar-track, transparent); scrollbar-width: thin; }
+      }
     </style>
   </head>
   <body>
@@ -331,12 +352,17 @@
         }
       }
 
-      // Match the host's theme and colours (MCP Apps host context).
-      const theme = (ctx) => {
-        if (ctx?.theme) document.documentElement.style.colorScheme = ctx.theme
-        for (const [k, v] of Object.entries(ctx?.styles?.variables ?? {})) if (v) document.documentElement.style.setProperty(k, v)
+      // Centralu's theme (the MCP Apps host context): the colour scheme, the standard style
+      // variables, and Centralu's own (the signal colour and the scrollbar). A change notification
+      // carries only what changed, so this reads the whole context the bridge keeps.
+      const applyTheme = () => {
+        const ctx = app.getHostContext() ?? {}
+        const root = document.documentElement
+        if (ctx.theme === 'light' || ctx.theme === 'dark') root.style.colorScheme = ctx.theme
+        const vars = { ...ctx.styles?.variables, ...ctx.centralu?.variables }
+        for (const [name, value] of Object.entries(vars)) if (typeof value === 'string' && value) root.style.setProperty(name, value)
       }
-      app.onhostcontextchanged = theme
+      app.onhostcontextchanged = applyTheme
       app.ontoolresult = (params) => show(params)
       // Centralu's own notification (not part of the MCP Apps standard): the app's state changed.
       app.fallbackNotificationHandler = async (n) => {
@@ -346,7 +372,7 @@
       $('area').onchange = render
       $('priority').onchange = render
       app.connect().then(() => {
-        theme(app.getHostContext())
+        applyTheme()
         if (!state) return load(false)
       })
     </script>

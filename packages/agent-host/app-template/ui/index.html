@@ -2,25 +2,51 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <!-- Until Centralu says which theme shows, follow the system's (Centralu's window follows it too). -->
+    <meta name="color-scheme" content="light dark" />
     <title>{{APP_NAME}}</title>
     <style>
+      /*
+       * Colours, type and corners come from Centralu's theme: it sends MCP Apps style variables
+       * (applied by the script below), so the screen follows the person's theme, light or dark.
+       * The fallbacks are Centralu's dark theme, for a moment before the theme arrives.
+       */
       body {
         margin: 16px;
-        font: 14px var(--font-sans, system-ui, sans-serif);
-        color: var(--color-text-primary, #e8e8e8);
+        font: var(--font-text-md-size, 13px) / var(--font-text-md-line-height, 1.65) var(--font-sans, system-ui, sans-serif);
+        color: var(--color-text-primary, #e9e9e9);
         background: transparent;
       }
       .count { font-size: 32px; font-variant-numeric: tabular-nums; margin-bottom: 12px; }
       button {
         font: inherit;
         color: inherit;
-        background: var(--color-background-tertiary, #2a2a2a);
-        border: 1px solid var(--color-border-primary, #3a3a3a);
-        border-radius: 6px;
+        background: var(--color-background-secondary, #1d1d1d);
+        border: var(--border-width-regular, 1px) solid var(--color-border-secondary, #353535);
+        border-radius: var(--border-radius-md, 4px);
         padding: 4px 12px;
         cursor: pointer;
       }
-      .error { color: #e06c6c; margin-top: 8px; white-space: pre-wrap; }
+      button:hover { background: var(--color-background-tertiary, #353535); }
+      .error { color: var(--color-text-danger, #ffa198); margin-top: 8px; white-space: pre-wrap; }
+
+      /*
+       * Centralu's scrollbar. Keep this block: it draws scrollbars the way Centralu does, from the
+       * theme's scrollbar variables, with its dark values as fallbacks.
+       */
+      ::-webkit-scrollbar { width: var(--centralu-scrollbar-size, 10px); height: var(--centralu-scrollbar-size, 10px); }
+      ::-webkit-scrollbar-track { background: var(--centralu-scrollbar-track, transparent); }
+      ::-webkit-scrollbar-thumb {
+        background: var(--centralu-scrollbar-thumb, #292929);
+        border: var(--centralu-scrollbar-inset, 3px) solid transparent;
+        background-clip: content-box;
+        border-radius: var(--centralu-scrollbar-radius, 999px);
+      }
+      ::-webkit-scrollbar-thumb:hover { background: var(--centralu-scrollbar-thumb-hover, #353535); background-clip: content-box; }
+      /* Only where ::-webkit-scrollbar does not exist: elsewhere scrollbar-color would switch it off */
+      @supports not selector(::-webkit-scrollbar) {
+        * { scrollbar-color: var(--centralu-scrollbar-thumb, #292929) var(--centralu-scrollbar-track, transparent); scrollbar-width: thin; }
+      }
     </style>
   </head>
   <body>
@@ -51,12 +77,17 @@
       }
       const reread = () => call('show')
 
-      // Match the host's theme (MCP Apps host context). The page's colors, and the backdrop a browser
-      // paints behind a frame whose color scheme differs from its host's, then agree with Centralu's.
-      const theme = (ctx) => {
-        if (ctx?.theme) document.documentElement.style.colorScheme = ctx.theme
+      // Centralu's theme (the MCP Apps host context). Keep this: it applies the colour scheme, the
+      // standard style variables, and Centralu's own (the signal colour and the scrollbar). A change
+      // notification carries only what changed, so it reads the whole context the bridge keeps.
+      const applyTheme = () => {
+        const ctx = app.getHostContext() ?? {}
+        const root = document.documentElement
+        if (ctx.theme === 'light' || ctx.theme === 'dark') root.style.colorScheme = ctx.theme
+        const vars = { ...ctx.styles?.variables, ...ctx.centralu?.variables }
+        for (const [name, value] of Object.entries(vars)) if (typeof value === 'string' && value) root.style.setProperty(name, value)
       }
-      app.onhostcontextchanged = theme
+      app.onhostcontextchanged = applyTheme
 
       app.ontoolresult = (params) => show(params)
       // Centralu's own notification (not part of the MCP Apps standard): the app's state changed.
@@ -66,7 +97,7 @@
       $('increment').onclick = () => call('increment', { by: 1 })
       $('reset').onclick = () => call('reset')
       app.connect().then(() => {
-        theme(app.getHostContext())
+        applyTheme()
         return reread()
       })
     </script>

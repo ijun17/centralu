@@ -75,6 +75,26 @@ when an agent's call started it, on this app's screen when the screen did — an
 until the manifest's `uses` changes. The call waits while the person decides (up to 5 minutes). A
 refusal comes back as that error: show it plainly instead of retrying.
 
+## The screen's look
+
+Centralu sends the person's theme to the screen (light or dark, their colours), and sends it again
+when they switch. The template's `ui/index.html` already uses it; keep these when you change it:
+
+- **The `applyTheme` function** in the page script. It puts the theme on `<html>`: `color-scheme`
+  from `theme`, the MCP Apps style variables (`--color-text-primary`, `--color-background-secondary`,
+  `--font-sans`, `--font-text-md-size`, `--border-radius-md`, …) and Centralu's own
+  (`--centralu-signal`, `--centralu-scrollbar-*`). It reads `app.getHostContext()`, because a change
+  notification carries only what changed.
+- **Style with those variables**, each with a fallback (`color: var(--color-text-primary, #e9e9e9)`),
+  instead of fixed colours. Then the screen follows light and dark and sits on Centralu's background
+  (keep `background: transparent` on the page). The roles: `primary` / `secondary` / `tertiary` for
+  text and surfaces in falling order; `--color-text-danger` for errors; `--color-text-warning` (the
+  same as `--centralu-signal`) only for what waits on the person — it is Centralu's signal colour,
+  the strongest thing on screen.
+- **The "Centralu's scrollbar" block** in the stylesheet. It draws scrollbars the way Centralu
+  does, from the theme. Do not add `scrollbar-color` or `scrollbar-width` outside its `@supports`
+  guard: in Chromium they switch the styled scrollbar off.
+
 ## Checking your work
 
 - Call Centralu's **`check`** tool after changes. It validates the manifest, starts the app, lists

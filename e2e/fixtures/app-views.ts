@@ -103,6 +103,21 @@ log('connected', { origin: self.origin, href: location.href, referrer: document.
 </script></body></html>`
 }
 
+const BRIDGE_TAG = '<script src="centralu:mcp-app.js"></script>'
+
+/**
+ * A real app's screen as its server serves it: `ui/index.html` with the bridge inlined from the
+ * app's own `runtime/mcp-app.js`, the way `centralu.uiResource` does (app-runtime centralu.mjs).
+ * `fill` replaces the template's placeholders (`{{APP_ID}}` and the like).
+ */
+export function appScreenHtml(appDir: URL, fill: Record<string, string> = {}): string {
+  let html = readFileSync(new URL('ui/index.html', appDir), 'utf8')
+  for (const [from, to] of Object.entries(fill)) html = html.replaceAll(from, to)
+  if (!html.includes(BRIDGE_TAG)) throw new Error(`${appDir.pathname}ui/index.html no longer has the bridge tag`)
+  const js = readFileSync(new URL('runtime/mcp-app.js', appDir), 'utf8')
+  return html.replace(BRIDGE_TAG, () => `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>`)
+}
+
 type Served = { html: string }
 
 export type FixtureHost = {

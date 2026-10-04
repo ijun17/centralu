@@ -4,9 +4,10 @@ import { createHash } from 'node:crypto'
  * The sandbox proxy page (M4 B-3, spike S-1 `harness/static/sandbox.js`).
  *
  * An app view runs inside two nested iframes. The outer one is this page (the origin of the host's
- * port), and the inner one is the app's HTML. This page does exactly two things: builds the inner
- * frame according to the rules, and shuttles messages between our view (the parent) and the app's
- * view (the child).
+ * port), and the inner one is the app's HTML. This page does two things: builds the inner frame
+ * according to the rules, and shuttles messages between our view (the parent) and the app's view
+ * (the child). While shuttling, it reads the theme's side from what the parent sends, to keep its
+ * own color scheme matching (`DEFAULT_COLOR_SCHEME` below); it never changes a message.
  *
  * It follows the rules the spike settled on exactly.
  *   - `sandbox` is applied **before** the document is inserted. The opaque method is `srcdoc`.
@@ -43,6 +44,17 @@ export const PROXY_SCRIPT = `(function () {
   'use strict'
   var cfg = JSON.parse(document.getElementById('cc-view-config').textContent)
   var HOST = cfg.hostOrigin
+  var root = document.documentElement
+  function scheme(theme) {
+    if (theme === 'light' || theme === 'dark') root.style.colorScheme = theme
+  }
+  var asked = /(?:^#|&)color-scheme=(light|dark)(?:&|$)/.exec(location.hash)
+  if (asked) scheme(asked[1])
+  function follow(d) {
+    if (!d || typeof d !== 'object') return
+    var ctx = d.method === 'ui/notifications/host-context-changed' ? d.params : d.result && d.result.hostContext
+    if (ctx && typeof ctx === 'object') scheme(ctx.theme)
+  }
   var inner = document.createElement('iframe')
   inner.setAttribute('sandbox', cfg.sandbox)
   if (cfg.allow) inner.setAttribute('allow', cfg.allow)
@@ -53,6 +65,7 @@ export const PROXY_SCRIPT = `(function () {
   window.addEventListener('message', function (e) {
     if (e.source === window.parent) {
       if (e.origin !== HOST) return
+      follow(e.data)
       if (inner.contentWindow) inner.contentWindow.postMessage(e.data, toInner)
       return
     }
@@ -82,29 +95,35 @@ function embedJson(value: unknown): string {
 }
 
 /**
- * The proxy page's color scheme — must match the host view (the UI's `html { color-scheme: dark }`,
- * and the `theme: 'dark'` that AppFrame passes down to the view).
+ * The proxy page's color scheme — must match the host view's: the side of the theme that shows
+ * (#312), which AppFrame sets on the frame element and tells the view as `theme`.
  *
- * The iframe that loads the proxy inherits the host document's `dark`. If the iframe's color
- * scheme differs from the document inside it, Chromium paints the inner document's background
- * **opaque** (CSS Color Adjustment: a rule meant to keep a light document embedded in a dark
- * surrounding readable). A proxy that did not state a color scheme counted as a light document, so
- * a white canvas covered the entire app view, and a template view using the host's light text
- * color became unreadable against that white background. Stating the same scheme makes it
- * transparent — the inner frame also inherits `dark`, so an app view that states its color scheme
- * from the theme it was given (ext-apps' `applyDocumentTheme`, and our own template) also sits
- * transparently on top of the host's background. An app that states nothing gets Chromium's own
- * light canvas laid underneath it (its default black text remains readable). WKWebView always
- * keeps child frames transparent, so nothing visibly changes under Tauri — this page has nothing to
- * draw besides the iframe anyway.
+ * If a frame element's color scheme differs from the document inside it, Chromium paints that
+ * document's background **opaque** (CSS Color Adjustment: a rule meant to keep a light document
+ * embedded in a dark surrounding readable; Playwright's WebKit does the same). A proxy that did
+ * not state a color scheme counted as a light document, so a white canvas covered the entire app
+ * view on the dark theme, and a template view using the host's light text color became unreadable
+ * against it. Stating the same scheme makes it transparent — the inner frame inherits it, so an
+ * app view that states its color scheme from the theme it was given (ext-apps'
+ * `applyDocumentTheme`, and our own template) also sits transparently on the host's background.
+ * An app that states nothing counts as light: transparent on a light theme, and on a dark one it
+ * gets the browser's light canvas laid underneath it (its default black text remains readable).
+ * WKWebView keeps child frames transparent, so under Tauri this mostly matters for what the
+ * scheme does inside the view (form controls, scrollbars) — this page draws nothing of its own.
+ *
+ * The page follows the theme without being served again: the script reads the side from the
+ * address's fragment (`#color-scheme=light`, set by AppFrame before the first paint), then from
+ * every host context the bridge passes through (the `ui/initialize` answer and
+ * `host-context-changed`). A side is only ever `light` or `dark`; anything else is ignored. This
+ * default is for an address without a fragment (a UI from before the theme reached apps).
  */
-const HOST_COLOR_SCHEME = 'dark'
+const DEFAULT_COLOR_SCHEME = 'dark'
 
 export function proxyPageHtml(config: ProxyPageConfig): string {
   return [
     '<!doctype html>',
     '<html><head><meta charset="utf-8"><title>app view</title>',
-    `<meta name="color-scheme" content="${HOST_COLOR_SCHEME}">`,
+    `<meta name="color-scheme" content="${DEFAULT_COLOR_SCHEME}">`,
     '<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}</style>',
     '</head><body>',
     `<script type="application/json" id="cc-view-config">${embedJson(config)}</script>`,

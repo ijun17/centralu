@@ -1,9 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import type { AppBridge, McpUiHostContext } from '@modelcontextprotocol/ext-apps/app-bridge'
+import type { AppBridge, McpUiHostContext, McpUiStyles, McpUiTheme } from '@modelcontextprotocol/ext-apps/app-bridge'
 import { APP_VERSION, type AppId } from '@cc/protocol'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { TEXT_SCALES, externalAppKey, useStore } from '../../store/store.js'
+import { activeTheme, readHostStyles } from './hostStyles.js'
 
 /**
  * A single app view (M4 B-3c, spike S-1 `harness/src/host.ts`).
@@ -172,37 +173,10 @@ function keepAlive(bridge: AppBridge, token: string | number | undefined, beats:
 }
 
 /**
- * Passes our colors and font over under the spec's variable names. The values are **read from
- * the slot the view is placed in.** The conversation lane raises its background one step
- * (styles/index.css `[data-testid='session-view']`). Hardcoding the values would give the wrong
- * color depending on where the view sits.
- */
-const STYLE_MAP: readonly [string, string][] = [
-  ['--color-background-primary', '--color-surface-floor'],
-  ['--color-background-secondary', '--color-surface-raised'],
-  ['--color-background-tertiary', '--color-surface-hover'],
-  ['--color-text-primary', '--color-ink'],
-  ['--color-text-secondary', '--color-ink-muted'],
-  ['--color-text-tertiary', '--color-ink-faint'],
-  ['--color-border-primary', '--color-line'],
-  ['--color-border-secondary', '--color-line-strong'],
-  ['--font-sans', '--font-sans'],
-  ['--font-mono', '--font-mono'],
-]
-
-function styleVariables(el: Element | null): Record<string, string> {
-  if (!el) return {}
-  const cs = getComputedStyle(el)
-  const out: Record<string, string> = {}
-  for (const [spec, ours] of STYLE_MAP) {
-    const v = cs.getPropertyValue(ours).trim()
-    if (v) out[spec] = v
-  }
-  return out
-}
-
-/**
- * Our environment as told to the view. There is only one theme (dark).
+ * Our environment as told to the view: the side of the theme that shows (`theme`), every MCP Apps
+ * style variable mapped from our tokens, and Centralu's own variables (the signal colour and the
+ * scrollbar) in the `centralu` extension (hostStyles.ts, #312 step 6). A theme switch sends it
+ * again (the effect below), and the bridge sends only the fields that changed.
  *
  * The text size is **only announced** through `centralu.fontScale`. The app-wide text size
  * comes from CSS zoom on the root, and zoom renders even the content inside an iframe at the
@@ -211,18 +185,27 @@ function styleVariables(el: Element | null): Record<string, string> {
  * by the same factor and sending that would double the enlargement.
  */
 function hostContext(scale: number, el: Element | null, fill = false): McpUiHostContext {
-  const variables = styleVariables(el)
+  const { theme, variables, centralu } = readHostStyles(el)
   return {
-    theme: 'dark',
+    theme,
     platform: 'desktop',
     displayMode: 'inline',
     availableDisplayModes: ['inline'],
     containerDimensions: fill ? fillDimensions(el) : { maxHeight: MAX_HEIGHT },
     locale: navigator.language,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    ...(Object.keys(variables).length ? { styles: { variables: variables as never } } : {}),
-    centralu: { fontScale: scale },
+    ...(Object.keys(variables).length ? { styles: { variables: variables as McpUiStyles } } : {}),
+    centralu: { fontScale: scale, ...(Object.keys(centralu).length ? { variables: centralu } : {}) },
   }
+}
+
+/**
+ * The proxy page learns the side before the view says anything, from the address's fragment
+ * (agent-host views/proxy-page.ts), so its colour scheme matches the frame's from the first paint.
+ * The fragment never reaches the host, and the address kept for comparison stays the host's.
+ */
+function withScheme(url: string, theme: McpUiTheme): string {
+  return `${url.split('#')[0]}#color-scheme=${theme}`
 }
 
 /**
@@ -257,6 +240,21 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const [error, setError] = useState<string | null>(null)
   const [height, setHeight] = useState(INITIAL_HEIGHT)
   const [linkAsk, setLinkAsk] = useState<LinkAsk | null>(null)
+  /*
+   * The side of the theme that shows, and a count of switches (app/theme.ts announces each one
+   * with `cc-themechange`). The tokens are read again from the slot on every switch, so an edit to
+   * a custom theme or the accent reaches the view the same way a preset switch does.
+   */
+  const [theme, setTheme] = useState<McpUiTheme>(activeTheme)
+  const [themeRevision, setThemeRevision] = useState(0)
+  useEffect(() => {
+    const follow = () => {
+      setTheme(activeTheme())
+      setThemeRevision((n) => n + 1)
+    }
+    window.addEventListener('cc-themechange', follow)
+    return () => window.removeEventListener('cc-themechange', follow)
+  }, [])
 
   // The bridge handlers are attached once and live long — changing values are read through refs
   const onMessageRef = useRef(onMessage)
@@ -383,7 +381,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       // Feature delegation is fixed before navigation — set it before loading the address
       if (frame.allow) iframe.setAttribute('allow', frame.allow)
       else iframe.removeAttribute('allow')
-      iframe.src = frame.url
+      iframe.src = withScheme(frame.url, activeTheme())
       loadedUrl.current = frame.url
     })().catch((e: unknown) => {
       if (cancelled) return
@@ -468,12 +466,12 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     }
   }, [phase, toolInput, toolResult, toolCancelled])
 
-  // On a text-size change, host-context-changed (setHostContext sends only the changed field)
+  // On a text-size or theme change, host-context-changed (setHostContext sends only the changed fields)
   useEffect(() => {
     const b = bridgeRef.current
     if (phase !== 'ready' || !b) return
     b.setHostContext(hostContext(scale, boxRef.current, fill))
-  }, [phase, scale, fill])
+  }, [phase, scale, fill, themeRevision])
 
   /*
    * A filling view is told whenever its slot's size changes (window size, sidebar width,
@@ -564,12 +562,12 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
           ...(fill ? {} : { height }),
           display: phase === 'ready' || phase === 'loading' ? 'block' : 'none',
           /*
-           * Pinned to the proxy page's own scheme (agent-host views/proxy-page.ts states dark).
-           * Chromium paints a framed document's canvas opaque when the frame element's scheme and
-           * the document's differ, so on a light theme the view would sit on a solid rectangle.
-           * The proxy draws nothing of its own; telling apps the real theme is #312 step 6.
+           * The side of the theme, which the proxy page states too (agent-host views/proxy-page.ts:
+           * from the address's fragment first, then from every theme the bridge sends). Chromium and
+           * WebKit paint a framed document's canvas opaque when the frame element's scheme and the
+           * document's differ, so the view would sit on a solid rectangle instead of our background.
            */
-          colorScheme: 'dark',
+          colorScheme: theme,
         }}
       />
       {linkAsk && (
