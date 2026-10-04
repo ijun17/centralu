@@ -49,7 +49,8 @@ if (query.includes('updateProjectV2ItemFieldValue')) {
 } else if (query.includes('addProjectV2ItemById')) {
   const c = st.repo.find((x) => x.id === v.content)
   const id = 'item-' + c.number
-  st.items.push({ id, content: c, values: {} })
+  // lag: GitHub lists a newly added item only after a few reads, as it did live on 2026-10-04
+  st.items.push({ id, content: c, values: {}, hiddenReads: st.lag ?? 0 })
   save()
   out({ addProjectV2ItemById: { item: { id } } })
 } else if (query.includes('issueOrPullRequest')) {
@@ -59,8 +60,13 @@ if (query.includes('updateProjectV2ItemFieldValue')) {
 } else if (query.includes('projectV2(number')) {
   if (v.number !== 1) fail('gh: Could not resolve to a ProjectV2 with the number ' + v.number + '.\n', 1, JSON.stringify({ data: { repositoryOwner: { projectV2: null } }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a ProjectV2 with the number ' + v.number + '.' }] }))
   const start = v.after ? Number(v.after) : 0
-  const page = st.items.slice(start, start + 2)
-  const more = start + 2 < st.items.length
+  if (start === 0 && st.items.some((i) => i.hiddenReads > 0)) {
+    for (const i of st.items) if (i.hiddenReads > 0) i.hiddenReads -= 1
+    save()
+  }
+  const visible = st.items.filter((i) => !(i.hiddenReads > 0))
+  const page = visible.slice(start, start + 2)
+  const more = start + 2 < visible.length
   out({ repositoryOwner: { projectV2: {
     id: 'PVT_test', title: 'Centralu', url: 'https://github.com/users/ijun17/projects/1',
     fields: { nodes: [{}, ...st.fields.map(fieldNode)] },
@@ -267,6 +273,16 @@ describe('the project board app', { timeout: 30_000 }, () => {
     const badStatus = await call('add_item', { item: '43', status: 'Someday' })
     expect(badStatus.text).toContain('"Someday" is not a Status in this project.')
     expect(mutations().filter((q) => q.includes('addProjectV2ItemById'))).toHaveLength(2)
+  })
+
+  it('finds an item GitHub lists only a moment after adding it, and still sets its fields', async () => {
+    runtime()
+    writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), lag: 2 }))
+    const r = await call('add_item', { item: '#42', status: 'Ready', priority: 'Medium', area: 'UI' })
+    expect(r.isError).toBe(false)
+    expect(r.text).toContain('Added to the project')
+    expect(r.text).toContain('- Status: (none) → Ready')
+    expect(r.text).toMatch(/GitHub now shows #42: Status Ready/)
   })
 
   it('the screen gets the board in column order with the decision column first', async () => {

@@ -140,17 +140,33 @@ async function applyFields(b, item, changes) {
 const describeDone = (done) => done.map((d) => `- ${d.field}: ${d.from ?? '(none)'} → ${d.to}`).join('\n')
 
 /**
+ * GitHub can take a moment to list an item that was just added: on 2026-10-04 the read right after
+ * `addProjectV2ItemById` came back without it four times in a row, and a second read a few seconds
+ * later had it. So a read that looks for one item tries a few times, with short waits.
+ */
+const LIST_WAITS_MS = [0, 500, 1000, 1500, 2000]
+async function findFresh(itemId) {
+  let last
+  for (const ms of LIST_WAITS_MS) {
+    if (ms) await new Promise((r) => setTimeout(r, ms))
+    last = await board({ fresh: true })
+    const item = last.items.find((i) => i.itemId === itemId)
+    if (item) return { board: last, item }
+  }
+  return { board: last, item: null }
+}
+
+/**
  * Reads the item again, fresh, and says what GitHub now shows (and whether it matches). It never
  * throws: by now something may have been written, and a failed read must not hide that.
  */
 async function readBack(itemId, plan) {
-  let after
+  let item
   try {
-    after = await board({ fresh: true })
+    ;({ item } = await findFresh(itemId))
   } catch (e) {
     return { item: null, text: `Reading it back from GitHub failed: ${e?.message ?? e}` }
   }
-  const item = after.items.find((i) => i.itemId === itemId)
   if (!item) return { item: null, text: 'Reading it back, GitHub did not list the item in the project.' }
   const off = plan.filter((p) => item[p.key] !== p.option.name).map((p) => `${p.field.name} is ${item[p.key] ?? '(none)'}, not ${p.option.name}`)
   return {
@@ -212,8 +228,7 @@ async function addItem({ item: input, status, priority, area }) {
       const itemId = await addContent(b.project.id, content.id)
       forget()
       parts.push(`Added to the project ${b.project.title} on GitHub: ${TYPE[content.type]} ${ref({ ...content, repository: want.repo })} ${content.title} (${content.url}).`)
-      current = await board({ fresh: true })
-      item = current.items.find((i) => i.itemId === itemId)
+      ;({ board: current, item } = await findFresh(itemId))
       if (!item) throw new GitHubError('github', 'GitHub accepted the item but did not list it when read back. Refresh in a moment.')
     }
     let plan = []
