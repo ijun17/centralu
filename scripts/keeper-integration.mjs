@@ -35,13 +35,18 @@
  *   - the drain answers a slow call the host serves itself with a retryable error once the bound
  *     (shortened to 1.5 s here) has passed, and the swap reports what it cut.
  *
- * Every process it starts is killed before it exits, pass or fail.
+ * It needs no model and no network, and CI runs all of it (the `keeper` job in
+ * `.github/workflows/build.yml`).
+ *
+ * Every process it starts, and everything those start, is killed before it exits, pass or fail
+ * (`keeper-test-processes.mjs`); a failed scenario prints the end of its keeper's and host's logs.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-processes.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
@@ -51,6 +56,9 @@ const FAKE_BUNDLE = '/tmp/centralu-keeper-test/Centralu.app'
 
 const started = new Set()
 const tempDirs = []
+/** The data folders of scenarios with a failed check: their logs are printed before they are removed */
+const failedDirs = new Set()
+let currentData = null
 let failures = 0
 
 function log(msg) {
@@ -60,6 +68,7 @@ function check(cond, what, detail = '') {
   if (cond) log(`  ok   ${what}`)
   else {
     failures++
+    if (currentData) failedDirs.add(currentData)
     log(`  FAIL ${what}${detail ? `\n       ${detail}` : ''}`)
   }
   return cond
@@ -205,6 +214,7 @@ function newData() {
   // Short on purpose: a unix socket path is limited to 104 bytes on macOS.
   const d = mkdtempSync('/tmp/ck-')
   tempDirs.push(d)
+  currentData = d
   return d
 }
 
@@ -784,21 +794,14 @@ async function scenarioDrainCutsSlowCall() {
   await request(sock, { op: 'stop' }).catch(() => {})
 }
 
-function cleanup() {
-  for (const pid of started) {
-    try {
-      process.kill(pid, 'SIGKILL')
-    } catch {}
-  }
-  for (const d of tempDirs) {
-    for (const h of existsSync(d) ? hostsFor(d) : []) {
-      try {
-        process.kill(h.pid, 'SIGKILL')
-      } catch {}
-    }
-    rmSync(d, { recursive: true, force: true })
-  }
-}
+const cleanup = once((threw) => {
+  // A scenario that threw rather than failed a check left its folder's logs worth reading too
+  if (threw && currentData) failedDirs.add(currentData)
+  printLogTails([...failedDirs], log)
+  const hosts = tempDirs.flatMap((d) => (existsSync(d) ? hostsFor(d).map((h) => h.pid) : []))
+  killFamily([...started, ...hosts])
+  for (const d of tempDirs) rmSync(d, { recursive: true, force: true })
+})
 
 async function main() {
   if (!process.argv.includes('--no-build')) {
@@ -830,15 +833,13 @@ async function main() {
   }
 }
 
-process.on('SIGINT', () => {
-  cleanup()
-  process.exit(130)
-})
+cleanupOnExit(cleanup, log)
 try {
   await main()
 } catch (e) {
   failures++
   log(`\nerror: ${e?.stack ?? e}`)
+  cleanup(true)
 } finally {
   cleanup()
 }

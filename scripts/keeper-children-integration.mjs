@@ -19,13 +19,19 @@
  *     drains and detaches, the new one re-attaches);
  *   - stop ("Quit and stop agents") ends every child the keeper held.
  *
- * Every process it starts is killed before it exits, pass or fail.
+ * `--no-claude --no-codex` leaves the parts that need no model and no network: the terminal and the
+ * dev server across a host crash, and stop. CI runs exactly that (the `keeper` job in
+ * `.github/workflows/build.yml`); the agent parts stay a manual run.
+ *
+ * Every process it starts, and everything those start, is killed before it exits, pass or fail
+ * (`keeper-test-processes.mjs`); a failed run prints the end of the keeper's and the host's logs.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-processes.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
@@ -184,11 +190,16 @@ async function hostClient(port, token) {
   }
 }
 
+/** The host ready under a new pid, or undefined: at once if the keeper has given up on it */
 async function readyView(sock, notPid) {
-  return waitFor(async () => {
+  let gaveUp = false
+  const view = await waitFor(async () => {
     const v = await status(sock)
+    // Five failed starts take the keeper about 11 s; waiting out the minute after that only delays the report
+    if (v?.status?.state === 'failed') return (gaveUp = true)
     return v?.status?.state === 'ready' && v.hostPid && v.hostPid !== notPid && v
   }, 60_000, 250)
+  return gaveUp ? undefined : view
 }
 
 const session = async (host, id) => (await host.call('sessions.list', {})).find((s) => s.id === id)
@@ -350,14 +361,11 @@ async function scenario() {
   app.kill('SIGKILL')
 }
 
-function cleanup() {
-  for (const pid of [...started, ...heldPids]) {
-    try {
-      process.kill(pid, 'SIGKILL')
-    } catch {}
-  }
+const cleanup = once((threw) => {
+  if (failures > 0 || threw) printLogTails(tempDirs, log)
+  killFamily([...started, ...heldPids])
   for (const d of tempDirs) rmSync(d, { recursive: true, force: true })
-}
+})
 
 async function main() {
   if (!process.argv.includes('--no-build')) {
@@ -374,10 +382,7 @@ async function main() {
   await scenario()
 }
 
-process.on('SIGINT', () => {
-  cleanup()
-  process.exit(130)
-})
+cleanupOnExit(cleanup, log)
 try {
   await main()
 } catch (e) {

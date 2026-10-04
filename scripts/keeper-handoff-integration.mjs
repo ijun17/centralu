@@ -33,13 +33,20 @@
  *     swaps the host to build C, the terminal and dev server still the same processes;
  *   - stop ends the keeper, the host and every child.
  *
- * Every process it starts (keepers included, found in keeper.log) is killed before it exits.
+ * `--no-claude --no-codex` leaves the parts that need no model and no network: everything above
+ * except the two agent turns. CI runs exactly that (the `keeper` job in
+ * `.github/workflows/build.yml`); the agent parts stay a manual run.
+ *
+ * Every process it starts (keepers included, found in keeper.log), and everything those start, is
+ * killed before it exits, pass or fail (`keeper-test-processes.mjs`); a failed run prints the end of
+ * the keepers' and the host's logs. `KEEP_TEMP=1` keeps the temporary folders for a look afterwards.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-processes.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
@@ -249,11 +256,16 @@ async function hostClient(port, token) {
   }
 }
 
+/** The host ready under a new pid, or undefined: at once if the keeper has given up on it */
 async function readyView(sock, notPid) {
-  return waitFor(async () => {
+  let gaveUp = false
+  const view = await waitFor(async () => {
     const v = await status(sock)
+    // Five failed starts take the keeper about 11 s; waiting out the minute after that only delays the report
+    if (v?.status?.state === 'failed') return (gaveUp = true)
     return v?.status?.state === 'ready' && v.hostPid && v.hostPid !== notPid && v
   }, 60_000, 250)
+  return gaveUp ? undefined : view
 }
 
 const transcript = async (host, id) => JSON.stringify(await host.call('messages.load', { sessionId: id, limit: 400 }))
@@ -504,15 +516,15 @@ async function scenario() {
   app.kill('SIGKILL')
 }
 
-function cleanup() {
-  for (const pid of [...started, ...heldPids]) {
-    try {
-      process.kill(pid, 'SIGKILL')
-    } catch {}
-  }
-  if (process.env.KEEP_TEMP) log(`kept: ${tempDirs.join(" ")}`)
+const cleanup = once((threw) => {
+  if (failures > 0 || threw) printLogTails(tempDirs, log)
+  // A successor keeper the scenario had not read from the log yet (it failed mid-handoff) is the
+  // parent of nothing the script started, so only the log names it
+  const successors = tempDirs.flatMap((d) => successorsInLog(d))
+  killFamily([...started, ...heldPids, ...successors])
+  if (process.env.KEEP_TEMP) log(`kept: ${tempDirs.join(' ')}`)
   else for (const d of tempDirs) rmSync(d, { recursive: true, force: true })
-}
+})
 
 async function main() {
   if (!process.argv.includes('--no-build')) {
@@ -529,10 +541,7 @@ async function main() {
   await scenario()
 }
 
-process.on('SIGINT', () => {
-  cleanup()
-  process.exit(130)
-})
+cleanupOnExit(cleanup, log)
 try {
   await main()
 } catch (e) {
