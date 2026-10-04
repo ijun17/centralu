@@ -102,6 +102,7 @@ fn bundled_host_dir(app: &AppHandle) -> Option<PathBuf> {
         .filter(|p| p.join("main.mjs").exists())
 }
 
+#[cfg_attr(not(unix), allow(dead_code))] // off unix the answer is always no, and nobody asks
 fn use_keeper() -> bool {
     if std::env::var("CC_HOST_CMD").is_ok() || !cfg!(unix) {
         return false;
@@ -219,6 +220,7 @@ impl Supervisor {
         }
     }
 
+    #[cfg_attr(not(unix), allow(unused_variables))] // `on` is for the keeper, which is unix-only
     pub fn set_background(&self, on: bool) -> Result<bool, String> {
         match self.choice() {
             #[cfg(unix)]

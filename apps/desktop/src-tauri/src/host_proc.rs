@@ -64,6 +64,7 @@ pub enum LaunchError {
     /// backoff rounds on it.
     Fatal(String),
     /// Worth another attempt after the backoff (a copy that failed half way, say).
+    #[cfg_attr(not(unix), allow(dead_code))] // only the keeper (unix) builds a Retry
     Retry(String),
 }
 
@@ -181,6 +182,7 @@ pub fn backoff(attempt: u32) -> Duration {
 }
 
 impl Supervisor {
+    #[cfg_attr(not(unix), allow(dead_code))] // the keeper (unix) is its only caller
     pub fn new() -> Self {
         Self::default()
     }
@@ -194,6 +196,7 @@ impl Supervisor {
     }
 
     /// The running host's pid, if one is running.
+    #[cfg_attr(not(unix), allow(dead_code))] // the keeper (unix) is its only caller
     pub fn pid(&self) -> Option<u32> {
         self.inner.lock().ok()?.child.as_ref().map(|c| c.id())
     }
@@ -468,6 +471,7 @@ impl Supervisor {
      * The host is stopped the same way as on shutdown — TERM, a grace period for its own
      * `shutdown()`, then the group. Returns false when no host is running.
      */
+    #[cfg_attr(not(unix), allow(dead_code))] // the keeper (unix) is its only caller
     pub fn bounce(&self) -> bool {
         let pid = match self.inner.lock() {
             Ok(mut inner) => match inner.child.as_ref().map(|c| c.id()) {
@@ -1182,6 +1186,8 @@ mod tests {
         );
     }
 
+    // The login-shell probe is unix-only, and its sample answer is a unix path.
+    #[cfg(unix)]
     #[test]
     fn picks_the_marked_line_only() {
         // Only the marked line is checked, no matter what the shell configuration prints

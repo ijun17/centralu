@@ -526,7 +526,10 @@ struct QuitApproved(std::sync::Arc<std::sync::atomic::AtomicBool>);
  * and the link itself is pulled out with `take_app_links` — one link never travels twice, once
  * as the event and once as the thing pulled out.
  */
+// App links arrive on macOS only (docs/apps.md §12.3); elsewhere these wait for a receiver.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const APP_LINK_MAX_CHARS: usize = 4096;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const APP_LINKS_KEPT: usize = 8;
 
 #[derive(Default)]
@@ -534,6 +537,7 @@ struct AppLinks(std::sync::Mutex<Vec<String>>);
 
 /** Is this an acceptable shape — starts with `centralu:` (case-insensitive) and within the
  * length cap. */
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn accept_app_link(url: &str) -> Option<String> {
     if url.len() > APP_LINK_MAX_CHARS {
         return None;
