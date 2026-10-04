@@ -29,7 +29,7 @@
 import { build, version as esbuildVersion } from 'esbuild'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 
@@ -139,6 +139,17 @@ function checkPins() {
   if (wrong.length) fail(`installed versions differ from PINS — update PINS on purpose, not by accident:\n  ${wrong.join('\n  ')}`)
 }
 
+/**
+ * Whether a file is our own helper's source. Asked through `relative()` rather than a string
+ * prefix: on Windows paths ignore case, and esbuild and Node do not always spell the drive letter
+ * the same way (`d:\` and `D:\`), so a prefix check could call our own file someone else's and
+ * build a different source map there than here (#14).
+ */
+function insideSrc(absPath) {
+  const rel = relative(SRC, absPath)
+  return rel !== '' && !rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel)
+}
+
 /** A file inside node_modules → that package's folder (pnpm's `.pnpm/<hash>/node_modules/<name>` follows the same rule) */
 function packageDirOf(absPath) {
   const i = absPath.lastIndexOf(`${sep}node_modules${sep}`)
@@ -169,7 +180,7 @@ function canonicalSource(absPath) {
     const pj = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))
     return `vendored/${pj.name}@${pj.version}/${relative(pkgDir, absPath).split(sep).join('/')}`
   }
-  if (absPath.startsWith(SRC + sep)) return `vendored/centralu/${relative(SRC, absPath).split(sep).join('/')}`
+  if (insideSrc(absPath)) return `vendored/centralu/${relative(SRC, absPath).split(sep).join('/')}`
   return `vendored/other/${relative(ROOT, absPath).split(sep).join('/')}`
 }
 
@@ -227,7 +238,7 @@ async function buildInto(outDir) {
    * stderr. An error from an app author's bad argument is usually thrown from inside the helper.
    * Embedding third-party source text too would swell the map to several megabytes.
    */
-  map.sourcesContent = abs.map((p) => (p.startsWith(SRC + sep) ? readFileSync(p, 'utf8') : null))
+  map.sourcesContent = abs.map((p) => (insideSrc(p) ? readFileSync(p, 'utf8') : null))
   writeFileSync(mapPath, `${JSON.stringify(map)}\n`)
 
   writeFileSync(join(outDir, LICENSES), licenses(inputs))
@@ -262,6 +273,19 @@ if (process.argv.includes('--check')) {
   try {
     await buildInto(tmp)
     const stale = OUTPUTS.filter((f) => !existsSync(join(DEST, f)) || !readFileSync(join(tmp, f)).equals(readFileSync(join(DEST, f))))
+    // A source map that differs says where, so a difference on a machine nobody here has (the
+    // Windows CI job) can be read from its log.
+    if (stale.includes(`${RUNTIME}.map`) && existsSync(join(DEST, `${RUNTIME}.map`))) {
+      const built = readJson(join(tmp, `${RUNTIME}.map`))
+      const kept = readJson(join(DEST, `${RUNTIME}.map`))
+      for (const key of Object.keys({ ...built, ...kept })) {
+        if (JSON.stringify(built[key]) === JSON.stringify(kept[key])) continue
+        const a = Array.isArray(built[key]) ? built[key] : [built[key]]
+        const b = Array.isArray(kept[key]) ? kept[key] : [kept[key]]
+        const i = a.findIndex((v, n) => JSON.stringify(v) !== JSON.stringify(b[n]))
+        console.error(`[app-runtime] map.${key} differs at [${i}]: built ${JSON.stringify(a[i])?.slice(0, 200)}, committed ${JSON.stringify(b[i])?.slice(0, 200)}`)
+      }
+    }
     if (stale.length) fail(`the committed runtime is not what this source builds (${stale.join(', ')}) — run: pnpm build:app-runtime`)
     console.log(`[app-runtime] up to date: ${OUTPUTS.join(', ')}`)
   } finally {
