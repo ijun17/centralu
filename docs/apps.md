@@ -344,14 +344,54 @@ A summary; the reasoning is in security-boundaries.md, "App views".
   outside Centralu after the person confirms (http(s) and mailto only); log messages are accepted
   and dropped; size changes resize an inline view (24 to 2000 px), while a pinned view fills its
   area.
-- **Host context**: dark theme, `displayMode: "inline"`, our colours and fonts under the standard's
-  CSS variable names, locale, time zone, and `centralu.fontScale` (reported only: the UI's own zoom
-  already scales the frame). The proxy page declares the same color scheme as the host (`dark`),
-  and the template's page sets its own from the theme it receives, as ext-apps'
-  `applyDocumentTheme` does. With matching schemes a view is transparent on Centralu's background in
-  Chromium too; Chromium paints an opaque backdrop behind a frame whose document declares a
-  different scheme (white for one that declares none, which is right for an app with dark default
-  text). WKWebView keeps subframes transparent either way.
+- **Host context**: the theme (§6.5), `displayMode: "inline"`, locale, time zone, and
+  `centralu.fontScale` (reported only: the UI's own zoom already scales the frame).
+
+### 6.5 The theme in a view (#312)
+
+A view gets the theme the person chose in Settings (light or dark, a preset, a custom theme, the
+accent; [themes.md](themes.md)), so an app can look like Centralu without knowing which theme is on.
+
+- **`theme`** is `light` or `dark`: the side of the theme that shows.
+- **`styles.variables`** carries all 76 MCP Apps style variables, mapped from Centralu's tokens
+  (`packages/ui/src/features/app-frame/hostStyles.ts` is the table): the colour roles (background,
+  text and border for primary, secondary, tertiary, inverse, ghost, info, danger, success, warning
+  and disabled, and the focus rings), the two fonts, weights, text and heading sizes with their line
+  heights, radii, the border width and shadows. Centralu is achromatic, so the roles the standard
+  gives a hue land on the inks: info is plain text, and **warning is the signal colour**, what is
+  waiting for the person (pure white in dark, pure black in light). Danger is Centralu's danger red,
+  success the diff's green. Sizes are not multiplied by the text size setting, since the root zoom
+  already scales the frame; where Centralu has no step of its own (a large heading, bold), the value
+  is written out.
+- **`centralu.variables`** carries Centralu's own, which the standard has no name for:
+  `--centralu-signal` (the signal colour again, under its own name) and the scrollbar,
+  `--centralu-scrollbar-thumb`, `-thumb-hover`, `-track`, `-size`, `-inset` and `-radius`.
+- **Read where the view sits.** The values come from the tokens as they compute on the view's slot,
+  so a view in the conversation gets the conversation's raised surfaces and a pinned view the
+  floor's.
+- **Switches reach open views.** A theme switch, an edit to a custom theme and the accent send
+  `host-context-changed` to every open view, without reloading it. Like every change notification
+  it carries only the fields that changed, so an app reads the whole context the bridge keeps
+  (`app.getHostContext()`), not the notification's.
+- **The color scheme.** The view's frame, the proxy page and the app's page must declare the same
+  scheme: Chromium and WebKit paint an opaque backdrop behind a frame whose document declares a
+  different one (white for a document that declares none, which is right for an app with dark
+  default text). AppFrame sets the frame's scheme to the theme's side and puts it in the proxy
+  address's fragment (`#color-scheme=light`), the proxy page takes it from there before the first
+  paint and from every host context it passes on afterwards, and the template's page sets its own
+  from `theme`, as ext-apps' `applyDocumentTheme` does. With matching schemes a view is
+  transparent on Centralu's background, light or dark. WKWebView keeps subframes transparent
+  either way; there the scheme still decides how form controls draw.
+
+**What the template does, and what an app should do** (recommended, never checked; owner
+decision 7): the template's page applies everything it receives on `<html>` (the colour scheme, the
+standard variables and Centralu's own), on connect and on every change, and its styles read the
+variables with Centralu's dark values as fallbacks. It also ships **Centralu's scrollbar**: a small
+stylesheet that draws `::-webkit-scrollbar` from the `--centralu-scrollbar-*` variables the way
+Centralu draws its own, with `scrollbar-color` and `scrollbar-width` only where `::-webkit-scrollbar`
+does not exist (where it does, Chromium lets `scrollbar-color` switch it off). The project-board app
+uses the same pieces. An app built for another host that applies the standard variables gets
+Centralu's colours too, and draws its own scrollbars.
 
 ## 7. What is standard and what is Centralu's
 
@@ -360,7 +400,7 @@ A summary; the reasoning is in security-boundaries.md, "App views".
 | Standard | MCP server; `ui://` resources (`text/html;profile=mcp-app`) and `_meta.ui.resourceUri`; `_meta.ui.visibility`; `_meta.ui.csp` and `permissions`; the view lifecycle (tool-input, tool-result, tool-cancelled, resource-teardown, size, host context); the sandbox proxy | Works |
 | Standard, inline | A view under the tool card that called it | **Works: `e2e/public-apps.spec.ts`**, two official examples, unmodified |
 | Centralu's way, within the standard | The manifest; the pinned view (the host calls `home`); attaching apps to sessions as `app-<id>`; trust; run records; `check`; the builder | The pinned view needs only a `home` tool with a view in the manifest (not covered by the compatibility test). The rest is invisible to the app |
-| Centralu extension | `centralu/notifications/changed`; the fd 3 broker and `_meta["centralu/runId"]`; `run_status`; `centralu.fontScale` | Does not apply: such an app ignores the notification, so an open view shows what it last read, and it has no broker |
+| Centralu extension | `centralu/notifications/changed`; the fd 3 broker and `_meta["centralu/runId"]`; `run_status`; `centralu.fontScale`; `centralu.variables` (signal, scrollbar) | Does not apply: such an app ignores the notification, so an open view shows what it last read, and it has no broker |
 
 So "an app for another host runs as it is" holds **for the inline surface**. Keeping open views
 current and the broker work only for apps built from our template. In the other direction, a

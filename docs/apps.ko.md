@@ -176,7 +176,20 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 - **불투명 출처**(기본): 안쪽 프레임은 `allow-scripts allow-forms`만 받는다. 브라우저 저장소가 없으므로 어느 두 화면도 저장소를 나누지 않는다. **앱별 출처**(`view.origin: "app"`): 안쪽 프레임이 `http://127.0.0.1:<포트>`에서 `allow-same-origin`을 받는다. 포트는 그 (프로젝트, 앱)에 고정되고 다른 앱에 다시 주지 않는다. WebKit이 저장소를 출처마다 남기기 때문이다. 저장소 없이는 깨지는 앱을 위한 것이다: 스파이크 표본(S-8)의 공개 앱 86개 중 5개, ext-apps의 지도 예제도 그중 하나다.
 - **CSP**는 리소스의 `_meta.ui.csp`(규격의 자리)에서 오고, 규격의 기본값보다 엄격하다: 네트워크 없음, 중첩 프레임 없음, 폼 제출 없음, `'self'` 출처 없음, 선언해도 루프백 주소는 버림. `_meta.ui.permissions`는 선언한 것만 넘긴다(카메라, 마이크, 위치, 클립보드 쓰기).
 - **브리지**: 공식 ext-apps 2.x `AppBridge`를 처음 화면을 열 때 불러온다. 프레임은 `event.source`로, 앱은 화면을 연 컴포넌트로 가린다. 도구 호출은 `apps.invoke`로, 리소스 읽기는 `apps.readResource`로(프레임의 앱 것만) 간다. 링크는 사람이 확인한 뒤 Centralu 밖에서 연다(http(s)와 mailto만). 로그 메시지는 받고 버린다. 크기 변화는 대화 안 화면의 높이를 바꾸고(24~2000px), 고정 화면은 자리를 채운다.
-- **호스트 문맥**: 어두운 테마, `displayMode: "inline"`, 우리 색과 글꼴을 규격의 CSS 변수 이름으로, 로캘, 시간대, 그리고 `centralu.fontScale`(알리기만 한다. UI 자체의 확대가 이미 프레임까지 키운다). 프록시 페이지는 호스트와 같은 색 체계(`dark`)를 말하고, 템플릿의 페이지는 받은 테마로 제 색 체계를 정한다(ext-apps의 `applyDocumentTheme`과 같다). 체계가 같으면 Chromium에서도 화면이 Centralu의 바탕 위에 투명하게 선다. 다른 체계를 말하는 문서의 프레임 뒤에는 Chromium이 불투명한 바탕을 칠한다(아무것도 말하지 않는 문서면 흰색. 기본 글자가 검은 앱에게는 그것이 맞다). WKWebView는 어느 쪽이든 하위 프레임을 투명하게 둔다.
+- **호스트 문맥**: 테마(§6.5), `displayMode: "inline"`, 로캘, 시간대, 그리고 `centralu.fontScale`(알리기만 한다. UI 자체의 확대가 이미 프레임까지 키운다).
+
+### 6.5 화면 안의 테마 (#312)
+
+화면은 사람이 설정에서 고른 테마(밝음이나 어두움, 프리셋, 사용자 테마, 강조색. [themes.ko.md](themes.ko.md))를 받는다. 그래서 앱은 어느 테마가 켜져 있는지 몰라도 Centralu처럼 보일 수 있다.
+
+- **`theme`**은 `light`나 `dark`다: 지금 보이는 테마의 쪽.
+- **`styles.variables`**는 MCP Apps 스타일 변수 76개를 모두 Centralu의 토큰에서 옮겨 담는다(표는 `packages/ui/src/features/app-frame/hostStyles.ts`): 색의 역할(primary, secondary, tertiary, inverse, ghost, info, danger, success, warning, disabled 각각의 배경, 글자, 테두리와 포커스 링), 글꼴 둘, 굵기, 본문과 제목의 크기와 줄 높이, 모서리, 테두리 두께, 그림자. Centralu는 무채색이라 규격이 색조를 주는 역할은 잉크에 놓인다: info는 보통 글자이고, **warning은 신호색**, 사람을 기다리는 것이다(어두운 쪽에서 순백, 밝은 쪽에서 순흑). danger는 Centralu의 위험 빨강, success는 diff의 초록이다. 크기는 글자 크기 설정을 곱하지 않는다. 루트 확대가 이미 프레임을 키우기 때문이다. Centralu에 해당 단계가 없는 곳(큰 제목, bold)은 값을 직접 적었다.
+- **`centralu.variables`**는 규격에 이름이 없는 Centralu의 것을 담는다: `--centralu-signal`(신호색을 제 이름으로 한 번 더)과 스크롤바, `--centralu-scrollbar-thumb`, `-thumb-hover`, `-track`, `-size`, `-inset`, `-radius`.
+- **화면이 놓인 자리에서 읽는다.** 값은 화면 자리에서 계산된 토큰에서 오므로, 대화 안 화면은 대화의 한 단계 올라간 표면을, 고정 화면은 바닥의 표면을 받는다.
+- **바뀌면 열린 화면에 닿는다.** 테마 전환, 사용자 테마 수정, 강조색은 열린 모든 화면에 다시 불러오지 않고 `host-context-changed`를 보낸다. 다른 변경 알림처럼 바뀐 필드만 담으므로, 앱은 알림이 아니라 브리지가 쥔 문맥 전체(`app.getHostContext()`)를 읽는다.
+- **색 체계.** 화면의 프레임, 프록시 페이지, 앱의 페이지가 같은 체계를 말해야 한다: 다른 체계를 말하는 문서의 프레임 뒤에는 Chromium과 WebKit이 불투명한 바탕을 칠한다(아무것도 말하지 않는 문서면 흰색. 기본 글자가 검은 앱에게는 그것이 맞다). AppFrame은 프레임의 체계를 테마의 쪽으로 두고 프록시 주소의 조각(`#color-scheme=light`)에도 적는다. 프록시 페이지는 첫 그리기 전에 거기서, 그 뒤로는 자기가 넘기는 모든 호스트 문맥에서 체계를 읽고, 템플릿의 페이지는 `theme`으로 제 체계를 정한다(ext-apps의 `applyDocumentTheme`과 같다). 체계가 같으면 화면은 밝든 어둡든 Centralu의 바탕 위에 투명하게 선다. WKWebView는 어느 쪽이든 하위 프레임을 투명하게 두지만, 거기서도 체계가 폼 컨트롤을 그리는 방식을 정한다.
+
+**템플릿이 하는 일, 앱이 할 일**(권하되 검사하지 않는다. 소유자 결정 7): 템플릿의 페이지는 받은 것을 모두 `<html>`에 적용한다(색 체계, 표준 변수, Centralu의 것). 연결할 때와 바뀔 때마다 그렇게 하고, 스타일은 Centralu의 어두운 값을 대체값으로 두고 변수를 읽는다. 템플릿은 **Centralu의 스크롤바**도 싣는다: `--centralu-scrollbar-*` 변수로 `::-webkit-scrollbar`를 Centralu가 제 것을 그리는 방식대로 그리는 작은 스타일시트다. `scrollbar-color`와 `scrollbar-width`는 `::-webkit-scrollbar`가 없는 곳에서만 쓴다(있는 곳에서는 Chromium이 `scrollbar-color` 때문에 그것을 끈다). 프로젝트 보드 앱도 같은 조각을 쓴다. 다른 호스트용으로 만든 앱이라도 표준 변수를 적용하면 Centralu의 색을 받고, 스크롤바는 제 것을 그린다.
 
 ## 7. 무엇이 표준이고 무엇이 우리 것인가
 
@@ -185,7 +198,7 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 | 표준 | MCP 서버, `ui://` 리소스(`text/html;profile=mcp-app`)와 `_meta.ui.resourceUri`, `_meta.ui.visibility`, `_meta.ui.csp`와 `permissions`, 화면 수명 메시지(tool-input, tool-result, tool-cancelled, resource-teardown, 크기, 호스트 문맥), 샌드박스 프록시 | 된다 |
 | 표준, 대화 안 | 자기를 부른 도구 카드 아래의 화면 | **된다: `e2e/public-apps.spec.ts`**, 공식 예제 둘을 고치지 않은 채로 |
 | 규격 안의 우리 방식 | 매니페스트, 고정 화면(호스트가 `home`을 부른다), `app-<id>`로 세션에 붙이기, 신뢰, 실행 기록, `check`, 만드는 세션 | 고정 화면은 매니페스트에 화면 달린 `home` 도구만 있으면 된다(호환 시험은 이것을 다루지 않는다). 나머지는 앱에 보이지 않는다 |
-| 우리 확장 | `centralu/notifications/changed`, fd 3 중개와 `_meta["centralu/runId"]`, `run_status`, `centralu.fontScale` | 해당하지 않는다: 그런 앱은 알림을 무시하므로 열린 화면은 마지막으로 읽은 것을 보이고, 중개도 없다 |
+| 우리 확장 | `centralu/notifications/changed`, fd 3 중개와 `_meta["centralu/runId"]`, `run_status`, `centralu.fontScale`, `centralu.variables`(신호색, 스크롤바) | 해당하지 않는다: 그런 앱은 알림을 무시하므로 열린 화면은 마지막으로 읽은 것을 보이고, 중개도 없다 |
 
 그래서 "다른 호스트용 앱이 그대로 돈다"는 **대화 안 화면에서** 참이다. 열린 화면을 최신으로 두는 일과 중개는 우리 템플릿으로 만든 앱에서만 된다. 반대 방향으로, 템플릿 앱은 표준 화면을 가진 표준 MCP 서버다. 다른 호스트는 알림을 무시하고, `centralu.agent()`는 "중개 파이프(fd 3)가 열려 있지 않다"며 실패한다. 템플릿 앱을 다른 호스트에서 돌려 보지는 않았다.
 

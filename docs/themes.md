@@ -129,3 +129,12 @@ after a switch.
 | The desktop CSP allows it by hash (`script-src 'self' 'sha256-…'`) | `script-src 'self'` refuses inline scripts. A hash allows exactly this text and nothing else. `tooling/first-paint.test.ts` fails with the new hash when the script changes |
 | The preset floors are written into the script | The stylesheet has not loaded yet, so there is nothing to read them from. The same test compares them with `index.css` |
 | The native window does not read the cache at launch | Rust would need a cached value of its own, written by the page. The document loads from the bundle's embedded assets, and the script paints with its first frame. Only the gap before that frame is left, and it is not worth a second cache |
+
+## Apps
+
+App views get the theme too ([apps.md](apps.md) §6.5): the side as the MCP Apps `theme`, all 76
+standard style variables mapped from these tokens, and in the `centralu` extension the signal colour
+and the scrollbar tokens. Every switch, custom-theme edit and accent change reaches open views
+without reloading them. The signal colour is the standard's warning colour there, so an app that
+marks "waiting for you" with it keeps the urgency order. The app template applies all of it and
+ships Centralu's scrollbar as a stylesheet; apps are encouraged to use both, never checked.
