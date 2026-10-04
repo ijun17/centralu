@@ -26,6 +26,7 @@ import { Markdown } from './Markdown.jsx'
 import { InlineViewSlot } from './InlineView.jsx'
 import { RunMenu } from './RunMenu.jsx'
 import { BackgroundTasksBadge } from './BackgroundTasks.jsx'
+import { NoticeMark } from './NoticeMark.jsx'
 import { CommandRunnerOverlay } from './CommandRunner.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
@@ -2675,6 +2676,8 @@ const ChatRow = memo(function ChatRow({
      * leaves over — center alignment holds even when the label wraps to several lines, and a
      * short label still looks exactly as it did before.
      */
+    // A tool's notice the host made readable (#342): who, what kind, whose to act on, the tool's words on demand
+    if (item.notice) return <NoticeMark notice={item.notice} />
     return (
       <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
         <span className="h-px flex-1 bg-line" />

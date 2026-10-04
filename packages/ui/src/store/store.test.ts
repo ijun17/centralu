@@ -3623,6 +3623,69 @@ describe('resets, notices and switches the tool made (#304)', () => {
     expect(items.map((i) => (i as { text: string }).text)).toEqual(['Earlier messages were compacted here'])
   })
 
+  it('a readable notice (#342) leads with who, what kind and whose it is, live and restored alike', async () => {
+    const CONFIG =
+      'Codex is ignoring 2 unrecognized configuration settings. Check for typos or deprecated settings.\n' +
+      '  user (~/.codex/config.toml): `a.b` is ignored.\n  user (~/.codex/config.toml): `c` is ignored.'
+    const notice = {
+      type: 'notice' as const,
+      sessionId: 'n-5',
+      level: 'warning' as const,
+      text: CONFIG,
+      oncePerSession: true,
+      from: 'Codex',
+      label: 'config warning',
+      audience: 'you' as const,
+      summary: 'Codex ignored 2 settings in `~/.codex/config.toml`',
+      items: ['a.b', 'c'],
+      hint: 'Codex already runs without them; removing them from the file only silences this notice.',
+    }
+    const expected = {
+      text: 'Codex · config warning · for you — Codex ignored 2 settings in `~/.codex/config.toml`',
+      notice: {
+        head: 'Codex · config warning',
+        from: 'Codex',
+        audience: 'you',
+        summary: 'Codex ignored 2 settings in `~/.codex/config.toml`',
+        original: CONFIG,
+        items: ['a.b', 'c'],
+        hint: 'Codex already runs without them; removing them from the file only silences this notice.',
+      },
+    }
+    const mock = new MockPlatform()
+    mock.sessions.set('n-5', sessionInfo('n-5'))
+    await useStore.getState().attach(mock)
+    mock.emit(notice)
+    const live = (useStore.getState().chat['n-5'] ?? []).filter((i) => i.kind === 'mark')
+    expect(live).toMatchObject([expected])
+
+    const restored = messagesToChat([{ sessionId: 'n-5', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: notice }])
+    expect(restored).toMatchObject([expected])
+  })
+
+  it("an unknown readable notice keeps the tool's text as its line, and one from before #342 reads as before", () => {
+    const items = messagesToChat([
+      {
+        sessionId: 'n-6', seq: 1, role: 'system', kind: 'marker', ts: 1,
+        payload: { type: 'notice', sessionId: 'n-6', level: 'warning', text: 'Exceeded skills context budget.', from: 'Codex', label: 'warning' },
+      },
+      {
+        sessionId: 'n-6', seq: 2, role: 'system', kind: 'marker', ts: 2,
+        payload: { type: 'notice', sessionId: 'n-6', level: 'warning', text: 'Full-history hydration is deprecated.', from: 'Codex', label: 'deprecation', audience: 'centralu' },
+      },
+      { sessionId: 'n-6', seq: 3, role: 'system', kind: 'marker', ts: 3, payload: { type: 'notice', sessionId: 'n-6', level: 'warning', text: HOOK } },
+    ])
+    expect(items.map((i) => (i as { text: string }).text)).toEqual([
+      'Codex · warning — Exceeded skills context budget.',
+      'Codex · deprecation · for Centralu — Full-history hydration is deprecated.',
+      HOOK,
+    ])
+    // No summary: the text is the line itself, so there is nothing to show on demand
+    expect(items[0]).toMatchObject({ notice: { head: 'Codex · warning', from: 'Codex' } })
+    expect((items[0] as { notice?: { original?: string } }).notice?.original).toBeUndefined()
+    expect((items[2] as { notice?: unknown }).notice).toBeUndefined()
+  })
+
   it('a model switch the tool made updates the model shown without a toast; the orchestrator still raises one', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('n-3', sessionInfo('n-3', { model: 'opus' }))

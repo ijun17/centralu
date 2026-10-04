@@ -499,8 +499,11 @@ export type ChatItem = (
       live?: string
     }
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
-  /** A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it */
-  | { kind: 'mark'; seq: number; text: string }
+  /**
+   * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
+   * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
+   */
+  | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine }
 ) & {
   /**
    * The **number within the session** the host assigned when it stored this row (the store's
@@ -5898,7 +5901,7 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'conversation_reset':
     case 'notice':
       if (holds(items, e.seq)) return items
-      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: markerText(e) }]
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
     /*
      * A failed turn is also kept in the conversation (#107).
      *
@@ -5966,12 +5969,65 @@ export function markerText(e: Extract<NormalizedEvent, { type: 'compaction' | 'h
       return errorText(e)
     case 'conversation_reset':
       return resetText(e)
-    // The tool's own sentence, as is (#304) — the same rule as an error's
-    case 'notice':
-      return e.text
+    // The tool's own sentence, as is (#304) — the same rule as an error's. A readable notice leads with who and what (#342)
+    case 'notice': {
+      const line = noticeLine(e)
+      if (!line) return e.text
+      return [line.head, line.audience && audienceText(line.audience)].filter(Boolean).join(' · ') + ` — ${line.body}`
+    }
     default:
       return compactionText(e)
   }
+}
+
+/**
+ * The readable parts of a tool's notice (#342), for the line that draws it. The owner saw two Codex notices in a row
+ * that read like the same kind of problem: one about the person's own `config.toml`, one about how Centralu loads
+ * history, which they can do nothing about. So the line says who is speaking and what kind of notice it is
+ * (`head`), whose it is to act on (`audience`), and for a notice the host recognized, a plain explanation (`summary`,
+ * `items`, `hint`) with the tool's own words (`original`) one click away.
+ */
+export type NoticeLine = {
+  /** "Codex · config warning" */
+  head: string
+  audience?: 'you' | 'centralu'
+  /** What the line says after who and what: the plain explanation, or the tool's own text when there is none */
+  body: string
+  summary?: string
+  items?: string[]
+  hint?: string
+  /** The tool's own words, shown on demand when there is a summary; absent when they are the line itself */
+  original?: string
+  /** Who said `original`, for the control that shows it */
+  from: string
+}
+
+/** A notice's readable parts, or null for one the host did not place (stored before #342): it reads as its text alone */
+export function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine | null {
+  if (!e.from) return null
+  return {
+    head: e.label ? `${e.from} · ${e.label}` : e.from,
+    from: e.from,
+    body: e.summary ?? e.text,
+    ...(e.audience ? { audience: e.audience } : {}),
+    ...(e.summary ? { summary: e.summary, original: e.text } : {}),
+    ...(e.items?.length ? { items: e.items } : {}),
+    ...(e.hint ? { hint: e.hint } : {}),
+  }
+}
+
+/** Whose notice it is to act on, in the words the line uses (#342) */
+export function audienceText(a: 'you' | 'centralu'): string {
+  return a === 'you' ? 'for you' : 'for Centralu'
+}
+
+/** A marker's text, and for a readable notice its parts — the live and restored paths build the row the same way */
+function markerParts(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>): {
+  text: string
+  notice?: NoticeLine
+} {
+  const notice = e.type === 'notice' ? noticeLine(e) : null
+  return notice ? { text: markerText(e), notice } : { text: markerText(e) }
 }
 
 /** A failed turn's one line (#107) — carries the tool's own sentence as is. Rewording it into our own words would erase the cause */
@@ -6117,7 +6173,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
        * "Earlier messages were compacted here".
        */
       if (typeof e.type === 'string' && !KNOWN_MARKERS.has(e.type)) continue
-      items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, text: markerText(e) })
+      items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { callId?: string; summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary)
