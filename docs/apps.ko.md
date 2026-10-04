@@ -235,10 +235,18 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 
 화면에서 온 호출은 묻지 않는다. 화면은 앱이 사람에게 내놓은 조작면이기 때문이다. 기록에는 `view`로 남는다.
 
-**모델이 결과에서 읽는 것.** 도구 결과에 `content`(글)와 `structuredContent`(JSON)가 함께 있으면, Claude Code는
-글이 아니라 `structuredContent`를 모델에 넘긴다. 2026-10-04에 SDK를 거친 claude 2.1.282에서, 프로젝트 보드 앱
-(`.centralu/apps/project-board`)으로 확인했다. 그래서 모델이 꼭 읽어야 하는 문장("Status: On hold → Ready" 같은 것)은
-글에도 쓰고, `structuredContent` 맨 앞에도 넣는다.
+**모델이 결과에서 읽는 것.** 도구 결과에는 `content`(글)와 `structuredContent`(JSON)가 함께 올 수 있다. MCP 명세는
+둘을 같은 데이터로 본다: "하위 호환을 위해, 구조화된 내용을 돌려주는 도구는 그 JSON을 직렬화한 것도 TextContent 블록으로
+돌려주어야 한다(SHOULD)" (2025-06-18, Tools, Structured Content). 모델이 어느 쪽을 읽는지는 두 에이전트가 다르다.
+2026-10-04에, 글에는 `TEXT-7381`, 구조화된 부분에는 `STRUCT-4402`를 담는 시험 도구로 쟀다.
+
+- **Claude Code**(2.1.282, 그리고 VS Code 확장의 2.1.287)는 모델이 보기 전에 글을 `structuredContent`의 JSON으로
+  바꿔 넣는다. `outputSchema`가 있든 없든 그렇다. 모델은 `STRUCT-4402`만 답했다.
+- **Codex**(0.160.0, `gpt-5.6-luna`)는 모델이 쓴 스크립트 안에서 MCP 도구를 부르고, 스크립트는 결과 전체를 받는다.
+  `outputSchema`가 없으면 모델의 스크립트가 글(`TEXT-7381`)을 출력했고, 있으면 `structuredContent`(`STRUCT-4402`)를 읽었다.
+
+그래서 글과 구조화된 부분이 같은 내용을 말하게 하고, 모델이 꼭 읽어야 하는 문장("Status: On hold → Ready" 같은 것)은
+`structuredContent` 안에도 넣는다 (프로젝트 보드 앱은 `summary` 필드로 시작한다).
 
 **Codex는 소스로만 확인했다.** M4 동안 Codex가 로그아웃 상태였으므로, Codex 경로는 로그인한 실행이 아니라 설치된 0.153.4의 생성 타입, 바이너리 문자열, Codex 소스로 확인했다: 승인 방식 값, 설정 필드 이름, elicitation의 `_meta` 키, 그리고 `thread/resume`에 실은 MCP 설정이 실제로 먹히는지(스파이크 S-3·S-7은 로그인을 기다린다). 알려진 틈이 하나 있다: `normal`은 사람의 `~/.codex/config.toml`을 따르므로, 거기에 `approval_policy = "never"`가 있으면 Codex가 앱의 쓰기 도구를 거부한다.
 

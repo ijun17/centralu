@@ -483,11 +483,23 @@ from a server name that starts with `app-`.
 A call from a view is never asked about: the view is the control surface the app offers the
 person. It is recorded as `view`.
 
-**What the model reads from a result.** When a tool result carries both `content` (text) and
-`structuredContent` (JSON), Claude Code hands the model the `structuredContent`, not the text.
-This was seen on 2026-10-04 with claude 2.1.282 through the SDK, in the project board app
-(`.centralu/apps/project-board`). So a sentence the model must read, such as "Status: On hold →
-Ready", goes first inside `structuredContent` as well as in the text.
+**What the model reads from a result.** A tool result can carry both `content` (text) and
+`structuredContent` (JSON). The MCP specification treats the two as the same data: "For backwards
+compatibility, a tool that returns structured content SHOULD also return the serialized JSON in a
+TextContent block" (2025-06-18, Tools, Structured Content). The two agents differ in which one the
+model reads. Measured on 2026-10-04 with a probe tool whose text said `TEXT-7381` and whose
+structured part said `STRUCT-4402`:
+
+- **Claude Code** (2.1.282, and 2.1.287 from the VS Code extension) replaces the text with the
+  JSON of `structuredContent` before the model sees it, with or without an `outputSchema`. The
+  model answered only `STRUCT-4402`.
+- **Codex** (0.160.0, `gpt-5.6-luna`) calls MCP tools from a script the model writes, and the
+  script receives the whole result. Without an `outputSchema`, the model's script printed the
+  text (`TEXT-7381`); with one, it read `structuredContent` (`STRUCT-4402`).
+
+So keep the text and the structured part saying the same thing, and put any sentence the model must
+read, such as "Status: On hold → Ready", inside `structuredContent` too (the project board app
+leads with a `summary` field).
 
 **Codex is verified from its source only.** Codex was logged out during M4, so the Codex path was
 checked against the installed 0.153.4's generated types, its binary's strings and Codex's source,
