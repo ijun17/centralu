@@ -17,6 +17,10 @@ import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/
  */
 
 let fx: FixtureHost
+/** The host answering the view address — a test swaps it to stand for another host behind the connection */
+let serving: FixtureHost
+/** How many times the page asked for a view address */
+let frameCalls = 0
 
 test.beforeAll(async () => {
   fx = await startFixtureHost({
@@ -34,11 +38,15 @@ test.afterAll(async () => {
 })
 
 test.beforeEach(async ({ page }) => {
+  serving = fx
+  frameCalls = 0
   // When the test-bed's mock asks for the view address, the real ViewHost answers
   await page.exposeFunction(
     '__viewFrame',
-    (appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) =>
-      fx.views.frame({ app: { appId, projectId: opts.projectId ?? null }, instanceId, hostOrigin: opts.hostOrigin }),
+    (appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) => {
+      frameCalls++
+      return serving.views.frame({ app: { appId, projectId: opts.projectId ?? null }, instanceId, hostOrigin: opts.hostOrigin })
+    },
   )
   await page.goto('/app-frame.html')
   await page.waitForFunction(() => !!(window as any).__appFrame)
@@ -502,4 +510,63 @@ test('a view that does not know this extension notification simply ignores it', 
 test('a view that is not open fails with a reason', async ({ page }) => {
   await page.evaluate(() => (window as any).__appFrame.mount('x', { appId: 'fixture', projectId: null, instanceId: 'A'.repeat(22) }))
   await expect(page.getByTestId('app-frame-error')).toContainText('This app view is not open')
+})
+
+/*
+ * Another host behind the connection (#280 step 4): a restart, or a build switch behind the
+ * keeper's front door. The mock says so the way the real client does (`resync_required`), and the
+ * view asks for its address again.
+ */
+test.describe('after the connection comes back to another host', () => {
+  const resync = (page: Page) => page.evaluate(() => (window as any).__mock.setConnectionState('resync_required'))
+
+  test('the same address leaves the view alone: no reload, the state it built is still there, and it keeps calling', async ({ page }) => {
+    const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+    await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: id, toolInput: { q: 'kept' } })
+    const v = view(page, 'a')
+    await v.locator('#call').click()
+    await entry(v, 'call-result')
+    expect(frameCalls).toBe(1)
+
+    await resync(page)
+    await expect.poll(() => frameCalls).toBe(2)
+    // A reload would have started the document over: one `connected`, and the call's line still there
+    await expect(v.locator('li[data-k="connected"]')).toHaveCount(1)
+    await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
+    await expect(page.getByTestId('frame-a').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await v.locator('#call').click()
+    await expect(v.locator('li[data-k="call-result"]')).toHaveCount(2)
+  })
+
+  test('another address is loaded, and the bridge connects to the new view the way the first load did', async ({ page }) => {
+    const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+    await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: id, toolInput: { q: 'moved' } })
+    const v = view(page, 'a')
+    await entry(v, 'tool-input')
+
+    // The next host serves the same instance at its own port (a host without the keeper's front door)
+    const next = await startFixtureHost({ 'fixture ui://fixture/main': { html: fixtureViewHtml() } })
+    try {
+      expect(next.views.restore([{ id, app: { projectId: 'p1', appId: 'fixture' }, uri: 'ui://fixture/main' }])).toEqual([id])
+      serving = next
+      await resync(page)
+      await expect.poll(() => page.frames().some((f) => f.url().startsWith(`http://127.0.0.1:${next.port}/`))).toBe(true)
+      await expect(page.getByTestId('frame-a').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+      // The new document heard the input again and its calls reach the mock under this frame's app
+      expect(await entry(v, 'tool-input')).toEqual({ q: 'moved' })
+      await v.locator('#call').click()
+      expect(await entry(v, 'call-result')).toEqual({ appId: 'fixture', tool: 'increment', args: { by: 2 } })
+    } finally {
+      serving = fx
+      await next.close()
+    }
+  })
+
+  test('a host that no longer has the view fails it with the reason, as a first load would', async ({ page }) => {
+    const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+    await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: id })
+    fx.views.close(id)
+    await resync(page)
+    await expect(page.getByTestId('app-frame-error')).toContainText('This app view is not open')
+  })
 })

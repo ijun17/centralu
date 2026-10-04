@@ -533,6 +533,13 @@ export type SubagentSteps = { open: boolean; rows: StoredMessage[]; more: boolea
 export type AppState = {
   platform: Platform | null
   connection: ConnectionState
+  /**
+   * How many times the connection came back to a host that could not replay what was missed
+   * (`resync_required`) — in practice another host lifetime: a restart, or a build switch behind
+   * the keeper's front door (#280). An open app view asks for its address again on every change
+   * (AppFrame): the new host may serve it at another address, or not at all.
+   */
+  hostResyncs: number
   projects: Record<string, ProjectInfo>
   /**
    * How many times, per project, we have heard "the working tree may have moved" (#160). Bumped
@@ -2338,6 +2345,7 @@ function flushWorkspace(get: () => AppState): void {
 export const useStore = create<AppState>((set, get) => ({
   platform: null,
   connection: 'connecting',
+  hostResyncs: 0,
   projects: {},
   gitEpoch: {},
   sessions: {},
@@ -2447,7 +2455,7 @@ export const useStore = create<AppState>((set, get) => ({
          * conversation being viewed).
          */
         if (connection === 'resync_required') {
-          set({ connection: 'connected' })
+          set({ connection: 'connected', hostResyncs: get().hostResyncs + 1 })
           void get().recoverAfterReconnect(true)
           return
         }

@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppBridge, McpUiHostContext } from '@modelcontextprotocol/ext-apps/app-bridge'
 import { APP_VERSION, type AppId } from '@cc/protocol'
-import type { AppToolResult } from '@cc/platform/ports'
+import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { TEXT_SCALES, externalAppKey, useStore } from '../../store/store.js'
 
@@ -22,6 +22,12 @@ import { TEXT_SCALES, externalAppKey, useStore } from '../../store/store.js'
  * the same object across navigation, so the view's first `ui/initialize` reaches a bridge that
  * is already listening. That is why there is no readiness handshake with the proxy (host
  * views/proxy-page.ts).
+ *
+ * **Another host behind the connection** (a restart, or a build switch behind the keeper's front
+ * door, #280): the view asks for its address again. The same address means the new host serves
+ * this instance where the old one did, so the frame and the bridge are left alone and the view
+ * keeps its state. Another address is loaded the way the first one was; a failure goes the same
+ * way as a first load's failure.
  */
 
 export type AppFrameTeardown = 'answered' | 'timeout' | 'failed' | 'not-connected'
@@ -266,6 +272,12 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const beats = useRef(new Set<ReturnType<typeof setInterval>>())
   const changeRef = useRef(signal)
   changeRef.current = signal
+  const hostResyncs = useStore((s) => s.hostResyncs)
+  /** The address the frame was loaded with — null until it is, and again once the load is undone */
+  const loadedUrl = useRef<string | null>(null)
+  /** An address already asked for that has to be loaded (another host gave a different one) — the load below takes it instead of asking again */
+  const nextFrame = useRef<AppViewFrame | null>(null)
+  const [reload, setReload] = useState(0)
 
   /** A link opens only after the person confirms it. If an earlier question is still pending, it is closed as rejected */
   const linkAskRef = useRef<LinkAsk | null>(null)
@@ -294,12 +306,14 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     sent.current = { input: false, result: false, change: changeRef.current }
     setPhase('loading')
     setError(null)
+    const known = nextFrame.current
+    nextFrame.current = null
 
     void (async () => {
       const [{ AppBridge, PostMessageTransport }, frame] = await Promise.all([
         // The bridge is loaded only when a view first opens — someone who never opens an app view pays zero startup cost
         import('@modelcontextprotocol/ext-apps/app-bridge'),
-        platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }),
+        known ?? platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }),
       ])
       if (cancelled) return
       bridge = new AppBridge(
@@ -370,6 +384,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       if (frame.allow) iframe.setAttribute('allow', frame.allow)
       else iframe.removeAttribute('allow')
       iframe.src = frame.url
+      loadedUrl.current = frame.url
     })().catch((e: unknown) => {
       if (cancelled) return
       const message = e instanceof Error ? e.message : String(e)
@@ -381,13 +396,44 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     const heartbeats = beats.current
     return () => {
       cancelled = true
+      loadedUrl.current = null
       bridgeRef.current = null
       if (bridge) void bridge.close()
       for (const t of heartbeats) clearInterval(t)
       heartbeats.clear()
       settleLink(false)
     }
-  }, [platform, appId, projectId, instanceId, askToOpen, settleLink])
+  }, [platform, appId, projectId, instanceId, askToOpen, settleLink, reload])
+
+  /*
+   * Another host lifetime: ask for the address again (see the header). A view still loading is
+   * skipped, since its own request already goes to the new host; so is one taken down.
+   */
+  const resyncsSeen = useRef(hostResyncs)
+  useEffect(() => {
+    if (hostResyncs === resyncsSeen.current) return
+    resyncsSeen.current = hostResyncs
+    const loaded = loadedUrl.current
+    if (loaded === null) return
+    let cancelled = false
+    platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }).then(
+      (frame) => {
+        if (cancelled || loadedUrl.current !== loaded || frame.url === loaded) return
+        nextFrame.current = frame
+        setReload((n) => n + 1)
+      },
+      (e: unknown) => {
+        if (cancelled || loadedUrl.current !== loaded) return
+        const message = e instanceof Error ? e.message : String(e)
+        setError(message)
+        setPhase('error')
+        onFailedRef.current?.(message)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [hostResyncs, platform, appId, projectId, instanceId])
 
   /*
    * A last-ditch attempt for the case where the parent tears the view down without calling
@@ -483,6 +529,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         beats.current.clear()
         // Take the view down — so it says nothing more in the meantime even if the parent detaches it soon after
         iframeRef.current?.removeAttribute('src')
+        loadedUrl.current = null
         setPhase('closed')
         return outcome
       },
