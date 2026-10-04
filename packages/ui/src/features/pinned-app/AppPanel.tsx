@@ -80,7 +80,17 @@ export function AppPanel({
           <CloseIcon size={14} />
         </IconButton>
       </div>
-      <div ref={slot} className="min-h-0 flex-1" data-testid={slotTestId} />
+      {/*
+        Focusable: the view laid over it is after every panel in the document, so this is where Tab from the header
+        reaches it — focus is handed on to the view (slots.ts).
+      */}
+      <div
+        ref={slot}
+        className="min-h-0 flex-1 outline-none"
+        tabIndex={0}
+        aria-label={`${title} view`}
+        data-testid={slotTestId}
+      />
     </>
   )
 }

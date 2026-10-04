@@ -427,5 +427,49 @@ export function gridAppTests(): void {
       await expect(view.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
       await expectOverSlot(page, `grid:${pid}/slider`, page.getByTestId(`grid-slot-app:${pid}/slider`))
     })
+
+    test('Tab from an app panel’s header reaches its view, and Shift+Tab out of the view comes back to the header', async ({
+      page,
+    }) => {
+      const { pid } = await alphaWithSlider(page)
+      const app = `app:${pid}/slider`
+      const viewKey = `grid:${pid}/slider`
+      await page.evaluate(
+        (p) =>
+          (window as any).__store.getState().setGridPanels([{ kind: 'app', projectId: p, appId: 'slider' }]),
+        pid,
+      )
+      await page.getByTestId('grid-button').click()
+      await expect(page.getByTestId(`pinned-app-${viewKey}`).getByTestId('app-frame')).toHaveAttribute(
+        'data-phase',
+        'ready',
+      )
+
+      const remove = page.getByTestId(`grid-remove-${app}`)
+      await remove.focus()
+      await page.keyboard.press('Tab')
+      // The view is after every panel in the document; the slot hands focus on to its frame
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (k) =>
+              document.activeElement ===
+              document.querySelector(`[data-testid="pinned-app-${k}"] [data-testid="app-frame-iframe"]`),
+            viewKey,
+          ),
+        )
+        .toBe(true)
+      /*
+       * Shift+Tab out of the view lands on the slot, the last thing before the view in the document. Where the engine
+       * puts focus inside two nested cross-origin frames first is its own business, so the step that is ours is
+       * played directly: focus reaching the slot from inside the view goes on to the header, not back into the view.
+       */
+      // In the page: Playwright's own focus() goes about it differently while focus is inside a frame
+      const after = await page.evaluate((a) => {
+        ;(document.querySelector(`[data-testid="grid-slot-${a}"]`) as HTMLElement).focus()
+        return document.activeElement?.getAttribute('data-testid')
+      }, app)
+      expect(after).toBe(`grid-remove-${app}`)
+    })
   })
 }

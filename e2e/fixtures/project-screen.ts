@@ -646,6 +646,20 @@ export function appPanelTests(): void {
       await expectOverSlot(page, key)
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
       expect(await opened(page)).toBe(1)
+
+      // The keyboard reaches the view from its panel's header, as it reaches a session panel's conversation (#288)
+      await page.getByTestId('project-hide-app:slider').focus()
+      await page.keyboard.press('Tab')
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (k) =>
+              document.activeElement ===
+              document.querySelector(`[data-testid="pinned-app-${k}"] [data-testid="app-frame-iframe"]`),
+            key,
+          ),
+        )
+        .toBe(true)
     })
   })
 }

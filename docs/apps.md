@@ -272,7 +272,8 @@ call.
   the screen brings a hidden panel back where it lands. While anything is dragged over the screen
   (one of the project's rows, or one of its panels), the view is hidden, not unloaded: in WebKit a
   drag goes into a frame whatever its pointer-events say, and the row or panel would land in the
-  app instead of beside it.
+  app instead of beside it. The panel's slot takes the view's place in the keyboard order: Tab
+  from the panel's header goes into the view, and back out to the header.
 - **On the grid** (product-spec §5.4, #288) an app placed there by hand gets **a view of its own**:
   the same hosting (opened by `home`, laid over the panel's slot, hidden rather than unloaded on
   another screen, teardown first when the panel is removed), but a separate entry and instance

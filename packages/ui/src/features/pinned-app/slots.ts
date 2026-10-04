@@ -17,6 +17,12 @@
  * grid lays its app panels' views out the same way (#288), keyed by the grid's own view of the app
  * (`gridAppViewKey`, `grid:<project>/<appId>`). Only one of the two screens is ever on show, so they
  * share the drag state below.
+ *
+ * A slot is also the view's place in the **keyboard** order. The view sits after every panel in the
+ * document, so Tab from an app panel's header would skip its own view and land on the next panel,
+ * reaching the view only after the last panel. The slot is focusable and hands focus on to the view
+ * laid over it — and back to the header when focus comes back out of the view, so Shift+Tab is not
+ * caught between the two.
  */
 
 const slots = new Map<string, HTMLElement>()
@@ -68,14 +74,53 @@ function place(key: string): void {
   view.style.visibility = panelDragged || inbound ? 'hidden' : ''
 }
 
+/** What can take focus, for the keyboard order around a slot */
+const FOCUSABLE = 'iframe, button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+
+/** The element that last had focus in this document — read by a slot as focus reaches it (see `slotFocused`) */
+let lastFocus: Element | null = null
+let trackingFocus = false
+function trackFocus(): void {
+  if (trackingFocus || typeof document.addEventListener !== 'function') return
+  trackingFocus = true
+  // Capture, so it is recorded however the element's own handlers treat the event. A frame taking focus is reported
+  // here as the frame element: focus inside another document is that frame, seen from this one. The active element
+  // rather than the event's target: a slot hands focus on from its own focus handler, and the slot's focusin still
+  // arrives after that, naming the slot as if it had kept focus
+  document.addEventListener('focusin', () => (lastFocus = document.activeElement), true)
+}
+
+/**
+ * Focus reached a slot. Coming from before it (Tab from the panel's header), it goes on into the view laid over it:
+ * its frame, or the first control a view without one shows (Trust this project, Restart). Coming back out of that view
+ * (Shift+Tab from its frame), it goes on to whatever stands before the slot — the header's last control — or Shift+Tab
+ * would be sent straight back into the view.
+ */
+function slotFocused(key: string, slot: HTMLElement): void {
+  const view = views.get(key)
+  if (!view) return
+  if (lastFocus && view.contains(lastFocus)) {
+    const all = [...document.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.getClientRects().length > 0)
+    const at = all.indexOf(slot)
+    all[at - 1]?.focus()
+    return
+  }
+  const inside = [...view.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => el.getClientRects().length > 0)
+  inside?.focus()
+}
+
 /** A panel's body for this app (the project screen's or the grid's). Returns the function that removes it */
 export function registerSlot(key: string, el: HTMLElement): () => void {
   slots.set(key, el)
   const ro = new ResizeObserver(() => place(key))
   ro.observe(el)
   place(key)
+  trackFocus()
+  const onFocus = () => slotFocused(key, el)
+  el.addEventListener?.('focus', onFocus)
   return () => {
     ro.disconnect()
+    el.removeEventListener?.('focus', onFocus)
     if (slots.get(key) === el) slots.delete(key)
   }
 }
