@@ -18,8 +18,8 @@
  * This stays plain `@theme`, not `@theme inline`: every utility then reads `var(--color-…)` at
  * run time, which is what lets a theme switch by changing variables alone.
  *
- * **These values are the Dark preset.** Another preset is a `[data-theme='…']` block below that
- * sets the same names; a custom theme is the person's copy of a preset, written as inline
+ * **These values are the Dark preset.** Light and the two high-contrast presets are
+ * `[data-theme='…']` blocks below that set the same names; a custom theme is the person's copy of a preset, written as inline
  * properties on `<html>` (app/theme.ts). A token added here has to be added to THEME_TOKENS there
  * too, or themes cannot reach it (a unit test checks the two lists agree).
  *
@@ -278,6 +278,223 @@
 [data-testid='session-view'] {
   --color-surface-floor: var(--color-surface-reading);
   --color-surface-raised: var(--color-surface-reading-raised);
+}
+
+/*
+ * ── Presets ──────────────────────────────────────────────────────
+ * The `@theme` values above are Dark. Each block here is another preset, selected by
+ * `data-theme` on <html> (app/theme.ts). A preset sets every colour token, so nothing of Dark
+ * shows through; a custom theme file then overrides whatever it names, inline.
+ *
+ * Light keeps the dark rule in the form that survives the inversion: **contrast is urgency**
+ * (#312 decision 2). Pure black is reserved for what is waiting for you, as pure white is in
+ * dark, and each ink keeps its rank on every reading surface — signal > text > secondary >
+ * background — which Settings checks for every theme (app/theme.ts `urgencyBreaks`) and a test
+ * checks for every preset. Raised surfaces are lighter than the floor, so in light "lifting" a
+ * card means moving it toward white. The reading surface is near-white with its cards on white,
+ * the same front-most arrangement the conversation has in dark.
+ *
+ * The high-contrast presets push every step further apart: black or white floors, borders that
+ * meet a 3:1 contrast against the floor, and inks that all clear 4.5:1, with the order intact.
+ */
+[data-theme='light'] {
+  --color-surface-floor: #f2f2f2;
+  --color-surface-side: #ececec;
+  --color-surface-raised: #ffffff;
+  --color-surface-selected: #e2e2e2;
+  --color-surface-hover: #dadada;
+  /* The grid's floor is darker than the panels here: what was a brighter plate in dark is a
+     deeper one in light, so the panels still read as cut out of it */
+  --color-surface-deck: #dcdcdc;
+  --color-surface-reading: #f8f8f8;
+  --color-surface-reading-raised: #ffffff;
+
+  --color-line: #dedede;
+  --color-line-strong: #c4c4c4;
+
+  --color-ink-signal: #000000;
+  --color-ink: #1f1f1f;
+  --color-ink-muted: #5c5c5c;
+  --color-ink-faint: #8a8a8a;
+
+  --color-diff-add: #1a7f37;
+  --color-diff-add-bg: #dafbe1;
+  --color-diff-del: #cf222e;
+  --color-diff-del-bg: #ffebe9;
+  --color-danger: #cf222e;
+  --color-danger-bg: #ffebe9;
+
+  --color-focus: #5c5c5c;
+  /* Translucent black: it darkens whatever is under it by the same amount, as the white does in dark */
+  --color-selection: rgb(0 0 0 / 0.14);
+  --color-scrollbar-thumb: #cfcfcf;
+  --color-scrollbar-thumb-hover: #b5b5b5;
+  --color-scrim-thin: color-mix(in oklab, #000 25%, transparent);
+
+  --color-keycap-top: #ffffff;
+  --color-keycap-bottom: #ececec;
+  --color-keycap-border: #c4c4c4;
+  /* A halo does not make black text stand out; it only blurs it */
+  --color-signal-glow: transparent;
+
+  /* The galaxy, a step deeper so it holds on white (the gust multiplies instead of screening, below) */
+  --color-activity-1: #2d6cf0;
+  --color-activity-2: #7b3fe4;
+  --color-activity-3: #d63aa8;
+  --color-activity-4: #e8701f;
+  --color-activity-5: #13a8a2;
+
+  /* The terminal: GitHub's light palette, readable on near-white */
+  --color-term-bg: #fafafa;
+  --color-term-log-bg: #ffffff;
+  --color-term-fg: #1f1f1f;
+  --color-term-cursor: #1f1f1f;
+  --color-term-selection: #d6d6d6;
+  --color-term-black: #24292f;
+  --color-term-red: #cf222e;
+  --color-term-green: #116329;
+  --color-term-yellow: #4d2d00;
+  --color-term-blue: #0969da;
+  --color-term-magenta: #8250df;
+  --color-term-cyan: #1b7c83;
+  --color-term-white: #6e7781;
+  --color-term-bright-black: #57606a;
+  --color-term-bright-red: #a40e26;
+  --color-term-bright-green: #1a7f37;
+  --color-term-bright-yellow: #633c01;
+  --color-term-bright-blue: #218bff;
+  --color-term-bright-magenta: #a475f9;
+  --color-term-bright-cyan: #3192aa;
+  --color-term-bright-white: #8c959f;
+
+  /* Shadows carry far less black: on a light floor the dark values read as smudges */
+  --shadow-popover: 0 12px 32px -8px rgb(0 0 0 / 0.18);
+  --shadow-popover-up: 0 -12px 32px -8px rgb(0 0 0 / 0.18);
+  --shadow-dropdown: 0 16px 48px -8px rgb(0 0 0 / 0.2);
+  --shadow-notice: 0 12px 32px -12px rgb(0 0 0 / 0.2);
+  --shadow-modal: 0 24px 60px -12px rgb(0 0 0 / 0.25);
+  --shadow-sticky: 0 8px 24px -8px rgb(0 0 0 / 0.16);
+  --shadow-dock: 0 -14px 32px -12px rgb(0 0 0 / 0.12);
+  --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.12);
+  --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 0 rgb(0 0 0 / 0.12);
+  --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -1px 2px rgb(0 0 0 / 0.06), 0 1px 0 rgb(0 0 0 / 0.08);
+}
+
+[data-theme='hc-dark'] {
+  --color-surface-floor: #000000;
+  --color-surface-side: #000000;
+  --color-surface-raised: #0f0f0f;
+  --color-surface-selected: #2a2a2a;
+  --color-surface-hover: #383838;
+  --color-surface-deck: #1f1f1f;
+  --color-surface-reading: #000000;
+  --color-surface-reading-raised: #141414;
+
+  --color-line: #707070;
+  --color-line-strong: #a8a8a8;
+
+  --color-ink-signal: #ffffff;
+  --color-ink: #f0f0f0;
+  --color-ink-muted: #c8c8c8;
+  --color-ink-faint: #9e9e9e;
+
+  --color-diff-add: #8af59a;
+  --color-diff-add-bg: #0a2e14;
+  --color-diff-del: #ff9a90;
+  --color-diff-del-bg: #3a0e0e;
+  --color-danger: #ff9a90;
+  --color-danger-bg: #3a0e0e;
+
+  --color-focus: #e0e0e0;
+  --color-selection: rgb(255 255 255 / 0.35);
+  --color-scrollbar-thumb: #707070;
+  --color-scrollbar-thumb-hover: #a8a8a8;
+
+  --color-keycap-top: #1a1a1a;
+  --color-keycap-bottom: #0a0a0a;
+  --color-keycap-border: #707070;
+
+  --color-term-bg: #000000;
+  --color-term-log-bg: #0f0f0f;
+  --color-term-fg: #f0f0f0;
+  --color-term-cursor: #ffffff;
+  --color-term-selection: #4a4a4a;
+}
+
+[data-theme='hc-light'] {
+  --color-surface-floor: #ffffff;
+  --color-surface-side: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-selected: #e0e0e0;
+  --color-surface-hover: #d2d2d2;
+  --color-surface-deck: #e6e6e6;
+  --color-surface-reading: #ffffff;
+  --color-surface-reading-raised: #f2f2f2;
+
+  --color-line: #767676;
+  --color-line-strong: #4a4a4a;
+
+  --color-ink-signal: #000000;
+  --color-ink: #121212;
+  --color-ink-muted: #3a3a3a;
+  --color-ink-faint: #595959;
+
+  --color-diff-add: #0b5a1f;
+  --color-diff-add-bg: #d1f5d8;
+  --color-diff-del: #a1001f;
+  --color-diff-del-bg: #ffe1e1;
+  --color-danger: #a1001f;
+  --color-danger-bg: #ffe1e1;
+
+  --color-focus: #1a1a1a;
+  --color-selection: rgb(0 0 0 / 0.22);
+  --color-scrollbar-thumb: #8a8a8a;
+  --color-scrollbar-thumb-hover: #4a4a4a;
+  --color-scrim-thin: color-mix(in oklab, #000 35%, transparent);
+
+  --color-keycap-top: #ffffff;
+  --color-keycap-bottom: #f0f0f0;
+  --color-keycap-border: #4a4a4a;
+  --color-signal-glow: transparent;
+
+  --color-activity-1: #1f5ad6;
+  --color-activity-2: #6a2fd0;
+  --color-activity-3: #b81f8c;
+  --color-activity-4: #c25400;
+  --color-activity-5: #00807a;
+
+  --color-term-bg: #ffffff;
+  --color-term-log-bg: #ffffff;
+  --color-term-fg: #000000;
+  --color-term-cursor: #000000;
+  --color-term-selection: #c8c8c8;
+  --color-term-black: #24292f;
+  --color-term-red: #a40e26;
+  --color-term-green: #0b5a1f;
+  --color-term-yellow: #4d2d00;
+  --color-term-blue: #0550ae;
+  --color-term-magenta: #6639ba;
+  --color-term-cyan: #135e65;
+  --color-term-white: #57606a;
+  --color-term-bright-black: #3d444d;
+  --color-term-bright-red: #82071e;
+  --color-term-bright-green: #044f1e;
+  --color-term-bright-yellow: #3b2300;
+  --color-term-bright-blue: #033d8b;
+  --color-term-bright-magenta: #512a97;
+  --color-term-bright-cyan: #0b4a4f;
+  --color-term-bright-white: #424a53;
+
+  --shadow-popover: 0 12px 32px -8px rgb(0 0 0 / 0.25);
+  --shadow-popover-up: 0 -12px 32px -8px rgb(0 0 0 / 0.25);
+  --shadow-dropdown: 0 16px 48px -8px rgb(0 0 0 / 0.28);
+  --shadow-notice: 0 12px 32px -12px rgb(0 0 0 / 0.28);
+  --shadow-modal: 0 24px 60px -12px rgb(0 0 0 / 0.32);
+  --shadow-sticky: 0 8px 24px -8px rgb(0 0 0 / 0.2);
+  --shadow-dock: 0 -14px 32px -12px rgb(0 0 0 / 0.16);
+  --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.16);
+  --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 0 rgb(0 0 0 / 0.25);
+  --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -1px 2px rgb(0 0 0 / 0.1), 0 1px 0 rgb(0 0 0 / 0.2);
 }
 
 @layer base {
@@ -1084,4 +1301,23 @@
   40% {
     opacity: 0.12;
   }
+}
+
+/*
+ * On a light theme the gust multiplies instead of screening. Screen only ever lightens, and on a
+ * near-white floor there is nothing left to lighten: the band would pass invisibly. Multiply is the
+ * same idea turned over — it tints what is under it and leaves nothing behind once it passes.
+ */
+[data-theme-base='light'] .cc-gust {
+  mix-blend-mode: multiply;
+}
+
+/*
+ * File-kind icons on a light theme get a hairline outline. Several vscode-icons are drawn pale for a
+ * dark editor (the default file, YAML, JS/JSON, SQL, text, TOML, fonts: fills from #c5c5c5 to
+ * #ffe885) and all but vanish on white. A drop-shadow of half a pixel draws their edge without
+ * changing their colour, so the set needs no second copy of each icon.
+ */
+[data-theme-base='light'] img[data-file-icon] {
+  filter: drop-shadow(0 0 0.6px rgb(0 0 0 / 0.55));
 }

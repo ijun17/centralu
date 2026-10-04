@@ -28,9 +28,10 @@ describe('resolving a side', () => {
     expect(t).toMatchObject({ id: 'mine', base: 'light', tokens: { '--color-surface-floor': '#fafafa', '--shadow-modal': 'none' } })
   })
 
-  it('falls back to the side’s preset when the id names nothing, and Dark when the side has no preset yet', () => {
+  it('falls back to the side’s preset when the id names nothing', () => {
     expect(resolveSide('dark', 'gone', [], null)).toMatchObject({ id: 'dark', preset: 'dark', tokens: {} })
-    expect(resolveSide('light', 'light', [], null)).toMatchObject({ preset: 'dark' })
+    expect(resolveSide('light', 'gone', [], null)).toMatchObject({ id: 'light', preset: 'light', base: 'light' })
+    expect(resolveSide('dark', 'hc-dark', [], null)).toMatchObject({ preset: 'hc-dark', base: 'dark' })
   })
 
   it('does not apply a broken file (the store hands over its last clean version instead)', () => {

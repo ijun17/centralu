@@ -1,5 +1,5 @@
 import { test } from '@playwright/test'
-import { themeTests } from './fixtures/theme.js'
+import { presetTests, themeTests } from './fixtures/theme.js'
 
 /**
  * Themes (#312) in WebKit, the engine the desktop app runs in: prefers-color-scheme, inline custom
@@ -8,3 +8,4 @@ import { themeTests } from './fixtures/theme.js'
 test.use({ browserName: 'webkit' })
 
 themeTests()
+presetTests()

@@ -132,6 +132,21 @@ describe('the built CSS actually contains styles', () => {
       // than pure white** (the spinning ring speaks to state, so it lives inside the
       // brightness hierarchy, and the top of that hierarchy belongs to waiting).
       '2d6cf0', '7b3fe4', 'd63aa8', 'ff8a3d', '4ad6d0',
+      /*
+       * The light and high-contrast presets (#312 step 4) carry the same three exceptions, each
+       * re-tuned for its floor: the diff's green and red (and danger, which borrows the red), the
+       * orbit's galaxy a step deeper so it holds on white, and the terminal's ANSI palette. They are
+       * listed by preset so a value that is no longer used can be found and removed.
+       */
+      // light: diff and danger, activity, terminal
+      '1a7f37', 'dafbe1', 'cf222e', 'ffebe9', 'e8701f', '13a8a2',
+      '24292f', '116329', '4d2d00', '0969da', '8250df', '1b7c83', '6e7781',
+      '57606a', 'a40e26', '633c01', '218bff', 'a475f9', '3192aa', '8c959f',
+      // high contrast dark: diff and danger
+      '8af59a', '0a2e14', 'ff9a90', '3a0e0e',
+      // high contrast light: diff and danger, activity, terminal
+      '0b5a1f', 'd1f5d8', 'a1001f', 'ffe1e1', '1f5ad6', '6a2fd0', 'b81f8c', 'c25400', '00807a',
+      '0550ae', '6639ba', '135e65', '3d444d', '82071e', '044f1e', '3b2300', '033d8b', '512a97', '0b4a4f', '424a53',
     ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
     const chromatic = hexes.filter((h) => {

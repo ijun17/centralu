@@ -588,6 +588,7 @@ function FileKind({ name }: { name: string }) {
       className="w-7 shrink-0 px-[7px]"
       draggable={false}
       aria-hidden
+      data-file-icon
     />
   )
 }

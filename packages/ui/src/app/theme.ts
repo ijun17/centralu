@@ -15,8 +15,16 @@ import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type UiPreferenc
 export type ThemeBase = 'dark' | 'light'
 export type ThemePreset = { id: string; name: string; base: ThemeBase }
 
-/** The presets the stylesheet defines. Dark is the `@theme` values themselves. */
-export const THEME_PRESETS: readonly ThemePreset[] = [{ id: 'dark', name: 'Dark', base: 'dark' }]
+/**
+ * The presets the stylesheet defines. Dark is the `@theme` values themselves; the others are
+ * `[data-theme='…']` blocks in index.css. The first preset of each base is that side's default.
+ */
+export const THEME_PRESETS: readonly ThemePreset[] = [
+  { id: 'dark', name: 'Dark', base: 'dark' },
+  { id: 'light', name: 'Light', base: 'light' },
+  { id: 'hc-dark', name: 'High contrast dark', base: 'dark' },
+  { id: 'hc-light', name: 'High contrast light', base: 'light' },
+]
 
 export { THEME_TOKENS }
 

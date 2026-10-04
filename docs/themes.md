@@ -18,9 +18,26 @@ Four preferences, stored with the other screen preferences (`UiPreferences`):
 The two sides are chosen separately so that following the OS switches between two themes the
 person picked. An id that names nothing (a deleted file) falls back to that side's preset.
 
-**Presets** live in the stylesheet: the `@theme` values are the Dark preset, and any other preset
-is a `[data-theme='…']` block. A side with no preset of its own yet (light, until the light
-presets land) borrows Dark.
+**Presets** live in the stylesheet: the `@theme` values are the Dark preset, and the others are
+`[data-theme='…']` blocks that set every colour token:
+
+| Preset | Id | Side |
+|---|---|---|
+| Dark | `dark` | dark (the default) |
+| Light | `light` | light (the default) |
+| High contrast dark | `hc-dark` | dark |
+| High contrast light | `hc-light` | light |
+
+Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
+is waiting for you, raised surfaces move toward white, and the conversation is near-white with its
+cards on white. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
+more against every reading surface. A test checks the urgency order (below) for every preset, and
+those two thresholds for the high-contrast ones.
+
+A few things change with the side rather than the tokens: `color-scheme` follows it, the gust that
+marks a finished response multiplies instead of screening on a light side (screen cannot lighten
+white), and file-kind icons get a hairline outline there, since several vscode-icons are drawn pale
+for a dark editor.
 
 **The accent never colours the signal.** `ink-signal` is reserved for "waiting for you"
 (product-spec FR-12); an accent on it would make an ordinary control compete with the one thing

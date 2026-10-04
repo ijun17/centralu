@@ -33,8 +33,19 @@ test.setTimeout(60_000)
 
 /** Every scene runs on a page clock that starts here, see freeze() */
 const CLOCK_START = Date.parse('2026-10-01T09:00:00Z')
+/**
+ * `STYLE_SNAPSHOT_THEME=<preset id>` records the scenes in that preset (light, hc-dark, …) instead
+ * of Dark, through the mock's stored preferences — so a change to one preset can be checked the
+ * same way. The folder gets the preset's name, so runs in different presets never mix.
+ */
+const THEME = process.env.STYLE_SNAPSHOT_THEME ?? ''
 test.beforeEach(async ({ page }) => {
   await page.clock.install({ time: CLOCK_START })
+  if (THEME) {
+    const side = THEME === 'light' || THEME === 'hc-light' ? 'light' : 'dark'
+    const prefs = side === 'light' ? { themeMode: 'light', themeLight: THEME } : { themeMode: 'dark', themeDark: THEME }
+    await page.addInitScript((p) => localStorage.setItem('cc-mock-prefs', JSON.stringify(p)), prefs)
+  }
 })
 
 /**
@@ -165,7 +176,7 @@ async function freeze(page: Page): Promise<void> {
 
 async function snapshot(page: Page, scene: string): Promise<void> {
   await freeze(page)
-  const dir = join(OUT!, BROWSER)
+  const dir = join(OUT!, THEME ? `${BROWSER}-${THEME}` : BROWSER)
   mkdirSync(dir, { recursive: true })
   const styles = await page.evaluate(collect, PROPS)
   writeFileSync(join(dir, `${scene}.json`), JSON.stringify(styles, null, 1))

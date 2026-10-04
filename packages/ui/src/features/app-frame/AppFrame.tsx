@@ -563,6 +563,13 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         style={{
           ...(fill ? {} : { height }),
           display: phase === 'ready' || phase === 'loading' ? 'block' : 'none',
+          /*
+           * Pinned to the proxy page's own scheme (agent-host views/proxy-page.ts states dark).
+           * Chromium paints a framed document's canvas opaque when the frame element's scheme and
+           * the document's differ, so on a light theme the view would sit on a solid rectangle.
+           * The proxy draws nothing of its own; telling apps the real theme is #312 step 6.
+           */
+          colorScheme: 'dark',
         }}
       />
       {linkAsk && (

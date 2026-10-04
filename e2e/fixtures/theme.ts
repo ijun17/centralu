@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { INK_ORDER, READING_SURFACES, THEME_PRESETS, contrast, urgencyBreaks, type Rgba } from '../../packages/ui/src/app/theme.js'
 
 /**
  * Themes (#312 step 3), run in Chromium (theme.spec.ts) and WebKit (theme-webkit.spec.ts).
@@ -44,6 +45,75 @@ async function writeFile(page: Page, id: string, file: unknown) {
 
 async function fileText(page: Page, id: string): Promise<string | undefined> {
   return page.evaluate((i) => (window as never as { __mock: Mock }).__mock.themeFiles.get(i), id)
+}
+
+/** The preset's colours as the page resolves them, read back through a canvas so any syntax lands as sRGB */
+async function presetColors(page: Page, names: readonly string[]): Promise<Record<string, Rgba>> {
+  return page.evaluate((list) => {
+    const probe = document.createElement('div')
+    probe.style.display = 'none'
+    document.body.appendChild(probe)
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 1
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+    const out: Record<string, [number, number, number, number]> = {}
+    for (const name of list) {
+      probe.style.color = `var(${name})`
+      ctx.clearRect(0, 0, 1, 1)
+      ctx.fillStyle = getComputedStyle(probe).color
+      ctx.fillRect(0, 0, 1, 1)
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+      out[name] = [r!, g!, b!, a! / 255]
+    }
+    probe.remove()
+    return out
+  }, names as string[])
+}
+
+export function presetTests() {
+  test('Light mode shows the Light preset, and the window and color-scheme follow', async ({ page }) => {
+    await openDemo(page)
+    await openAppearance(page)
+    await page.getByTestId('settings-theme-mode-light').click()
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f2f2f2')
+    expect(await token(page, '--color-ink-signal')).toBe('#000000')
+    expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('light')
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'light', background: 'rgb(242, 242, 242)' })
+    // The conversation keeps its own front-most surface in light too
+    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#f8f8f8')
+  })
+
+  test('Follow system picks the light preset when the OS is light', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' })
+    await openDemo(page)
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'system', themeLight: 'hc-light' }))
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
+    expect(await token(page, '--color-line')).toBe('#767676')
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
+  })
+
+  for (const preset of THEME_PRESETS) {
+    test(`${preset.name} keeps the urgency order on every reading surface`, async ({ page }) => {
+      await openDemo(page)
+      await page.evaluate(
+        ([id, base]) => (window as any).__store.getState().setPrefs(base === 'dark' ? { themeMode: 'dark', themeDark: id } : { themeMode: 'light', themeLight: id }),
+        [preset.id, preset.base],
+      )
+      await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(preset.id)
+      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line']
+      const colors = await presetColors(page, names)
+      expect(urgencyBreaks(colors)).toEqual([])
+      if (preset.id.startsWith('hc-')) {
+        // High contrast: every ink clears 4.5:1 and the hairline 3:1, on every reading surface
+        for (const [surface] of READING_SURFACES) {
+          for (const [ink] of INK_ORDER) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(4.5)
+          expect(contrast(colors['--color-line']!, colors[surface]!), `line on ${surface}`).toBeGreaterThanOrEqual(3)
+        }
+      }
+    })
+  }
 }
 
 export function themeTests() {
