@@ -161,6 +161,9 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
    * running host, which gets up to 10 seconds to finish the calls it serves itself, and the window
    * reconnects through the same front door. The bar shows each phase, and a failure with its
    * reason. It asks first only when something can be lost (`switchPlan`).
+   *
+   * The keeper itself moves to the window's build first (#280 step 4), handing everything over
+   * without stopping anything. A keeper that is behind while the host is not gets the same bar.
    */
   const [build, setBuild] = useState<HostBuild | null>(null)
   const [askSwitch, setAskSwitch] = useState(false)
@@ -174,14 +177,16 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       .catch(() => {})
     return onHostBuild((b) => {
       setBuild(b)
-      if (b.sameBuild) setDismissed(false)
+      if (b.sameBuild && b.keeperSameBuild !== false) setDismissed(false)
     })
   }, [])
   const keeper = build?.mode === 'keeper'
   const swap = keeper ? build?.swap : undefined
   const switching = swapRunning(swap)
   const swapFailed = swap?.phase === 'failed' && dismissedSwap !== swap.startedAt
-  const otherBuild = keeper && build?.sameBuild === false && !dismissed
+  // Switched, but the keeper stayed on the previous build: worth a line, not an alarm
+  const swapNotice = swap?.phase === 'done' && !!swap.keeperMessage && dismissedSwap !== swap.startedAt
+  const otherBuild = keeper && (build?.sameBuild === false || build?.keeperSameBuild === false) && !dismissed
   const plan = build ? switchPlan(build) : null
   const startSwitch = () => {
     setSwitchError(null)
@@ -245,13 +250,13 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           />
         </div>
       )}
-      {keeper && build && (switching || swapFailed || otherBuild) && (
+      {keeper && build && (switching || swapFailed || swapNotice || otherBuild) && (
         <div
           className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-line bg-surface-side px-4 py-1.5 text-xs text-ink-muted"
           data-testid="host-other-build"
           role={swapFailed ? 'alert' : 'status'}
         >
-          {switching || swapFailed ? (
+          {switching || swapFailed || swapNotice ? (
             <span
               className={`min-w-0 flex-1 truncate ${swapFailed ? 'text-danger' : ''}`}
               title={swap?.message}
@@ -261,7 +266,10 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
             </span>
           ) : (
             <span className="min-w-0 flex-1 truncate">
-              The agent host is running {describeBuild(build.host)}. This window is {describeBuild(build.app)}.
+              {build.sameBuild === false
+                ? `The agent host is running ${describeBuild(build.host)}.`
+                : `The background keeper is running ${describeBuild(build.keeper)}.`}{' '}
+              This window is {describeBuild(build.app)}.
             </span>
           )}
           {switchError && <span className="shrink-0 text-danger">{switchError}</span>}
@@ -288,7 +296,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
                 setDismissed(true)
               }}
             >
-              {swapFailed ? 'Dismiss' : 'Not now'}
+              {swapFailed || swapNotice ? 'Dismiss' : 'Not now'}
             </button>
           )}
         </div>

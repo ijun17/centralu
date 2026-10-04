@@ -40,6 +40,14 @@ pub struct HostBuild {
     /// switch. None when it cannot be told (direct mode, or not attached yet).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_build: Option<bool>,
+    /// The build of the keeper itself (#280 step 4). Absent for a keeper older than step 4.
+    #[cfg(unix)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keeper: Option<crate::keeper::source::BuildSource>,
+    /// False when the keeper is from another build than this window. Switching moves the keeper
+    /// over too, without stopping anything. None when it cannot be told.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keeper_same_build: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background: Option<bool>,
     /// The current or last blue-green swap (#280 step 3), as the keeper reports it.
@@ -337,6 +345,8 @@ mod link {
                 app: Some(self.app_build.clone()),
                 host: st.view.as_ref().and_then(|v| v.source.clone()),
                 same_build: st.view.as_ref().and_then(|v| v.source.as_ref()).map(|s| s.same_build(&self.app_build)).or(st.same_build),
+                keeper: st.view.as_ref().and_then(|v| v.keeper.build.clone()),
+                keeper_same_build: st.view.as_ref().and_then(|v| v.keeper.build.as_ref()).map(|b| b.same_build(&self.app_build)),
                 background: st.view.as_ref().map(|v| v.background),
                 swap: st.view.as_ref().and_then(|v| v.swap.clone()),
                 keeps_agents: st.view.as_ref().and_then(|v| v.keeps_agents),
@@ -466,6 +476,7 @@ mod link {
                     .as_ref()
                     .map(|v| {
                         v.status != view.status
+                            || v.keeper != view.keeper
                             || v.source != view.source
                             || v.background != view.background
                             || v.swap != view.swap
@@ -513,8 +524,17 @@ mod link {
                 .unwrap_or(false)
         }
 
+        /// Switches to this window's build. The keeper is handed this app's own executable, inside
+        /// its bundle, so that a keeper of another build first hands itself over to this build's
+        /// keeper (#280 step 4): the same signed program, never a copy (#220). A keeper older than
+        /// step 4 ignores the field and swaps only the host.
         pub fn switch_build(&self) -> Result<(), String> {
-            client::request(&self.sock, &json!({ "op": "switch", "source": self.app_build }), Duration::from_secs(10)).map(|_| ())
+            let exe = std::env::current_exe().ok();
+            let mut req = json!({ "op": "switch", "source": self.app_build });
+            if let Some(exe) = exe.filter(|_| !self.dev) {
+                req["keeper"] = json!({ "exe": exe });
+            }
+            client::request(&self.sock, &req, Duration::from_secs(10)).map(|_| ())
         }
 
         pub fn background(&self) -> Result<bool, String> {

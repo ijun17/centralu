@@ -19,6 +19,14 @@ describe('what switching builds costs (#280 step 3)', () => {
     expect(loses).not.toContain('turns stop')
   })
 
+  it('moving only the keeper asks nothing and loses nothing (#280 step 4)', () => {
+    const plan = switchPlan({ keepsAgents: true, busy: true, sameBuild: true, keeperSameBuild: false })
+    expect(plan.confirm).toBe(false)
+    expect(plan.loses).toContain('Nothing stops')
+    // A host of another build still costs what a host swap costs
+    expect(switchPlan({ keepsAgents: true, busy: true, sameBuild: false, keeperSameBuild: false }).confirm).toBe(true)
+  })
+
   it('a host that cannot hand agents over yet says turns stop, rather than pretending they survive', () => {
     const { loses } = switchPlan({ keepsAgents: false, busy: true })
     expect(loses).toContain('running turns stop')
@@ -37,6 +45,14 @@ describe('a swap’s progress in the bar (#280 step 3)', () => {
     expect(swapProgressText(swap({ phase: 'done' }))).toBeNull()
     expect(swapRunning(swap({ phase: 'standby' }))).toBe(true)
     expect(swapRunning(swap({ phase: 'failed' }))).toBe(false)
+  })
+
+  it('names the keeper moving, and says so when it stayed behind (#280 step 4)', () => {
+    expect(swapProgressText(swap({ phase: 'handing_over' }))).toContain('background keeper')
+    expect(swapRunning(swap({ phase: 'handing_over' }))).toBe(true)
+    expect(swapProgressText(swap({ phase: 'done', keeperMessage: 'the new keeper did not start: x\ny' }))).toBe(
+      'Switched builds, but the background keeper stays on the previous build: the new keeper did not start: x.',
+    )
   })
 
   it('a failure says why, on one line, and which build is serving now', () => {

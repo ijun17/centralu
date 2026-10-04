@@ -147,6 +147,10 @@ export type HostBuild = {
   app?: BuildSource
   host?: BuildSource
   sameBuild?: boolean
+  /** The build of the keeper itself (#280 step 4); absent for a keeper older than step 4 */
+  keeper?: BuildSource
+  /** False when the keeper is from another build than this window; switching moves it too */
+  keeperSameBuild?: boolean
   background?: boolean
   /** The current or last blue-green swap (#280 step 3) */
   swap?: SwapView
