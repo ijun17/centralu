@@ -483,6 +483,12 @@ from a server name that starts with `app-`.
 A call from a view is never asked about: the view is the control surface the app offers the
 person. It is recorded as `view`.
 
+**What the model reads from a result.** When a tool result carries both `content` (text) and
+`structuredContent` (JSON), Claude Code hands the model the `structuredContent`, not the text.
+This was seen on 2026-10-04 with claude 2.1.282 through the SDK, in the project board app
+(`.centralu/apps/project-board`). So a sentence the model must read, such as "Status: On hold →
+Ready", goes first inside `structuredContent` as well as in the text.
+
 **Codex is verified from its source only.** Codex was logged out during M4, so the Codex path was
 checked against the installed 0.153.4's generated types, its binary's strings and Codex's source,
 not by a logged-in run: the approval-mode values, the configuration field names, the elicitation's

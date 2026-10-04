@@ -29,6 +29,7 @@ const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 if (st.mode === 'offline') fail('error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n')
 if (st.mode === 'logged-out') fail('To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n', 4)
+if (st.mode === 'no-access') fail('gh: Could not resolve to a ProjectV2 with the number 1.\n', 1, JSON.stringify({ data: { repositoryOwner: { projectV2: null } }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a ProjectV2 with the number 1.' }] }))
 if (st.mode === 'no-scope') fail('gh: Your token has not been granted the required scopes to execute this query.\n', 1, JSON.stringify({ errors: [{ type: 'INSUFFICIENT_SCOPES', message: "Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['read:project']" }] }))
 const v = {}
 let query = ''
@@ -284,6 +285,8 @@ describe('the project board app', { timeout: 30_000 }, () => {
     ['offline', /^GitHub could not be reached \(error connecting to api\.github\.com\)\. Check the network, then refresh\.$/],
     ['no-scope', /lacks the "project" scope this app needs\. Run `gh auth refresh -s project`/],
     ['logged-out', /^gh is not logged in to github\.com\. Run `gh auth login`/],
+    // The project is private: someone without access sees why, and what to do about it
+    ['no-access', /cannot see it\. A project can be private to its owner: ask for access, or point project\.json at a project your account can see\.$/],
   ])('when gh fails (%s), the tools and the screen say why instead of showing nothing', async (mode, message) => {
     runtime()
     setMode(mode)

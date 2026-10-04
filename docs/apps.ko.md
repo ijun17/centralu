@@ -235,6 +235,11 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 
 화면에서 온 호출은 묻지 않는다. 화면은 앱이 사람에게 내놓은 조작면이기 때문이다. 기록에는 `view`로 남는다.
 
+**모델이 결과에서 읽는 것.** 도구 결과에 `content`(글)와 `structuredContent`(JSON)가 함께 있으면, Claude Code는
+글이 아니라 `structuredContent`를 모델에 넘긴다. 2026-10-04에 SDK를 거친 claude 2.1.282에서, 프로젝트 보드 앱
+(`.centralu/apps/project-board`)으로 확인했다. 그래서 모델이 꼭 읽어야 하는 문장("Status: On hold → Ready" 같은 것)은
+글에도 쓰고, `structuredContent` 맨 앞에도 넣는다.
+
 **Codex는 소스로만 확인했다.** M4 동안 Codex가 로그아웃 상태였으므로, Codex 경로는 로그인한 실행이 아니라 설치된 0.153.4의 생성 타입, 바이너리 문자열, Codex 소스로 확인했다: 승인 방식 값, 설정 필드 이름, elicitation의 `_meta` 키, 그리고 `thread/resume`에 실은 MCP 설정이 실제로 먹히는지(스파이크 S-3·S-7은 로그인을 기다린다). 알려진 틈이 하나 있다: `normal`은 사람의 `~/.codex/config.toml`을 따르므로, 거기에 `approval_policy = "never"`가 있으면 Codex가 앱의 쓰기 도구를 거부한다.
 
 ### 9.3 오래 걸리는 호출과 취소

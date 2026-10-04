@@ -163,7 +163,7 @@ export async function readBoard(config) {
 }
 
 const notFound = (config) =>
-  new GitHubError('not-found', `GitHub Project #${config.number} of ${config.owner} was not found, or the account gh is logged in as cannot see it.`)
+  new GitHubError('not-found', `GitHub Project #${config.number} of ${config.owner} was not found, or the account gh is logged in as cannot see it. A project can be private to its owner: ask for access, or point project.json at a project your account can see.`)
 
 function toItem(node, fields) {
   const values = {}
