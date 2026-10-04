@@ -96,7 +96,15 @@ fn use_keeper() -> bool {
     if std::env::var("CC_HOST_CMD").is_ok() || !cfg!(unix) {
         return false;
     }
-    !cfg!(debug_assertions) || std::env::var("CC_USE_KEEPER").as_deref() == Ok("1")
+    let opted_in = std::env::var("CC_USE_KEEPER").as_deref() == Ok("1");
+    // The keeper has only ever run on macOS (#295). On Linux it compiles in CI but was never
+    // started, and an AppImage unmounts its files when the app exits, which may take a
+    // background keeper's executable with it. Until someone runs it there, Linux keeps the
+    // direct host path unless CC_USE_KEEPER=1 asks for the keeper.
+    if !cfg!(target_os = "macos") {
+        return opted_in;
+    }
+    !cfg!(debug_assertions) || opted_in
 }
 
 impl Supervisor {
