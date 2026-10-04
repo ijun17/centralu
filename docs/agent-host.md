@@ -211,6 +211,8 @@ host restarts   → under the keeper: agents, terminals and commands keep runnin
                   → attempt resume with the externalId from the store (the same path as FR-10)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
                 → clients reconnect to the same address and resync on the new streamEpoch
+keeper updated  → the old keeper hands every handle to the new build's keeper (§4.4): the host,
+                  agents, terminals and every connection carry on; nothing reconnects
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
 ```
@@ -243,10 +245,11 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 
 | request | answer |
 |---|---|
-| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and token (§4.2), build source, background mode, attached windows, activity, the current or last swap (`swap`) and whether the host keeps agents across one (`keepsAgents`) |
-| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach |
+| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and token (§4.2), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4) |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit and stop agents") |
-| `{"op":"switch","source":…}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. A second `switch` during a swap is refused |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its own executable) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A second `switch` during a swap is refused |
+| `{"op":"upgrade","exe":…,"source":…}` | hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4) |
 | `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
 
@@ -396,7 +399,7 @@ naming it and interrupts the turn. A planned swap drains such calls first (§4.2
 nothing: its bridge fails a call whose socket closed.
 
 **Strays.** `strays.ts` rule 3 counts the keeper's live children and their descendants as ours. After a keeper
-handover (step 4) their parent will be init, and the parent chain alone would offer them as leftovers.
+handover (§4.4) their parent is init, and the parent chain alone would offer them as leftovers.
 
 **Activity.** Kept terminals, runs and live sessions are the host's own entries again once taken over, so the
 activity report counts them as before. While no host is up the keeper counts nothing; its idle limit is 30
@@ -405,6 +408,22 @@ minutes and a crashed host is back in seconds.
 `scripts/keeper-children-integration.mjs` drives this with the real binary, host, claude (haiku) and codex
 (`gpt-5.6-luna`): a claude turn across a SIGKILLed host, a terminal and a dev server across the same crash (resized
 afterwards), a codex turn across a swap, and stop ending every child.
+
+### 4.4 The keeper's handoff, seen from the host (#280, option C step 4)
+
+The design is in [architecture.md](architecture.md) §4.4. The host does nothing for it and notices nothing: its
+stdin and stdout are the same pipes, its control and attach connections on `children.sock` are the same sockets, its
+token and the front door's address do not change, and its parent becomes init when the old keeper exits. What it
+writes on stdout during the freeze (an activity report, say) waits in the pipe and is read by the new keeper; what the
+old keeper had already read from it but not acted on is handed over with the rest. Its own control lines on stdin,
+used by a swap, keep working from the new keeper, which can drain it as the start of a switch. Its children are as
+they were: the outgoing keeper parks the child table between two passes and the new one carries on from the same
+buffers, so a turn in progress loses and repeats nothing.
+
+`scripts/keeper-handoff-integration.mjs` drives this with real binaries of three builds, the real host, claude (haiku)
+and codex (`gpt-5.6-luna`): a handoff with a turn of each in a tool call, a terminal and a dev server counting; a
+handoff killed before its commit; a switch that moves the keeper and then swaps the host; and an app view and the
+window's connection across all of it.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

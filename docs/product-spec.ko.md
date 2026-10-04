@@ -236,8 +236,12 @@ come back to the desk
   호스트는 자기가 직접 처리하는 호출을 마칠 시간을 최대 10초 받고, 창은 잠깐 뒤 다시 붙는다. 막대는 단계마다 보여
   주고, 실패하면 이유와 지금 어느 빌드가 일하는지 보여 준다. 잃을 것이 있을 때만(일하거나 기다리는 세션, 터미널,
   명령) 먼저 묻고, 무엇을 잃는지 말한다: 도는 턴·터미널·명령은 바꾸기를 넘어 이어지고(2단계), 10초가 지나도록 도는
-  오케스트레이터나 앱 도구 호출만 멈추며 에이전트에게 다시 시도하라고 알린다. 데스크톱 전용이고 키퍼가 필요하다
-  ([architecture.ko.md](architecture.ko.md) §4.1–4.3).
+  오케스트레이터나 앱 도구 호출만 멈추며 에이전트에게 다시 시도하라고 알린다. 같은 바꾸기가 먼저 키퍼(호스트와
+  에이전트를 쥐고 있는 백그라운드 프로세스)를 새 빌드로 옮긴다(#280 4단계): 키퍼는 가진 것을 모두 새 빌드의 키퍼에게
+  넘기고 끝나며, 이것은 아무것도 멈추지 않고 창이 다시 붙을 일도 만들지 않는다. 열려 있는 앱 뷰는 바꾸기 내내 계속
+  동작한다. 호스트는 같은데 키퍼만 뒤처져 있으면 같은 막대가 뜨고, 이때 바꾸기는 아무것도 묻지 않는다. 키퍼가 옮겨
+  가지 못하면 호스트 바꾸기는 그대로 진행되고, 막대가 키퍼는 이전 빌드에 남았다는 것과 그 이유를 말한다. 데스크톱
+  전용이고 키퍼가 필요하다 ([architecture.ko.md](architecture.ko.md) §4.1–4.4).
 
 #### FR-11. 오케스트레이터 세션 (2026-08-25 구현, issues #13 · #30 — 이 절은 실제로 만들어진 것을 기술한다)
 
@@ -613,6 +617,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │  keeper — the same executable as `centralu --keeper`, detached         │
 │  · launches, watches, restarts and swaps the host · per-build copies  │
+│  · hands itself, and everything it holds, to a new build's keeper     │
 │  · the front door: one stable port and token, relayed to the host     │
 └──────────────────────────────┬────────────────────────────────────────┘
                                │ the UI talks to the host over WebSocket

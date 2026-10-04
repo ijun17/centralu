@@ -237,8 +237,12 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   and, if the switch fails, why and which build serves now. It asks first only when something can be lost (a
   session working or waiting, a terminal or a command), and says what: running turns, terminals and commands carry
   on across the switch (step 2), and only an orchestrator or app tool call still running after 10 seconds is
-  stopped, with the agent told to try it again. Desktop only; it needs the keeper
-  ([architecture.md](architecture.md) §4.1–4.3).
+  stopped, with the agent told to try it again. The same switch first moves the keeper (the background process
+  that holds the host and the agents) to the new build (#280 step 4): it hands everything to the new build's
+  keeper and exits, which stops nothing and does not even make the window reconnect; an open app view keeps
+  working across the whole switch. A keeper that is behind while the host is not gets the same bar, and switching
+  then asks nothing. If the keeper cannot move, the host switch still happens and the bar says the keeper stayed
+  on the previous build, and why. Desktop only; it needs the keeper ([architecture.md](architecture.md) §4.1–4.4).
 
 #### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
@@ -620,6 +624,7 @@ the host does the work, and the UI talks to the host over one WebSocket that is 
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │  keeper — the same executable as `centralu --keeper`, detached         │
 │  · launches, watches, restarts and swaps the host · per-build copies  │
+│  · hands itself, and everything it holds, to a new build's keeper     │
 │  · the front door: one stable port and token, relayed to the host     │
 └──────────────────────────────┬────────────────────────────────────────┘
                                │ the UI talks to the host over WebSocket

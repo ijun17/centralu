@@ -175,6 +175,8 @@ host restarts   → under the keeper: agents, terminals and commands keep runnin
                   → attempt resume with the externalId from the store (the same path as FR-10)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
                 → clients reconnect to the same address and resync on the new streamEpoch
+keeper updated  → the old keeper hands every handle to the new build's keeper (§4.4): the host,
+                  agents, terminals and every connection carry on; nothing reconnects
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
 ```
@@ -206,10 +208,11 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 
 | 요청 | 답 |
 |---|---|
-| `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 정문의 포트와 토큰(§4.2), 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동, 지금 또는 마지막 교체(`swap`), 교체 때 호스트가 에이전트를 넘겨주는지(`keepsAgents`) |
-| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다 |
+| `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 정문의 포트와 토큰(§4.2), 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동, 지금 또는 마지막 교체(`swap`), 교체 때 호스트가 에이전트를 넘겨주는지(`keepsAgents`), 키퍼 자신의 빌드(`keeper.build`, 4단계부터) |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다 |
 | `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit and stop agents") |
-| `{"op":"switch","source":…}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. 교체 중의 두 번째 `switch`는 거절한다 |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. `keeper`가 있고(앱은 자기 실행 파일을 보낸다) 키퍼가 다른 빌드면, 키퍼가 먼저 그 빌드의 키퍼에게 스스로를 넘기고([architecture.ko.md](architecture.ko.md) §4.4) 그 키퍼가 교체를 한다. 교체 중의 두 번째 `switch`는 거절한다 |
+| `{"op":"upgrade","exe":…,"source":…}` | 호스트는 그대로 두고, 키퍼를 `exe`에 있는 `source` 빌드의 키퍼에게 넘긴다(§4.4) |
 | `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry (교체 중에는 거절) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |
 
@@ -348,8 +351,8 @@ sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId
 그 안에서 자기 in-process 도구를 찾으면 그 이름을 밝힌 오류를 내고 턴을 중단한다. 계획된 교체는 그런 호출을 먼저 드레인한다
 (§4.2). 이것은 크래시를 위한 것이다. codex는 아무것도 필요 없다: 소켓이 닫힌 호출은 브리지가 실패시킨다.
 
-**떠돌이.** `strays.ts` 규칙 3은 키퍼의 살아 있는 자식과 그 자손을 우리 것으로 센다. 키퍼 넘겨주기(4단계) 뒤에는 그
-부모가 init이 되고, 부모 사슬만 보면 남은 찌꺼기로 내놓게 된다.
+**떠돌이.** `strays.ts` 규칙 3은 키퍼의 살아 있는 자식과 그 자손을 우리 것으로 센다. 키퍼 넘겨주기(§4.4) 뒤에는 그
+부모가 init이고, 부모 사슬만 보면 남은 찌꺼기로 내놓게 된다.
 
 **활동.** 넘겨받은 터미널·실행·살아 있는 세션은 다시 호스트 자신의 항목이므로 활동 보고는 전처럼 그것을 센다. 호스트가
 없는 동안 키퍼는 아무것도 세지 않는다. 유휴 한도는 30분이고 죽은 호스트는 몇 초 안에 돌아온다.
@@ -357,6 +360,19 @@ sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId
 `scripts/keeper-children-integration.mjs`가 실제 바이너리·호스트·claude(haiku)·codex(`gpt-5.6-luna`)로 이것을 돌린다:
 SIGKILL당한 호스트를 넘는 claude 턴, 같은 크래시를 넘는 터미널과 개발 서버(그 뒤 크기 바꾸기), 교체를 넘는 codex 턴,
 그리고 모든 자식을 끝내는 stop.
+
+### 4.4 호스트에서 본 키퍼 넘겨주기 (#280, 옵션 C 4단계)
+
+설계는 [architecture.ko.md](architecture.ko.md) §4.4에 있다. 호스트는 이를 위해 하는 일도, 알아채는 것도 없다: stdin과
+stdout은 같은 파이프이고, `children.sock`의 제어·붙기 연결은 같은 소켓이며, 토큰과 정문 주소는 바뀌지 않고, 옛 키퍼가
+끝나면 부모가 init이 된다. 얼어 있는 동안 stdout에 쓴 것(예를 들어 활동 보고)은 파이프에서 기다렸다가 새 키퍼가 읽는다.
+옛 키퍼가 이미 읽었지만 처리하지 않은 것은 나머지와 함께 넘어간다. 교체가 쓰는 stdin의 제어 줄은 새 키퍼에게서도 그대로
+통하고, 새 키퍼는 바꾸기의 시작으로 이 호스트를 비울 수 있다. 자식들도 그대로다: 떠나는 키퍼가 자식 표를 두 차례 사이에서
+세우고 새 키퍼가 같은 버퍼에서 이어 가니, 도는 턴은 잃는 것도 되풀이하는 것도 없다.
+
+`scripts/keeper-handoff-integration.mjs`가 세 빌드의 실제 바이너리, 실제 호스트, claude(haiku), codex(`gpt-5.6-luna`)로
+이것을 돌린다: 각각 도구 호출 중인 턴과 세는 터미널·개발 서버를 둔 채의 넘겨주기, 커밋 전에 죽인 넘겨주기, 키퍼를 옮기고
+이어서 호스트를 교체하는 바꾸기, 그리고 그 모든 과정을 넘는 앱 뷰와 창의 연결.
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 

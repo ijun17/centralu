@@ -117,7 +117,7 @@ Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own sessio
 | Every host runs from a per-build copy, `<data>/hosts/<commit>/` | A rebuild or update rewrites the bundle; a host running from it read the Codex bridge, `schema.sql` and `app-template/` on demand and could mix two builds (2026-10-03). Copies no host uses are removed once a host is up. |
 | Background mode is a setting, off by default | Off: the last window detaching stops the keeper and host, as quitting always did. On: they keep running, and a relaunched app re-attaches. "Quit and stop agents" stops them either way. |
 | An unwatched keeper in background mode exits after 30 minutes with no window and no activity | Something has to end a host nobody is watching. Activity (a working or waiting session, a terminal, a command run) is the host's own report on its stdout; the keeper parses nothing else. A running turn or a waiting approval keeps it alive however long that takes. |
-| A window of another build attaches to the running host and offers to switch | The keeper knows both builds. Switching is the blue-green swap of §4.2; the window confirms first only when something can be lost. |
+| A window of another build attaches to the running host and offers to switch | The keeper knows both builds, its own included. Switching moves the keeper to the window's build (§4.4) and then runs the blue-green swap of §4.2; the window confirms first only when something can be lost. |
 | Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a debug build in. Non-unix targets have no keeper yet. |
 
 The keeper also holds the host's long-lived children (§4.3), so a host restart or swap no longer ends them. The
@@ -136,6 +136,7 @@ Codex orchestrator bridge connect there.
 | The keeper owns the token and hands it to every host (`CC_HOST_TOKEN`) | The host keeps checking `hello` and the browser's `Origin` itself; the token and the port stay the same across restarts and swaps, so a client never has to be told again. Measured hazard it removes: a Codex bridge gets its address and token once, when its thread starts, and a running codex keeps that bridge, so a host on a new port or token silently cut every bridge. |
 | While no host is ready, a new connection is held (up to 45 s), not refused | A client that reconnects at once lands on the next host as soon as it is up, instead of failing and backing off. Measured: a client cut by a swap was greeted by the new host 84–86 ms later. |
 | The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives a swap. The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
+| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host in a planned ending ([agent-host.md](agent-host.md) §4.2), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
 
 `switch` is a **blue-green swap** (`keeper/swap.rs`):
 
@@ -175,8 +176,8 @@ with it (owner decision 2).
 | A pty is drained continuously into a 256 KiB ring, replayed to the next host | A pty child cannot finish exiting while its output is unread (measured in #280: bash stuck in `?Es` for over 5 s). The ring is the same 256 KiB a terminal's scrollback keeps. |
 | An agent's stdout is buffered losslessly (up to 64 MiB, then the child waits) and handed over in whole lines | It is a protocol; a dropped byte breaks a frame. Claude was measured buffering 60 s with stdout unread. One codex `thread/resume` answer was 23 MB on one line, hence the size. A host that dies loses at most what was already in its socket; the next host starts on a line boundary. |
 | No connection closing ever signals a child, closes its stdin or closes its pty | That is what lets a host leave without its agents. The Agent SDK kills its process when its owner exits; that kill is a keeper request, and a leaving host never sends it. |
-| Exits are watched with kqueue `NOTE_EXIT \| NOTE_EXITSTATUS` (macOS), pidfd (Linux) | They report a non-child's exit and status, which a keeper that takes the children over from another keeper (step 4) needs. |
-| One thread owns every descriptor | The child table is plain data plus raw descriptors, so step 4 can serialise it and pass the descriptors to the next keeper over `SCM_RIGHTS`. |
+| Exits are watched with kqueue `NOTE_EXIT \| NOTE_EXITSTATUS` (macOS), pidfd (Linux) | They report a non-child's exit (and, on macOS, its status), which a keeper that took the children over from another keeper (§4.4) needs. |
+| One thread owns every descriptor | The child table is plain data plus raw descriptors, so a keeper handoff (§4.4) freezes it between two passes, serialises it and passes the descriptors to the next keeper over `SCM_RIGHTS`. |
 
 **Leaving has two modes.** *Stop* is the old ending: sessions, terminals and commands stop with the host. It is
 every ending without a keeper, and under one the keeper asks for it (`stop` on the child socket) when it is stopping
@@ -198,6 +199,58 @@ A session with a kept process keeps its live state through the startup reset, an
 for it (the buffered output would be recorded twice). A call to one of the host's own in-process tools (orchestrator,
 app proxy) that was in flight when the old host died is never answered; the adopting adapter fails it out loud and
 interrupts the turn, which was measured to release it. The detail is in [agent-host.md](agent-host.md) §4.3.
+
+### 4.4 The keeper hands itself over (#280, option C step 4)
+
+A keeper update must cut nothing: not the host, not a turn in progress, not a terminal or a dev server, not a client's
+connection. `exec` would keep the pid and the descriptors on macOS and Linux but has no Windows equivalent, so the
+direction is the same on every OS: **start the new keeper, pass it every handle, and let the old one exit**
+(`keeper/handoff/`).
+
+```
+keeper A (running build)                           keeper B (new build, from its own bundle)
+ 1  starts B: centralu --keeper --take-over-fd 3  ──▶  hello
+ 2  freezes: accepts nothing, parks every relay,
+    pauses the host's stdout, freezes the child table
+ 3  state + buffers + descriptors (SCM_RIGHTS)    ──▶  4  rebuilds everything, no I/O; proves it holds the lock
+ 6  commit point, on ready: reaps, sends commit   ◀──  5  ready
+    and exits without touching anything           ──▶  7  starts all I/O, adopts the host, serves;
+                                                          then swaps the host, if the switch asked for it
+```
+
+**What is passed:** `keeper.lock` (the same open file description, so the `flock` never has a gap), `keeper.sock`'s
+and `children.sock`'s listeners, the front door's listener and its token, the host's stdin and stdout, every child's
+pipes or pty master, every connection on the child socket, both sockets of every relayed front-door connection, every
+attached window's connection, and as data: every buffer with its absolute offsets, half-read requests, unsent events,
+tags, pids, exit statuses, the build records, settings, idle clocks and the last swap.
+
+**What survives and what reconnects.** Nothing reconnects. The host is the same process; it never notices, since its
+pipes and its child-socket connections are the same sockets, now held by B. A WebSocket through the front door, an
+app view's traffic and a Codex bridge's connection are the same TCP connections, pumped by B. An attached window keeps
+its control connection and hears B's next status on it. Connections waiting in a listen queue are accepted by B. The
+only thing turned away is a control request other than `status` that arrives in the instant of the freeze: it is
+answered "try again", and the app's retry reaches B.
+
+| Decision | Why |
+|---|---|
+| B is the new build's executable **inside its bundle**, the path the attaching app reports (`current_exe`), never a copy | The keeper is the app's own signed executable so macOS attributes it to Centralu (#220); a copy outside the bundle would be another program. Replacing the bundle later does not disturb B: `tauri build` deletes the old `.app` and writes a new one (`bundle_project`, tauri-bundler 2.10), and `centralu install` does `rmSync` then `ditto`, so the running executable's file is unlinked, not overwritten, and keeps running (the integration script deletes and rewrites keeper A's executable under it, and A goes on serving and hands over). An in-place overwrite is not something to rely on: a probe that overwrote a running keeper's file in place saw it keep answering for the 3 s it watched, its code being resident, but any page not yet loaded would come from the new file. Nothing in the tree overwrites in place. |
+| The channel is a `socketpair` end at B's descriptor 3, not a socket file | It has no path, so no other process can connect at all (stronger than `0600`), and there is nothing to clean up. B still checks the peer's uid. |
+| A **freezes** rather than drains | A byte A read but did not deliver would be lost with A (the #280 measurement's rule: the outgoing keeper must not read ahead, or must forward what it read). Frozen, A reads nothing more; everything it holds is in the snapshot. A relay is stopped between two copies, the host's reader between two lines, the child table between two passes. |
+| The commit point is A receiving `ready` | Before it, any failure (B not starting, B failing to rebuild, B dying, a timeout) rolls A back: it kills B and thaws, and since it closed nothing (the snapshot holds duplicates) and read nothing, it carries on exactly where it stopped. After it, A never resumes. B treats a channel that closes after `ready` without `commit` as A having died: it takes over if A is gone, since it holds the only copy of everything, and exits if A is still there. |
+| B rebuilds everything before `ready`, but starts no reader or writer until `commit` | A rolled-back A must be the only reader of every child and socket. |
+| A reaps at the commit and passes the statuses on | B is not the children's parent. kqueue `NOTE_EXIT \| NOTE_EXITSTATUS` gives a non-child's status (measured in #280), but registering on a child that is already a zombie fails with `ESRCH` (measured 2026-10-04, Darwin 27), so the statuses of children that exited during the freeze come from A. After A exits, launchd (or init) reaps. On Linux a pidfd tells B a non-child has gone; the status is read from `/proc/<pid>/stat` while the zombie lasts and is otherwise unknown (no non-parent status before `PIDFD_GET_INFO`, Linux 6.15). |
+| "Switch to this build" moves the keeper first, then the new keeper swaps the host, in one action | Moving the keeper costs nothing, so it needs no question of its own, and a full update ends with keeper, host and app on one build. Keeper first means every exchange across builds is read by the newer side: B reads A's snapshot, B supervises A's host, B drains A's host and starts its own build's host. Swapping the host first would have the old keeper drive a newer host. |
+| A failed handoff still lets the host switch run | The host switch is what the person asked for; the old keeper can do it, as in step 3. The bar says the keeper stayed on the previous build and why, and keeps offering the switch. |
+| The snapshot format is versioned and only grows | The outgoing keeper is the older build in an update, so the newer keeper reads the older format. A keeper from before step 4 cannot hand itself over: the first update to a step-4 build swaps only the host. |
+
+Measured with `scripts/keeper-handoff-integration.mjs` (macOS, debug build, a claude turn and a codex turn in their
+tool calls, a terminal printing every 50 ms, a dev server printing every 100 ms): the handoff took 0.5–0.8 s beyond the
+test's 1.5 s hold, the same host and child pids carried on, the counters were continuous, and every tool call was
+recorded once. A handoff killed before the commit left A serving everything.
+
+Unverified: which identity macOS holds responsible for a keeper started by a keeper (B inherits A's responsible
+process, the app that launched A); any of this on Linux end to end (the unit tests ran in Docker); Windows, which has
+no keeper (`DuplicateHandle` would be its way to pass handles).
 
 ## 5. Data flow (summary — detail in [state-management.md](state-management.md))
 

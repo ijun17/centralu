@@ -222,7 +222,8 @@ host. It changes where a client connects, not what it must prove:
   same user (`ps eww` on macOS), which is the same trust as the control socket. It is never written to
   `keeper.json`, `keeper.log` or `host.log`.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
-  the agents it serves; a keeper restart makes a new one.
+  the agents it serves; a keeper restart makes a new one, and a keeper update (step 4) passes the
+  same one on to the new keeper over the handoff channel below.
 - The Codex orchestrator bridge is given the front door's address and token in its environment (codex starts it),
   as it was given the host's before.
 - While no host is ready, the door holds a connection up to 45 s before closing it, so an unauthenticated
@@ -252,6 +253,30 @@ Limits: as with `switch`, spawning lets any process of this user run a program โ
 reading a held agent's stream lets it read what that agent says, which the same user could also read from the
 agent's own transcript. It is not a boundary between processes of the same user. It is local only; Windows has no
 keeper.
+
+### The keeper handoff channel
+
+A keeper update hands everything the keeper holds to the new build's keeper (#280 step 4,
+[architecture.md](architecture.md) ยง4.4): through that channel go the front door's token, every
+agent's and terminal's descriptors with their unsent output, and the listening sockets. So who can
+be on the other end matters as much as on `keeper.sock`.
+
+- The channel is one end of a `socketpair` that the outgoing keeper places at descriptor 3 of the
+  process it starts itself. It has no path in the filesystem, so no other process can connect to it
+  at all; there is no socket file to protect with `0600` and none to remove. The incoming keeper
+  still reads its peer's uid from the kernel and refuses another user's.
+- The process started is the executable named by `switch` (`keeper.exe`) or `upgrade` (`exe`):
+  the app's own executable inside its bundle. Like `switch`'s host folder, any process of this user
+  can name another one through `keeper.sock`, and the keeper will start it and hand it the token and
+  every handle. That is no new power: the same user can already read the token from the socket and
+  the agents' streams from the child socket. It is not a boundary between processes of the same
+  user.
+- Nothing from the channel is logged: the snapshot carries the token, and the log lines name only
+  pids, counts and reasons.
+- The incoming keeper proves it holds `keeper.lock` by taking the `flock` on the passed description
+  before it says ready; a third keeper is refused throughout, as before.
+- `CC_KEEPER_HANDOFF_HOLD_MS` makes an incoming keeper wait before it says ready. It exists for the
+  integration test and changes nothing but timing.
 
 ## App servers
 
