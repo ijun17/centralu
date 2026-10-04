@@ -141,8 +141,8 @@ export function whichTool(
     // Lowercased: NTFS ignores case, and `claude.cmd` is the name npm actually wrote.
     const exts = /\.[^\\/.]+$/.test(name)
       ? ['']
-      : (env.PATHEXT || DEFAULT_PATHEXT).split(';').filter(Boolean).map((e) => e.toLowerCase())
-    for (const dir of (env.PATH ?? '').split(';')) {
+      : (envVar(env, 'PATHEXT') || DEFAULT_PATHEXT).split(';').filter(Boolean).map((e) => e.toLowerCase())
+    for (const dir of (envVar(env, 'PATH') ?? '').split(';')) {
       if (!dir || !win32.isAbsolute(dir)) continue
       for (const ext of exts) {
         const candidate = win32.join(dir, name + ext)
@@ -161,3 +161,14 @@ export function whichTool(
 
 /** What Windows assumes when PATHEXT is not set */
 const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD'
+
+/**
+ * A Windows environment variable, whatever its case. `process.env` itself ignores case there, but
+ * a copy of it (`{ ...process.env }`, an app's environment) is a plain object that keeps the
+ * spelling Windows stored, which is usually `Path`.
+ */
+function envVar(env: Env, name: string): string | undefined {
+  if (env[name] !== undefined) return env[name]
+  const key = Object.keys(env).find((k) => k.toUpperCase() === name)
+  return key === undefined ? undefined : env[key]
+}

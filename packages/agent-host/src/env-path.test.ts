@@ -105,6 +105,10 @@ describe('finding a tool on Windows', () => {
     expect(whichTool('git', { PATH: 'bin;.' }, 'win32', (p) => planted.has(p))).toBeNull()
   })
 
+  it('reads Path and Pathext whatever their case, as a copy of the Windows environment spells them', () => {
+    expect(whichTool('claude', { Path: npm, Pathext: '.EXE;.CMD' }, 'win32', exists)).toBe(`${npm}\\claude.cmd`)
+  })
+
   it('a name that already has an extension is looked up as it is', () => {
     expect(whichTool('claude.cmd', { PATH: npm }, 'win32', exists)).toBe(`${npm}\\claude.cmd`)
   })
