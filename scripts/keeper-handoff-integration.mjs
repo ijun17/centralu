@@ -24,6 +24,8 @@
  *     token, the WebSocket opened before the handoff never closed and still answers, a new client
  *     connects, the attached window was never dropped and hears from B, `keeper.json` names B, A
  *     has exited, and `keeper.lock` is held by B (a third keeper is turned away);
+ *   - an app view opened before the handoff (a user-folder app from the bundled template) is served
+ *     at the same address through the front door after it, and again after the host swap below;
  *   - B starting keeper C, killed before the commit: B rolls back and serves everything as before;
  *   - "Switch to this build" from build C (`switch` with `keeper`): the keeper moves to C and C
  *     swaps the host to build C, the terminal and dev server still the same processes;
@@ -32,7 +34,7 @@
  * Every process it starts (keepers included, found in keeper.log) is killed before it exits.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -130,6 +132,28 @@ function makeBuild(root, name) {
   cpSync(BIN, exe)
   return { name, exe, host, commit: `handoff-${name}`, bundle: join(dir, 'Centralu.app') }
 }
+/** A user-folder app with a home view: the bundled template, placeholders filled in */
+function plantApp(data, id) {
+  const dir = join(data, 'apps', id)
+  cpSync(join(HOST_SRC, 'app-template'), dir, { recursive: true })
+  const walk = (d) => {
+    for (const f of readdirSync(d)) {
+      const p = join(d, f)
+      if (statSync(p).isDirectory()) {
+        if (f !== 'runtime') walk(p)
+        continue
+      }
+      const text = readFileSync(p, 'utf8')
+      if (text.includes('{{APP_')) writeFileSync(p, text.replaceAll('{{APP_ID}}', id).replaceAll('{{APP_NAME}}', 'Demo').replaceAll('{{APP_DESCRIPTION}}', 'demo'))
+    }
+  }
+  walk(dir)
+}
+/** What the desktop webview's origin is; any allowed origin works for a client without an Origin header */
+const VIEW_ORIGIN = 'tauri://localhost'
+const viewFrame = (host, opened) => host.call('apps.viewFrame', { appId: 'demo', projectId: null, instanceId: opened.instanceId, hostOrigin: VIEW_ORIGIN })
+const fetchStatus = (url) => fetch(url).then((r) => r.status).catch((e) => String(e))
+
 const sourceOf = (b) => ({ commit: b.commit, hostDir: b.host, bundlePath: b.bundle, version: '0.0.0-test' })
 
 function startKeeper(b, data, extraEnv = {}) {
@@ -293,6 +317,7 @@ async function scenario() {
   execFileSync('git', ['init', '-q'], { cwd: project })
   const sock = join(data, 'keeper.sock')
   const keeperLog = () => readFileSync(join(data, 'keeper.log'), 'utf8')
+  plantApp(data, 'demo')
 
   log('\nkeeper A with a host, a terminal, a dev server and agents')
   const keeperA = startKeeper(A, data)
@@ -315,6 +340,10 @@ async function scenario() {
   const cmd = `node -e "let i=0;setInterval(()=>console.log('tick '+(i++)),100)"`
   const run = await host.call('commands.run', { projectId: p.id, command: cmd })
   check(await waitFor(async () => (await host.call('commands.log', { projectId: p.id, command: cmd })).run?.history.includes('tick 5'), 15_000), 'the dev server ticks')
+  const opened = await host.call('apps.openView', { appId: 'demo', projectId: null })
+  const frame = await viewFrame(host, opened)
+  check(new URL(frame.url).port === String(door.port), 'an app view is addressed through the front door')
+  check((await fetchStatus(frame.url)) === 200, 'and its frame loads')
 
   let claudeId = null
   let codexId = null
@@ -368,6 +397,8 @@ async function scenario() {
   const fresh = await hostClient(door.port, door.token).catch(() => null)
   check(fresh, 'a new client connects through the front door')
   fresh?.close()
+  check((await fetchStatus(frame.url)) === 200, 'the app view opened before the handoff still loads at the same address')
+  check((await viewFrame(host, opened)).url === frame.url, 'and the host gives the same address for it')
   check(alive(app.pid) && !readFileSync(windowOut, 'utf8').includes('"closed"'), 'the attached window was never dropped')
   check(
     await waitFor(() => readFileSync(windowOut, 'utf8').includes(`"pid":${keeperB}`), 10_000),
@@ -446,6 +477,8 @@ async function scenario() {
   const h2 = await hostClient(door.port, door.token)
   const terms = await h2.call('terminal.list', { projectId: p.id })
   check(terms.terminals.some((t) => t.terminalId === term.terminalId && t.alive), 'the new host took the terminal over')
+  check((await fetchStatus(frame.url)) === 200, 'the app view still loads at the same address after the host swap')
+  check((await viewFrame(h2, opened).catch((e) => ({ url: String(e) }))).url === frame.url, 'and the new host gives the same address for it')
 
   // ---- stop
   log('\nquit and stop agents')
