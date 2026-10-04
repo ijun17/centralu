@@ -34,8 +34,18 @@
 //! **One thread owns everything.** Every descriptor (listener, children's pipes and pty masters,
 //! connections, the exit watch) lives in the `Reactor`, driven by one `poll` loop that other
 //! threads reach only through `Children` (a command queue plus a wake pipe). Each `Child` is plain
-//! data plus its `OwnedFd`s, with no state hidden in a thread of its own, so a later keeper upgrade
-//! (step 4) can serialise the table and pass the descriptors to the next keeper over `SCM_RIGHTS`.
+//! data plus its `OwnedFd`s, with no state hidden in a thread of its own, so a keeper upgrade
+//! (step 4, `../handoff/`) serialises the table and passes the descriptors to the next keeper over
+//! `SCM_RIGHTS`.
+//!
+//! **Handing the table over** (step 4). `freeze` makes the reactor finish its current pass, reap
+//! what has exited, and then stop: it reads nothing more from any child or connection, writes
+//! nothing, accepts nothing. Everything it had read but not yet delivered is in the snapshot
+//! (`ReactorState`: buffers with their absolute offsets, half-read requests, unsent events), so
+//! the next keeper starts exactly where this one stopped and **no byte is read twice or lost**
+//! (the #280 measurement's rule: the outgoing keeper must not read ahead, or must forward what it
+//! read). A rolled-back handoff `thaw`s the reactor, which carries on as if nothing happened: it
+//! never closed or moved anything, the snapshot holds duplicates.
 
 mod buffer;
 mod proc;
@@ -54,8 +64,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-use self::buffer::{OutBuf, Policy, LINES_CAP, RING_CAP, TAIL_CAP};
-use self::proc::ExitStatus;
+use self::buffer::{BufState, OutBuf, Policy, LINES_CAP, RING_CAP, TAIL_CAP};
+pub use self::proc::ExitStatus;
+use super::handoff::pack::{Pack, Shifted};
 use super::sys;
 
 /// The child socket's protocol version. A host that speaks another one keeps its own children.
@@ -101,6 +112,13 @@ struct Shared {
 enum Cmd {
     AskHostStop(mpsc::Sender<()>),
     StopAll { grace: Duration, done: mpsc::Sender<()> },
+    /// Stop all I/O and describe the table (step 4).
+    Freeze(mpsc::Sender<Result<(Value, Pack), String>>),
+    /// A handoff was rolled back: carry on.
+    Thaw,
+    /// Reap every child that has exited since the freeze and report it (the outgoing keeper is
+    /// still their parent; the next one cannot reap them).
+    Reap(mpsc::Sender<Vec<(i32, ExitStatus)>>),
 }
 
 impl Children {
@@ -152,6 +170,46 @@ impl Children {
         rx.recv_timeout(wait).is_ok()
     }
 
+    /**
+     * Freezes the reactor for a keeper handoff (#280 step 4) and returns its table: plain data plus
+     * the descriptors and buffers in a `Pack`. `Ok(None)` for a disabled service (nothing to hand
+     * over). Refused while a stop is under way.
+     */
+    pub fn freeze(&self, wait: Duration) -> Result<Option<(Value, Pack)>, String> {
+        let (tx, rx) = mpsc::channel();
+        if !self.send(Cmd::Freeze(tx)) {
+            return Ok(None);
+        }
+        rx.recv_timeout(wait).map_err(|_| "the child service did not freeze in time".to_string())?.map(Some)
+    }
+
+    /// Resumes a frozen reactor (the handoff was rolled back).
+    pub fn thaw(&self) {
+        self.send(Cmd::Thaw);
+    }
+
+    /// Reaps, while frozen, every child that exited since the freeze (#280 step 4, at the commit).
+    pub fn reap_now(&self, wait: Duration) -> Vec<(i32, ExitStatus)> {
+        let (tx, rx) = mpsc::channel();
+        if !self.send(Cmd::Reap(tx)) {
+            return Vec::new();
+        }
+        rx.recv_timeout(wait).unwrap_or_default()
+    }
+
+    /**
+     * The receiving half of a handoff: rebuilds the table another keeper froze, **without starting
+     * any I/O**. Nothing is read or written until `Pending::start`, which the new keeper calls only
+     * after the commit, so a handoff that is rolled back leaves the outgoing keeper the sole reader.
+     */
+    pub fn prepare(data: &Path, state: &Value, unpack: &mut Shifted) -> Result<Pending, String> {
+        let st: ReactorState = serde_json::from_value(state.clone()).map_err(|e| format!("child table: {e}"))?;
+        let (wake_r, wake_w) = pipe().map_err(|e| e.to_string())?;
+        let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: wake_w, sock: socket_path(data) });
+        let reactor = Reactor::restore(st, unpack, wake_r, shared.clone())?;
+        Ok(Pending { reactor, shared })
+    }
+
     /// Ends every child still running: stdin EOF for pipes and SIGHUP for ptys, then after `grace`
     /// TERM to each child's group, then KILL. Returns once they are gone or the steps ran out.
     pub fn stop_all(&self, grace: Duration) {
@@ -160,6 +218,32 @@ impl Children {
             let _ = rx.recv_timeout(grace + Duration::from_secs(4));
         }
     }
+}
+
+/// A child table taken over from another keeper, not running yet.
+pub struct Pending {
+    reactor: Reactor,
+    shared: Arc<Shared>,
+}
+
+impl Pending {
+    /// Starts the reactor. `reaped` are the exit statuses the outgoing keeper collected at the
+    /// commit, for children this keeper (not their parent) could not learn them for otherwise.
+    pub fn start(mut self, reaped: &[(i32, ExitStatus)]) -> io::Result<Children> {
+        for &(pid, st) in reaped {
+            self.reactor.watch.know(pid, st);
+        }
+        let sock = self.shared.sock.clone();
+        let reactor = self.reactor;
+        thread::Builder::new().name("keeper-children".into()).spawn(move || reactor.run())?;
+        log(&format!("took over {} from the previous keeper", sock.display()));
+        Ok(Children { shared: Some(self.shared) })
+    }
+}
+
+/// Reaps `pid` if it is this process's child and has exited (the host, at a handoff's commit).
+pub fn reap_pid(pid: i32) -> Option<ExitStatus> {
+    proc::try_reap(pid)
 }
 
 fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
@@ -177,13 +261,15 @@ fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     Ok((r, w))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum Kind {
     Pipes,
     Pty,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum Which {
     Out,
     Err,
@@ -319,6 +405,64 @@ struct Reactor {
     next_conn: u64,
     host_stop_waiters: Vec<mpsc::Sender<()>>,
     stopping: Option<Stopping>,
+    /// Frozen for a handoff: no I/O at all until thawed (step 4).
+    frozen: bool,
+}
+
+/// The child table as one keeper hands it to the next (#280 step 4). Descriptors and buffers are
+/// indices into the handoff message (`../handoff/pack.rs`).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ReactorState {
+    listener: usize,
+    next_child: u64,
+    next_conn: u64,
+    children: Vec<ChildState>,
+    conns: Vec<ConnState>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ChildState {
+    n: u64,
+    kind: Kind,
+    pid: i32,
+    cmd: String,
+    args: Vec<String>,
+    cwd: String,
+    started_ms: u64,
+    tag: Value,
+    cols: u16,
+    rows: u16,
+    stdin: Option<usize>,
+    out_fd: Option<usize>,
+    err_fd: Option<usize>,
+    out: BufState,
+    out_data: usize,
+    err: BufState,
+    err_data: usize,
+    out_reader: Option<u64>,
+    err_reader: Option<u64>,
+    inbuf: usize,
+    close_stdin: bool,
+    exit: Option<ExitStatus>,
+    /// How long ago it exited, so the oldest exited children still go first.
+    exited_ms_ago: Option<u64>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ConnState {
+    id: u64,
+    fd: usize,
+    role: RoleState,
+    rbuf: usize,
+    wbuf: usize,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "role", rename_all = "snake_case")]
+enum RoleState {
+    Hello,
+    Control,
+    Attach { child: u64, which: Which, detaching: bool },
 }
 
 impl Reactor {
@@ -334,11 +478,151 @@ impl Reactor {
             next_conn: 1,
             host_stop_waiters: Vec::new(),
             stopping: None,
+            frozen: false,
         })
+    }
+
+    /// Describes the whole table and stops all I/O (step 4). Called on the reactor thread, between
+    /// two passes, so no request is half handled and no buffer half updated.
+    fn freeze(&mut self) -> Result<(Value, Pack), String> {
+        if self.stopping.is_some() || !self.host_stop_waiters.is_empty() {
+            return Err("the child service is stopping".into());
+        }
+        // Whatever has exited is reaped now, while this keeper is still the parent; the snapshot
+        // then carries the status.
+        self.collect_exits();
+        let mut pack = Pack::default();
+        let e = |e: io::Error| e.to_string();
+        let listener = pack.fd(&self.listener).map_err(e)?;
+        let now = Instant::now();
+        let mut children = Vec::new();
+        for (&n, c) in &self.children {
+            let (out, out_bytes) = c.out.save();
+            let (err, err_bytes) = c.err.save();
+            children.push(ChildState {
+                n,
+                kind: c.kind,
+                pid: c.pid,
+                cmd: c.cmd.clone(),
+                args: c.args.clone(),
+                cwd: c.cwd.clone(),
+                started_ms: c.started_ms,
+                tag: c.tag.clone(),
+                cols: c.cols,
+                rows: c.rows,
+                stdin: c.stdin.as_ref().map(|f| pack.fd(f)).transpose().map_err(e)?,
+                out_fd: c.out_fd.as_ref().map(|f| pack.fd(f)).transpose().map_err(e)?,
+                err_fd: c.err_fd.as_ref().map(|f| pack.fd(f)).transpose().map_err(e)?,
+                out,
+                out_data: pack.blob(out_bytes),
+                err,
+                err_data: pack.blob(err_bytes),
+                out_reader: c.out_reader,
+                err_reader: c.err_reader,
+                inbuf: pack.blob(c.inbuf.clone()),
+                close_stdin: c.close_stdin,
+                exit: c.exit,
+                exited_ms_ago: c.exited_at.map(|t| now.duration_since(t).as_millis() as u64),
+            });
+        }
+        let mut conns = Vec::new();
+        for (&id, conn) in &self.conns {
+            conns.push(ConnState {
+                id,
+                fd: pack.fd(&conn.stream).map_err(e)?,
+                role: match conn.role {
+                    Role::Hello => RoleState::Hello,
+                    Role::Control => RoleState::Control,
+                    Role::Attach { child, which, detaching } => RoleState::Attach { child, which, detaching },
+                },
+                rbuf: pack.blob(conn.rbuf.clone()),
+                wbuf: pack.blob(conn.wbuf.clone()),
+            });
+        }
+        let st = ReactorState { listener, next_child: self.next_child, next_conn: self.next_conn, children, conns };
+        let v = serde_json::to_value(&st).map_err(|e| e.to_string())?;
+        self.frozen = true;
+        log(&format!("frozen for a handoff ({} children, {} connections)", st.children.len(), st.conns.len()));
+        Ok((v, pack))
+    }
+
+    /// Rebuilds a table another keeper froze. Exit watches are registered here (passive); every
+    /// read and write waits for `run`.
+    fn restore(st: ReactorState, u: &mut Shifted, wake: OwnedFd, shared: Arc<Shared>) -> Result<Reactor, String> {
+        let nb = |fd: &OwnedFd| proc::set_nonblocking(fd.as_raw_fd()).map_err(|e| e.to_string());
+        let lfd = u.fd(st.listener)?;
+        nb(&lfd)?;
+        let listener = UnixListener::from(lfd);
+        let mut r = Reactor::new(listener, wake, shared).map_err(|e| e.to_string())?;
+        r.next_child = st.next_child;
+        r.next_conn = st.next_conn;
+        let now = Instant::now();
+        for c in st.children {
+            let mut take = |i: Option<usize>| -> Result<Option<OwnedFd>, String> {
+                match i {
+                    Some(i) => {
+                        let fd = u.fd(i)?;
+                        nb(&fd)?;
+                        Ok(Some(fd))
+                    }
+                    None => Ok(None),
+                }
+            };
+            let stdin = take(c.stdin)?;
+            let out_fd = take(c.out_fd)?;
+            let err_fd = take(c.err_fd)?;
+            if c.exit.is_none() {
+                r.watch.watch(c.pid);
+            }
+            let child = Child {
+                kind: c.kind,
+                pid: c.pid,
+                cmd: c.cmd,
+                args: c.args,
+                cwd: c.cwd,
+                started_ms: c.started_ms,
+                tag: c.tag,
+                cols: c.cols,
+                rows: c.rows,
+                stdin,
+                out_fd,
+                err_fd,
+                out: OutBuf::restore(&c.out, u.blob(c.out_data)?),
+                err: OutBuf::restore(&c.err, u.blob(c.err_data)?),
+                out_reader: c.out_reader,
+                err_reader: c.err_reader,
+                inbuf: u.blob(c.inbuf)?,
+                close_stdin: c.close_stdin,
+                exit: c.exit,
+                exited_at: c.exited_ms_ago.map(|ms| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now)),
+            };
+            r.children.insert(c.n, child);
+        }
+        for c in st.conns {
+            let fd = u.fd(c.fd)?;
+            let stream = UnixStream::from(fd);
+            stream.set_nonblocking(true).map_err(|e| e.to_string())?;
+            let role = match c.role {
+                RoleState::Hello => Role::Hello,
+                RoleState::Control => Role::Control,
+                RoleState::Attach { child, which, detaching } => Role::Attach { child, which, detaching },
+            };
+            r.conns.insert(c.id, Conn { stream, role, rbuf: u.blob(c.rbuf)?, wbuf: u.blob(c.wbuf)? });
+        }
+        Ok(r)
     }
 
     fn run(mut self) {
         loop {
+            if self.frozen {
+                // Only the command queue is listened to: a thaw, a reap, or nothing until the
+                // process exits after a committed handoff.
+                let mut p = libc::pollfd { fd: self.wake.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+                // SAFETY: one valid pollfd.
+                unsafe { libc::poll(&mut p, 1, 1000) };
+                self.take_commands();
+                continue;
+            }
             let (mut fds, toks) = self.poll_set();
             let quick = self.stopping.is_some() || !self.host_stop_waiters.is_empty() || self.watch.polling();
             let timeout = if quick { 100 } else { 1000 };
@@ -450,6 +734,27 @@ impl Reactor {
                     }
                     log(if any { "asked the host to stop its children" } else { "no host connected to stop its children" });
                     self.host_stop_waiters.push(done);
+                }
+                Cmd::Freeze(reply) => {
+                    let r = if self.frozen { Err("already frozen".to_string()) } else { self.freeze() };
+                    let _ = reply.send(r);
+                }
+                Cmd::Thaw => {
+                    if self.frozen {
+                        self.frozen = false;
+                        log("thawed: the handoff was rolled back");
+                    }
+                }
+                Cmd::Reap(reply) => {
+                    let mut reaped = Vec::new();
+                    for c in self.children.values_mut().filter(|c| c.exit.is_none()) {
+                        if let Some(st) = proc::try_reap(c.pid) {
+                            c.exit = Some(st);
+                            c.exited_at = Some(Instant::now());
+                            reaped.push((c.pid, st));
+                        }
+                    }
+                    let _ = reply.send(reaped);
                 }
                 Cmd::StopAll { grace, done } => match &mut self.stopping {
                     Some(s) => s.done.push(done),

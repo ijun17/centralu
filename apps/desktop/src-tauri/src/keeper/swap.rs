@@ -28,9 +28,8 @@
 //! Retrying B was the alternative, but a build that just failed its own start is the less likely of
 //! the two to start now, and every retry is time with no host at all.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -39,7 +38,7 @@ use serde_json::{json, Value};
 
 use super::front_door::FrontDoor;
 use super::source::{self, BuildSource};
-use crate::host_proc::{self, parse_ready, Adopted, HostInfo, Supervisor};
+use crate::host_proc::{self, parse_ready, Adopted, HostInfo, HostOut, NextLine, Supervisor};
 
 /// How long the old host gets for its running calls before they are cut. Measured: the longest
 /// in-process call on record took 5.6 s (#280, "Measurements for option C" §2).
@@ -70,6 +69,8 @@ pub fn drain_bound() -> Duration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
+    /// The keeper is handing itself over to the new build's keeper first (#280 step 4)
+    HandingOver,
     /// Copying the build and starting the standby host
     Starting,
     /// The new host passed its own checks and is waiting
@@ -100,6 +101,10 @@ pub struct SwapView {
     /// In-process calls the old host was still running at the drain bound, and cut.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cut: Vec<String>,
+    /// The keeper could not hand itself over to the new build's keeper (#280 step 4), why, in
+    /// words a person can act on. The host switch went ahead under the running keeper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keeper_message: Option<String>,
     /// Seconds since the epoch.
     pub started_at: u64,
 }
@@ -171,7 +176,8 @@ pub fn run(p: &Plan) -> Outcome {
         forget_copy(&copy);
         return Outcome::NotStarted("could not read the new host's output".into());
     };
-    let lines = line_channel(stdout);
+    // A reader that can be paused, so this host can later be handed to another keeper (step 4)
+    let lines = HostOut::new(stdout.into(), Vec::new());
     log(&format!("swap: standby host {} started (pid {}) from {}", next.key(), child.id(), copy.display()));
 
     // 2. Health
@@ -235,7 +241,8 @@ pub fn run(p: &Plan) -> Outcome {
     };
 
     // 5. Flip
-    let host = Adopted { child, lines: Box::new(lines.into_iter()), info };
+    let gate = Some(lines.gate());
+    let host = Adopted { child, lines: Box::new(lines), info, gate };
     if let Err(e) = (p.adopt)(host, next) {
         return Outcome::FailedAfterDrain { message: e, cut };
     }
@@ -246,30 +253,26 @@ fn log(msg: &str) {
     eprintln!("[keeper] {msg}");
 }
 
-/// Reads a host's stdout on a thread of its own, so a swap can wait on it with a deadline and later
-/// hand what is left to the supervisor. The channel closes when the host's stdout does.
-fn line_channel(stdout: std::process::ChildStdout) -> Receiver<String> {
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if tx.send(line).is_err() {
-                return;
-            }
-        }
-    });
-    rx
+/// Where a swap reads a host's lines from: the host's stdout (`HostOut`), or a list in tests.
+trait LineSource {
+    fn next_line(&self, deadline: Option<Instant>) -> NextLine;
+}
+
+impl LineSource for HostOut {
+    fn next_line(&self, deadline: Option<Instant>) -> NextLine {
+        HostOut::next_line(self, deadline)
+    }
 }
 
 /// Waits for the first JSON line `want` accepts. Other lines are logged; the last few non-JSON ones
 /// become the reason if the host exits or the time runs out, since that is where a host explains
 /// itself (a store too new, a missing module).
-fn wait_for(lines: &Receiver<String>, limit: Duration, want: impl Fn(&Value) -> bool) -> Result<Value, String> {
+fn wait_for(lines: &impl LineSource, limit: Duration, want: impl Fn(&Value) -> bool) -> Result<Value, String> {
     let deadline = Instant::now() + limit;
     let mut said: Vec<String> = Vec::new();
     loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        match lines.recv_timeout(left) {
-            Ok(line) => {
+        match lines.next_line(Some(deadline)) {
+            NextLine::Line(line) => {
                 if let Ok(v) = serde_json::from_str::<Value>(&line) {
                     if want(&v) {
                         return Ok(v);
@@ -283,10 +286,10 @@ fn wait_for(lines: &Receiver<String>, limit: Duration, want: impl Fn(&Value) -> 
                     }
                 }
             }
-            Err(RecvTimeoutError::Timeout) => {
+            NextLine::Timeout => {
                 return Err(last_words(&said, &format!("no answer within {}s", limit.as_secs())));
             }
-            Err(RecvTimeoutError::Disconnected) => return Err(last_words(&said, "it exited")),
+            NextLine::End => return Err(last_words(&said, "it exited")),
         }
     }
 }
@@ -302,13 +305,32 @@ fn last_words(said: &[String], fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
-    fn feed(lines: &[&str]) -> Receiver<String> {
-        let (tx, rx) = mpsc::channel();
-        for l in lines {
-            tx.send(l.to_string()).unwrap();
+    /// Lines a host said, then either silence (`open`) or its end.
+    struct Feed {
+        lines: RefCell<Vec<String>>,
+        open: bool,
+    }
+
+    impl LineSource for Feed {
+        fn next_line(&self, deadline: Option<Instant>) -> NextLine {
+            let mut l = self.lines.borrow_mut();
+            if !l.is_empty() {
+                return NextLine::Line(l.remove(0));
+            }
+            if !self.open {
+                return NextLine::End;
+            }
+            if let Some(d) = deadline {
+                thread::sleep(d.saturating_duration_since(Instant::now()));
+            }
+            NextLine::Timeout
         }
-        rx
+    }
+
+    fn feed(lines: &[&str]) -> Feed {
+        Feed { lines: RefCell::new(lines.iter().map(|s| s.to_string()).collect()), open: false }
     }
 
     #[test]
@@ -329,7 +351,7 @@ mod tests {
 
     #[test]
     fn a_silent_host_times_out() {
-        let (_tx, rx) = mpsc::channel::<String>();
+        let rx = Feed { lines: RefCell::new(Vec::new()), open: true };
         let err = wait_for(&rx, Duration::from_millis(50), |_| true).unwrap_err();
         assert!(err.contains("no answer"), "{err}");
     }
@@ -350,6 +372,7 @@ mod tests {
             message: Some("the new build did not pass its start check".into()),
             rolled_back: true,
             cut: vec!["tool app-board/add_item".into()],
+            keeper_message: None,
             started_at: 1,
         };
         let text = serde_json::to_string(&v).unwrap();

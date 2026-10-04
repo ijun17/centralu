@@ -8,7 +8,8 @@
 //! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and token, build source, the last swap |
 //! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open |
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
-//! | `{"op":"switch","source":BuildSource}` | `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start |
+//! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap |
+//! | `{"op":"upgrade","exe":path,"source":BuildSource}` | `{"ok":true}`, then the keeper hands itself over to the keeper at `exe` (of build `source`), leaving the host alone (#280 step 4) |
 //! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up (refused during a swap) |
 //! | `{"op":"settings"}` | `{"ok":true,"background":bool}` |
 //! | `{"op":"set_background","on":bool}` | `{"ok":true,"background":bool}` |
@@ -19,13 +20,20 @@
 //! only this user can read today.
 //!
 //! The port and token in `status` are the **front door's** (#280 step 3, `front_door.rs`), not a
-//! host's: the same for as long as this keeper lives, whichever host is behind them.
+//! host's: the same for as long as this keeper lives, whichever host is behind them — and, since
+//! step 4, across keepers too: a handoff passes the door, its token and this socket on.
+//!
+//! **Frozen** (step 4): while the keeper is handing itself over, it accepts nothing on this socket
+//! (connections wait in the listen queue, which the next keeper inherits), answers only `status`,
+//! pushes nothing to windows, and its idle rule does not run. After the commit (`handed_over`)
+//! nothing in this process acts again; it exits.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, Write};
+use std::io::{BufReader, Seek, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -33,6 +41,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use super::children::{self, Children};
+use super::handoff;
 use super::client::{self, read_line};
 use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
@@ -48,6 +57,9 @@ pub struct Options {
     pub host_source: Option<PathBuf>,
     pub bundle_path: Option<String>,
     pub app_version: Option<String>,
+    /// Started by another keeper to take over from it (#280 step 4): the handoff channel's
+    /// descriptor, inherited from that keeper.
+    pub take_over_fd: Option<i32>,
 }
 
 pub fn parse_args(args: &[String]) -> Options {
@@ -59,6 +71,7 @@ pub fn parse_args(args: &[String]) -> Options {
             "--host-source" => o.host_source = it.next().map(PathBuf::from),
             "--bundle-path" => o.bundle_path = it.next().cloned(),
             "--app-version" => o.app_version = it.next().cloned(),
+            "--take-over-fd" => o.take_over_fd = it.next().and_then(|s| s.parse().ok()),
             _ => {}
         }
     }
@@ -71,48 +84,78 @@ pub fn parse_args(args: &[String]) -> Options {
     o
 }
 
-struct State {
-    status: HostStatus,
-    /// The build the current host runs or is starting.
-    source: Option<BuildSource>,
-    /// The build the next launch runs. Changed by `switch`.
-    desired: BuildSource,
-    subscribers: Vec<(u64, UnixStream)>,
-    next_id: u64,
-    attached: usize,
-    ever_attached: bool,
-    last_detach: Instant,
-    busy: bool,
-    last_busy: Instant,
-    settings: Settings,
-    stopping: bool,
-    /// The current or last swap, as the windows are shown it.
-    swap: Option<SwapView>,
-    /// A swap is running: a second `switch` and `restart` are refused until it ends.
-    swapping: bool,
-    /// The draining host's `{"drained":..}` report.
-    drained: Option<Value>,
-    /// The current host's `{"swap":{"keepsAgents":..}}` report.
-    keeps_agents: Option<bool>,
+/// The build this keeper's executable is from, as the options name it (`--host-source`).
+pub(super) fn own_build(o: &Options) -> BuildSource {
+    match &o.host_source {
+        Some(dir) => BuildSource::from_host_dir(
+            dir,
+            o.bundle_path.clone(),
+            o.app_version.clone().or_else(|| Some(env!("CARGO_PKG_VERSION").to_string())),
+        ),
+        None => BuildSource::dev(),
+    }
 }
 
-struct Keeper {
-    data: PathBuf,
-    sock: PathBuf,
-    info: KeeperInfo,
-    sup: Supervisor,
+pub(super) struct State {
+    pub(super) status: HostStatus,
+    /// The build the current host runs or is starting.
+    pub(super) source: Option<BuildSource>,
+    /// The build the next launch runs. Changed by `switch`.
+    pub(super) desired: BuildSource,
+    pub(super) subscribers: Vec<(u64, UnixStream)>,
+    pub(super) next_id: u64,
+    pub(super) attached: usize,
+    pub(super) ever_attached: bool,
+    pub(super) last_detach: Instant,
+    pub(super) busy: bool,
+    pub(super) last_busy: Instant,
+    pub(super) settings: Settings,
+    pub(super) stopping: bool,
+    /// The current or last swap, as the windows are shown it.
+    pub(super) swap: Option<SwapView>,
+    /// A swap (or a keeper handoff) is running: a second `switch` and `restart` are refused until
+    /// it ends.
+    pub(super) swapping: bool,
+    /// The draining host's `{"drained":..}` report.
+    pub(super) drained: Option<Value>,
+    /// The current host's `{"swap":{"keepsAgents":..}}` report.
+    pub(super) keeps_agents: Option<bool>,
+}
+
+pub(super) struct Keeper {
+    pub(super) data: PathBuf,
+    pub(super) sock: PathBuf,
+    pub(super) info: KeeperInfo,
+    pub(super) sup: Supervisor,
     /// Where every client connects, whichever host is current (#280 step 3).
-    door: FrontDoor,
+    pub(super) door: FrontDoor,
     /// Agents, terminals and commands the keeper holds for its hosts (step 2, `children/`).
-    children: Children,
-    state: Mutex<State>,
-    idle: Duration,
-    started: Instant,
+    pub(super) children: Children,
+    pub(super) state: Mutex<State>,
+    pub(super) idle: Duration,
+    pub(super) started: Instant,
+    /// `keeper.lock`, held (flock) for this keeper's life and passed on in a handoff (step 4).
+    pub(super) lock: File,
+    /// `keeper.sock`'s listener, polled so a handoff can stop accepting and pass it on.
+    pub(super) listener: UnixListener,
+    /// Handing over to another keeper: no accepting, no pushing, no idle rule (step 4).
+    pub(super) frozen: AtomicBool,
+    /// The handoff committed: this process only waits to exit and must not act on anything.
+    pub(super) handed_over: AtomicBool,
+    /// The accept loop has noticed `frozen` and stopped.
+    pub(super) accept_parked: AtomicBool,
+    /// Requests being answered right now (an attach counts until it is registered). A freeze
+    /// waits for them, so no answer is half written when the socket changes hands.
+    pub(super) requests: AtomicUsize,
 }
 
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
     let opts = parse_args(args);
+    // Started by another keeper to take its place (step 4): everything comes from that keeper.
+    if let Some(fd) = opts.take_over_fd {
+        return handoff::take(opts, fd);
+    }
     let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
     // Before anything creates the folder: the host leaves a legacy folder alone once the new one
     // exists, so creating it first would strand the person's data (data-dir.ts).
@@ -178,14 +221,7 @@ pub fn run(args: &[String]) -> i32 {
         Children::disabled()
     });
 
-    let desired = match &opts.host_source {
-        Some(dir) => BuildSource::from_host_dir(
-            dir,
-            opts.bundle_path.clone(),
-            opts.app_version.clone().or_else(|| Some(env!("CARGO_PKG_VERSION").to_string())),
-        ),
-        None => BuildSource::dev(),
-    };
+    let desired = own_build(&opts);
     let settings = source::load_settings(&data);
     // The front door: one port and one token for this keeper's whole life (front_door.rs)
     let door = match front_door::new_token().and_then(|t| FrontDoor::open(0, t)) {
@@ -203,6 +239,7 @@ pub fn run(args: &[String]) -> i32 {
             version: env!("CARGO_PKG_VERSION").to_string(),
             started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
             data_dir: data.to_string_lossy().to_string(),
+            build: Some(desired.clone()),
         },
         data,
         sock,
@@ -229,6 +266,12 @@ pub fn run(args: &[String]) -> i32 {
         }),
         idle: idle_limit(),
         started: now,
+        lock,
+        listener,
+        frozen: AtomicBool::new(false),
+        handed_over: AtomicBool::new(false),
+        accept_parked: AtomicBool::new(false),
+        requests: AtomicUsize::new(0),
     });
     log(&format!(
         "keeper {} started (pid {}, data {}, front door {}, background {}, idle limit {}s)",
@@ -241,32 +284,86 @@ pub fn run(args: &[String]) -> i32 {
     ));
 
     keeper.sup.start(sink(&keeper), launcher(&keeper));
-    spawn_idle_watch(keeper.clone());
+    serve(keeper)
+}
 
-    for conn in listener.incoming() {
-        match conn {
-            Ok(stream) => {
-                let k = keeper.clone();
-                thread::spawn(move || handle(k, stream));
-            }
-            Err(e) => log(&format!("accept failed: {e}")),
-        }
-    }
+/// Runs a keeper that is fully set up: the idle rule and the control socket, until it exits.
+pub(super) fn serve(k: Arc<Keeper>) -> i32 {
+    spawn_idle_watch(k.clone());
+    accept_loop(&k);
     0
 }
 
-fn log(msg: &str) {
+/// Accepts on `keeper.sock`, looking up every 100 ms for a freeze (step 4). A blocking `accept`
+/// could not be stopped without closing the socket, and the socket must stay open: it is passed to
+/// the next keeper with whatever is waiting in its queue.
+fn accept_loop(k: &Arc<Keeper>) {
+    use std::os::fd::AsRawFd;
+    let _ = k.listener.set_nonblocking(true);
+    loop {
+        if k.handed_over.load(Ordering::SeqCst) {
+            // The next keeper owns the socket now; this process is about to exit.
+            thread::sleep(Duration::from_secs(3600));
+            continue;
+        }
+        if k.frozen.load(Ordering::SeqCst) {
+            k.accept_parked.store(true, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        k.accept_parked.store(false, Ordering::SeqCst);
+        let mut p = libc::pollfd { fd: k.listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+        // SAFETY: one valid pollfd.
+        if unsafe { libc::poll(&mut p, 1, 100) } <= 0 {
+            continue;
+        }
+        match k.listener.accept() {
+            Ok((stream, _)) => {
+                let _ = stream.set_nonblocking(false);
+                k.requests.fetch_add(1, Ordering::SeqCst);
+                let k = k.clone();
+                thread::spawn(move || {
+                    let guard = Request(Some(k.clone()));
+                    handle(k, stream, guard);
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(e) => log(&format!("accept failed: {e}")),
+        }
+    }
+}
+
+/// One request being answered; dropping it (or `done`) stops a freeze from waiting for it.
+pub(super) struct Request(Option<Arc<Keeper>>);
+
+impl Request {
+    fn done(&mut self) {
+        if let Some(k) = self.0.take() {
+            k.requests.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+impl Drop for Request {
+    fn drop(&mut self) {
+        self.done();
+    }
+}
+
+pub(super) fn log(msg: &str) {
     eprintln!("[keeper] {msg}");
 }
 
 /// Writes our pid into the lock file — a description of the holder for someone reading it,
-/// not the lock itself (the flock is).
-fn record_lock_holder(mut lock: &File) {
+/// not the lock itself (the flock is). From the start of the file: a keeper that took the lock
+/// over in a handoff shares the previous keeper's file offset.
+pub(super) fn record_lock_holder(mut lock: &File) {
     let _ = lock.set_len(0);
+    let _ = lock.seek(std::io::SeekFrom::Start(0));
     let _ = writeln!(lock, "{}", std::process::id());
 }
 
-fn sink(k: &Arc<Keeper>) -> Arc<dyn StatusSink> {
+pub(super) fn sink(k: &Arc<Keeper>) -> Arc<dyn StatusSink> {
     Arc::new(KeeperSink(k.clone()))
 }
 
@@ -275,6 +372,9 @@ struct KeeperSink(Arc<Keeper>);
 impl StatusSink for KeeperSink {
     fn status(&self, status: &HostStatus) {
         let k = &self.0;
+        if k.handed_over.load(Ordering::SeqCst) {
+            return;
+        }
         // Clients only ever see the front door (#280 step 3): a ready host becomes the door's
         // target, and what the windows are told is the door's port and token, not the host's.
         let shown = match status {
@@ -358,7 +458,7 @@ impl StatusSink for KeeperSink {
 }
 
 /// Builds each launch: copies the desired build to its per-build folder and runs it from there.
-fn launcher(k: &Arc<Keeper>) -> Launcher {
+pub(super) fn launcher(k: &Arc<Keeper>) -> Launcher {
     let k = k.clone();
     Arc::new(move || {
         let desired = k.state.lock().map(|s| s.desired.clone()).map_err(|_| LaunchError::Fatal("keeper state poisoned".into()))?;
@@ -402,7 +502,7 @@ fn host_env(k: &Keeper, running: &BuildSource) -> Vec<(String, String)> {
 }
 
 impl Keeper {
-    fn view(&self, st: &State) -> KeeperView {
+    pub(super) fn view(&self, st: &State) -> KeeperView {
         KeeperView {
             keeper: self.info.clone(),
             status: st.status.clone(),
@@ -416,8 +516,13 @@ impl Keeper {
         }
     }
 
-    /// Pushes the current view to every attached window, dropping any that stopped reading.
-    fn broadcast(&self, st: &mut State) {
+    /// Pushes the current view to every attached window, dropping any that stopped reading. Not
+    /// while frozen for a handoff: the windows' sockets may be in two keepers' hands then, and two
+    /// writers could interleave half lines.
+    pub(super) fn broadcast(&self, st: &mut State) {
+        if self.frozen.load(Ordering::SeqCst) || self.handed_over.load(Ordering::SeqCst) {
+            return;
+        }
         let line = match serde_json::to_vec(&json!({ "event": "status", "view": self.view(st) })) {
             Ok(mut v) => {
                 v.push(b'\n');
@@ -430,12 +535,16 @@ impl Keeper {
 
     /// `keeper.json`: what this keeper is and what it runs, for a person reading the data folder
     /// (the socket is how programs ask). It holds no token.
-    fn write_state_file(&self) {
+    pub(super) fn write_state_file(&self) {
+        if self.handed_over.load(Ordering::SeqCst) {
+            return;
+        }
         let Ok(st) = self.state.lock() else { return };
         let body = json!({
             "pid": self.info.pid,
             "protocol": self.info.protocol,
             "version": self.info.version,
+            "build": self.info.build,
             "startedAt": self.info.started_at,
             "socket": self.sock,
             "background": st.settings.background,
@@ -458,6 +567,11 @@ impl Keeper {
 
     /// Stops the host and ends the keeper. Idempotent.
     fn shutdown(self: &Arc<Self>, reason: &str) {
+        // A keeper that has handed over owns nothing any more: stopping now would stop the next
+        // keeper's host and children.
+        if self.handed_over.load(Ordering::SeqCst) {
+            return;
+        }
         {
             let Ok(mut st) = self.state.lock() else { return };
             if st.stopping {
@@ -481,9 +595,12 @@ impl Keeper {
     }
 }
 
-fn spawn_idle_watch(k: Arc<Keeper>) {
+pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(1));
+        if k.frozen.load(Ordering::SeqCst) || k.handed_over.load(Ordering::SeqCst) {
+            continue;
+        }
         let reason = {
             let Ok(st) = k.state.lock() else { return };
             let now = Instant::now();
@@ -513,7 +630,7 @@ fn reply(stream: &mut UnixStream, v: &Value) {
     let _ = stream.write_all(&line);
 }
 
-fn handle(k: Arc<Keeper>, mut stream: UnixStream) {
+fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
     match sys::peer_uid(&stream) {
         Ok(uid) if uid == sys::my_uid() => {}
         other => {
@@ -533,18 +650,23 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream) {
         _ => return,
     };
     let op = req.get("op").and_then(Value::as_str).unwrap_or("");
+    if k.frozen.load(Ordering::SeqCst) && op != "status" {
+        // A request that slipped in as the freeze began. The next keeper answers it once retried.
+        return reply(&mut stream, &json!({ "ok": false, "error": "the keeper is handing over to a new build; try again in a moment" }));
+    }
     match op {
         "status" => {
             let view = k.state.lock().map(|st| k.view(&st)).ok();
             reply(&mut stream, &json!({ "ok": true, "view": view }));
         }
-        "attach" => attach(k, stream, reader, &req),
+        "attach" => attach(k, stream, reader, &req, guard),
         "stop" => {
             reply(&mut stream, &json!({ "ok": true }));
             drop(stream);
             k.shutdown("asked to stop (Quit and stop agents)");
         }
         "switch" => switch(k, &mut stream, &req),
+        "upgrade" => upgrade(k, &mut stream, &req),
         "restart" => {
             if k.state.lock().map(|st| st.swapping).unwrap_or(false) {
                 return reply(&mut stream, &json!({ "ok": false, "error": "a build switch is in progress" }));
@@ -576,7 +698,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream) {
     }
 }
 
-fn attach(k: Arc<Keeper>, mut stream: UnixStream, mut reader: BufReader<UnixStream>, req: &Value) {
+fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<UnixStream>, req: &Value, mut guard: Request) {
     let protocol = req.get("protocol").and_then(Value::as_u64).unwrap_or(0);
     if protocol != KEEPER_PROTOCOL as u64 {
         return reply(
@@ -600,16 +722,34 @@ fn attach(k: Arc<Keeper>, mut stream: UnixStream, mut reader: BufReader<UnixStre
             (Some(c), Some(s)) => Some(c.same_build(s)),
             _ => None,
         };
+        // Whether the keeper itself is from the window's build (step 4): None for a keeper that
+        // cannot say (older than step 4)
+        let keeper_same = match (&client, &k.info.build) {
+            (Some(c), Some(b)) => Some(c.same_build(b)),
+            _ => None,
+        };
         // The answer goes out before this window is added to the push list, under the same lock,
         // so no event can overtake it.
-        reply(&mut stream, &json!({ "ok": true, "view": k.view(&st), "sameBuild": same }));
+        reply(&mut stream, &json!({ "ok": true, "view": k.view(&st), "sameBuild": same, "keeperSameBuild": keeper_same }));
         st.subscribers.push((id, push));
         k.broadcast(&mut st);
         id
     };
+    // From here the window is a subscriber, not a request a freeze has to wait for.
+    guard.done();
     let _ = stream.set_read_timeout(None);
+    watch_window(k, id, reader);
+}
+
+/// Waits for an attached window to go away (its connection ending is the detach) and applies
+/// background mode. Shared by `attach` and a keeper that took the window over in a handoff.
+pub(super) fn watch_window(k: Arc<Keeper>, id: u64, mut reader: BufReader<UnixStream>) {
     // The window says nothing more; the connection ending is the detach.
     while let Ok(Some(_)) = read_line(&mut reader) {}
+    // Handed over: the window is the next keeper's to count (it sees the same end).
+    if k.handed_over.load(Ordering::SeqCst) {
+        return;
+    }
     let stop = {
         let Ok(mut st) = k.state.lock() else { return };
         st.subscribers.retain(|(i, _)| *i != id);
@@ -618,9 +758,27 @@ fn attach(k: Arc<Keeper>, mut stream: UnixStream, mut reader: BufReader<UnixStre
         k.broadcast(&mut st);
         st.attached == 0 && !st.settings.background
     };
-    if stop {
+    // Frozen: the decision waits for the thaw, when the idle rule sees no window either.
+    if stop && !k.frozen.load(Ordering::SeqCst) {
         k.shutdown("the last window closed and background mode is off");
     }
+}
+
+/// Registers a window connection another keeper handed over (step 4) and watches it.
+pub(super) fn adopt_window(k: &Arc<Keeper>, stream: UnixStream) {
+    let Ok(read_half) = stream.try_clone() else { return };
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let id = {
+        let Ok(mut st) = k.state.lock() else { return };
+        let id = st.next_id;
+        st.next_id += 1;
+        st.attached += 1;
+        st.ever_attached = true;
+        st.subscribers.push((id, stream));
+        id
+    };
+    let k = k.clone();
+    thread::spawn(move || watch_window(k, id, BufReader::new(read_half)));
 }
 
 /// Switches the host to the requesting app's build: a blue-green swap when a host is up
@@ -639,12 +797,39 @@ fn switch(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
         None if asked.commit == "dev" => BuildSource::dev(),
         None => return reply(stream, &json!({ "ok": false, "error": "switch needs a host folder" })),
     };
+    // The new build's keeper executable, from the window asking (step 4): hand the keeper over first
+    if let Some(exe) = req.pointer("/keeper/exe").and_then(Value::as_str).map(PathBuf::from) {
+        if k.info.build.as_ref().map(|b| !b.same_build(&next)).unwrap_or(true) {
+            {
+                let Ok(mut st) = k.state.lock() else { return };
+                if st.swapping {
+                    drop(st);
+                    return reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+                }
+                st.swapping = true;
+            }
+            reply(stream, &json!({ "ok": true }));
+            log(&format!("switching to {}: the keeper first, from {}", next.key(), exe.display()));
+            thread::spawn(move || move_keeper(k, exe, next, true));
+            return;
+        }
+    }
     log(&format!("switching the host to {} (from {})", next.key(), next.bundle_path.as_deref().unwrap_or("?")));
+    begin_switch(k, next, None, Some(stream));
+}
+
+/// Starts a host switch already decided on: a blue-green swap when a host is up, else the next
+/// start runs the new build. `stream`, when there is one, is answered once it is under way.
+pub(super) fn begin_switch(k: Arc<Keeper>, next: BuildSource, keeper_message: Option<String>, mut stream: Option<&mut UnixStream>) {
     let blue_green = {
         let Ok(mut st) = k.state.lock() else { return };
-        if st.swapping {
+        // A stream means a fresh request; without one the caller (a keeper move) already holds it
+        if st.swapping && stream.is_some() {
             drop(st);
-            return reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+            if let Some(s) = stream.as_mut() {
+                reply(s, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+            }
+            return;
         }
         // Only a host that is up has anything to hand over; otherwise the next start simply runs
         // the new build
@@ -652,21 +837,111 @@ fn switch(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
         if up {
             st.swapping = true;
         } else {
+            st.swapping = false;
             st.desired = next.clone();
+            if let Some(m) = &keeper_message {
+                // Nothing to swap, but the window should still hear why the keeper stayed behind
+                st.swap = Some(SwapView {
+                    phase: Phase::Done,
+                    target: next.clone(),
+                    from: st.source.clone(),
+                    message: None,
+                    rolled_back: false,
+                    cut: Vec::new(),
+                    keeper_message: Some(m.clone()),
+                    started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                });
+                k.broadcast(&mut st);
+            }
         }
         up
     };
-    reply(stream, &json!({ "ok": true }));
+    if let Some(s) = stream {
+        reply(s, &json!({ "ok": true }));
+    }
     if blue_green {
-        thread::spawn(move || swap_to(k, next));
+        thread::spawn(move || swap_to(k, next, keeper_message));
     } else if !k.sup.bounce() {
         // A host still starting is bounced into the new build; one that had given up starts fresh
         k.sup.restart(sink(&k), launcher(&k));
     }
 }
 
+/**
+ * `upgrade`: hands the keeper over to the keeper at `exe` (of build `source`), leaving the host
+ * alone (#280 step 4). The app's switch reaches the same thing through `switch` with `keeper`; this
+ * one exists for a keeper that is behind while the host is not, and for the integration test.
+ */
+fn upgrade(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
+    let Some(exe) = req.get("exe").and_then(Value::as_str).map(PathBuf::from) else {
+        return reply(stream, &json!({ "ok": false, "error": "upgrade needs exe" }));
+    };
+    let asked: Option<BuildSource> = req.get("source").cloned().and_then(|s| serde_json::from_value(s).ok());
+    let target = match asked.as_ref().and_then(|a| a.host_dir.clone()) {
+        Some(dir) if Path::new(&dir).join("main.mjs").is_file() => {
+            let a = asked.unwrap_or_default();
+            BuildSource::from_host_dir(Path::new(&dir), a.bundle_path, a.version)
+        }
+        _ => return reply(stream, &json!({ "ok": false, "error": "upgrade needs a source with a host folder" })),
+    };
+    {
+        let Ok(mut st) = k.state.lock() else { return };
+        if st.swapping {
+            drop(st);
+            return reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+        }
+        st.swapping = true;
+    }
+    reply(stream, &json!({ "ok": true }));
+    thread::spawn(move || move_keeper(k, exe, target, false));
+}
+
+/**
+ * Hands this keeper over to the keeper at `exe` (#280 step 4), then, when `switch_host` and the
+ * host is of another build, has the new keeper swap the host too. On success this never returns:
+ * the process exits once the new keeper has committed.
+ *
+ * If the handoff fails, this keeper carries on as it was (`handoff::give` rolled it back), and a
+ * host switch that was asked for still runs here, under this keeper: the window is told the keeper
+ * stayed behind and why.
+ */
+fn move_keeper(k: Arc<Keeper>, exe: PathBuf, target: BuildSource, switch_host: bool) {
+    let (from, host_differs) = match k.state.lock() {
+        Ok(st) => (st.source.clone(), st.source.as_ref().map(|s| !s.same_build(&target)).unwrap_or(true)),
+        Err(_) => return,
+    };
+    let then_switch = (switch_host && host_differs).then(|| target.clone());
+    let started_at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let view = |phase: Phase, message: Option<String>, keeper_message: Option<String>| SwapView {
+        phase,
+        target: target.clone(),
+        from: from.clone(),
+        message,
+        rolled_back: false,
+        cut: Vec::new(),
+        keeper_message,
+        started_at,
+    };
+    if let Ok(mut st) = k.state.lock() {
+        st.swap = Some(view(Phase::HandingOver, None, None));
+        k.broadcast(&mut st);
+    }
+    let Err(why) = handoff::give(&k, &exe, &target, then_switch) else { return };
+    log(&format!("the keeper stays on its build: {why}"));
+    if switch_host && host_differs {
+        // The host switch still happens, under this keeper
+        begin_switch(k, target, Some(why), None);
+        return;
+    }
+    if let Ok(mut st) = k.state.lock() {
+        st.swapping = false;
+        st.swap = Some(view(Phase::Failed, Some(format!("could not hand over to the new build's keeper: {why}")), Some(why)));
+        k.broadcast(&mut st);
+    }
+}
+
 /// Runs a blue-green swap (`swap.rs`) and applies its outcome to the keeper's state.
-fn swap_to(k: Arc<Keeper>, next: BuildSource) {
+pub(super) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_message: Option<String>) {
     let (from, current_copy) = match k.state.lock() {
         Ok(mut st) => {
             st.drained = None;
@@ -682,6 +957,7 @@ fn swap_to(k: Arc<Keeper>, next: BuildSource) {
         message: None,
         rolled_back: false,
         cut: Vec::new(),
+        keeper_message: keeper_message.clone(),
         started_at,
     };
     let show = |v: SwapView| {

@@ -20,7 +20,7 @@ pub struct Spawned {
     pub err: Option<OwnedFd>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExitStatus {
     pub code: Option<i32>,
     pub signal: Option<i32>,
@@ -251,11 +251,18 @@ pub fn exists(pid: i32) -> bool {
  *
  * - **macOS: kqueue `EVFILT_PROC` with `NOTE_EXIT | NOTE_EXITSTATUS`.** It works for a process
  *   that is not our child and still returns the exit status (measured in #280: status `7 << 8` for
- *   `exit 7` seen by a non-parent). In step 2 the keeper is every child's parent, but a keeper that
- *   takes its children over from another keeper (step 4) will not be, so the watch is the one that
- *   keeps working then. `waitpid` still reaps what is ours.
- * - **Linux: a `pidfd` per child**, readable once the child exits, then `waitpid` (the keeper is
- *   the parent in step 2). Kernels without `pidfd_open` fall back to polling `waitpid`.
+ *   `exit 7` seen by a non-parent). A keeper that took its children over from another keeper
+ *   (step 4) is not their parent, so this is the watch that keeps working then. `waitpid` still
+ *   reaps what is ours. **Registering on a zombie fails with `ESRCH`** (measured 2026-10-04 on
+ *   Darwin 27: `EV_ERROR`, data 3, for a non-child that had exited but was not reaped), so a child
+ *   that exited in the moment between the outgoing keeper freezing and this one registering is
+ *   polled instead, and its status comes from the outgoing keeper, which reaps it (`know`).
+ * - **Linux: a `pidfd` per child**, readable once the child exits. Ours: `waitpid` reaps it and
+ *   gives the status. Not ours (taken over in step 4): the parent was the outgoing keeper, and once
+ *   that exits init (or the nearest subreaper) reaps the child, so `waitpid` cannot; the status is
+ *   read from `/proc/<pid>/stat` while the zombie is still there, else it is unknown. Linux has no
+ *   non-parent exit status before `PIDFD_GET_INFO` (6.15). Kernels without `pidfd_open` fall back
+ *   to polling.
  * - Elsewhere: polling `waitpid`.
  *
  * The watch's descriptors join the reactor's `poll`; `collect` is called when one is readable and
@@ -273,6 +280,9 @@ pub struct ExitWatch {
     /// Children whose exit was reported before `waitpid` could collect them: reaped on a later
     /// pass, so no zombie is left behind.
     unreaped: Vec<i32>,
+    /// Exit statuses learned some other way: the outgoing keeper reaped these children as it
+    /// handed over (step 4). Used when this watch can only tell that a child is gone.
+    known: HashMap<i32, ExitStatus>,
 }
 
 impl ExitWatch {
@@ -294,7 +304,19 @@ impl ExitWatch {
             polled: Vec::new(),
             ready: Vec::new(),
             unreaped: Vec::new(),
+            known: HashMap::new(),
         })
+    }
+
+    /// An exit status reported by the outgoing keeper, which was this child's parent and reaped
+    /// it (#280 step 4). Used once the watch sees the child gone and cannot learn the status
+    /// itself.
+    pub fn know(&mut self, pid: i32, st: ExitStatus) {
+        self.known.insert(pid, st);
+    }
+
+    fn unknown_status(&mut self, pid: i32) -> ExitStatus {
+        self.known.remove(&pid).unwrap_or(ExitStatus { code: None, signal: None })
     }
 
     pub fn watch(&mut self, pid: i32) {
@@ -385,9 +407,24 @@ impl ExitWatch {
         {
             let pids: Vec<i32> = self.pidfds.keys().copied().collect();
             for pid in pids {
-                if let Some(st) = try_reap(pid) {
-                    self.pidfds.remove(&pid);
-                    out.push((pid, st));
+                match reap(pid) {
+                    Reap::Reaped(st) => {
+                        self.pidfds.remove(&pid);
+                        out.push((pid, st));
+                    }
+                    Reap::Running => {}
+                    // Taken over from another keeper: the pidfd says it has gone; init reaps it.
+                    // Without this the readable pidfd would wake every poll forever.
+                    Reap::NotOurs => {
+                        if self.pidfds.get(&pid).map(|f| pidfd_exited(f.as_raw_fd())).unwrap_or(true) {
+                            self.pidfds.remove(&pid);
+                            let st = match self.known.remove(&pid) {
+                                Some(st) => st,
+                                None => proc_exit_status(pid).unwrap_or(ExitStatus { code: None, signal: None }),
+                            };
+                            out.push((pid, st));
+                        }
+                    }
                 }
             }
         }
@@ -396,12 +433,46 @@ impl ExitWatch {
         for pid in polled {
             match try_reap(pid) {
                 Some(st) => out.push((pid, st)),
-                None if !exists(pid) => out.push((pid, ExitStatus { code: None, signal: None })),
+                None if !exists(pid) => {
+                    let st = self.unknown_status(pid);
+                    out.push((pid, st))
+                }
                 None => self.polled.push(pid),
             }
         }
         out
     }
+}
+
+/// Whether a pidfd reports its process gone (readable), without waiting.
+#[cfg(target_os = "linux")]
+fn pidfd_exited(fd: RawFd) -> bool {
+    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    // SAFETY: one valid pollfd, no wait.
+    unsafe { libc::poll(&mut p, 1, 0) == 1 }
+}
+
+/// A zombie's exit status from `/proc/<pid>/stat` (field 52, `exit_code`, the raw wait status;
+/// Linux 3.5+). Only a process in state `Z` qualifies: anything else under that pid is not the
+/// child that exited.
+#[cfg(target_os = "linux")]
+fn proc_exit_status(pid: i32) -> Option<ExitStatus> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_proc_exit(&stat)
+}
+
+/// The parsing half of `proc_exit_status`. The command name (field 2) may hold spaces and
+/// parentheses, so fields are counted from the last `)`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_proc_exit(stat: &str) -> Option<ExitStatus> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    // fields[0] is field 3 (state); field 52 is fields[49].
+    if fields.first() != Some(&"Z") {
+        return None;
+    }
+    let raw: i32 = fields.get(49)?.parse().ok()?;
+    Some(ExitStatus::from_wait_status(raw))
 }
 
 /// Looks a program up the way a shell would, on the PATH the host passed for the child. `Command`
@@ -499,6 +570,48 @@ mod tests {
         assert!(found == "/usr/bin/sh" || found == "/bin/sh", "{found}");
         assert_eq!(resolve_program("/bin/sh", &HashMap::new()), "/bin/sh");
         assert_eq!(resolve_program("no-such-program-cc", &env()), "no-such-program-cc");
+    }
+
+    /// After a keeper handoff the keeper is not its children's parent. The watch must still see
+    /// such a child exit (macOS: kqueue, with its status; Linux: pidfd, status from /proc while the
+    /// zombie lasts), and must not spin on it.
+    #[test]
+    fn the_exit_of_a_process_that_is_not_our_child_is_seen() {
+        // The shell starts a sleeper and exits at once: the sleeper is reparented away from us.
+        let out = Command::new("/bin/sh").args(["-c", "sleep 1 >/dev/null 2>&1 & echo $!"]).output().unwrap();
+        let pid: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        let mut w = ExitWatch::new().unwrap();
+        w.watch(pid);
+        assert_eq!(reap(pid), Reap::NotOurs, "not our child");
+        assert!(w.collect().is_empty(), "still running");
+        let st = wait_exit(&mut w, pid);
+        if cfg!(target_os = "macos") {
+            assert_eq!(st, ExitStatus { code: Some(0), signal: None }, "kqueue reports a non-child's status");
+        } else {
+            assert!(st == ExitStatus { code: Some(0), signal: None } || st == ExitStatus { code: None, signal: None }, "{st:?}");
+        }
+        assert!(w.collect().is_empty() && !w.polling(), "reported once, and nothing left to watch");
+    }
+
+    #[test]
+    fn a_zombie_exit_status_is_read_from_proc_stat() {
+        // `exit 7` is wait status 7 << 8 = 1792; a name with spaces and a ')' does not shift fields.
+        let mut f: Vec<String> = vec!["Z".into()];
+        f.extend((4..=51).map(|i| i.to_string()));
+        f.push("1792".into());
+        let zombie = format!("42 (we ird) name) {}", f.join(" "));
+        assert_eq!(parse_proc_exit(&zombie), Some(ExitStatus { code: Some(7), signal: None }));
+        assert_eq!(parse_proc_exit(&zombie.replacen(") Z ", ") S ", 1)), None, "only a zombie is the exited child");
+    }
+
+    /// The handoff (#280 step 4): a child registered after it had already exited, by a watch that
+    /// is not its parent, is reported with the status the outgoing keeper reaped.
+    #[test]
+    fn a_status_from_the_outgoing_keeper_completes_a_polled_child() {
+        let mut w = ExitWatch::new().unwrap();
+        w.polled.push(999_999);
+        w.know(999_999, ExitStatus { code: Some(3), signal: None });
+        assert_eq!(w.collect(), vec![(999_999, ExitStatus { code: Some(3), signal: None })]);
     }
 
     #[test]

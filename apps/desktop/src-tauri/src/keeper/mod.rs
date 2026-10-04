@@ -24,10 +24,17 @@
 //!   - **the blue-green swap** (`swap.rs`): `switch` starts the next build in standby next to the
 //!     running host, drains the running one, and hands the front door over, instead of stopping
 //!     the host and cutting every turn.
+//!
+//! Step 4 (`handoff/`) replaces the keeper itself: the new build's keeper is started from the new
+//! bundle's executable, the running one freezes and passes it every descriptor it owns (the
+//! sockets, the host's pipes, every child's pipes and pty, every relayed connection) with its
+//! state, and exits once the new one has rebuilt everything. Nothing is restarted and no address
+//! changes.
 
 pub mod children;
 pub mod client;
 pub mod front_door;
+pub mod handoff;
 pub mod server;
 pub mod source;
 pub mod swap;
@@ -154,6 +161,11 @@ pub struct KeeperInfo {
     /// Seconds since the epoch.
     pub started_at: u64,
     pub data_dir: String,
+    /// The build this keeper's own executable is from: the build the app that launched it (or the
+    /// handoff that started it) named with `--host-source` (#280 step 4). Absent from keepers that
+    /// predate step 4, which cannot hand themselves over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<BuildSource>,
 }
 
 /// Everything the idle rule looks at, so the rule can be tested without a clock.

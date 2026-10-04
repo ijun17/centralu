@@ -11,10 +11,18 @@
 //! did: five consecutive failures, a 30 s stable-uptime reset, and an immediate stop when the
 //! host says another owner holds the data folder (#184). Only where the status goes differs, and
 //! that is the `StatusSink`.
+//!
+//! The keeper's own upgrade (#280 step 4) adds two things: a host's stdout is read by a
+//! `HostOut` that can be stopped between lines and handed over with what it had read, and a
+//! supervisor can take over a host **another keeper started** (`adopt_foreign`): it holds the
+//! host's pipes but is not its parent, so it learns of the end from stdout closing and stops it by
+//! pid, as it already did.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
+#[cfg(not(unix))]
+use std::io::BufRead;
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -82,11 +90,17 @@ pub struct Adopted {
     pub child: Child,
     pub lines: Lines,
     pub info: HostInfo,
+    /// The reader behind `lines`, so this host can be frozen for a keeper handoff later.
+    #[cfg(unix)]
+    pub gate: Option<Arc<LineGate>>,
 }
 
 #[derive(Default)]
 struct Inner {
-    child: Option<Child>,
+    child: Option<HostProc>,
+    /// The running host's stdout reader, when it can be paused (unix).
+    #[cfg(unix)]
+    gate: Option<Arc<LineGate>>,
     info: Option<HostInfo>,
     status_text: Option<String>,
     shutting_down: bool,
@@ -201,6 +215,74 @@ impl Supervisor {
         self.inner.lock().ok()?.child.as_ref().map(|c| c.id())
     }
 
+    /**
+     * Stops reading the running host's stdout for a keeper handoff (#280 step 4) and returns what
+     * the next keeper needs to go on supervising it. `Ok(None)` when no host is running (it gave
+     * up): there is nothing to hand over. Refused while a host is starting, restarting, being
+     * stopped or swapped: those are moments with a second process or a half-read ready line.
+     */
+    #[cfg(unix)]
+    pub fn freeze(&self, wait: Duration) -> Result<Option<HostFreeze>, String> {
+        let gate = {
+            let inner = self.inner.lock().map_err(|_| "supervisor lock poisoned")?;
+            if inner.shutting_down || inner.bouncing || inner.handing_over {
+                return Err("the host is being stopped or swapped".into());
+            }
+            if !inner.running {
+                return Ok(None);
+            }
+            match (&inner.child, &inner.gate, &inner.info) {
+                (Some(_), Some(g), Some(_)) => g.clone(),
+                _ => return Err("the host is starting or restarting".into()),
+            }
+        };
+        let buffered = gate.freeze(wait)?;
+        let frozen = (|| {
+            let inner = self.inner.lock().map_err(|_| "supervisor lock poisoned".to_string())?;
+            let child = inner.child.as_ref().ok_or("the host is gone")?;
+            Ok::<_, String>(HostFreeze {
+                pid: child.id(),
+                stdin: child.dup_stdin().map_err(|e| e.to_string())?,
+                stdout: gate.fd().try_clone_to_owned().map_err(|e| e.to_string())?,
+                buffered,
+                info: inner.info.clone(),
+            })
+        })();
+        if frozen.is_err() {
+            gate.thaw();
+        }
+        frozen.map(Some)
+    }
+
+    /// Resumes reading the host's stdout: the handoff was rolled back.
+    #[cfg(unix)]
+    pub fn thaw(&self) {
+        if let Some(g) = self.inner.lock().ok().and_then(|i| i.gate.clone()) {
+            g.thaw();
+        }
+    }
+
+    /**
+     * Takes over a host another keeper started and handed over (#280 step 4). From here it is
+     * supervised like any other: its later lines reach the sink, and when it dies the next host is
+     * started with `launcher` (as this supervisor's own child) by the usual rules.
+     */
+    #[cfg(unix)]
+    pub fn adopt_foreign(&self, h: ForeignAdopt, sink: Arc<dyn StatusSink>, launcher: Launcher) -> Result<(), String> {
+        if !self.claim(true) {
+            return Err("the supervisor is already running a host".into());
+        }
+        let out = HostOut::new(h.stdout, h.buffered);
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_output.clear();
+            inner.child = Some(HostProc::Foreign { pid: h.pid, stdin: Some(std::fs::File::from(h.stdin)) });
+            inner.gate = Some(out.gate());
+            inner.info = Some(h.info.clone());
+        }
+        self.watch(sink, launcher, Some((Box::new(out), h.info)));
+        Ok(())
+    }
+
     /// Launches the host and starts the watcher thread. Returns false if one is already running.
     pub fn start(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) -> bool {
         if self.claim(false) {
@@ -243,8 +325,12 @@ impl Supervisor {
         }
         if let Ok(mut inner) = self.inner.lock() {
             inner.last_output.clear();
-            inner.child = Some(host.child);
+            inner.child = Some(HostProc::Own(host.child));
             inner.info = Some(host.info.clone());
+            #[cfg(unix)]
+            {
+                inner.gate = host.gate.clone();
+            }
         }
         self.watch(sink, launcher, Some((host.lines, host.info)));
         Ok(())
@@ -269,7 +355,7 @@ impl Supervisor {
         let stdin = inner
             .child
             .as_mut()
-            .and_then(|c| c.stdin.as_mut())
+            .and_then(|c| c.stdin())
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotConnected, "no host is running"))?;
         stdin.write_all(format!("{line}\n").as_bytes())?;
         stdin.flush()
@@ -280,7 +366,7 @@ impl Supervisor {
     #[cfg_attr(not(unix), allow(dead_code))]
     pub fn stop_current(&self) -> bool {
         let Some(pid) = self.pid() else { return false };
-        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.stdin.take()));
+        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.take_stdin()));
         stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
         true
     }
@@ -399,10 +485,23 @@ impl Supervisor {
         let mut child = spawn_host(launch)?;
         let stdout = child.stdout.take().ok_or("could not open stdout")?;
 
+        // unix: a reader that can be paused for a keeper handoff (#280 step 4)
+        #[cfg(unix)]
+        let (lines, gate): (Lines, _) = {
+            let out = HostOut::new(stdout.into(), Vec::new());
+            let gate = out.gate();
+            (Box::new(out), Some(gate))
+        };
+        #[cfg(not(unix))]
+        let lines: Lines = Box::new(BufReader::new(stdout).lines().map_while(Result::ok));
         if let Ok(mut inner) = self.inner.lock() {
-            inner.child = Some(child);
+            inner.child = Some(HostProc::Own(child));
+            #[cfg(unix)]
+            {
+                inner.gate = gate;
+            }
         }
-        Ok(self.pump(sink, Box::new(BufReader::new(stdout).lines().map_while(Result::ok))))
+        Ok(self.pump(sink, lines))
     }
 
     /// Follows a running host's stdout to its end, then reaps it and returns its exit code.
@@ -443,9 +542,13 @@ impl Supervisor {
         let mut child = {
             let mut guard = self.inner.lock().ok()?;
             guard.info = None;
+            #[cfg(unix)]
+            {
+                guard.gate = None;
+            }
             guard.child.take()
         };
-        child.as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code())
+        child.as_mut().and_then(|c| c.wait())
     }
 
     fn set_error(&self, msg: &str) {
@@ -484,7 +587,7 @@ impl Supervisor {
             },
             Err(_) => return false,
         };
-        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.stdin.take()));
+        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.take_stdin()));
         stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
         true
     }
@@ -504,9 +607,9 @@ impl Supervisor {
         };
         if let Some(mut child) = child {
             let pid = child.id();
-            let stdin = child.stdin.take();
-            stop_pid_gracefully(pid, stdin, || matches!(child.try_wait(), Ok(Some(_))));
-            let _ = child.kill();
+            let stdin = child.take_stdin();
+            stop_pid_gracefully(pid, stdin, || child.has_exited());
+            child.kill();
             let _ = child.wait();
         }
     }
@@ -564,7 +667,7 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
 #[cfg_attr(not(unix), allow(dead_code))]
 pub fn stop_child(child: &mut Child) {
     let pid = child.id();
-    let stdin = child.stdin.take();
+    let stdin = child.stdin.take().map(|s| Box::new(s) as Box<dyn Send>);
     stop_pid_gracefully(pid, stdin, || matches!(child.try_wait(), Ok(Some(_))));
     let _ = child.kill();
     let _ = child.wait();
@@ -587,7 +690,7 @@ pub fn stop_child(child: &mut Child) {
  * `host.lock` (#14). On unix stdin is kept open until the end, so EOF does not race the signal
  * into a second `shutdown()`.
  */
-fn stop_pid_gracefully(pid: u32, stdin: Option<ChildStdin>, mut gone: impl FnMut() -> bool) {
+fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, mut gone: impl FnMut() -> bool) {
     #[cfg(unix)]
     let _stdin_until_the_end = stdin;
     #[cfg(not(unix))]
@@ -608,6 +711,283 @@ fn stop_pid_gracefully(pid: u32, stdin: Option<ChildStdin>, mut gone: impl FnMut
     if cfg!(unix) || !ended {
         kill_group(pid);
     }
+}
+
+
+/**
+ * A host's stdout, one line at a time, that can be **stopped between two lines** and handed to
+ * another keeper (#280 step 4) with every byte it had read but not yet delivered.
+ *
+ * A `BufReader` would read ahead into a buffer nobody else can see, and a thread blocked in
+ * `read` cannot be told to stop. So the bytes live in a buffer shared with whoever freezes it, and
+ * the reading thread polls with a short timeout and parks when asked. The next keeper starts its
+ * own reader with those bytes first: no status line is lost or seen twice.
+ */
+#[cfg(unix)]
+pub struct LineGate {
+    st: Mutex<GateState>,
+    cv: std::sync::Condvar,
+    fd: std::os::fd::OwnedFd,
+}
+
+#[cfg(unix)]
+#[derive(Default)]
+struct GateState {
+    /// Read from the host and not yet returned as a line.
+    buf: Vec<u8>,
+    frozen: bool,
+    parked: bool,
+    eof: bool,
+}
+
+#[cfg(unix)]
+impl LineGate {
+    /// Stops the reader at its next line boundary and returns the bytes it holds. Refused if the
+    /// reader does not come back within `wait` (it is inside the sink, which should not happen).
+    pub fn freeze(&self, wait: Duration) -> Result<Vec<u8>, String> {
+        let deadline = Instant::now() + wait;
+        let mut st = self.st.lock().map_err(|_| "host reader poisoned")?;
+        st.frozen = true;
+        while !st.parked {
+            if st.eof {
+                st.frozen = false;
+                return Err("the host has exited".into());
+            }
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                st.frozen = false;
+                self.cv.notify_all();
+                return Err("the host's output reader did not pause in time".into());
+            };
+            st = self.cv.wait_timeout(st, left).map_err(|_| "host reader poisoned")?.0;
+        }
+        Ok(st.buf.clone())
+    }
+
+    pub fn thaw(&self) {
+        if let Ok(mut st) = self.st.lock() {
+            st.frozen = false;
+        }
+        self.cv.notify_all();
+    }
+
+    pub fn fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        use std::os::fd::AsFd;
+        self.fd.as_fd()
+    }
+}
+
+/// What `HostOut::next_line` found.
+#[cfg(unix)]
+#[derive(Debug, PartialEq)]
+pub enum NextLine {
+    Line(String),
+    Timeout,
+    End,
+}
+
+#[cfg(unix)]
+pub struct HostOut(Arc<LineGate>);
+
+#[cfg(unix)]
+impl HostOut {
+    /// A reader over the host's stdout. `initial` is what a previous keeper had read and not yet
+    /// delivered.
+    pub fn new(fd: std::os::fd::OwnedFd, initial: Vec<u8>) -> HostOut {
+        HostOut(Arc::new(LineGate {
+            st: Mutex::new(GateState { buf: initial, ..Default::default() }),
+            cv: std::sync::Condvar::new(),
+            fd,
+        }))
+    }
+
+    pub fn gate(&self) -> Arc<LineGate> {
+        self.0.clone()
+    }
+
+    /// The next line, waiting until `deadline` (forever with None).
+    pub fn next_line(&self, deadline: Option<Instant>) -> NextLine {
+        use std::os::fd::AsRawFd;
+        let g = &self.0;
+        loop {
+            {
+                let Ok(mut st) = g.st.lock() else { return NextLine::End };
+                if st.frozen {
+                    st.parked = true;
+                    g.cv.notify_all();
+                    while st.frozen {
+                        st = match g.cv.wait(st) {
+                            Ok(s) => s,
+                            Err(_) => return NextLine::End,
+                        };
+                    }
+                    st.parked = false;
+                }
+                if let Some(i) = st.buf.iter().position(|&b| b == b'\n') {
+                    let mut line: Vec<u8> = st.buf.drain(..=i).collect();
+                    line.pop();
+                    if line.last() == Some(&b'\r') {
+                        line.pop();
+                    }
+                    return NextLine::Line(String::from_utf8_lossy(&line).into_owned());
+                }
+                if st.eof {
+                    if st.buf.is_empty() {
+                        return NextLine::End;
+                    }
+                    let rest = std::mem::take(&mut st.buf);
+                    return NextLine::Line(String::from_utf8_lossy(&rest).into_owned());
+                }
+            }
+            let mut wait_ms = 100;
+            if let Some(d) = deadline {
+                let Some(left) = d.checked_duration_since(Instant::now()) else { return NextLine::Timeout };
+                wait_ms = wait_ms.min(left.as_millis() as i32 + 1);
+            }
+            let mut p = libc::pollfd { fd: g.fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            // SAFETY: one valid pollfd.
+            if unsafe { libc::poll(&mut p, 1, wait_ms) } <= 0 {
+                continue;
+            }
+            let mut tmp = [0u8; 16 * 1024];
+            // SAFETY: tmp is valid for its length.
+            let n = unsafe { libc::read(g.fd.as_raw_fd(), tmp.as_mut_ptr() as *mut libc::c_void, tmp.len()) };
+            let Ok(mut st) = g.st.lock() else { return NextLine::End };
+            if n > 0 {
+                st.buf.extend_from_slice(&tmp[..n as usize]);
+            } else if n == 0 {
+                st.eof = true;
+            } else {
+                let e = std::io::Error::last_os_error();
+                if !matches!(e.kind(), std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock) {
+                    st.eof = true;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Iterator for HostOut {
+    type Item = String;
+    fn next(&mut self) -> Option<String> {
+        match self.next_line(None) {
+            NextLine::Line(l) => Some(l),
+            _ => None,
+        }
+    }
+}
+
+/// A running host frozen for a keeper handoff (#280 step 4): what the next keeper needs to go on
+/// supervising it.
+#[cfg(unix)]
+pub struct HostFreeze {
+    pub pid: u32,
+    pub stdin: std::os::fd::OwnedFd,
+    pub stdout: std::os::fd::OwnedFd,
+    /// Read from its stdout and not yet delivered.
+    pub buffered: Vec<u8>,
+    pub info: Option<HostInfo>,
+}
+
+/// A host another keeper started, handed over at a commit (#280 step 4).
+#[cfg(unix)]
+pub struct ForeignAdopt {
+    pub pid: u32,
+    pub stdin: std::os::fd::OwnedFd,
+    pub stdout: std::os::fd::OwnedFd,
+    pub buffered: Vec<u8>,
+    pub info: HostInfo,
+}
+
+/// The host process a supervisor holds: one it started, or (unix) one another keeper started and
+/// handed over, which it is not the parent of.
+pub enum HostProc {
+    Own(Child),
+    #[cfg(unix)]
+    Foreign { pid: u32, stdin: Option<std::fs::File> },
+}
+
+impl HostProc {
+    pub fn id(&self) -> u32 {
+        match self {
+            HostProc::Own(c) => c.id(),
+            #[cfg(unix)]
+            HostProc::Foreign { pid, .. } => *pid,
+        }
+    }
+
+    fn stdin(&mut self) -> Option<&mut dyn Write> {
+        match self {
+            HostProc::Own(c) => c.stdin.as_mut().map(|s| s as &mut dyn Write),
+            #[cfg(unix)]
+            HostProc::Foreign { stdin, .. } => stdin.as_mut().map(|s| s as &mut dyn Write),
+        }
+    }
+
+    fn take_stdin(&mut self) -> Option<Box<dyn Send>> {
+        match self {
+            HostProc::Own(c) => c.stdin.take().map(|s| Box::new(s) as Box<dyn Send>),
+            #[cfg(unix)]
+            HostProc::Foreign { stdin, .. } => stdin.take().map(|s| Box::new(s) as Box<dyn Send>),
+        }
+    }
+
+    #[cfg(unix)]
+    fn dup_stdin(&self) -> std::io::Result<std::os::fd::OwnedFd> {
+        use std::os::fd::AsFd;
+        let missing = || std::io::Error::new(std::io::ErrorKind::NotConnected, "the host's stdin is closed");
+        match self {
+            HostProc::Own(c) => c.stdin.as_ref().ok_or_else(missing)?.as_fd().try_clone_to_owned(),
+            HostProc::Foreign { stdin, .. } => stdin.as_ref().ok_or_else(missing)?.as_fd().try_clone_to_owned(),
+        }
+    }
+
+    fn has_exited(&mut self) -> bool {
+        match self {
+            HostProc::Own(c) => matches!(c.try_wait(), Ok(Some(_))),
+            #[cfg(unix)]
+            HostProc::Foreign { pid, .. } => !pid_alive(*pid),
+        }
+    }
+
+    fn kill(&mut self) {
+        match self {
+            HostProc::Own(c) => {
+                let _ = c.kill();
+            }
+            #[cfg(unix)]
+            HostProc::Foreign { pid, .. } => {
+                if pid_alive(*pid) {
+                    // SAFETY: a plain syscall; the pid is the host we supervise and is still there.
+                    unsafe { libc::kill(*pid as i32, libc::SIGKILL) };
+                }
+            }
+        }
+    }
+
+    /// Waits for it to end. A foreign host is not ours to reap: its parent (init, once the keeper
+    /// that started it has gone) does, and its exit code is not ours to read.
+    fn wait(&mut self) -> Option<i32> {
+        match self {
+            HostProc::Own(c) => c.wait().ok().and_then(|s| s.code()),
+            #[cfg(unix)]
+            HostProc::Foreign { pid, .. } => {
+                let end = Instant::now() + Duration::from_secs(10);
+                while pid_alive(*pid) && Instant::now() < end {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                None
+            }
+        }
+    }
+}
+
+/// Whether a process exists and is not a zombie waiting for someone else to reap it.
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks.
+    let rc = unsafe { libc::kill(pid as i32, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// Clears `running` when the watcher thread ends. There are several `return` points, so this is
@@ -1137,6 +1517,42 @@ mod tests {
         assert_eq!(backoff(1), Duration::from_millis(400));
         assert_eq!(backoff(2), Duration::from_millis(800));
         assert_eq!(backoff(9), Duration::from_millis(5000));
+    }
+
+    /// The keeper handoff (#280 step 4): a host's stdout reader stops between two lines and hands
+    /// over every byte it read but did not deliver, the half line included; while frozen it reads
+    /// nothing more, and a thaw carries on where it stopped.
+    #[cfg(unix)]
+    #[test]
+    fn a_frozen_host_reader_hands_over_what_it_read_and_stops_between_lines() {
+        use std::os::unix::net::UnixStream;
+        let (r, mut w) = UnixStream::pair().unwrap();
+        w.write_all(b"one\ntwo\nfour-five\nthr").unwrap();
+        let out = HostOut::new(r.into(), Vec::new());
+        let gate = out.gate();
+        // The supervisor's thread: it hands each line on and waits until it is taken (a sink)
+        let (tx, rx) = std::sync::mpsc::sync_channel::<String>(0);
+        thread::spawn(move || {
+            for line in out {
+                if tx.send(line).is_err() {
+                    return;
+                }
+            }
+        });
+        let t = Duration::from_secs(2);
+        assert_eq!(rx.recv_timeout(t).unwrap(), "one");
+        // The reader now holds "two" for the sink. The freeze is asked for, and lands once the
+        // sink takes it and the reader comes back for the next line.
+        let freezer = thread::spawn(move || (gate.freeze(Duration::from_secs(2)), gate));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(rx.recv_timeout(t).unwrap(), "two");
+        let (held, gate) = freezer.join().unwrap();
+        assert_eq!(held.unwrap(), b"four-five\nthr", "what the next keeper starts with: a whole line and a half one");
+        w.write_all(b"ee\n").unwrap();
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "nothing is delivered while frozen");
+        gate.thaw();
+        assert_eq!(rx.recv_timeout(t).unwrap(), "four-five");
+        assert_eq!(rx.recv_timeout(t).unwrap(), "three");
     }
 
     #[test]

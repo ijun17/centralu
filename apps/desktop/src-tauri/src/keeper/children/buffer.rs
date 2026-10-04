@@ -31,7 +31,7 @@ pub const RING_CAP: usize = 256 * 1024;
 /// An agent's stderr tail.
 pub const TAIL_CAP: usize = 256 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Policy {
     Lines { cap: usize },
     Ring { cap: usize },
@@ -215,6 +215,47 @@ impl OutBuf {
     pub fn drained(&self) -> bool {
         self.eof && self.cursor.max(self.base) >= self.end()
     }
+
+    /// Everything about this buffer except its bytes, which go separately (a blob in the keeper
+    /// handoff, #280 step 4): offsets are absolute, so the next keeper carries on exactly where
+    /// this one stopped, mid-line included.
+    pub fn save(&self) -> (BufState, Vec<u8>) {
+        (
+            BufState {
+                policy: self.policy,
+                base: self.base,
+                cursor: self.cursor,
+                line_start: self.line_start,
+                eof: self.eof,
+                dropped: self.dropped,
+            },
+            self.live().to_vec(),
+        )
+    }
+
+    pub fn restore(st: &BufState, data: Vec<u8>) -> OutBuf {
+        OutBuf {
+            policy: st.policy,
+            data,
+            head: 0,
+            base: st.base,
+            cursor: st.cursor,
+            line_start: st.line_start,
+            eof: st.eof,
+            dropped: st.dropped,
+        }
+    }
+}
+
+/// `OutBuf` without its bytes, as one keeper hands it to the next.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BufState {
+    pub policy: Policy,
+    pub base: u64,
+    pub cursor: u64,
+    pub line_start: u64,
+    pub eof: bool,
+    pub dropped: u64,
 }
 
 #[cfg(test)]
@@ -320,6 +361,24 @@ mod tests {
         b.sent(4);
         b.attached();
         assert_eq!(b.sendable(false), b"", "what was sent is not sent again");
+    }
+
+    /// The keeper handoff (#280 step 4): a buffer saved mid-line by one keeper and restored by
+    /// the next sends exactly what the first would have sent next, no byte twice and none lost.
+    #[test]
+    fn a_saved_buffer_carries_on_mid_line_in_the_next_keeper() {
+        let mut b = lines(1024);
+        b.push(b"one\ntwo-long-line\nthr");
+        b.sent(4 + 3); // "one\n" and "two" went to the reader
+        let (st, bytes) = b.save();
+        let mut c = OutBuf::restore(&st, bytes);
+        assert_eq!(c.sendable(false), b.sendable(false));
+        assert_eq!(c.sendable(false), b"-long-line\n");
+        c.reader_lost();
+        assert_eq!(c.sendable(false), b"two-long-line\n", "the line start survived the handoff");
+        c.sent(14);
+        c.push(b"ee\n");
+        assert_eq!(c.sendable(false), b"three\n");
     }
 
     #[test]
