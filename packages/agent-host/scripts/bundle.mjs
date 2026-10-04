@@ -184,7 +184,14 @@ mkdirSync(join(ptyDest, ptyNativeDir), { recursive: true })
 // Files are picked one by one. `build/Release` also holds node-gyp's intermediate output
 // (obj.target and the like), so copying it whole would drag tens of megabytes of object files into
 // the bundle.
-for (const file of ['pty.node', 'spawn-helper']) {
+//
+// Windows (#14): on Windows 10 1809 and later node-pty loads `conpty.node`, not `pty.node`
+// (lib/windowsPtyAgent.js picks ConPTY from build 18309), and `conpty_console_list.node` is what
+// lets it find a shell's console processes to end them. Shipping only `pty.node` (the winpty
+// binding) left the packaged terminal dead with "Failed to load native module: conpty.node".
+// `conpty/` (conpty.dll and OpenConsole.exe) and winpty's agent are only used with options we do
+// not pass (`useConptyDll`, or a Windows older than 1809), so they stay out.
+for (const file of ['pty.node', 'spawn-helper', 'conpty.node', 'conpty_console_list.node']) {
   const from = join(ptySrc, ptyNativeDir, file)
   if (existsSync(from)) cpSync(from, join(ptyDest, ptyNativeDir, file))
 }
