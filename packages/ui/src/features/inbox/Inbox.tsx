@@ -76,9 +76,9 @@ export function Inbox() {
         data-testid="inbox"
       >
         <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
-          <h2 className="text-[12px] font-medium text-ink">Waiting</h2>
-          <span className="readout text-[11px] text-ink-faint">{items.length}</span>
-          <span className="ml-auto flex items-center gap-1 text-[10px] text-ink-faint">
+          <h2 className="text-sm font-medium text-ink">Waiting</h2>
+          <span className="readout text-xs text-ink-faint">{items.length}</span>
+          <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd> Move
             <Kbd>↵</Kbd> Open
@@ -87,9 +87,9 @@ export function Inbox() {
         </header>
 
         {items.length === 0 ? (
-          <p className="px-4 py-10 text-center text-[13px] text-ink-muted" data-testid="inbox-empty">
+          <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">
             Nothing waiting
-            <span className="mt-1 block text-[11px] text-ink-faint">Finished agents collect here</span>
+            <span className="mt-1 block text-xs text-ink-faint">Finished agents collect here</span>
           </p>
         ) : (
           <ul className="max-h-[calc(56vh/var(--text-zoom))] overflow-y-auto">
@@ -106,14 +106,14 @@ export function Inbox() {
                   data-testid={`inbox-item-${it.id}`}
                 >
                   <StateDot state={it.state} />
-                  <span className={`truncate text-[13px] ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
+                  <span className={`truncate text-md ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
                     {it.name}
                   </span>
-                  <span className="truncate text-[11px] text-ink-faint">
+                  <span className="truncate text-xs text-ink-faint">
                     {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
                   </span>
                   <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                    <span className="text-[11px] text-ink-faint">
+                    <span className="text-xs text-ink-faint">
                       {it.state === 'waiting_approval'
                         ? 'Needs approval'
                         : it.state === 'error'
@@ -121,7 +121,7 @@ export function Inbox() {
                           : 'Waiting for input'}
                     </span>
                     {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
-                    <span className={`readout w-16 text-right text-[11px] ${waitingTone(it.waitingMs)}`}>
+                    <span className={`readout w-16 text-right text-xs ${waitingTone(it.waitingMs)}`}>
                       {formatWaiting(it.waitingMs)}
                     </span>
                   </span>

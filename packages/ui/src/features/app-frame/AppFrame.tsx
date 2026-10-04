@@ -498,12 +498,12 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
             {loading}
           </div>
         ) : (
-          <div className="px-3 py-2 text-[12px] text-ink-muted" data-testid="app-frame-loading">
+          <div className="px-3 py-2 text-sm text-ink-muted" data-testid="app-frame-loading">
             Loading app view…
           </div>
         ))}
       {phase === 'error' && !onFailed && (
-        <div className="rounded-md border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink-muted" role="alert" data-testid="app-frame-error">
+        <div className="rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink-muted" role="alert" data-testid="app-frame-error">
           This app view could not be shown: {error}
         </div>
       )}
@@ -519,13 +519,13 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         }}
       />
       {linkAsk && (
-        <div className="mt-1 flex items-center gap-2 rounded-md border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink" data-testid="app-frame-link-ask">
+        <div className="mt-1 flex items-center gap-2 rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink" data-testid="app-frame-link-ask">
           <span className="min-w-0 flex-1 truncate">
             This app wants to open <span className="readout text-ink-muted">{linkAsk.url}</span>
           </span>
           <button
             type="button"
-            className="rounded border border-line px-2 py-0.5 hover:bg-surface-hover"
+            className="rounded-md border border-line px-2 py-0.5 hover:bg-surface-hover"
             data-testid="app-frame-link-open"
             onClick={() => settleLink(true)}
           >
@@ -533,7 +533,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
           </button>
           <button
             type="button"
-            className="rounded px-2 py-0.5 text-ink-muted hover:bg-surface-hover"
+            className="rounded-md px-2 py-0.5 text-ink-muted hover:bg-surface-hover"
             data-testid="app-frame-link-cancel"
             onClick={() => settleLink(false)}
           >

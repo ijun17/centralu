@@ -176,7 +176,7 @@ export function Sidebar() {
       <OrchestratorButton />
       <GridButton />
       {ids.length === 0 ? (
-        <p className="px-4 py-6 text-xs leading-relaxed text-ink-faint">
+        <p className="px-4 py-6 text-sm leading-body text-ink-faint">
           No projects yet.
           <br />
           Start with <span className="text-ink-muted">Add project</span> below.
@@ -208,7 +208,7 @@ export function Sidebar() {
            * ink is by itself enough to make it the brightest thing on screen, and that
            * brightness itself means "here."
            */
-          className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors disabled:opacity-40 ${
+          className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors disabled:opacity-40 ${
             hint
               ? 'breathe border-ink-muted text-ink'
               : 'border-line text-ink-faint hover:border-line-strong hover:text-ink'
@@ -283,7 +283,7 @@ function OrchestratorButton() {
   return (
     <div className="px-2 pt-2">
       <button
-        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors ${
           active
             ? 'border-ink-faint/50 bg-surface-hover text-ink'
             : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
@@ -313,7 +313,7 @@ function OrchestratorButton() {
       >
         <CrownIcon />
         <span className="truncate font-medium tracking-tight">Orchestrator</span>
-        <span className="shrink-0 text-[10px] text-ink-faint" data-testid="orchestrator-experimental">
+        <span className="shrink-0 text-2xs text-ink-faint" data-testid="orchestrator-experimental">
           Evolving
         </span>
       </button>
@@ -351,11 +351,11 @@ function HomelessSessions() {
   if (homeless.length === 0) return null
   return (
     <div className="mt-1 space-y-0.5" data-testid="homeless-sessions">
-      <p className="px-2.5 text-[10px] uppercase text-ink-faint">No app</p>
+      <p className="px-2.5 text-2xs uppercase text-ink-faint">No app</p>
       {homeless.map((s) => (
         <button
           key={s.id}
-          className={`flex w-full items-center gap-2 rounded border-l-2 py-1 pl-2.5 pr-2 text-left text-[12px] transition-colors ${
+          className={`flex w-full items-center gap-2 rounded-md border-l-2 py-1 pl-2.5 pr-2 text-left text-sm transition-colors ${
             focused === s.id
               ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
               : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
@@ -401,7 +401,7 @@ function GridButton() {
   return (
     <div className="px-2 pb-1 pt-1.5">
       <button
-        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors ${
           active
             ? 'border-ink-faint/50 bg-surface-hover text-ink'
             : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
@@ -440,7 +440,7 @@ function GridButton() {
       >
         <GridIcon />
         <span className="truncate font-medium tracking-tight">Grid</span>
-        {panels.length > 0 && <span className="readout ml-auto text-[10px] text-ink-faint">{panels.length}</span>}
+        {panels.length > 0 && <span className="readout ml-auto text-2xs text-ink-faint">{panels.length}</span>}
       </button>
     </div>
   )
@@ -631,7 +631,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           testId={`project-tip-${project.name}`}
         >
           <button
-            className={`truncate text-left text-[13px] font-medium tracking-tight text-ink transition-colors ${
+            className={`truncate text-left text-md font-medium tracking-tight text-ink transition-colors ${
               selected ? '' : 'hover:text-ink-signal'
             }`}
             onClick={() => focusProject(projectId)}
@@ -670,7 +670,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             summary.length > 0 ? '' : 'ml-auto'
           } ${
             menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
-          } ${proposalHere ? 'breathe rounded text-ink' : ''}`}
+          } ${proposalHere ? 'breathe rounded-md text-ink' : ''}`}
           data-testid={`project-actions-${project.name}`}
           data-worktree-proposal={proposalHere || undefined}
         >
@@ -684,7 +684,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             aria-label={`Actions for ${project.name}`}
             onClick={() => setMenuOpen((v) => !v)}
             data-testid={`project-menu-${project.name}`}
-            className="flex items-center justify-center rounded p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
+            className="flex items-center justify-center rounded-md p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
           >
             <DotsIcon size={14} />
           </button>
@@ -786,7 +786,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         long name would run in underneath the buttons — text hidden under a button
                         is worse than text truncated.
                       */
-                      className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-[13px] transition-colors ${
+                      className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-md transition-colors ${
                         focused
                           ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
                           : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
@@ -807,7 +807,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */}
                       {s.merged && (
                         <span
-                          className="shrink-0 rounded border border-line px-1 text-[9px] leading-relaxed text-ink-faint"
+                          className="shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint"
                           data-testid={`merged-badge-${s.id}`}
                           title="Branch merged into the trunk — safe to clean up from the delete dialog"
                         >
@@ -821,7 +821,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */}
                       {s.pr && !s.merged && (
                         <span
-                          className="shrink-0 rounded border border-line px-1 text-[9px] leading-relaxed text-ink-faint"
+                          className="shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint"
                           data-testid={`pr-badge-${s.id}`}
                           title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}
                         >
@@ -876,7 +876,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                           setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
                         }}
                         data-testid={`session-menu-${s.id}`}
-                        className="flex items-center justify-center rounded p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
+                        className="flex items-center justify-center rounded-md p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
                       >
                         <DotsIcon size={14} />
                       </button>
@@ -1020,7 +1020,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}
         title={app.status.reason ?? app.info.description ?? undefined}
-        className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-[13px] transition-colors ${
+        className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-md transition-colors ${
           active ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >
@@ -1031,7 +1031,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         <span className="truncate">{app.title}</span>
         {hint && (
           <span
-            className={`readout ml-auto shrink-0 text-[10px] ${asking || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
+            className={`readout ml-auto shrink-0 text-2xs ${asking || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
             data-testid="app-row-hint"
             data-asking={asking || undefined}
           >
@@ -1062,7 +1062,7 @@ function UserApps() {
   return (
     <section className="border-b border-line/70 py-2.5" data-testid="user-apps">
       <header className="flex items-center gap-2 px-3">
-        <span className={`text-[13px] font-medium tracking-tight ${apps.length ? 'text-ink' : 'text-ink-faint'}`}>Your apps</span>
+        <span className={`text-md font-medium tracking-tight ${apps.length ? 'text-ink' : 'text-ink-faint'}`}>Your apps</span>
         <span className="-my-1 ml-auto shrink-0">
           <IconButton label="Import an app from a folder, a .zip, or a link" onClick={() => openImport()} testId="user-apps-import" align="right">
             <ImportIcon size={13} />
@@ -1100,20 +1100,20 @@ function TrustAsk({ project }: { project: ProjectInfo }) {
   const answer = useStore((s) => s.answerTrustAsk)
   return (
     <div
-      className="mx-3 mt-2 rounded border border-line bg-surface-raised px-2.5 py-2"
+      className="mx-3 mt-2 rounded-md border border-line bg-surface-raised px-2.5 py-2"
       role="group"
       aria-label={`Trust ${project.name}?`}
       data-testid={`trust-ask-${project.name}`}
     >
-      <p className="text-[12px] text-ink">Trust this project?</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+      <p className="text-sm text-ink">Trust this project?</p>
+      <p className="mt-1 text-xs leading-body text-ink-muted">
         Trusting lets this project&apos;s apps run and its settings apply. Trust it only if you trust the code in this
         folder.
       </p>
       <div className="mt-2 flex justify-end gap-2">
         <button
           type="button"
-          className="rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink"
+          className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink"
           onClick={() => void answer(false)}
           data-testid={`trust-ask-no-${project.name}`}
         >
@@ -1121,7 +1121,7 @@ function TrustAsk({ project }: { project: ProjectInfo }) {
         </button>
         <button
           type="button"
-          className="rounded border border-line bg-surface-floor px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
+          className="rounded-md border border-line bg-surface-floor px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
           onClick={() => void answer(true)}
           data-testid={`trust-ask-yes-${project.name}`}
         >
@@ -1179,11 +1179,11 @@ function ConfirmHandoff({
   return (
     <Modal onClose={onCancel} testId="confirm-handoff">
       <div className="w-[400px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">
-        <p className="text-[13px] text-ink">Hand off to a fresh session?</p>
-        <p className="mt-1.5 truncate text-[12px] text-ink-muted">{name}</p>
+        <p className="text-md text-ink">Hand off to a fresh session?</p>
+        <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
 
         {/* Where the note comes from — a live session writes it itself, a dead one has the app build it from the transcript (#78) */}
-        <p className="mt-3 text-[10px] uppercase text-ink-faint">Handoff note</p>
+        <p className="mt-3 text-2xs uppercase text-ink-faint">Handoff note</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Handoff note source">
           {(
             [
@@ -1198,7 +1198,7 @@ function ConfirmHandoff({
               aria-checked={mode === m.key}
               data-testid={`handoff-mode-${m.key}`}
               onClick={() => setMode(m.key)}
-              className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
+              className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
                 mode === m.key
                   ? 'border-ink-muted bg-surface-hover text-ink'
                   : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
@@ -1208,13 +1208,13 @@ function ConfirmHandoff({
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="handoff-mode-note">
+        <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="handoff-mode-note">
           {mode === 'agent'
             ? 'This session writes a handoff note, the app saves it outside the project, then a fresh session starts by reading it.'
             : 'The app builds the note from its stored conversation — this session is not asked. Use this when the agent cannot respond (outage, limits).'}
         </p>
         {mode === 'agent' && blocked && (
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-signal" data-testid="handoff-blocked">
+          <p className="mt-2 text-xs leading-body text-ink-signal" data-testid="handoff-blocked">
             This session is waiting on {blocked === 'question' ? 'a question' : 'an approval'}. Asking for a note now would
             {blocked === 'question' ? ' answer the question with the handoff request' : ' drop the approval card'} —
             answer it first, or build the note from the record.
@@ -1222,7 +1222,7 @@ function ConfirmHandoff({
         )}
 
         {/* The receiving agent — choosing a different tool does not carry over tool-specific settings like model or reasoning effort */}
-        <p className="mt-3 text-[10px] uppercase text-ink-faint">Hand off to</p>
+        <p className="mt-3 text-2xs uppercase text-ink-faint">Hand off to</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Hand off to">
           {tools.map((t) => (
             <button
@@ -1232,21 +1232,21 @@ function ConfirmHandoff({
               aria-checked={heirTool === t.name}
               data-testid={`handoff-tool-${t.name}`}
               onClick={() => setHeirTool(t.name)}
-              className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
+              className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
                 heirTool === t.name
                   ? 'border-ink-muted bg-surface-hover text-ink'
                   : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
               }`}
             >
               {t.label}
-              {t.name === tool && <span className="ml-1 text-[10px] text-ink-faint">(current)</span>}
+              {t.name === tool && <span className="ml-1 text-2xs text-ink-faint">(current)</span>}
             </button>
           ))}
         </div>
 
         {deleteOld ? (
           <p
-            className="mt-3 rounded border border-danger/40 bg-danger-bg px-2.5 py-2 text-[11px] leading-relaxed text-ink"
+            className="mt-3 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="handoff-warning"
           >
             When the new session is ready, this session moves to the trash — and{' '}
@@ -1254,12 +1254,12 @@ function ConfirmHandoff({
             too</span>. Until then, Settings → Trash reads it and restores it.
           </p>
         ) : (
-          <p className="mt-3 text-[11px] leading-relaxed text-ink-muted" data-testid="handoff-keep-note">
+          <p className="mt-3 text-xs leading-body text-ink-muted" data-testid="handoff-keep-note">
             This session stays — the new one starts from the note alongside it.
           </p>
         )}
         <label
-          className={`mt-2 flex cursor-pointer items-start gap-2 text-[11px] ${
+          className={`mt-2 flex cursor-pointer items-start gap-2 text-xs ${
             deleteOld ? 'text-danger' : 'text-ink-muted hover:text-ink'
           }`}
           data-testid="handoff-delete-toggle"
@@ -1274,11 +1274,11 @@ function ConfirmHandoff({
         </label>
 
         <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink" onClick={onCancel}>
+          <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
             Cancel
           </button>
           <button
-            className={`rounded border px-3 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`rounded-md border px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               deleteOld
                 ? 'border-danger/40 bg-danger-bg text-danger hover:border-danger/70'
                 : 'border-line bg-surface-raised text-ink hover:border-line-strong'
@@ -1332,7 +1332,7 @@ function SessionNameInput({
   return (
     <input
       autoFocus
-      className="w-full border-l-2 border-l-ink-muted bg-surface-hover/40 py-1.5 pl-2.5 pr-3 text-[13px] text-ink outline-none"
+      className="w-full border-l-2 border-l-ink-muted bg-surface-hover/40 py-1.5 pl-2.5 pr-3 text-md text-ink outline-none"
       value={text}
       onChange={(e) => setText(e.target.value)}
       // An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append instead)
@@ -1487,7 +1487,7 @@ function RowMenu({
       ref={ref}
       role="menu"
       data-testid={testId}
-      className="fixed z-30 w-48 rounded border border-line bg-surface-raised py-1 shadow-(--shadow-popover)"
+      className="fixed z-30 w-48 rounded-md border border-line bg-surface-raised py-1 shadow-(--shadow-popover)"
       style={{ top: pos?.top ?? 0, right: pos?.right ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
       {children}
@@ -1513,7 +1513,7 @@ function ActionRow({
       role="menuitem"
       data-testid={testId}
       onClick={onClick}
-      className={`block w-full px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-surface-hover/25 ${
+      className={`block w-full px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover/25 ${
         danger ? 'text-ink-muted hover:text-ink-signal' : 'text-ink-muted hover:text-ink'
       }`}
     >
@@ -1718,15 +1718,15 @@ function ConfirmDelete({
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">
-        <p className="text-[13px] text-ink">Move this session to the trash?</p>
-        <p className="mt-1.5 truncate text-[12px] text-ink-muted">{name}</p>
-        <p className="mt-2 text-[11px] leading-relaxed text-ink-faint" data-testid="delete-trash-note">
+        <p className="text-md text-ink">Move this session to the trash?</p>
+        <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
+        <p className="mt-2 text-xs leading-body text-ink-faint" data-testid="delete-trash-note">
           Chat history and attachments stay in Centralu’s trash, out of the sidebar, search and the agents’ reach.{' '}
           <span className="text-ink">Settings → Trash</span> reads it, restores it, or deletes it for good.
         </p>
         {deleteExternal ? (
           <p
-            className="mt-1 rounded border border-danger/40 bg-danger-bg px-2 py-1.5 text-[11px] leading-relaxed text-ink"
+            className="mt-1 rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink"
             data-testid="delete-external-warning"
           >
             When it is deleted for good,{' '}
@@ -1734,13 +1734,13 @@ function ConfirmDelete({
             nothing left to pull back.
           </p>
         ) : (
-          <p className="mt-1 text-[11px] leading-relaxed text-ink-muted" data-testid="delete-notice">
+          <p className="mt-1 text-xs leading-body text-ink-muted" data-testid="delete-notice">
             The conversation stays in {toolLabel} — you can pull it back from{' '}
             <span className="text-ink">+ → Past conversations</span>.
           </p>
         )}
         <label
-          className={`mt-2 flex cursor-pointer items-start gap-2 text-[11px] ${
+          className={`mt-2 flex cursor-pointer items-start gap-2 text-xs ${
             deleteExternal ? 'text-danger' : 'text-ink-muted hover:text-ink'
           }`}
           data-testid="delete-external-toggle"
@@ -1760,18 +1760,18 @@ function ConfirmDelete({
           on by hand — and to read first what would be lost.
         */}
         {wt && (
-          <div className="mt-3 rounded border border-line bg-surface-raised p-2.5" data-testid="delete-worktree">
-            <p className="text-[11px] text-ink-muted">
+          <div className="mt-3 rounded-md border border-line bg-surface-raised p-2.5" data-testid="delete-worktree">
+            <p className="text-xs text-ink-muted">
               This session ran in a worktree — <span className="font-mono text-ink">{wt.branch}</span>
             </p>
-            <p className="mt-1 text-[11px] text-ink-faint">It stays where it is while the session is in the trash.</p>
+            <p className="mt-1 text-xs text-ink-faint">It stays where it is while the session is in the trash.</p>
             {wt.dirty && (
-              <p className="mt-1 text-[11px] text-ink" data-testid="worktree-dirty">
+              <p className="mt-1 text-xs text-ink" data-testid="worktree-dirty">
                 {wt.changedFiles} uncommitted {wt.changedFiles === 1 ? 'change' : 'changes'} would be lost once it is
                 deleted.
               </p>
             )}
-            <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[11px] text-ink-muted hover:text-ink">
+            <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-xs text-ink-muted hover:text-ink">
               <input
                 type="checkbox"
                 className="mt-0.5 accent-ink-muted"
@@ -1781,17 +1781,17 @@ function ConfirmDelete({
               />
               <span>
                 Delete the worktree too, when deleted for good
-                <span className="mt-0.5 block text-[10px] break-all text-ink-faint">{wt.path}</span>
+                <span className="mt-0.5 block text-2xs break-all text-ink-faint">{wt.path}</span>
               </span>
             </label>
           </div>
         )}
         <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink" onClick={onCancel}>
+          <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
             Cancel
           </button>
           <button
-            className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink hover:border-line-strong"
+            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink hover:border-line-strong"
             onClick={() => onConfirm(deleteWorktree, deleteExternal)}
             data-testid="confirm-delete-yes"
           >
@@ -1826,7 +1826,7 @@ function ProjectMarks({ project }: { project: ProjectInfo }) {
       they simply stop asking. The fewer units a bare-number mark has, the faster the answer needs
       to come.
     */
-    <span className="readout flex shrink-0 items-center gap-1.5 text-[10px] text-ink-faint">
+    <span className="readout flex shrink-0 items-center gap-1.5 text-2xs text-ink-faint">
       {changed > 0 && (
         <Tooltip
           content={`${changed} uncommitted file${changed > 1 ? 's' : ''}`}
@@ -1883,12 +1883,12 @@ function StateCount({ state, count }: { state: FoldSummaryState; count: number }
   useOrbitSync(state === 'working')
   return (
     <span
-      className={`shrink-0 rounded-[5px] p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
+      className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
       style={state === 'working' ? undefined : { background: RING[state] }}
       data-state={state}
     >
       <span
-        className={`readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-[3.5px] border border-line-strong bg-surface-floor px-[3px] text-[9px] font-semibold leading-none text-ink ${
+        className={`readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor px-[3px] text-2xs font-semibold leading-none text-ink ${
           state === 'error' ? 'opacity-50' : ''
         }`}
       >
@@ -1960,7 +1960,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
 
   return (
     <span
-      className={`shrink-0 rounded-[5px] p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
+      className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
       style={state === 'working' ? undefined : { background: RING[state] }}
       title={label}
       aria-label={label}
@@ -1988,7 +1988,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
           brightness is the resource this app uses to state urgency, so spending it on decoration
           would cut into that signal by the same amount.
         */
-        className={`readout cc-chip flex size-[14px] items-center justify-center rounded-[3.5px] border border-line-strong bg-surface-floor text-[9px] font-semibold leading-none text-ink ${
+        className={`readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor text-2xs font-semibold leading-none text-ink ${
           stalled ? 'opacity-50' : ''
         }`}
       >

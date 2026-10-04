@@ -118,7 +118,7 @@ export function FileTree({ projectId }: { projectId: string }) {
         <TabActions>
           {/* 'Ignored' alone read as a state, not an action — it is the showing that is optional */}
           <label
-            className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-faint"
+            className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint"
             title="Show what .gitignore hides — node_modules, build output, local files"
           >
             <input
@@ -368,7 +368,7 @@ function Dir({
           <FileRow key={e.path} entry={e} depth={depth} />
         ),
       )}
-      {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-[12px] text-ink-faint">Empty</li>}
+      {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-sm text-ink-faint">Empty</li>}
     </ul>
   )
 }
@@ -405,7 +405,7 @@ function DirRow({
   return (
     <li data-testid={`file-drop-${entry.path}`} {...drop.handlers}>
       <button
-        className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] transition-colors hover:text-ink ${
+        className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-sm transition-colors hover:text-ink ${
           drop.over ? 'bg-surface-hover/40 text-ink' : 'text-ink-muted'
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
@@ -439,7 +439,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
   return (
     <li>
       <button
-        className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] transition-colors ${
+        className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-sm transition-colors ${
           current === entry.path ? 'bg-surface-hover/40 text-ink' : entry.ignored ? 'text-ink-faint' : 'text-ink-muted hover:text-ink'
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
@@ -459,7 +459,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
         <span className="truncate">{entry.name}</span>
         {/* A file the agent just touched (FR-5) — a symbol, not a color */}
         {touched.has(entry.path) && (
-          <span className="ml-auto shrink-0 text-[9px] text-ink-faint" title="Edited by agent">
+          <span className="ml-auto shrink-0 text-2xs text-ink-faint" title="Edited by agent">
             ◆
           </span>
         )}
@@ -524,7 +524,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
       ref={rootRef}
       role="menu"
       data-testid="file-menu"
-      className="fixed z-40 w-56 overflow-hidden rounded border border-line bg-surface-raised shadow-(--shadow-popover)"
+      className="fixed z-40 w-56 overflow-hidden rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)"
       // Opening it near the edge of the screen would push the menu off the window — pulled back inward
       style={{
         left: Math.min(state.x / zoom, window.innerWidth / zoom - 232),
@@ -536,7 +536,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         role="menuitem"
         data-testid="file-menu-reveal"
         title={`Show ${target.name} in ${fileManager}`}
-        className="block w-full truncate px-2.5 py-1.5 text-left text-[12px] text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
+        className="block w-full truncate px-2.5 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
         onClick={() => {
           close()
           void ops.reveal(target)
@@ -554,7 +554,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         role="menuitem"
         data-testid="file-menu-trash"
         title="Moves it to the Trash — you can put it back from there"
-        className="block w-full truncate border-t border-line px-2.5 py-1.5 text-left text-[12px] text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
+        className="block w-full truncate border-t border-line px-2.5 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
         onClick={() => {
           close()
           void ops.trash(target)

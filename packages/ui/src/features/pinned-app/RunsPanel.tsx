@@ -59,10 +59,10 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="runs-panel" aria-label="Runs">
       <header className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3">
-        <span className="readout text-[10px] uppercase text-ink-faint">Runs</span>
+        <span className="readout text-2xs uppercase text-ink-faint">Runs</span>
         <button
           type="button"
-          className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink"
+          className="ml-auto rounded-md px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink"
           onClick={() => void load()}
           data-testid="runs-refresh"
         >
@@ -73,11 +73,11 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
         <Permissions appId={appId} projectId={projectId} changed={changed} />
         <AgentUseSection appId={appId} projectId={projectId} runs={runs} />
         {error && (
-          <p className="px-3 py-2 text-[11px] text-ink-muted" role="alert">
+          <p className="px-3 py-2 text-xs text-ink-muted" role="alert">
             Could not read runs: {error}
           </p>
         )}
-        {runs && runs.length === 0 && <p className="px-3 py-3 text-[11px] text-ink-faint">No runs yet.</p>}
+        {runs && runs.length === 0 && <p className="px-3 py-3 text-xs text-ink-faint">No runs yet.</p>}
         <ol>
           {runs &&
             chainRuns(runs).map(({ run: r, depth }) => (
@@ -134,10 +134,10 @@ function Permissions({ appId, projectId, changed }: { appId: string; projectId: 
   if (!list || list.length === 0) return null
   return (
     <section className="border-b border-line px-3 py-2" data-testid="runs-permissions">
-      <p className="readout text-[10px] uppercase text-ink-faint">Permissions</p>
+      <p className="readout text-2xs uppercase text-ink-faint">Permissions</p>
       <ul className="mt-1 space-y-1">
         {list.map((p) => (
-          <li key={p.capability} className="flex items-baseline gap-2 text-[11px]" data-testid="permission-row" data-capability={p.capability} data-decision={p.decision}>
+          <li key={p.capability} className="flex items-baseline gap-2 text-xs" data-testid="permission-row" data-capability={p.capability} data-decision={p.decision}>
             <span className={`min-w-0 flex-1 break-words ${p.current ? 'text-ink-muted' : 'text-ink-faint line-through'}`} title={p.capability}>
               {p.text}
             </span>
@@ -146,7 +146,7 @@ function Permissions({ appId, projectId, changed }: { appId: string; projectId: 
             </span>
             <button
               type="button"
-              className="shrink-0 rounded px-1 text-[10px] text-ink-faint transition-colors hover:text-ink"
+              className="shrink-0 rounded-md px-1 text-2xs text-ink-faint transition-colors hover:text-ink"
               onClick={() => void forget(p)}
               data-testid="permission-forget"
             >
@@ -184,8 +184,8 @@ function AgentUseSection({ appId, projectId, runs }: { appId: string; projectId:
   if (!use || use.month.runs === 0) return null
   return (
     <section className="border-b border-line px-3 py-2" data-testid="runs-agent-use">
-      <p className="readout text-[10px] uppercase text-ink-faint">Agent use</p>
-      <dl className="mt-1 space-y-0.5 text-[11px]">
+      <p className="readout text-2xs uppercase text-ink-faint">Agent use</p>
+      <dl className="mt-1 space-y-0.5 text-xs">
         <UseLine label="24 h" use={use.day} testId="agent-use-day" />
         <UseLine label="30 days" use={use.month} testId="agent-use-month" />
       </dl>
@@ -297,7 +297,7 @@ function RunRow({
   const tool = !broker && !own ? `${appName} · ${run.tool}` : run.tool
   return (
     <li
-      className={`border-b border-l-2 border-line/60 py-1.5 pr-3 text-[11px] ${failed ? 'border-l-ink' : 'border-l-transparent'}`}
+      className={`border-b border-l-2 border-line/60 py-1.5 pr-3 text-xs ${failed ? 'border-l-ink' : 'border-l-transparent'}`}
       style={{ paddingLeft: 12 + depth * 14 }}
       data-testid="run-row"
       data-status={run.status}
@@ -333,7 +333,7 @@ function RunRow({
         {onOpenSession && (
           <button
             type="button"
-            className="shrink-0 rounded px-1 text-[10px] text-ink-faint underline-offset-2 transition-colors hover:text-ink hover:underline"
+            className="shrink-0 rounded-md px-1 text-2xs text-ink-faint underline-offset-2 transition-colors hover:text-ink hover:underline"
             onClick={onOpenSession}
             data-testid="run-open-session"
           >

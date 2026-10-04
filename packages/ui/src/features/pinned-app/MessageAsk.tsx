@@ -41,21 +41,21 @@ export function MessageAsk({
       aria-label={`${appTitle} wants to send a message`}
       data-testid="pinned-message-ask"
     >
-      <p className="text-[12px] text-ink">{appTitle} wants to send this to a session:</p>
+      <p className="text-sm text-ink">{appTitle} wants to send this to a session:</p>
       <pre
-        className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded border border-line bg-surface-floor px-2.5 py-2 font-sans text-[12px] text-ink-muted"
+        className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface-floor px-2.5 py-2 font-sans text-sm text-ink-muted"
         data-testid="pinned-message-text"
       >
         {ask.text}
       </pre>
       {ask.dropped > 0 && (
-        <p className="mt-1 text-[11px] text-ink-faint">
+        <p className="mt-1 text-xs text-ink-faint">
           {ask.dropped} non-text part{ask.dropped > 1 ? 's' : ''} will not be sent.
         </p>
       )}
-      <p className="mt-3 text-[11px] text-ink-faint">Send to</p>
+      <p className="mt-3 text-xs text-ink-faint">Send to</p>
       {targets.length === 0 ? (
-        <p className="mt-1 text-[12px] text-ink-muted">There is no session to send it to.</p>
+        <p className="mt-1 text-sm text-ink-muted">There is no session to send it to.</p>
       ) : (
         <ul className="mt-1 space-y-0.5">
           {targets.map((s) => (
@@ -68,7 +68,7 @@ export function MessageAsk({
       <div className="mt-3 flex justify-end">
         <button
           type="button"
-          className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink"
+          className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink"
           onClick={() => onAnswer(null)}
           data-testid="pinned-message-cancel"
         >
@@ -84,15 +84,15 @@ function Target({ session, project, onPick }: { session: SessionSummary; project
   return (
     <button
       type="button"
-      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] text-ink-muted transition-colors hover:bg-surface-hover/40 hover:text-ink"
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/40 hover:text-ink"
       onClick={onPick}
       data-testid={`pinned-message-to-${session.id}`}
     >
-      <span className="readout flex size-[14px] shrink-0 items-center justify-center rounded-[3px] border border-line-strong text-[9px] text-ink">
+      <span className="readout flex size-[14px] shrink-0 items-center justify-center rounded-sm border border-line-strong text-2xs text-ink">
         {meta.mark}
       </span>
       <span className="truncate">{session.kind === 'orchestrator' ? 'Orchestrator' : session.name}</span>
-      {project && <span className="ml-auto shrink-0 truncate text-[10px] text-ink-faint">{project}</span>}
+      {project && <span className="ml-auto shrink-0 truncate text-2xs text-ink-faint">{project}</span>}
     </button>
   )
 }

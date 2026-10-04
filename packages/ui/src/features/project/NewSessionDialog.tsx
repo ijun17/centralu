@@ -8,7 +8,7 @@ import { Modal } from '../../components/Modal.jsx'
 
 /** What one field looks like. All three must share a shape to read as "the same kind of answer" */
 const inputClass =
-  'w-full rounded border border-line bg-surface-floor px-2 py-1.5 font-mono text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
+  'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
 /**
  * The state of the past sessions list.
@@ -341,7 +341,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           within reach no matter how far the scroll has gone.
         */}
         <header className="shrink-0 border-b border-line px-4 py-2.5">
-          <h2 className="text-[13px] font-medium text-ink">
+          <h2 className="text-md font-medium text-ink">
             New session <span className="text-ink-faint">·</span>{' '}
             <span className="text-ink-muted">{project?.name}</span>
           </h2>
@@ -354,7 +354,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 onClick={() => setTool(t.name)}
                 data-testid={`tool-option-${t.name}`}
                 title={info(t.name)?.detail}
-                className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
+                className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
                   tool === t.name
                     ? 'border-ink-muted bg-surface-hover/40 text-ink'
                     : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
@@ -366,7 +366,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           </div>
           {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
           {blocked && (
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="tool-blocked">
+            <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="tool-blocked">
               {info(tool)?.installed
                 ? `${toolMeta.label} needs a login — run ${toolMeta.login} in a terminal`
                 : `${toolMeta.label} not found (${info(tool)?.detail ?? 'not installed'})`}
@@ -381,7 +381,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         */}
           <div
             ref={listRef}
-            className="max-h-64 overflow-y-auto rounded border border-line bg-surface-raised"
+            className="max-h-64 overflow-y-auto rounded-md border border-line bg-surface-raised"
             data-testid="past-sessions"
           >
             <PastRow
@@ -392,21 +392,21 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               meta=""
             />
             {past.status === 'loading' && (
-              <p className="px-2.5 py-2 text-[11px] text-ink-faint" data-testid="past-loading">
+              <p className="px-2.5 py-2 text-xs text-ink-faint" data-testid="past-loading">
                 Looking for past conversations…
               </p>
             )}
             {/* Using an older tool version does not block a new session too — only the reason is quietly stated */}
             {past.status === 'unsupported' && (
               <p
-                className="px-2.5 py-2 text-[11px] leading-relaxed text-ink-faint"
+                className="px-2.5 py-2 text-xs leading-body text-ink-faint"
                 data-testid="past-unsupported"
               >
                 Could not load past conversations — {past.reason}
               </p>
             )}
             {past.status === 'ok' && past.sessions.length === 0 && (
-              <p className="px-2.5 py-2 text-[11px] text-ink-faint" data-testid="past-empty">
+              <p className="px-2.5 py-2 text-xs text-ink-faint" data-testid="past-empty">
                 No past conversations in this folder.
               </p>
             )}
@@ -453,14 +453,14 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           explaining an option that cannot even be used is noise for the task of creating a session.
         */}
           {running.length > 0 && (
-            <p className="mt-2.5 text-[11px] leading-relaxed text-ink-muted" data-testid="concurrent-warning">
+            <p className="mt-2.5 text-xs leading-body text-ink-muted" data-testid="concurrent-warning">
               {running.length} sessions are already running in this directory. Editing the same files can lose
               changes.
             </p>
           )}
           {isRepo && (
             <label
-              className="mt-2.5 flex cursor-pointer items-center gap-2 text-[11px] text-ink-muted hover:text-ink"
+              className="mt-2.5 flex cursor-pointer items-center gap-2 text-xs text-ink-muted hover:text-ink"
               data-testid="worktree-toggle"
             >
               <input
@@ -485,7 +485,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         */}
           {isRepo && worktree && (
             <div
-              className="mt-2 space-y-2.5 rounded border border-line bg-surface-raised p-2.5"
+              className="mt-2 space-y-2.5 rounded-md border border-line bg-surface-raised p-2.5"
               data-testid="worktree-options"
             >
               {/*
@@ -574,7 +574,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                                       : [...picks, e.path]
                                     setCopyFiles(next.join(', '))
                                   }}
-                                  className={`rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
+                                  className={`rounded-md border px-1.5 py-0.5 font-mono text-2xs transition-colors ${
                                     picked
                                       ? 'border-ink-muted bg-surface-hover/40 text-ink'
                                       : 'border-line text-ink-faint hover:border-line-strong hover:text-ink-muted'
@@ -596,7 +596,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                         after the worktree is already created.
                       */}
                         {picks.length > 0 && (
-                          <p className="mt-1.5 text-[10px] text-ink-faint" data-testid="copy-total">
+                          <p className="mt-1.5 text-2xs text-ink-faint" data-testid="copy-total">
                             {picks.length} to copy{pickedBytes > 0 ? ` · ~${fmtBytes(pickedBytes)}` : ''}
                             {pickedBytes > 1024 ** 3 && (
                               <span className="text-ink-muted"> — every worktree pays this again</span>
@@ -612,7 +612,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   type="button"
                   data-testid="worktree-setup-summary"
                   onClick={() => setSetupOpen(true)}
-                  className="block w-full truncate rounded border border-line px-2 py-1 text-left font-mono text-[10px] text-ink-faint hover:border-line-strong hover:text-ink-muted"
+                  className="block w-full truncate rounded-md border border-line px-2 py-1 text-left font-mono text-2xs text-ink-faint hover:border-line-strong hover:text-ink-muted"
                   title="Edit worktree setup"
                 >
                   {savedSetup?.command ? `setup: ${savedSetup.command}` : 'setup: (none)'}
@@ -624,7 +624,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
           {error && (
             <p
-              className="mt-3 rounded border border-line bg-surface-raised px-2.5 py-2 text-[11px] leading-relaxed text-ink"
+              className="mt-3 rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink"
               data-testid="create-session-error"
             >
               {error}
@@ -640,7 +640,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-2.5">
           <button
             type="button"
-            className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink"
+            className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink"
             onClick={onClose}
           >
             Cancel
@@ -648,7 +648,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           <button
             /* Since the input field is gone, Enter means start — this needs to hold the default focus */
             autoFocus
-            className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
             disabled={busy || blocked}
             data-testid="create-session-confirm"
           >
@@ -676,7 +676,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div>
-      <p className="mb-1 text-[10px] text-ink-muted">
+      <p className="mb-1 text-2xs text-ink-muted">
         {label}
         {hint && <span className="text-ink-faint"> · {hint}</span>}
       </p>
@@ -714,8 +714,8 @@ function PastRow({
           : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
       }`}
     >
-      <span className="truncate text-[12px] leading-snug">{title}</span>
-      {meta && <span className="readout truncate text-[10px] text-ink-faint">{meta}</span>}
+      <span className="truncate text-sm leading-tight">{title}</span>
+      {meta && <span className="readout truncate text-2xs text-ink-faint">{meta}</span>}
     </button>
   )
 }

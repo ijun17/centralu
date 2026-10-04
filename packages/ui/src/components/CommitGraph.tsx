@@ -13,6 +13,7 @@ import type { GraphRow } from '@cc/core'
  *
  * The row height has to be fixed. A line has to meet exactly at the row boundary to read as one
  * continuous stroke; if rows had different heights, the line would look broken at the mismatch.
+ * For the same reason it is a number of pixels, not a step on the theme's line-height scale.
  */
 export const ROW_H = 38
 const LANE_W = 9

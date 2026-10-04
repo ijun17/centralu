@@ -64,19 +64,19 @@ export function AppPanel({
           <AppIcon />
         </span>
         <span
-          className="truncate text-[13px] font-medium tracking-tight text-ink"
+          className="truncate text-md font-medium tracking-tight text-ink"
           data-testid="app-panel-title"
         >
           {title}
         </span>
         {app && (
-          <span className="readout shrink-0 text-[10px] text-ink-faint" data-testid="app-panel-status">
+          <span className="readout shrink-0 text-2xs text-ink-faint" data-testid="app-panel-status">
             {app.status.label}
           </span>
         )}
         <button
           type="button"
-          className="ml-auto shrink-0 rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
+          className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
           onClick={onOpen}
           title="Open this app on its own, with its runs, secrets and versions"
           data-testid={openTestId}

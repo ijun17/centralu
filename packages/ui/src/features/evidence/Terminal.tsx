@@ -101,7 +101,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       </TabActions>
 
       {error && (
-        <p className="px-3 py-2 text-[11px] leading-relaxed text-ink-muted" data-testid="terminal-error">
+        <p className="px-3 py-2 text-xs leading-body text-ink-muted" data-testid="terminal-error">
           Could not open terminal — {error}
         </p>
       )}
@@ -142,8 +142,8 @@ function CommandTerminal({ projectId, run }: { projectId: string; run: CommandRu
     >
       <div className="flex items-center gap-1.5 px-2 py-0.5">
         <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-ink" aria-label="running" />
-        {label && <span className="truncate text-[10px] text-ink-muted">{label}</span>}
-        <span className="readout truncate text-[10px] text-ink-faint" title={run.command}>
+        {label && <span className="truncate text-2xs text-ink-muted">{label}</span>}
+        <span className="readout truncate text-2xs text-ink-faint" title={run.command}>
           {run.command}
         </span>
         <span className="ml-auto">
@@ -179,8 +179,7 @@ function CommandLog({ projectId, command, runId }: { projectId: string; command:
     if (!el) return
 
     const term = new Xterm({
-      fontSize: 11,
-      // Colours and font come from the theme (styles/index.css, --color-term-*)
+      // Colours, font and size come from the theme (styles/index.css, --color-term-*)
       ...terminalStyle(el, 'log'),
       disableStdin: true,
       scrollback: 5000,
@@ -297,9 +296,8 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
     if (!el) return
 
     const term = new Xterm({
-      fontSize: 11,
       // The strict-grayscale rule belongs to our own screens; it does not take color away from a
-      // shell's own output. Colours and font come from the theme (styles/index.css, --color-term-*).
+      // shell's own output. Colours, font and size come from the theme (styles/index.css).
       ...terminalStyle(el, 'shell'),
       cursorBlink: true,
       scrollback: 5000,
@@ -378,10 +376,10 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
       data-testid={`terminal-${info.terminalId}`}
     >
       <div className="flex items-center gap-1.5 px-2 py-0.5">
-        <span className="readout truncate text-[10px] text-ink-faint">{info.title}</span>
+        <span className="readout truncate text-2xs text-ink-faint">{info.title}</span>
         {dead && (
           <button
-            className="rounded px-1 text-[10px] text-ink-muted transition-colors hover:text-ink"
+            className="rounded-md px-1 text-2xs text-ink-muted transition-colors hover:text-ink"
             data-testid={`terminal-restart-${info.terminalId}`}
             onClick={async () => {
               const term = termRef.current

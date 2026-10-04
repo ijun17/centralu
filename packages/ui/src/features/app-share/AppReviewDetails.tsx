@@ -14,13 +14,13 @@ import type { AppReview, AppUses } from '@cc/protocol'
 export function AppReviewDetails({ review }: { review: AppReview }) {
   const uses = usesLines(review.uses)
   return (
-    <div className="space-y-3 text-[12px]" data-testid="app-review">
+    <div className="space-y-3 text-sm" data-testid="app-review">
       <div>
-        <p className="text-[13px] text-ink">
-          <span data-testid="review-name">{review.name}</span> <span className="readout text-[10px] text-ink-faint">v{review.version}</span>{' '}
-          <span className="readout text-[10px] text-ink-faint">{review.appId}</span>
+        <p className="text-md text-ink">
+          <span data-testid="review-name">{review.name}</span> <span className="readout text-2xs text-ink-faint">v{review.version}</span>{' '}
+          <span className="readout text-2xs text-ink-faint">{review.appId}</span>
         </p>
-        <p className="mt-0.5 break-words text-[11px] text-ink-faint" data-testid="review-source">
+        <p className="mt-0.5 break-words text-xs text-ink-faint" data-testid="review-source">
           From {review.source}
         </p>
         <p className="mt-1 whitespace-pre-wrap break-words text-ink-muted">{review.description}</p>
@@ -44,7 +44,7 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
 
       <Section title="What it runs" testId="review-runs">
         <Command server={review.server} />
-        <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+        <p className="mt-1 text-xs leading-body text-ink-faint">
           In its own folder, as you: it can read your files, use the network and start programs. Only its screen is sandboxed.
         </p>
       </Section>
@@ -59,7 +59,7 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
             ))}
           </ul>
         )}
-        {uses.length > 0 && <p className="mt-1 text-[11px] text-ink-faint">Each is asked about once, the first time the app uses it.</p>}
+        {uses.length > 0 && <p className="mt-1 text-xs text-ink-faint">Each is asked about once, the first time the app uses it.</p>}
       </Section>
 
       <Section title="Secrets it wants" testId="review-secrets">
@@ -67,7 +67,7 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
           <p className="text-ink-muted">None.</p>
         ) : (
           <p className="text-ink-muted">
-            <span className="font-mono text-[11px] text-ink">{review.secrets.join(', ')}</span>
+            <span className="font-mono text-xs text-ink">{review.secrets.join(', ')}</span>
             <span className="text-ink-faint"> — you enter the values after it is in, and they stay on this machine.</span>
           </p>
         )}
@@ -81,7 +81,7 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
       </Section>
 
       <Section title={`Files · ${review.files.length} · ${size(review.totalBytes)}`} testId="review-files">
-        <ul className="max-h-40 overflow-y-auto rounded border border-line bg-surface-floor px-2 py-1 font-mono text-[11px]" data-testid="review-file-list">
+        <ul className="max-h-40 overflow-y-auto rounded-md border border-line bg-surface-floor px-2 py-1 font-mono text-xs" data-testid="review-file-list">
           {review.files.map((f) => (
             <li key={f.path} className="flex gap-2">
               <span className="min-w-0 flex-1 truncate text-ink-muted" title={f.path}>
@@ -92,7 +92,7 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
           ))}
         </ul>
         {review.skipped.length > 0 && (
-          <p className="mt-1 break-words text-[11px] leading-relaxed text-ink-faint" data-testid="review-skipped">
+          <p className="mt-1 break-words text-xs leading-body text-ink-faint" data-testid="review-skipped">
             Not copied: {review.skipped.map((s) => `${s.path} (${SKIP_WHY[s.why] ?? s.why})`).join(', ')}
           </p>
         )}
@@ -120,8 +120,8 @@ const SKIP_WHY: Record<string, string> = {
 
 function Section({ title, testId, tone, children }: { title: string; testId: string; tone?: 'alert'; children: React.ReactNode }) {
   return (
-    <section data-testid={testId} className={tone === 'alert' ? 'rounded border border-line bg-surface-raised px-2.5 py-2' : undefined}>
-      <p className={`readout mb-1 text-[10px] uppercase ${tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}>{title}</p>
+    <section data-testid={testId} className={tone === 'alert' ? 'rounded-md border border-line bg-surface-raised px-2.5 py-2' : undefined}>
+      <p className={`readout mb-1 text-2xs uppercase ${tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}>{title}</p>
       {children}
     </section>
   )
@@ -130,7 +130,7 @@ function Section({ title, testId, tone, children }: { title: string; testId: str
 /** The command and its arguments on one line — each argument shown in its own span (so an argument containing a space is not read as two arguments) */
 function Command({ server, testId = 'review-command' }: { server: AppReview['server']; testId?: string }) {
   return (
-    <code className="block break-all rounded border border-line bg-surface-floor px-2 py-1 font-mono text-[11px] text-ink" data-testid={testId}>
+    <code className="block break-all rounded-md border border-line bg-surface-floor px-2 py-1 font-mono text-xs text-ink" data-testid={testId}>
       {[server.command, ...server.args].map((part, i) => (
         <span key={i}>
           {i > 0 ? ' ' : ''}

@@ -402,7 +402,7 @@ function TopBar() {
          * shape, and this one is read least of anything here — you already opened the app.
          * Set flush it stops being spelled out and just sits there being the title.
          */
-        className="pointer-events-none text-[12px] font-semibold text-ink"
+        className="pointer-events-none text-sm font-semibold text-ink"
         data-testid="app-title"
       >
         CENTRALU
@@ -418,7 +418,7 @@ function TopBar() {
       {/* flex, not inline — an inline span's box is a text line, so top-full lands wrong */}
       <span className="relative flex">
         <button
-          className="group flex items-center gap-2.5 rounded px-2 py-0.5 transition-colors hover:bg-surface-hover/50"
+          className="group flex items-center gap-2.5 rounded-md px-2 py-0.5 transition-colors hover:bg-surface-hover/50"
           onClick={() => toggleInbox()}
           data-testid="counter"
           title={`Waiting (${sc('mod', 'I')})`}
@@ -484,7 +484,7 @@ function TopBar() {
           a flow is different from hiding the entrance.
         */}
         <button
-          className="rounded px-2 py-1 text-[11px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
+          className="rounded-md px-2 py-1 text-xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
           onClick={() => useStore.getState().toggleSettings(true)}
           data-testid="open-settings"
           title="Settings (shortcuts · notifications · approval rules)"
@@ -527,8 +527,8 @@ function Metric({
         Since the label sits out of the brightness competition (always ink-faint), only the
         inheritance is cut off.
       */}
-      <span className="text-[10px] text-ink-faint [text-shadow:none]">{label}</span>
-      <span className="readout text-[13px] leading-none">{String(value).padStart(2, '0')}</span>
+      <span className="text-2xs text-ink-faint [text-shadow:none]">{label}</span>
+      <span className="readout text-md leading-none">{String(value).padStart(2, '0')}</span>
     </span>
   )
 }
@@ -629,7 +629,7 @@ function Toast() {
       what it covers up is the app's whole answer to "that didn't work".
     */
     <div
-      className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink shadow-(--shadow-popover)"
+      className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink shadow-(--shadow-popover)"
       data-testid="toast"
       role="status"
     >

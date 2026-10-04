@@ -83,12 +83,12 @@ export function QuestionCard({
 
   return (
     <div
-      className="overflow-hidden rounded border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid="question-card"
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-[10px] font-medium">Agent is asking</span>
-        <span className="text-[11px] text-ink-faint">
+        <span className="signal text-2xs font-medium">Agent is asking</span>
+        <span className="text-xs text-ink-faint">
           {tabbed ? `${questions.length} questions` : 'Pick an option'}
         </span>
       </div>
@@ -107,7 +107,7 @@ export function QuestionCard({
               data-testid={`question-tab-${qi}`}
               data-answered={answered[qi] || undefined}
               onClick={() => setActive(qi)}
-              className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 text-sm transition-colors ${
                 active === qi ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted hover:text-ink'
               }`}
             >
@@ -132,11 +132,11 @@ export function QuestionCard({
             <div key={qi} className="flex flex-col gap-1.5">
               <div className="flex items-baseline gap-2">
                 {!tabbed && q.header && (
-                  <span className="shrink-0 rounded bg-surface-selected px-1.5 py-px text-[10px] text-ink-faint">{q.header}</span>
+                  <span className="shrink-0 rounded-md bg-surface-selected px-1.5 py-px text-2xs text-ink-faint">{q.header}</span>
                 )}
-                <span className="text-[13px] leading-snug text-ink">{q.question}</span>
+                <span className="text-md leading-tight text-ink">{q.question}</span>
                 {/* That several answers are allowed must be known before pressing, not after */}
-                {q.multiSelect && <span className="shrink-0 text-[10px] text-ink-faint">multiple allowed</span>}
+                {q.multiSelect && <span className="shrink-0 text-2xs text-ink-faint">multiple allowed</span>}
               </div>
               <div className="flex flex-col gap-1">
                 {q.options.map((o) => {
@@ -147,14 +147,14 @@ export function QuestionCard({
                       type="button"
                       data-testid="question-option"
                       onClick={() => toggle(qi, o.label, q.multiSelect)}
-                      className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
+                      className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                         on ? 'border-ink-signal bg-surface-selected' : 'border-line hover:bg-surface-selected/50'
                       }`}
                     >
-                      <div className="text-[12px] text-ink">{o.label}</div>
+                      <div className="text-sm text-ink">{o.label}</div>
                       {/* The description is the grounds for the choice — never folded, never cut */}
                       {o.description && (
-                        <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">{o.description}</div>
+                        <div className="mt-0.5 text-xs leading-tight text-ink-faint">{o.description}</div>
                       )}
                     </button>
                   )
@@ -165,11 +165,11 @@ export function QuestionCard({
                   type="button"
                   data-testid="question-other"
                   onClick={() => toggleOther(qi, q.multiSelect)}
-                  className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
+                  className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                     otherOn[qi] ? 'border-ink-signal bg-surface-selected' : 'border-line hover:bg-surface-selected/50'
                   }`}
                 >
-                  <div className="text-[12px] text-ink-faint">Other — write your own</div>
+                  <div className="text-sm text-ink-faint">Other — write your own</div>
                 </button>
 
                 {otherOn[qi] && (
@@ -180,7 +180,7 @@ export function QuestionCard({
                     value={otherText[qi] ?? ''}
                     onChange={(e) => setOtherText((t) => ({ ...t, [qi]: e.target.value }))}
                     placeholder="Type your answer"
-                    className="w-full resize-y rounded border border-line bg-surface-floor px-2 py-1.5 text-[12px] text-ink outline-none focus:border-ink-signal"
+                    className="w-full resize-y rounded-md border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink outline-none focus:border-ink-signal"
                   />
                 )}
               </div>
@@ -195,11 +195,11 @@ export function QuestionCard({
           data-testid="question-submit"
           disabled={!ready || sending}
           onClick={() => void submit()}
-          className="rounded border border-line px-2.5 py-1 text-[11px] text-ink enabled:hover:bg-surface-selected disabled:opacity-40"
+          className="rounded-md border border-line px-2.5 py-1 text-xs text-ink enabled:hover:bg-surface-selected disabled:opacity-40"
         >
           {sending ? 'Sending…' : 'Answer'}
         </button>
-        <span className="text-[11px] text-ink-faint">
+        <span className="text-xs text-ink-faint">
           {ready
             ? 'Sends your choice back to the agent'
             : tabbed

@@ -68,11 +68,11 @@ export function Overlay() {
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-surface-floor" data-testid="overlay">
       <header className="flex items-center gap-2 border-b border-line bg-surface-side px-3 py-1.5">
-        <span className="text-[11px] uppercase text-ink-faint">
+        <span className="text-xs uppercase text-ink-faint">
           {overlay.kind === 'git' ? 'Git' : 'Files'}
         </span>
         <button
-          className="ml-auto flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
+          className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
           onClick={close}
           data-testid="overlay-close"
         >

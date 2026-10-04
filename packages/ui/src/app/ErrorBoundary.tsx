@@ -35,14 +35,14 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
     const detail = [error.message, error.stack?.split('\n').slice(1, 4).join('\n')].filter(Boolean).join('\n')
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-surface-floor p-8 text-ink">
-        <p className="text-[14px]" data-testid="app-crashed">
+        <p className="text-md" data-testid="app-crashed">
           Something in this screen crashed.
         </p>
-        <p className="max-w-lg text-center text-[12px] leading-relaxed text-ink-muted">
+        <p className="max-w-lg text-center text-sm leading-body text-ink-muted">
           Your sessions are not affected — they run in the agent host, not in this window. Reloading
           rebuilds the screen from the host.
         </p>
-        <pre className="readout max-h-40 max-w-lg overflow-auto rounded border border-line bg-surface-raised p-3 text-[10px] leading-relaxed text-ink-faint">
+        <pre className="readout max-h-40 max-w-lg overflow-auto rounded-md border border-line bg-surface-raised p-3 text-2xs leading-body text-ink-faint">
           {detail}
         </pre>
         <div className="flex items-center gap-2">
@@ -50,7 +50,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
             type="button"
             data-testid="app-crashed-reload"
             onClick={() => location.reload()}
-            className="rounded border border-line px-3 py-1.5 text-[12px] text-ink transition-colors hover:border-line-strong hover:bg-surface-hover/25"
+            className="rounded-md border border-line px-3 py-1.5 text-sm text-ink transition-colors hover:border-line-strong hover:bg-surface-hover/25"
           >
             Reload
           </button>
@@ -58,7 +58,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
             type="button"
             data-testid="app-crashed-copy"
             onClick={() => void navigator.clipboard?.writeText(`${error.message}\n${error.stack ?? ''}`)}
-            className="rounded border border-line px-3 py-1.5 text-[12px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
+            className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
           >
             Copy details
           </button>

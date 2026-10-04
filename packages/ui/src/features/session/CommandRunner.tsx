@@ -136,12 +136,12 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
       */}
       <div
         onAnimationEnd={() => leaving && onClose()}
-        className={`flex max-h-full w-[min(560px,100%)] flex-col overflow-hidden rounded border border-line bg-surface-raised shadow-(--shadow-dropdown) ${
+        className={`flex max-h-full w-[min(560px,100%)] flex-col overflow-hidden rounded-md border border-line bg-surface-raised shadow-(--shadow-dropdown) ${
           leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'
         }`}
       >
         <div className="flex items-center gap-1.5 border-b border-line px-3 py-1.5">
-          <span className="text-[11px] uppercase text-ink-faint">Commands</span>
+          <span className="text-xs uppercase text-ink-faint">Commands</span>
           <span className="ml-auto">
             <IconButton label="Close" onClick={leave} testId="run-close" align="right">
               <CloseIcon size={12} />
@@ -165,7 +165,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
         */}
         <div className="max-h-64 shrink-0 overflow-y-auto border-b border-line bg-surface-floor">
           {commands.length === 0 && (
-            <p className="px-3 py-2 text-[11px] text-ink-faint">
+            <p className="px-3 py-2 text-xs text-ink-faint">
               No saved commands yet — add one below. It runs in the project folder.
             </p>
           )}
@@ -190,7 +190,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                       defaultValue={c.label ?? ''}
                       placeholder="Name (blank removes it)"
                       data-testid={`run-rename-input-${i}`}
-                      className="w-full rounded border border-line bg-surface-raised px-1 py-0.5 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+                      className="w-full rounded-md border border-line bg-surface-raised px-1 py-0.5 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
                         // An Enter that ends a composition does not save (#181) — the last
@@ -203,11 +203,11 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                     />
                   ) : c.label ? (
                     <>
-                      <span className="block truncate text-[12px] text-ink">{c.label}</span>
-                      <span className="readout block truncate text-[10px] text-ink-faint">{c.command}</span>
+                      <span className="block truncate text-sm text-ink">{c.label}</span>
+                      <span className="readout block truncate text-2xs text-ink-faint">{c.command}</span>
                     </>
                   ) : (
-                    <span className="readout block truncate py-0.5 text-[12px] text-ink-muted transition-colors group-hover/row:text-ink">
+                    <span className="readout block truncate py-0.5 text-sm text-ink-muted transition-colors group-hover/row:text-ink">
                       {c.command}
                     </span>
                   )}
@@ -222,7 +222,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                   />
                 )}
                 {r && !r.running && (
-                  <span className="readout mr-1 shrink-0 text-[10px] text-ink-faint" data-testid={`run-exit-${i}`}>
+                  <span className="readout mr-1 shrink-0 text-2xs text-ink-faint" data-testid={`run-exit-${i}`}>
                     exit {r.exitCode ?? '?'}
                   </span>
                 )}
@@ -233,7 +233,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                   data-testid={`run-rename-${i}`}
                   aria-label={`Rename ${c.command}`}
                   onClick={() => setRenaming(c.command)}
-                  className="shrink-0 px-1.5 py-1.5 text-[10px] text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/row:opacity-100"
+                  className="shrink-0 px-1.5 py-1.5 text-2xs text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/row:opacity-100"
                 >
                   {c.label ? 'Rename' : 'Name'}
                 </button>
@@ -247,7 +247,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                     if (current === c.command) setSelected(null)
                     void save(projectId, commands.filter((_, j) => j !== i))
                   }}
-                  className="shrink-0 rounded-r px-2 py-1.5 text-ink-faint transition-colors hover:bg-surface-hover/70 hover:text-ink"
+                  className="shrink-0 rounded-r-md px-2 py-1.5 text-ink-faint transition-colors hover:bg-surface-hover/70 hover:text-ink"
                 >
                   <CloseIcon size={10} />
                 </button>
@@ -268,7 +268,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               }}
               placeholder="Command, e.g. pnpm dev"
               data-testid="run-add-input"
-              className="readout min-w-0 flex-1 rounded border border-line bg-surface-floor px-2 py-1.5 text-[12px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              className="readout min-w-0 flex-1 rounded-md border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
             />
             <input
               value={draftName}
@@ -278,13 +278,13 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               }}
               placeholder="Name (optional)"
               data-testid="run-add-name"
-              className="w-32 shrink-0 rounded border border-line bg-surface-floor px-2 py-1.5 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              className="w-32 shrink-0 rounded-md border border-line bg-surface-floor px-2 py-1.5 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
             />
             <button
               type="button"
               data-testid="run-add"
               onClick={add}
-              className="shrink-0 rounded border border-line px-2 py-1.5 text-[11px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
+              className="shrink-0 rounded-md border border-line px-2 py-1.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
             >
               Add
             </button>
@@ -300,7 +300,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                 type="button"
                 data-testid="run-exec"
                 onClick={() => void run(current)}
-                className="rounded border border-line px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong hover:bg-surface-hover/25"
+                className="rounded-md border border-line px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong hover:bg-surface-hover/25"
               >
                 {currentRun?.running ? 'Restart' : 'Run'}
               </button>
@@ -309,12 +309,12 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                   type="button"
                   data-testid="run-stop"
                   onClick={() => void stop(current)}
-                  className="rounded border border-line px-3 py-1 text-[12px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
+                  className="rounded-md border border-line px-3 py-1 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
                 >
                   Stop
                 </button>
               )}
-              <span className="readout min-w-0 truncate text-[11px] text-ink-faint" data-testid="run-selected">
+              <span className="readout min-w-0 truncate text-xs text-ink-faint" data-testid="run-selected">
                 {sel?.label ? `${sel.label} · ${current}` : current}
               </span>
             </div>
@@ -324,7 +324,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               {currentRun ? (
                 <LogView key={currentRun.runId} projectId={projectId} command={current} runId={currentRun.runId} />
               ) : (
-                <p className="px-3 py-2 text-[11px] text-ink-faint">Not run yet — press Run.</p>
+                <p className="px-3 py-2 text-xs text-ink-faint">Not run yet — press Run.</p>
               )}
             </div>
           </>
@@ -349,8 +349,7 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
     if (!el) return
 
     const term = new Xterm({
-      fontSize: 11,
-      // Colours and font come from the theme (styles/index.css, --color-term-*)
+      // Colours, font and size come from the theme (styles/index.css, --color-term-*)
       ...terminalStyle(el, 'log'),
       disableStdin: true,
       scrollback: 5000,

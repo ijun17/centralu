@@ -119,7 +119,7 @@ export function UsageDonuts() {
    */
   if (offline) {
     return (
-      <span className="flex items-center gap-1.5 text-[11px] text-ink-signal" data-testid="connection">
+      <span className="flex items-center gap-1.5 text-xs text-ink-signal" data-testid="connection">
         <span className="size-1.5 rounded-full bg-ink-signal breathe" aria-hidden />
         {connection === 'connecting' ? 'Connecting' : 'Disconnected'}
       </span>
@@ -143,7 +143,7 @@ export function UsageDonuts() {
           </span>
         }
       >
-        <span className="text-[11px] text-ink-muted" data-testid="usage-no-agent">
+        <span className="text-xs text-ink-muted" data-testid="usage-no-agent">
           No agent
         </span>
       </Tooltip>
@@ -171,8 +171,8 @@ export function UsageDonuts() {
             data-testid="usage-drop"
           >
             <header className="flex items-center gap-2 border-b border-line px-4 py-2">
-              <h2 className="text-[13px] font-medium text-ink">Usage</h2>
-              <span className="readout text-[11px] text-ink-faint">{openMeta.label}</span>
+              <h2 className="text-md font-medium text-ink">Usage</h2>
+              <span className="readout text-xs text-ink-faint">{openMeta.label}</span>
             </header>
             <div className="max-h-[calc(60vh/var(--text-zoom))] overflow-y-auto">
               <UsagePanel tool={open} />
@@ -280,7 +280,7 @@ function Donut({
             textAnchor="middle"
             dominantBaseline="central"
             className={`fill-current font-mono ${known ? 'text-ink' : 'text-ink-faint'}`}
-            style={{ fontSize: '9px' }}
+            style={{ fontSize: 'var(--text-2xs)' }}
           >
             {meta.mark}
           </text>

@@ -6,7 +6,7 @@ import { useStore } from '../../store/store.js'
 import { AppReviewDetails } from './AppReviewDetails.jsx'
 
 const inputClass =
-  'w-full rounded border border-line bg-surface-floor px-2 py-1.5 font-mono text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
+  'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
 /**
  * Import an app (M4 E-3) — from a folder, a .zip, or an https link to a .zip, into the user
@@ -96,10 +96,10 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
     <Modal onClose={close} testId="import-app-dialog" align="top">
       <div className="flex max-h-[calc(80vh/var(--text-zoom))] w-[520px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)">
         <header className="shrink-0 border-b border-line px-4 py-2.5">
-          <h2 className="text-[13px] font-medium text-ink">
+          <h2 className="text-md font-medium text-ink">
             Import an app <span className="text-ink-faint">·</span> <span className="text-ink-muted">Your apps</span>
           </h2>
-          <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+          <p className="mt-1 text-xs leading-body text-ink-faint">
             It arrives turned off. You see what it runs before you turn it on.
           </p>
         </header>
@@ -114,12 +114,12 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
               }}
             >
               {fromLink && (
-                <p className="rounded border border-line bg-surface-raised px-2.5 py-2 text-[11px] leading-relaxed text-ink-muted" data-testid="import-from-link">
+                <p className="rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink-muted" data-testid="import-from-link">
                   A link asked Centralu to import this app. Nothing is read or downloaded until you choose Review.
                 </p>
               )}
               <label className="block">
-                <span className="mb-1 block text-[10px] text-ink-muted">Folder, .zip file, or https link to a .zip</span>
+                <span className="mb-1 block text-2xs text-ink-muted">Folder, .zip file, or https link to a .zip</span>
                 <input
                   autoFocus
                   type="text"
@@ -132,10 +132,10 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
                 />
               </label>
               <div className="flex gap-2">
-                <button type="button" className="rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink" onClick={() => void pick('folder')} data-testid="import-pick-folder">
+                <button type="button" className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink" onClick={() => void pick('folder')} data-testid="import-pick-folder">
                   Choose folder…
                 </button>
-                <button type="button" className="rounded px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:text-ink" onClick={() => void pick('zip')} data-testid="import-pick-zip">
+                <button type="button" className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink" onClick={() => void pick('zip')} data-testid="import-pick-zip">
                   Choose .zip…
                 </button>
               </div>
@@ -144,7 +144,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
             <AppReviewDetails review={staged.review} />
           )}
           {error && (
-            <p className="mt-3 whitespace-pre-wrap break-words rounded border border-line bg-surface-raised px-2.5 py-2 text-[11px] leading-relaxed text-ink" role="alert" data-testid="import-error">
+            <p className="mt-3 whitespace-pre-wrap break-words rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink" role="alert" data-testid="import-error">
               {error}
             </p>
           )}
@@ -153,15 +153,15 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
         <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-4 py-2.5">
           {staged ? (
             <>
-              <button type="button" className="mr-auto rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink" onClick={back} disabled={!!busy}>
+              <button type="button" className="mr-auto rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={back} disabled={!!busy}>
                 Back
               </button>
-              <button type="button" className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink" onClick={close} data-testid="import-cancel">
+              <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={close} data-testid="import-cancel">
                 Cancel
               </button>
               <button
                 type="button"
-                className="rounded border border-line px-3 py-1 text-[12px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+                className="rounded-md border border-line px-3 py-1 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
                 onClick={() => void commit(false)}
                 disabled={!!busy}
                 data-testid="import-commit"
@@ -170,7 +170,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
               </button>
               <button
                 type="button"
-                className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
                 onClick={() => void commit(true)}
                 disabled={!!busy}
                 data-testid="import-enable"
@@ -180,12 +180,12 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
             </>
           ) : (
             <>
-              <button type="button" className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink" onClick={close} data-testid="import-cancel">
+              <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={close} data-testid="import-cancel">
                 Cancel
               </button>
               <button
                 type="button"
-                className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
                 onClick={() => void review()}
                 disabled={!source.trim() || !!busy}
                 data-testid="import-review"

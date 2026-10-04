@@ -148,7 +148,7 @@ export const SIDEBAR_DEFAULT = 240
  *
  * The value is the root's CSS zoom factor. The alternative of scaling only the font (switching to
  * rem) would be a full rewrite, because every bit of text in this codebase is fixed in px
- * (text-[11px]…), and if only the text grows while the panel does not, line wrapping breaks first
+ * (text-xs…), and if only the text grows while the panel does not, line wrapping breaks first
  * in a narrow grid panel. Scaling the whole screen by the same factor is predictable instead,
  * because it follows the same rule as the OS's own display scaling.
  */

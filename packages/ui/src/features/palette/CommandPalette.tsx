@@ -181,7 +181,7 @@ export function CommandPalette() {
       >
         <input
           ref={inputRef}
-          className="w-full border-b border-line bg-transparent px-4 py-3 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none"
+          className="w-full border-b border-line bg-transparent px-4 py-3 text-md text-ink placeholder:text-ink-faint focus:outline-none"
           placeholder="Search sessions, projects, messages"
           value={query}
           onChange={(e) => {
@@ -192,7 +192,7 @@ export function CommandPalette() {
         />
         <ul className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
           {items.length === 0 ? (
-            <li className="px-4 py-6 text-center text-[12px] text-ink-faint" data-testid="palette-empty">
+            <li className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="palette-empty">
               No results
             </li>
           ) : (
@@ -205,17 +205,17 @@ export function CommandPalette() {
                   onClick={() => choose(item)}
                   data-testid={`palette-item-${item.kind}`}
                 >
-                  <span className="w-10 shrink-0 text-[10px] uppercase text-ink-faint">
+                  <span className="w-10 shrink-0 text-2xs uppercase text-ink-faint">
                     {item.kind === 'session' ? 'Session' : item.kind === 'project' ? 'Folder' : item.kind === 'message' ? 'Chat' : 'Action'}
                   </span>
-                  <span className="truncate text-[13px] text-ink">{item.label}</span>
-                  <span className="ml-auto shrink-0 truncate text-[11px] text-ink-faint">{item.sub}</span>
+                  <span className="truncate text-md text-ink">{item.label}</span>
+                  <span className="ml-auto shrink-0 truncate text-xs text-ink-faint">{item.sub}</span>
                 </button>
               </li>
             ))
           )}
         </ul>
-        <footer className="flex items-center gap-1 border-t border-line px-3 py-1.5 text-[10px] text-ink-faint">
+        <footer className="flex items-center gap-1 border-t border-line px-3 py-1.5 text-2xs text-ink-faint">
           <Kbd>↑</Kbd>
           <Kbd>↓</Kbd> Move
           <Kbd>↵</Kbd> Open

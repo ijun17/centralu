@@ -266,9 +266,9 @@ export function GridView() {
     >
       {visible.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-center" data-testid="grid-empty">
-          <p className="text-[13px] leading-relaxed text-ink-muted">
+          <p className="text-md leading-body text-ink-muted">
             Drag sessions and apps here from the sidebar
-            <span className="mt-1 block text-[11px] text-ink-faint">
+            <span className="mt-1 block text-xs text-ink-faint">
               They keep running — this is another way to look at them
             </span>
           </p>

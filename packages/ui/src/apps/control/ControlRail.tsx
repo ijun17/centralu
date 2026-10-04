@@ -94,14 +94,14 @@ export function ControlRail() {
       {/* Things where the machine called out the person by name — calls that do not show up as session state (control_notify) */}
       {notifies.length > 0 && (
         <section className="border-b border-line px-3 py-2">
-          <h2 className="text-[10px] uppercase text-ink-faint">Notices</h2>
+          <h2 className="text-2xs uppercase text-ink-faint">Notices</h2>
           {notifies.map((n) => (
             <div key={n.id} className="mt-1.5 flex items-start gap-1.5" data-testid={`rail-notify-${n.id}`}>
-              <p className={`min-w-0 flex-1 text-[11px] leading-snug ${n.priority === 'high' ? 'text-ink' : 'text-ink-muted'}`}>
+              <p className={`min-w-0 flex-1 text-xs leading-tight ${n.priority === 'high' ? 'text-ink' : 'text-ink-muted'}`}>
                 {n.text}
                 {n.sessionId && sessions[n.sessionId] && (
                   <button
-                    className="ml-1 text-[10px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+                    className="ml-1 text-2xs text-ink-faint underline-offset-2 hover:text-ink hover:underline"
                     onClick={() => focusSession(n.sessionId!)}
                   >
                     {sessions[n.sessionId]!.name} →
@@ -109,7 +109,7 @@ export function ControlRail() {
                 )}
               </p>
               <button
-                className="shrink-0 text-[11px] text-ink-faint hover:text-ink"
+                className="shrink-0 text-xs text-ink-faint hover:text-ink"
                 onClick={() => dismiss(n.id)}
                 data-testid={`rail-notify-dismiss-${n.id}`}
                 aria-label="Dismiss"
@@ -123,10 +123,10 @@ export function ControlRail() {
 
       {/* My turn — action. In the exact order of the inbox's own judgment (@cc/core buildInbox) */}
       <section className="border-b border-line px-3 py-2">
-        <h2 className="text-[10px] uppercase text-ink-faint">
+        <h2 className="text-2xs uppercase text-ink-faint">
           My turn {mine.length > 0 && <span className="text-ink">{mine.length}</span>}
         </h2>
-        {mine.length === 0 && <p className="mt-1.5 text-[11px] text-ink-faint">Nothing needs you right now.</p>}
+        {mine.length === 0 && <p className="mt-1.5 text-xs text-ink-faint">Nothing needs you right now.</p>}
         {mine.map((item) => (
           <TurnRow key={item.id} id={item.id} waitingMs={item.waitingMs} unread={item.unread} s={sessions[item.id]} />
         ))}
@@ -136,9 +136,9 @@ export function ControlRail() {
           person steps off the bus and into the referee's seat */}
       <section className="border-b border-line px-3 py-2" data-testid="rail-tasks">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-[10px] uppercase text-ink-faint">Tasks {tasks.length > 0 && tasks.filter((t) => t.status === 'active').length}</h2>
+          <h2 className="text-2xs uppercase text-ink-faint">Tasks {tasks.length > 0 && tasks.filter((t) => t.status === 'active').length}</h2>
           <button
-            className="text-[10px] text-ink-faint hover:text-ink"
+            className="text-2xs text-ink-faint hover:text-ink"
             onClick={() => setCreating(true)}
             data-testid="rail-new-task"
           >
@@ -154,8 +154,8 @@ export function ControlRail() {
                 onClick={() => focusSession(t.coordinatorId)}
                 data-testid={`rail-task-open-${t.id}`}
               >
-                <span className="block truncate text-[11px] text-ink-muted">{t.title}</span>
-                <span className="block truncate text-[10px] text-ink-faint">
+                <span className="block truncate text-xs text-ink-muted">{t.title}</span>
+                <span className="block truncate text-2xs text-ink-faint">
                   Foreman: {sessions[t.coordinatorId]?.state ?? 'gone'}
                 </span>
               </button>
@@ -171,7 +171,7 @@ export function ControlRail() {
                     onClick={() => focusSession(id)}
                     data-testid={`rail-task-member-${t.id}-${id}`}
                     title={sessions[id] ? `${sessions[id]!.name} — ${sessions[id]!.state}` : 'session gone'}
-                    className="max-w-full truncate rounded border border-line px-1 py-px text-[10px] text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
+                    className="max-w-full truncate rounded-md border border-line px-1 py-px text-2xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
                   >
                     {sessions[id]?.name ?? '(gone)'}
                   </button>
@@ -181,13 +181,13 @@ export function ControlRail() {
           ))}
         {tasks.some((t) => t.status === 'done') && (
           <details className="mt-1.5">
-            <summary className="cursor-pointer text-[10px] text-ink-faint">Done {tasks.filter((t) => t.status === 'done').length}</summary>
+            <summary className="cursor-pointer text-2xs text-ink-faint">Done {tasks.filter((t) => t.status === 'done').length}</summary>
             {tasks
               .filter((t) => t.status === 'done')
               .map((t) => (
                 <button
                   key={t.id}
-                  className="mt-1 block w-full truncate text-left text-[10px] text-ink-faint hover:text-ink"
+                  className="mt-1 block w-full truncate text-left text-2xs text-ink-faint hover:text-ink"
                   onClick={() => focusSession(t.coordinatorId)}
                 >
                   ✅ {t.title}
@@ -201,8 +201,8 @@ export function ControlRail() {
 
       {/* Running — background. Compresses the grid's monitoring into one line per session */}
       <section className="px-3 py-2">
-        <h2 className="text-[10px] uppercase text-ink-faint">Running {running.length > 0 && running.length}</h2>
-        {running.length === 0 && <p className="mt-1.5 text-[11px] text-ink-faint">No sessions working.</p>}
+        <h2 className="text-2xs uppercase text-ink-faint">Running {running.length > 0 && running.length}</h2>
+        {running.length === 0 && <p className="mt-1.5 text-xs text-ink-faint">No sessions working.</p>}
         {running.map((s) => (
           <RunningRow key={s.id} s={s} />
         ))}
@@ -228,11 +228,11 @@ function RunningRow({ s }: { s: SessionSummary }) {
       data-testid={`rail-running-${s.id}`}
     >
       <span className="flex items-center gap-1.5">
-        <span className="min-w-0 flex-1 truncate text-[11px] text-ink-muted">{s.name}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">{s.name}</span>
         {/* The same mark as the sidebar row's — written here, since an app does not reach into features (#81) */}
         {bg > 0 && (
           <span
-            className="readout shrink-0 rounded border border-line px-1 text-[9px] leading-relaxed text-ink-faint"
+            className="readout shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint"
             data-testid={`rail-background-${s.id}`}
             title={`${bg} background task${bg === 1 ? '' : 's'} running`}
           >
@@ -240,8 +240,8 @@ function RunningRow({ s }: { s: SessionSummary }) {
           </span>
         )}
       </span>
-      <span className="block truncate text-[10px] leading-snug text-ink-faint">{words ?? s.preview ?? '…'}</span>
-      {tool && <span className="readout block truncate text-[9px] text-ink-faint/70">{tool}</span>}
+      <span className="block truncate text-2xs leading-tight text-ink-faint">{words ?? s.preview ?? '…'}</span>
+      {tool && <span className="readout block truncate text-2xs text-ink-faint/70">{tool}</span>}
     </button>
   )
 }
@@ -281,13 +281,13 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
           focusSession(id)
         }}
       >
-        <span className={`min-w-0 flex-1 truncate text-[11px] ${unread ? 'text-ink' : 'text-ink-muted'}`}>{s.name}</span>
-        <span className="readout shrink-0 text-[9px] text-ink-faint">{ago(waitingMs)}</span>
+        <span className={`min-w-0 flex-1 truncate text-xs ${unread ? 'text-ink' : 'text-ink-muted'}`}>{s.name}</span>
+        <span className="readout shrink-0 text-2xs text-ink-faint">{ago(waitingMs)}</span>
       </button>
 
       {approval && (
         <div className="mt-1">
-          <p className="readout truncate text-[10px] text-ink-faint">
+          <p className="readout truncate text-2xs text-ink-faint">
             {approval.detail.kind === 'command'
               ? `$ ${approval.detail.command}`
               : approval.detail.kind === 'file_edit'
@@ -300,7 +300,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
               opening the session requires seeing what actually changes */}
           {approval.detail.kind === 'file_edit' && showDiff && (
             <pre
-              className="readout mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all rounded border border-line bg-surface-raised p-1.5 text-[9px] leading-snug text-ink-muted"
+              className="readout mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-line bg-surface-raised p-1.5 text-2xs leading-tight text-ink-muted"
               data-testid={`rail-diff-${id}`}
             >
               {approval.detail.diffPreview}
@@ -308,7 +308,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
           )}
           <div className="mt-1 flex gap-1.5">
             <button
-              className="rounded border border-line bg-surface-raised px-2 py-0.5 text-[10px] text-ink hover:border-line-strong"
+              className="rounded-md border border-line bg-surface-raised px-2 py-0.5 text-2xs text-ink hover:border-line-strong"
               onClick={() => {
                 bumpMetric(doc, 'inlineReplies')
                 respondApproval(id, approval.requestId, 'allow')
@@ -318,7 +318,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
               Approve
             </button>
             <button
-              className="rounded px-2 py-0.5 text-[10px] text-ink-faint hover:text-ink"
+              className="rounded-md px-2 py-0.5 text-2xs text-ink-faint hover:text-ink"
               onClick={() => {
                 bumpMetric(doc, 'inlineReplies')
                 respondApproval(id, approval.requestId, 'deny')
@@ -329,7 +329,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
             </button>
             {approval.detail.kind === 'file_edit' && (
               <button
-                className="rounded px-2 py-0.5 text-[10px] text-ink-faint hover:text-ink"
+                className="rounded-md px-2 py-0.5 text-2xs text-ink-faint hover:text-ink"
                 onClick={() => setShowDiff((v) => !v)}
                 data-testid={`rail-diff-toggle-${id}`}
               >
@@ -342,7 +342,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
 
       {!approval && question && questionReq && (
         <div className="mt-1">
-          <p className="truncate text-[10px] text-ink-faint">{question.question}</p>
+          <p className="truncate text-2xs text-ink-faint">{question.question}</p>
           <div className="mt-1 flex flex-wrap gap-1">
             {/* A multi-select question does not get finished in a row — it is answered by opening
                 the session and its full card */}
@@ -350,7 +350,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
               question.options.slice(0, 3).map((o) => (
                 <button
                   key={o.label}
-                  className="rounded border border-line bg-surface-raised px-1.5 py-0.5 text-[10px] text-ink hover:border-line-strong"
+                  className="rounded-md border border-line bg-surface-raised px-1.5 py-0.5 text-2xs text-ink hover:border-line-strong"
                   onClick={() => {
                     bumpMetric(doc, 'inlineReplies')
                     answerQuestion(id, questionReq, [{ question: question.question, answers: [o.label] }])
@@ -365,7 +365,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
       )}
 
       {!approval && !question && s.state === 'error' && (
-        <p className="mt-1 truncate text-[10px] text-danger">{s.lastError?.message ?? 'error'}</p>
+        <p className="mt-1 truncate text-2xs text-danger">{s.lastError?.message ?? 'error'}</p>
       )}
 
       {!approval && !question && s.state === 'waiting_input' && (
@@ -376,9 +376,9 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
             raised the question "is this normal?"). The composer must always look like a blank
             sheet of paper.
           */}
-          {(words ?? s.preview) && <p className="mt-1 truncate text-[10px] text-ink-faint">{words ?? s.preview}</p>}
+          {(words ?? s.preview) && <p className="mt-1 truncate text-2xs text-ink-faint">{words ?? s.preview}</p>}
           <input
-            className="mt-1 w-full rounded border border-line bg-surface-raised px-1.5 py-1 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            className="mt-1 w-full rounded-md border border-line bg-surface-raised px-1.5 py-1 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
             placeholder="Reply…"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -430,31 +430,31 @@ function NewTaskDialog({ sessions, onClose }: { sessions: Record<string, Session
         className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="text-[13px] text-ink">New task</p>
-        <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+        <p className="text-md text-ink">New task</p>
+        <p className="mt-1 text-xs leading-body text-ink-muted">
           Pick member sessions and state the goal — a foreman session will coordinate them, keep a
           board, and call you on the rail when needed.
         </p>
         <input
-          className="mt-3 w-full rounded border border-line bg-surface-raised px-2 py-1.5 text-[12px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          className="mt-3 w-full rounded-md border border-line bg-surface-raised px-2 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
           placeholder="Task name"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           data-testid="task-title"
         />
         <textarea
-          className="mt-2 w-full resize-none rounded border border-line bg-surface-raised px-2 py-1.5 text-[12px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          className="mt-2 w-full resize-none rounded-md border border-line bg-surface-raised px-2 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
           rows={2}
           placeholder="Goal — becomes the foreman's brief"
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           data-testid="task-goal"
         />
-        <p className="mt-2 text-[10px] uppercase text-ink-faint">Members</p>
+        <p className="mt-2 text-2xs uppercase text-ink-faint">Members</p>
         <div className="mt-1 max-h-40 overflow-y-auto">
-          {workers.length === 0 && <p className="text-[11px] text-ink-faint">No worker sessions yet.</p>}
+          {workers.length === 0 && <p className="text-xs text-ink-faint">No worker sessions yet.</p>}
           {workers.map((s) => (
-            <label key={s.id} className="flex cursor-pointer items-center gap-2 py-0.5 text-[12px] text-ink-muted hover:text-ink">
+            <label key={s.id} className="flex cursor-pointer items-center gap-2 py-0.5 text-sm text-ink-muted hover:text-ink">
               <input
                 type="checkbox"
                 className="accent-ink-muted"
@@ -468,13 +468,13 @@ function NewTaskDialog({ sessions, onClose }: { sessions: Record<string, Session
             </label>
           ))}
         </div>
-        {error && <p className="mt-2 text-[11px] text-danger">{error}</p>}
+        {error && <p className="mt-2 text-xs text-danger">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink" onClick={onClose}>
+          <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onClose}>
             Cancel
           </button>
           <button
-            className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink hover:border-line-strong disabled:opacity-40"
+            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink hover:border-line-strong disabled:opacity-40"
             disabled={!title.trim() || members.length === 0 || busy}
             onClick={() => void create()}
             data-testid="task-create"

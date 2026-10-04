@@ -34,6 +34,14 @@
 `e2e/style-snapshot.spec.ts`로 확인한다. 데모 장면에서 모든 요소의 계산된 색을 전후로 기록하고,
 `scripts/style-snapshot-diff.mjs`가 둘을 비교한다.
 
+**글자 크기, 줄 높이, 모서리 반경의 단계.** 같은 블록에 글자 크기 다섯(`text-2xs` 10px,
+`text-xs` 11px, `text-sm` 12px, `text-md` 13px, `text-display` 19px), 줄 높이 셋(`leading-tight`
+1.3, `leading-body` 1.65, `leading-code` 1.5), 반경 넷(`rounded-sm` 3px, `rounded-md` 4px,
+`rounded-lg` 8px, `rounded-full`)이 있고, Tailwind 자체의 단계는 지워서 다른 값은 이름으로 쓸 수
+없다. 크기에는 짝이 되는 줄 높이를 두지 않아, 크기 유틸리티는 물려받은 줄 높이를 건드리지 않는다.
+행 높이가 고정된 화면(코드 뷰어, diff, 커밋 그래프)은 행 높이를 그것에 기대는 코드 옆에 픽셀로
+둔다. `tooling/styles.test.ts`는 짧은 예외 목록 밖의 임의 크기, 줄 높이, 반경에서 실패한다.
+
 ## 2. 스키마와 검증 (packages/protocol)
 
 | 영역 | 선택 | 이유 |

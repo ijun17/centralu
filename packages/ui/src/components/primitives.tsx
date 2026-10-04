@@ -24,7 +24,7 @@ export function StateDot({ state }: { state: SessionState }) {
   const s = SIGNAL[state]
   return (
     <span
-      className={`w-2.5 shrink-0 text-center text-[9px] leading-none ${s.tone}`}
+      className={`w-2.5 shrink-0 text-center text-2xs leading-none ${s.tone}`}
       title={s.label}
       data-testid={`dot-${state}`}
       aria-label={s.label}
@@ -173,7 +173,7 @@ export function Tooltip({
           ref={tipRef}
           role="tooltip"
           data-testid={testId}
-          className="pointer-events-none fixed z-50 w-max max-w-64 rounded border border-line bg-surface-raised px-2 py-1.5 text-[11px] leading-relaxed text-ink-muted shadow-(--shadow-popover)"
+          className="pointer-events-none fixed z-50 w-max max-w-64 rounded-md border border-line bg-surface-raised px-2 py-1.5 text-xs leading-body text-ink-muted shadow-(--shadow-popover)"
           style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
         >
           {content}

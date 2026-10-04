@@ -298,8 +298,8 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   if (!path) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2" data-testid="viewer-empty">
-        <p className="text-[13px] text-ink-muted">Select a file</p>
-        <p className="text-[11px] text-ink-faint">
+        <p className="text-md text-ink-muted">Select a file</p>
+        <p className="text-xs text-ink-faint">
           <Kbd>{sc('mod', '⇧2')}</Kbd> pick a file in the tree to open it here
         </p>
       </div>
@@ -309,13 +309,13 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="code-viewer">
       <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
-        <span className="readout truncate text-[11px] text-ink-muted" data-testid="viewer-path">
+        <span className="readout truncate text-xs text-ink-muted" data-testid="viewer-path">
           {path}
         </span>
         {!showingImage && (
           <>
             <input
-              className="ml-2 w-40 rounded border border-line bg-surface-raised px-2 py-0.5 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              className="ml-2 w-40 rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
               placeholder="Search in file"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -327,14 +327,14 @@ export function CodeViewer({ projectId }: { projectId: string }) {
               data-testid="viewer-search"
             />
             {query && (
-              <span className="readout text-[10px] text-ink-faint" data-testid="viewer-match-count">
+              <span className="readout text-2xs text-ink-faint" data-testid="viewer-match-count">
                 {matchAt >= 0 ? `${matchAt + 1}/${matchLines.length}` : `${matches.size} lines`}
               </span>
             )}
           </>
         )}
         {isSvg && (
-          <span className="ml-2 flex overflow-hidden rounded border border-line text-[10px]" data-testid="viewer-svg-mode">
+          <span className="ml-2 flex overflow-hidden rounded-md border border-line text-2xs" data-testid="viewer-svg-mode">
             <button
               type="button"
               className={`px-2 py-0.5 transition-colors ${
@@ -358,7 +358,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           </span>
         )}
         <button
-          className="ml-auto shrink-0 text-[11px] text-ink-faint hover:text-ink"
+          className="ml-auto shrink-0 text-xs text-ink-faint hover:text-ink"
           onClick={() => {
             void platform.fs
               .resolve(projectId, path)
@@ -373,12 +373,12 @@ export function CodeViewer({ projectId }: { projectId: string }) {
 
       {error !== null ? (
         <div className="p-3">
-          <p className="text-[12px] text-ink-muted" data-testid="viewer-error">
+          <p className="text-sm text-ink-muted" data-testid="viewer-error">
             Could not open this file — {error}
           </p>
           {candidates.length > 0 && (
             <div className="mt-2" data-testid="viewer-candidates">
-              <p className="text-[11px] text-ink-faint">
+              <p className="text-xs text-ink-faint">
                 Files ending in <span className="readout text-ink-muted">{path}</span> — did you mean:
               </p>
               <ul className="mt-1 flex flex-col gap-0.5">
@@ -392,7 +392,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
                         if (jumpNow?.path === path) requestViewerJump(c, jumpNow.line)
                         useStore.getState().openFile(c)
                       }}
-                      className="readout rounded px-1 py-0.5 text-left text-[11px] text-ink underline decoration-ink-faint underline-offset-2 hover:decoration-ink"
+                      className="readout rounded-md px-1 py-0.5 text-left text-xs text-ink underline decoration-ink-faint underline-offset-2 hover:decoration-ink"
                     >
                       {c}
                     </button>
@@ -403,7 +403,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           )}
         </div>
       ) : file === null ? (
-        <p className="p-3 text-[12px] text-ink-faint">Loading…</p>
+        <p className="p-3 text-sm text-ink-faint">Loading…</p>
       ) : showingImage && image ? (
         <div
           className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto bg-surface-floor p-4"
@@ -415,10 +415,10 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             className="max-h-full max-w-full object-contain"
             data-testid="viewer-image-content"
           />
-          <p className="readout shrink-0 text-[10px] text-ink-faint">{(file.bytes / 1024).toFixed(0)}KB</p>
+          <p className="readout shrink-0 text-2xs text-ink-faint">{(file.bytes / 1024).toFixed(0)}KB</p>
         </div>
       ) : file.binary ? (
-        <p className="p-3 text-[12px] text-ink-faint" data-testid="viewer-binary">
+        <p className="p-3 text-sm text-ink-faint" data-testid="viewer-binary">
           {file.previewError ?? `Binary file (${(file.bytes / 1024).toFixed(0)}KB)`}
         </p>
       ) : (
@@ -429,13 +429,17 @@ export function CodeViewer({ projectId }: { projectId: string }) {
          * no way back in by keyboard, and the far right end of a wrapped-tight line would never
          * be seen. The name is left as just `Code` — the path is already stated by the header
          * right above.
+         *
+         * The 18px line height is the row height the virtual list estimates (estimateSize
+         * above), so it stays a number here rather than a step on the line-height scale: a theme
+         * changing `--leading-code` must not desynchronise the rows from their estimate.
          */
         <div
           ref={scrollRef}
           role="region"
           aria-label="Code"
           tabIndex={0}
-          className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[18px] focus:outline-none"
+          className="min-h-0 flex-1 overflow-auto font-mono text-xs leading-[18px] focus:outline-none"
           onKeyDown={(e) => {
             // Both modifiers, like every other shortcut here. ⌘⇧A is the global "next
             // waiting session" and must fall through untouched.
@@ -475,7 +479,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
               </div>
             ))}
           </div>
-          {file.truncated && <p className="p-2 text-[11px] text-ink-faint">{TRUNCATED_NOTICE}</p>}
+          {file.truncated && <p className="p-2 text-xs text-ink-faint">{TRUNCATED_NOTICE}</p>}
         </div>
       )}
     </section>

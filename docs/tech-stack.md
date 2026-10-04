@@ -33,6 +33,15 @@ variables when a terminal opens (`components/terminalTheme.ts`). A restyling tha
 pixel is checked with `e2e/style-snapshot.spec.ts`, which records every element's computed colours
 on the demo scenes before and after (`scripts/style-snapshot-diff.mjs` compares the two).
 
+**Type, line height and radius scales.** The same block holds five text sizes (`text-2xs` 10px,
+`text-xs` 11px, `text-sm` 12px, `text-md` 13px, `text-display` 19px), three line heights
+(`leading-tight` 1.3, `leading-body` 1.65, `leading-code` 1.5) and four radii (`rounded-sm` 3px,
+`rounded-md` 4px, `rounded-lg` 8px, `rounded-full`), with Tailwind's own scales cleared so nothing
+else can be named. Sizes define no paired line height, so a size utility leaves the inherited line
+height alone. Views with fixed rows (the code viewer, the diff, the commit graph) keep their row
+heights in pixels next to the code that depends on them. `tooling/styles.test.ts` fails on an
+arbitrary size, line height or radius outside a short list of exceptions.
+
 ## 2. Schema and validation (packages/protocol)
 
 | Area | Choice | Reasoning |

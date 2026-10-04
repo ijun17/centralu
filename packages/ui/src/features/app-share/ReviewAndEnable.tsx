@@ -55,22 +55,22 @@ export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
 
   return (
     <div className="mx-auto w-full max-w-xl overflow-y-auto px-6 py-6" data-testid="pinned-review">
-      <p className="text-[13px] text-ink" data-testid="pinned-review-title">
+      <p className="text-md text-ink" data-testid="pinned-review-title">
         {app.info.imported?.confirmedAt ? 'This app changed. Review it before it runs again.' : 'This app was imported. Review it before it runs.'}
       </p>
-      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+      <p className="mt-1 text-xs leading-body text-ink-faint">
         Nothing from it runs until you enable it: no process, no tools for agents, no screen.
       </p>
-      <div className="mt-4">{review ? <AppReviewDetails review={review} /> : !error && <p className="text-[12px] text-ink-faint">Reading…</p>}</div>
+      <div className="mt-4">{review ? <AppReviewDetails review={review} /> : !error && <p className="text-sm text-ink-faint">Reading…</p>}</div>
       {error && (
-        <p className="mt-3 whitespace-pre-wrap break-words rounded border border-line bg-surface-raised px-2.5 py-2 text-[11px] text-ink" role="alert" data-testid="pinned-review-error">
+        <p className="mt-3 whitespace-pre-wrap break-words rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs text-ink" role="alert" data-testid="pinned-review-error">
           {error}
         </p>
       )}
       <div className="mt-4 flex justify-end">
         <button
           type="button"
-          className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+          className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
           onClick={() => void enable()}
           disabled={!review || busy}
           data-testid="pinned-enable"

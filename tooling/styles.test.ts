@@ -169,6 +169,43 @@ describe('our own classes are actually used', () => {
   })
 })
 
+/**
+ * The type and radius scales hold (#312 step 2).
+ *
+ * Tailwind's own scales are cleared in index.css, so a size or radius that is not a token can only
+ * come back as an arbitrary value (`text-[9px]`, `rounded-[5px]`). That is exactly how the app
+ * had drifted to nine text sizes and ten radii, one call site at a time. The few arbitrary values
+ * that are allowed say why where they are written: rows of a fixed height that a virtual list
+ * or a drawn lane depends on, and a radius derived from a token.
+ */
+describe('type and radius stay on the scale', () => {
+  const ALLOWED = new Set([
+    'leading-[18px]', // CodeViewer: the virtual list's row height
+    'leading-[1.5]', // GitPanel's diff: the virtual list's ~17px rows
+    'rounded-b-[calc(var(--radius-lg)-1px)]', // the folded composer inside the pane's 1px border
+  ])
+  const files = execFileSync('git', ['ls-files', 'packages/ui/src', 'apps/web/src', 'apps/desktop/src'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  })
+    .split('\n')
+    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
+
+  it('no arbitrary text size, line height or radius outside the listed exceptions', () => {
+    const offenders: string[] = []
+    for (const f of files) {
+      const text = readFileSync(join(ROOT, f), 'utf8')
+      for (const m of text.matchAll(/(?<![\w-])(?:text|leading|rounded(?:-[trblse]{1,2})?)-\[[^\]\s]+\]/g)) {
+        // text-[…] is also how a colour is written arbitrarily; only sizes are the scale's business
+        if (m[0].startsWith('text-[') && !/^text-\[[\d.]+(px|rem|em)\]$/.test(m[0])) continue
+        if (!ALLOWED.has(m[0])) offenders.push(`${f}: ${m[0]}`)
+      }
+      for (const m of text.matchAll(/fontSize: ['"`]?\d/g)) offenders.push(`${f}: ${m[0]}`)
+    }
+    expect(offenders, 'use a token from the scale in styles/index.css, or add the exception here with its reason').toEqual([])
+  })
+})
+
 describe('bundle regression (decision C-3: no editor engine in the viewer)', () => {
   it('CodeMirror and Shiki are not in the bundle', () => {
     // An editor engine is overkill for a read-only viewer. Including one would require lazy

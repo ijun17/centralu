@@ -159,12 +159,12 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
    */
   return (
     <DragRegion className="flex h-10 items-center gap-2 border-b border-line px-3">
-      <span className="readout truncate text-[11px] text-ink-muted" data-testid="evidence-project">
+      <span className="readout truncate text-xs text-ink-muted" data-testid="evidence-project">
         {projectName}
       </span>
       {branch && (
         <button
-          className="readout truncate text-[10px] text-ink-faint transition-colors hover:text-ink"
+          className="readout truncate text-2xs text-ink-faint transition-colors hover:text-ink"
           onClick={openBranches}
           data-testid="evidence-branch"
           title="Switch branch"
@@ -487,7 +487,7 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
         data-testid={gi === 0 ? 'evidence-tabs-more' : `evidence-tabs-more-${gi}`}
         aria-label={`${hidden.length} more tabs`}
         title={hidden.map((t) => TAB_LABELS[t]).join(' · ')}
-        className={`rounded px-1.5 py-0.5 text-[11px] transition-colors hover:bg-surface-hover/50 hover:text-ink ${
+        className={`rounded-md px-1.5 py-0.5 text-xs transition-colors hover:bg-surface-hover/50 hover:text-ink ${
           open ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted'
         }`}
       >
@@ -498,7 +498,7 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
           {/* Closes when clicked outside — the menu itself sits at a higher z below */}
           <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />
           <div
-            className="cc-drop absolute left-0 top-full z-50 mt-1 min-w-28 overflow-hidden rounded border border-line bg-surface-raised py-0.5 shadow-(--shadow-popover)"
+            className="cc-drop absolute left-0 top-full z-50 mt-1 min-w-28 overflow-hidden rounded-md border border-line bg-surface-raised py-0.5 shadow-(--shadow-popover)"
             data-testid={gi === 0 ? 'evidence-tabs-overflow' : `evidence-tabs-overflow-${gi}`}
           >
             {hidden.map((id) => (
@@ -510,7 +510,7 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
                   onPick(id)
                   setOpen(false)
                 }}
-                className="block w-full px-3 py-1 text-left text-[11px] text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
+                className="block w-full px-3 py-1 text-left text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
               >
                 {TAB_LABELS[id]}
               </button>
@@ -588,7 +588,7 @@ function TabButton({
         e.stopPropagation()
         onLayout(moveTab(groups, dragged, id, dropsLeft(e.currentTarget.getBoundingClientRect(), e.clientX)))
       }}
-      className={`rounded px-2 py-0.5 text-[12px] transition-colors disabled:opacity-40 ${
+      className={`rounded-md px-2 py-0.5 text-sm transition-colors disabled:opacity-40 ${
         active ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted hover:text-ink'
       } ${dropLine(edge)}`}
     >
@@ -640,7 +640,7 @@ function TabBody({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {tab !== 'files' && !isRepo && (
-          <p className="px-3 py-2 text-[11px] text-ink-faint" data-testid="evidence-not-repo">
+          <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-not-repo">
             Not a git repository
           </p>
         )}
@@ -697,7 +697,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       data-testid="evidence-rail"
     >
       <button
-        className="rounded px-1 py-0.5 text-[12px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
+        className="rounded-md px-1 py-0.5 text-sm text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
         onClick={() => togglePanel(true)}
         data-testid="evidence-open"
         title={`Expand evidence panel (${sc('mod', 'B')})`}
@@ -706,7 +706,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       </button>
       {count !== null && count > 0 && (
         <button
-          className="readout rounded px-1 text-[10px] text-ink-muted transition-colors hover:text-ink"
+          className="readout rounded-md px-1 text-2xs text-ink-muted transition-colors hover:text-ink"
           onClick={() => togglePanel(true)}
           data-testid="evidence-rail-count"
           title={`${count} changed files`}
@@ -716,7 +716,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       )}
       {running && (
         <button
-          className="flex items-center justify-center rounded px-1 py-1"
+          className="flex items-center justify-center rounded-md px-1 py-1"
           onClick={() => togglePanel(true)}
           data-testid="evidence-rail-running"
           title="A command is running — open the terminal tab"
@@ -726,7 +726,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       )}
       {/* Vertical text — states what the collapsed strip is a strip of */}
       <span
-        className="mt-1 text-[10px] text-ink-faint"
+        className="mt-1 text-2xs text-ink-faint"
         style={{ writingMode: 'vertical-rl' }}
         aria-hidden
       >
@@ -796,11 +796,11 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
       {/* The label 'Changes' was dropped since the tab already says it — only the count and buttons go to the right of the strip */}
       {files && files.length > 0 && (
         <TabActions>
-          <span className="readout text-[10px] text-ink-muted" data-testid="evidence-change-count">
+          <span className="readout text-2xs text-ink-muted" data-testid="evidence-change-count">
             {files.length}
           </span>
           <button
-            className="rounded px-1.5 py-0.5 text-[10px] text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
+            className="rounded-md px-1.5 py-0.5 text-2xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
             onClick={() => openGit()}
             data-testid="evidence-git-full"
             title="Open in wide view"
@@ -811,13 +811,13 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
       )}
 
       {denied ? (
-        <p className="px-3 pb-2 text-[11px] leading-relaxed text-ink-muted" data-testid="evidence-git-denied">
+        <p className="px-3 pb-2 text-xs leading-body text-ink-muted" data-testid="evidence-git-denied">
           Folder access permission required — System Settings → Privacy & Security → Files and Folders
         </p>
       ) : files === null ? (
-        <p className="px-3 pb-2 text-[11px] text-ink-faint">Loading…</p>
+        <p className="px-3 pb-2 text-xs text-ink-faint">Loading…</p>
       ) : files.length === 0 ? (
-        <p className="px-3 pb-2 text-[11px] text-ink-faint" data-testid="evidence-clean">
+        <p className="px-3 pb-2 text-xs text-ink-faint" data-testid="evidence-clean">
           No changes
         </p>
       ) : (
@@ -867,7 +867,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
          */
         <div className="mt-auto border-t border-line px-3 py-2">
           <input
-            className="w-full rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            className="w-full rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
             placeholder="Commit message"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -875,7 +875,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
           />
           <div className="mt-1.5 flex gap-1.5">
             <button
-              className="flex-1 rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+              className="flex-1 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-40"
               disabled={busy || !message.trim() || staged.length === 0}
               data-testid="evidence-commit"
               onClick={() =>
@@ -889,7 +889,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
               Commit
             </button>
             <button
-              className="rounded border border-line px-2 py-1 text-[11px] text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+              className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
               disabled={busy}
               data-testid="evidence-push"
               onClick={() =>
@@ -926,10 +926,10 @@ function ChangeGroup({
   return (
     <section data-testid={`evidence-group-${title.toLowerCase()}`}>
       <header className="sticky top-0 flex items-center gap-1.5 bg-surface-side px-3 py-1">
-        <h4 className="text-[10px] uppercase text-ink-faint">{title}</h4>
-        <span className="readout text-[10px] text-ink-faint">{files.length}</span>
+        <h4 className="text-2xs uppercase text-ink-faint">{title}</h4>
+        <span className="readout text-2xs text-ink-faint">{files.length}</span>
         <button
-          className="ml-auto text-[10px] text-ink-faint transition-colors hover:text-ink disabled:opacity-40"
+          className="ml-auto text-2xs text-ink-faint transition-colors hover:text-ink disabled:opacity-40"
           disabled={busy}
           onClick={() => void action.run(files.map((f) => f.path))}
           data-testid={`evidence-${action.id}-all`}
@@ -978,8 +978,8 @@ function ChangeRow({
         title={`${file.path} — view diff`}
       >
         {/* The kind is told apart by a letter, not a color (strict grayscale) */}
-        <span className="readout w-3 shrink-0 text-[10px] text-ink-muted">{statusMark(file.status)}</span>
-        <span className="truncate text-[12px] text-ink-muted" dir="rtl">
+        <span className="readout w-3 shrink-0 text-2xs text-ink-muted">{statusMark(file.status)}</span>
+        <span className="truncate text-sm text-ink-muted" dir="rtl">
           {file.path}
         </span>
       </button>
@@ -989,7 +989,7 @@ function ChangeRow({
         it was being reviewed.
       */}
       <button
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-40"
+        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-1 text-2xs text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-40"
         disabled={busy}
         onClick={onAction}
         data-testid={`evidence-${actionId}-${file.path}`}
@@ -1046,14 +1046,14 @@ function CommitHistory({ projectId }: { projectId: string }) {
 
   if (commits === null) {
     return (
-      <p className="px-3 py-2 text-[11px] text-ink-faint" data-testid="evidence-history">
+      <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history">
         Loading…
       </p>
     )
   }
   if (commits.length === 0) {
     return (
-      <p className="px-3 py-2 text-[11px] text-ink-faint" data-testid="evidence-history-empty">
+      <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history-empty">
         No commits yet
       </p>
     )
@@ -1075,8 +1075,8 @@ function CommitHistory({ projectId }: { projectId: string }) {
               {/* The left padding is the graph's own job (PAD_L) — stacking px-3 on top would push the dot twice as far from the wall */}
               <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12px] text-ink-muted">{c.subject}</span>
-                <span className="readout block truncate text-[10px] text-ink-faint">
+                <span className="block truncate text-sm text-ink-muted">{c.subject}</span>
+                <span className="readout block truncate text-2xs text-ink-faint">
                   {[
                     c.shortSha,
                     commitAgo(c.when, now),
@@ -1094,7 +1094,7 @@ function CommitHistory({ projectId }: { projectId: string }) {
       {/* A list that cuts off silently is a list lying that there are no older commits */}
       {commits.length >= COMMIT_LIMIT && (
         <p
-          className="shrink-0 border-t border-line px-3 py-1.5 text-[10px] text-ink-faint"
+          className="shrink-0 border-t border-line px-3 py-1.5 text-2xs text-ink-faint"
           data-testid="evidence-history-cap"
         >
           Newest {COMMIT_LIMIT} commits — older ones are not listed

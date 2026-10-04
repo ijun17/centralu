@@ -9,7 +9,7 @@ import { appIdHint, deriveAppId } from './newAppId.js'
 
 /** What one field looks like — it has to match the new session dialog's shape to read as "the same kind of dialog" */
 const inputClass =
-  'w-full rounded border border-line bg-surface-floor px-2 py-1.5 text-[12px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
+  'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
 /** The ids of built-in apps — an external app cannot claim these (the same list as the host's reservedIds) */
 const BUILTIN_IDS = APPS.map((a) => a.id)
@@ -119,11 +119,11 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
         }}
       >
         <header className="shrink-0 border-b border-line px-4 py-2.5">
-          <h2 className="text-[13px] font-medium text-ink">
+          <h2 className="text-md font-medium text-ink">
             New app <span className="text-ink-faint">·</span>{' '}
             <span className="text-ink-muted">{project ? project.name : 'Your apps'}</span>
           </h2>
-          <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+          <p className="mt-1 text-xs leading-body text-ink-faint">
             {projectId
               ? 'Lives in this project, in .centralu/apps, and is shared with the repository.'
               : 'Lives on this machine and works in every project.'}
@@ -132,7 +132,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
 
         <div className="space-y-3 px-4 py-3">
           <label className="block">
-            <span className="mb-1 block text-[10px] text-ink-muted">Name</span>
+            <span className="mb-1 block text-2xs text-ink-muted">Name</span>
             <input
               autoFocus
               type="text"
@@ -146,7 +146,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[10px] text-ink-muted">
+            <span className="mb-1 block text-2xs text-ink-muted">
               Id <span className="text-ink-faint">· folder name, and how agents see it (app-{id || '…'})</span>
             </span>
             <input
@@ -155,19 +155,19 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
               onChange={(e) => setIdEdit(e.target.value)}
               placeholder="resource-search"
               spellCheck={false}
-              className={`${inputClass} font-mono text-[11px]`}
+              className={`${inputClass} font-mono text-xs`}
               data-testid="new-app-id"
               aria-invalid={problem !== null || undefined}
             />
             {problem !== null && (name.trim() !== '' || idEdit !== null) && (
-              <span className="mt-1 block text-[11px] leading-relaxed text-ink-muted" data-testid="new-app-id-problem">
+              <span className="mt-1 block text-xs leading-body text-ink-muted" data-testid="new-app-id-problem">
                 {appIdHint(id, problem)}
               </span>
             )}
           </label>
 
           <div>
-            <p className="mb-1 text-[10px] text-ink-muted">Built by</p>
+            <p className="mb-1 text-2xs text-ink-muted">Built by</p>
             <div className="flex gap-1.5">
               {allTools.map((t) => (
                 <button
@@ -177,7 +177,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
                   data-testid={`new-app-tool-${t.name}`}
                   aria-pressed={tool === t.name}
                   title={info(t.name)?.detail}
-                  className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
+                  className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
                     tool === t.name
                       ? 'border-ink-muted bg-surface-hover/40 text-ink'
                       : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
@@ -189,27 +189,27 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
             </div>
             {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
             {blocked && (
-              <p className="mt-1.5 text-[11px] leading-relaxed text-ink-muted" data-testid="new-app-tool-blocked">
+              <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid="new-app-tool-blocked">
                 {info(tool)?.installed
                   ? `${toolMeta.label} needs a login. Run ${toolMeta.login} in a terminal, then open this again.`
                   : `${toolMeta.label} is not installed (${info(tool)?.detail ?? 'not found'}).`}
               </p>
             )}
             {!blocked && (
-              <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+              <p className="mt-1.5 text-xs leading-body text-ink-faint">
                 A builder session with {toolMeta.label} starts with the app. Ask it for changes while you use the app.
               </p>
             )}
           </div>
 
           {untrusted && project && (
-            <div className="rounded border border-line bg-surface-raised px-2.5 py-2" data-testid="new-app-untrusted">
-              <p className="text-[11px] leading-relaxed text-ink-muted">
+            <div className="rounded-md border border-line bg-surface-raised px-2.5 py-2" data-testid="new-app-untrusted">
+              <p className="text-xs leading-body text-ink-muted">
                 Apps only run in projects you trust. Trust {project.name} to make an app here.
               </p>
               <button
                 type="button"
-                className="mt-1.5 rounded border border-line bg-surface-floor px-2.5 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
+                className="mt-1.5 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
                 onClick={() => void setProjectTrusted(project.id, true)}
                 data-testid="new-app-trust"
               >
@@ -220,7 +220,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
 
           {error && (
             <p
-              className="whitespace-pre-wrap break-words rounded border border-line bg-surface-raised px-2.5 py-2 text-[11px] leading-relaxed text-ink"
+              className="whitespace-pre-wrap break-words rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink"
               role="alert"
               data-testid="new-app-error"
             >
@@ -230,11 +230,11 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
         </div>
 
         <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-2.5">
-          <button type="button" className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink" onClick={onClose}>
+          <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={onClose}>
             Cancel
           </button>
           <button
-            className="rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
             disabled={!canCreate}
             data-testid="new-app-create"
           >

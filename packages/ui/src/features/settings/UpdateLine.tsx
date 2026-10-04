@@ -22,7 +22,7 @@ export function UpdateLine() {
   const applyUpdate = useStore((s) => s.applyUpdate)
   if (!update) return null
 
-  const tone = 'text-[11px] leading-none'
+  const tone = 'text-xs leading-none'
 
   if (update.phase === 'updating') {
     return (
@@ -65,7 +65,7 @@ export function UpdateLine() {
   return (
     <button
       type="button"
-      className={`rounded px-2 py-1 ${tone} text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink`}
+      className={`rounded-md px-2 py-1 ${tone} text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink`}
       data-testid="update-line"
       onClick={() => void applyUpdate()}
       title={`Install ${update.latest} (you will be asked to restart, never restarted for you)`}

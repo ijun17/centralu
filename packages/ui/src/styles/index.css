@@ -187,6 +187,61 @@
   /* The terminal's stack is xterm's current one, kept apart so this change moves nothing; the
      font settings (#312 step 5) will bring it together with --font-mono. */
   --font-term: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /*
+   * Type, line height and radius scales (#312 step 2). Tailwind's own scales are cleared, so
+   * these are the only values a utility can name; anything else has to be written as an
+   * arbitrary value, where a reviewer sees it.
+   *
+   * Five text sizes. The app reads in a dense band: 13px is what a person reads (a message, a
+   * title), 12px the controls around it, 11px what a machine wrote (paths, logs, the code viewer),
+   * 10px labels and counts, and 19px the one heading of the first-run screen. 9px was folded into
+   * 10px: at the default zoom it was below what reads comfortably, and it sat one pixel from its
+   * neighbour. The whole UI scales by the root zoom (Settings → Appearance), not by these.
+   *
+   * No `--text-*--line-height` is defined on purpose. Without it a size utility sets only the
+   * font size, as `text-[11px]` did, so every element keeps the line height it inherits; with it,
+   * each of ~650 sites would get a new line height of its own.
+   */
+  --text-*: initial;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-display: 19px;
+
+  /*
+   * Three line heights: tight for headings and two-line labels, body for prose (the conversation,
+   * descriptions), code for code blocks. Fixed-row views do not use these — see CodeViewer (18px
+   * rows), GitPanel's diff (17px rows) and CommitGraph (38px rows): a virtual list or a drawn
+   * lane has to know the row height in pixels, so it stays a number written next to the code that
+   * depends on it.
+   */
+  --leading-*: initial;
+  --leading-tight: 1.3;
+  --leading-body: 1.65;
+  --leading-code: 1.5;
+
+  /*
+   * Four radii. sm for small marks (14px chips, checkboxes, inline code), md for controls and
+   * cards, lg for panels and bubbles, full for pills and dots. A shape inside a bordered shape
+   * takes the outer radius minus the border (the folded composer's bottom corners), so it is
+   * written as a calc on the token rather than as its own step.
+   */
+  --radius-*: initial;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-full: calc(infinity * 1px);
+
+  --font-weight-*: initial;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  --tracking-*: initial;
+  --tracking-tight: -0.025em; /* names: a project, an app, the sidebar's buttons */
+  --tracking-readout: 0.02em; /* figures, see .readout */
+  --tracking-caps: 0.2em; /* a small uppercase label */
 }
 
 /*
@@ -311,7 +366,7 @@
     height: 13px;
     flex-shrink: 0;
     border: 1px solid var(--color-line-strong);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: transparent;
     cursor: inherit;
   }
@@ -409,12 +464,13 @@
     min-width: 1.15rem;
     padding: 0.0625rem 0.3rem;
     font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: var(--text-xs);
+    /* A keycap's own box, not a line of text: its height is the cap, so it stays off the scale */
     line-height: 1.2;
     color: var(--color-ink-muted);
     background: linear-gradient(180deg, var(--color-keycap-top) 0%, var(--color-keycap-bottom) 100%);
     border: 1px solid var(--color-keycap-border);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     box-shadow: var(--shadow-key);
   }
   .keycap-live {
@@ -425,7 +481,7 @@
   .readout {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
+    letter-spacing: var(--tracking-readout);
   }
 
   /* With no color to spend, "waiting" is spoken by light instead.
@@ -642,8 +698,8 @@
  */
 @layer components {
   .cc-md {
-    font-size: 13px;
-    line-height: 1.65;
+    font-size: var(--text-md);
+    line-height: var(--leading-body);
     /* Breaks even long strings with no whitespace (URLs, paths, hashes) to prevent horizontal scroll */
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -662,14 +718,14 @@
   .cc-md h3,
   .cc-md h4 {
     color: var(--color-ink);
-    font-weight: 600;
-    line-height: 1.3;
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--leading-tight);
     margin-top: 1.1em;
   }
   .cc-md h1 { font-size: 1.25em; }
   .cc-md h2 { font-size: 1.15em; }
   .cc-md h3 { font-size: 1.05em; }
-  .cc-md strong { color: var(--color-ink-signal); font-weight: 600; }
+  .cc-md strong { color: var(--color-ink-signal); font-weight: var(--font-weight-semibold); }
   .cc-md em { font-style: italic; }
   .cc-md a {
     color: var(--color-ink);
@@ -690,13 +746,13 @@
     font-size: 0.92em;
     background: var(--color-surface-raised);
     border: 1px solid var(--color-line);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     padding: 0.05em 0.3em;
   }
   .cc-md pre {
     background: var(--color-surface-raised);
     border: 1px solid var(--color-line);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     padding: 0.6em 0.7em;
     overflow-x: auto;
   }
@@ -705,7 +761,7 @@
     border: 0;
     padding: 0;
     font-size: 0.9em;
-    line-height: 1.5;
+    line-height: var(--leading-code);
   }
   .cc-md blockquote {
     border-left: 2px solid var(--color-line-strong);
@@ -729,7 +785,7 @@
     padding: 0.3em 0.6em;
     text-align: left;
   }
-  .cc-md th { color: var(--color-ink); font-weight: 600; background: var(--color-surface-raised); }
+  .cc-md th { color: var(--color-ink); font-weight: var(--font-weight-semibold); background: var(--color-surface-raised); }
   .cc-md td { color: var(--color-ink-muted); }
   /* Drawing is left to the global checkbox rule (base) — this only handles inline placement */
   .cc-md input[type='checkbox'] { margin-right: 0.4em; vertical-align: -2px; }

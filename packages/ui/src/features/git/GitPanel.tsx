@@ -300,7 +300,7 @@ function DiffView({
   if (!path) {
     return (
       <div
-        className="flex flex-1 items-center justify-center text-[12px] text-ink-faint"
+        className="flex flex-1 items-center justify-center text-sm text-ink-faint"
         data-testid="diff-empty"
       >
         {emptyHint ?? 'Select a file to see its diff'}
@@ -308,7 +308,7 @@ function DiffView({
     )
   }
   if (data?.binary) {
-    return <div className="flex flex-1 items-center justify-center text-[12px] text-ink-faint">Binary file</div>
+    return <div className="flex flex-1 items-center justify-center text-sm text-ink-faint">Binary file</div>
   }
 
   /**
@@ -323,11 +323,11 @@ function DiffView({
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
       <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
-        <span className="readout truncate text-[11px] text-ink-muted">{path}</span>
+        <span className="readout truncate text-xs text-ink-muted">{path}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {onOpenViewer && (
             <button
-              className="text-[11px] text-ink-faint hover:text-ink"
+              className="text-xs text-ink-faint hover:text-ink"
               onClick={onOpenViewer}
               data-testid="open-in-viewer"
             >
@@ -335,7 +335,7 @@ function DiffView({
             </button>
           )}
           <button
-            className="text-[11px] text-ink-faint hover:text-ink"
+            className="text-xs text-ink-faint hover:text-ink"
             onClick={() => void onOpenInIde({ file: place.file, line: place.line })}
             data-testid="open-in-ide"
           >
@@ -351,12 +351,16 @@ function DiffView({
        * is also a reason to keep the name as just `Diff`: the file name is already stated by
        * the header right above, and stating it again here would read the same name twice (the
        * same problem as the band below).
+       *
+       * The line height stays written out (1.5 of 11px, the ~17px rows the virtual list
+       * estimates) instead of using `leading-code`: a theme changing the code line height must
+       * not move the rows away from their estimate.
        */}
       <div
         ref={scrollRef}
         role="region"
         aria-label="Diff"
-        className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[1.5]"
+        className="min-h-0 flex-1 overflow-auto font-mono text-xs leading-[1.5]"
         tabIndex={0}
         onMouseDown={() => scrollRef.current?.focus()}
         onKeyDown={(event) => {
@@ -384,7 +388,7 @@ function DiffView({
             data-testid="diff-current-file-band"
             aria-hidden="true"
           >
-            <span className="readout text-[11px] text-ink">{place.label}</span>
+            <span className="readout text-xs text-ink">{place.label}</span>
           </div>
         )}
         <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
@@ -412,7 +416,7 @@ function DiffView({
                   className="absolute left-0 top-0 w-max min-w-full border-b border-line bg-surface-raised px-3 py-1"
                   style={{ transform: `translateY(${v.start}px)` }}
                 >
-                  <span data-code className="readout text-[11px] text-ink">
+                  <span data-code className="readout text-xs text-ink">
                     {label}
                   </span>
                 </div>
@@ -458,7 +462,7 @@ function DiffView({
           })}
         </div>
         {truncated && (
-          <p className="p-2 text-[11px] text-ink-faint" data-testid="diff-truncation">
+          <p className="p-2 text-xs text-ink-faint" data-testid="diff-truncation">
             {DIFF_TRUNCATED_MESSAGE}
           </p>
         )}
@@ -580,24 +584,24 @@ function Branches({ projectId }: { projectId: string }) {
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="git-branches">
       {pending && (
         <div className="border-b border-line bg-surface-raised p-3" data-testid="checkout-warning">
-          <p className="text-[12px] text-ink">
+          <p className="text-sm text-ink">
             Switching to {pending.branch} may affect the changes below.
           </p>
-          <ul className="readout mt-1.5 max-h-24 overflow-y-auto text-[11px] text-ink-muted">
+          <ul className="readout mt-1.5 max-h-24 overflow-y-auto text-xs text-ink-muted">
             {pending.conflicts.slice(0, 10).map((p) => (
               <li key={p}>{p}</li>
             ))}
           </ul>
           <div className="mt-2 flex gap-1.5">
             <button
-              className="rounded border border-line bg-surface-raised px-2 py-1 text-[12px] text-ink hover:border-line-strong"
+              className="rounded-md border border-line bg-surface-raised px-2 py-1 text-sm text-ink hover:border-line-strong"
               onClick={() => void doCheckout(pending.branch)}
               data-testid="checkout-proceed"
             >
               Switch anyway
             </button>
             <button
-              className="rounded px-2 py-1 text-[12px] text-ink-faint hover:text-ink"
+              className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink"
               onClick={() => setPending(null)}
             >
               Cancel
@@ -623,21 +627,21 @@ function BranchList({
   if (branches.length === 0) return null
   return (
     <div className="border-b border-line/60" data-testid={`branches-${title.toLowerCase()}`}>
-      <h3 className="px-2.5 py-1.5 text-[10px] uppercase text-ink-faint">{title}</h3>
+      <h3 className="px-2.5 py-1.5 text-2xs uppercase text-ink-faint">{title}</h3>
       <ul>
         {branches.map((b) => (
           <li key={b.name}>
             <button
-              className={`flex w-full items-center gap-2 px-2.5 py-1 text-left text-[12px] transition-colors ${
+              className={`flex w-full items-center gap-2 px-2.5 py-1 text-left text-sm transition-colors ${
                 b.current ? 'text-ink' : 'text-ink-muted hover:text-ink'
               }`}
               onClick={() => !b.current && onPick(b.name)}
               data-testid={`branch-${b.name}`}
             >
-              <span className="w-2.5 shrink-0 text-center text-[9px] text-ink-faint">{b.current ? '●' : ''}</span>
+              <span className="w-2.5 shrink-0 text-center text-2xs text-ink-faint">{b.current ? '●' : ''}</span>
               <span className="truncate">{b.name}</span>
               {b.upstream && (
-                <span className="readout ml-auto shrink-0 text-[10px] text-ink-faint">→ {b.upstream}</span>
+                <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">→ {b.upstream}</span>
               )}
             </button>
           </li>

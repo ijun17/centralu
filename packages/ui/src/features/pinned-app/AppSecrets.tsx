@@ -26,7 +26,7 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
           <SecretRow key={s.name} app={app} name={s.name} set={s.set} />
         ))}
       </ul>
-      <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+      <p className="mt-2 text-xs leading-body text-ink-faint">
         Values stay on this machine and are never shown again. The app gets a new value the next time it starts.
       </p>
     </div>
@@ -63,8 +63,8 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
   }
 
   return (
-    <li className="rounded border border-line bg-surface-floor px-2.5 py-2" data-testid={`secret-${name}`} data-set={set || undefined}>
-      <div className="flex items-center gap-2 text-[11px]">
+    <li className="rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid={`secret-${name}`} data-set={set || undefined}>
+      <div className="flex items-center gap-2 text-xs">
         <span className="min-w-0 truncate font-mono text-ink">{name}</span>
         <span className={`readout ml-auto shrink-0 ${set ? 'text-ink-faint' : 'text-ink'}`} data-testid="secret-state">
           {set ? 'Set' : 'Missing'}
@@ -73,7 +73,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
           <>
             <button
               type="button"
-              className="shrink-0 rounded px-1.5 py-0.5 text-ink-faint transition-colors hover:text-ink"
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-ink-faint transition-colors hover:text-ink"
               onClick={() => setEditing(true)}
               disabled={busy}
               data-testid="secret-replace"
@@ -82,7 +82,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
             </button>
             <button
               type="button"
-              className="shrink-0 rounded px-1.5 py-0.5 text-ink-faint transition-colors hover:text-ink-signal"
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-ink-faint transition-colors hover:text-ink-signal"
               onClick={() => void write(null)}
               disabled={busy}
               data-testid="secret-clear"
@@ -108,13 +108,13 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
             onChange={(e) => setDraft(e.target.value)}
             placeholder={set ? 'New value' : 'Value'}
             aria-label={`Value for ${name}`}
-            className="min-w-0 flex-1 rounded border border-line bg-surface-side px-2 py-1 text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            className="min-w-0 flex-1 rounded-md border border-line bg-surface-side px-2 py-1 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
             data-testid="secret-input"
           />
           {editing && (
             <button
               type="button"
-              className="shrink-0 rounded px-1.5 py-1 text-[11px] text-ink-faint transition-colors hover:text-ink"
+              className="shrink-0 rounded-md px-1.5 py-1 text-xs text-ink-faint transition-colors hover:text-ink"
               onClick={() => {
                 setDraft('')
                 setEditing(false)
@@ -125,7 +125,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
             </button>
           )}
           <button
-            className="shrink-0 rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+            className="shrink-0 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-40"
             disabled={!draft || busy}
             data-testid="secret-save"
           >
@@ -134,7 +134,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
         </form>
       )}
       {error && (
-        <p className="mt-1 break-words text-[11px] text-ink-muted" role="alert" data-testid="secret-error">
+        <p className="mt-1 break-words text-xs text-ink-muted" role="alert" data-testid="secret-error">
           {error}
         </p>
       )}
@@ -147,7 +147,7 @@ export function SecretsPanel({ app }: { app: ExternalCatalogApp }) {
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="secrets-panel" aria-label="Secrets">
       <header className="flex h-8 shrink-0 items-center border-b border-line px-3">
-        <span className="readout text-[10px] uppercase text-ink-faint">Secrets</span>
+        <span className="readout text-2xs uppercase text-ink-faint">Secrets</span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <AppSecrets app={app} />

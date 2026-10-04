@@ -58,18 +58,18 @@ export function ApprovalCard({
 
   return (
     <div
-      className="overflow-hidden rounded border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid="approval-card"
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-[10px] font-medium">
+        <span className="signal text-2xs font-medium">
           Awaiting approval
         </span>
-        <span className="text-[11px] text-ink-faint">Agent is blocked, waiting</span>
+        <span className="text-xs text-ink-faint">Agent is blocked, waiting</span>
       </div>
 
       <pre
-        className="mt-2 whitespace-pre-wrap break-words px-3 font-mono text-[12px] leading-relaxed text-ink"
+        className="mt-2 whitespace-pre-wrap break-words px-3 font-mono text-sm leading-body text-ink"
         data-testid="approval-detail"
       >
         {detailText(detail)}
@@ -86,7 +86,7 @@ export function ApprovalCard({
           title={`Hold ${sc('alt')} and click to apply to the whole project`}
           onClick={(alt) => void respond(sessionId, requestId, 'always', alt ? 'project' : 'session')}
         />
-        <span className="ml-auto text-[10px] text-ink-faint">
+        <span className="ml-auto text-2xs text-ink-faint">
           <Kbd alt /> <Kbd>a</Kbd> whole project
         </span>
       </div>
@@ -116,18 +116,18 @@ export function PermissionCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid={testId}
       data-kind="capability"
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-[10px] font-medium">Awaiting approval</span>
-        <span className="text-[11px] text-ink-faint">An app asks for a permission, and waits</span>
+        <span className="signal text-2xs font-medium">Awaiting approval</span>
+        <span className="text-xs text-ink-faint">An app asks for a permission, and waits</span>
       </div>
-      <p className="mt-2 px-3 text-[13px] leading-relaxed text-ink" data-testid="approval-detail">
+      <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {appName} wants to {text}.
       </p>
-      <p className="mt-1 px-3 text-[11px] leading-relaxed text-ink-faint">
+      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
         Centralu remembers your answer for this app and asks again if the app&apos;s manifest changes what it uses. You can
         change it later under Runs → Permissions.
       </p>
@@ -156,7 +156,7 @@ function ActionKey({
 }) {
   return (
     <button
-      className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-50"
+      className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-50"
       onClick={(e) => onClick(e.altKey)}
       disabled={disabled}
       data-testid={testId}

@@ -52,7 +52,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           }
         }}
       >
-        <h2 className="text-[13px] font-medium text-ink">
+        <h2 className="text-md font-medium text-ink">
           Delete project <span className="text-ink-faint">·</span>{' '}
           <span className="text-ink-muted">{project.name}</span>
         </h2>
@@ -70,7 +70,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         */}
         {withFiles ? (
           <p
-            className="mt-2 rounded border border-danger/40 bg-danger-bg px-2.5 py-2 text-[11px] leading-relaxed text-ink"
+            className="mt-2 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="delete-project-warning"
           >
             The folder itself goes to the Trash — <span className="readout text-ink-muted">{project.path}</span> and
@@ -78,7 +78,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             Its sessions go to Centralu’s trash; restoring one needs the folder back.
           </p>
         ) : (
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-muted" data-testid="delete-project-note">
+          <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="delete-project-note">
             The project leaves Centralu with its always-allow rules and usage. Its sessions go to Centralu’s trash —
             Settings → Trash restores them or deletes them for good.{' '}
             <span className="text-ink">The folder on disk is left alone.</span>
@@ -86,7 +86,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         )}
 
         <label
-          className={`mt-3 flex cursor-pointer items-start gap-2 text-[11px] ${
+          className={`mt-3 flex cursor-pointer items-start gap-2 text-xs ${
             withFiles ? 'text-danger' : 'text-ink-muted hover:text-ink'
           }`}
           data-testid="delete-project-files-toggle"
@@ -106,7 +106,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           (or warning) above and then coming down to it, so typing is an answer to what was just
           read.
         */}
-        <label className="mt-3 block text-[11px] text-ink-muted" htmlFor="delete-project-name">
+        <label className="mt-3 block text-xs text-ink-muted" htmlFor="delete-project-name">
           Type <span className="readout text-ink">{project.name}</span> to confirm
         </label>
         <input
@@ -117,12 +117,12 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           spellCheck={false}
           autoComplete="off"
           data-testid="delete-project-name-input"
-          className="mt-1 w-full rounded border border-line bg-surface-floor px-2 py-1.5 font-mono text-[11px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          className="mt-1 w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
         />
 
         {error && (
           <p
-            className="mt-3 rounded border border-line bg-surface-raised px-2.5 py-2 text-[11px] leading-relaxed text-ink"
+            className="mt-3 rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="delete-project-error"
           >
             {error}
@@ -133,7 +133,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           <button
             type="button"
             onClick={onClose}
-            className="rounded px-2 py-1 text-[12px] text-ink-faint transition-colors hover:text-ink"
+            className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink"
           >
             Cancel
           </button>
@@ -142,7 +142,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             type="submit"
             disabled={!armed || busy}
             data-testid="delete-project-confirm"
-            className="rounded border border-danger/40 bg-danger-bg px-3 py-1 text-[12px] text-danger transition-colors hover:border-danger/70 disabled:opacity-40"
+            className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger transition-colors hover:border-danger/70 disabled:opacity-40"
           >
             {busy ? 'Deleting…' : withFiles ? 'Delete and trash folder' : 'Delete'}
           </button>

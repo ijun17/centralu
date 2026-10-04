@@ -131,12 +131,12 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
 
   return (
     <div
-      className="mt-1.5 rounded border border-line bg-surface-raised/60"
+      className="mt-1.5 rounded-md border border-line bg-surface-raised/60"
       data-testid="inline-view"
       data-call={view.callId}
       data-state={view.state}
     >
-      <div className="flex items-center gap-2 px-2.5 py-1 text-[11px]">
+      <div className="flex items-center gap-2 px-2.5 py-1 text-xs">
         <span className="shrink-0 text-ink-faint">
           <AppIcon size={12} />
         </span>
@@ -149,7 +149,7 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
         {view.state === 'live' && view.stale && (
           <button
             type="button"
-            className="shrink-0 rounded px-1.5 py-0.5 text-ink-muted transition-colors hover:bg-surface-hover/60 hover:text-ink"
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-ink-muted transition-colors hover:bg-surface-hover/60 hover:text-ink"
             onClick={() => void reload(sessionId, callId)}
             title="The app now runs new code. It changed several times in a row, so this view was not reopened on its own"
             data-testid="inline-view-stale"
@@ -160,7 +160,7 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
         {app?.info.home && !view.rejected && (
           <button
             type="button"
-            className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
+            className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
             onClick={() => openApp(view.projectId, view.appId)}
             title={`Open ${title} in its own view, beside your sessions`}
             data-testid="inline-view-pin"
@@ -193,24 +193,24 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
           />
         )}
         {ask && (
-          <div className="mt-1.5 rounded-md border border-line bg-surface-side px-3 py-2 text-[12px]" role="dialog" data-testid="inline-view-ask">
+          <div className="mt-1.5 rounded-md border border-line bg-surface-side px-3 py-2 text-sm" role="dialog" data-testid="inline-view-ask">
             <p className="text-ink">{title} wants to send this to this conversation:</p>
             <pre
-              className="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded border border-line bg-surface-floor px-2.5 py-2 font-sans text-[12px] text-ink-muted"
+              className="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface-floor px-2.5 py-2 font-sans text-sm text-ink-muted"
               data-testid="inline-view-ask-text"
             >
               {ask.text}
             </pre>
             {ask.dropped > 0 && (
-              <p className="mt-1 text-[11px] text-ink-faint">
+              <p className="mt-1 text-xs text-ink-faint">
                 {ask.dropped} non-text part{ask.dropped > 1 ? 's' : ''} will not be sent.
               </p>
             )}
-            <p className="mt-1.5 text-[11px] text-ink-faint">The agent will see it as the app&apos;s message, not as yours.</p>
+            <p className="mt-1.5 text-xs text-ink-faint">The agent will see it as the app&apos;s message, not as yours.</p>
             <div className="mt-2 flex justify-end gap-2">
               <button
                 type="button"
-                className="rounded px-2 py-1 text-ink-faint transition-colors hover:text-ink"
+                className="rounded-md px-2 py-1 text-ink-faint transition-colors hover:text-ink"
                 onClick={() => void answer(false)}
                 data-testid="inline-view-ask-cancel"
               >
@@ -218,7 +218,7 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
               </button>
               <button
                 type="button"
-                className="rounded border border-line bg-surface-floor px-3 py-1 text-ink transition-colors hover:border-line-strong"
+                className="rounded-md border border-line bg-surface-floor px-3 py-1 text-ink transition-colors hover:border-line-strong"
                 onClick={() => void answer(true)}
                 data-testid="inline-view-ask-send"
               >
@@ -254,13 +254,13 @@ function Placeholder({
 }) {
   if (view.rejected) {
     return (
-      <p className="px-1 py-1 text-[12px] text-ink-muted" role="note" data-testid="inline-view-rejected">
+      <p className="px-1 py-1 text-sm text-ink-muted" role="note" data-testid="inline-view-rejected">
         This view was not shown: <span className="text-ink-faint">{view.rejected}</span>
       </p>
     )
   }
   return (
-    <div className="flex items-center gap-3 rounded-md border border-dashed border-line px-3 py-2 text-[12px]" data-testid="inline-view-placeholder">
+    <div className="flex items-center gap-3 rounded-md border border-dashed border-line px-3 py-2 text-sm" data-testid="inline-view-placeholder">
       <p className="min-w-0 flex-1 text-ink-muted">
         {title}&apos;s view is closed
         {view.reason && <span className="text-ink-faint" data-testid="inline-view-reason"> · {view.reason}</span>}
@@ -268,7 +268,7 @@ function Placeholder({
       {view.kept && (
         <button
           type="button"
-          className="shrink-0 rounded border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong"
+          className="shrink-0 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong"
           onClick={onReopen}
           title="Show this call's view again, with the same input and result. The tool is not called again."
           data-testid="inline-view-reopen"
@@ -279,7 +279,7 @@ function Placeholder({
       {canOpen && (
         <button
           type="button"
-          className="shrink-0 rounded px-2 py-0.5 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
+          className="shrink-0 rounded-md px-2 py-0.5 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
           onClick={onOpen}
           data-testid="inline-view-open-app"
         >

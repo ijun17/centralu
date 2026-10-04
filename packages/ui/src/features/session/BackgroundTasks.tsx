@@ -85,7 +85,7 @@ export function BackgroundTasksBadge({
         data-testid="background-badge"
         data-count={count}
         title={count > 0 ? `${count} background task${count === 1 ? '' : 's'} running — open the list` : 'Background tasks that ended — open the list'}
-        className={`readout flex shrink-0 items-center gap-1 rounded border px-1.5 text-[10px] transition-colors hover:text-ink ${
+        className={`readout flex shrink-0 items-center gap-1 rounded-md border px-1.5 text-2xs transition-colors hover:text-ink ${
           count > 0 ? 'border-ink-muted text-ink-muted' : 'border-line text-ink-faint'
         }`}
       >
@@ -116,14 +116,14 @@ function BackgroundTaskList({
       role="dialog"
       aria-label="Background tasks"
       data-testid="background-list"
-      className="absolute left-0 top-full z-30 mt-1 max-h-96 w-96 max-w-[80vw] overflow-y-auto rounded border border-line bg-surface-raised shadow-(--shadow-popover)"
+      className="absolute left-0 top-full z-30 mt-1 max-h-96 w-96 max-w-[80vw] overflow-y-auto rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)"
     >
       <div className="flex items-center gap-2 border-b border-line px-2.5 py-1.5">
-        <span className="text-[11px] text-ink-muted">Background tasks</span>
+        <span className="text-xs text-ink-muted">Background tasks</span>
         {hasEnded && (
           <button
             type="button"
-            className="readout ml-auto text-[10px] text-ink-faint transition-colors hover:text-ink"
+            className="readout ml-auto text-2xs text-ink-faint transition-colors hover:text-ink"
             onClick={() => void clear(sessionId)}
             data-testid="background-clear"
           >
@@ -162,17 +162,17 @@ function BackgroundTaskRow({
   return (
     <li className="border-b border-line px-2.5 py-1.5 last:border-b-0" data-testid={`background-task-${task.id}`} data-status={task.status}>
       <div className="flex items-baseline gap-2">
-        <span className="readout shrink-0 text-[10px] text-ink-faint">{KIND[task.kind]}</span>
-        <span className={`min-w-0 flex-1 truncate text-[11px] ${running ? 'text-ink' : 'text-ink-muted'}`} title={task.description}>
+        <span className="readout shrink-0 text-2xs text-ink-faint">{KIND[task.kind]}</span>
+        <span className={`min-w-0 flex-1 truncate text-xs ${running ? 'text-ink' : 'text-ink-muted'}`} title={task.description}>
           {task.description}
         </span>
-        <span className="readout shrink-0 text-[10px] text-ink-faint" data-testid={`background-status-${task.id}`}>
+        <span className="readout shrink-0 text-2xs text-ink-faint" data-testid={`background-status-${task.id}`}>
           {task.ambient && running ? 'ambient' : STATUS[task.status]}
         </span>
         {running && task.stoppable && (
           <button
             type="button"
-            className="shrink-0 rounded border border-line px-1.5 text-[10px] text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+            className="shrink-0 rounded-md border border-line px-1.5 text-2xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
             disabled={stopping}
             onClick={() => {
               setStopping(true)
@@ -185,7 +185,7 @@ function BackgroundTaskRow({
         )}
       </div>
       {(withTurn || (!running && task.summary && task.summary !== task.description)) && (
-        <p className="mt-0.5 line-clamp-2 text-[10px] text-ink-faint" data-testid={`background-note-${task.id}`}>
+        <p className="mt-0.5 line-clamp-2 text-2xs text-ink-faint" data-testid={`background-note-${task.id}`}>
           {withTurn ?? task.summary}
         </p>
       )}
@@ -207,7 +207,7 @@ export function BackgroundMark({ tasks, testId }: { tasks: readonly BackgroundTa
   if (n === 0) return null
   return (
     <span
-      className="readout shrink-0 rounded border border-line px-1 text-[9px] leading-relaxed text-ink-faint"
+      className="readout shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint"
       data-testid={testId}
       title={`${n} background task${n === 1 ? '' : 's'} running`}
     >

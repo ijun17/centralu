@@ -34,7 +34,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
 
   if (state.loading) {
     return (
-      <p className="px-4 py-6 text-center text-[12px] text-ink-faint" data-testid="usage-loading">
+      <p className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="usage-loading">
         Loading usage…
       </p>
     )
@@ -43,9 +43,9 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
   // Failing to read it and there being none are different — the reason is shown as is
   if (!state.usage || state.usage.windows.length === 0) {
     return (
-      <p className="px-4 py-6 text-center text-[12px] leading-relaxed text-ink-muted" data-testid="usage-unavailable">
+      <p className="px-4 py-6 text-center text-sm leading-body text-ink-muted" data-testid="usage-unavailable">
         Usage unavailable
-        {state.reason && <span className="mt-1 block text-[11px] text-ink-faint">{state.reason}</span>}
+        {state.reason && <span className="mt-1 block text-xs text-ink-faint">{state.reason}</span>}
       </p>
     )
   }
@@ -55,7 +55,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
   return (
     <div className="px-4 py-4" data-testid="usage-panel">
       {plan && (
-        <p className="readout mb-3 text-[11px] text-ink-faint" data-testid="usage-plan">
+        <p className="readout mb-3 text-xs text-ink-faint" data-testid="usage-plan">
           {plan} plan
         </p>
       )}
@@ -116,14 +116,14 @@ function Donut({ window: w }: { window: UsageWindow }) {
             className={tone}
           />
         </svg>
-        <span className={`readout text-[13px] leading-none ${tone}`}>{w.percent}%</span>
+        <span className={`readout text-md leading-none ${tone}`}>{w.percent}%</span>
         {/*
           The model name **is written out** (user's observation, 2026-09-09). Before, when a
           scope existed, only a dangling "·" was shown and the name was left to the tooltip, so
           two 74% weekly donuts standing side by side gave no way to read on screen which was
           whose limit — that is what "per model seems to be missing" meant.
         */}
-        <span className="max-w-[92px] truncate text-[10px] text-ink-faint" title={w.scope ?? undefined}>
+        <span className="max-w-[92px] truncate text-2xs text-ink-faint" title={w.scope ?? undefined}>
           {w.label}
           {w.scope ? ` · ${w.scope}` : ''}
         </span>
@@ -154,22 +154,22 @@ function DailyTokens({ daily }: { daily: { date: string; tokens: number }[] }) {
   return (
     <section className="mt-5 border-t border-line pt-3" data-testid="usage-daily">
       <div className="flex items-baseline gap-2">
-        <span className="text-[11px] uppercase text-ink-faint">Daily tokens</span>
+        <span className="text-xs uppercase text-ink-faint">Daily tokens</span>
         {today && (
-          <span className="readout ml-auto text-[11px] text-ink">Today {formatTokens(today.tokens)}</span>
+          <span className="readout ml-auto text-xs text-ink">Today {formatTokens(today.tokens)}</span>
         )}
       </div>
       <ul className="mt-2 space-y-1">
         {recent.map((d) => (
           <li key={d.date} className="flex items-center gap-2">
-            <span className="readout w-12 shrink-0 text-[10px] text-ink-faint">{d.date.slice(5)}</span>
+            <span className="readout w-12 shrink-0 text-2xs text-ink-faint">{d.date.slice(5)}</span>
             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
               <span
                 className="block h-full rounded-full bg-ink-muted"
                 style={{ width: `${Math.round((d.tokens / peak) * 100)}%` }}
               />
             </span>
-            <span className="readout w-14 shrink-0 text-right text-[10px] text-ink-faint">
+            <span className="readout w-14 shrink-0 text-right text-2xs text-ink-faint">
               {formatTokens(d.tokens)}
             </span>
           </li>

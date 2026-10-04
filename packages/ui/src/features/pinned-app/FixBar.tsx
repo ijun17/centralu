@@ -64,7 +64,7 @@ export function FixBar({
 
   if (builder.id === null) {
     return (
-      <div className="mt-2 flex items-center gap-3 rounded border border-dashed border-line px-3 py-1.5 text-[12px]" data-testid="fix-bar-no-builder">
+      <div className="mt-2 flex items-center gap-3 rounded-md border border-dashed border-line px-3 py-1.5 text-sm" data-testid="fix-bar-no-builder">
         <p className="min-w-0 flex-1 text-ink-muted">
           {app.title} has no builder session, so there is no one to ask for changes.
           {builder.error && (
@@ -75,7 +75,7 @@ export function FixBar({
         </p>
         <button
           type="button"
-          className="shrink-0 rounded border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+          className="shrink-0 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong disabled:opacity-40"
           onClick={() => void builder.start()}
           disabled={builder.starting}
           data-testid="fix-bar-start-builder"
@@ -132,8 +132,8 @@ export function FixBar({
       {attachments.length > 0 && (
         <ul className="mb-1 flex flex-wrap gap-1.5" data-testid="fix-bar-attachments">
           {attachments.map((a, i) => (
-            <li key={`${a.path}-${i}`} className="flex items-center gap-1.5 rounded border border-line bg-surface-raised px-2 py-0.5 text-[11px] text-ink-muted">
-              <span className="readout text-[9px] text-ink-faint">{a.kind === 'image' ? 'IMG' : 'DOC'}</span>
+            <li key={`${a.path}-${i}`} className="flex items-center gap-1.5 rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink-muted">
+              <span className="readout text-2xs text-ink-faint">{a.kind === 'image' ? 'IMG' : 'DOC'}</span>
               <span className="max-w-40 truncate">{a.name}</span>
               <button
                 type="button"
@@ -147,7 +147,7 @@ export function FixBar({
           ))}
         </ul>
       )}
-      <div className="flex items-end gap-1.5 rounded border border-line bg-surface-raised px-2.5 py-1 transition-colors focus-within:border-line-strong">
+      <div className="flex items-end gap-1.5 rounded-md border border-line bg-surface-raised px-2.5 py-1 transition-colors focus-within:border-line-strong">
         <textarea
           ref={inputRef}
           rows={1}
@@ -173,7 +173,7 @@ export function FixBar({
           }}
           placeholder={`Ask ${builderName ?? 'the builder'} to change this app…`}
           aria-label={`Ask the builder of ${app.title} to change it`}
-          className="max-h-24 min-h-[20px] flex-1 resize-none bg-transparent py-0.5 text-[12px] leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none"
+          className="max-h-24 min-h-[20px] flex-1 resize-none bg-transparent py-0.5 text-sm leading-body text-ink placeholder:text-ink-faint focus:outline-none"
           data-testid="fix-bar-input"
         />
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void takeFiles(e.target.files)} />
@@ -185,7 +185,7 @@ export function FixBar({
         </IconButton>
       </div>
       {sent && !error && (
-        <p className="mt-1 flex items-center gap-2 text-[11px] text-ink-faint" role="status" data-testid="fix-bar-sent">
+        <p className="mt-1 flex items-center gap-2 text-xs text-ink-faint" role="status" data-testid="fix-bar-sent">
           <span className="truncate">Sent to {sent}.</span>
           <button type="button" className="shrink-0 text-ink-muted underline-offset-2 hover:text-ink hover:underline" onClick={onShowBuilder} data-testid="fix-bar-show-builder">
             Show the conversation
@@ -193,7 +193,7 @@ export function FixBar({
         </p>
       )}
       {error && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-ink-muted" role="alert" data-testid="fix-bar-error">
+        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-ink-muted" role="alert" data-testid="fix-bar-error">
           {error}
         </p>
       )}

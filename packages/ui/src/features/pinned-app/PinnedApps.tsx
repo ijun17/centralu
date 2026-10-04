@@ -273,7 +273,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           ? 'flex min-h-0 min-w-0 flex-1 flex-col'
           : mode === 'slot'
             ? // The slot is the panel's body: the panel's ground under it, and its rounded bottom corners inside the 1px border
-              'absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-b-[7px] bg-surface-floor'
+              'absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-b-[calc(var(--radius-lg)-1px)] bg-surface-floor'
             : OUT_OF_SIGHT
       }
       inert={mode === 'hidden'}
@@ -288,12 +288,12 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           <span className="text-ink-muted">
             <AppIcon />
           </span>
-          <span className="truncate text-[13px] font-medium tracking-tight text-ink" data-testid="pinned-title">
+          <span className="truncate text-md font-medium tracking-tight text-ink" data-testid="pinned-title">
             {app?.title ?? pv.appId}
           </span>
-          <span className="truncate text-[11px] text-ink-faint">{scope}</span>
+          <span className="truncate text-xs text-ink-faint">{scope}</span>
           {app && (
-            <span className="readout shrink-0 text-[10px] text-ink-faint" data-testid="pinned-status">
+            <span className="readout shrink-0 text-2xs text-ink-faint" data-testid="pinned-status">
               {app.status.label}
             </span>
           )}
@@ -302,7 +302,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           {pv.phase === 'open' && pv.stale && (
             <button
               type="button"
-              className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
               onClick={() => void reload(pv.key)}
               title="The app now runs new code. It changed several times in a row, so this view was not reopened on its own"
               data-testid="pinned-stale"
@@ -313,7 +313,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           {builder.id && (
             <button
               type="button"
-              className={`ml-auto rounded px-2 py-0.5 text-[11px] transition-colors ${
+              className={`ml-auto rounded-md px-2 py-0.5 text-xs transition-colors ${
                 builderOpen ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
               }`}
               aria-pressed={builderOpen}
@@ -326,7 +326,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           )}
           <button
             type="button"
-            className={`${builder.id ? '' : 'ml-auto '}rounded px-2 py-0.5 text-[11px] transition-colors ${
+            className={`${builder.id ? '' : 'ml-auto '}rounded-md px-2 py-0.5 text-xs transition-colors ${
               runsOpen ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
             }`}
             aria-pressed={runsOpen}
@@ -339,7 +339,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           {!!app?.info.secrets?.length && (
             <button
               type="button"
-              className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+              className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
                 secretsOpen ? 'bg-surface-hover text-ink' : `${missing ? 'text-ink' : 'text-ink-faint'} hover:bg-surface-hover/50 hover:text-ink`
               }`}
               aria-pressed={secretsOpen}
@@ -353,7 +353,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           {app && (
             <button
               type="button"
-              className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+              className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
                 versionsOpen ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
               }`}
               aria-pressed={versionsOpen}
@@ -366,7 +366,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           )}
           <button
             type="button"
-            className="flex items-center justify-center rounded p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
+            className="flex items-center justify-center rounded-md p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
             aria-label={toPanel ? `Back to ${scope}, where ${app?.title ?? pv.appId} stays in its panel` : `Close ${app?.title ?? pv.appId}`}
             onClick={() => void onClose()}
             data-testid="pinned-close"
@@ -435,7 +435,7 @@ function Body({
       <>
         {down && (
           <div
-            className="mb-2 flex items-start gap-3 rounded-md border border-line bg-surface-raised px-3 py-2 text-[12px]"
+            className="mb-2 flex items-start gap-3 rounded-md border border-line bg-surface-raised px-3 py-2 text-sm"
             role="alert"
             data-testid="pinned-crashed"
           >
@@ -482,7 +482,7 @@ function Body({
         {app.projectId && (
           <button
             type="button"
-            className="mt-3 block rounded border border-line bg-surface-raised px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong"
+            className="mt-3 block rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong"
             onClick={() => void trust(app.projectId!, true)}
             data-testid="pinned-trust"
           >
@@ -531,7 +531,7 @@ function RestartButton({ onClick, className = '' }: { onClick: () => void; class
   return (
     <button
       type="button"
-      className={`shrink-0 rounded border border-line bg-surface-floor px-3 py-1 text-[12px] text-ink transition-colors hover:border-line-strong ${className}`}
+      className={`shrink-0 rounded-md border border-line bg-surface-floor px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong ${className}`}
       onClick={onClick}
       data-testid="pinned-restart"
     >
@@ -559,13 +559,13 @@ function Skeleton({ label }: { label: string }) {
       aria-live="polite"
       data-testid="pinned-skeleton"
     >
-      <p className="text-[12px] text-ink-muted" data-testid="pinned-skeleton-label">
+      <p className="text-sm text-ink-muted" data-testid="pinned-skeleton-label">
         {label}
       </p>
-      <div className="h-3 w-1/3 animate-pulse rounded bg-surface-hover/60" />
-      <div className="h-24 animate-pulse rounded bg-surface-hover/40" />
-      <div className="h-3 w-2/3 animate-pulse rounded bg-surface-hover/40" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-surface-hover/40" />
+      <div className="h-3 w-1/3 animate-pulse rounded-md bg-surface-hover/60" />
+      <div className="h-24 animate-pulse rounded-md bg-surface-hover/40" />
+      <div className="h-3 w-2/3 animate-pulse rounded-md bg-surface-hover/40" />
+      <div className="h-3 w-1/2 animate-pulse rounded-md bg-surface-hover/40" />
     </div>
   )
 }
@@ -573,8 +573,8 @@ function Skeleton({ label }: { label: string }) {
 function Notice({ testId, title, children }: { testId: string; title: string; children?: ReactNode }) {
   return (
     <div className="m-auto max-w-md px-6 py-10 text-center" data-testid={testId}>
-      <p className="text-[13px] text-ink">{title}</p>
-      {children && <div className="mt-2 flex flex-col items-center text-[12px] leading-relaxed text-ink-muted">{children}</div>}
+      <p className="text-md text-ink">{title}</p>
+      {children && <div className="mt-2 flex flex-col items-center text-sm leading-body text-ink-muted">{children}</div>}
     </div>
   )
 }

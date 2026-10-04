@@ -50,7 +50,7 @@ export function IconButton({
     <Tooltip content={label} placement={placement} align={align}>
       <button
         type={type}
-        className={`flex items-center justify-center rounded p-1 transition-colors hover:bg-surface-hover/60 hover:text-ink disabled:opacity-40 ${
+        className={`flex items-center justify-center rounded-md p-1 transition-colors hover:bg-surface-hover/60 hover:text-ink disabled:opacity-40 ${
           lit ? 'text-ink' : 'text-ink-faint'
         } ${className}`}
         onClick={onClick}

@@ -105,7 +105,7 @@ function NoticeCard({
   const look = LOOK[notice.kind]
   return (
     <div
-      className={`flex items-start gap-2 rounded border border-line ${look.edge} border-l-2 bg-surface-raised py-2 pl-2.5 pr-1.5 shadow-(--shadow-notice)`}
+      className={`flex items-start gap-2 rounded-md border border-line ${look.edge} border-l-2 bg-surface-raised py-2 pl-2.5 pr-1.5 shadow-(--shadow-notice)`}
       data-testid="notice"
       data-kind={notice.kind}
       data-session={notice.sessionId}
@@ -118,12 +118,12 @@ function NoticeCard({
         onClick={onOpen}
         title="Open this session"
       >
-        <div className="truncate text-[12px] text-ink">{notice.name}</div>
-        <div className="mt-0.5 text-[10px] uppercase text-ink-faint">{look.label}</div>
+        <div className="truncate text-sm text-ink">{notice.name}</div>
+        <div className="mt-0.5 text-2xs uppercase text-ink-faint">{look.label}</div>
       </button>
       <button
         type="button"
-        className="shrink-0 rounded px-1.5 py-0.5 text-[12px] leading-none text-ink-faint hover:bg-surface-selected hover:text-ink"
+        className="shrink-0 rounded-md px-1.5 py-0.5 text-sm leading-none text-ink-faint hover:bg-surface-selected hover:text-ink"
         data-testid="notice-close"
         onClick={onClose}
         aria-label="Dismiss"

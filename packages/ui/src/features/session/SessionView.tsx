@@ -99,8 +99,8 @@ export function SessionView() {
         className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
         data-testid="empty-focus"
       >
-        <p className="text-[13px] text-ink-muted">Select a project or session</p>
-        <p className="text-[11px] text-ink-faint">
+        <p className="text-md text-ink-muted">Select a project or session</p>
+        <p className="text-xs text-ink-faint">
           <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you
         </p>
       </div>
@@ -303,12 +303,12 @@ export function SessionPane({
           <CrownIcon size={14} />
         </span>
       )}
-      <h1 className="truncate text-[13px] font-medium text-ink" data-testid="session-name">
+      <h1 className="truncate text-md font-medium text-ink" data-testid="session-name">
         {session.name}
       </h1>
 
       {session.limit && (
-        <span className="readout text-[11px] text-ink-muted" data-testid="limit-badge">
+        <span className="readout text-xs text-ink-muted" data-testid="limit-badge">
           Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
           {session.limit.resumeAt
             ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
@@ -325,7 +325,7 @@ export function SessionPane({
       */}
       {session.goal && (
         <span
-          className="readout shrink-0 rounded border border-line px-1.5 text-[10px] text-ink-muted"
+          className="readout shrink-0 rounded-md border border-line px-1.5 text-2xs text-ink-muted"
           data-testid="goal-badge"
           title={`${session.goal.objective}${session.goal.reason ? `\n\n${session.goal.reason}` : ''}`}
         >
@@ -573,9 +573,10 @@ export function SessionPane({
                * The bottom corners are rounded too — at **the same radius** as the pane
                * (reported by a user on 2026-09-10). The pane is clipped with rounded-lg, and a
                * square card bottom gets cut by that curve into a sharp, broken-looking corner.
-               * Drawing the same curve leaves nothing for it to be cut by.
+               * Drawing the same curve leaves nothing for it to be cut by. The curve it meets is
+               * inside the pane's 1px border, so it is the pane's radius minus that pixel.
                */
-              `absolute inset-x-0 bottom-0 z-20 rounded-t-xl rounded-b-[7px] border border-line bg-surface-floor px-1 pt-1 transition-[translate,box-shadow] duration-300 ease-out motion-reduce:transition-none ${
+              `absolute inset-x-0 bottom-0 z-20 rounded-t-lg rounded-b-[calc(var(--radius-lg)-1px)] border border-line bg-surface-floor px-1 pt-1 transition-[translate,box-shadow] duration-300 ease-out motion-reduce:transition-none ${
                 composerUp
                   ? /*
                      * The shadow's job is **to separate the card from the text it covers.**
@@ -1089,7 +1090,7 @@ const Composer = memo(function Composer({
          * The rule that brightness marks something currently happening is still kept by the
          * border — line-strong on focus, ink-muted when a file is dragged over it.
          */
-        className={`relative flex items-end gap-2 rounded border bg-surface-raised px-3 py-2 transition-colors focus-within:border-line-strong ${
+        className={`relative flex items-end gap-2 rounded-md border bg-surface-raised px-3 py-2 transition-colors focus-within:border-line-strong ${
           dragging ? 'border-ink-muted' : 'border-line'
         }`}
         onDragEnter={(e) => {
@@ -1120,7 +1121,7 @@ const Composer = memo(function Composer({
         )}
         <textarea
           ref={inputRef}
-          className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none"
+          className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-md leading-body text-ink placeholder:text-ink-faint focus:outline-none"
           rows={1}
           value={text}
           /*
@@ -1330,7 +1331,7 @@ const ComposerFooter = memo(function ComposerFooter({
         */}
       {session.worktree && (
         <span
-          className="readout truncate text-[10px] text-ink-faint"
+          className="readout truncate text-2xs text-ink-faint"
           title={`Runs in a git worktree: ${session.worktree.path}`}
           data-testid="worktree-badge"
         >
@@ -1351,7 +1352,7 @@ const ComposerFooter = memo(function ComposerFooter({
           now, so a blank truly only ever means "never reported at all".)
         */}
       <span
-        className={`readout ml-auto shrink-0 text-[11px] ${
+        className={`readout ml-auto shrink-0 text-xs ${
           ctxPct === null ? 'text-ink-faint/50' : ctxPct >= 80 ? 'text-ink' : 'text-ink-faint'
         }`}
         data-testid="context-gauge"
@@ -2054,7 +2055,7 @@ function ChatStream({
        * comment above #61). Measuring has to keep happening, so this hides only the picture,
        * not the layout.
        */
-      className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-[13px] leading-relaxed ${
+      className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
         bottomPeek ? 'pb-14' : 'pb-4'
       } ${settling ? 'invisible' : ''}`}
       /* The empty space the card will settle onto. Follows size, not state, so there is no
@@ -2140,7 +2141,7 @@ function ChatStream({
               type="button"
               onClick={() => setStickyOpen((v) => !v)}
               aria-expanded={stickyOpen}
-              className="w-full cursor-pointer truncate rounded-lg rounded-br-sm border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-[13px] text-ink shadow-(--shadow-sticky)"
+              className="w-full cursor-pointer truncate rounded-lg rounded-br-md border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-md text-ink shadow-(--shadow-sticky)"
             >
               {stickyText}
             </button>
@@ -2161,7 +2162,7 @@ function ChatStream({
                   reason to expand it is to read it — the conversation showing through a long
                   question would immediately defeat that purpose.
                 */
-                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-[13px] text-ink shadow-(--shadow-sticky)"
+                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-md border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-md text-ink shadow-(--shadow-sticky)"
               >
                 {stickyText}
               </button>
@@ -2289,7 +2290,7 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
           {plan.map((step, i) => (
             <li
               key={i}
-              className={`flex items-baseline gap-1.5 text-[11px] ${step.status === 'inProgress' ? 'text-ink' : 'text-ink-faint'}`}
+              className={`flex items-baseline gap-1.5 text-xs ${step.status === 'inProgress' ? 'text-ink' : 'text-ink-faint'}`}
               data-testid={`plan-step-${i}`}
               data-status={step.status}
             >
@@ -2310,7 +2311,7 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
         and with the same wording, someone waiting has no way to tell whether it has stopped or
         is just taking a while.
       */}
-        <span className="text-[12px] text-ink-muted" data-testid="activity-label">
+        <span className="text-sm text-ink-muted" data-testid="activity-label">
           {activity === 'compacting'
             ? 'Compacting context'
             : activity === 'reviewing'
@@ -2324,18 +2325,18 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
         </span>
         {/* Showing a number for a one-second wait would just be noise */}
         {seconds >= 2 && (
-          <span className="readout text-[11px] text-ink-faint" data-testid="activity-elapsed">
+          <span className="readout text-xs text-ink-faint" data-testid="activity-elapsed">
             {formatElapsed(seconds)}
           </span>
         )}
         {notice && (
-          <span className="ml-auto truncate text-[11px] text-ink-muted" data-testid="interrupt-background-note">
+          <span className="ml-auto truncate text-xs text-ink-muted" data-testid="interrupt-background-note">
             {notice}
           </span>
         )}
         <button
           type="button"
-          className={`${notice ? '' : 'ml-auto '}shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink-faint transition-colors hover:border-line-strong hover:text-ink`}
+          className={`${notice ? '' : 'ml-auto '}shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink`}
           onClick={() => void interrupt(sessionId)}
           title={notice ? `Stop the turn — ${notice.charAt(0).toLowerCase()}${notice.slice(1)}` : 'Stop the turn'}
           data-testid="activity-interrupt"
@@ -2443,7 +2444,7 @@ function OlderSentinel({
         type="button"
         onClick={() => void loadOlder(sessionId)}
         disabled={loading}
-        className="readout rounded border border-line px-2 py-0.5 text-[10px] text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60"
+        className="readout rounded-md border border-line px-2 py-0.5 text-2xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60"
       >
         {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>
@@ -2471,7 +2472,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   if (error && !waking) {
     return (
       <p
-        className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-[11px] leading-relaxed text-ink-muted"
+        className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted"
         data-testid="dormant-note"
       >
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
@@ -2483,7 +2484,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
          */}
         {locked && (
           <button
-            className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
+            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
             onClick={() => void fork(sessionId)}
             title="Continue in a copy of this conversation. The original stays untouched."
             data-testid="dormant-fork"
@@ -2492,7 +2493,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
           </button>
         )}
         <button
-          className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink transition-colors hover:border-line-strong"
+          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
           onClick={() => void wake(sessionId)}
           data-testid="dormant-retry"
         >
@@ -2503,7 +2504,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <p className="border-t border-line px-4 py-1.5 text-[11px] text-ink-faint" data-testid="dormant-note">
+    <p className="border-t border-line px-4 py-1.5 text-xs text-ink-faint" data-testid="dormant-note">
       {waking ? 'Waking session…' : 'Dormant — sending a message resumes it automatically'}
     </p>
   )
@@ -2566,7 +2567,7 @@ const ChatRow = memo(function ChatRow({
           (the palette rule): the distinction is made by shape, not brightness.
         */}
         {item.from && (
-          <div className="text-[11px] text-ink-muted" data-testid="msg-user-from">
+          <div className="text-xs text-ink-muted" data-testid="msg-user-from">
             {item.from.name} ⤷
           </div>
         )}
@@ -2576,7 +2577,7 @@ const ChatRow = memo(function ChatRow({
           one-line source), noting that the source is an app rather than a session.
         */}
         {item.fromApp && (
-          <div className="text-[11px] text-ink-muted" data-testid="msg-user-from-app">
+          <div className="text-xs text-ink-muted" data-testid="msg-user-from-app">
             {item.fromApp.name} app ⤷
           </div>
         )}
@@ -2608,7 +2609,7 @@ const ChatRow = memo(function ChatRow({
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
-            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-surface-hover px-3 py-2 text-ink ${
+            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-md border bg-surface-hover px-3 py-2 text-ink ${
               item.from || item.fromApp ? 'border-dashed border-ink-muted/50' : 'border-ink-faint/40'
             }`}
           >
@@ -2633,7 +2634,7 @@ const ChatRow = memo(function ChatRow({
      * rendered through Markdown, just left quiet with no background color.
      */
     return (
-      <div className="min-w-0 text-[13px] text-ink-muted [&_strong]:text-ink-muted" data-testid="msg-reasoning">
+      <div className="min-w-0 text-md text-ink-muted [&_strong]:text-ink-muted" data-testid="msg-reasoning">
         <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} />
       </div>
     )
@@ -2643,7 +2644,7 @@ const ChatRow = memo(function ChatRow({
     // once a decision has been made
     if (!item.decision) return null
     return (
-      <p className="readout text-[11px] text-ink-faint" data-testid="msg-approval-log">
+      <p className="readout text-xs text-ink-faint" data-testid="msg-approval-log">
         {item.decision === 'deny' ? 'Denied' : 'Allowed'} · {item.summary}
       </p>
     )
@@ -2667,7 +2668,7 @@ const ChatRow = memo(function ChatRow({
     return (
       <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
         <span className="h-px flex-1 bg-line" />
-        <span className="readout min-w-0 break-words text-center text-[10px] text-ink-faint">{item.text}</span>
+        <span className="readout min-w-0 break-words text-center text-2xs text-ink-faint">{item.text}</span>
         <span className="h-px flex-1 bg-line" />
       </div>
     )
@@ -2681,11 +2682,11 @@ const ChatRow = memo(function ChatRow({
     if (!item.data) {
       return (
         <div
-          className="rounded-lg border border-line bg-surface-raised px-3 py-2 text-[12px] text-ink-faint"
+          className="rounded-lg border border-line bg-surface-raised px-3 py-2 text-sm text-ink-faint"
           data-testid="msg-image-missing"
         >
           The image could not be displayed{item.note ? ` — ${item.note}` : ''}
-          {item.path && <span className="readout mt-1 block truncate text-[11px]">{item.path}</span>}
+          {item.path && <span className="readout mt-1 block truncate text-xs">{item.path}</span>}
         </div>
       )
     }
@@ -2802,7 +2803,7 @@ function AttachmentThumb({
 function AttachmentLabel({ att }: { att: ChatAttachment }) {
   return (
     <>
-      <span className="readout text-[9px] text-ink-faint" title={att.kind === 'image' ? 'Image' : 'File'}>
+      <span className="readout text-2xs text-ink-faint" title={att.kind === 'image' ? 'Image' : 'File'}>
         {att.kind === 'image' ? 'IMG' : 'DOC'}
       </span>
       <span className="max-w-40 truncate">{att.name}</span>
@@ -2825,7 +2826,7 @@ function UserAttachment({ att }: { att: ChatAttachment }) {
       thumbClassName="max-h-48 max-w-full rounded-lg border border-ink-faint/40"
       chip={
         <span
-          className="flex items-center gap-1.5 rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink-muted"
+          className="flex items-center gap-1.5 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink-muted"
           data-testid="msg-user-attachment"
           title={att.name}
         >
@@ -2868,7 +2869,7 @@ const AttachmentStrip = memo(function AttachmentStrip({
       {uploading > 0 && (
         <li className="flex h-12 items-center">
           <span
-            className="flex items-center gap-1.5 rounded border border-dashed border-line px-2 py-1 text-[11px] text-ink-faint"
+            className="flex items-center gap-1.5 rounded-md border border-dashed border-line px-2 py-1 text-xs text-ink-faint"
             data-testid="attachment-uploading"
           >
             Attaching {uploading === 1 ? 'a file' : `${uploading} files`}…
@@ -2895,10 +2896,10 @@ const AttachmentStrip = memo(function AttachmentStrip({
                * wide screenshot and a tall one take a similar, bounded footprint. Clicking it
                * opens the same zoom as the sent bubble's thumbnail.
                */
-              thumbClassName="h-12 w-auto min-w-12 max-w-24 rounded border border-line object-cover"
+              thumbClassName="h-12 w-auto min-w-12 max-w-24 rounded-md border border-line object-cover"
               chip={
                 <span
-                  className="flex items-center gap-1.5 rounded border border-line bg-surface-raised px-2 py-1 text-[11px] text-ink-muted"
+                  className="flex items-center gap-1.5 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink-muted"
                   data-testid="attachment-chip"
                   title={a.name}
                 >
@@ -2913,7 +2914,7 @@ const AttachmentStrip = memo(function AttachmentStrip({
                  */
                 <span className="relative block" data-testid="attachment-thumb">
                   {img}
-                  <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-sm bg-surface-floor/80">
+                  <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-md bg-surface-floor/80">
                     {remove}
                   </span>
                 </span>
@@ -2947,7 +2948,7 @@ function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }
   // default sentence in that case
   const reason = item.title && !/propose_project$/.test(item.title) ? item.title : null
   return (
-    <p className="flex items-baseline gap-2 text-[12px] text-ink-muted" data-testid="project-proposal">
+    <p className="flex items-baseline gap-2 text-sm text-ink-muted" data-testid="project-proposal">
       {/* Points down and to the left — the actual direction of the lit-up button */}
       <span className="shrink-0 text-ink-faint" aria-hidden>
         ↙
@@ -2969,7 +2970,7 @@ function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }
 function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const branch = item.title && !/propose_worktree_session$/.test(item.title) ? item.title : null
   return (
-    <p className="flex items-baseline gap-2 text-[12px] text-ink-muted" data-testid="worktree-proposal">
+    <p className="flex items-baseline gap-2 text-sm text-ink-muted" data-testid="worktree-proposal">
       <span className="shrink-0 text-ink-faint" aria-hidden>
         ↖
       </span>
@@ -3007,7 +3008,7 @@ const PREVIEW_LINES = 3
  * So one more cap is added — a height counted in **visible lines**. `lh` is one line-height unit
  * of that element, so `3lh` is always exactly three lines regardless of font size or leading
  * changes (writing it in px would mean hand-rounding a value like
- * leading-relaxed × 11px = 17.875px, and that rounding would show one pixel of a fourth line's
+ * leading-body × 11px = 17.875px, and that rounding would show one pixel of a fourth line's
  * top edge).
  */
 const PREVIEW_CLAMP = 'max-h-[3lh] overflow-hidden'
@@ -3079,7 +3080,7 @@ function ToolCard({
       : []
 
   return (
-    <div className="rounded border border-line bg-surface-raised/60" data-testid="tool-card">
+    <div className="rounded-md border border-line bg-surface-raised/60" data-testid="tool-card">
       <button
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
         onClick={() => setOpen((o) => !o)}
@@ -3090,15 +3091,15 @@ function ToolCard({
         <span className="shrink-0 text-ink-faint">
           <ChevronIcon open={open} />
         </span>
-        <span className="readout shrink-0 text-[11px] text-ink-muted">{item.tool}</span>
-        <span className="readout truncate text-[11px] text-ink-faint">{item.title}</span>
-        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-ink">Failed</span>}
+        <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
+        <span className="readout truncate text-xs text-ink-faint">{item.title}</span>
+        {item.ok === false && <span className="ml-auto shrink-0 text-xs text-ink">Failed</span>}
       </button>
 
       {liveTail.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">
           <pre
-            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ink-faint ${PREVIEW_CLAMP}`}
+            className={`whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-faint ${PREVIEW_CLAMP}`}
             data-testid="tool-card-live"
           >
             {liveTail.join('\n')}
@@ -3110,7 +3111,7 @@ function ToolCard({
         <div className="border-t border-line px-2.5 py-1.5">
           <pre
             ref={outRef}
-            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ink-muted ${
+            className={`whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted ${
               open ? '' : PREVIEW_CLAMP
             }`}
             data-testid="tool-card-output"
@@ -3119,7 +3120,7 @@ function ToolCard({
           </pre>
           {!open && (hidden > 0 || clamped) && (
             <button
-              className="readout mt-1 text-[10px] text-ink-faint transition-colors hover:text-ink"
+              className="readout mt-1 text-2xs text-ink-faint transition-colors hover:text-ink"
               onClick={() => setOpen(true)}
               data-testid="tool-card-more"
             >
@@ -3179,16 +3180,16 @@ function SubagentSteps({
         <span className="shrink-0 text-ink-faint">
           <ChevronIcon open={open} />
         </span>
-        <span className="readout text-[11px] text-ink-faint">Subagent&apos;s steps</span>
+        <span className="readout text-xs text-ink-faint">Subagent&apos;s steps</span>
       </button>
       {open && (
         <div className="flex flex-col gap-2 border-t border-line px-2.5 py-2" data-testid="subagent-steps-list">
           {items.map((it) => (
             <ChatRow key={it.seq} item={it} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} nested />
           ))}
-          {steps?.loading && <p className="readout text-[11px] text-ink-faint">Loading the steps…</p>}
+          {steps?.loading && <p className="readout text-xs text-ink-faint">Loading the steps…</p>}
           {steps?.error && (
-            <p className="text-[11px] text-ink" data-testid="subagent-steps-error">
+            <p className="text-xs text-ink" data-testid="subagent-steps-error">
               Could not load the steps — {steps.error}{' '}
               <button className="readout text-ink-faint underline hover:text-ink" onClick={() => void loadMore(sessionId, callId)}>
                 Try again
@@ -3196,13 +3197,13 @@ function SubagentSteps({
             </p>
           )}
           {steps && !steps.loading && !steps.error && items.length === 0 && (
-            <p className="text-[11px] text-ink-faint" data-testid="subagent-steps-empty">
+            <p className="text-xs text-ink-faint" data-testid="subagent-steps-empty">
               No steps were recorded for this agent. One that ran before Centralu kept them left only its report.
             </p>
           )}
           {steps?.more && !steps.loading && (
             <button
-              className="readout self-start text-[10px] text-ink-faint transition-colors hover:text-ink"
+              className="readout self-start text-2xs text-ink-faint transition-colors hover:text-ink"
               onClick={() => void loadMore(sessionId, callId)}
               data-testid="subagent-steps-more"
             >
