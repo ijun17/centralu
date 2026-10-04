@@ -878,6 +878,20 @@ export interface ProcessPort {
   stop(pids: number[]): Promise<{ stopped: number }>
 }
 
+/**
+ * Background mode (#280): whether quitting the app leaves the agent host and its running sessions
+ * going. Off by default; with it off, quitting stops them as it always did.
+ *
+ * Only a desktop app whose host is held by the keeper can offer this — the keeper is what
+ * outlives the window. A platform that cannot leaves `Platform.background` undefined, and the
+ * setting is not shown, rather than shown as a switch that does nothing.
+ */
+export interface BackgroundPort {
+  get(): Promise<boolean>
+  /** @returns the mode now in force */
+  set(on: boolean): Promise<boolean>
+}
+
 export interface Platform {
   agents: AgentPort
   apps: AppsPort
@@ -894,6 +908,8 @@ export interface Platform {
   terminal: TerminalPort
   commands: CommandRunPort
   processes: ProcessPort
+  /** Present only where the host outlives the window (desktop, through the keeper — #280) */
+  background?: BackgroundPort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>
 }

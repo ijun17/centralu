@@ -61,3 +61,38 @@ describe('waiting for the host', () => {
     await vi.waitFor(() => expect(unlistened).toContain('host-status'))
   })
 })
+
+describe('background mode (#280)', () => {
+  const shell = (mode: 'keeper' | 'direct') =>
+    invoke.mockImplementation(async (cmd: string, args?: { on?: boolean }) => {
+      if (cmd === 'host_info') return { port: 1, token: 't' }
+      if (cmd === 'host_error') return null
+      if (cmd === 'host_build') return { mode }
+      if (cmd === 'background_mode') return false
+      if (cmd === 'set_background_mode') return args?.on
+      return null
+    })
+
+  it('is offered when the keeper holds the host, and goes through the shell', async () => {
+    shell('keeper')
+    const p = await createTauriPlatform()
+    try {
+      expect(p.background).toBeDefined()
+      expect(await p.background!.set(true)).toBe(true)
+      expect(invoke).toHaveBeenCalledWith('set_background_mode', { on: true })
+    } finally {
+      await p.dispose()
+    }
+  })
+
+  /** A switch that cannot work must not be shown: with no keeper, nothing outlives the window */
+  it('is not offered when the app runs the host itself', async () => {
+    shell('direct')
+    const p = await createTauriPlatform()
+    try {
+      expect(p.background).toBeUndefined()
+    } finally {
+      await p.dispose()
+    }
+  })
+})

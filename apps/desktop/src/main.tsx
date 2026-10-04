@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App, confirmKeyAction } from '@cc/ui'
-import { createTauriPlatform, focusWindow, listenForQuit, restartHost, type HostStatus } from '@cc/platform/tauri'
+import {
+  createTauriPlatform,
+  focusWindow,
+  hostBuild,
+  listenForQuit,
+  onHostBuild,
+  quitAndStopAgents,
+  restartHost,
+  switchHostBuild,
+  type HostBuild,
+  type HostStatus,
+} from '@cc/platform/tauri'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import '../../../packages/ui/src/styles/index.css'
@@ -75,18 +86,40 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
    */
   const [strays, setStrays] = useState<{ pid: number; command: string; cwd: string }[]>([])
   const [alsoStop, setAlsoStop] = useState(false)
-  const quit = useCallback(async () => {
-    if (alsoStop && strays.length > 0) {
-      // A failure here does not block quitting — what the person clicked was "quit".
-      await platform.processes.stop(strays.map((s) => s.pid)).catch(() => {})
-    }
-    await invoke('quit_app')
-  }, [alsoStop, strays, platform])
+  /*
+   * Background mode (#280), read each time the dialog opens: with it on, plain Quit leaves the
+   * agents running, so the dialog says so and offers the one way to stop them anyway. Null while
+   * unknown or where the platform has no keeper — then the dialog reads as it always did.
+   */
+  const [background, setBackground] = useState<boolean | null>(null)
+  const [quitError, setQuitError] = useState<string | null>(null)
+  const quit = useCallback(
+    async (stopAgents = false) => {
+      if (alsoStop && strays.length > 0) {
+        // A failure here does not block quitting — what the person clicked was "quit".
+        await platform.processes.stop(strays.map((s) => s.pid)).catch(() => {})
+      }
+      if (stopAgents) {
+        // If the keeper cannot be told, quitting anyway would leave agents running that the person
+        // just asked to stop — so this one says why and stays open.
+        await quitAndStopAgents().catch((e: Error) => setQuitError(e.message))
+        return
+      }
+      await invoke('quit_app')
+    },
+    [alsoStop, strays, platform],
+  )
 
   useEffect(() => {
     setQuitAsker(() => {
       setAskQuit(true)
       setAlsoStop(false)
+      setQuitError(null)
+      setBackground(null)
+      void platform.background
+        ?.get()
+        .then(setBackground)
+        .catch(() => setBackground(null))
       void platform.processes
         .strays()
         .then(setStrays)
@@ -96,7 +129,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       void focusWindow()
     })
     return () => setQuitAsker(null)
-  }, [platform.processes])
+  }, [platform.processes, platform.background])
 
   /*
    * The case where the host gives up after exceeding its restart limit once the app is already
@@ -116,6 +149,26 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
     })
     return () => void un.then((f) => f())
   }, [])
+  /*
+   * A window of one build attached to a host of another (#280). Happens when the app was updated
+   * or rebuilt while the keeper kept the old host running in the background. The window still
+   * works against the old host; this bar says so and offers to switch, which restarts the host.
+   */
+  const [build, setBuild] = useState<HostBuild | null>(null)
+  const [askSwitch, setAskSwitch] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  const [dismissed, setDismissed] = useState(false)
+  useEffect(() => {
+    void hostBuild()
+      .then(setBuild)
+      .catch(() => {})
+    return onHostBuild((b) => {
+      setBuild(b)
+      if (b.sameBuild) setDismissed(false)
+    })
+  }, [])
+  const otherBuild = build?.mode === 'keeper' && build.sameBuild === false && !dismissed
+
   const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!askQuit) return
@@ -173,6 +226,70 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           />
         </div>
       )}
+      {otherBuild && build && (
+        <div
+          className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-edge bg-pit px-4 py-1.5 text-[11px] text-ash"
+          data-testid="host-other-build"
+          role="status"
+        >
+          <span className="min-w-0 flex-1 truncate">
+            The agent host is running {describeBuild(build.host)}. This window is {describeBuild(build.app)}.
+          </span>
+          {switchError && <span className="shrink-0 text-del">{switchError}</span>}
+          <button
+            className="shrink-0 rounded border border-edge px-2 py-0.5 text-chalk hover:border-graphite"
+            onClick={() => {
+              setSwitchError(null)
+              setAskSwitch(true)
+            }}
+            data-testid="host-switch-build"
+          >
+            Switch to this build
+          </button>
+          <button className="shrink-0 text-slate hover:text-chalk" onClick={() => setDismissed(true)}>
+            Not now
+          </button>
+        </div>
+      )}
+      {askSwitch && build && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          data-testid="confirm-switch-build"
+          onClick={() => setAskSwitch(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Restart the agent host?"
+            className="w-[380px] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[13px] text-chalk">Restart the agent host on this window's build?</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-ash">
+              Every running turn is cut, and agent processes stop. Conversations are saved and
+              resume on the new host. Waiting approvals have to be asked again.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+                onClick={() => setAskSwitch(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del hover:border-del/70"
+                data-testid="confirm-switch-build-yes"
+                onClick={() => {
+                  setAskSwitch(false)
+                  void switchHostBuild().catch((e: Error) => setSwitchError(e.message))
+                }}
+              >
+                Restart host
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {askQuit && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -189,10 +306,18 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-[13px] text-chalk">Quit Centralu?</p>
-            <p className="mt-2 text-[11px] leading-relaxed text-ash">
-              Running agent processes stop with the app. Conversations are saved and resume when
-              you come back.
-            </p>
+            {background ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="confirm-quit-background">
+                Agents keep running in the background. Open Centralu again to come back to them,
+                waiting approvals included.
+              </p>
+            ) : (
+              <p className="mt-2 text-[11px] leading-relaxed text-ash">
+                Running agent processes stop with the app. Conversations are saved and resume when
+                you come back.
+              </p>
+            )}
+            {quitError && <p className="mt-2 text-[11px] text-del">{quitError}</p>}
             {strays.length > 0 && (
               <div className="mt-3 rounded border border-edge bg-void p-2" data-testid="quit-strays">
                 <p className="text-[11px] text-ash">
@@ -229,6 +354,15 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
               >
                 Cancel <span className="text-[10px] text-slate">esc</span>
               </button>
+              {background && (
+                <button
+                  className="rounded border border-edge px-2 py-1 text-[12px] text-ash hover:border-graphite hover:text-chalk"
+                  onClick={() => void quit(true)}
+                  data-testid="confirm-quit-stop"
+                >
+                  Quit and stop agents
+                </button>
+              )}
               <button
                 className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del hover:border-del/70"
                 onClick={() => void quit()}
@@ -242,6 +376,14 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       )}
     </>
   )
+}
+
+/** "build abc1234 (0.1.0-beta.6) from /Applications/Centralu.app" — what a person can check against what they installed */
+function describeBuild(b: HostBuild['host']): string {
+  if (!b) return 'an unknown build'
+  const version = b.version ? ` (${b.version})` : ''
+  const from = b.bundlePath ? ` from ${b.bundlePath}` : ''
+  return `build ${b.commit}${version}${from}`
 }
 
 function Starting() {

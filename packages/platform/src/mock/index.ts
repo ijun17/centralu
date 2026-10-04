@@ -1519,6 +1519,17 @@ export class MockPlatform implements Platform {
    */
   strayProcesses: { pid: number; command: string; cwd: string }[] = []
 
+  /** Background mode (#280). The mock stands in for the desktop app, which offers it through the keeper */
+  backgroundOn = false
+
+  readonly background = {
+    get: async () => this.backgroundOn,
+    set: async (on: boolean) => {
+      this.backgroundOn = on
+      return on
+    },
+  }
+
   readonly processes = {
     strays: async () => [...this.strayProcesses],
     stop: async (pids: number[]) => {

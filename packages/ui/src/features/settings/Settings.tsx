@@ -11,6 +11,7 @@ import { APPS } from '../../apps/registry.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { TrashSection } from './TrashSection.jsx'
+import type { BackgroundPort } from '@cc/platform/ports'
 
 type Rule = {
   id: number
@@ -121,6 +122,12 @@ const CATEGORIES = [
   // An experimental feature is an app (#81) — there has to be a place to turn it on and off for "unused, it disappears" to hold true
   { id: 'apps', label: 'Apps' },
   { id: 'notifications', label: 'Notifications' },
+  /*
+   * Whether quitting leaves agents running (#280). Its own category because the question people
+   * arrive with is "what happens to my agents when I quit?", and the answer is one switch plus
+   * what it costs. Shown only where the platform can do it (the desktop app's keeper).
+   */
+  { id: 'background', label: 'Background' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'permissions', label: 'Permissions' },
   // Deleted sessions (#204) — the only place a conversation is deleted for good, so it has a place of its own
@@ -198,7 +205,7 @@ export function Settings() {
             data-testid="settings-nav"
             aria-label="Settings categories"
           >
-            {CATEGORIES.map((c) => (
+            {CATEGORIES.filter((c) => c.id !== 'background' || platform.background).map((c) => (
               <button
                 key={c.id}
                 type="button"
@@ -263,6 +270,8 @@ export function Settings() {
                 </div>
               </section>
             )}
+
+            {category === 'background' && platform.background && <BackgroundSection port={platform.background} />}
 
             {category === 'appearance' && <AppearanceSection />}
 
@@ -870,6 +879,69 @@ function AppearanceSection() {
           <span>Session icon in the sidebar</span>
         </label>
       </div>
+    </section>
+  )
+}
+
+/**
+ * Background mode (#280, decision 1 — off by default).
+ *
+ * The description says the three things a person needs before turning it on: what keeps running,
+ * how to stop it anyway, and when it stops by itself. A switch that keeps processes alive behind
+ * no window must never be one whose consequences someone discovers later.
+ */
+function BackgroundSection({ port }: { port: BackgroundPort }) {
+  const [on, setOn] = useState<boolean | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    port
+      .get()
+      .then((v) => alive && setOn(v))
+      .catch((e: Error) => alive && setError(e.message))
+    return () => {
+      alive = false
+    }
+  }, [port])
+
+  return (
+    <section data-testid="settings-background">
+      <label className="flex items-start gap-2 text-[12px] text-ash">
+        <input
+          type="checkbox"
+          className="mt-0.5 accent-graphite"
+          data-testid="settings-background-toggle"
+          checked={on ?? false}
+          disabled={on === null}
+          onChange={(e) => {
+            const next = e.target.checked
+            setError(null)
+            port
+              .set(next)
+              .then(setOn)
+              .catch((err: Error) => setError(err.message))
+          }}
+        />
+        <span>
+          Keep agents running after Centralu quits
+          <span className="mt-1 block text-[11px] leading-relaxed text-slate">
+            Closing the window leaves the agent host and its running sessions going. Opening
+            Centralu again picks them up where they are, waiting approvals included. Off, quitting
+            stops them, as before.
+          </span>
+        </span>
+      </label>
+      <p className="mt-3 text-[11px] leading-relaxed text-slate">
+        To stop everything anyway, choose <span className="text-ash">Quit and stop agents</span>{' '}
+        when you quit. With no window open and nothing running for 30 minutes, the background host
+        stops by itself.
+      </p>
+      {error && (
+        <p className="mt-2 text-[11px] text-del" data-testid="settings-background-error">
+          {error}
+        </p>
+      )}
     </section>
   )
 }

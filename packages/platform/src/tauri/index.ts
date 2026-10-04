@@ -122,6 +122,54 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
   }
 }
 
+/** Where a build came from (#280) — the keeper's record, as the shell hands it over */
+export type BuildSource = {
+  commit: string
+  builtAt?: string
+  version?: string
+  protocolVersion?: number
+  bundlePath?: string
+  hostDir?: string
+  copyDir?: string
+}
+
+/**
+ * Which builds are involved (#280): this window's and the running host's. `mode` says whether the
+ * host is held by the keeper (release builds) or is the app's own child (`pnpm app:dev`).
+ * `sameBuild` is false when a window of one build is attached to a host of another — the case the
+ * window offers to switch.
+ */
+export type HostBuild = {
+  mode: 'keeper' | 'direct'
+  app?: BuildSource
+  host?: BuildSource
+  sameBuild?: boolean
+  background?: boolean
+}
+
+export async function hostBuild(): Promise<HostBuild> {
+  return invoke<HostBuild>('host_build')
+}
+
+/** Listens for changes to which builds are involved (a host restarted, a switch finished) */
+export function onHostBuild(cb: (b: HostBuild) => void): () => void {
+  const un = listen<HostBuild>('host-build', (e) => cb(e.payload))
+  return () => void un.then((f) => f())
+}
+
+/**
+ * Restarts the host from this window's build (#280). **Cuts every running turn** — the caller
+ * confirms that with the person first. The new host arrives as an ordinary `host-status` ready.
+ */
+export async function switchHostBuild(): Promise<void> {
+  await invoke('switch_host_build').catch(rethrowAsError)
+}
+
+/** "Quit and stop agents" (#280): stops the host whatever background mode says, then quits */
+export async function quitAndStopAgents(): Promise<void> {
+  await invoke('quit_and_stop_agents').catch(rethrowAsError)
+}
+
 /** Exported for testing — checks the seam with the Rust commands without a webview */
 export class TauriSystemPort implements SystemPort {
   private granted: boolean | null = null
@@ -270,6 +318,12 @@ export async function createTauriPlatform(): Promise<Platform> {
   // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
   const fileManagerName = await invoke<string>('file_manager_name').catch(() => 'file manager')
 
+  // Background mode exists only when the keeper holds the host (#280). A failure to ask is read
+  // as "no keeper": the setting then stays hidden instead of offering a switch that cannot work.
+  const mode = await hostBuild()
+    .then((b) => b.mode)
+    .catch(() => 'direct' as const)
+
   // If the supervisor revives the host, the port and token change → this has to switch to the new address.
   // Without this subscription, the app stays stuck at 'disconnected' after the sidecar crashes (measured at L4-2).
   const base = createWebPlatform({
@@ -298,6 +352,14 @@ export async function createTauriPlatform(): Promise<Platform> {
 
   return {
     ...base,
+    ...(mode === 'keeper'
+      ? {
+          background: {
+            get: () => invoke<boolean>('background_mode').catch(rethrowAsError),
+            set: (on: boolean) => invoke<boolean>('set_background_mode', { on }).catch(rethrowAsError),
+          },
+        }
+      : {}),
     system: new TauriSystemPort(),
     capabilities: {
       osNotifications: true,
