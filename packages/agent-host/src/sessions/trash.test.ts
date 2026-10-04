@@ -170,7 +170,7 @@ describe('who can delete for good', () => {
         if (e.isDirectory()) walk(p)
         else if (/\.tsx?$/.test(e.name) && !/\.test(-helpers)?\.tsx?$/.test(e.name)) {
           for (const m of readFileSync(p, 'utf8').matchAll(/([\w.]+)\.(purgeSession|emptyTrash)\(/g)) {
-            callers.push(`${p.slice(src.length + 1)}: ${m[1]}.${m[2]}`)
+            callers.push(`${p.slice(src.length + 1).replaceAll('\\', '/')}: ${m[1]}.${m[2]}`)
           }
         }
       }

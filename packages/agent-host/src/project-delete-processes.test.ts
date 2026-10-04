@@ -80,8 +80,10 @@ describe('project deletion — terminals and executions', () => {
 
     // The same first shot as the Stop button — anything that survives the grace period is collected
     // by tree-kill with SIGKILL
-    expect(termA!.kill).toHaveBeenCalledWith('SIGTERM')
-    expect(runA!.kill).toHaveBeenCalledWith('SIGTERM')
+    // Windows has no signals: the pty is closed with kill() and no argument (kill-tree.ts, #14)
+    const firstShot = process.platform === 'win32' ? [] : ['SIGTERM']
+    expect(termA!.kill).toHaveBeenCalledWith(...firstShot)
+    expect(runA!.kill).toHaveBeenCalledWith(...firstShot)
     // Does not touch the other project
     expect(termB!.kill).not.toHaveBeenCalled()
     expect(runB!.kill).not.toHaveBeenCalled()

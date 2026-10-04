@@ -315,7 +315,8 @@ describe('what an app receives', () => {
       CC_DATA_DIR: null,
     })
     expect(statSync(dataDir).isDirectory()).toBe(true)
-    expect(statSync(join(dataRoot, SECRETS_FILE)).mode & 0o777).toBe(0o600)
+    // Windows has no mode bits (Node reports 0o666); the profile folder's ACL guards the file there (#14)
+    if (process.platform !== 'win32') expect(statSync(join(dataRoot, SECRETS_FILE)).mode & 0o777).toBe(0o600)
   })
 
   it('stderr goes to the app\'s own log, with secret values masked by name', async () => {
