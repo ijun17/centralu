@@ -1,5 +1,8 @@
-import type { ApprovalDetail, BackgroundTask, NormalizedEvent, SessionGoal, ToolSummary } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, NormalizedEvent, SessionActivity, SessionGoal, ToolSummary } from '@cc/protocol'
 import { UnmappedTypes } from '../unmapped.js'
+
+/** The settings a Claude process was launched with — the snapshot a `settings_changed` the tool made carries (#304). */
+export type ClaudeLaunchedSettings = { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null }
 
 /**
  * Converts Claude SDK messages into NormalizedEvent (a pure function, so contract tests are
@@ -232,6 +235,66 @@ export function normalizeMessage(
    * For those 39 seconds, the UI looked no different from ordinary "waiting for response" — a
    * problem that surfaced from dogfooding.
    */
+  /*
+   * `/clear` (#304). Measured (CLI 2.1.289 through SDK 0.3.263, haiku, 2026-10-04): `/clear` passes straight through
+   * to the CLI, which sends `conversation_reset {new_conversation_id, trigger: 'clear', user_message_uuid}`, then an
+   * `init` carrying a **new `session_id`** (19eced5a… → b7843a7a…) and a result with `num_turns: 0`. The adapter
+   * already follows the new id; what was missing is any sign on screen that the model now knows nothing above this
+   * point. The context gauge read 15,967 before and 14,093 after (the system prompt alone).
+   */
+  if (type === 'conversation_reset') {
+    const trigger = str(m.trigger)
+    out.push({ type: 'conversation_reset', sessionId, ...(trigger ? { trigger } : {}) })
+    return out
+  }
+
+  /*
+   * Text the CLI shows its own user (#304). `system/informational` carries hook feedback: measured (CLI 2.1.289), a
+   * `UserPromptSubmit` hook that exits 2 sends `{content: "UserPromptSubmit operation blocked by hook:\n[<command>]:
+   * <its stderr>\n\nOriginal prompt: …", level: 'warning', prevent_continuation: true}`, then a result with
+   * `num_turns: 0`. Nothing reached the screen before: the prompt simply went unanswered. The SDK says level `info`
+   * "shows only in transcript mode", so the CLI itself hides it, and so does this.
+   */
+  if (type === 'system' && str(m.subtype) === 'informational') {
+    const text = str(m.content).trim()
+    const level = str(m.level)
+    if (text && level !== 'info') out.push({ type: 'notice', sessionId, level: level === 'warning' ? 'warning' : 'info', text })
+    return out
+  }
+
+  /*
+   * The CLI's notification queue (#304, not exercised: it carries things like fast-mode credits running out or a model
+   * the organization denies). Its colour and priority fold into the notice's level. "Error compacting conversation" is
+   * left out: the failed-compaction marker (`status` below) already says so, with the reason.
+   */
+  if (type === 'system' && str(m.subtype) === 'notification') {
+    const text = str(m.text).trim()
+    if (!text || str(m.key) === 'error-compacting-conversation') return out
+    const color = str(m.color)
+    const priority = str(m.priority)
+    const level = color === 'error' ? 'error' : color === 'warning' || priority === 'high' || priority === 'immediate' ? 'warning' : 'info'
+    out.push({ type: 'notice', sessionId, level, text })
+    return out
+  }
+
+  /*
+   * The CLI is retrying a failed API call (#304), the twin of Codex's `error {willRetry}`. Measured (CLI 2.1.289, an
+   * `ANTHROPIC_BASE_URL` answering 529, `CLAUDE_CODE_MAX_RETRIES=2`): `{attempt: 1, max_retries: 2, retry_delay_ms: 556,
+   * error_status: 529, error: 'overloaded'}`, the same for attempt 2, then a synthetic assistant message "API Error: 529
+   * Overloaded…" and an error result. Nothing came between the attempts, so the screen read "waiting for a reply" for
+   * the whole time. It shows as the `retrying` activity (`ClaudeStreamNormalizer` puts back what was showing once output
+   * flows again) and goes to host.log with the reason.
+   */
+  if (type === 'system' && str(m.subtype) === 'api_retry') {
+    const status = typeof m.error_status === 'number' ? `${m.error_status} ` : ''
+    const delay = typeof m.retry_delay_ms === 'number' ? ` in ${m.retry_delay_ms}ms` : ''
+    console.error(
+      `[claude] ${sessionId.slice(0, 8)} retrying after: ${status}${str(m.error, 'connection error')} (attempt ${String(m.attempt ?? '?')}/${String(m.max_retries ?? '?')}${delay})`,
+    )
+    out.push({ type: 'activity', sessionId, activity: 'retrying' })
+    return out
+  }
+
   if (type === 'system' && str(m.subtype) === 'status') {
     out.push({ type: 'activity', sessionId, activity: m.status === 'compacting' ? 'compacting' : null })
     /*
@@ -831,9 +894,8 @@ export class ClaudeBackgroundTracker {
  *     plugin installs, session-state events, the remote bridge, file checkpoints, URL elicitation, prompt suggestions,
  *     a `SessionStore`)
  *
- * The types the survey would show or store stay out on purpose: `system/informational`, `system/notification`,
- * `system/api_retry`, the refusal pair, `system/permission_denied` and `conversation_reset` among them. Their log line
- * is how a real instance gets noticed.
+ * The types the survey would show or store but nobody has wired yet stay out on purpose: `system/permission_denied`,
+ * `system/commands_changed` and `system/memory_recall` among them. Their log line is how a real instance gets noticed.
  */
 const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
   // mapped
@@ -841,6 +903,9 @@ const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
   'system/compact_boundary', 'system/local_command_output', 'system/task_notification',
   // mapped by #290 (ClaudeBackgroundTracker)
   'system/background_tasks_changed', 'system/task_started', 'system/task_updated',
+  // mapped by #304: resets, notices, retries and the refusal pair
+  'conversation_reset', 'system/informational', 'system/notification', 'system/api_retry',
+  'system/model_refusal_fallback', 'system/model_refusal_no_fallback',
   // ignored by #58
   'tool_progress', 'system/task_progress', 'system/hook_started', 'system/hook_progress', 'system/hook_response',
   'system/thinking_tokens',
@@ -906,16 +971,103 @@ export class ClaudeStreamNormalizer {
 
   /** The session's background work (see `ClaudeBackgroundTracker`). */
   readonly tasks: ClaudeBackgroundTracker
+  /**
+   * The CLI is retrying a failed API call (`system/api_retry`, #304): the `retrying` activity is up, and
+   * `activityBefore` is what was showing before it. The CLI sends no "recovered" message — the next stream event or
+   * assistant message is the sign that output flows again, so that is where the previous activity is put back. The
+   * same shape as the Codex adapter's.
+   */
+  private retrying = false
+  private activityBefore: SessionActivity | null = null
+  /**
+   * What the CLI said when the model refused and no fallback ran (`model_refusal_no_fallback`, #304), held until the
+   * turn's result: if the turn failed, this is its message (the result itself only says *that* it failed); if not, it
+   * goes out as a notice.
+   */
+  private refusal: string | null = null
 
-  constructor(private readonly sessionId: string) {
+  constructor(
+    private readonly sessionId: string,
+    /**
+     * The settings the CLI was launched with, for the snapshot a model switch the tool made carries (#304). The
+     * host applies only what differs from what it launched, so an absent getter means "nothing but the model".
+     */
+    private readonly settings: () => ClaudeLaunchedSettings = () => ({ model: null, effort: null, verbosity: null, serviceTier: null }),
+  ) {
     this.goal = new ClaudeGoalTracker(sessionId)
     this.unmapped = new UnmappedTypes('claude', sessionId, CLAUDE_KNOWN_TYPES)
     this.tasks = new ClaudeBackgroundTracker(sessionId)
   }
 
+  /**
+   * The refusal pair (#304), not exercised: a refusal cannot be asked for. Shapes from sdk.d.ts (SDK 0.3.263) and the
+   * CLI's own code (2.1.289).
+   *
+   *   model_refusal_fallback      the model ended with stop_reason "refusal" and the turn is retried once on
+   *                               `fallback_model`. With `scope` session (or absent, older CLIs) the CLI keeps the
+   *                               fallback for the rest of the session, so the model the screen shows would be wrong:
+   *                               a `settings_changed` the tool made, plus a notice saying why. With scope `local` only
+   *                               a subagent's or a side question's answer came from the fallback, and the session model
+   *                               is unchanged: host.log only. (`retracted_message_uuids`, the refused partial the SDK
+   *                               asks hosts to remove, is not acted on: the conversation keeps what was shown.)
+   *   model_refusal_no_fallback   no retry ran. The CLI's main-thread paths send it with `content: ""`, so the line
+   *                               falls back to the refusal's explanation, then its category.
+   */
+  private refusalEvents(m: Json): NormalizedEvent[] {
+    const subtype = str(m.subtype)
+    const explanation = str(m.api_refusal_explanation)
+    if (subtype === 'model_refusal_no_fallback') {
+      const category = str(m.api_refusal_category)
+      this.refusal =
+        str(m.content).trim() || explanation || `The model declined to answer${category ? ` (${category})` : ''}`
+      return []
+    }
+    const from = str(m.original_model, 'the model')
+    const to = str(m.fallback_model)
+    if (str(m.scope) === 'local') {
+      console.error(`[claude] ${this.sessionId.slice(0, 8)} a subagent's answer came from ${to} after ${from} declined`)
+      return []
+    }
+    if (!to) return []
+    const text =
+      str(m.content).trim() ||
+      `${from} declined to answer, so Claude Code switched this session to ${to}${explanation ? `: ${explanation}` : ''}`
+    return [
+      { type: 'notice', sessionId: this.sessionId, level: 'warning', text },
+      { type: 'settings_changed', sessionId: this.sessionId, ...this.settings(), model: to, by: 'tool' },
+    ]
+  }
+
   /** The adapter interrupted the turn (see `stopping` above). */
   stopped(): void {
     this.stopping = true
+  }
+
+  /** Raises `retrying` once per episode and puts the previous activity back when output flows again (see `retrying`). */
+  private followRetry(type: string, events: NormalizedEvent[]): NormalizedEvent[] {
+    const out: NormalizedEvent[] = []
+    for (const e of events) {
+      if (e.type === 'activity' && e.activity === 'retrying') {
+        // Each attempt sends its own message; one indication is enough
+        if (this.retrying) continue
+        this.retrying = true
+      } else if (e.type === 'activity') {
+        // A status message says what is happening now by itself, which ends the retry indication too
+        this.activityBefore = e.activity
+        this.retrying = false
+      }
+      out.push(e)
+    }
+    if (this.retrying && (type === 'stream_event' || type === 'assistant')) {
+      this.retrying = false
+      out.unshift({ type: 'activity', sessionId: this.sessionId, activity: this.activityBefore })
+    }
+    // A finished turn takes its activity with it (the state machine clears it on leaving working)
+    if (type === 'result') {
+      this.retrying = false
+      this.activityBefore = null
+    }
+    return out
   }
 
   push(msg: unknown): NormalizedEvent[] {
@@ -956,6 +1108,8 @@ export class ClaudeStreamNormalizer {
       if (launched) this.background.add(launched)
     }
 
+    if (type === 'system' && /^model_refusal_(no_)?fallback$/.test(str(m.subtype))) return [...tasks, ...this.refusalEvents(m)]
+
     let events = [
       ...tasks,
       ...normalizeMessage(msg, this.sessionId, {
@@ -964,6 +1118,15 @@ export class ClaudeStreamNormalizer {
       }),
     ]
     if (subagent) return events
+    events = this.followRetry(type, events)
+    if (type === 'result' && this.refusal !== null) {
+      const refusal = this.refusal
+      this.refusal = null
+      const failed = events.some((e) => e.type === 'error')
+      events = failed
+        ? events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: refusal } } : e))
+        : [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text: refusal }, ...events]
+    }
     /*
      * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in
      * `message_start` and its chunks carry none; a message that arrives whole carries its own. Two

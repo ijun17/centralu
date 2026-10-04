@@ -500,23 +500,143 @@ describe('unmapped message types (#58)', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const one = new ClaudeStreamNormalizer('aaaaaaaa-1')
-      // What /clear sends (measured, CLI 2.1.282): nothing maps it, so it is said once however often it comes
-      one.push({ type: 'conversation_reset', new_conversation_id: 'c1', trigger: 'clear' })
-      one.push({ type: 'conversation_reset', new_conversation_id: 'c2', trigger: 'clear' })
-      one.push({ type: 'system', subtype: 'informational', content: 'heads up', level: 'warning' })
+      // What a settings deny rule sends (measured in #58, CLI 2.1.282): nothing maps it, so it is said once however often it comes
+      one.push({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' })
+      one.push({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' })
+      one.push({ type: 'tool_use_summary', summary: 'Read 3 files' })
       // Mapped, and ignored on purpose: no line
       one.push({ type: 'system', subtype: 'init', session_id: 'x' })
       one.push({ type: 'system', subtype: 'task_started', task_id: 't' })
       one.push({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } })
+      one.push({ type: 'conversation_reset', new_conversation_id: 'c1', trigger: 'clear' })
       // Another session has not said it yet
-      new ClaudeStreamNormalizer('bbbbbbbb-2').push({ type: 'conversation_reset', new_conversation_id: 'c3' })
+      new ClaudeStreamNormalizer('bbbbbbbb-2').push({ type: 'system', subtype: 'permission_denied', tool_name: 'Edit' })
       expect(unmappedLines(spy)).toEqual([
-        '[claude] aaaaaaaa unmapped message type: conversation_reset',
-        '[claude] aaaaaaaa unmapped message type: system/informational',
-        '[claude] bbbbbbbb unmapped message type: conversation_reset',
+        '[claude] aaaaaaaa unmapped message type: system/permission_denied',
+        '[claude] aaaaaaaa unmapped message type: tool_use_summary',
+        '[claude] bbbbbbbb unmapped message type: system/permission_denied',
       ])
     } finally {
       spy.mockRestore()
     }
+  })
+})
+
+/**
+ * What the CLI tells its own user (#304). The payloads marked "measured" are copied from a probe through SDK 0.3.263
+ * and the installed CLI 2.1.289 (haiku, a temp folder, 2026-10-04); the refusal pair could not be triggered and uses
+ * the shapes in sdk.d.ts.
+ */
+describe('resets, notices, retries and refusals (#304)', () => {
+  const launched = { model: 'opus', effort: 'high', verbosity: null, serviceTier: null }
+
+  it("/clear's conversation_reset becomes a reset marker (measured)", () => {
+    expect(
+      n({
+        type: 'conversation_reset',
+        new_conversation_id: '0e609cab-8f4e-4471-96e8-b142bec4e95e',
+        trigger: 'clear',
+        user_message_uuid: 'de3a1e0f-4dcc-4c3a-9889-f3db12a80bb6',
+        timestamp: '2026-10-04T14:43:18.593Z',
+        session_id: '19eced5a-7d55-4c54-a769-012c0c990d73',
+      }),
+    ).toEqual([{ type: 'conversation_reset', sessionId: SID, trigger: 'clear' }])
+  })
+
+  it("a hook's block reason becomes a notice, and an info-level line the CLI hides stays hidden (measured)", () => {
+    const content =
+      'UserPromptSubmit operation blocked by hook:\n[node /tmp/cc304/block-hook.mjs]: Prompts containing BLOCKME are not allowed here.\n\nOriginal prompt: BLOCKME reply with ok'
+    expect(n({ type: 'system', subtype: 'informational', content, level: 'warning', prevent_continuation: true })).toEqual([
+      { type: 'notice', sessionId: SID, level: 'warning', text: content },
+    ])
+    expect(n({ type: 'system', subtype: 'informational', content: 'transcript-only detail', level: 'info' })).toEqual([])
+    expect(n({ type: 'system', subtype: 'informational', content: 'Tip: try /compact', level: 'suggestion' })).toEqual([
+      { type: 'notice', sessionId: SID, level: 'info', text: 'Tip: try /compact' },
+    ])
+  })
+
+  it("a notification becomes a notice at its urgency, except the compaction error the failure marker already says", () => {
+    expect(
+      n({ type: 'system', subtype: 'notification', key: 'fast-mode-overage-rejected', text: 'Fast mode disabled · usage credits not available', priority: 'immediate', color: 'error' }),
+    ).toEqual([{ type: 'notice', sessionId: SID, level: 'error', text: 'Fast mode disabled · usage credits not available' }])
+    expect(n({ type: 'system', subtype: 'notification', key: 'k', text: 'Model access restricted', priority: 'high', color: 'warning' })).toEqual([
+      { type: 'notice', sessionId: SID, level: 'warning', text: 'Model access restricted' },
+    ])
+    expect(
+      n({ type: 'system', subtype: 'notification', key: 'error-compacting-conversation', text: 'Error compacting conversation', priority: 'immediate', color: 'error' }),
+    ).toEqual([])
+  })
+
+  it('api_retry shows retrying once per episode and puts the previous activity back when output flows (measured shape)', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const stream = new ClaudeStreamNormalizer(SID)
+      const activity = (msg: unknown) => stream.push(msg).filter((e) => e.type === 'activity')
+      expect(activity({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([{ type: 'activity', sessionId: SID, activity: null }])
+      const retry = (attempt: number) => ({
+        type: 'system', subtype: 'api_retry', attempt, max_retries: 2, retry_delay_ms: 556, error_status: 529, error: 'overloaded',
+      })
+      expect(activity(retry(1))).toEqual([{ type: 'activity', sessionId: SID, activity: 'retrying' }])
+      expect(activity(retry(2))).toEqual([])
+      expect(activity({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } })).toEqual([
+        { type: 'activity', sessionId: SID, activity: null },
+      ])
+      // Once is enough: the next chunk changes nothing
+      expect(activity({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm2' } } })).toEqual([])
+      expect(spy.mock.calls.map((c) => c.join(' '))).toContain('[claude] s1 retrying after: 529 overloaded (attempt 2/2 in 556ms)')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('a session-scoped refusal fallback says why and reports the model the CLI switched to', () => {
+    const stream = new ClaudeStreamNormalizer(SID, () => launched)
+    const out = stream.push({
+      type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', scope: 'session',
+      original_model: 'claude-opus-4-8', fallback_model: 'claude-sonnet-4-6', request_id: 'req_1', content: '',
+    })
+    expect(out).toEqual([
+      { type: 'notice', sessionId: SID, level: 'warning', text: 'claude-opus-4-8 declined to answer, so Claude Code switched this session to claude-sonnet-4-6' },
+      { type: 'settings_changed', sessionId: SID, model: 'claude-sonnet-4-6', effort: 'high', verbosity: null, serviceTier: null, by: 'tool' },
+    ])
+  })
+
+  it("a subagent's refusal fallback leaves the session's model alone", () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const stream = new ClaudeStreamNormalizer(SID, () => launched)
+      expect(
+        stream.push({
+          type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', scope: 'local',
+          original_model: 'claude-opus-4-8', fallback_model: 'claude-sonnet-4-6', request_id: null, content: 'x',
+        }),
+      ).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("a refusal with no fallback becomes the failed turn's message, or a notice if the turn did not fail", () => {
+    const refused = {
+      type: 'system', subtype: 'model_refusal_no_fallback', original_model: 'claude-opus-4-8', request_id: null,
+      api_refusal_category: 'cyber', api_refusal_explanation: null, content: '',
+    }
+    const failing = new ClaudeStreamNormalizer(SID)
+    expect(failing.push(refused)).toEqual([])
+    const ended = failing.push({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: refused', modelUsage: {} })
+    expect(ended).toEqual([
+      { type: 'error', sessionId: SID, error: { code: 'internal', message: 'The model declined to answer (cyber)', retryable: true } },
+    ])
+
+    const quiet = new ClaudeStreamNormalizer(SID)
+    quiet.push({ ...refused, api_refusal_explanation: 'This request looks like malware development.' })
+    expect(quiet.push({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} })).toEqual([
+      { type: 'notice', sessionId: SID, level: 'warning', text: 'This request looks like malware development.' },
+      { type: 'turn_complete', sessionId: SID },
+    ])
+    // Said once: the next turn's result is its own
+    expect(quiet.push({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} })).toEqual([
+      { type: 'turn_complete', sessionId: SID },
+    ])
   })
 })

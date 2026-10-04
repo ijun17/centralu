@@ -283,7 +283,13 @@ class ClaudeSession implements SessionHandle {
     private opts: CreateSessionOpts,
     private emit: EventSink,
   ) {
-    this.stream = new ClaudeStreamNormalizer(sessionId)
+    // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
+    this.stream = new ClaudeStreamNormalizer(sessionId, () => ({
+      model: opts.model ?? null,
+      effort: opts.effort ?? null,
+      verbosity: opts.verbosity ?? null,
+      serviceTier: opts.serviceTier ?? null,
+    }))
     this.stream.goal.seed(opts.knownGoal)
     // An adopted CLI announces its id only with its next turn's init; it is the conversation we resume
     if (opts.processSource?.adopt) this.externalId = opts.resumeExternalId ?? null
