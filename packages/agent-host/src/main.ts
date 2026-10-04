@@ -27,6 +27,8 @@ import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
+import { hostDrain } from './drain.js'
+import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby } from './swap-control.js'
 
 /**
  * Agent Host entry point.
@@ -47,8 +49,15 @@ const BUILD = typeof __CC_BUILD__ === 'string' ? __CC_BUILD__ : 'dev'
  */
 const underKeeper = process.env.CC_KEEPER === '1'
 const keeperSource = process.env.CC_HOST_SOURCE
+/*
+ * The keeper's front door (#280 step 3): the stable address every client reaches this host
+ * through, whichever host is current. The Codex bridge is given this rather than the host's own
+ * port, because a running codex keeps the bridge it started and a swap must not cut it off.
+ */
+const frontDoor = process.env.CC_FRONT_DOOR
 delete process.env.CC_KEEPER
 delete process.env.CC_HOST_SOURCE
+delete process.env.CC_FRONT_DOOR
 
 const { values } = parseArgs({
   options: {
@@ -58,13 +67,27 @@ const { values } = parseArgs({
     /** Exits together if the parent dies (turned on by the Tauri supervisor) */
     'watch-parent': { type: 'boolean' },
     memory: { type: 'boolean', default: false },
+    /** Started by the keeper next to a running host, for a swap (#280 step 3, swap-control.ts) */
+    standby: { type: 'boolean', default: false },
   },
 })
+
+/*
+ * Control lines from the keeper on stdin (#280 step 3). Only under a keeper: anyone else's stdin is
+ * not ours to read.
+ */
+const control = underKeeper ? new ControlChannel(process.stdin) : null
 
 /** The fact that the data folder was moved, if it was. Recorded once logging is on (see below) */
 let movedNote: string | null = null
 
 const token = values.token || process.env.CC_HOST_TOKEN || randomBytes(16).toString('hex')
+/*
+ * Out of the environment once read: every terminal, agent and command this host starts inherits
+ * it otherwise, and a shell in a project has no business holding the key to every RPC. Under a
+ * keeper this is the keeper's token, the same for every host it runs (#280 step 3).
+ */
+delete process.env.CC_HOST_TOKEN
 /*
  * The secret for the HTTP door (M4 P-2). A **different value** from the WebSocket token. Since
  * this value ends up as a path segment in an iframe's address and travels around in a URL, even if
@@ -125,6 +148,24 @@ if (pathResult.source !== 'unchanged') {
   console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
 }
 
+/*
+ * A swap's standby (#280 step 3): checks the store without writing to it, reports, and waits here,
+ * before the ownership lock, until the keeper says the running host has let go.
+ */
+const swapping = values.standby === true && control !== null
+if (values.standby && !control) {
+  console.error('[agent-host] --standby is only meaningful under a keeper; starting normally')
+}
+if (swapping) {
+  await standby({
+    control: control!,
+    inspect: () => Store.inspect(dbPath),
+    write: (line) => void writeSync(1, `${line}\n`),
+    log: (line) => console.error(line),
+    exit: (code) => process.exit(code),
+  })
+}
+
 /**
  * Two hosts on the same data folder desync the session list and contend over SQLite.
  * Failing to start with a stated reason is better than going quietly wrong.
@@ -179,7 +220,8 @@ process.on('exit', lock.release)
  */
 let store: Store
 try {
-  store = new Store(dbPath)
+  // Taking over in a swap: only what the previous build can still read runs now (store.ts, "During a swap")
+  store = new Store(dbPath, { swap: swapping })
 } catch (err) {
   if (!(err instanceof StoreTooNewError)) throw err
   console.error(err.message)
@@ -201,7 +243,7 @@ const mgr = new SessionManager(
   store,
   adapters,
   (e) => server.broadcast(e),
-  () => (port ? { url: `ws://127.0.0.1:${port}`, token } : null),
+  () => bridgeAddress(frontDoor, port, token),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
 )
@@ -304,6 +346,8 @@ const server: HostServer = new HostServer({
   http: { secret: httpSecret, routes: views.routes },
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)
   build: hostBuild(BUILD, keeperSource),
+  // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
+  drain: hostDrain,
 })
 
 let port: number
@@ -315,6 +359,22 @@ try {
 }
 // This line is parsed by the Tauri supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
+// What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts)
+if (underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP } }))
+/*
+ * The heavy and breaking steps a swap left for later (store.ts, "During a swap"). By the time this
+ * timer fires the ready line has gone out and the keeper has pointed the front door here: the host
+ * this one replaced is gone, so a breaking step can no longer strand it.
+ */
+if (swapping && store.deferredSteps.length > 0) {
+  setTimeout(() => {
+    try {
+      store.runDeferred()
+    } catch (err) {
+      console.error(`[store] a step left from the swap failed; it runs again on the next start: ${(err as Error).stack ?? err}`)
+    }
+  }, 0)
+}
 
 /*
  * Once right after startup, and then every 6 hours (issue #43).
@@ -382,10 +442,15 @@ function record(kind: string, err: unknown): void {
 process.on('unhandledRejection', (reason) => record('Unhandled rejection', reason))
 process.on('uncaughtException', (err) => {
   record('Uncaught exception', err)
-  void shutdown()
+  void shutdown('stop')
 })
 
-const shutdown = async () => {
+/**
+ * Stops or hands off everything this host holds, without exiting. `detach` is the swap's hook
+ * (#280): with step 2 it releases keeper-held agents, terminals and commands instead of killing
+ * them; until then both modes do the same thing.
+ */
+async function stopServices(_mode: 'stop' | 'detach'): Promise<void> {
   updates.stop()
   stopActivity()
   /*
@@ -409,13 +474,35 @@ const shutdown = async () => {
   await views.dispose()
   await server.close()
   store.close()
+}
+
+const shutdown = async (mode: 'stop' | 'detach' = 'stop') => {
+  await stopServices(mode)
   // Why it ended becomes the first line of the next investigation — it never disappears silently
   console.error(`[agent-host] shutting down (pid ${process.pid})`)
   stopLog()
   process.exit(0)
 }
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+process.on('SIGINT', () => void shutdown('stop'))
+process.on('SIGTERM', () => void shutdown('stop'))
+
+/*
+ * The keeper's drain (#280 step 3, swap-control.ts): finish or cut what the host serves itself,
+ * detach, let go of the lock, say so, exit. The next host takes over from there.
+ */
+if (control) {
+  onDrain(control, {
+    drain: hostDrain,
+    detach: () => stopServices('detach'),
+    release: lock.release,
+    write: (line) => void writeSync(1, `${line}\n`),
+    log: (line) => console.error(line),
+    exit: (code) => {
+      stopLog()
+      process.exit(code)
+    },
+  })
+}
 
 /**
  * Shuts itself down when the parent (the Tauri supervisor) disappears.
@@ -431,7 +518,7 @@ if (values['watch-parent']) {
   process.stdin.resume()
   const onParentGone = () => {
     console.error('[agent-host] parent process exited; shutting down')
-    void shutdown()
+    void shutdown('stop')
   }
   process.stdin.on('end', onParentGone)
   process.stdin.on('close', onParentGone)

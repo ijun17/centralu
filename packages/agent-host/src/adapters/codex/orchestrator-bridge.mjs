@@ -14,7 +14,7 @@
  * (it goes through neither tsx nor a bundler).
  *
  * What it receives through environment variables:
- *   CC_HOST_URL       the host's WS address
+ *   CC_HOST_URL       the host's WS address (under the keeper, its front door: stable across host swaps)
  *   CC_HOST_TOKEN     the auth token
  *   CC_SESSION_ID     this session's id (the host judges permission by this)
  *   CC_APP_SERVER     (if present) this is the bridge for a single external app — that app's session server name `app-<id>` (M4 A-5)
@@ -74,6 +74,19 @@ function connect() {
         pending.delete(f.id)
         if (f.ok) p.resolve(f.result)
         else p.reject(new Error(f.error?.message ?? 'host error'))
+      }
+    })
+    /*
+     * A closed socket fails the calls still waiting on it at once, and the next call connects again
+     * (#280 step 3). The host behind CC_HOST_URL can change: under the keeper this address is the
+     * front door, and a host swap closes every connection through it. Waiting out the call's own
+     * timeout (60 s, 280 s for an app) would leave the model staring at a dead call for minutes.
+     */
+    sock.on('close', () => {
+      if (ws === sock) ws = null
+      for (const [id, p] of pending) {
+        pending.delete(id)
+        p.reject(new Error('the connection to Centralu closed before it answered; call the tool again'))
       }
     })
     sock.on('open', () => {
