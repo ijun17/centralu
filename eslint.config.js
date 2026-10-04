@@ -14,7 +14,10 @@ export default tseslint.config(
   { ignores: ['.claude/**','**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', '**/*.app/**',
     // The app template's runtime — a minified build artifact (scripts/build-app-runtime.mjs) —
     // and its copy in each project app committed here.
-    'packages/agent-host/app-template/runtime/**', '.centralu/apps/*/runtime/**'] },
+    'packages/agent-host/app-template/runtime/**', '.centralu/apps/*/runtime/**',
+    // .centralu/ is git-ignored except apps/ (.gitignore); anything else there is someone's
+    // local material, such as a Claude Code mod being tried out, not code this repo checks.
+    '.centralu/*', '!.centralu/apps'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
