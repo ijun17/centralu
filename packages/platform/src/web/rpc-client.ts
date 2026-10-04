@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  parseRpcResult,
   parseServerFrame,
   type NormalizedEvent,
   type ProtocolError,
@@ -37,6 +38,8 @@ export type RpcClientOptions = {
  * reconnecting, per the existing contract.
  */
 type Pending = {
+  /** Which method was called — its result schema is what the answer is read through */
+  method: RpcMethodName
   resolve: (v: unknown) => void
   reject: (e: Error) => void
   timer: ReturnType<typeof setTimeout>
@@ -344,7 +347,14 @@ export class RpcClient {
     if (frame.kind === 'res') {
       const p = this.take(frame.id)
       if (!p) return
-      if (frame.ok) p.resolve(frame.result)
+      /*
+       * The answer goes through the method's result schema here, once (protocol.md §4). Events
+       * already did, inside `parseServerFrame`; results were declared `unknown` in the envelope and
+       * reached the screen as sent. Then a window attached to an older host (#280) read a session
+       * list without `backgroundTasks` (#305) and crashed on `undefined.filter`: the field's
+       * `.default([])` was never applied, because nothing parsed the payload.
+       */
+      if (frame.ok) p.resolve(parseRpcResult(p.method, frame.result))
       else p.reject(toError(frame.error))
     }
   }
@@ -465,7 +475,7 @@ export class RpcClient {
       }, this.opts.callTimeoutMs ?? (method === 'apps.invoke' ? APP_CALL_TIMEOUT_MS : LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS))
       // Sent now if the host is ready, otherwise after the next hello_ok
       const ws = this.ready ? this.ws : null
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, frame: ws ? null : frame, bytes })
+      this.pending.set(id, { method, resolve: resolve as (v: unknown) => void, reject, timer, frame: ws ? null : frame, bytes })
       this.queuedBytes += bytes
       ws?.send(frame)
     })

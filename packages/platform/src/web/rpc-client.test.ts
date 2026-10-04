@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RpcClient, type RpcClientOptions } from './rpc-client.js'
+import { SessionInfo, liveBackgroundTasks } from '@cc/protocol'
+import { currentSession, missingDefaults, withoutDefaultedFields } from '../../../protocol/src/test-helpers.js'
 
 /**
  * A fake WebSocket for reproducing connect, disconnect and responses by hand, with no real
@@ -111,6 +113,29 @@ describe('RpcClient unreadable response (dogfooding)', () => {
     ws.receive({ kind: 'res', id: lastRpcId(ws), ok: true, result: { sessions: [] } })
 
     await expect(call).resolves.toMatchObject({ sessions: [] })
+    rpc.close()
+  })
+})
+
+/**
+ * A window attached to an older host (#280). The beta.9 window read a beta.7 host's session list,
+ * which had no `backgroundTasks` (#305), and crashed on `undefined.filter`: results reached the
+ * screen as sent, so the field's `.default([])` never applied.
+ */
+describe('RpcClient — an older host\'s answers get the defaults the protocol added since (#280)', () => {
+  it('a session list with every defaulted field left out arrives with all of them filled in', async () => {
+    const rpc = makeClient()
+    rpc.connect()
+    const ws = FakeWebSocket.last
+    ws.ready()
+
+    const call = rpc.call('sessions.list', {})
+    ws.receive({ kind: 'res', id: lastRpcId(ws), ok: true, result: [withoutDefaultedFields(SessionInfo, currentSession('s1'))] })
+
+    const sessions = await call
+    expect(missingDefaults(SessionInfo.array(), sessions)).toEqual([])
+    // The line that took the screen down
+    expect(liveBackgroundTasks(sessions[0]!.backgroundTasks)).toEqual([])
     rpc.close()
   })
 })

@@ -39,6 +39,7 @@ import {
   UpdateStatus,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
+import { parseTolerant } from './tolerant.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
 
@@ -1875,3 +1876,12 @@ export type RpcParams<M extends RpcMethodName> = z.input<(typeof RpcMethods)[M][
 
 /** What the **receiver** holds in hand (`z.output`) — after defaults have been filled in */
 export type RpcResult<M extends RpcMethodName> = z.output<(typeof RpcMethods)[M]['result']>
+
+/**
+ * A host's answer to `method`, as the receiving client holds it: through the method's result schema, so every field
+ * the protocol added with a default has that default even when an older host never sent it (#280 lets a window
+ * attach to an older host). Tolerant, not strict — see `parseTolerant`. Call it once, at the client's boundary.
+ */
+export function parseRpcResult<M extends RpcMethodName>(method: M, raw: unknown): RpcResult<M> {
+  return parseTolerant(RpcMethods[method].result, raw) as RpcResult<M>
+}

@@ -23,7 +23,8 @@ const STARTUP_SPEC = /startup\.spec\.ts/
  */
 const RECOVERY_PORT = 5177
 const RECOVERY_URL = `http://127.0.0.1:${RECOVERY_PORT}`
-const RECOVERY_SPEC = /recovery\.spec\.ts/
+// The older-host suite (#280) runs the same way: the real web platform, a real host, the relay on 5178
+const RECOVERY_SPEC = /(recovery|older-host)\.spec\.ts/
 
 export default defineConfig({
   testDir: '.',
