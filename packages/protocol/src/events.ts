@@ -443,6 +443,10 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * configuration warnings arrive on every app-server start and every thread start or resume (measured, codex-cli
    * 0.160.0: an unknown `config.toml` key sent `configWarning` and `warning` with the same text). The host stores and
    * sends such a notice only if the session has no stored notice with the same text yet.
+   *
+   * The fields below `oncePerSession` make the line readable (#342): who is speaking, what kind of notice it is, who
+   * has to act, and for a notice the host recognizes, a plain explanation first with the tool's own words on demand.
+   * All are optional: a notice stored before #342, or one the host cannot place, is drawn from `text` alone, as before.
    */
   z.object({
     ...base,
@@ -451,6 +455,22 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     level: z.enum(['info', 'warning', 'error']).catch('info'),
     text: z.string(),
     oncePerSession: z.boolean().optional(),
+    /** Who is speaking, as the person knows the tool: `Codex`, `Claude Code` */
+    from: z.string().optional(),
+    /** What kind of notice, in a few words: `config warning`, `deprecation`, `warning` */
+    label: z.string().optional(),
+    /**
+     * Who has to act. `you`: the person's own setup (their `config.toml`, an MCP server they added). `centralu`: how
+     * Centralu uses the tool, which the person cannot change. Absent when the host cannot tell; an unknown word from a
+     * newer host reads as absent.
+     */
+    audience: z.enum(['you', 'centralu']).optional().catch(undefined),
+    /** A plain one-line explanation in Centralu's words. When present, `text` is shown only on demand */
+    summary: z.string().optional(),
+    /** What the explanation names, one per line (the settings Codex ignored) */
+    items: z.array(z.string()).optional(),
+    /** What would make the notice go away, or that nothing needs doing */
+    hint: z.string().optional(),
   }),
   /**
    * This session was born from a handoff, and the predecessor's note is pinned here (#102).

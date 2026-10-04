@@ -138,6 +138,20 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     text: 'UserPromptSubmit operation blocked by hook:\n[node block-hook.mjs]: Prompts containing BLOCKME are not allowed here.',
   },
   { type: 'notice', sessionId: 's1', level: 'warning', text: 'Codex is ignoring 2 unrecognized configuration settings.', oncePerSession: true },
+  // The same notice made readable (#342): who speaks, what kind, who acts, a plain explanation and its list
+  {
+    type: 'notice',
+    sessionId: 's1',
+    level: 'warning',
+    text: 'Codex is ignoring 1 unrecognized configuration setting.\n  user (~/.codex/config.toml): `a.b` is ignored.',
+    oncePerSession: true,
+    from: 'Codex',
+    label: 'config warning',
+    audience: 'you',
+    summary: 'Codex ignored 1 setting in `~/.codex/config.toml`',
+    items: ['a.b'],
+    hint: 'Codex already runs without it; removing it from the file only silences this notice.',
+  },
   // A marker for a session born from a handoff (#102) — note is never carried in a broadcast, so the shape without it is the golden one
   { type: 'handoff', sessionId: 's1', from: 'Mea' },
   { type: 'history_synced', sessionId: 's1', added: 2 },
@@ -227,6 +241,17 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
   it('reads a notice level a newer host invented as info, keeping the text (#304)', () => {
     const r = parseEventLenient({ type: 'notice', sessionId: 's1', level: 'suggestion', text: 'Try /compact' })
     expect(r).toMatchObject({ type: 'notice', level: 'info', text: 'Try /compact' })
+  })
+
+  it("keeps a readable notice's parts through parsing — the screen draws from what survives it (#342)", () => {
+    const raw = GOLDEN_EVENTS_V1.find((e) => (e as { type: string; from?: string }).type === 'notice' && 'from' in (e as object))
+    expect(parseEventLenient(raw)).toEqual(raw)
+  })
+
+  it('reads a notice audience a newer host invented as absent, keeping the rest (#342)', () => {
+    const r = parseEventLenient({ type: 'notice', sessionId: 's1', level: 'warning', text: 'x', from: 'Codex', audience: 'admin' })
+    expect(r).toMatchObject({ type: 'notice', text: 'x', from: 'Codex' })
+    expect(r && 'audience' in r ? r.audience : undefined).toBeUndefined()
   })
 
   it('rejects an event missing a required field', () => {
