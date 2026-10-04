@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module'
 import { ensureToolPath } from '../env-path.js'
-import { commandShell } from './terminal.js'
+import { commandShell, type Pty, type PtyModule } from './terminal.js'
+import { idNumber, type CommandTag } from '../keeper/tags.js'
 import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 
 /**
@@ -24,16 +25,8 @@ import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 
 const require = createRequire(import.meta.url)
 
-type Pty = {
-  /** The child pid node-pty gave us — the target for a group kill. A pty child is the leader of a new session, so pgid == pid */
-  pid?: number
-  onData(cb: (data: string) => void): void
-  onExit(cb: (e: { exitCode: number }) => void): void
-  write(data: string): void
-  resize(cols: number, rows: number): void
-  kill(signal?: string): void
-}
-type PtyModule = { spawn(file: string, args: string[] | string, opts: Record<string, unknown>): Pty }
+/** A command run a previous host left in the keeper — running, or ended with its log kept (#280 step 2) */
+export type KeptRun = { cwd: string; command: string; runId: string; startedAt: number; pty: Pty }
 
 /** The same cap as a terminal — a single build log commonly reaches tens of MB */
 const LOG_BYTES = 256 * 1024
@@ -65,7 +58,33 @@ export class CommandRunner {
   private entries = new Map<string, Entry>()
   private counter = 0
 
-  constructor(private emit: CommandSink) {}
+  constructor(
+    private emit: CommandSink,
+    /** Where ptys come from. Absent: node-pty, with the master in this host */
+    private ptys?: PtyModule,
+  ) {}
+
+  /**
+   * Takes over the runs a previous host left in the keeper (#280 step 2): a dev server still
+   * running, or a run that ended while no host was there, whose log and exit code the keeper kept.
+   * Either way the keeper replays the last output, which becomes the log here.
+   */
+  adopt(kept: readonly KeptRun[]): void {
+    for (const k of kept) {
+      const key = this.key(k.cwd, k.command)
+      if (this.entries.has(key)) continue
+      const entry: Entry = { cwd: k.cwd, command: k.command, runId: k.runId, pty: null, buffer: '', exitCode: null, startedAt: k.startedAt }
+      this.entries.set(key, entry)
+      this.counter = Math.max(this.counter, idNumber(k.runId))
+      this.wire(entry, k.pty)
+    }
+  }
+
+  /** The host is leaving and the keeper keeps the runs (#280 step 2): let go without signalling anything. */
+  async detachAll(): Promise<void> {
+    await Promise.allSettled([...this.entries.values()].map((e) => e.pty?.detach?.()))
+    this.entries.clear()
+  }
 
   private key(cwd: string, command: string): string {
     return `${cwd}\u0000${command}`
@@ -163,7 +182,7 @@ export class CommandRunner {
 
   /** A test substitutes this (the same reason as terminal.ts) */
   protected loadPty(): PtyModule {
-    return require('node-pty') as PtyModule
+    return this.ptys ?? (require('node-pty') as PtyModule)
   }
 
   private toRun(e: Entry): CommandRun {
@@ -203,20 +222,10 @@ export class CommandRunner {
         rows,
         cwd: e.cwd,
         env: { ...process.env, TERM: 'xterm-256color' },
+        // What the next host needs to take this run over from the keeper (ignored by node-pty)
+        tag: { kind: 'command', cwd: e.cwd, command: e.command, runId: e.runId, startedAt: e.startedAt } satisfies CommandTag,
       })
-      e.pty = handle
-      handle.onData((data) => {
-        // The old process's last output after a rerun is discarded — it must never mix into the new log
-        if (e.pty !== handle) return
-        this.append(e, data)
-        this.emit({ terminalId: e.runId, data })
-      })
-      handle.onExit(({ exitCode }) => {
-        if (e.pty !== handle) return
-        e.pty = null
-        e.exitCode = exitCode ?? null
-        this.emit({ terminalId: e.runId, exitCode: exitCode ?? null })
-      })
+      this.wire(e, handle)
     } catch (err) {
       // this never fails silently — an empty log with no message leaves no way to know the cause
       const msg = `Could not run: ${(err as Error).message}\r\n`
@@ -224,6 +233,22 @@ export class CommandRunner {
       this.emit({ terminalId: e.runId, data: msg })
       this.emit({ terminalId: e.runId, exitCode: null })
     }
+  }
+
+  private wire(e: Entry, handle: Pty): void {
+    e.pty = handle
+    handle.onData((data) => {
+      // The old process's last output after a rerun is discarded — it must never mix into the new log
+      if (e.pty !== handle) return
+      this.append(e, data)
+      this.emit({ terminalId: e.runId, data })
+    })
+    handle.onExit(({ exitCode }) => {
+      if (e.pty !== handle) return
+      e.pty = null
+      e.exitCode = exitCode ?? null
+      this.emit({ terminalId: e.runId, exitCode: exitCode ?? null })
+    })
   }
 
   private append(e: Entry, data: string): void {

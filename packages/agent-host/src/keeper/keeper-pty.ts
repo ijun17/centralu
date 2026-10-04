@@ -183,8 +183,9 @@ export class KeeperPty {
 /** A node-pty-shaped module whose `spawn` asks the keeper. The spawn options carry the tag. */
 export function keeperPtyModule(keeper: KeeperChildren) {
   return {
-    spawn(file: string, args: string[], opts: Record<string, unknown>): KeeperPty {
-      return KeeperPty.spawn(keeper, file, args, {
+    // A single string is node-pty's Windows command line; the keeper is unix-only and always gets an array
+    spawn(file: string, args: string[] | string, opts: Record<string, unknown>): KeeperPty {
+      return KeeperPty.spawn(keeper, file, Array.isArray(args) ? args : [args], {
         cwd: String(opts.cwd ?? process.cwd()),
         env: (opts.env as Record<string, string | undefined>) ?? process.env,
         cols: Number(opts.cols) || 80,

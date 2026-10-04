@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { win32 } from 'node:path'
 import { ensureToolPath, whichTool } from '../env-path.js'
 import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
+import { idNumber, type TerminalTag } from '../keeper/tags.js'
 
 /**
  * The project terminal (M2.7).
@@ -21,16 +22,26 @@ import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 const require = createRequire(import.meta.url)
 
 /** Only the part of node-pty's surface we actually use (native types are never exported outward) */
-type Pty = {
+export type Pty = {
+  pid?: number
   onData(cb: (data: string) => void): void
   onExit(cb: (e: { exitCode: number }) => void): void
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
+  /** Lets go of the pty and leaves the shell running — only a pty the keeper owns can (#280 step 2) */
+  detach?(): Promise<void>
 }
-type PtyModule = {
+/**
+ * node-pty, or the keeper's pty service with the same surface (#280 step 2, `keeper/keeper-pty.ts`).
+ * The spawn options also carry a `tag`, which node-pty ignores and the keeper stores for the next host.
+ */
+export type PtyModule = {
   spawn(file: string, args: string[] | string, opts: Record<string, unknown>): Pty
 }
+
+/** A terminal a previous host left running in the keeper, to be taken over at startup */
+export type KeptTerminal = { id: string; cwd: string; pty: Pty; cols: number; rows: number }
 
 /**
  * The scrollback cap. Once exceeded, the oldest part is dropped.
@@ -66,7 +77,40 @@ export class TerminalService {
   private byId = new Map<string, Entry>()
   private counter = 0
 
-  constructor(private emit: TerminalSink) {}
+  constructor(
+    private emit: TerminalSink,
+    /** Where ptys come from. Absent: node-pty, with the master in this host */
+    private ptys?: PtyModule,
+  ) {}
+
+  /**
+   * Takes over the terminals a previous host left running in the keeper (#280 step 2). Each keeps its
+   * id, so a screen that still shows it finds it again, and the keeper replays its last output, which
+   * becomes the scrollback here. New ids continue after the highest one taken over.
+   */
+  adopt(kept: readonly KeptTerminal[]): void {
+    const sorted = [...kept].sort((a, b) => idNumber(a.id) - idNumber(b.id))
+    for (const k of sorted) {
+      if (this.byId.has(k.id)) continue
+      const siblings = this.byCwd.get(k.cwd) ?? []
+      const entry: Entry = { id: k.id, cwd: k.cwd, title: `Terminal ${siblings.length + 1}`, pty: null, buffer: '', cols: k.cols, rows: k.rows }
+      siblings.push(entry)
+      this.byCwd.set(k.cwd, siblings)
+      this.byId.set(entry.id, entry)
+      this.counter = Math.max(this.counter, idNumber(k.id))
+      this.wire(entry, k.pty)
+    }
+  }
+
+  /**
+   * The host is leaving and the keeper keeps the shells (#280 step 2): let go of every pty without
+   * signalling anything. The next host takes them over with `adopt`.
+   */
+  async detachAll(): Promise<void> {
+    await Promise.allSettled([...this.byId.values()].map((e) => e.pty?.detach?.()))
+    this.byCwd.clear()
+    this.byId.clear()
+  }
 
   /** That directory's terminal list. Switching sessions leaves this list untouched */
   list(cwd: string): TerminalHandle[] {
@@ -179,7 +223,7 @@ export class TerminalService {
    * actually being verified.
    */
   protected loadPty(): PtyModule {
-    return require('node-pty') as PtyModule
+    return this.ptys ?? (require('node-pty') as PtyModule)
   }
 
   private toHandle(e: Entry): TerminalHandle {
@@ -220,26 +264,10 @@ export class TerminalService {
         rows,
         cwd: e.cwd,
         env: { ...process.env, TERM: 'xterm-256color' },
+        // What the next host needs to take this terminal over from the keeper (ignored by node-pty)
+        tag: { kind: 'terminal', id: e.id, cwd: e.cwd } satisfies TerminalTag,
       })
-      e.pty = handle
-      handle.onData((data) => {
-        // The last output the old shell spits out after a restart is discarded — it must never mix into the new shell's screen
-        if (e.pty !== handle) return
-        this.append(e, data)
-        this.emit({ terminalId: e.id, data })
-      })
-      handle.onExit(({ exitCode }) => {
-        /*
-         * **This clears the slot only when it is still that slot's owner.**
-         *
-         * When restart() kills the old pty, its onExit arrives late — **after** the new pty has
-         * already taken the slot. Unconditionally setting e.pty = null would mark the just-launched
-         * new shell as dead, turning restart into a button that kills the terminal forever.
-         */
-        if (e.pty !== handle) return
-        e.pty = null
-        this.emit({ terminalId: e.id, exitCode: exitCode ?? null })
-      })
+      this.wire(e, handle)
     } catch (err) {
       // this never fails silently — an empty black screen with no message leaves no way to know the cause
       const msg = `\r\n[2mCould not start shell: ${(err as Error).message}[0m\r\n`
@@ -247,6 +275,28 @@ export class TerminalService {
       this.emit({ terminalId: e.id, data: msg })
       this.emit({ terminalId: e.id, exitCode: null })
     }
+  }
+
+  private wire(e: Entry, handle: Pty): void {
+    e.pty = handle
+    handle.onData((data) => {
+      // The last output the old shell spits out after a restart is discarded — it must never mix into the new shell's screen
+      if (e.pty !== handle) return
+      this.append(e, data)
+      this.emit({ terminalId: e.id, data })
+    })
+    handle.onExit(({ exitCode }) => {
+      /*
+       * **This clears the slot only when it is still that slot's owner.**
+       *
+       * When restart() kills the old pty, its onExit arrives late — **after** the new pty has
+       * already taken the slot. Unconditionally setting e.pty = null would mark the just-launched
+       * new shell as dead, turning restart into a button that kills the terminal forever.
+       */
+      if (e.pty !== handle) return
+      e.pty = null
+      this.emit({ terminalId: e.id, exitCode: exitCode ?? null })
+    })
   }
 
   private append(e: Entry, data: string): void {
