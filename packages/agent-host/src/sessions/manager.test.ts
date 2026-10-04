@@ -489,13 +489,15 @@ describe('approvals, read state, and messages', () => {
     h.emitApproval('r-seq')
     raw({ type: 'approval_resolved', requestId: 'r-seq', decision: 'allow' })
     raw({ type: 'compaction', failed: false })
+    raw({ type: 'conversation_reset', trigger: 'clear' })
+    raw({ type: 'notice', level: 'warning', text: 'heads up' })
     raw({ type: 'app_view', callId: 'c-2', appId: 'notes', projectId: null, tool: 'home', phase: 'open' })
     h.emitError('400 bad request')
 
     const stamped = events.filter((e) => typeof (e as { seq?: unknown }).seq === 'number')
     const kinds = new Set(stamped.map((e) => e.type))
     // Not a vacuous test — the recorded kinds actually went out carrying a seq.
-    for (const k of ['user_message', 'message_delta', 'reasoning_delta', 'tool_call', 'tool_result', 'approval_request', 'approval_resolved', 'compaction', 'app_view', 'error']) {
+    for (const k of ['user_message', 'message_delta', 'reasoning_delta', 'tool_call', 'tool_result', 'approval_request', 'approval_resolved', 'compaction', 'conversation_reset', 'notice', 'app_view', 'error']) {
       expect(kinds, k).toContain(k)
     }
     for (const e of stamped) {
@@ -4698,5 +4700,104 @@ describe('a handoff note lives in the data folder (#142)', () => {
     await reborn.resumeSession(heir.id)
     expect(adapter.lastOpts?.sessionId).toBe(heir.id)
     expect(adapter.lastOpts?.readableDirs).toEqual([join(data, 'handoff', p.id)])
+  })
+})
+
+/**
+ * What the agent tools tell the person (#304): a fresh conversation, a notice, a model switch the tool made. The
+ * shapes are what the adapters emit for the measured payloads (Claude's `/clear` and hook block, Codex's
+ * configuration warning).
+ */
+describe('resets, notices and switches the tool made (#304)', () => {
+  const start = async (model?: string) => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal', ...(model ? { model } : {}),
+    })) as SessionInfo
+    return { p, s, h: adapter.last! }
+  }
+  const markers = (sessionId: string) =>
+    store.loadMessages(sessionId, 100).filter((r) => r.kind === 'marker').map((r) => r.payload as { type: string; text?: string })
+
+  it('what the tool says while a new session is starting is recorded once the session exists (codex configWarning)', async () => {
+    const p = await addProject()
+    const text = 'Codex is ignoring 2 unrecognized configuration settings.'
+    const create = adapter.createSession.bind(adapter)
+    adapter.createSession = async (opts, emit) => {
+      // Measured: configWarning arrives while thread/start is answered, before the adapter hands its session back
+      emit({ type: 'notice', sessionId: opts.sessionId, level: 'warning', text, oncePerSession: true })
+      const h = await create(opts, emit)
+      h.emitEvent({ type: 'notice', sessionId: opts.sessionId, level: 'warning', text, oncePerSession: true })
+      return h
+    }
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+
+    expect(markers(s.id).map((m) => m.text)).toEqual([text])
+    const sent = events.filter((e) => e.sessionId === s.id).map((e) => [e.type, (e as { seq?: number }).seq])
+    expect(sent).toEqual([['session_created', undefined], ['notice', 1]])
+  })
+
+  it('a reset is a marker in the record and empties the context gauge', async () => {
+    const { s, h } = await start()
+    h.emitContext(15967, 200000)
+    h.emitEvent({ type: 'conversation_reset', sessionId: s.id, trigger: 'clear' })
+
+    expect(markers(s.id)).toEqual([expect.objectContaining({ type: 'conversation_reset', trigger: 'clear' })])
+    const sent = events.find((e) => e.type === 'conversation_reset') as { seq?: number }
+    expect(typeof sent.seq).toBe('number')
+    const listed = ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!
+    expect(listed.context).toBeNull()
+  })
+
+  it('a notice is a marker, and one marked once per session is kept once, even across restarts', async () => {
+    const { s, h } = await start()
+    const warning = 'Codex is ignoring 2 unrecognized configuration settings. Check for typos or deprecated settings.'
+    h.emitEvent({ type: 'notice', sessionId: s.id, level: 'warning', text: warning, oncePerSession: true })
+    h.emitEvent({ type: 'notice', sessionId: s.id, level: 'warning', text: warning, oncePerSession: true })
+    await rpc('agents.restartSession', { sessionId: s.id })
+    adapter.last!.emitEvent({ type: 'notice', sessionId: s.id, level: 'warning', text: warning, oncePerSession: true })
+    // A notice that is not marked is said every time: a hook blocking two prompts blocked two prompts
+    adapter.last!.emitEvent({ type: 'notice', sessionId: s.id, level: 'warning', text: 'blocked by hook' })
+    adapter.last!.emitEvent({ type: 'notice', sessionId: s.id, level: 'warning', text: 'blocked by hook' })
+
+    expect(markers(s.id).map((m) => m.text)).toEqual([warning, 'blocked by hook', 'blocked by hook'])
+    expect(events.filter((e) => e.type === 'notice')).toHaveLength(3)
+  })
+
+  it('a model switch the tool made is recorded without a restart and sent as the host snapshot', async () => {
+    const { p, s, h } = await start('opus')
+    h.emitEvent({
+      type: 'settings_changed', sessionId: s.id, model: 'claude-sonnet-4-6', effort: null, verbosity: null, serviceTier: null, by: 'tool',
+    })
+
+    // The process already runs with it: not swapped
+    expect(adapter.last).toBe(h)
+    expect(h.disposed).toBe(false)
+    const listed = ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!
+    expect(listed.model).toBe('claude-sonnet-4-6')
+    expect(events.filter((e) => e.type === 'settings_changed')).toEqual([
+      { type: 'settings_changed', sessionId: s.id, model: 'claude-sonnet-4-6', effort: null, verbosity: null, serviceTier: null, by: 'tool' },
+    ])
+    // Not a choice the person made — the project's remembered default stays as it was
+    const defaults = ((await rpc('projects.list', {})) as { id: string; defaultModels: Record<string, unknown> }[]).find((x) => x.id === p.id)
+    expect(defaults?.defaultModels.claude).toBeUndefined()
+    // Saving the same model afterwards is not a change to the running process either
+    await rpc('agents.updateSettings', { sessionId: s.id, model: 'claude-sonnet-4-6' })
+    expect(adapter.last).toBe(h)
+  })
+
+  it("a switch the tool made does not overwrite a choice the person saved mid-turn; the turn's end applies theirs", async () => {
+    const { s, h } = await start('opus')
+    await rpc('agents.send', { sessionId: s.id, text: 'work' })
+    await rpc('agents.updateSettings', { sessionId: s.id, model: 'haiku' })
+    h.emitEvent({
+      type: 'settings_changed', sessionId: s.id, model: 'claude-sonnet-4-6', effort: null, verbosity: null, serviceTier: null, by: 'tool',
+    })
+    expect(((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!.model).toBe('haiku')
+    expect(events.some((e) => e.type === 'settings_changed')).toBe(false)
+
+    h.finishTurn()
+    await vi.waitFor(() => expect(adapter.last).not.toBe(h))
+    expect(adapter.lastOpts?.model).toBe('haiku')
   })
 })

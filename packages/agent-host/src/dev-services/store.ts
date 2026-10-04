@@ -2196,6 +2196,25 @@ export class Store {
   }
 
   /**
+   * Whether this session already has a stored notice with this text (#304) — so a notice the tool repeats on every
+   * start (`oncePerSession`, Codex's configuration warnings) is kept once. Only marker rows are read, and a session has
+   * a handful of those; the text is compared after parsing, as stored.
+   */
+  hasNotice(sessionId: string, text: string): boolean {
+    const rows = this.db
+      .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
+      .all(sessionId) as { payload: string }[]
+    return rows.some((r) => {
+      try {
+        const p = JSON.parse(r.payload) as { type?: unknown; text?: unknown }
+        return p.type === 'notice' && p.text === text
+      } catch {
+        return false
+      }
+    })
+  }
+
+  /**
    * Whether this session inherited a handoff (#142) — asked so that waking it can reopen access to the notes
    * folder it can read from. The same test as above: a handoff marker carrying `fromSessionId`. A session only
    * ever has a handful of markers, so only those are read.

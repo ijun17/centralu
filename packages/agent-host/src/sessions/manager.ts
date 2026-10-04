@@ -377,6 +377,15 @@ export class SessionManager {
    * because compared against meta nothing changed (dogfooding: "it shows auto selected but keeps
    * asking anyway"). So the comparison baseline is always this map, not meta.
    */
+  /**
+   * Events a session's tool sent while `createSession` was still waiting for it to come up (#304). The session is
+   * registered only once the adapter answers (a failed start must leave no ghost), so anything emitted before then
+   * had no session to be recorded under: it went out unnumbered and was never stored. Measured with codex-cli 0.160.0:
+   * `configWarning` arrives while `thread/start` is being answered, and its notice was lost from the record while the
+   * thread's own `warning` with the same text was stored. Held here and replayed once the session exists; dropped
+   * with it if the start fails.
+   */
+  private unborn = new Map<string, NormalizedEvent[]>()
   private running = new Map<
     string,
     { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset }
@@ -1450,6 +1459,7 @@ export class SessionManager {
     // it
     const apps = this.appsFor(info)
     const from = this.handleSink()
+    this.unborn.set(id, [])
     try {
       handle = await adapter.createSession(
         {
@@ -1499,6 +1509,7 @@ export class SessionManager {
       )
       from.own(handle)
     } catch (err) {
+      this.unborn.delete(id)
       apps?.close()
       // A session that never came up is not a builder session — clear the slot the app points at
       if (params.builderOf) this.setBuilder(params.builderOf, null, id)
@@ -1560,6 +1571,10 @@ export class SessionManager {
       permissionPreset: info.permissionPreset,
     })
     handle.applyRules?.(this.rulesFor(id, params.projectId))
+    // What the tool said while it was starting, now that the session exists to record it (see `unborn`)
+    const early = this.unborn.get(id) ?? []
+    this.unborn.delete(id)
+    for (const e of early) this.onEvent(e)
 
     // Restores past conversation. Done **after the adapter comes up** — a session with history but
     // no way to address it is just as bad as a ghost session.
@@ -2762,10 +2777,21 @@ export class SessionManager {
       if (!m || !e.ended?.length) return
       return this.onEvent({ ...e, live: m.backgroundTasks.filter((t) => t.status === 'running') })
     }
+    const unborn = e.sessionId && !this.meta.has(e.sessionId) ? this.unborn.get(e.sessionId) : undefined
+    if (unborn) {
+      unborn.push(e)
+      return
+    }
     if (e.type === 'subagent_event') {
       this.recordSubagentStep(e)
       return
     }
+    if (e.type === 'settings_changed' && e.by === 'tool') {
+      this.recordToolSettings(e)
+      return
+    }
+    // Text the tool repeats on every start (#304): one stored line per session is enough
+    if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.store.hasNotice(e.sessionId, e.text)) return
     let seq: number | null = null
     /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
      * itself */
@@ -2974,6 +3000,10 @@ export class SessionManager {
       case 'context_update':
         m.context = { used: e.used, window: e.window, exactness: e.exactness }
         break
+      case 'conversation_reset':
+        // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
+        m.context = null
+        break
       case 'goal':
         // The goal (2026-09-07) is a live field too — after a restart, the tool tells us again (codex fetches
         // it on resume)
@@ -3052,6 +3082,10 @@ export class SessionManager {
       // it still exists as-is in our record — showing where it was folded is what makes reading back through
       // it possible.
       : e.type === 'compaction' ? 'marker'
+      // The same reason for a fresh conversation inside the session (#304): the model forgot, our record did not
+      : e.type === 'conversation_reset' ? 'marker'
+      // What the tool wanted the person to read (#304) — a line in the transcript, like an error
+      : e.type === 'notice' ? 'marker'
       /*
        * A failure is part of the record too (#107). An error used to just change state and move on —
        * all that remained on screen was a single `lastError` line, and even that was cleared the
@@ -3089,6 +3123,42 @@ export class SessionManager {
     this.store.appendMessages([msg])
     m.lastSeq = seq
     return seq
+  }
+
+  /**
+   * The agent tool switched a setting by itself (#304): Claude Code's refusal fallback, another Codex client changing
+   * the thread. The process already runs with the new value, so this is recorded, not applied: no restart, and the
+   * process's launch record (`running`) moves along with it so `settingsDrifted` does not read it as a change the person
+   * still wants made. Only the fields that differ from that launch record are taken — the adapter's snapshot is its own
+   * view. A field the person changed mid-turn (saved, waiting for the turn to end) keeps the person's value: the launch
+   * record still moves, so the restart at the turn's end applies their choice over the tool's. The project's remembered
+   * default is left alone: the person did not choose this. The broadcast is the host's full snapshot.
+   */
+  private recordToolSettings(e: Extract<NormalizedEvent, { type: 'settings_changed' }>): void {
+    const m = this.meta.get(e.sessionId)
+    if (!m) return
+    const live = this.running.get(e.sessionId)
+    let changed = false
+    for (const k of ['model', 'effort', 'verbosity', 'serviceTier'] as const) {
+      const v = e[k]
+      if (v === undefined || v === (live ?? m)[k]) continue
+      const pending = !!live && m[k] !== live[k]
+      if (live) live[k] = v
+      if (pending) continue
+      m[k] = v
+      changed = true
+    }
+    if (!changed) return
+    this.store.upsertSession(m)
+    this.emit({
+      type: 'settings_changed',
+      sessionId: m.id,
+      model: m.model,
+      effort: m.effort,
+      verbosity: m.verbosity,
+      serviceTier: m.serviceTier,
+      by: 'tool',
+    })
   }
 
   /**
