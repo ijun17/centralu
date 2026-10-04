@@ -63,13 +63,30 @@ puts it back and leaves your conversations alone.
 > npm it just opens. We measured that rather than assuming it —
 > [beta release checklist §2](docs/plans/beta-release-checklist.md) has the numbers.
 
+### On Windows
+
+The same commands, in PowerShell or cmd (from 0.1.0-beta.8, x64 only). `centralu install`
+copies the app to `%LOCALAPPDATA%\Programs\Centralu` and adds a Start-menu shortcut — no
+admin rights. Quit Centralu before `centralu update` or `npm i -g`: Windows won't replace a
+program while it runs, and the launcher says so if that is what stopped it. On Windows you
+also need Git for Windows on PATH.
+
+- **The build is unsigned.** If Windows shows "Windows protected your PC", click
+  **More info → Run anyway**. An npm install isn't expected to trigger it (the same
+  download-tag story as macOS above), but that hasn't been measured on Windows yet.
+- **It needs the Microsoft Edge WebView2 Runtime.** Windows 11 has it, and so do most
+  updated Windows 10 machines. If yours doesn't, `centralu` says so and links the
+  [installer](https://developer.microsoft.com/microsoft-edge/webview2/) instead of
+  opening nothing.
+
 ## Where it runs
 
 | | |
 |---|---|
 | **macOS, Apple Silicon** | on npm, and what we use every day |
 | **Linux, x86-64 · arm64** | on npm (x86-64 since 0.1.0-beta.2, arm64 since beta.3). Nobody has reported running either yet — you may be first |
-| **Windows · Intel Macs** | don't build at all ([#14](https://github.com/ijun17/centralu/issues/14)) |
+| **Windows, x86-64** | on npm from 0.1.0-beta.8. Built and checked in CI; nobody has run it from npm yet ([#14](https://github.com/ijun17/centralu/issues/14)) |
+| **Windows on ARM · Intel Macs** | not published |
 
 That Linux row deserves a note. Nobody here has a Linux machine, so the packages on npm
 have been built and checked in CI, but never started by a person. Compiling and running

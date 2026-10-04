@@ -6,7 +6,7 @@ Centralu의 한 버전이 사용자에게 도달하는 방법을 다룬다. 배�
 
 ## 패키지가 이런 모양인 이유
 
-npm에는 네 개의 패키지가 올라간다:
+npm에는 다섯 개의 패키지가 올라간다:
 
 | 패키지 | 내용 | 설치 대상 |
 |---|---|---|
@@ -14,8 +14,9 @@ npm에는 네 개의 패키지가 올라간다:
 | `centralu-darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
 | `centralu-linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
 | `centralu-linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 — 0.1.0-beta.3부터 |
+| `centralu-win32-x64` | `Centralu\` 폴더: `centralu.exe`, `resources\host\` | Windows, x86-64 — 0.1.0-beta.8부터 |
 
-`centralu`는 나머지 셋을 `optionalDependencies`로 선언하고 각각에 `os`/`cpu` 필드를 달아 둔다. 그래서 npm은 설치를 수행하는 머신에 맞는 번들 딱 하나만 설치한다. esbuild와 swc가 쓰는 것과 같은 구성이며, 이유는 크기다: Linux 머신에 macOS 번들을 내려받을 사람은 없다.
+`centralu`는 나머지를 `optionalDependencies`로 선언하고 각각에 `os`/`cpu` 필드를 달아 둔다. 그래서 npm은 설치를 수행하는 머신에 맞는 번들 딱 하나만 설치한다. esbuild와 swc가 쓰는 것과 같은 구성이며, 이유는 크기다: Linux 머신에 macOS 번들을 내려받을 사람은 없다.
 
 이 구성에서 아래 절차의 모양을 결정하는 귀결이 두 가지 나온다:
 
@@ -27,7 +28,8 @@ npm에는 네 개의 패키지가 올라간다:
 ## CI가 하는 일
 
 - `.github/workflows/build.yml` — 모든 push와 PR에서 모든 플랫폼을 빌드하고 번들을 아티팩트로 업로드한다. 프로젝트에 Linux 머신을 가진 사람이 없으므로, Linux 빌드가 실제로 돌아가는 곳은 여기뿐이다. 써 보려면 아티팩트를 내려받는다. GitHub 아티팩트는 zip이라 실행 비트가 사라지므로, 압축을 푼 뒤 AppImage에 `chmod +x`를 해 준다.
-- `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 세 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다.
+- 같은 워크플로가 **windows-x64**(#14)도 빌드해 아티팩트 두 개를 올린다: 포터블 폴더 `centralu-windows-x64`(`Centralu\centralu.exe` 옆에 `Centralu\resources\host\`)와 NSIS 설치 파일 `centralu-windows-x64-setup`(사용자별 설치, 관리자 권한 불필요). 둘 다 서명되어 있지 않다. 별도의 `windows tests` 잡이 `pnpm verify`의 네 부분을 돌리며, 단위 테스트 단계만 아직 막지 않는다(#307의 W2 목록). npm 패키지 `centralu-win32-x64`는 같은 폴더를 싣고, `release.yml`의 Windows 잡이 따로 다시 빌드한다(아래 [Windows](#windows-14-w3) 참고).
+- `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 모든 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다.
 - `.github/workflows/publish-linux-npm.yml` — 전신이다: `centralu-linux-x64` 하나만, `workflow_dispatch`로만, 기본은 dry run. `release.yml`이 이를 대체하며 엄밀히 더 많은 일을 한다. 그래도 `release.yml`이 실제 릴리스를 한 번 해낼 때까지는 동작하는 상태로 남겨 둔다 — 0.1.0-beta.2를 배포한 경로를, 후계자가 아직 아무것도 배포해 본 적 없는 시점에 지우는 것은 검증된 것을 검증 안 된 것과 맞바꾸는 일이다. 그 릴리스가 끝나면 지운다.
 
 브랜치 push나 머지는 여전히 아무것도 배포하지 않는다. **`v*` 태그는 이제 배포한다** — 태그가 존재하는 이유가 그것이다.
@@ -41,7 +43,7 @@ npm에는 네 개의 패키지가 올라간다:
 
 1. `packages/protocol/src/brand.ts`의 `APP_VERSION`을 올리고, 같은 버전을 `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/package.json`에도 반영한다. 하나라도 어긋나면 `tooling/brand.test.ts`가 실패한다. 커밋하고 push한다 — 릴리스 스크립트는 더러운 트리에서는 실행을 거부하므로, 배포되는 것과 git에 있는 것이 서로 다를 수 없다.
 
-2. **리허설한다.** Actions → `release` → Run workflow, `dry_run`은 체크된 채로 둔다. 두 플랫폼을 빌드하고 세 패키지를 모두 pack하되 아무것도 배포하지 않는다. 승인도 요구하지 않는다: `npm pack`에는 토큰이 필요 없고, 리허설에 게이트를 두면 시도할 때마다 승인이 하나씩 든다 — 첫 릴리스에서 그런 식으로 세 번을 썼다.
+2. **리허설한다.** Actions → `release` → Run workflow, `dry_run`은 체크된 채로 둔다. 모든 플랫폼을 빌드하고 모든 패키지를 pack하되 아무것도 배포하지 않는다. 승인도 요구하지 않는다: `npm pack`에는 토큰이 필요 없고, 리허설에 게이트를 두면 시도할 때마다 승인이 하나씩 든다 — 첫 릴리스에서 그런 식으로 세 번을 썼다.
 
    각 패키지의 `npm pack` 출력을 읽는다. shim 잡은 플랫폼 패키지들이 이 버전으로 레지스트리에 없다는 노란 경고로 끝나는데, 그것은 리허설이라는 사실 그대로일 뿐 결함이 아니다.
 
@@ -51,17 +53,19 @@ npm에는 네 개의 패키지가 올라간다:
    git tag v0.1.0-beta.3 && git push origin v0.1.0-beta.3
    ```
 
-   `release.yml`은 무언가를 빌드하기 전에 태그를 `APP_VERSION`과 대조한다. 그래서 잘못된 커밋에 단 태그나 버전 범프보다 앞서 나간 태그의 비용은 Rust 릴리스 빌드 두 번이 아니라 몇 초다. 고치려면: `git push --delete origin <tag>`, 수정하고, 다시 태그를 단다.
+   `release.yml`은 무언가를 빌드하기 전에 태그를 `APP_VERSION`과 대조한다. 그래서 잘못된 커밋에 단 태그나 버전 범프보다 앞서 나간 태그의 비용은 Rust 릴리스 빌드 네 번이 아니라 몇 초다. 고치려면: `git push --delete origin <tag>`, 수정하고, 다시 태그를 단다.
 
-4. **승인한다.** 배포는 `npm-publish` 환경에서 대기한다. GitHub은 두 번 묻는다: 함께 대기하는 두 플랫폼 잡에 대해 한 번, 둘 다 성공한 뒤 shim 잡에 대해 다시 한 번. 그 두 번째 승인이 아직 무언가를 되돌릴 수 있는 마지막 순간이다.
+4. **승인한다.** 배포는 `npm-publish` 환경에서 대기한다. GitHub은 두 번 묻는다: 함께 대기하는 네 플랫폼 잡에 대해 한 번, 모두 성공한 뒤 shim 잡에 대해 다시 한 번. 그 두 번째 승인이 아직 무언가를 되돌릴 수 있는 마지막 순간이다.
 
 5. 한 번도 설치한 적 없는 머신에서 확인한다: `npm i -g centralu@beta && centralu`.
 
 ### 잡 그래프가 보장하는 것
 
 ```
-guard ──┬── linux-x64 (ubuntu-22.04) ──┐
-        └── darwin-arm64 (macos-14) ───┴── centralu (shim)
+guard ──┬── linux-x64 (ubuntu-22.04) ──────┐
+        ├── linux-arm64 (ubuntu-22.04-arm) ─┤
+        ├── darwin-arm64 (macos-14) ────────┤
+        └── win32-x64 (windows-2022) ───────┴── centralu (shim)
 ```
 
 shim은 플랫폼 패키지들을 *정확한* 버전으로 핀하므로, 그 전부가 이미 레지스트리에 올라가 있어야만 나갈 수 있다. matrix 잡에 대한 `needs`는 **모든** 항목의 성공을 의미한다 — 플랫폼이 추가되어도, 누가 갱신을 기억하지 않아도 이 성질은 계속 참이다. `scripts/release-npm.mts`는 shim을 배포하기 전에 레지스트리를 직접 다시 확인하므로, 그래프는 유일한 방어선이 아니라 첫 번째 방어선이다.
@@ -70,7 +74,7 @@ shim은 플랫폼 패키지들을 *정확한* 버전으로 핀하므로, 그 전
 
 ### 잡이 중간에 실패했을 때
 
-되돌려지는 것도 없고, 되돌릴 필요도 없다. 같은 실행(run)에서 실패한 잡을 다시 실행한다: 플랫폼 잡은 자기 빌드와 배포를 다시 돌리고, shim 잡은 두 플랫폼이 모두 green이 되면 혼자서 다시 돈다. 이 버전으로 이미 레지스트리에 있는 패키지는 재배포 시 잡이 실패할 뿐(`EPUBLISHCONFLICT`) 피해를 입히지 않는다 — 정말로 다시 빌드해야 하는 버전이라면 다음 prerelease로 올린다.
+되돌려지는 것도 없고, 되돌릴 필요도 없다. 같은 실행(run)에서 실패한 잡을 다시 실행한다: 플랫폼 잡은 자기 빌드와 배포를 다시 돌리고, shim 잡은 모든 플랫폼이 green이 되면 혼자서 다시 돈다. 이 버전으로 이미 레지스트리에 있는 패키지는 재배포 시 잡이 실패할 뿐(`EPUBLISHCONFLICT`) 피해를 입히지 않는다 — 정말로 다시 빌드해야 하는 버전이라면 다음 prerelease로 올린다.
 
 ### 수동 배포
 
@@ -81,7 +85,7 @@ pnpm release:npm                       # rehearsal: build, copy, verify, npm pac
 pnpm release:npm --publish             # publishes centralu-darwin-arm64, then centralu
 ```
 
-Linux는 먼저 CI에서 나와야 한다 (`publish-linux-npm.yml`, 또는 `dry_run`을 끈 `release.yml`). 두 번째 명령은 핀된 플랫폼 패키지 중 하나라도 이 버전으로 레지스트리에 없는 동안에는 shim 배포를 거부하기 때문이다.
+Linux와 Windows는 먼저 CI에서 나와야 한다 (`dry_run`을 끈 `release.yml`; linux-x64 하나만이라면 `publish-linux-npm.yml`도 된다). 두 번째 명령은 핀된 플랫폼 패키지 중 하나라도 이 버전으로 레지스트리에 없는 동안에는 shim 배포를 거부하기 때문이다.
 
 릴리스 빌드는 `.app`만 만들고, 일반 `pnpm app` 빌드가 함께 만드는 `.dmg`는 만들지 않는다. 이것은 두 겹으로 의도된 것이다: 릴리스는 배포하는 것만 빌드해야 하고, DMG 단계는 코드와 무관한 이유로 실패할 수 있는 단계다 — Tauri의 `bundle_dmg.sh`는 `osascript`로 Finder를 조작하므로, 뒤에 GUI 세션이 없는 셸(에이전트, ssh 세션)은 Automation 접근이 거부되어 64로 종료한다. 올바르게 빌드되고 서명된 `.app`이 이미 놓여 있는데 그것 때문에 릴리스를 잃는 것은 할 만한 거래가 아니다. CI는 여전히 `.dmg`를 빌드하며, DMG의 진짜 고장은 거기서 드러나야 한다.
 
@@ -103,10 +107,41 @@ Linux는 먼저 CI에서 나와야 한다 (`publish-linux-npm.yml`, 또는 `dry_
 2. `os`/`cpu`/`files`를 맞춘 `packaging/npm/<id>/package.json`을 추가한다.
 3. `packaging/npm/centralu/package.json`의 `optionalDependencies`와 `os`에 추가한다.
 4. 버전 핀이 강제되도록 `tooling/brand.test.ts`의 목록에 추가한다.
-5. 런처(`packaging/npm/centralu/bin/centralu.mjs`)가 이를 찾아서 실행하도록 가르친다.
+5. 런처가 이를 찾아서 실행하도록 가르친다: `packaging/npm/centralu/bin/platform.mjs`의 `TARGETS`에 항목을 넣고(`tooling/launcher-platform.test.ts`가 shim의 핀과 대조한다), 실행에 필요한 것은 `centralu.mjs`에 넣는다.
 6. 모든 push가 빌드하도록 `.github/workflows/build.yml`의 matrix에 추가한다.
 7. 모든 릴리스가 배포하도록 `.github/workflows/release.yml`의 matrix에 추가한다.
    3번과 7번은 함께 들어가야 한다 — `tooling/release-workflow.test.ts`는 어느 한쪽만 있으면 실패하는데, 그것이 요점이다: 잡 없는 핀은 반쯤 배포된 릴리스를 좌초시키고, 핀 없는 잡은 자기 앱을 찾지 못하는 런처를 사용자에게 배포한다.
+
+## Windows (#14, W3)
+
+위의 일곱 단계는 0.1.0-beta.8을 위해 한꺼번에 들어갔다. 이유는 아래 linux-arm64 절과 같다: 핀은 그것이 가리키는 것을 배포하는 바로 그 변경에서만 추가할 수 있다.
+
+**패키지.** `centralu-win32-x64`(`os: win32`, `cpu: x64`)는 W1(#307)부터 `build.yml`이 올리던 포터블 폴더를 싣는다: `Centralu\centralu.exe` 옆에 `Centralu\resources\host\`. Tauri는 설치된 것이 없으면 exe 옆에서 리소스를 찾으므로, 폴더는 npm이 풀어 놓은 자리에서 그대로 실행된다. 네이티브 Node를 쓰는 ARM64 Windows는 이 패키지를 건너뛰고, 런처는 아직 지원하지 않는 플랫폼이라고 알린다. 그쪽으로는 아무것도 배포하지 않는다.
+
+**릴리스 잡.** `release.yml` 플랫폼 matrix의 `win32-x64`, `windows-2022`에서, 다른 잡과 같은 `npm-publish` 게이트 뒤에서 돈다. `scripts/release-npm.mts`는 다른 타깃처럼 실행하되 세 가지가 다르며, 각각 그 자리에 주석이 있다:
+
+- `tauri build --no-bundle`로 빌드한다. 배포되는 것은 NSIS 설치 파일이 아니고, 릴리스는 배포하는 것만 빌드한다.
+- `pnpm verify` 대신 `pnpm lint`, `pnpm depcruise`, `pnpm typecheck`를 돌린다. 단위 테스트에는 Windows에서 알려진 실패가 있다(#307의 W2 목록). 전체 `pnpm verify`는 같은 커밋으로 다른 모든 플랫폼 잡과 shim 잡에서 돌고, 그것들이 모두 통과해야만 shim이 나갈 수 있다. W2 목록이 비면 이 예외를 없앤다.
+- 코드 서명과 실행 비트 대신 PE 헤더를 검사한다: `MZ`와 `PE\0\0`(우리가 생각하는 그 파일인지), 서브시스템이 GUI인지(콘솔 서브시스템 exe는 실행할 때마다 콘솔 창을 연다), 머신이 x86-64인지, `main.mjs`와 `conpty.node`가 옆에 있는지.
+
+**Windows에서 런처가 하는 일** (`packaging/npm/centralu/bin/platform.mjs`, 모든 OS에서 `tooling/launcher-platform.test.ts`가 검사한다):
+
+| 명령 | 하는 일 |
+|---|---|
+| `centralu` | 레지스트리에서 WebView2 Runtime을 확인한다. 없으면 창 없이 끝나 버릴 exe를 실행하는 대신 내려받을 링크를 출력하고 끝낸다. 있으면 `centralu.exe`를 **detached**로 실행한다 — 설치된 복사본이 있으면 그것을, 없으면 npm 패키지 안의 것을. 그리고 3초 동안 지켜본다: 그 안에 0이 아닌 코드로 끝나면 WebView2 링크와 `host.log` 경로를 담은 메시지를 출력한다 |
+| `centralu install` | 폴더를 `%LOCALAPPDATA%\Programs\Centralu`로 복사하고 시작 메뉴 바로 가기(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Centralu.lnk`)를 만든다. 새 복사본은 옛 복사본 옆에서 조립된 뒤 바꿔 끼워지므로, 복사가 실패하거나 앱이 실행 중이어도 동작하던 설치는 그대로 남는다 |
+| `centralu update` | `npm i -g centralu@<latest>`(`npm`이 `npm.cmd`라서 셸을 거친다), 그리고 설치된 복사본이 있으면 갱신한다 |
+| `centralu uninstall` | 복사본과 바로 가기를 지운다. `%USERPROFILE%\.centralu`는 건드리지 않는다 |
+
+Linux처럼 패키지를 가리키는 바로 가기가 아니라 macOS처럼 복사본을 두는 이유: Windows는 실행 중인 프로그램의 파일을 바꿔치기하지 못하게 한다. 앱이 npm 패키지 안에서 실행 중이면 `npm i -g centralu@newer`는 EBUSY로 실패한다. 복사본에서 실행하면 패키지는 자유롭게 업데이트된다. 어느 쪽이든, 앱이 아직 실행 중이라서 Windows가 거부했을 때는 런처가 그렇게 말해 준다.
+
+detached는 선택이 아니다. libuv는 detached가 아닌 모든 자식을, 부모가 끝나면 자식도 죽이는 job object에 넣는다. 그래서 붙어 있는 앱은 런처가 반환되거나 콘솔 창이 닫히는 순간 같이 닫힌다. `windowsHide`는 끈 채로 둔다: 프로세스를 SW_HIDE로 시작시키는데, GUI 프로그램은 그것을 첫 창에 적용해 버린다.
+
+**서명 없음: SmartScreen.** Windows 코드 서명은 없다. SmartScreen은 브라우저가 다운로드에 붙이는 mark-of-the-web을 기준으로 삼는데 npm은 그것을 붙이지 않으므로, npm 설치는 경고 없이 실행될 것으로 예상한다. macOS quarantine과 같은 논리지만 Windows에서는 측정하지 않았다. zip으로 내려받은 CI 아티팩트에는 그 표시가 붙는다. SmartScreen이 "Windows의 PC 보호" 창을 띄우면 **추가 정보 → 실행**을 누른다. Smart App Control(깨끗하게 새로 설치한 Windows 11에서만 기본으로 켜진다)은 그런 버튼 없이 서명 없는 exe를 아예 막을 수 있는데, 이 exe를 막는지는 모른다.
+
+**WebView2.** Windows 11에는 런타임이 들어 있고, 최신 Windows 10에도 대개 있다. NSIS 설치 파일은 그것을 설치해 주지만 npm 설치는 그럴 수 없으므로, 런처가 먼저 확인하고(Microsoft 배포 가이드의 레지스트리 위치 세 곳) Evergreen Bootstrapper를 가리킨다. `reg.exe`를 실행할 수 없으면 확인 결과는 "모름"이 되고 앱은 그대로 실행된다. 확인 장치가 고장 났다고 실행을 막아서는 안 되기 때문이다.
+
+**아직 증명되지 않은 것.** Windows에서 `npm i -g centralu`를 실행해 본 사람은 없다: 런처도, 바로 가기도, 앱이 열린 상태의 업데이트도. 릴리스 잡은 dry run으로만 돌았다. 기본 npm prefix 아래 경로 깊이는 약 180자로, 평범한 프로필 이름이라면 `MAX_PATH` 안이지만 긴 이름으로는 확인하지 않았다.
 
 ## linux-arm64 (#29)
 

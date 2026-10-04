@@ -63,13 +63,29 @@ centralu update     # 새 버전이 나왔을 때
 > 짐작이 아니라 재본 겁니다 — 방법과 숫자는
 > [베타 릴리스 점검표 §2](docs/plans/beta-release-checklist.md)에 있습니다.
 
+### Windows에서
+
+같은 명령을 PowerShell이나 cmd에서 씁니다(0.1.0-beta.8부터, x64만). `centralu install`은
+앱을 `%LOCALAPPDATA%\Programs\Centralu`로 복사하고 시작 메뉴 바로 가기를 만듭니다 —
+관리자 권한은 필요 없습니다. `centralu update`나 `npm i -g` 전에는 Centralu를 종료하세요:
+Windows는 실행 중인 프로그램을 바꿔치기하지 못하게 하고, 그 때문에 멈췄다면 런처가
+그렇게 알려줍니다. Windows에서는 Git for Windows도 PATH에 있어야 합니다.
+
+- **서명되지 않은 빌드입니다.** "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을
+  누르세요. npm 설치로는 뜨지 않을 것으로 예상하지만(위 macOS와 같은 다운로드 딱지
+  이야기), Windows에서는 아직 재보지 않았습니다.
+- **Microsoft Edge WebView2 Runtime이 필요합니다.** Windows 11에는 들어 있고, 업데이트된
+  Windows 10도 대부분 있습니다. 없으면 `centralu`가 아무것도 안 띄우는 대신 그렇다고
+  말하고 [설치 페이지](https://developer.microsoft.com/microsoft-edge/webview2/)를 알려줍니다.
+
 ## 어디서 도나
 
 | | |
 |---|---|
 | **macOS, Apple Silicon** | npm에 올라가 있고, 우리가 매일 쓰는 환경입니다 |
 | **Linux, x86-64 · arm64** | npm에 있습니다(x86-64는 0.1.0-beta.2부터, arm64는 beta.3부터). 실행 보고는 아직 없습니다 — 첫 번째가 되어주세요 |
-| **Windows · Intel Mac** | 아예 빌드가 안 됩니다 ([#14](https://github.com/ijun17/centralu/issues/14)) |
+| **Windows, x86-64** | 0.1.0-beta.8부터 npm에 있습니다. CI에서 빌드·검사했고, npm으로 띄워본 사람은 아직 없습니다 ([#14](https://github.com/ijun17/centralu/issues/14)) |
+| **ARM Windows · Intel Mac** | 배포하지 않습니다 |
 
 리눅스 줄엔 설명이 좀 필요합니다. 여기엔 리눅스 기계가 없어서, npm에 올라간 패키지도
 CI에서 빌드·검사만 거쳤지 사람이 띄워본 적은 없습니다. 컴파일된다와 돌아간다는 다른
