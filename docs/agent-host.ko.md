@@ -165,8 +165,10 @@ interface AdapterCapabilities {
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
 UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
-host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
-                → attempt resume with the externalId from the store (the same path as FR-10)
+host restarts   → under the keeper: agents, terminals and commands keep running there; the new
+                  host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
+                → without a keeper: session processes die → a new streamEpoch → UIs resync
+                  → attempt resume with the externalId from the store (the same path as FR-10)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
                 → clients reconnect to the same address and resync on the new streamEpoch
 app quits       → background mode off (default): the keeper stops the host, as above
@@ -252,12 +254,92 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 프록시)이 추적기 하나를 지난다. `drain`이 오면 새 호출은 거절하고 도는 호출에 한도를 준다. 한도가 지나면 각
 호출에 "호스트가 빌드를 바꾸느라 기다리기를 멈췄고, 호출은 끝났을 수도 아닐 수도 있으니 확인하고 다시 부르라"는
 오류로 답한다. 거절과 끊기에서 나온 RPC 오류는 `retryable: true`다. 그 다음 차례로: 끊긴 호출의 오류가 에이전트에
-닿을 잠깐, **detach 훅** `stopServices('detach')`, 잠금 놓기, `drained` 쓰기, 종료. **2단계 전까지 detach 훅은
-stop과 같은 일을 한다**(터미널·명령·세션·앱 프로세스를 멈춘다). 2단계가 `stopServices('detach')`를 키퍼가 쥔
-에이전트·터미널·명령을 놓아주는 일로 바꾸고 `KEEPS_AGENTS_ACROSS_SWAP`을 켠다.
+닿을 잠깐, **detach 훅** `stopServices('detach')`, 잠금 놓기, `drained` 쓰기, 종료. detach 훅은 키퍼가 쥔
+에이전트·터미널·명령을 놓아주고(§4.3), 호스트 안에 사는 것(앱 프로세스, in-process 서버)만 멈춘다.
+`drained.keptAgents`와 시작 때의 `keepsAgents` 보고는 호스트가 키퍼의 자식 서비스를 가졌을 때만 참이다. 그것이
+없는 호스트는 여기서 stop처럼 자식을 멈춘다.
 
 **넘겨받기.** `activate` 뒤에 호스트는 잠금을 잡고 저장소를 `swap: true`로 연다: 확장 단계는 지금 돌고, 무거운
 단계와 깨는 단계는 준비 줄 뒤에 돈다(§5.1).
+
+### 4.3 호스트에서 본, 키퍼가 쥔 자식들 (#280, 옵션 C 2단계)
+
+설계는 [architecture.ko.md](architecture.ko.md) §4.3에 있다. 키퍼 아래에서(`CC_KEEPER=1`) 호스트는 시작할 때
+`<data>/children.sock`에 붙는다(`keeper/held-children.ts`). 거기서 아무도 답하지 않으면(옛 키퍼, 묶이지 못한 소켓)
+호스트는 자기 자식을 직접 띄우고 모든 끝에서 멈춘다, 키퍼가 없을 때와 똑같이. `pnpm dev`, e2e, 디버그 앱, Windows는
+이 경로를 타지 않는다.
+
+**자식 소켓** (데스크톱 크레이트의 `keeper/children/`, 여기의 `keeper/children-client.ts`). 연결의 첫 줄이 그것이
+무엇인지 말한다. *제어* 연결(`{"op":"hello","protocol":1}`)은 호스트마다 하나이고, `{"rid":n,"op":…}` 요청과
+`{"rid":n,"ok":…}` 답, 그리고 밀어 주는 이벤트 둘을 나른다: `{"event":"exit","id","code","signal"}`과
+`{"event":"stop"}`(키퍼가 아주 멈춘다, 자식들을 멈춰라). *붙기* 연결(`{"op":"attach","protocol":1,"id","stream":"out"|"err"}`)은
+한 줄로 답한 뒤 날 바이트를 나른다: 자식의 출력은 호스트로, 호스트의 바이트는 자식의 stdin이나 pty로.
+
+| 요청 | 하는 일 |
+|---|---|
+| `spawn` `{kind:"pipes"\|"pty", cmd, args, cwd, env, cols?, rows?, tag}` | 자식을 자기 세션에서 띄운다. `cmd`는 `env`의 `PATH`에서 찾는다 |
+| `list` | 모든 자식: id, 종류, pid, cmd, cwd, 시작, 살아 있는지, 종료 상태, 태그, 크기, 아직 보내지 않은 바이트 |
+| `signal` `{id, signal, group?}` | 자식이나 그 그룹 전체에 신호. TERM/KILL/INT/HUP/QUIT/USR1/USR2/WINCH 밖의 이름은 거절하고, 이미 끝난 자식에는 아무것도 하지 않는다(그 pid는 남의 것일 수 있다) |
+| `close_stdin` `{id}` | 쓴 것이 다 간 뒤 EOF (codex는 EOF에 스레드 잠금을 지운다, #57) |
+| `resize` `{id, cols, rows}` | pty에 `TIOCSWINSZ` |
+| `set_tag` `{id, tag}` / `release` `{id}` | 태그를 바꾼다. 끝난 자식을 잊는다(도는 자식은 거절) |
+
+새 붙기는 그 스트림의 이전 독자를 대신한다. 붙기 연결을 반만 닫는 호스트는 떨어지는 중이다: 지금 있는 줄의 나머지를
+받고, 스트림이 끝나며, 키퍼는 다음 호스트를 위해 버퍼에 담는다.
+
+**버퍼** (`keeper/children/buffer.rs`). 에이전트의 stdout: 64 MiB까지 잃지 않고, 그 뒤로는 키퍼가 읽기를 멈춰
+자식이 자기 파이프에서 기다린다. 독자에게는 온전한 줄만 가고, 사라진 독자가 일부만 받은 줄은 다음 독자에게 처음부터
+다시 간다. pty: 언제나 비우고, 마지막 256 KiB를 쥐어 새 독자마다 다시 보낸다. 에이전트의 stderr: 256 KiB 꼬리,
+결코 막지 않는다. 호스트의 바이트는 에이전트의 stdin에 온전한 줄로만 들어가므로, 쓰다 죽은 호스트가 찢어진 요청을
+남기지 않는다. 키퍼는 8 MiB까지 쌓은 뒤 호스트를 읽지 않는다.
+
+**호스트가 거기서 띄우는 것.** 자식마다 호스트만 읽는 태그가 붙는다(`keeper/tags.ts`): `{kind:"agent", tool,
+sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. 새 호스트는 옛 호스트의
+태그를 계속 읽을 수 있어야 한다: 자식은 자기를 띄운 빌드보다 오래 산다.
+
+- **에이전트.** 매니저는 어댑터에 `ProcessSource`(`adapters/contract.ts`)를 넘긴다: 키퍼에서 `spawn`하거나, 쥐어 둔
+  프로세스를 `adopt`한다. claude는 이것을 `spawnClaudeCodeProcess`로 받고, `CodexClient`는 띄우는 대신 그 프로세스를
+  받는다. `KeeperAgentProcess`는 둘이 쓰는 `ChildProcess`의 표면을 갖지만, `kill()`은 키퍼에 보내는 요청이고 프로세스를
+  놓았거나 호스트가 끝나는 중이면 결코 보내지 않는다(SDK는 주인이 끝날 때 자기 프로세스를 kill한다). `stdin.end()`는
+  `close_stdin`이다. codex 요청 id에는 클라이언트마다 접두사가 붙어, 이전 호스트의 요청에 대한 답이 우리 요청을 풀지 못한다.
+- **터미널과 명령.** `TerminalService`와 `CommandRunner`는 node-pty 대신 키퍼의 pty 모듈(`KeeperPty`, node-pty의 표면)을
+  받는다. 멈출 때는 여전히 프로세스 트리를 걷는다(`kill-tree.ts`). 어디서든 통한다.
+
+**떠나기** (`main.ts`, `stopServices(mode)`). *detach* — SIGTERM, SIGINT, 키퍼 파이프가 닫힘, 잡히지 않은 예외,
+교체의 드레인 — 는 모든 세션 핸들·터미널·명령 실행에 `detach()`를 부른다: 도구에는 아무것도 보내지 않고, 기다리는
+승인은 계속 기다리며, 오는 중이던 출력은 저장소가 닫히기 전에 기록한다. 앱 프로세스와 in-process 도구 서버는 호스트에
+살므로 멈춘다. *stop* — 키퍼의 `stop` 이벤트, 또는 자식 서비스 없는 모든 끝 — 은 예전 경로다: 세션을 정리하고 터미널과
+실행을 죽인다. stop 뒤에는 남은 것을 키퍼가 끝낸다(stdin EOF와 SIGHUP, 2초, 각 그룹에 TERM, 1초, KILL).
+
+**다시 붙기.** 시작할 때 호스트가 키퍼의 자식 목록을 읽는다. 살아 있는 에이전트는 `listen` 뒤에 `resumeSession`을 거쳐
+다시 붙는다. 그래서 같은 세션을 깨우는 화면은 두 번째 프로세스를 띄우지 않고 다시 붙기에 합류한다. 그 세션들은 시작 시
+재설정에서도 `working` / `waiting_approval`을 지키고(`keptSessions`), 상태는 그 뒤 도구가 하는 말로 바로잡힌다.
+대화록 따라잡기는 건너뛴다(그사이 한 말은 키퍼의 버퍼가 전한다). 세션이 사라진 에이전트는 멈춘다. 터미널과 명령 실행은
+같은 id로 돌아오고, 다시 받은 출력이 스크롤백이 된다. 붙은 호스트가 없을 때 끝난 실행은 종료 코드를 지킨다. 끝난
+에이전트나 터미널은 놓아준다. 기대기 전에 측정했다(2026-10-04, CLI 2.1.282 + SDK 0.3.263에 haiku, codex-cli 0.160.0에
+`gpt-5.6-luna` 낮은 노력):
+
+| 도구 | 측정 |
+|---|---|
+| claude | 쥐어 둔 프로세스 위의 새 `query()`: 그 `initialize`가 기다리던 승인을 새 `canUseTool`에 즉시 다시 전했고, 답하자 명령이 돌고 턴이 끝났다. 턴 도중이면 남은 Bash 호출 셋과 결과가 새 호스트를 통해 왔다. |
+| codex | `initialize`를 다시: `-32600 "Already initialized"`, 그 밖에 바뀌는 것 없음. `thread/resume`: `thread.status`는 `active`/`waitingOnApproval`, 도는 턴은 `thread.turns`에(Stop에 필요한 id), 승인은 같은 요청 id(`0`)로 다시 왔고, 수락하자 턴이 끝났다. 스레드의 MCP 서버는 다시 띄우지 않는다(resume에 설정한 탐침 서버는 뜨지 않았다). 브리지가 정문의 주소와 토큰을 갖는 이유가 이것이다. |
+
+**잃어버린 in-process 호출.** 호스트가 죽을 때 진행 중이던 호스트 자신의 in-process 도구 호출(오케스트레이터
+`mcp__centralu__*`, 앱 프록시 `mcp__app-*`)은 결코 답을 받지 못한다: 측정해 보니 넘겨받은 claude는 새 주인이
+`interrupt()`를 부를 때까지 조용히 기다렸고, 그러자 턴이 끝났다(`error_during_execution`). 다음 턴은, 이제 새 호스트가
+섬기는 같은 도구 호출까지, 평소대로 돌았다. 그래서 매니저는 저장소에 결과 없이 남은 도구 호출을 어댑터에 넘기고, claude는
+그 안에서 자기 in-process 도구를 찾으면 그 이름을 밝힌 오류를 내고 턴을 중단한다. 계획된 교체는 그런 호출을 먼저 드레인한다
+(§4.2). 이것은 크래시를 위한 것이다. codex는 아무것도 필요 없다: 소켓이 닫힌 호출은 브리지가 실패시킨다.
+
+**떠돌이.** `strays.ts` 규칙 3은 키퍼의 살아 있는 자식과 그 자손을 우리 것으로 센다. 키퍼 넘겨주기(4단계) 뒤에는 그
+부모가 init이 되고, 부모 사슬만 보면 남은 찌꺼기로 내놓게 된다.
+
+**활동.** 넘겨받은 터미널·실행·살아 있는 세션은 다시 호스트 자신의 항목이므로 활동 보고는 전처럼 그것을 센다. 호스트가
+없는 동안 키퍼는 아무것도 세지 않는다. 유휴 한도는 30분이고 죽은 호스트는 몇 초 안에 돌아온다.
+
+`scripts/keeper-children-integration.mjs`가 실제 바이너리·호스트·claude(haiku)·codex(`gpt-5.6-luna`)로 이것을 돌린다:
+SIGKILL당한 호스트를 넘는 claude 턴, 같은 크래시를 넘는 터미널과 개발 서버(그 뒤 크기 바꾸기), 교체를 넘는 codex 턴,
+그리고 모든 자식을 끝내는 stop.
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 

@@ -201,8 +201,10 @@ logs every request it answers with `{}`.
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
 UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
-host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
-                → attempt resume with the externalId from the store (the same path as FR-10)
+host restarts   → under the keeper: agents, terminals and commands keep running there; the new
+                  host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
+                → without a keeper: session processes die → a new streamEpoch → UIs resync
+                  → attempt resume with the externalId from the store (the same path as FR-10)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
                 → clients reconnect to the same address and resync on the new streamEpoch
 app quits       → background mode off (default): the keeper stops the host, as above
@@ -291,12 +293,99 @@ app-tool proxy) runs through one tracker. On `drain`, new calls are refused and 
 it each is answered with an error saying the host switched builds and stopped waiting, that the call may or may
 not have finished, and to check and call again. RPC errors from a refusal or a cut carry `retryable: true`. Then,
 in order: a moment for a cut call's error to reach its agent, the **detach hook** `stopServices('detach')`, the
-lock released, `drained` written, exit. **Until step 2 the detach hook does what a stop does** (terminals,
-commands, sessions and app processes are stopped); step 2 makes `stopServices('detach')` release the
-keeper-held agents, terminals and commands instead, and flips `KEEPS_AGENTS_ACROSS_SWAP`.
+lock released, `drained` written, exit. The detach hook releases the keeper-held agents, terminals and commands
+(§4.3) and stops only what lives in the host (app processes, in-process servers); `drained.keptAgents` and the
+start-up `keepsAgents` report are true only when the host has the keeper's child service. A host without one
+stops its children here, as a stop does.
 
 **Taking over.** After `activate` the host takes the lock and opens the store with `swap: true`: expand steps run
 now, heavy and breaking steps run after its ready line (§5.1).
+
+### 4.3 The children the keeper holds, seen from the host (#280, option C step 2)
+
+The design is in [architecture.md](architecture.md) §4.3. Under the keeper (`CC_KEEPER=1`) the host connects to
+`<data>/children.sock` at startup (`keeper/held-children.ts`). If nothing answers there (an older keeper, a socket
+that would not bind), the host spawns its own children and every ending stops them, exactly as without a keeper.
+`pnpm dev`, e2e, a debug app and Windows never take this path.
+
+**The child socket** (`keeper/children/` in the desktop crate, `keeper/children-client.ts` here). The first line
+of a connection says what it is. A *control* connection (`{"op":"hello","protocol":1}`), one per host, carries
+requests `{"rid":n,"op":…}` answered `{"rid":n,"ok":…}` and two pushed events: `{"event":"exit","id","code","signal"}`
+and `{"event":"stop"}` (the keeper is stopping for good; stop your children). An *attach* connection
+(`{"op":"attach","protocol":1,"id","stream":"out"|"err"}`) answers one line and then carries raw bytes: the
+child's output to the host, the host's bytes to the child's stdin or pty.
+
+| request | does |
+|---|---|
+| `spawn` `{kind:"pipes"\|"pty", cmd, args, cwd, env, cols?, rows?, tag}` | starts the child in its own session; `cmd` is looked up on the `PATH` in `env` |
+| `list` | every child: id, kind, pid, cmd, cwd, start, alive, exit status, tag, size, bytes not yet sent |
+| `signal` `{id, signal, group?}` | a signal to the child, or its whole group; refused for a name outside TERM/KILL/INT/HUP/QUIT/USR1/USR2/WINCH, and a no-op once it has exited (its pid may belong to someone else) |
+| `close_stdin` `{id}` | EOF after what was written (codex removes its thread lock on EOF, #57) |
+| `resize` `{id, cols, rows}` | `TIOCSWINSZ` on a pty |
+| `set_tag` `{id, tag}` / `release` `{id}` | replace the tag; forget an exited child (a running one is refused) |
+
+A new attach replaces the previous reader of that stream. A host that half-closes its attach connection is
+detaching: it is sent the rest of the line it is in, then the stream ends and the keeper buffers for the next one.
+
+**Buffers** (`keeper/children/buffer.rs`). An agent's stdout: lossless up to 64 MiB, then the keeper stops reading
+and the child blocks on its pipe; only whole lines go to a reader, and a line a lost reader got part of is sent
+whole to the next. A pty: drained always, the last 256 KiB kept and replayed to each new reader. An agent's stderr:
+a 256 KiB tail, never blocking. Bytes from a host go to an agent's stdin in whole lines only, so a host that dies
+mid-write never leaves a torn request; up to 8 MiB are queued before the keeper stops reading the host.
+
+**What the host spawns there.** Every child carries a tag only hosts read (`keeper/tags.ts`): `{kind:"agent",
+tool, sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. A newer host
+must keep reading an older host's tags: the children outlive the build that spawned them.
+
+- **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract.ts`): `spawn` in the keeper,
+  or `adopt` a kept process. Claude gets it as `spawnClaudeCodeProcess`; `CodexClient` takes the process instead
+  of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request that
+  is never sent once the process is detached or the host is exiting (the SDK kills its processes on owner exit),
+  and `stdin.end()` is `close_stdin`. Codex request ids carry a per-client prefix, so an answer to the previous
+  host's request cannot resolve one of ours.
+- **Terminals and commands.** `TerminalService` and `CommandRunner` take the keeper's pty module (`KeeperPty`,
+  node-pty's surface) instead of node-pty; stopping them still walks the process tree (`kill-tree.ts`), which
+  works from anywhere.
+
+**Leaving** (`main.ts`, `stopServices(mode)`). *Detach* — SIGTERM, SIGINT, the keeper's pipe closing, an
+uncaught exception, a swap's drain — calls `detach()` on every session handle, terminal and command run: nothing
+is sent to the tool, a waiting approval stays waiting, and output still in flight is recorded before the store
+closes. App processes and the in-process tool servers stop, as they live in the host. *Stop* — the keeper's `stop`
+event, or any ending without the child service — is the old path: sessions disposed, terminals and runs killed.
+After a stop the keeper ends whatever is left (stdin EOF and SIGHUP, 2 s, TERM to each group, 1 s, KILL).
+
+**Re-attach.** At startup the host lists the keeper's children. Live agents re-attach after `listen`, through
+`resumeSession`, so a screen waking the same session joins the re-attach instead of starting a second process.
+Their sessions keep `working` / `waiting_approval` through the startup reset (`keptSessions`); the state is then
+corrected by what the tool says. The transcript catch-up is skipped (the keeper's buffer delivers what was said
+meanwhile). A kept agent whose session is gone is stopped. Terminals and command runs come back under their ids
+with the replayed output as scrollback; a run that ended while no host was attached keeps its exit code. An exited
+agent or terminal is released. Measured before relying on it (2026-10-04, CLI 2.1.282 + SDK 0.3.263 with haiku;
+codex-cli 0.160.0 with `gpt-5.6-luna`, low effort):
+
+| tool | measured |
+|---|---|
+| claude | A new `query()` over the kept process: its `initialize` re-delivered the pending approval to the new `canUseTool` at once; answering it ran the command and finished the turn. Mid-turn, the remaining three Bash calls and the result arrived through the new host. |
+| codex | `initialize` again: `-32600 "Already initialized"`, nothing else changes. `thread/resume`: `thread.status` `active`/`waitingOnApproval`, the running turn in `thread.turns` (the id Stop needs), and the approval re-sent with the same request id (`0`); accepting it finished the turn. It does not restart the thread's MCP servers (a probe server configured on resume never started), which is why the bridge has the front door's address and token. |
+
+**A lost in-process call.** A call to the host's own in-process tools (orchestrator `mcp__centralu__*`, app
+proxies `mcp__app-*`) in flight when the host died is never answered: measured, the adopted claude waited silently
+until the new owner called `interrupt()`, which ended the turn (`error_during_execution`); the next turn, including
+a call to the same tool now served by the new host, ran normally. So the manager hands the adapter the tool calls
+the store holds without a result, and Claude, finding one of its in-process tools among them, reports an error
+naming it and interrupts the turn. A planned swap drains such calls first (§4.2); this is for a crash. Codex needs
+nothing: its bridge fails a call whose socket closed.
+
+**Strays.** `strays.ts` rule 3 counts the keeper's live children and their descendants as ours. After a keeper
+handover (step 4) their parent will be init, and the parent chain alone would offer them as leftovers.
+
+**Activity.** Kept terminals, runs and live sessions are the host's own entries again once taken over, so the
+activity report counts them as before. While no host is up the keeper counts nothing; its idle limit is 30
+minutes and a crashed host is back in seconds.
+
+`scripts/keeper-children-integration.mjs` drives this with the real binary, host, claude (haiku) and codex
+(`gpt-5.6-luna`): a claude turn across a SIGKILLed host, a terminal and a dev server across the same crash (resized
+afterwards), a codex turn across a swap, and stop ending every child.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

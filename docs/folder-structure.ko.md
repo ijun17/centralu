@@ -67,6 +67,7 @@ centralu/
 │        ├─ transport/          # WS server, session handshake
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract
 │        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
+│        ├─ keeper/             # 키퍼의 자식 서비스: 거기서 띄우는 에이전트와 pty, 다시 붙기 (#280)
 │        ├─ usage/              # incremental parser for ~/.claude, ~/.codex logs
 │        └─ mcp/                # MCP server for the orchestrator (M3)
 │

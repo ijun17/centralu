@@ -229,6 +229,30 @@ host. It changes where a client connects, not what it must prove:
   connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
   timeout (10 s) applies.
 
+### The keeper's child socket
+
+The keeper also holds the host's agents, terminals and commands (#280 step 2) and serves them on a second socket,
+`<data>/children.sock`. Through it a process can start a program with the arguments, folder and environment of its
+choosing, read and write an agent's stdin and stdout (its whole conversation, approvals included) or a terminal, and
+signal any child the keeper holds. The rule is the keeper socket's: **only this user's processes get in.**
+
+- Created under `umask 077`, so it is born `0600`; every connection's peer uid is read from the kernel and the
+  connection is dropped unless it is the keeper's own uid.
+- A control line is capped at 16 MiB (a spawn carries a whole environment); a host's input to a child is queued up
+  to 8 MiB before the keeper stops reading it; a control connection that stops reading its events is dropped past
+  8 MiB.
+- `signal` takes only TERM, KILL, INT, HUP, QUIT, USR1, USR2 and WINCH, never pid 1 or below, and is a no-op for a
+  child that has exited, whose pid may already belong to someone else.
+- Children start in their own session, with the environment the host passed. The host takes `CC_KEEPER`,
+  `CC_HOST_SOURCE`, `CC_HOST_TOKEN` and `CC_FRONT_DOOR` out of its own environment before it spawns anything, so no
+  child inherits the front door's token.
+- The keeper stores each child's tag and parses nothing in it, and parses nothing a child says.
+
+Limits: as with `switch`, spawning lets any process of this user run a program — which it could do by itself — and
+reading a held agent's stream lets it read what that agent says, which the same user could also read from the
+agent's own transcript. It is not a boundary between processes of the same user. It is local only; Windows has no
+keeper.
+
 ## App servers
 
 An app's server is code running as the user, with the user's files, network and processes. The

@@ -101,8 +101,12 @@ Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own sessio
    │                 unix socket     │ launch · watch · restart · swap
    │                 <data>/keeper.sock, 0600
    │                                 │
-   └── WebSocket ──▶ front door ─────┴─ bytes ─▶ agent-host (node, from <data>/hosts/<build>/)
-       ws://127.0.0.1:DOOR   (one port and token per keeper)
+   └── WebSocket ──▶ front door ─────┼─ bytes ─▶ agent-host (node, from <data>/hosts/<build>/)
+       ws://127.0.0.1:DOOR           │               │
+       (one port and token per       │               │ <data>/children.sock, 0600
+        keeper)                      │               ▼   spawn · attach · signal (§4.3)
+                                     └─ holds ─▶ claude · codex app-server · terminals · commands
+                                                 (each in its own session)
 ```
 
 | Decision | Why |
@@ -116,9 +120,9 @@ Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own sessio
 | A window of another build attaches to the running host and offers to switch | The keeper knows both builds. Switching is the blue-green swap of §4.2; the window confirms first only when something can be lost. |
 | Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a debug build in. Non-unix targets have no keeper yet. |
 
-What the keeper does not do yet: hold agents, terminals or project commands (step 2). Until it does, a host
-restart or swap still ends every child of the host. The control socket, its protocol and its trust rule are in
-[agent-host.md](agent-host.md) §4.1 and [security-boundaries.md](security-boundaries.md).
+The keeper also holds the host's long-lived children (§4.3), so a host restart or swap no longer ends them. The
+control socket, its protocol and its trust rule are in [agent-host.md](agent-host.md) §4.1 and
+[security-boundaries.md](security-boundaries.md).
 
 ### 4.2 The front door and the blue-green swap (#280, option C step 3)
 
@@ -153,8 +157,47 @@ Codex orchestrator bridge connect there.
 | B checks itself before A drains, and migrates only after | A failed check costs nothing: A is untouched. Expand-only steps during the swap keep the store readable by A's build. |
 | If B fails after A drained, A's build is started again | A has exited and released the lock, so it cannot resume; its build is known good and still reads the store, and its copy is kept until the swap succeeds. Retrying B was the alternative, but the build that just failed is the less likely one to start. The window shows the failure and that the previous build serves again; the person can retry. |
 | Every phase is pushed to attached windows (`view.swap`) | The window shows progress and a failure's reason, and asks before switching only when something can be lost: a session working or waiting, a terminal or a command. |
-| Until step 2, the swap's detach does what a shutdown does | Agents, terminals and commands are the host's children until the keeper holds them, so a swap still ends running turns. The host reports `keepsAgents: false` and the window says so; step 2 fills in the detach hook and flips the report. |
+| The swap's detach hands agents, terminals and commands over | They are the keeper's children (§4.3), so A lets go of them and B re-attaches in its normal startup: a running turn goes on across the swap. The host reports `keepsAgents: true` only when it has the keeper's child service; one without it still stops its children, and the window says so. |
 
+
+### 4.3 The keeper holds agents, terminals and commands (#280, option C step 2)
+
+The host no longer spawns its long-lived children itself. Under the keeper, claude, codex app-server, terminals and
+project commands (dev servers) are spawned **by the keeper**, over a second user-only socket,
+`<data>/children.sock`. A host that crashes, restarts or is swapped out releases its connections, and the children
+keep running; the next host lists them and re-attaches mid-turn. App MCP processes stay with the host and restart
+with it (owner decision 2).
+
+| Decision | Why |
+|---|---|
+| Every child runs in its own session (`setsid`) | Outside the keeper's and every host's process group, so a host's exit or group kill cannot reach it. Before, claude and codex shared the host's group. |
+| The keeper owns each pty (`openpty`, `setsid`, `TIOCSCTTY`) | node-pty keeps the master in the host, so a host that went away took the screen and, with SIGHUP, the shell. |
+| A pty is drained continuously into a 256 KiB ring, replayed to the next host | A pty child cannot finish exiting while its output is unread (measured in #280: bash stuck in `?Es` for over 5 s). The ring is the same 256 KiB a terminal's scrollback keeps. |
+| An agent's stdout is buffered losslessly (up to 64 MiB, then the child waits) and handed over in whole lines | It is a protocol; a dropped byte breaks a frame. Claude was measured buffering 60 s with stdout unread. One codex `thread/resume` answer was 23 MB on one line, hence the size. A host that dies loses at most what was already in its socket; the next host starts on a line boundary. |
+| No connection closing ever signals a child, closes its stdin or closes its pty | That is what lets a host leave without its agents. The Agent SDK kills its process when its owner exits; that kill is a keeper request, and a leaving host never sends it. |
+| Exits are watched with kqueue `NOTE_EXIT \| NOTE_EXITSTATUS` (macOS), pidfd (Linux) | They report a non-child's exit and status, which a keeper that takes the children over from another keeper (step 4) needs. |
+| One thread owns every descriptor | The child table is plain data plus raw descriptors, so step 4 can serialise it and pass the descriptors to the next keeper over `SCM_RIGHTS`. |
+
+**Leaving has two modes.** *Stop* is the old ending: sessions, terminals and commands stop with the host. It is
+every ending without a keeper, and under one the keeper asks for it (`stop` on the child socket) when it is stopping
+for good: "Quit and stop agents", the last window closing with background mode off, idle exit. Whatever the host
+could not stop, the keeper ends itself afterwards (stdin EOF and SIGHUP, then TERM, then KILL). *Detach* is every
+other ending under a keeper: a crash, a restart, a swap's drain, the keeper's pipe closing. Nothing is sent to the
+tools: no deny for a waiting approval, no EOF, no signal.
+
+**Re-attach** happens in the next host's startup. Each child carries a tag the host wrote when it asked for it
+(which session, terminal or command run); the keeper stores it and parses nothing in it.
+
+| Kind | How the next host takes it over |
+|---|---|
+| claude | A new `query()` whose `spawnClaudeCodeProcess` returns the kept process. Measured: its re-`initialize` re-delivers a pending approval at once and the rest of a running turn arrives through it. |
+| codex app-server | The same stdio. The second `initialize` is rejected ("Already initialized") harmlessly; `thread/resume` returns the running turn and re-sends a pending approval under the same request id. |
+| terminal, command run | Same id or run id; the keeper's replayed ring becomes the scrollback or log. A run that ended while no host was attached comes back with its exit code. |
+
+A session with a kept process keeps its live state through the startup reset, and the transcript catch-up is skipped
+for it (the buffered output would be recorded twice). A call to one of the host's own in-process tools (orchestrator,
+app proxy) that was in flight when the old host died is never answered; the adopting adapter fails it out loud and
+interrupts the turn, which was measured to release it. The detail is in [agent-host.md](agent-host.md) §4.3.
 
 ## 5. Data flow (summary — detail in [state-management.md](state-management.md))
 

@@ -221,6 +221,11 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   - Conversation record loaded immediately from local logs/SQLite (shown read-only first)
   - Session processes are **resumed where resume is possible** (Claude Agent SDK resume, `codex resume`); where not, offer "view the record only + start a new session"
 - Make explicit that an agent turn that was in flight is interrupted when the process dies (restore is "continue the conversation", not "continue the turn").
+  In the desktop app the process no longer dies with the host (#280 step 2): the keeper holds agents, terminals and
+  project commands, so a host crash, restart or build switch leaves a running turn going, and the next host
+  re-attaches to it — a waiting approval comes back, a terminal keeps its screen, a dev server keeps running. Only a
+  call to Centralu's own tools (orchestrator, app tools) that was running when the host crashed is lost; the turn is
+  stopped with an error naming it, so the person can send the message again.
 - Crash safety: the snapshot is saved on every state change, not at exit.
 - **Background mode** (#280, decision 1 — a setting, off by default). Off: quitting the app stops the host and its
   agents, as before. On: closing or quitting the app leaves the host and its running turns going, and reopening the
@@ -230,10 +235,10 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   Switching is a blue-green swap (#280 step 3): the new build starts next to the running host, which gets up to
   10 seconds to finish the calls it serves itself, and the window reconnects in a moment. The bar shows each step
   and, if the switch fails, why and which build serves now. It asks first only when something can be lost (a
-  session working or waiting, a terminal or a command), and says what: until the keeper holds agents (step 2) a
-  switch still stops running turns; after that, only an orchestrator or app tool call still running after 10
-  seconds is stopped, and the agent is told to try it again. Desktop only; it needs the keeper
-  ([architecture.md](architecture.md) §4.1–4.2).
+  session working or waiting, a terminal or a command), and says what: running turns, terminals and commands carry
+  on across the switch (step 2), and only an orchestrator or app tool call still running after 10 seconds is
+  stopped, with the agent told to try it again. Desktop only; it needs the keeper
+  ([architecture.md](architecture.md) §4.1–4.3).
 
 #### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
