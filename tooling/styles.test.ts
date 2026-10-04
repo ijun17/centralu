@@ -341,7 +341,7 @@ describe('icon script', () => {
     const script = readFileSync(join(ROOT, 'scripts/render-icon.mts'), 'utf8')
     const list = /for \(const junk of \[([^\]]*)\]\)/.exec(script)
     expect(list, 'the junk list in render-icon.mts moved; update this test').not.toBeNull()
-    const deleted = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1])
+    const deleted = [...(list?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1])
     for (const conf of ['tauri.conf.json', 'tauri.linux.conf.json', 'tauri.windows.conf.json']) {
       const icons = (
         JSON.parse(readFileSync(join(ROOT, 'apps/desktop/src-tauri', conf), 'utf8')) as { bundle: { icon: string[] } }
