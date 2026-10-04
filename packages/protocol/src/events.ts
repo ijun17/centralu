@@ -411,6 +411,48 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     after: z.number().optional(),
   }),
   /**
+   * The tool started a fresh conversation inside this session (#304): Claude Code's `/clear`, measured
+   * (`conversation_reset {new_conversation_id, trigger: 'clear'}`, then an `init` with a new `session_id`). The SDK
+   * says plan-mode exit and other fresh-session flows send it too, with another `trigger`.
+   *
+   * Recorded as a marker, like compaction: our record keeps everything above it, but the model no longer knows any of
+   * it, and nothing on screen said so. The context gauge empties with it (the tool reports the new, smaller number when
+   * the command's turn ends).
+   */
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('conversation_reset'),
+    /** The tool's word for what caused it — `clear` for `/clear`; absent when the tool did not say */
+    trigger: z.string().optional(),
+  }),
+  /**
+   * Text the agent tool wants the person to read (#304), one line in the conversation.
+   *
+   *   Claude    `system/informational` (a hook's block reason, say) and `system/notification`; the refusal pair
+   *             (`model_refusal_fallback`, `model_refusal_no_fallback` when its turn did not fail)
+   *   Codex     `warning`, `configWarning`, `deprecationNotice`, `guardianWarning`, `model/rerouted`, an MCP server
+   *             that failed to start (`mcpServer/startupStatus/updated`), and a thread whose settings another client
+   *             changed
+   *
+   * `text` is the tool's own sentence where it has one: rewording it into ours would lose the cause, the same rule as an
+   * error marker. `level` is the tool's urgency folded into three words; an unknown word from a newer host reads as
+   * `info` rather than failing the event.
+   *
+   * `oncePerSession` is for text that repeats every time the tool starts but says the same thing each time: Codex's
+   * configuration warnings arrive on every app-server start and every thread start or resume (measured, codex-cli
+   * 0.160.0: an unknown `config.toml` key sent `configWarning` and `warning` with the same text). The host stores and
+   * sends such a notice only if the session has no stored notice with the same text yet.
+   */
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('notice'),
+    level: z.enum(['info', 'warning', 'error']).catch('info'),
+    text: z.string(),
+    oncePerSession: z.boolean().optional(),
+  }),
+  /**
    * This session was born from a handoff, and the predecessor's note is pinned here (#102).
    *
    * **The reason a record is needed is the same as for the compaction marker**: back when the
@@ -455,6 +497,17 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     verbosity: z.string().nullable(),
     /** Response speed. Follows the same snapshot rule as the three above — optional since old frames lack it */
     serviceTier: z.string().nullable().optional(),
+    /**
+     * Whose hand it was (#304). Absent means the orchestrator, the only author this event had before.
+     *
+     * `tool` means the agent tool switched by itself, mid-session: Claude Code falling back to another model after a
+     * refusal (`model_refusal_fallback`), another Codex client changing the thread's settings
+     * (`thread/settings/updated`). The process already runs with the new value, so the host records it without a
+     * restart and the screen updates the model shown without a toast: a `notice` in the conversation says why.
+     * From an adapter, the snapshot is the adapter's own view; the host applies only the fields that differ from what
+     * the process was launched with, and re-sends its full snapshot.
+     */
+    by: z.enum(['orchestrator', 'tool']).optional(),
   }),
   z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
   /** The session was deleted — the list must stay correct in other windows and after a reconnect too */

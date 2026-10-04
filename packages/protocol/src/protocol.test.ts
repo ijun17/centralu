@@ -124,6 +124,20 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' },
   { type: 'compaction', sessionId: 's1', before: 25485, after: 3686 },
   { type: 'settings_changed', sessionId: 's1', model: 'gpt-5.3-codex', effort: 'high', verbosity: null },
+  // The tool switched by itself (#304) — the host records it without a restart and the screen shows it without a toast
+  { type: 'settings_changed', sessionId: 's1', model: 'claude-sonnet-4-6', effort: null, verbosity: null, by: 'tool' },
+  // Claude Code's /clear (#304), measured: conversation_reset {trigger: 'clear'}
+  { type: 'conversation_reset', sessionId: 's1', seq: 21, trigger: 'clear' },
+  { type: 'conversation_reset', sessionId: 's1' },
+  // Text the tool wants read (#304) — the measured Claude hook block and Codex configuration warning
+  {
+    type: 'notice',
+    sessionId: 's1',
+    seq: 22,
+    level: 'warning',
+    text: 'UserPromptSubmit operation blocked by hook:\n[node block-hook.mjs]: Prompts containing BLOCKME are not allowed here.',
+  },
+  { type: 'notice', sessionId: 's1', level: 'warning', text: 'Codex is ignoring 2 unrecognized configuration settings.', oncePerSession: true },
   // A marker for a session born from a handoff (#102) — note is never carried in a broadcast, so the shape without it is the golden one
   { type: 'handoff', sessionId: 's1', from: 'Mea' },
   { type: 'history_synced', sessionId: 's1', added: 2 },
@@ -206,6 +220,11 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
   it('parses a known event even with an unknown field attached', () => {
     const r = parseEventLenient({ type: 'turn_complete', sessionId: 's1', futureField: 123 })
     expect(r?.type).toBe('turn_complete')
+  })
+
+  it('reads a notice level a newer host invented as info, keeping the text (#304)', () => {
+    const r = parseEventLenient({ type: 'notice', sessionId: 's1', level: 'suggestion', text: 'Try /compact' })
+    expect(r).toMatchObject({ type: 'notice', level: 'info', text: 'Try /compact' })
   })
 
   it('rejects an event missing a required field', () => {
