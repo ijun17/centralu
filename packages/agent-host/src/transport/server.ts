@@ -10,6 +10,7 @@ import {
 } from '@cc/protocol'
 import { EventLog } from './event-log.js'
 import { createHttpHandler, type HttpGate } from './http.js'
+import { DrainCut, type Drain } from '../drain.js'
 
 /**
  * The WS server (docs/protocol.md §1). Identical in dev and prod — Tauri only spawns this process.
@@ -81,6 +82,12 @@ export type HostServerOptions = {
   closeGraceMs?: number
   /** Which build this host is, sent in every `hello_ok` (#280) */
   build?: HostBuild
+  /**
+   * Tracks every RPC for a planned host swap (#280 step 3, drain.ts): once the drain begins, new
+   * RPCs are refused and running ones get its bound to finish. Refused and cut calls are answered
+   * `retryable: true`, because the same call reaches the next host.
+   */
+  drain?: Drain
 }
 
 /**
@@ -413,15 +420,18 @@ export class HostServer {
       }
 
       // RPC
+      const { method, params, id } = frame.data
       try {
-        const result = await this.opts.onRpc(frame.data.method, frame.data.params)
-        this.sendTo(ws, JSON.stringify({ kind: 'res', id: frame.data.id, ok: true, result }))
+        const run = () => this.opts.onRpc(method, params)
+        const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
+        this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {
         const e = err as Error & { code?: unknown }
-        this.sendError(ws, frame.data.id, {
+        this.sendError(ws, id, {
           code: errorCode(e.code),
           message: e.message ?? 'Unknown error',
-          retryable: false,
+          // Only a swap's refusal or cut says "send it again": the next host will take it (#280)
+          retryable: err instanceof DrainCut,
         })
       }
     })

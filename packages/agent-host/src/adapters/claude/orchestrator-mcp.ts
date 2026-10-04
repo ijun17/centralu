@@ -12,6 +12,7 @@ import {
   runOrchestratorTool,
 } from '../../sessions/orchestrator-tools.js'
 import type { ToolProfile } from '../../apps/contract.js'
+import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
 
 /**
  * Attaches the orchestrator's tools to Claude (FR-11).
@@ -62,10 +63,18 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
       ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)),
       ...appToolEntries(profile),
     ].map((t) =>
-      tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) => {
-        const r = await runOrchestratorTool(tools, t.name, args, { sessionId: sessionId ?? null, profile })
-        return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
-      }),
+      tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) =>
+        // Served by the host itself, so a planned swap waits for it, within a bound (#280, drain.ts)
+        hostDrain
+          .track(`tool ${ORCHESTRATOR_MCP_NAME}/${t.name}`, async () => {
+            const r = await runOrchestratorTool(tools, t.name, args, { sessionId: sessionId ?? null, profile })
+            return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
+          })
+          .catch((e: unknown) => {
+            if (e instanceof DrainCut) return drainToolResult(e)
+            throw e
+          }),
+      ),
     ),
   })
 }

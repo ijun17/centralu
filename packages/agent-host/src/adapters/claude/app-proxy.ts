@@ -1,6 +1,7 @@
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import type { SessionApps } from '../contract.js'
+import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
 
 /**
  * An in-process proxy server that attaches one external app to a Claude session (M4 A-5).
@@ -80,7 +81,13 @@ export function appProxy(apps: SessionApps, server: string): AppProxy {
     const { name, arguments: args, _meta } = request.params as { name: string; arguments?: Record<string, unknown>; _meta?: Record<string, unknown> }
     const toolUseId = _meta?.[CLAUDE_TOOL_USE_META]
     // If the CLI cancels the call (notifications/cancelled), extra.signal fires — it propagates through to the app call.
-    return apps.call(server, name, args ?? {}, { signal: extra?.signal, ...(typeof toolUseId === 'string' && toolUseId ? { callId: toolUseId } : {}) })
+    const call = () =>
+      apps.call(server, name, args ?? {}, { signal: extra?.signal, ...(typeof toolUseId === 'string' && toolUseId ? { callId: toolUseId } : {}) })
+    // The host serves this call itself (it proxies to the app), so a planned swap waits for it, within a bound (#280, drain.ts)
+    return hostDrain.track(`tool ${server}/${name}`, call).catch((e: unknown) => {
+      if (e instanceof DrainCut) return drainToolResult(e)
+      throw e
+    })
   })
   return {
     config,
