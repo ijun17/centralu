@@ -206,12 +206,32 @@ pub fn clean_copies(data: &Path, keep: Option<&Path>) -> Vec<String> {
     let mut removed = Vec::new();
     for name in stale_copies(&names, keep_name.as_deref()) {
         let path = hosts.join(&name);
+        // A temporary copy still being written belongs to a launch or swap in progress. Measured
+        // (#280 step 4): a keeper that took over and was handed a switch started copying the new
+        // build at once, and the cleanup its adopted host's ready line set off deleted that copy
+        // under it ("No such file or directory"). One a dead keeper left behind goes once it is old.
+        if name.starts_with(".tmp-") && in_progress(&path) {
+            continue;
+        }
         let gone = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
         if gone.is_ok() {
             removed.push(name);
         }
     }
     removed
+}
+
+/// How long a temporary copy counts as still being written: copying a 20 MB host takes well
+/// under a second; this only has to outlast a slow disk.
+const COPY_IN_PROGRESS: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+fn in_progress(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .map(|age| age < COPY_IN_PROGRESS)
+        .unwrap_or(false)
 }
 
 /// Background mode (#280, decision 1): whether closing the last window leaves the keeper and
@@ -377,10 +397,32 @@ mod tests {
         for n in &names {
             fs::create_dir_all(hosts_dir(&data).join(n)).unwrap();
         }
+        // A temporary copy left by a keeper that died long ago
+        age(&hosts_dir(&data).join(".tmp-ghi-12"), 3600);
         let mut removed = clean_copies(&data, Some(&hosts_dir(&data).join("def")));
         removed.sort();
         assert_eq!(removed, vec![".tmp-ghi-12".to_string(), "abc".to_string()]);
         assert!(hosts_dir(&data).join("def").is_dir());
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// Sets a file's modification time `secs` into the past.
+    fn age(path: &Path, secs: i64) {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let t = libc::timeval { tv_sec: (now - secs) as libc::time_t, tv_usec: 0 };
+        let c = std::ffi::CString::new(path.to_string_lossy().as_bytes()).unwrap();
+        // SAFETY: a valid C string and two valid timevals.
+        assert_eq!(unsafe { libc::utimes(c.as_ptr(), [t, t].as_ptr()) }, 0);
+    }
+
+    /// A copy being written right now is a launch or a swap in progress, not a leftover.
+    #[test]
+    fn cleanup_leaves_a_copy_being_written_alone() {
+        let data = temp("clean-fresh");
+        fs::create_dir_all(hosts_dir(&data).join(".tmp-next-7")).unwrap();
+        fs::create_dir_all(hosts_dir(&data).join("old")).unwrap();
+        assert_eq!(clean_copies(&data, None), vec!["old".to_string()]);
+        assert!(hosts_dir(&data).join(".tmp-next-7").is_dir());
         let _ = fs::remove_dir_all(&data);
     }
 
