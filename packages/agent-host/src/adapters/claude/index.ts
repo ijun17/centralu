@@ -10,6 +10,8 @@ type QueryHandle = AsyncIterable<unknown> &
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
     /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
     interrupt(): Promise<unknown>
+    /** Stops one background task; a task_notification with status 'stopped' follows (sdk.d.ts, measured — #290). */
+    stopTask(taskId: string): Promise<void>
     supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
     /** Closes the query and terminates the CLI process (sdk.d.ts) — called by dispose (#157). */
     close(): void
@@ -874,6 +876,16 @@ class ClaudeSession implements SessionHandle {
   }
 
   /**
+   * Stops one background task (#290). Measured on a backgrounded shell: `background_tasks_changed` without it,
+   * `task_updated` killed and `task_notification` stopped follow at once, and the stream turns that into the
+   * session's next `background_tasks` event. A rejection is thrown to the caller, so the person hears it.
+   */
+  async stopBackgroundTask(taskId: string): Promise<void> {
+    if (!this.query || this.closed) throw new Error('The session process is not running')
+    await this.query.stopTask(taskId)
+  }
+
+  /**
    * A pending approval is **never released silently.**
    *
    * Without a notification here, the approval card stays on the screen. Its `requestId` is not in
@@ -930,7 +942,10 @@ class ClaudeSession implements SessionHandle {
     }
   }
 
-  /** Closes the card of a background agent that was still running — no notification arrives, since it disappeared with the process (#98). */
+  /**
+   * Closes the card of a background agent that was still running — no notification arrives, since it disappeared with
+   * the process (#98) — and ends every background task the session listed (#290), for the same reason.
+   */
   private releaseAgents(why: string): void {
     for (const e of this.stream.release(why)) this.emit(e)
   }
@@ -1039,6 +1054,8 @@ export class ClaudeAdapter implements AgentAdapter {
     // up to the moment I set it down is mine." Reading history here already means the SDK reading
     // the local file anyway, so skipping it would only save a few milliseconds regardless.
     exclusiveWriter: false,
+    // background_tasks_changed and the task messages (#290, ClaudeBackgroundTracker)
+    backgroundTasks: true,
   }
 
   async detect(): Promise<DetectResult> {

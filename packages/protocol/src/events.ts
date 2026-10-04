@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AppId,
   ApprovalDecision,
+  BackgroundTask,
   Attachment,
   ApprovalDetail,
   ProtocolError,
@@ -499,6 +500,22 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * comes back once the person sends `/goal` (the CLI restores the goal itself, silently).
    */
   z.object({ ...base, type: z.literal('goal'), goal: SessionGoal.nullable() }),
+  /**
+   * The session's background work changed (#290). A level, not an edge: `live` is every running task after the
+   * change and replaces the previous set, so a missed message cannot leave a task "running" forever. `ended` carries
+   * the tasks that just left, with how they ended (completed, failed, stopped) — they stay listed with that status.
+   * `clearEnded` is the host's own: the person cleared the ended ones. Apply it with `applyBackgroundTasks`.
+   *
+   * Live-only, like `goal`: never stored, and a new tool process starts from an empty set (Claude's level is
+   * per-process; a process that goes away takes its tasks with it, measured).
+   */
+  z.object({
+    ...base,
+    type: z.literal('background_tasks'),
+    live: z.array(BackgroundTask),
+    ended: z.array(BackgroundTask).optional(),
+    clearEnded: z.boolean().optional(),
+  }),
   /**
    * The update picture changed (issue #43).
    *

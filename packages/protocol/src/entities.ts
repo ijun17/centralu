@@ -106,6 +106,70 @@ export type SessionGoal = z.infer<typeof SessionGoal>
 export type SessionActivity = z.infer<typeof SessionActivity>
 
 /**
+ * One piece of work an agent runs in the background of a session (#290): a subagent, a backgrounded shell command,
+ * an MCP task. The adapter maps its tool's own report onto this — Claude's `background_tasks_changed` and task
+ * messages, Codex's child threads — and an adapter that cannot see its background work reports nothing rather than
+ * guessing.
+ *
+ *   kind           what it is. A tool's kind that fits none of the first three is `other`; an unknown word from a
+ *                  newer host reads as `other` too, instead of failing the whole event
+ *   parentCallId   the tool call that started it, when known: Claude's `Agent` or `Bash` tool_use id, Codex's
+ *                  `spawnAgent` collab item. For an agent this is also the key of its recorded steps (#222)
+ *   ambient        housekeeping the tool itself says is not activity (Claude's flag). Listed, never counted
+ *   stopsWithTurn  what interrupting the session's turn does to it, as measured per tool: true stops it, false
+ *                  leaves it running, absent means not measured. Claude: a subagent stops, a shell continues;
+ *                  Codex: a child agent continues (probe-background-tasks.mts, probe-codex-background.mts)
+ *   stoppable      it can be stopped on its own (`agents.stopBackgroundTask`)
+ *   status         running while it is in the live set; an ended task keeps how it ended
+ */
+export const BackgroundTaskKind = z.enum(['agent', 'shell', 'mcp', 'other'])
+export type BackgroundTaskKind = z.infer<typeof BackgroundTaskKind>
+export const BackgroundTaskStatus = z.enum(['running', 'completed', 'failed', 'stopped'])
+export type BackgroundTaskStatus = z.infer<typeof BackgroundTaskStatus>
+export const BackgroundTask = z.object({
+  id: z.string(),
+  kind: BackgroundTaskKind.catch('other'),
+  description: z.string(),
+  parentCallId: z.string().optional(),
+  ambient: z.boolean().optional(),
+  stopsWithTurn: z.boolean().optional(),
+  stoppable: z.boolean().optional(),
+  status: BackgroundTaskStatus.catch('completed').default('running'),
+  /** How it ended, in the tool's words (a failure's reason, a stop's cause). Ended tasks only */
+  summary: z.string().optional(),
+})
+export type BackgroundTask = z.infer<typeof BackgroundTask>
+
+/** How many ended tasks a session keeps listed. Enough for one burst of parallel agents, small enough to stay a list */
+export const BACKGROUND_ENDED_KEPT = 10
+
+/**
+ * The one way a session's task list moves (#290) — the host's manager, the UI's reducer and the mock all call this,
+ * so the three cannot drift apart.
+ *
+ * `live` replaces every running entry (REPLACE semantics: a missed edge cannot leave a stale "running"). `ended`
+ * adds tasks that just left, with their status; an ended task stays listed until `clearEnded` or until it is pushed
+ * out by newer ones (`BACKGROUND_ENDED_KEPT`). A task that leaves the live set with no `ended` entry simply
+ * disappears — the adapter did not say how it ended, and nothing here guesses.
+ */
+export function applyBackgroundTasks(
+  prev: readonly BackgroundTask[],
+  e: { live: readonly BackgroundTask[]; ended?: readonly BackgroundTask[]; clearEnded?: boolean },
+): BackgroundTask[] {
+  const live = e.live.map((t) => ({ ...t, status: 'running' as const }))
+  const liveIds = new Set(live.map((t) => t.id))
+  const fresh = (e.ended ?? []).filter((t) => !liveIds.has(t.id) && t.status !== 'running')
+  const freshIds = new Set(fresh.map((t) => t.id))
+  const kept = e.clearEnded ? [] : prev.filter((t) => t.status !== 'running' && !liveIds.has(t.id) && !freshIds.has(t.id))
+  return [...live, ...[...kept, ...fresh].slice(-BACKGROUND_ENDED_KEPT)]
+}
+
+/** The running tasks that count as activity — what the header, the sidebar and the idle check count (ambient excluded) */
+export function liveBackgroundTasks(tasks: readonly BackgroundTask[]): BackgroundTask[] {
+  return tasks.filter((t) => t.status === 'running' && !t.ambient)
+}
+
+/**
  * A tool's identifier — open, not a fixed list.
  *
  * This was `z.enum(['claude', 'codex'])`, which meant every vendor had to be taught to
@@ -589,6 +653,12 @@ export const AdapterCapabilities = z.object({
    * default is false.
    */
   exclusiveWriter: z.boolean().default(false),
+  /**
+   * Whether this tool reports its background work (#290, the `background_tasks` event). Not an optional method:
+   * reporting is a stream of events, and nothing else says whether silence means "none running" or "cannot see".
+   * The idle check (#297) needs that difference — a session whose background work is invisible is never called idle.
+   */
+  backgroundTasks: z.boolean().default(false),
 })
 export type AdapterCapabilities = z.infer<typeof AdapterCapabilities>
 

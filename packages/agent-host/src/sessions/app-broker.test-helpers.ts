@@ -64,7 +64,7 @@ export class FakeHandle implements SessionHandle {
 export class FakeAdapter implements AgentAdapter {
   descriptor: AgentAdapter['descriptor']
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   loggedIn = true
   /** How to answer what the agent receives — silence by default (the test decides) */

@@ -41,7 +41,7 @@ class FakeAdapter implements AgentAdapter {
   constructor(readonly tool: ToolName) {}
   descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   seen: CreateSessionOpts[] = []
   /** The event sink received per session — the test emits turns in place of the tool */

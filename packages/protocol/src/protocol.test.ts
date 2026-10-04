@@ -6,7 +6,10 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
+  applyBackgroundTasks,
   ATTACHMENT_MAX_BASE64,
+  type BackgroundTask,
+  liveBackgroundTasks,
   NormalizedEvent,
   PROTOCOL_VERSION,
   parseClientFrame,
@@ -150,6 +153,14 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     goal: { objective: 'All tests green', status: 'active', iterations: 2, reason: '1 failing', tokenBudget: null, tokensUsed: 300 },
   },
   { type: 'goal', sessionId: 's1', goal: null },
+  // A session's background work (#290): the live set, and the tasks that just ended with their status
+  {
+    type: 'background_tasks',
+    sessionId: 's1',
+    live: [{ id: 'a1', kind: 'agent', description: 'probe sleeper', parentCallId: 'toolu_a', stopsWithTurn: true, stoppable: true }],
+    ended: [{ id: 'b1', kind: 'shell', description: 'sleep 191', status: 'stopped', summary: 'sleep 191' }],
+  },
+  { type: 'background_tasks', sessionId: 's1', live: [], clearEnded: true },
   { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: 'process exited', retryable: true } },
   /*
    * An event that does not belong to a session (issue #43). It must parse **even without**
@@ -359,5 +370,44 @@ describe('SessionId', () => {
     const ok = { sessionId: 's1', name: 'a.png', mime: 'image/png' }
     expect(save.safeParse({ ...ok, dataBase64: 'AAAA' }).success).toBe(true)
     expect(save.safeParse({ ...ok, dataBase64: 'A'.repeat(ATTACHMENT_MAX_BASE64 + 1) }).success).toBe(false)
+  })
+})
+
+describe("a session's background tasks (#290)", () => {
+  const task = (id: string, extra: Partial<BackgroundTask> = {}): BackgroundTask => ({ id, kind: 'agent', description: id, status: 'running', ...extra })
+
+  it('the live set replaces every running entry, and a task that left without an ending disappears', () => {
+    const before = applyBackgroundTasks([], { live: [task('a'), task('b')] })
+    expect(before.map((t) => t.id)).toEqual(['a', 'b'])
+    expect(applyBackgroundTasks(before, { live: [task('b')] }).map((t) => [t.id, t.status])).toEqual([['b', 'running']])
+  })
+
+  it('an ended task stays listed with its status until cleared, and the newest ones are kept', () => {
+    let list = applyBackgroundTasks([], { live: [task('a'), task('b')] })
+    list = applyBackgroundTasks(list, { live: [task('b')], ended: [task('a', { status: 'stopped' })] })
+    list = applyBackgroundTasks(list, { live: [] })
+    expect(list.map((t) => [t.id, t.status])).toEqual([['a', 'stopped']])
+    // A later ending for the same task replaces it rather than listing it twice
+    list = applyBackgroundTasks(list, { live: [], ended: [task('a', { status: 'failed' })] })
+    expect(list.map((t) => [t.id, t.status])).toEqual([['a', 'failed']])
+    for (let i = 0; i < 12; i++) list = applyBackgroundTasks(list, { live: [], ended: [task('e' + i, { status: 'completed' })] })
+    expect(list).toHaveLength(10)
+    expect(list.at(-1)?.id).toBe('e11')
+    expect(applyBackgroundTasks(list, { live: [task('z')], clearEnded: true }).map((t) => t.id)).toEqual(['z'])
+  })
+
+  it('a task back in the live set is running again, not listed as ended too', () => {
+    const ended = applyBackgroundTasks([], { live: [], ended: [task('a', { status: 'stopped' })] })
+    expect(applyBackgroundTasks(ended, { live: [task('a')] }).map((t) => [t.id, t.status])).toEqual([['a', 'running']])
+  })
+
+  it('only running tasks that are activity count — ambient and ended ones do not', () => {
+    const list = [task('a'), task('w', { ambient: true }), task('x', { status: 'stopped' })]
+    expect(liveBackgroundTasks(list).map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('an unknown kind from a newer host reads as other instead of failing the event', () => {
+    const e = NormalizedEvent.parse({ type: 'background_tasks', sessionId: 's1', live: [{ id: 'm', kind: 'monitor', description: 'watch' }] })
+    expect(e.type === 'background_tasks' && e.live[0]).toMatchObject({ kind: 'other', status: 'running' })
   })
 })

@@ -1,4 +1,4 @@
-import type { ApprovalDetail, NormalizedEvent, SessionGoal, ToolSummary } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, NormalizedEvent, SessionGoal, ToolSummary } from '@cc/protocol'
 import { UnmappedTypes } from '../unmapped.js'
 
 /**
@@ -691,6 +691,135 @@ export class ClaudeGoalTracker {
   }
 }
 
+type TaskInfo = { kind: BackgroundTask['kind']; description: string; parentCallId?: string; ambient?: boolean; nested?: boolean }
+
+/** A Claude task type to the kind the screen shows (#290). Read loosely: the SDK documents the field as open. */
+function taskKind(type: string): BackgroundTask['kind'] {
+  if (/agent|teammate/.test(type)) return 'agent'
+  if (/bash|shell/.test(type)) return 'shell'
+  if (/mcp|monitor/.test(type)) return 'mcp'
+  return 'other'
+}
+
+/**
+ * The session's background work, read off the parent stream (#290).
+ *
+ * `system/background_tasks_changed` is the level: every live task after a change (`task_id`, `task_type`,
+ * `description`, `ambient`), with REPLACE semantics (sdk.d.ts). It carries no tool_use_id, so the launching call
+ * comes from `task_started`, which arrived just after the level for the same task every time it was measured
+ * (probe-background-tasks.mts). `task_notification` is how a task ended: `completed`, `failed` or `stopped`.
+ *
+ * What interrupting the turn does was measured, and is what `stopsWithTurn` says: a background subagent stops with
+ * the turn (`task_notification` stopped, in the same millisecond), a backgrounded shell keeps running. A task a
+ * subagent started, and any other kind, was not measured, so it carries nothing. Every task can be stopped on its own
+ * (`Query.stopTask`, measured on a shell: the same three messages as an interrupt's).
+ *
+ * The level is per process and nothing is sent at startup (sdk.d.ts), so a new tracker starts empty. When the
+ * process goes away its tasks go with it, silently (measured: `close()` killed a running shell and nothing was
+ * emitted) — `release` says so.
+ */
+export class ClaudeBackgroundTracker {
+  /** Ids in the last level, in its order. */
+  private live: string[] = []
+  /** Every id the level ever listed — only those are background work (a foreground task's ending is its card's). */
+  private readonly seen = new Set<string>()
+  private readonly info = new Map<string, TaskInfo>()
+
+  constructor(private readonly sessionId: string) {}
+
+  push(m: Json): NormalizedEvent[] {
+    if (str(m.type) !== 'system') return []
+    const subtype = str(m.subtype)
+    if (subtype === 'background_tasks_changed') {
+      const tasks = (Array.isArray(m.tasks) ? m.tasks : []) as Json[]
+      this.live = []
+      for (const t of tasks) {
+        const id = str(t.task_id)
+        if (!id) continue
+        const prev = this.info.get(id)
+        this.info.set(id, {
+          ...prev,
+          kind: taskKind(str(t.task_type)),
+          description: str(t.description, prev?.description ?? ''),
+          ...(t.ambient === true ? { ambient: true } : { ambient: undefined }),
+        })
+        this.live.push(id)
+        this.seen.add(id)
+      }
+      return [this.event()]
+    }
+    if (subtype === 'task_started' || subtype === 'task_updated') {
+      const id = str(m.task_id)
+      const prev = this.info.get(id)
+      if (!id) return []
+      if (subtype === 'task_started') {
+        const callId = str(m.tool_use_id)
+        const depth = typeof m.spawn_depth === 'number' ? m.spawn_depth : 1
+        this.info.set(id, {
+          ...prev,
+          kind: str(m.task_type) ? taskKind(str(m.task_type)) : (prev?.kind ?? 'other'),
+          description: prev?.description || str(m.description),
+          ...(callId ? { parentCallId: callId } : {}),
+          ...(m.owned_by_subagent === true || depth > 1 ? { nested: true } : {}),
+          ...(m.ambient === true ? { ambient: true } : {}),
+        })
+      } else {
+        const description = str((m.patch as Json | undefined)?.description)
+        if (!prev || !description) return []
+        this.info.set(id, { ...prev, description })
+      }
+      return this.live.includes(id) ? [this.event()] : []
+    }
+    if (subtype === 'task_notification') {
+      const id = str(m.task_id)
+      const known = this.info.get(id)
+      if (!this.seen.has(id)) return []
+      this.seen.delete(id)
+      this.info.delete(id)
+      this.live = this.live.filter((x) => x !== id)
+      const raw = str(m.status)
+      const status = raw === 'failed' || raw === 'stopped' ? raw : 'completed'
+      const summary = str(m.summary).slice(0, 300)
+      return [this.event([{ ...this.entry(id, known), status, ...(summary ? { summary } : {}) }])]
+    }
+    return []
+  }
+
+  /** The process went away and took its tasks with it — each live one ends as stopped, with the reason. */
+  release(why: string): NormalizedEvent[] {
+    if (this.live.length === 0) return []
+    const ended = this.live.map((id) => ({ ...this.entry(id, this.info.get(id)), status: 'stopped' as const, summary: why }))
+    this.live = []
+    this.info.clear()
+    this.seen.clear()
+    return [this.event(ended)]
+  }
+
+  private entry(id: string, i: TaskInfo | undefined): BackgroundTask {
+    const kind = i?.kind ?? 'other'
+    const stopsWithTurn = i?.nested ? undefined : kind === 'agent' ? true : kind === 'shell' ? false : undefined
+    return {
+      id,
+      kind,
+      description: i?.description || id,
+      ...(i?.parentCallId ? { parentCallId: i.parentCallId } : {}),
+      ...(i?.ambient ? { ambient: true } : {}),
+      ...(stopsWithTurn !== undefined ? { stopsWithTurn } : {}),
+      stoppable: true,
+      status: 'running',
+    }
+  }
+
+  private event(ended?: BackgroundTask[]): NormalizedEvent {
+    return {
+      type: 'background_tasks',
+      sessionId: this.sessionId,
+      live: this.live.map((id) => this.entry(id, this.info.get(id))),
+      ...(ended ? { ended } : {}),
+    }
+  }
+}
+
 /**
  * Every message type the adapter handles or leaves out on purpose, keyed as `type`, or `system/<subtype>` for system
  * messages. Anything else is said once per session in host.log (`UnmappedTypes`, #58). The groups follow the #58
@@ -710,9 +839,11 @@ const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
   // mapped
   'assistant', 'user', 'result', 'stream_event', 'rate_limit_event', 'active_goal', 'system/init', 'system/status',
   'system/compact_boundary', 'system/local_command_output', 'system/task_notification',
+  // mapped by #290 (ClaudeBackgroundTracker)
+  'system/background_tasks_changed', 'system/task_started', 'system/task_updated',
   // ignored by #58
-  'tool_progress', 'system/task_started', 'system/task_updated', 'system/task_progress', 'system/hook_started',
-  'system/hook_progress', 'system/hook_response', 'system/thinking_tokens', 'system/background_tasks_changed',
+  'tool_progress', 'system/task_progress', 'system/hook_started', 'system/hook_progress', 'system/hook_response',
+  'system/thinking_tokens',
   // correctly ignored
   'system/control_request_progress', 'system/plugin_install', 'system/session_state_changed',
   'system/worker_shutting_down', 'system/files_persisted', 'system/elicitation_complete', 'prompt_suggestion',
@@ -773,9 +904,13 @@ export class ClaudeStreamNormalizer {
   /** Message types this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
   private readonly unmapped: UnmappedTypes
 
+  /** The session's background work (see `ClaudeBackgroundTracker`). */
+  readonly tasks: ClaudeBackgroundTracker
+
   constructor(private readonly sessionId: string) {
     this.goal = new ClaudeGoalTracker(sessionId)
     this.unmapped = new UnmappedTypes('claude', sessionId, CLAUDE_KNOWN_TYPES)
+    this.tasks = new ClaudeBackgroundTracker(sessionId)
   }
 
   /** The adapter interrupted the turn (see `stopping` above). */
@@ -788,10 +923,11 @@ export class ClaudeStreamNormalizer {
     const type = str(m.type)
     const subagent = str(m.parent_tool_use_id) !== ''
     this.unmapped.note(type === 'system' ? `system/${str(m.subtype)}` : type)
+    const tasks = this.tasks.push(m)
 
     if (type === 'system' && str(m.subtype) === 'task_notification') {
       const callId = str(m.tool_use_id)
-      if (!this.background.delete(callId)) return []
+      if (!this.background.delete(callId)) return tasks
       const status = str(m.status, 'completed')
       const usage = (m.usage ?? {}) as Json
       /*
@@ -810,9 +946,9 @@ export class ClaudeStreamNormalizer {
         summary: output.slice(0, 300),
         ...(output ? { output } : {}),
       }
-      if (!this.textStreamed && !this.reasoningStreamed) return [done]
+      if (!this.textStreamed && !this.reasoningStreamed) return [...tasks, done]
       this.deferred.push(done)
-      return []
+      return tasks
     }
 
     if (type === 'user' && !subagent) {
@@ -820,10 +956,13 @@ export class ClaudeStreamNormalizer {
       if (launched) this.background.add(launched)
     }
 
-    let events = normalizeMessage(msg, this.sessionId, {
-      textStreamed: this.textStreamed,
-      reasoningStreamed: this.reasoningStreamed,
-    })
+    let events = [
+      ...tasks,
+      ...normalizeMessage(msg, this.sessionId, {
+        textStreamed: this.textStreamed,
+        reasoningStreamed: this.reasoningStreamed,
+      }),
+    ]
     if (subagent) return events
     /*
      * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in
@@ -881,6 +1020,8 @@ export class ClaudeStreamNormalizer {
     const out: NormalizedEvent[] = this.deferred.splice(0)
     for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })
     this.background.clear()
+    // The reason above names an agent's card; a background shell went the same way, so its ending says what happened
+    out.push(...this.tasks.release('Ended with the session process'))
     return out
   }
 }

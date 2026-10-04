@@ -109,6 +109,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'sessions.rename': { sessionId: S, name: 'for the check' },
   'sessions.markRead': { sessionId: S, seq: 0 },
   'agents.interrupt': { sessionId: S },
+  'agents.clearBackgroundTasks': { sessionId: S },
   'agents.archiveSession': { sessionId: S, archived: false },
   'agents.resumeSession': { sessionId: S },
   'orchestrator.get': {},

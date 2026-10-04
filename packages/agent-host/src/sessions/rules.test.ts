@@ -13,7 +13,7 @@ function fakeAdapter(applied: string[][]): AgentAdapter {
   return {
     tool: 'claude',
     descriptor: { name: 'claude', label: 'Claude Code', mark: 'C', install: 'npm i -g x', login: 'x login' },
-    capabilities: { approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false },
+    capabilities: { approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false },
     detect: async () => ({ tool: 'claude', installed: true, loggedIn: true, detail: 'fake' }),
     createSession: async (opts): Promise<SessionHandle> => ({
       sessionId: opts.sessionId,

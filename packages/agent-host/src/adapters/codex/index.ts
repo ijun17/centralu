@@ -28,6 +28,7 @@ import { listCodexModels } from './models.js'
 import {
   approvalDetailFrom,
   childSteps,
+  CodexChildTracker,
   CODEX_KNOWN_NOTIFICATIONS,
   fileChangesOf,
   goalFromCodex,
@@ -294,6 +295,8 @@ class CodexSession implements SessionHandle {
   private unlinkedCount = 0
   /** Notification methods this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
   private readonly unmapped: UnmappedTypes
+  /** The child agents running in the background (#290, see `CodexChildTracker`). */
+  private readonly children: CodexChildTracker
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
@@ -303,6 +306,7 @@ class CodexSession implements SessionHandle {
   ) {
     this.sessionId = opts.sessionId
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
+    this.children = new CodexChildTracker(opts.sessionId)
     this.client = new CodexClient(
       {
         onNotification: (n) => this.onNotification(n),
@@ -318,6 +322,8 @@ class CodexSession implements SessionHandle {
          * way to find the actual cause.
          */
         onExit: (code, expected) => {
+          // The child threads lived in that process (#290) — closed by us or not, they are gone
+          this.releaseChildren()
           if (expected) return
           this.emit({
             type: 'error',
@@ -572,6 +578,7 @@ class CodexSession implements SessionHandle {
      * steps under the `spawnAgent` card that launched it, which the host stores apart from the conversation.
      */
     if (typeof from === 'string' && this.threadId !== null && from !== this.threadId) {
+      for (const e of this.children.push(from, n)) this.emit(e)
       this.onChildNotification(from, n)
       this.noteSpawn(n)
       return
@@ -655,6 +662,7 @@ class CodexSession implements SessionHandle {
     for (const thread of receivers) {
       if (typeof thread !== 'string' || this.childCalls.has(thread)) continue
       this.childCalls.set(thread, item.id)
+      for (const e of this.children.link(thread, item.id, typeof item.prompt === 'string' ? item.prompt : '')) this.emit(e)
       const held = this.unlinked.get(thread) ?? []
       this.unlinked.delete(thread)
       this.unlinkedCount -= held.length
@@ -1096,6 +1104,23 @@ class CodexSession implements SessionHandle {
   }
 
   /**
+   * Stops one child agent (#290) by interrupting its own turn — measured to stop it (`turn/completed {interrupted}`
+   * on the child), where interrupting the parent's turn leaves it running. Its ending arrives through the child's
+   * notifications like any other. A command the child was running is not killed by Codex's interrupt (measured: its
+   * process outlived the interrupt), which is Codex's own behaviour for every interrupted turn.
+   */
+  async stopBackgroundTask(taskId: string): Promise<void> {
+    const turnId = this.children.turnOf(taskId)
+    if (!turnId) throw new Error('That child agent has no running turn to stop')
+    await this.client.request('turn/interrupt', { threadId: taskId, turnId })
+  }
+
+  /** The app-server is gone, and the child threads with it — each still listed ends as stopped. */
+  private releaseChildren(): void {
+    for (const e of this.children.release('Ended with the session process')) this.emit(e)
+  }
+
+  /**
    * The watchdog for a background resume (lazy resume only). If resume fails or exceeds the
    * ceiling after the handle has already been handed out, we cannot just go quietly to sleep — we
    * raise adapter_crashed so the manager retires the handle and the "resend if missing" automatic
@@ -1152,6 +1177,8 @@ class CodexSession implements SessionHandle {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
     }
     this.approvals.clear()
+    // Said before the process goes, while this handle is still the session's (the manager drops a stale handle's events)
+    this.releaseChildren()
     /*
      * The case of dying together with messages that were waiting for a compact to finish — the
      * screen already shows them as sent (the manager records them first), so dropping them
@@ -1254,6 +1281,8 @@ export class CodexAdapter implements AgentAdapter {
     // translates). This is a guarantee that every record change while we hold the handle is ours,
     // and the manager marks a catch-up skip on top of it (the basis for skipping a 48.6MB/8-second thread/read).
     exclusiveWriter: true,
+    // Child agents, from their threads' status and turns (#290, CodexChildTracker)
+    backgroundTasks: true,
   }
 
   async detect(): Promise<DetectResult> {

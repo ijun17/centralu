@@ -2111,6 +2111,7 @@ export class MockPlatform implements Platform {
       verbosities: tool === 'codex' ? ['low', 'medium', 'high'] : [],
       // The same shape as the real thing: only codex has a writer lock (the UI does not read this yet, but the shape follows the real thing)
       exclusiveWriter: tool === 'codex',
+      backgroundTasks: true,
     }),
     detect: async () => this.detected,
     subscribe: (handler: (e: NormalizedEvent) => void): Unsubscribe => {

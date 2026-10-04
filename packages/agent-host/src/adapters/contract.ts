@@ -497,6 +497,16 @@ export interface SessionHandle {
    */
   listCommands?(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
   interrupt(): void
+  /**
+   * Stops one background task (#290) by the id its `background_tasks` entry carries. Only a task marked `stoppable`
+   * is asked for. The ending arrives as an ordinary `background_tasks` event; a rejection is thrown, so the person
+   * hears that it did not stop. An adapter that cannot stop a task alone leaves this unimplemented.
+   *
+   * **Reporting background work is the `background_tasks` event, declared by `capabilities.backgroundTasks`.** An
+   * adapter that reports it also releases it: when its process goes away it sends the last live set empty, with the
+   * tasks it held as ended (`stopped`) — the work went with the process (measured for both tools).
+   */
+  stopBackgroundTask?(taskId: string): Promise<void>
   dispose(): Promise<void>
 }
 

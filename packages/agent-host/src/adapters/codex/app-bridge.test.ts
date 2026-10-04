@@ -42,7 +42,7 @@ class NullAdapter implements AgentAdapter {
   tool: ToolName = 'codex'
   descriptor = { name: 'codex', label: 'Codex', mark: 'X', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: true,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: true, backgroundTasks: false,
   }
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }

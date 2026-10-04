@@ -47,7 +47,7 @@ class Handle implements SessionHandle {
 class Adapter implements AgentAdapter {
   descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   created: Handle[] = []
   /** The process holding a resumed conversation — from the moment it starts coming up until it closes (mimics Codex's write lock) */

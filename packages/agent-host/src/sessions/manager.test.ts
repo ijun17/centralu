@@ -104,7 +104,7 @@ class FakeAdapter implements AgentAdapter {
   tool: ToolName = 'claude'
   descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'npm i -g x', login: 'x login' }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   last: FakeHandle | null = null
   /** Tools that come only to the orchestrator — the test checks whether they are attached or not. */
@@ -560,7 +560,7 @@ describe('RPC in general', () => {
 describe('loading past sessions', () => {
   class ListingAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
     }
     listed: { cwd: string; limit: number } | null = null
     read: { externalId: string; cwd: string } | null = null
@@ -936,7 +936,7 @@ describe('a record unchanged outside is not read again', () => {
    */
   class LockingAdapter extends SyncAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: true,
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: true, backgroundTasks: false,
     }
   }
 
@@ -1129,7 +1129,7 @@ describe('settings drift is judged against the process, not the screen value', (
 describe('a deleted session can be recovered from the past-conversations list', () => {
   class ListingAdapter2 extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
     }
     async listExternalSessions() {
       return [{ externalId: 'ext-past', title: 'Work from yesterday', updatedAt: 111 }]
@@ -1183,7 +1183,7 @@ describe('a deleted session can be recovered from the past-conversations list', 
 describe('when the tool cannot find the conversation', () => {
   class GoneAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
     }
     /** The list of ids the tool will answer that it has. */
     present: string[] = ['ext-1']

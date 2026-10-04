@@ -27,6 +27,7 @@ import {
   QuestionAnswer,
   SessionActivity,
   SessionGoal,
+  BackgroundTask,
   SessionId,
   ProjectId,
   SessionState,
@@ -235,6 +236,11 @@ export const SessionInfo = z.object({
    */
   goal: SessionGoal.nullable().default(null),
   /**
+   * The agent's background work (#290): every running task, then the ended ones still listed with how they ended.
+   * Live-only like `goal` — the tool process holds these tasks, and a new process starts with none.
+   */
+  backgroundTasks: z.array(BackgroundTask).default([]),
+  /**
    * A coordinating session's view allowlist (#80, #81 — unnamed core handle #1).
    *
    * The sessions visible to the orchestrator tool of a session with kind='coordinator'. The host
@@ -330,7 +336,16 @@ export type UpdateSettingsResult = z.infer<typeof UpdateSettingsResult>
  */
 export function sessionLiveDefaults(): Pick<
   SessionInfo,
-  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'worktreeMerged' | 'worktreePr' | 'goal'
+  | 'pendingApproval'
+  | 'pendingQuestions'
+  | 'activity'
+  | 'limit'
+  | 'usage'
+  | 'context'
+  | 'worktreeMerged'
+  | 'worktreePr'
+  | 'goal'
+  | 'backgroundTasks'
 > {
   return {
     pendingApproval: null,
@@ -345,6 +360,8 @@ export function sessionLiveDefaults(): Pick<
     worktreePr: null,
     // The goal (2026-09-07) follows the same principle — the tool tells us again
     goal: null,
+    // Background tasks (#290) live in the tool process, and a new one starts with none
+    backgroundTasks: [],
   }
 }
 
@@ -586,6 +603,17 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   'agents.interrupt': { params: z.object({ sessionId: SessionId }), result: z.object({ ok: z.literal(true) }) },
+  /**
+   * Stops one background task of the session (#290) — only one the adapter marked `stoppable`. Claude stops it with
+   * `stopTask`, Codex by interrupting the child thread's own turn. The task leaves the live set through the session's
+   * next `background_tasks` event, with its ending, as for any other ending; this only asks.
+   */
+  'agents.stopBackgroundTask': {
+    params: z.object({ sessionId: SessionId, taskId: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** Takes the ended tasks off the session's list (#290). Running ones stay; they are the tool's to end */
+  'agents.clearBackgroundTasks': { params: z.object({ sessionId: SessionId }), result: z.object({ ok: z.literal(true) }) },
   /**
    * Moves a session to the trash (#204). Nothing is destroyed here: the rows, the attachments, the handoff note, the
    * tool's conversation file and the worktree all stay until the person deletes it for good in Settings

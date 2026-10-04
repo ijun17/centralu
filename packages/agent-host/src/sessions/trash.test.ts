@@ -36,7 +36,7 @@ class EchoAdapter implements AgentAdapter {
   readonly descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
   readonly capabilities = {
     approvals: true, contextUsage: 'exact' as const, resume: true, autoTitle: true, attachments: [],
-    verbosities: [], exclusiveWriter: false,
+    verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'echo' }

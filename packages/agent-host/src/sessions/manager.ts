@@ -43,7 +43,9 @@ import type {
 } from '@cc/protocol'
 import {
   APP_SLUG,
+  applyBackgroundTasks,
   DATA_DIR,
+  liveBackgroundTasks,
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
   // also needs to put words into a session built with the same frame.
   frameField,
@@ -2627,9 +2629,19 @@ export class SessionManager {
       this.handles.get(e.sessionId) !== from &&
       e.type !== 'approval_resolved' &&
       e.type !== 'question_resolved' &&
-      e.type !== 'tool_result'
+      e.type !== 'tool_result' &&
+      e.type !== 'background_tasks'
     ) {
       return
+    }
+    /*
+     * A set-aside handle's background work (#290) — only its endings are its to say. Its tasks went with its process,
+     * and the live set belongs to the handle now registered, which a late empty set from the old one must not wipe.
+     */
+    if (from && e.type === 'background_tasks' && this.handles.get(e.sessionId) !== from) {
+      const m = this.meta.get(e.sessionId)
+      if (!m || !e.ended?.length) return
+      return this.onEvent({ ...e, live: m.backgroundTasks.filter((t) => t.status === 'running') })
     }
     if (e.type === 'subagent_event') {
       this.recordSubagentStep(e)
@@ -2847,6 +2859,10 @@ export class SessionManager {
         // The goal (2026-09-07) is a live field too — after a restart, the tool tells us again (codex fetches
         // it on resume)
         m.goal = e.goal
+        break
+      case 'background_tasks':
+        // The same merge the UI's reducer and the mock run (#290), so a reconnect reads back what the screen showed
+        m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
         break
     }
   }
@@ -4060,6 +4076,49 @@ export class SessionManager {
       .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId === projectId))
       .map((r) => r.matcher)
       .filter(Boolean)
+  }
+
+  /**
+   * Stops one of the session's background tasks (#290). Only a task the adapter listed as running and stoppable is
+   * asked for — an id from an old list, or a task the tool cannot stop alone, is refused with a reason instead of
+   * being sent. The ending arrives as the session's next `background_tasks` event.
+   */
+  async stopBackgroundTask(sessionId: string, taskId: string): Promise<void> {
+    const handle = this.requireHandle(sessionId)
+    const task = this.meta.get(sessionId)?.backgroundTasks.find((t) => t.id === taskId && t.status === 'running')
+    if (!task) throw Object.assign(new Error('That background task is no longer running'), { code: 'task_gone' })
+    if (!task.stoppable || !handle.stopBackgroundTask) {
+      throw Object.assign(new Error('This task cannot be stopped on its own'), { code: 'unsupported' })
+    }
+    await handle.stopBackgroundTask(taskId)
+  }
+
+  /** Takes the ended tasks off the session's list (#290); the running ones stay. */
+  clearBackgroundTasks(sessionId: string): void {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const e: NormalizedEvent = { type: 'background_tasks', sessionId, live: m.backgroundTasks.filter((t) => t.status === 'running'), clearEnded: true }
+    m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
+    this.emit(e)
+  }
+
+  /**
+   * Whether the session is fully idle (#290, for #297): its process can be swapped without losing work. Not idle
+   * while a turn runs, while an approval or a question waits, or while a background task that is activity runs —
+   * the tool holds that work in its process, and a restart ends it. A tool that cannot report its background work
+   * is never called idle while its process lives: silence there does not mean nothing is running. A session with no
+   * process is idle, since it holds nothing.
+   */
+  sessionIdle(sessionId: string): { idle: true } | { idle: false; reason: 'turn' | 'approval' | 'question' | 'background' | 'background_unknown' } {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (m.pendingApproval) return { idle: false, reason: 'approval' }
+    if (m.pendingQuestions.length > 0) return { idle: false, reason: 'question' }
+    if (inTurn(m.state)) return { idle: false, reason: 'turn' }
+    if (!this.handles.has(sessionId)) return { idle: true }
+    if (liveBackgroundTasks(m.backgroundTasks).length > 0) return { idle: false, reason: 'background' }
+    if (!this.adapters.get(m.tool)?.capabilities.backgroundTasks) return { idle: false, reason: 'background_unknown' }
+    return { idle: true }
   }
 
   interrupt(sessionId: string): void {

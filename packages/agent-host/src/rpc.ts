@@ -104,6 +104,15 @@ export function createRpcHandler(
       mgr.interrupt(RpcMethods['agents.interrupt'].params.parse(p).sessionId)
       return { ok: true as const }
     },
+    'agents.stopBackgroundTask': async (p) => {
+      const { sessionId, taskId } = RpcMethods['agents.stopBackgroundTask'].params.parse(p)
+      await mgr.stopBackgroundTask(sessionId, taskId)
+      return { ok: true as const }
+    },
+    'agents.clearBackgroundTasks': async (p) => {
+      mgr.clearBackgroundTasks(RpcMethods['agents.clearBackgroundTasks'].params.parse(p).sessionId)
+      return { ok: true as const }
+    },
     // Deleting moves the session to the trash (#204); only the trash.* methods below remove anything for good
     'agents.deleteSession': async (p) => {
       const { sessionId, deleteWorktree, deleteExternal } = RpcMethods['agents.deleteSession'].params.parse(p)

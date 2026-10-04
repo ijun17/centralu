@@ -43,7 +43,7 @@ class FakeAdapter implements AgentAdapter {
   readonly tool: ToolName = 'claude'
   descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }

@@ -40,7 +40,7 @@ class CapturingAdapter implements AgentAdapter {
   tool: ToolName = 'claude'
   descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   seen: CreateSessionOpts[] = []
   async detect() {
