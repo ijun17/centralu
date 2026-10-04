@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
@@ -1379,7 +1379,7 @@ describe('the same conversation is not opened by two at once', () => {
 describe('catching up on a conversation continued outside', () => {
   class SyncAdapter extends FakeAdapter {
     /** The conversation the tool holds (this grows when continued from the terminal). */
-    toolHistory: { role: 'user' | 'assistant'; text: string }[] = []
+    toolHistory: HistoryMessage[] = []
     async listExternalSessions() {
       return [{ externalId: 'ext-1', title: 'Conversation', updatedAt: 1 }]
     }
@@ -1435,6 +1435,45 @@ describe('catching up on a conversation continued outside', () => {
     await m.resumeSession(s.id)
 
     expect(await texts(call, s.id)).toEqual(['First question'])
+  })
+
+  /*
+   * #303: Codex's record names where it compacted (`contextCompaction` in thread/read), and a live compaction leaves
+   * a marker. The record's compaction point is stored as that same marker — once, whether it was seen live or not.
+   */
+  const rows = async (call: ReturnType<typeof createRpcHandler>, id: string) =>
+    ((await call('messages.load', { sessionId: id, limit: 200 })) as { kind: string; payload: { text?: string; type?: string } }[])
+      .map((r) => (r.kind === 'marker' ? `[${r.payload.type}]` : r.payload.text))
+  const compaction = { role: 'system', marker: 'compaction' } as const
+
+  it('stores a compaction in the tool\'s record as the marker a live compaction leaves (import)', async () => {
+    const { a, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: 'First question' }, { role: 'assistant', text: 'First answer' }, compaction, { role: 'user', text: 'after' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    expect(await rows(call, s.id)).toEqual(['First question', 'First answer', '[compaction]', 'after'])
+    const stored = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).find((r) => r.kind === 'marker')!
+    expect(stored).toMatchObject({ role: 'system', payload: { type: 'compaction', sessionId: s.id, failed: false } })
+  })
+
+  it('a compaction seen live is not stored again when catching up, and one that ran outside is', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: 'First question' }, { role: 'assistant', text: 'First answer' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    // A /compact while the app watched: the adapter's marker is stored live
+    a.last!.emitEvent({ type: 'compaction', sessionId: s.id, failed: false })
+    await m.disposeAll()
+    // The tool's record has that compaction too, then work continued in the terminal, compacting once more there
+    a.toolHistory.push(compaction, { role: 'user', text: 'said in the terminal' }, compaction, { role: 'assistant', text: 'a terminal answer' })
+    await m.resumeSession(s.id)
+    expect(await rows(call, s.id)).toEqual([
+      'First question', 'First answer', '[compaction]', 'said in the terminal', '[compaction]', 'a terminal answer',
+    ])
   })
 
   it('does not append when the last message we know cannot be found (better than piling up a duplicate)', async () => {

@@ -279,6 +279,25 @@ function payloadText(payload: unknown): string {
   return typeof text === 'string' ? text : String(text ?? '')
 }
 
+/**
+ * A line read back from the tool into a stored row. A compaction point becomes the same row a live `compaction` event
+ * leaves (`onEvent`: kind marker, the event as its payload), so the screen and the handoff pivot cannot tell them
+ * apart (#303).
+ */
+function historyRow(sessionId: string, seq: number, h: HistoryMessage, fallbackTs: number): StoredMessage {
+  const ts = h.ts ?? fallbackTs
+  if (h.role === 'system') {
+    return { sessionId, seq, role: 'system', kind: 'marker', payload: { type: 'compaction', sessionId, failed: false }, ts }
+  }
+  return { sessionId, seq, role: h.role, kind: 'text', payload: { text: h.text }, ts }
+}
+
+/** A stored marker of a compaction that folded something (a failed one did not) */
+function isCompactionMarker(row: StoredMessage): boolean {
+  const p = row.payload as { type?: string; failed?: boolean } | null
+  return row.kind === 'marker' && p?.type === 'compaction' && !p.failed
+}
+
 /** In a turn — producing an answer or waiting for approval. Anything else (awaiting input, idle,
  * limit hit, error) means the turn is over (C-4) */
 const inTurn = (state: SessionState): boolean => state === 'working' || state === 'waiting_approval'
@@ -1715,7 +1734,8 @@ export class SessionManager {
     let start = -1
     if (lastText) {
       for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i]!.text.trim() === lastText) {
+        const h = history[i]!
+        if (h.role !== 'system' && h.text.trim() === lastText) {
           start = i + 1
           break
         }
@@ -1728,18 +1748,25 @@ export class SessionManager {
       return 0
     }
 
-    const fresh = history.slice(start)
+    /*
+     * A compaction right after that message may already be ours (#303): one that ran while this host was watching
+     * left its marker live, and the tool's record has the same compaction at the same spot. Those are skipped, as
+     * many as our record holds after its last message, so the marker is stored once. One that ran outside the app
+     * is not in our record and is attached like any other line.
+     */
+    let known = 0
+    for (let i = ours.length - 1; i >= 0 && ours[i]!.kind !== 'text'; i--) {
+      if (isCompactionMarker(ours[i]!)) known++
+    }
+    let skip = 0
+    while (skip < known && history[start + skip]?.role === 'system') skip++
+    const fresh = history.slice(start + skip)
+    if (fresh.length === 0) {
+      mark()
+      return 0
+    }
     const base = this.store.nextSeq(info.id)
-    this.store.appendMessages(
-      fresh.map((h, i) => ({
-        sessionId: info.id,
-        seq: base + i,
-        role: h.role,
-        kind: 'text' as const,
-        payload: { text: h.text },
-        ts: h.ts ?? Date.now(),
-      })),
-    )
+    this.store.appendMessages(fresh.map((h, i) => historyRow(info.id, base + i, h, Date.now())))
     info.lastSeq = base + fresh.length - 1
     // This is a message that happened outside — since it was never read here, it stays marked unread
     this.store.upsertSession(info)
@@ -1784,14 +1811,7 @@ export class SessionManager {
     // Fetched once and incremented locally (otherwise every row would land on the same seq and overwrite each
     // other).
     const base = this.store.nextSeq(info.id)
-    const rows: StoredMessage[] = history.map((h, i) => ({
-      sessionId: info.id,
-      seq: base + i,
-      role: h.role,
-      kind: 'text' as const,
-      payload: { text: h.text },
-      ts: h.ts ?? info.createdAt,
-    }))
+    const rows: StoredMessage[] = history.map((h, i) => historyRow(info.id, base + i, h, info.createdAt))
     this.store.appendMessages(rows)
 
     info.lastSeq = rows[rows.length - 1]!.seq
@@ -1799,7 +1819,7 @@ export class SessionManager {
     info.lastReadSeq = info.lastSeq
     if (info.autoNamed && info.name === 'New session') {
       const firstUser = history.find((h) => h.role === 'user')
-      if (firstUser) info.name = truncate(firstUser.text)
+      if (firstUser && firstUser.role === 'user') info.name = truncate(firstUser.text)
     }
     this.store.upsertSession(info)
     this.emit({ type: 'session_title', sessionId: info.id, title: info.name, auto: true })

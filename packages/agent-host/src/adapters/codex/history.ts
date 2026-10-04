@@ -147,12 +147,17 @@ export function turnsToHistory(turns: unknown, limit: number): HistoryMessage[] 
 /**
  * A ThreadItem into one line of conversation.
  *
- * Only picks up the two kinds we know about (userMessage, agentMessage). Everything else
+ * Only picks up the kinds we know about (userMessage, agentMessage, contextCompaction). Everything else
  * (reasoning, commandExecution, fileChange, ...) is **passed over as unknown** — even if codex
  * adds a new item kind, this does not break, it just does not show up.
+ *
+ * A compaction is kept as a marker (#303). Measured (codex-cli 0.147.0, 0.153.4 and 0.160.0, 2026-10-04):
+ * `thread/read` returns it as `{ type: 'contextCompaction', id }` in the turn where it ran — a turn of its own for a
+ * manual compaction, and ahead of the userMessage for an automatic one — so its position among the lines is right.
  */
 function itemToMessage(item: unknown, ts?: number): HistoryMessage | null {
   const it = (item ?? {}) as Record<string, unknown>
+  if (it.type === 'contextCompaction') return { role: 'system', marker: 'compaction', ts }
   if (it.type === 'agentMessage') {
     const text = str(it.text)
     return text ? { role: 'assistant', text, ts } : null

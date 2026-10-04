@@ -134,13 +134,44 @@ describe('codex — thread/list · thread/read', () => {
     ])
   })
 
+  /*
+   * #303: the shape thread/read gave on codex-cli 0.160.0 (scripts/probe-codex-compaction.mts, 2026-10-04). A manual
+   * compaction is a turn of its own holding only the item; an automatic one opens the turn that triggered it, ahead
+   * of its userMessage. Without this the marker a live compaction leaves was missing from every imported conversation.
+   */
+  it('keeps a compaction as a marker, where it ran (manual and automatic)', () => {
+    const out = turnsToHistory(
+      [
+        { startedAt: 1, items: [{ type: 'userMessage', content: [{ type: 'text', text: 'ready?' }] }, { type: 'agentMessage', text: 'ready' }] },
+        { startedAt: 2, items: [{ type: 'contextCompaction', id: 'c1' }] },
+        {
+          startedAt: 3,
+          items: [
+            { type: 'contextCompaction', id: 'c2' },
+            { type: 'userMessage', content: [{ type: 'text', text: 'and now?' }] },
+            { type: 'agentMessage', text: 'after' },
+          ],
+        },
+      ],
+      100,
+    )
+    expect(out).toEqual([
+      { role: 'user', text: 'ready?', ts: 1000 },
+      { role: 'assistant', text: 'ready', ts: 1000 },
+      { role: 'system', marker: 'compaction', ts: 2000 },
+      { role: 'system', marker: 'compaction', ts: 3000 },
+      { role: 'user', text: 'and now?', ts: 3000 },
+      { role: 'assistant', text: 'after', ts: 3000 },
+    ])
+  })
+
   it('keeps the most recent conversation past the limit (trims the older side)', () => {
     const turns = [
       {
         items: Array.from({ length: 10 }, (_, i) => ({ type: 'agentMessage', text: `m${i}` })),
       },
     ]
-    expect(turnsToHistory(turns, 3).map((m) => m.text)).toEqual(['m7', 'm8', 'm9'])
+    expect(turnsToHistory(turns, 3).map((m) => (m.role === 'system' ? m.marker : m.text))).toEqual(['m7', 'm8', 'm9'])
   })
 
   it('gives an empty conversation when turns is missing or malformed', () => {

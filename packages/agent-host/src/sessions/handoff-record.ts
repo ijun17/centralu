@@ -29,9 +29,12 @@ import type { StoredMessage } from '@cc/protocol'
  * again.
  *
  * **The pivot is optional.** If there is a last compaction marker, material is filled from there
- * and the tool's own summary is placed above it. Measured: codex sessions have **zero** compaction
- * markers in our store (compaction happens inside its own rollout file). A rule that assumes a
- * pivot only holds for claude, so when there is none, only the recency cap is applied.
+ * and the tool's own summary is placed above it. Measured: codex sessions used to have **zero**
+ * compaction markers in our store — the marker came only from `thread/compacted`, which no measured
+ * CLI sends (#303). Codex now leaves one from its `contextCompaction` item, but a session stored
+ * before that, or a conversation imported from a tool whose record names no compaction, still has
+ * none, so when there is none, only the recency cap is applied. Material is folded away only when
+ * a summary exists, and a remote (encrypted) codex compaction has none (#267).
  */
 
 /**
