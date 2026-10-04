@@ -167,6 +167,8 @@ UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
 host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
                 → attempt resume with the externalId from the store (the same path as FR-10)
+host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
+                → clients reconnect to the same address and resync on the new streamEpoch
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
 ```
@@ -198,11 +200,11 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 
 | 요청 | 답 |
 |---|---|
-| `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 포트와 토큰, 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동 |
+| `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 정문의 포트와 토큰(§4.2), 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동, 지금 또는 마지막 교체(`swap`), 교체 때 호스트가 에이전트를 넘겨주는지(`keepsAgents`) |
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다 |
 | `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit and stop agents") |
-| `{"op":"switch","source":…}` | 그 빌드로 호스트를 다시 띄운다(빌드 표식은 그 폴더에서 다시 읽는다) |
-| `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry |
+| `{"op":"switch","source":…}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. 교체 중의 두 번째 `switch`는 거절한다 |
+| `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry (교체 중에는 거절) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |
 
 **옛 폴더.** 기본 데이터 폴더를 무엇이 만들기 전에, 앱과 키퍼가 이름을 바꾸기 전의 폴더를 `data-dir.ts`와
@@ -220,6 +222,42 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 
 `scripts/keeper-integration.mjs`가 진짜 바이너리(`cargo build`, `/tmp`로)와 진짜 번들 호스트로 임시
 `CC_DATA_DIR`에서 이것을 전부 몰아 본다.
+
+### 4.2 호스트에서 본 정문과 교체 (#280, 옵션 C 3단계)
+
+설계는 [architecture.ko.md](architecture.ko.md) §4.2에 있다. 호스트가 하는 일:
+
+**토큰과 주소는 키퍼에게서.** 키퍼 아래에서 호스트는 `CC_HOST_TOKEN`(정문의 토큰, 키퍼가 돌리는 모든 호스트에
+같다)과 `CC_FRONT_DOOR`(`ws://127.0.0.1:<door>`)를 받고, 읽은 뒤 둘 다 환경에서 지워 터미널·에이전트·명령이
+물려받지 않게 한다. Codex 브리지는 정문 주소로 띄운다(`swap-control.ts`, `bridgeAddress`): 도는 codex는 브리지를
+계속 쥐고, 이 호스트보다 오래 사는 주소만 교체를 견딘다. 키퍼가 없으면 예전처럼 호스트 자신의 포트를 준다.
+
+**stdin의 제어 줄** (`swap-control.ts`). 키퍼의 파이프는 한 줄에 JSON 객체 하나씩도 나른다. 호스트는 준비 줄
+옆 stdout으로 답한다. 어느 쪽도 상대가 하는 다른 말은 해석하지 않는다.
+
+| 키퍼 → 호스트 | 호스트 → 키퍼 |
+|---|---|
+| (`--standby`로 띄움) | 자기 점검을 통과하면 `{"standby":{pid,schema}}` |
+| `{"op":"activate"}` | 일을 시작하면 평소의 준비 줄 |
+| `{"op":"drain","timeoutMs":N}` | `{"drained":{waitedFor,cut,ms,keptAgents}}`, 그리고 끝난다 |
+| — | 시작할 때마다 한 번 `{"swap":{"keepsAgents":bool}}` |
+
+**대기(standby).** 소유 잠금 전에: 호스트는 번들을 읽었고 도구를 찾았다. 저장소를 읽기 전용으로 읽고
+(`Store.inspect`), `min_reader_version`이 자기보다 높으면 "written by a newer Centralu" 문장을 말하고 1로 끝나서,
+도는 호스트를 건드리기 전에 교체가 실패한다. 아니면 보고하고 `activate`를 기다린다. 파이프가 닫히면(키퍼가
+포기했다) 아무것도 건드리지 않은 채 끝난다. 대기 중에는 듣지 않는다: 정문이 포트를 가리고, 서버는 세션 관리자가
+필요하며 그것은 쓰기용으로 연 저장소가 필요하다.
+
+**드레인** (`drain.ts`). 모든 WebSocket RPC와 모든 프로세스 안 MCP 도구 호출(오케스트레이터 도구, 앱 도구
+프록시)이 추적기 하나를 지난다. `drain`이 오면 새 호출은 거절하고 도는 호출에 한도를 준다. 한도가 지나면 각
+호출에 "호스트가 빌드를 바꾸느라 기다리기를 멈췄고, 호출은 끝났을 수도 아닐 수도 있으니 확인하고 다시 부르라"는
+오류로 답한다. 거절과 끊기에서 나온 RPC 오류는 `retryable: true`다. 그 다음 차례로: 끊긴 호출의 오류가 에이전트에
+닿을 잠깐, **detach 훅** `stopServices('detach')`, 잠금 놓기, `drained` 쓰기, 종료. **2단계 전까지 detach 훅은
+stop과 같은 일을 한다**(터미널·명령·세션·앱 프로세스를 멈춘다). 2단계가 `stopServices('detach')`를 키퍼가 쥔
+에이전트·터미널·명령을 놓아주는 일로 바꾸고 `KEEPS_AGENTS_ACROSS_SWAP`을 켠다.
+
+**넘겨받기.** `activate` 뒤에 호스트는 잠금을 잡고 저장소를 `swap: true`로 연다: 확장 단계는 지금 돌고, 무거운
+단계와 깨는 단계는 준비 줄 뒤에 돈다(§5.1).
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 
@@ -260,8 +298,15 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
    재시도하지 않고 곧바로 그 문장을 보여 준다. 스토어보다 오래되었지만 기록 이상인 호스트는 스토어를 열고, 자기가
    모르는 단계는 실행하지 않는다.
 4. **무거운 단계는 `heavy: true`로 표시한다:** 모든 메시지를 고쳐 쓰거나 다시 색인하거나 `VACUUM`하는 단계(지금까지
-   v3, v11, v21, v40; v40은 메시지 137,722개에서 시작을 1.9초 붙잡았다). 그러면 교체는 이 단계들을 전환 도중이 아니라
-   전환 뒤에 돌릴 수 있다.
+   v3, v11, v21, v40; v40은 메시지 137,722개에서 시작을 1.9초 붙잡았다). 교체는 이 단계들을 전환 도중이 아니라
+   전환 뒤에 돌린다.
+5. **교체 중에는 (#280 3단계)** 넘겨받는 호스트가 확장 단계를 돌리고, 무거운 단계와 깨는 단계는 모두 `runDeferred`로
+   미룬다. 이것은 준비 줄 바로 뒤, 정문이 이 호스트를 가리키고 바뀐 호스트가 완전히 사라진 다음에 부른다. 이전 빌드는
+   넓혀진 저장소를 여전히 읽으므로, 준비되기 전에 실패한 새 호스트는 다시 이전 빌드로 바꿀 수 있다. 깨는 단계가 바로
+   그것을 막는 것이다. `user_version`은 미룬 단계를 지나가고, 아직 남은 것은 `app_settings.deferred_migrations`가
+   적는다: 먼저 죽은 호스트는 그것을 다음 열기에 남기고, 다음 열기가 제자리에서 돌린다. 그래서 무거운 단계와 깨는
+   단계는 나중 단계 뒤에 돌아도 맞아야 하고, 그 단계를 싣는 빌드는 그 단계가 돌기 전에도 동작해야 한다(줄이기 단계는
+   규칙 2로, 무거운 단계는 코드가 어느 쪽이든 읽는 데이터만 모양을 바꾸는 것으로 이를 지킨다).
 
 | 단계 | 하는 일 | 옛 빌드 |
 |---|---|---|

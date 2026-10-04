@@ -186,6 +186,8 @@ UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
 host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
                 → attempt resume with the externalId from the store (the same path as FR-10)
+host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
+                → clients reconnect to the same address and resync on the new streamEpoch
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
 ```
@@ -218,11 +220,11 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 
 | request | answer |
 |---|---|
-| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, port and token, build source, background mode, attached windows, activity |
+| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and token (§4.2), build source, background mode, attached windows, activity, the current or last swap (`swap`) and whether the host keeps agents across one (`keepsAgents`) |
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit and stop agents") |
-| `{"op":"switch","source":…}` | restarts the host from that build (the build stamp is re-read from its folder) |
-| `{"op":"restart"}` | Retry after the host gave up |
+| `{"op":"switch","source":…}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. A second `switch` during a swap is refused |
+| `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
 
 **The legacy folder.** Before anything creates the default data folder, the app and the keeper move the
@@ -240,6 +242,44 @@ starting ends too: the app that launched it died first.
 
 `scripts/keeper-integration.mjs` drives all of this with the real binary (`cargo build` into `/tmp`) and the
 real bundled host against a temporary `CC_DATA_DIR`.
+
+### 4.2 The front door and the swap, seen from the host (#280, option C step 3)
+
+The design is in [architecture.md](architecture.md) §4.2. What the host does:
+
+**Token and address from the keeper.** Under the keeper the host gets `CC_HOST_TOKEN` (the front door's token,
+the same for every host the keeper runs) and `CC_FRONT_DOOR` (`ws://127.0.0.1:<door>`), and deletes both from its
+environment once read, so terminals, agents and commands do not inherit them. The Codex bridge is started with the
+front door's address (`swap-control.ts`, `bridgeAddress`): a running codex keeps its bridge, and only an address
+that outlives this host survives a swap. Without a keeper the bridge gets the host's own port, as before.
+
+**Control lines on stdin** (`swap-control.ts`). The keeper's pipe also carries one JSON object per line; the host
+answers on stdout next to its ready line. Neither side parses anything else the other says.
+
+| keeper → host | host → keeper |
+|---|---|
+| (started with `--standby`) | `{"standby":{pid,schema}}` once its own checks pass |
+| `{"op":"activate"}` | the ordinary ready line once it serves |
+| `{"op":"drain","timeoutMs":N}` | `{"drained":{waitedFor,cut,ms,keptAgents}}`, then it exits |
+| — | `{"swap":{"keepsAgents":bool}}` once per start |
+
+**Standby.** Before the ownership lock: the host has loaded its bundle and found its tools; it reads the store
+read-only (`Store.inspect`) and, if `min_reader_version` is past it, says the "written by a newer Centralu" sentence
+and exits 1, so the swap fails while the running host is untouched. Otherwise it reports and waits for `activate`;
+the pipe closing (the keeper gave up) ends it without having touched anything. It does not listen in standby: the
+front door hides the port, and the server needs the session manager, which needs the store open for writing.
+
+**Drain** (`drain.ts`). Every WebSocket RPC and every in-process MCP tool call (the orchestrator tools, the
+app-tool proxy) runs through one tracker. On `drain`, new calls are refused and running ones get the bound; past
+it each is answered with an error saying the host switched builds and stopped waiting, that the call may or may
+not have finished, and to check and call again. RPC errors from a refusal or a cut carry `retryable: true`. Then,
+in order: a moment for a cut call's error to reach its agent, the **detach hook** `stopServices('detach')`, the
+lock released, `drained` written, exit. **Until step 2 the detach hook does what a stop does** (terminals,
+commands, sessions and app processes are stopped); step 2 makes `stopServices('detach')` release the
+keeper-held agents, terminals and commands instead, and flips `KEEPS_AGENTS_ACROSS_SWAP`.
+
+**Taking over.** After `activate` the host takes the lock and opens the store with `swap: true`: expand steps run
+now, heavy and breaking steps run after its ready line (§5.1).
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 
@@ -282,8 +322,16 @@ step against:
    The desktop supervisor shows it at once instead of retrying. A host older than the store but at or above the
    record opens it and runs no step it does not know.
 4. **Heavy steps are marked `heavy: true`:** a step that rewrites or re-indexes every message, or `VACUUM`s (v3, v11,
-   v21, v40 so far; v40 held the start for 1.9s on 137,722 messages). A swap can then run them after the switch
-   rather than during it.
+   v21, v40 so far; v40 held the start for 1.9s on 137,722 messages). A swap runs them after the switch rather
+   than during it.
+5. **During a swap (#280 step 3)** the host taking over runs the expand steps and leaves every heavy or breaking
+   step for `runDeferred`, which it calls just after its ready line, once the front door points at it and the host
+   it replaced is gone for good. The previous build still reads an expanded store, so a new host that fails before
+   it is ready can be replaced by the previous build again; a breaking step is exactly what would stop that.
+   `user_version` moves past a deferred step, and `app_settings.deferred_migrations` lists what is still owed: a
+   host that dies first leaves it to the next open, which runs it in its place. So a heavy or breaking step must
+   be correct when it runs after later steps, and the build that ships it must work before it has run (a contract
+   step keeps this by rule 2; a heavy step by only reshaping data the code reads either way).
 
 | Steps | What they do | Older build |
 |---|---|---|

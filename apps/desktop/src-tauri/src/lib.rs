@@ -104,8 +104,8 @@ fn host_build(sup: State<'_, Supervisor>) -> HostBuild {
     sup.build()
 }
 
-/// Restarts the host from this window's build (#280). The UI confirms first that running turns
-/// will be cut.
+/// Switches the host to this window's build with the keeper's blue-green swap (#280 step 3). The
+/// swap's progress reaches the UI in `host-build`.
 #[tauri::command]
 fn switch_host_build(sup: State<'_, Supervisor>) -> Result<(), String> {
     sup.switch_build()

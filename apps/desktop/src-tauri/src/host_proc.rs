@@ -460,12 +460,12 @@ impl Supervisor {
     }
 
     /**
-     * Stops the running host so the watcher starts the next one at once, from attempt zero
-     * (the keeper's build switch). The launcher decides what the next one runs.
+     * Stops the running host so the watcher starts the next one at once, from attempt zero. The
+     * launcher decides what the next one runs. The keeper uses it for a `switch` while a host is
+     * still starting; a host that is up is swapped blue-green instead (`keeper/swap.rs`).
      *
      * The host is stopped the same way as on shutdown — TERM, a grace period for its own
-     * `shutdown()`, then the group — so a switch cuts running turns exactly as a quit always
-     * did, and no more than that. Returns false when no host is running.
+     * `shutdown()`, then the group. Returns false when no host is running.
      */
     pub fn bounce(&self) -> bool {
         let pid = match self.inner.lock() {

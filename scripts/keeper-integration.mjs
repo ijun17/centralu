@@ -17,7 +17,7 @@
  *   - a second keeper on the same folder defers to the first and starts no second host;
  *   - background off: killing the attached client stops the host and the keeper;
  *   - background on: killing it leaves both running, a new client re-attaches to the same host,
- *     a switch restarts the host from another build and removes the old copy, and the keeper
+ *     a switch moves the host to another build and removes the old copy, and the keeper
  *     ends itself after the idle limit with nothing attached — but not while a terminal is open;
  *   - stop ends everything;
  *   - a keeper killed outright takes its host with it, and a new keeper takes the folder over.

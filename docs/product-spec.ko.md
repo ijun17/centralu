@@ -228,8 +228,12 @@ come back to the desk
   켜짐: 앱을 닫거나 꺼도 호스트와 도는 턴이 계속 가고, 앱을 다시 열면 복원할 것 없이 그대로 다시 붙는다 — 기다리던
   승인은 여전히 기다리고 있다. 종료 대화상자의 **Quit and stop agents**는 어느 쪽이든 멈춘다. 지켜보는 이 없는
   호스트는 창도 없고 도는 것도 없이 30분이 지나면 스스로 멈춘다. 다른 빌드로 다시 연 앱은 그렇다고 말하고 자기
-  빌드로 호스트를 다시 띄우자고 권한다. 그러면 도는 턴이 끊긴다(확인 창에 적힌다). 데스크톱 전용이고 키퍼가
-  필요하다([architecture.ko.md](architecture.ko.md) §4.1).
+  빌드로 호스트를 바꾸자고 권한다. 바꾸기는 블루그린 교체다(#280 3단계): 새 빌드가 도는 호스트 옆에서 뜨고, 도는
+  호스트는 자기가 직접 처리하는 호출을 마칠 시간을 최대 10초 받고, 창은 잠깐 뒤 다시 붙는다. 막대는 단계마다 보여
+  주고, 실패하면 이유와 지금 어느 빌드가 일하는지 보여 준다. 잃을 것이 있을 때만(일하거나 기다리는 세션, 터미널,
+  명령) 먼저 묻고, 무엇을 잃는지 말한다: 키퍼가 에이전트를 쥐기 전까지(2단계) 바꾸기는 여전히 도는 턴을 멈춘다.
+  그 뒤로는 10초가 지나도록 도는 오케스트레이터나 앱 도구 호출만 멈추고, 에이전트에게 다시 시도하라고 알린다.
+  데스크톱 전용이고 키퍼가 필요하다([architecture.ko.md](architecture.ko.md) §4.1–4.2).
 
 #### FR-11. 오케스트레이터 세션 (2026-08-25 구현, issues #13 · #30 — 이 절은 실제로 만들어진 것을 기술한다)
 
@@ -604,10 +608,12 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
                                │ unix socket (attach, host info, stop, switch)
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │  keeper — the same executable as `centralu --keeper`, detached         │
-│  · launches, watches and restarts the host · per-build host copies    │
+│  · launches, watches, restarts and swaps the host · per-build copies  │
+│  · the front door: one stable port and token, relayed to the host     │
 └──────────────────────────────┬────────────────────────────────────────┘
-                               │ the UI talks to the host directly over
-                               │ WebSocket (same protocol dev and prod)
+                               │ the UI talks to the host over WebSocket
+                               │ (same protocol dev and prod), through
+                               │ the keeper's front door in the app
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │                      Node sidecar (Agent Host)                        │
 │  · ClaudeAdapter (Claude Agent SDK)   · CodexAdapter (app-server RPC) │

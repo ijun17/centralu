@@ -607,7 +607,8 @@ fn attach(k: Arc<Keeper>, mut stream: UnixStream, mut reader: BufReader<UnixStre
     }
 }
 
-/// Restarts the host from the requesting app's build. The build stamp is re-read from the folder
+/// Switches the host to the requesting app's build: a blue-green swap when a host is up
+/// (`swap.rs`), else the next start runs it. The build stamp is re-read from the folder
 /// rather than taken from the request, so the keeper's record says what will actually run.
 fn switch(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
     let asked: Option<BuildSource> = req.get("source").cloned().and_then(|s| serde_json::from_value(s).ok());

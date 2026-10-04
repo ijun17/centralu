@@ -185,8 +185,8 @@ answered once; a repeat is ignored.
 
 ## The keeper's control socket
 
-The keeper (`centralu --keeper`, #280) is a new trust boundary: through its socket a process can read the host's
-port and token, stop the host, and make the keeper run a host from another folder (`switch`). The rule is the same
+The keeper (`centralu --keeper`, #280) is a new trust boundary: through its socket a process can read the front
+door's port and token, stop the host, and make the keeper run a host from another folder (`switch`). The rule is the same
 as for the token itself, which only this user can read: **only this user's processes get in.**
 
 - The socket is `<data>/keeper.sock`, created under `umask 077` so it is born `0600`, with no window before a chmod.
@@ -205,6 +205,29 @@ Limits:
   the keeper run code of its choosing — which that process could do by itself anyway. It is not a privilege
   boundary between processes of the same user, and is not meant to be one.
 - The socket is local only. Windows has no keeper yet (named pipes and their ACLs are not written).
+
+### The front door
+
+Under the keeper, clients connect to the keeper's **front door** (#280 step 3), which relays bytes to the current
+host. It changes where a client connects, not what it must prove:
+
+- It listens on **loopback only** (`127.0.0.1`), on a port chosen when the keeper starts. Any process on this
+  machine can open a TCP connection to it, exactly as it could to a host before. The door adds no authentication of
+  its own and checks nothing: every byte goes to the host, which still requires the token in `hello` and still
+  applies the `Origin` rule to the browser's own header (the relay passes the upgrade request through unchanged).
+- **The token is the keeper's**, 16 random bytes from `/dev/urandom`, one per keeper lifetime. It reaches clients
+  only through the user-only control socket, and hosts only through their environment (`CC_HOST_TOKEN`). The host
+  deletes it from its environment once read, so terminals, agents, commands and app processes do not inherit it;
+  app processes never received `CC_*` variables anyway. A process's initial environment can still be read by the
+  same user (`ps eww` on macOS), which is the same trust as the control socket. It is never written to
+  `keeper.json`, `keeper.log` or `host.log`.
+- A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
+  the agents it serves; a keeper restart makes a new one.
+- The Codex orchestrator bridge is given the front door's address and token in its environment (codex starts it),
+  as it was given the host's before.
+- While no host is ready, the door holds a connection up to 45 s before closing it, so an unauthenticated
+  connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
+  timeout (10 s) applies.
 
 ## App servers
 

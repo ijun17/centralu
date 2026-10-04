@@ -226,9 +226,14 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   agents, as before. On: closing or quitting the app leaves the host and its running turns going, and reopening the
   app re-attaches to them with nothing to restore — a waiting approval is still waiting. **Quit and stop agents** in
   the quit dialog stops them either way. An unwatched host stops by itself after 30 minutes with no window open and
-  nothing running. A reopened app of a different build says so and offers to restart the host on its own build,
-  which cuts running turns (said in the confirmation). Desktop only; it needs the keeper
-  ([architecture.md](architecture.md) §4.1).
+  nothing running. A reopened app of a different build says so and offers to switch the host to its own build.
+  Switching is a blue-green swap (#280 step 3): the new build starts next to the running host, which gets up to
+  10 seconds to finish the calls it serves itself, and the window reconnects in a moment. The bar shows each step
+  and, if the switch fails, why and which build serves now. It asks first only when something can be lost (a
+  session working or waiting, a terminal or a command), and says what: until the keeper holds agents (step 2) a
+  switch still stops running turns; after that, only an orchestrator or app tool call still running after 10
+  seconds is stopped, and the agent is told to try it again. Desktop only; it needs the keeper
+  ([architecture.md](architecture.md) §4.1–4.2).
 
 #### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
@@ -609,10 +614,12 @@ the host does the work, and the UI talks to the host over one WebSocket that is 
                                │ unix socket (attach, host info, stop, switch)
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │  keeper — the same executable as `centralu --keeper`, detached         │
-│  · launches, watches and restarts the host · per-build host copies    │
+│  · launches, watches, restarts and swaps the host · per-build copies  │
+│  · the front door: one stable port and token, relayed to the host     │
 └──────────────────────────────┬────────────────────────────────────────┘
-                               │ the UI talks to the host directly over
-                               │ WebSocket (same protocol dev and prod)
+                               │ the UI talks to the host over WebSocket
+                               │ (same protocol dev and prod), through
+                               │ the keeper's front door in the app
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │                      Node sidecar (Agent Host)                        │
 │  · ClaudeAdapter (Claude Agent SDK)   · CodexAdapter (app-server RPC) │

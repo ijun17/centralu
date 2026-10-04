@@ -98,10 +98,11 @@ same Centralu executable started as `centralu --keeper`, detached from the app i
 
 ```
 Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own session)
-   │                 unix socket     │ launch · watch · restart (the old supervisor)
+   │                 unix socket     │ launch · watch · restart · swap
    │                 <data>/keeper.sock, 0600
-   │                                 ▼
-   └──── WebSocket ws://127.0.0.1:PORT ────▶ agent-host (node, from <data>/hosts/<build>/)
+   │                                 │
+   └── WebSocket ──▶ front door ─────┴─ bytes ─▶ agent-host (node, from <data>/hosts/<build>/)
+       ws://127.0.0.1:DOOR   (one port and token per keeper)
 ```
 
 | Decision | Why |
@@ -112,12 +113,48 @@ Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own sessio
 | Every host runs from a per-build copy, `<data>/hosts/<commit>/` | A rebuild or update rewrites the bundle; a host running from it read the Codex bridge, `schema.sql` and `app-template/` on demand and could mix two builds (2026-10-03). Copies no host uses are removed once a host is up. |
 | Background mode is a setting, off by default | Off: the last window detaching stops the keeper and host, as quitting always did. On: they keep running, and a relaunched app re-attaches. "Quit and stop agents" stops them either way. |
 | An unwatched keeper in background mode exits after 30 minutes with no window and no activity | Something has to end a host nobody is watching. Activity (a working or waiting session, a terminal, a command run) is the host's own report on its stdout; the keeper parses nothing else. A running turn or a waiting approval keeps it alive however long that takes. |
-| A window of another build attaches to the running host and offers to switch | The keeper knows both builds. Switching restarts the host from the window's build after a confirmation that running turns are cut. Swapping without a cut is step 3. |
+| A window of another build attaches to the running host and offers to switch | The keeper knows both builds. Switching is the blue-green swap of §4.2; the window confirms first only when something can be lost. |
 | Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a debug build in. Non-unix targets have no keeper yet. |
 
-What the keeper does not do yet: hold agents, terminals or project commands (step 2), or swap hosts without
-cutting turns (step 3). A host restart still ends every child of the host. The control socket, its protocol
-and its trust rule are in [agent-host.md](agent-host.md) §4.1 and [security-boundaries.md](security-boundaries.md).
+What the keeper does not do yet: hold agents, terminals or project commands (step 2). Until it does, a host
+restart or swap still ends every child of the host. The control socket, its protocol and its trust rule are in
+[agent-host.md](agent-host.md) §4.1 and [security-boundaries.md](security-boundaries.md).
+
+### 4.2 The front door and the blue-green swap (#280, option C step 3)
+
+Clients never learn a host's own port. The keeper listens on one loopback port for its whole life, the **front
+door**, and relays every connection byte for byte to whichever host is current. The webview, a browser and every
+Codex orchestrator bridge connect there.
+
+| Decision | Why |
+|---|---|
+| A byte relay, not a WebSocket proxy | The keeper parses no protocol (#280): a relay of bytes cannot be broken by a change to the host's frames, and the HTTP door for app views rides it unchanged. |
+| The keeper owns the token and hands it to every host (`CC_HOST_TOKEN`) | The host keeps checking `hello` and the browser's `Origin` itself; the token and the port stay the same across restarts and swaps, so a client never has to be told again. Measured hazard it removes: a Codex bridge gets its address and token once, when its thread starts, and a running codex keeps that bridge, so a host on a new port or token silently cut every bridge. |
+| While no host is ready, a new connection is held (up to 45 s), not refused | A client that reconnects at once lands on the next host as soon as it is up, instead of failing and backing off. Measured: a client cut by a swap was greeted by the new host 84–86 ms later. |
+| The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives a swap. The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
+
+`switch` is a **blue-green swap** (`keeper/swap.rs`):
+
+1. The keeper starts host B from the new build's per-build copy with `--standby`. B loads its bundle, finds its
+   tools, reads the store without writing to it, refuses a store past what it can read, reports, and waits. It takes
+   no lock, runs no migration and attaches to nothing. Host A keeps serving.
+2. No report within 60 s, or B exits: B is stopped and its copy removed. A was never touched.
+3. The front door holds new connections; A is told to **drain**: it refuses new RPCs and tool calls, gives the
+   running ones up to 10 s, cuts the rest with an error the model can retry, detaches, flushes and closes the store,
+   lets go of the #278 lock and exits.
+4. B is told to activate: it takes the lock, runs only expand migrations (heavy and breaking steps run after it is
+   ready, [agent-host.md](agent-host.md) §5.1), starts, listens and reports ready.
+5. The front door points at B and closes what was still relayed to A; clients reconnect to the same address and
+   resync on B's new stream epoch. A's copy is removed.
+
+| Decision | Why |
+|---|---|
+| Drain bound 10 s, then cut with a retryable error | Only calls the host serves itself need to drain: orchestrator tools took at most 0.2 s and app tools at most 5.6 s in a real store. Bash and subagents run inside the agent's process, which outlives the host. Draining every tool was never an option (p99 78 s, max 4.5 h). |
+| B checks itself before A drains, and migrates only after | A failed check costs nothing: A is untouched. Expand-only steps during the swap keep the store readable by A's build. |
+| If B fails after A drained, A's build is started again | A has exited and released the lock, so it cannot resume; its build is known good and still reads the store, and its copy is kept until the swap succeeds. Retrying B was the alternative, but the build that just failed is the less likely one to start. The window shows the failure and that the previous build serves again; the person can retry. |
+| Every phase is pushed to attached windows (`view.swap`) | The window shows progress and a failure's reason, and asks before switching only when something can be lost: a session working or waiting, a terminal or a command. |
+| Until step 2, the swap's detach does what a shutdown does | Agents, terminals and commands are the host's children until the keeper holds them, so a swap still ends running turns. The host reports `keepsAgents: false` and the window says so; step 2 fills in the detach hook and flips the report. |
+
 
 ## 5. Data flow (summary — detail in [state-management.md](state-management.md))
 
