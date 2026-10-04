@@ -136,20 +136,38 @@ function appToolOf(toolName: string): { server: string; tool: string } | null {
 /**
  * Preset to SDK permission options.
  *
- * **Normal sends no value at all.** This app loads the user's settings, hooks and CLAUDE.md in
+ * **Normal sends no permission mode.** This app loads the user's settings, hooks and CLAUDE.md in
  * full (settingSources left unspecified), but was silently overriding permissions on top of that.
  * That was exactly the place where we broke our own principle of not forcing a workflow.
  *
- * But **it cannot simply be omitted.** Measured (probe-perm2.mts):
+ * On the pinned SDK (0.3.263) **it cannot simply be omitted.** Measured (the probe older comments
+ * call probe-perm2 is packages/agent-host/scripts/probe-permission-mode.mts — no file by the other
+ * name was ever committed):
  *
  *   permissionMode:'default'                our callback is called    (settings ignored)
  *   permissionMode:'bypassPermissions'      not called
  *   sending nothing at all                   our callback is called    ← settings still ignored!
  *   sending nothing + resolvePermissionModeInCli   not called          ← settings finally apply
  *
- * Even with nothing sent, the SDK still fixes the mode to 'default'. So this was on track to
- * become a change that **looked like nothing changed while it actually did**. Only explicitly
- * telling the CLI to resolve the mode itself makes the settings apply.
+ * Up to 0.3.285 the SDK fixes an omitted mode to 'default' and passes `--permission-mode
+ * default`; only the untyped `resolvePermissionModeInCli` makes it pass no flag, so the CLI
+ * resolves the mode from the settings. 0.3.286 removed that option and made its behaviour the
+ * default: an omitted mode passes no flag, and the option is an unknown key it ignores.
+ * Re-measured (#275, CLI 2.1.282, haiku, `defaultMode: 'acceptEdits'` planted in a throwaway
+ * repo's settings.local.json, a Write call, 2026-10-04):
+ *
+ *   SDK      option     flag the CLI got           init permissionMode   our callback
+ *   0.3.263  sent       none                       acceptEdits           not called
+ *   0.3.263  omitted    --permission-mode default  default               called
+ *   0.3.289  sent       none                       acceptEdits           not called
+ *   0.3.289  omitted    none                       acceptEdits           not called
+ *
+ * So normal keeps sending it **while the workspace pin is below 0.3.286** — without it, normal is
+ * silently safe. When the pin reaches 0.3.286 or later, delete the key below (normal returns `{}`)
+ * and drop it from the stand-ins in project-trust.test.ts and setting-files.test.ts. Until then it
+ * is harmless on newer SDKs, which is what lets the drift check (`pnpm drift:claude`, step 4) stop
+ * requiring the name and guard the behaviour instead: an omitted mode must still reach the CLI as
+ * no flag.
  *
  * With this value, the meaning of the three presets differs from each other for the first time —
  * before this, safe and normal were literally identical in behavior.
@@ -161,7 +179,7 @@ function appToolOf(toolName: string): { server: string; tool: string } | null {
 function permissionOptionsFor(preset: 'safe' | 'normal' | 'auto'): Record<string, unknown> {
   if (preset === 'auto') return { permissionMode: 'bypassPermissions' } // Unconditionally allowed.
   if (preset === 'safe') return { permissionMode: 'default' } // Always asks, regardless of the person's own settings.
-  return { resolvePermissionModeInCli: true } // Follows the person's own settings.
+  return { resolvePermissionModeInCli: true } // Follows the person's own settings — the key matters only below SDK 0.3.286, see above.
 }
 
 /**

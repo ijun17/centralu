@@ -24,7 +24,8 @@ import type { OrchestratorTools } from '../contract.js'
  *   4. The mode is `permissionMode` if it was given; otherwise, if `resolvePermissionModeInCli` is
  *      set, it is the settings' `defaultMode` (filtered by the CLI if the repo tried to escalate
  *      it — `filterEscalatingDefaultMode`); with neither, the SDK fixes it to 'default'. With
- *      bypassPermissions, it never asks.
+ *      bypassPermissions, it never asks. (That is the pinned SDK 0.3.263; from 0.3.286 an omitted
+ *      mode is left to the CLI with or without the option — see permissionOptionsFor, #275.)
  *
  * The user's own settings live under `CLAUDE_CONFIG_DIR` pointed at a temp folder — so this
  * machine's own ~/.claude (bypass) never mixes in.

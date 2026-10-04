@@ -120,9 +120,9 @@ interface AdapterCapabilities {
 | 도구 | 계약 | 체크 | 잡는 것 |
 |---|---|---|---|
 | Codex | `adapters/codex/protocol-contract.json` — 우리가 보내거나 읽는 모든 RPC 메서드·알림, 승인 enum 값 | `pnpm codex:bindings --check` (설치된 CLI에서 바인딩을 재생성해 우리 이름을 대조) | 메서드/알림이 프로토콜에서 사라지는 것 (변경 축 C4) |
-| Claude | `scripts/claude-sdk-drift.mjs` 안의 이름 목록 — SDK export, 옵션 키, 응답 필드, `resolvePermissionModeInCli` 같은 런타임 전용 이름 | `pnpm drift:claude` (`@latest`를 임시 폴더에 설치 — 워크스페이스는 건드리지 않는다) | 업그레이드가 우리에게 닿기 **전에** 이름이 `.d.ts`나 런타임에서 사라지는 것 |
+| Claude | `scripts/claude-sdk-drift.mjs` 안의 이름 목록 — SDK export, 옵션 키, 응답 필드 — 과 런타임 모양 검사 하나: `permissionMode`를 생략하면 CLI에 `--permission-mode` 플래그가 아예 가지 않아야 한다 (`normal` 프리셋이 여기에 기댄다, #275) | `pnpm drift:claude [버전]` (`@latest` 또는 지정한 버전을 임시 폴더에 설치 — 워크스페이스는 건드리지 않는다) | 업그레이드가 우리에게 닿기 **전에** 이름이 `.d.ts`에서 사라지거나, SDK가 생략된 모드를 다시 `default`로 굳히는 것 |
 
-둘 다 이름 검사이고, 양방향으로 돈다: 벤더는 우리가 쓰는 모든 이름을 여전히 갖고
+둘 다 이름 검사이고 (Claude의 모양 검사 하나는 예외), 양방향으로 돈다: 벤더는 우리가 쓰는 모든 이름을 여전히 갖고
 있어야 하고, 우리 소스도 목록의 모든 이름을 여전히 써야 한다 (계약이 코드보다
 오래 살아남지 못하게). 필드가 존재하되 뜻이 바뀌는 종류는 못 잡는다 — 그 종류는
 어댑터의 런타임 타당성 검사가 지킨다 (컨텍스트 눈금 `149,084%`의 교훈).

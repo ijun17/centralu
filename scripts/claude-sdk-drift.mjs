@@ -4,12 +4,14 @@
  *
  * The Codex protocol has this already (packages/agent-host/scripts/codex-bindings.mjs
  * against protocol-contract.json). The Claude side did not, and everything we know
- * about that SDK was found by hand: `resolvePermissionModeInCli` cost three discarded
- * probes, `listSessions` was found by grepping the `.d.ts`, the usage API announces
+ * about that SDK was found by hand: how the `normal` preset reaches the user's own
+ * permission mode cost three discarded probes, `listSessions` was found by grepping the
+ * `.d.ts`, the usage API announces
  * its own instability in its name. Hand-won knowledge rots silently — this script is
  * where it is written down and re-verified.
  *
- *   pnpm drift:claude
+ *   pnpm drift:claude            # @latest
+ *   pnpm drift:claude 0.3.285    # any published version — for bisecting a red run
  *
  * What it does:
  *   1. Installs @anthropic-ai/claude-agent-sdk@latest into a temp dir — never the
@@ -18,12 +20,17 @@
  *   2. Imports it and asserts the module exports the adapter imports.
  *   3. Scans the shipped .d.ts for every typed name the adapter reads — methods on
  *      the Query handle, option keys it sends, response fields it picks out.
- *   4. Scans the shipped runtime too, for the names the types do not admit:
- *      `resolvePermissionModeInCli` is what makes the `normal` permission preset
- *      follow the user's own settings (measured, probe-perm2.mts: omitting it makes
- *      the SDK freeze permissionMode to 'default'), yet as of 0.3.231 it appears
- *      only in sdk.mjs and nowhere in any .d.ts. If it leaves the runtime as
- *      quietly as it lives there, that preset dies with no error anywhere.
+ *   4. Scans the shipped runtime for the one behaviour the `normal` permission preset
+ *      rests on and the types do not state: **an omitted `permissionMode` must reach
+ *      the CLI as no `--permission-mode` flag at all**, so the CLI resolves the mode
+ *      from the user's own settings. Up to 0.3.285 the SDK pinned an omitted mode to
+ *      'default' unless the untyped option `resolvePermissionModeInCli` was sent
+ *      (measured, packages/agent-host/scripts/probe-permission-mode.mts, a.k.a. probe-perm2);
+ *      0.3.286 dropped that option and made its behaviour the default (measured live
+ *      on 0.3.289, #275). So the check is no longer "is the name there" but "is the
+ *      pin gone": the flag must be pushed only when a mode is set, and no
+ *      `?? "default"` fallback may sit between the option and that flag. If an SDK
+ *      brings the pin back, the preset silently becomes 'safe' — no error anywhere.
  *   5. Asserts every contract name still appears in adapters/claude source — the
  *      reverse direction, so this list cannot outlive the code it describes.
  *
@@ -113,10 +120,40 @@ const TYPED = [
   'last_reason',
 ]
 
-/** Names that need only exist somewhere in the shipped package, types included or not. */
-const RUNTIME_ONLY = [
-  'resolvePermissionModeInCli', // index.ts permissionOptionsFor — see header, step 4
-]
+/**
+ * Step 4: does an omitted `permissionMode` still leave the mode to the CLI? Read off the
+ * minified sdk.mjs, so it matches shapes, not names (identifiers change every build):
+ *
+ *   flag     `if(m)a.push("--permission-mode",m)` — the flag only when a mode is set.
+ *   pin      `x=y??(…"default")` where both x and y are bound as `permissionMode:` — the
+ *            0.3.285 shape, `zL=Pne??(e?.resolvePermissionModeInCli?void 0:"default")`.
+ *   inline   `permissionMode:y??…` or `permissionMode:y="default"` — the same pin
+ *            written into the object or the destructuring instead.
+ *
+ * A pattern check, stated honestly: it proves the shape we measured is still there and
+ * the shape we measured against is absent, not that the CLI honours settings. The live
+ * answer is the probe. A false red here (the SDK rewrote the code another way) costs one
+ * re-measure; a false green would need the SDK to reinstate the pin in a new shape.
+ * `mode ?? "default"` passed as a call argument (an SDK-internal plugin-delivery check
+ * in both 0.3.285 and 0.3.289) is not a pin and is deliberately not matched.
+ */
+function permissionModeFindings(src) {
+  const findings = []
+  if (!/if\(([\w$]+)\)[\w$]+\.push\("--permission-mode",\1\)/.test(src)) {
+    findings.push('runtime: `--permission-mode` is no longer pushed only when a mode is set — an omitted mode may now reach the CLI as a flag')
+  }
+  const bound = [...new Set([...src.matchAll(/\bpermissionMode:([\w$]+)/g)].map((m) => m[1]))]
+  if (bound.length > 0) {
+    const alt = bound.map((v) => v.replace(/\$/g, '\\$')).join('|')
+    const pin = src.match(new RegExp(`(?<![\\w$])(?:${alt})=(?:${alt})\\?\\?[^;]{0,160}?"default"`))
+    if (pin) findings.push(`runtime: an omitted permissionMode is pinned to 'default' again — ${pin[0]}`)
+  } else {
+    findings.push('runtime: no `permissionMode:` binding in sdk.mjs — the pin check has nothing to look at')
+  }
+  const inline = src.match(/\bpermissionMode:[\w$]+(?:\?\?|="default")[^,;}]{0,80}/)
+  if (inline) findings.push(`runtime: an omitted permissionMode is given a fallback — ${inline[0]}`)
+  return findings
+}
 
 const words = (text) => text.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []
 
@@ -144,7 +181,7 @@ const adapterSource = identifierSet(
     .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
     .map((f) => join(ADAPTER, f)),
 )
-const stale = [...EXPORTS, ...TYPED, ...RUNTIME_ONLY].filter((n) => !adapterSource.has(n))
+const stale = [...EXPORTS, ...TYPED].filter((n) => !adapterSource.has(n))
 if (stale.length > 0) {
   console.error(
     `[claude-sdk] contract is stale — ${stale.length} name(s) no longer appear in adapters/claude:\n  ` +
@@ -154,17 +191,20 @@ if (stale.length > 0) {
   process.exit(1)
 }
 
+// One optional argument: the version to check instead of @latest.
+const spec = process.argv[2] ?? 'latest'
+
 const tmp = mkdtempSync(join(tmpdir(), 'claude-sdk-drift-'))
 try {
   try {
     // --prefix keeps everything inside tmp; the repo's lockfile is never in play.
     execFileSync(
       'npm',
-      ['install', '--prefix', tmp, '--no-audit', '--no-fund', '--loglevel=error', `${PKG}@latest`],
+      ['install', '--prefix', tmp, '--no-audit', '--no-fund', '--loglevel=error', `${PKG}@${spec}`],
       { stdio: 'pipe' },
     )
   } catch (e) {
-    console.error(`[claude-sdk] could not install ${PKG}@latest:`, e.message)
+    console.error(`[claude-sdk] could not install ${PKG}@${spec}:`, e.message)
     process.exit(1)
   }
 
@@ -186,19 +226,18 @@ try {
     if (typeof mod[name] !== 'function') missing.push(`export: ${name}`)
   }
 
-  // 3 and 4 — the names, in what the package ships.
+  // 3 — the names, in what the package ships.
   const typed = identifierSet(filesIn(sdkDir, ['.d.ts']))
-  const runtime = identifierSet(filesIn(sdkDir, ['.mjs', '.js']))
   for (const name of TYPED) {
     if (!typed.has(name)) missing.push(`typed surface: ${name}`)
   }
-  for (const name of RUNTIME_ONLY) {
-    if (!typed.has(name) && !runtime.has(name)) missing.push(`runtime surface: ${name}`)
-  }
+
+  // 4 — the permission-mode handoff, in the runtime query() actually runs.
+  missing.push(...permissionModeFindings(readFileSync(join(sdkDir, 'sdk.mjs'), 'utf8')))
 
   if (missing.length > 0) {
     console.error(
-      `[claude-sdk] the SDK moved (${version}). ${missing.length} name(s) we depend on are gone:\n  ` +
+      `[claude-sdk] the SDK moved (${version}). ${missing.length} thing(s) we depend on are gone:\n  ` +
         missing.join('\n  ') +
         '\n→ adapt packages/agent-host/src/adapters/claude and update scripts/claude-sdk-drift.mjs.',
     )
@@ -206,7 +245,7 @@ try {
   }
 
   console.log(
-    `[claude-sdk] contract holds (${version}) — ${EXPORTS.length} exports, ${TYPED.length} typed names, ${RUNTIME_ONLY.length} runtime-only name all present`,
+    `[claude-sdk] contract holds (${version}) — ${EXPORTS.length} exports, ${TYPED.length} typed names present; an omitted permissionMode still reaches the CLI as no flag`,
   )
 } finally {
   rmSync(tmp, { recursive: true, force: true })

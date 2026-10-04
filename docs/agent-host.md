@@ -124,9 +124,9 @@ explicit list of every vendor name it touches, and a script that re-verifies the
 | Tool | Contract | Check | What it catches |
 |---|---|---|---|
 | Codex | `adapters/codex/protocol-contract.json` — every RPC method and notification we send or read, plus approval enum values | `pnpm codex:bindings --check` (regenerates bindings from the installed CLI, greps for our names) | a method/notification leaving the protocol (change axis C4) |
-| Claude | name lists inside `scripts/claude-sdk-drift.mjs` — SDK exports, option keys, response fields, and runtime-only names like `resolvePermissionModeInCli` | `pnpm drift:claude` (installs `@latest` into a temp dir, never the workspace) | a name leaving the `.d.ts` or the runtime **before** an upgrade lands it on us |
+| Claude | name lists inside `scripts/claude-sdk-drift.mjs` — SDK exports, option keys, response fields — plus one runtime shape check: an omitted `permissionMode` must reach the CLI as no `--permission-mode` flag (the `normal` preset rests on it, #275) | `pnpm drift:claude [version]` (installs `@latest`, or the given version, into a temp dir, never the workspace) | a name leaving the `.d.ts`, or the SDK pinning an omitted mode to `default` again, **before** an upgrade lands it on us |
 
-Both are name checks, run in both directions: the vendor must still carry every name
+Both are name checks (Claude's one shape check aside), run in both directions: the vendor must still carry every name
 we use, and our source must still use every name listed (so the contract cannot
 outlive the code). They cannot catch a field that still exists but changed meaning —
 that class is guarded by runtime plausibility checks in the adapters (the
