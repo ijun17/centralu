@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { parseAppLink } from '@cc/protocol'
 import type { Platform } from '@cc/platform/ports'
@@ -8,7 +8,8 @@ import { letterOf } from './keys.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
-import { TEXT_SCALES, projectScreenOf, useStore } from '../store/store.js'
+import { applyTheme, cacheChoice, pickTheme, resolveChoice, systemPrefersDark } from './theme.js'
+import { TEXT_SCALES, projectScreenOf, usableThemeFiles, useStore } from '../store/store.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
@@ -85,6 +86,50 @@ export function App({ platform }: { platform: Platform }) {
      */
     style.setProperty('--text-zoom', String(factor))
   }, [textScale])
+
+  /*
+   * The theme (Settings → Appearance, #312), next to the zoom for the same reason: both are
+   * written once on the root and everything below follows.
+   *
+   * Nothing is applied until the host's preferences have arrived. Before that the store holds the
+   * defaults, and applying them would overwrite the theme main.tsx already put on from the cache
+   * — a light theme would flash dark for the length of the first round trip.
+   */
+  const themeMode = useStore((s) => s.prefs.themeMode)
+  const themeDark = useStore((s) => s.prefs.themeDark)
+  const themeLight = useStore((s) => s.prefs.themeLight)
+  const themeFiles = useStore((s) => s.themeFiles)
+  const lastGoodThemes = useStore((s) => s.lastGoodThemes)
+  const accent = useStore((s) => s.prefs.accent)
+  const connected = useStore((s) => s.connection === 'connected')
+  const [prefsArrived, setPrefsArrived] = useState(false)
+  if (connected && !prefsArrived) setPrefsArrived(true)
+  const [systemDark, setSystemDark] = useState(systemPrefersDark)
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return
+    const query = matchMedia('(prefers-color-scheme: dark)')
+    const follow = () => setSystemDark(query.matches)
+    query.addEventListener('change', follow)
+    return () => query.removeEventListener('change', follow)
+  }, [])
+  useEffect(() => {
+    if (!prefsArrived) return
+    const choice = resolveChoice(
+      { ...useStore.getState().prefs, themeMode, themeDark, themeLight, accent },
+      usableThemeFiles({ themeFiles, lastGoodThemes }),
+    )
+    const theme = pickTheme(choice, systemDark)
+    applyTheme(theme)
+    cacheChoice(choice)
+    /*
+     * The desktop window learns the side too: held to one appearance, it reports that appearance
+     * to the page's prefers-color-scheme, so System mode hands it back to the OS (null). Its
+     * background is the floor as it actually computed, for the strip the window paints itself.
+     */
+    void platform.system
+      .setWindowAppearance(themeMode === 'system' ? null : theme.base, getComputedStyle(document.body).backgroundColor)
+      .catch(() => {})
+  }, [prefsArrived, themeMode, themeDark, themeLight, themeFiles, lastGoodThemes, accent, systemDark, platform])
 
   /*
    * Where the spinning indicator gets stopped (user request, 2026-09-13).

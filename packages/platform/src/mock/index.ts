@@ -34,6 +34,8 @@ import type {
   UiPreferences,
   UiPreferencesPatch,
   UpdateStatus,
+  ThemeFileContent,
+  ThemeFileEntry,
 } from '@cc/protocol'
 import {
   APP_VERSION,
@@ -43,6 +45,8 @@ import {
   newAppIdProblem,
   isNewerVersion,
   parseUiPreferences,
+  parseThemeFile,
+  formatThemeFile,
   osPathBaseName,
   sessionLiveDefaults,
   SUBAGENT_STEPS_PAGE,
@@ -68,6 +72,7 @@ import type {
   NewAppSpec,
   Platform,
   PreferencesPort,
+  ThemesPort,
   ProjectPort,
   SystemPort,
   TerminalPort,
@@ -2511,6 +2516,10 @@ export class MockPlatform implements Platform {
       // The number of times the window drag started — a test needs to be able to see "tried to move a panel, but the app window moved instead"
       this.windowDrags++
     },
+    // The last appearance the screen asked the window for, so a test can see what the desktop window would be told
+    setWindowAppearance: async (scheme, background) => {
+      this.windowAppearance = { scheme, background }
+    },
     pickDirectory: async () => this.nextPickedDirectory,
     pickFile: async (opts: { title: string; extensions: string[] }) => {
       this.pickedFileAsks.push(opts)
@@ -2524,6 +2533,8 @@ export class MockPlatform implements Platform {
 
   /** How many times a window drag started (checked from Playwright) */
   windowDrags = 0
+  /** What `setWindowAppearance` was last told — null until the screen has said anything */
+  windowAppearance: { scheme: 'dark' | 'light' | null; background: string } | null = null
 
   /** The record of calls made with sound and the dock — this one has to ring even if the banner is dead */
   alerts: { kind: AlertKind; sound: boolean }[] = []
@@ -2570,6 +2581,90 @@ export class MockPlatform implements Platform {
    * all. localStorage throws in node, so it just falls out of the try/catch and the
    * in-memory copy answers as it always did.
    */
+  /**
+   * The themes folder (#312), as file texts by id — the host's rules: a write replaces the text,
+   * a hand edit is `writeThemeFile`, and every change goes out as `themes_changed`.
+   */
+  themeFiles = new Map<string, string>()
+  /** Paths `themes.importFile` can read, standing in for files elsewhere on disk */
+  themeImportSources = new Map<string, string>()
+  /** Theme ids revealed in the file manager, in order */
+  readonly revealedThemes: string[] = []
+
+  /** For tests: what an editor or an agent saving a theme file does */
+  writeThemeFile(id: string, text: string): void {
+    this.themeFiles.set(id, text)
+    this.persistThemes()
+    this.emit({ type: 'themes_changed' })
+  }
+
+  /*
+   * Kept in localStorage like the preferences: the real folder survives a restart, and a test
+   * that reloads the page has to see the same (node has no localStorage; the map still works).
+   */
+  private themesLoaded = false
+  private loadThemes(): void {
+    if (this.themesLoaded) return
+    this.themesLoaded = true
+    try {
+      const raw = localStorage.getItem('cc-mock-themes')
+      if (raw) for (const [id, text] of Object.entries(JSON.parse(raw) as Record<string, string>)) if (!this.themeFiles.has(id)) this.themeFiles.set(id, text)
+    } catch {
+      /* node, or storage denied */
+    }
+  }
+  private persistThemes(): void {
+    try {
+      localStorage.setItem('cc-mock-themes', JSON.stringify(Object.fromEntries(this.themeFiles)))
+    } catch {
+      /* node, or storage denied */
+    }
+  }
+
+  private themeEntry(id: string): ThemeFileEntry {
+    return parseThemeFile(id, `/mock/data/themes/${id}.json`, this.themeFiles.get(id) ?? '')
+  }
+
+  private freeThemeId(name: string): string {
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'theme'
+    for (let n = 1; ; n++) {
+      const id = n === 1 ? base : `${base}-${n}`
+      if (!this.themeFiles.has(id)) return id
+    }
+  }
+
+  readonly themes: ThemesPort = {
+    list: async () => {
+      this.loadThemes()
+      return [...this.themeFiles.keys()].sort().map((id) => this.themeEntry(id))
+    },
+    save: async (id: string | null, content: ThemeFileContent) => {
+      const target = id ?? this.freeThemeId(content.name)
+      this.writeThemeFile(target, formatThemeFile(content))
+      return this.themeEntry(target)
+    },
+    importFile: async (path: string) => {
+      const text = this.themeImportSources.get(path)
+      if (text === undefined) throw Object.assign(new Error(`No such file: ${path}`), { code: 'invalid_params' })
+      const parsed = parseThemeFile('import', path, text)
+      if (parsed.broken) throw Object.assign(new Error(parsed.problems[0] ?? 'Not a theme file.'), { code: 'invalid_params' })
+      const id = this.freeThemeId(parsed.name)
+      this.writeThemeFile(id, text)
+      return this.themeEntry(id)
+    },
+    // The mock stands in for the desktop here: it has a trash and a file manager
+    remove: async (id: string) => {
+      this.themeFiles.delete(id)
+      this.persistThemes()
+      this.emit({ type: 'themes_changed' })
+      return { supported: true }
+    },
+    reveal: async (id: string) => {
+      this.revealedThemes.push(id)
+      return { supported: true }
+    },
+  }
+
   readonly prefs: PreferencesPort = {
     load: async () => {
       try {

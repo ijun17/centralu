@@ -206,6 +206,21 @@ describe('type and radius stay on the scale', () => {
   })
 })
 
+/**
+ * Themes reach every token (#312). A custom theme can only set what THEME_TOKENS lists, so a
+ * colour, shadow or scrollbar token added to `@theme` and not to that list would be the one
+ * thing a theme cannot change — and nothing on screen would say so.
+ */
+describe('themes reach every token', () => {
+  it('THEME_TOKENS names exactly the colour, shadow and scrollbar tokens in @theme', async () => {
+    const { THEME_TOKENS } = await import('../packages/protocol/src/theme.js')
+    const css = readFileSync(join(ROOT, 'packages/ui/src/styles/index.css'), 'utf8')
+    const block = css.slice(css.indexOf('@theme {'), css.indexOf('\n}\n', css.indexOf('@theme {')))
+    const declared = [...block.matchAll(/^\s*(--(?:color|shadow|scrollbar)-[a-z0-9-]+):/gm)].map((m) => m[1])
+    expect([...THEME_TOKENS.map((t) => t.cssVar)].sort()).toEqual([...declared].sort())
+  })
+})
+
 describe('bundle regression (decision C-3: no editor engine in the viewer)', () => {
   it('CodeMirror and Shiki are not in the bundle', () => {
     // An editor engine is overkill for a read-only viewer. Including one would require lazy
@@ -214,12 +229,16 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     expect(css).not.toMatch(/cm-editor|shiki/i)
   })
 
-  it('the app\'s total JS does not exceed 1.5MB', () => {
+  it('the app\'s total JS does not exceed 1.6MB', () => {
     // 1.31MB in the release build (measured at M4 B-3c, including lazy-loaded chunks). It was
     // 1.16MB at 988713e, and the app screen's bridge (ext-apps app-bridge, 138KB loaded the
     // first time a screen opens) has been added since. Crossing this line means a heavy
     // dependency came in, so raise it with a reason recorded.
-    expect(jsBytes).toBeLessThan(1_500_000)
+    //
+    // Raised from 1.5MB for the theme engine and its Settings editor (#312 step 3): 1,495,774B
+    // on main at 2bafb869's successor, 1,516,889B with it (+21KB, no dependency). Main was 4KB
+    // under the old line, so any feature would have crossed it next.
+    expect(jsBytes).toBeLessThan(1_600_000)
   })
 })
 

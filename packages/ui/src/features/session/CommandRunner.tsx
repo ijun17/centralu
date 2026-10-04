@@ -9,7 +9,7 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { useOpenLayer } from '../../components/Modal.jsx'
 import { isPlainEnter } from './composerKeys.js'
 import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
-import { terminalStyle } from '../../components/terminalTheme.js'
+import { followTheme, terminalStyle } from '../../components/terminalTheme.js'
 import { useStore } from '../../store/store.js'
 
 const NO_COMMANDS: SavedCommand[] = []
@@ -358,6 +358,7 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
+    const unfollow = followTheme(term, el, 'log')
     const links = registerTerminalHttpLinks(term, (url) => {
       void platform.system
         .openUrl(url)
@@ -420,6 +421,7 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
       ro.disconnect()
       offOutput()
       offExit()
+      unfollow()
       links.dispose()
       term.dispose()
     }

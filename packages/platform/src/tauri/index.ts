@@ -263,6 +263,19 @@ export class TauriSystemPort implements SystemPort {
   }
 
   /**
+   * The window's appearance and background (#312). `setTheme(null)` hands the appearance back to
+   * the OS, which is what lets the webview's `prefers-color-scheme` follow it in System mode
+   * (tauri.conf.json no longer holds the window to Dark). The background arrives as a computed
+   * CSS colour (`rgb(20, 20, 20)`); Tauri wants channels, so anything else is left alone.
+   */
+  async setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void> {
+    const win = getCurrentWindow()
+    await win.setTheme(scheme)
+    const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(background)
+    if (rgb) await win.setBackgroundColor([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])])
+  }
+
+  /**
    * App links (M4 E-4). The shell queues up links it received through the OS's open event and
    * calls `app-link` — that call means only "come get it," and the link itself is retrieved
    * with `take_app_links` (retrieving it clears it from the shell). Drains once as soon as

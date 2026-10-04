@@ -212,6 +212,10 @@ describe('plugin permissions (#186)', () => {
         'core:window:allow-set-focus',
         'core:window:allow-show',
         'core:window:allow-unminimize',
+        // The theme (#312): System mode hands the window's appearance back to the OS, and the
+        // window's own background follows the floor colour
+        'core:window:allow-set-theme',
+        'core:window:allow-set-background-color',
         'notification:default',
         'global-shortcut:allow-register',
         'global-shortcut:allow-unregister',

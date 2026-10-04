@@ -38,6 +38,7 @@ import {
   UiPreferencesPatch,
   UpdateStatus,
 } from './entities.js'
+import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
 
@@ -1773,6 +1774,39 @@ export const RpcMethods = {
   'prefs.set': {
     params: z.object({ patch: UiPreferencesPatch }),
     result: UiPreferences,
+  },
+  /**
+   * The theme files in the data folder's `themes/` (#312), as the host read them. A file that
+   * does not read cleanly is still listed, with its problems, so Settings can say what is wrong
+   * next to it instead of the theme silently vanishing.
+   */
+  'themes.list': {
+    params: z.object({}),
+    result: z.array(ThemeFileEntry),
+  },
+  /**
+   * Writes a theme file, atomically (temp file and rename): a watcher, an editor or an agent
+   * reading the folder never sees half a file. `id` null creates a new file named after the theme.
+   */
+  'themes.save': {
+    params: z.object({ id: ThemeId.nullable(), content: ThemeFileContent }),
+    result: ThemeFileEntry,
+  },
+  /**
+   * Copies a theme file from elsewhere on disk into the folder (Import). The copy is validated
+   * like any other file and gets a fresh id if the name is taken.
+   */
+  'themes.import': {
+    params: z.object({ path: z.string() }),
+    result: ThemeFileEntry,
+  },
+  /**
+   * The absolute path of a theme file, for the shell to trash or reveal (the same two-step as
+   * `fs.resolve`: the host knows the folder, the shell knows the OS).
+   */
+  'themes.resolve': {
+    params: z.object({ id: ThemeId }),
+    result: z.object({ path: z.string() }),
   },
   'approvals.rules': {
     params: z.object({ projectId: ProjectId.optional() }),

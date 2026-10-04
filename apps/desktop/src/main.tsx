@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App, confirmKeyAction } from '@cc/ui'
+import { App, applyCachedTheme, confirmKeyAction } from '@cc/ui'
 import {
   createTauriPlatform,
   focusWindow,
@@ -25,6 +25,10 @@ import '../../../packages/ui/src/styles/index.css'
  * (docs/platform-abstraction.md §4). The only difference from apps/web is the single
  * createTauriPlatform line.
  */
+// The theme the last run chose, before anything is drawn — even the waiting-for-host screen
+// should open in it, and the preferences only arrive once the host answers (theme.ts)
+applyCachedTheme()
+
 const root = createRoot(document.getElementById('root')!)
 
 // A quit request is listened for **before anything else** (#184). Neither the screen waiting

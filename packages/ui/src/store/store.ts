@@ -19,6 +19,7 @@ import type {
   ToolName,
   UiPreferences,
   UiPreferencesPatch,
+  ThemeFileEntry,
   UpdateStatus,
 } from '@cc/protocol'
 import {
@@ -774,6 +775,18 @@ export type AppState = {
    */
   externalApps: ExternalAppInfo[]
   refreshExternalApps(): Promise<void>
+  /**
+   * The theme files in the data folder's `themes/` (#312), as the host last read them —
+   * re-read in full on `themes_changed` (a save from Settings, an editor, an agent).
+   */
+  themeFiles: ThemeFileEntry[]
+  /**
+   * The last version of each theme file that read cleanly. A file someone is halfway through
+   * editing comes back broken; the screen keeps showing this version of it until it reads again,
+   * rather than dropping to the preset mid-edit.
+   */
+  lastGoodThemes: Record<string, ThemeFileEntry>
+  refreshThemes(): Promise<void>
   /**
    * Capability questions for chains started from a view (M4 D-4) — a copy of the host's
    * `apps.questions`. Re-read in full when `external_app_questions_changed` arrives, and on
@@ -2374,6 +2387,8 @@ export const useStore = create<AppState>((set, get) => ({
   externalAppRunChanges: {},
   externalAppChangedBy: {},
   externalApps: [] as ExternalAppInfo[],
+  themeFiles: [] as ThemeFileEntry[],
+  lastGoodThemes: {} as Record<string, ThemeFileEntry>,
   appQuestions: [] as AppQuestion[],
   appQuestionsVersion: 0,
   railWidth: RAIL_DEFAULT,
@@ -2492,7 +2507,7 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
-    const [projects, sessions, gridPanels, tools, prefs, externalApps] = await Promise.all([
+    const [projects, sessions, gridPanels, tools, prefs, externalApps, themeFiles] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
       // The app must come up even if the layout cannot be read — the grid just looks empty
@@ -2515,6 +2530,9 @@ export const useStore = create<AppState>((set, get) => ({
       // do not pop in late. The app still comes up if it cannot be read: the app rows just look
       // empty, and the next broadcast re-reads them
       platform.apps.list().catch(() => [] as ExternalAppInfo[]),
+      // The theme files arrive with the preferences that choose among them, so the first screen
+      // already has its theme — and a folder that cannot be read just means the presets
+      platform.themes.list().catch(() => [] as ThemeFileEntry[]),
     ])
     const known: Record<string, SessionSummary> = Object.fromEntries(
       sessions.map((s) => [
@@ -2573,6 +2591,8 @@ export const useStore = create<AppState>((set, get) => ({
       tools,
       prefs,
       externalApps,
+      themeFiles,
+      lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
       connection: 'connected',
     }))
 
@@ -2834,6 +2854,11 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'update_status') {
       set({ update: e.status })
+      return
+    }
+
+    if (e.type === 'themes_changed') {
+      void get().refreshThemes()
       return
     }
 
@@ -3619,6 +3644,17 @@ export const useStore = create<AppState>((set, get) => ({
       set({ update: await platform.updates.setAuto(enabled) })
     } catch (e) {
       set({ toast: `Could not save that: ${(e as Error).message}` })
+    }
+  },
+
+  async refreshThemes() {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const themeFiles = await platform.themes.list()
+      set((st) => ({ themeFiles, lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles) }))
+    } catch {
+      /* the folder could not be read this time — the screen keeps what it has */
     }
   },
 
@@ -6086,4 +6122,19 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
     }
   }
   return items
+}
+
+/** The last clean read of each theme file: a clean entry replaces it, a broken one leaves it (see `lastGoodThemes`) */
+function goodThemes(prev: Record<string, ThemeFileEntry>, files: readonly ThemeFileEntry[]): Record<string, ThemeFileEntry> {
+  const next: Record<string, ThemeFileEntry> = {}
+  for (const f of files) {
+    const good = f.broken ? prev[f.id] : f
+    if (good) next[f.id] = good
+  }
+  return next
+}
+
+/** The theme files to apply: a broken one stands in as its last clean version, if it ever had one */
+export function usableThemeFiles(s: { themeFiles: ThemeFileEntry[]; lastGoodThemes: Record<string, ThemeFileEntry> }): ThemeFileEntry[] {
+  return s.themeFiles.map((f) => (f.broken ? (s.lastGoodThemes[f.id] ?? f) : f))
 }

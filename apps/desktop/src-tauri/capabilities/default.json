@@ -12,6 +12,8 @@
     "core:window:allow-set-focus",
     "core:window:allow-show",
     "core:window:allow-unminimize",
+    "core:window:allow-set-theme",
+    "core:window:allow-set-background-color",
     "notification:default",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",

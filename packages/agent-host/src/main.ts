@@ -23,6 +23,7 @@ import { storePermissionBook } from './app-permission-book.js'
 import { runtimeViewSource } from './app-view-source.js'
 import { onExternalAppListChanged } from './app-list-events.js'
 import { broadcastAppChanges, broadcastAppRuns } from './app-change-events.js'
+import { ThemeFiles } from './themes.js'
 import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
@@ -315,6 +316,17 @@ if (held) {
  * it is never done silently — it happens only when they click it.
  */
 const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
+// Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
+// (The watcher can fire before `server` below exists; a change that early has no screen to tell yet.)
+const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => {
+  try {
+    server.broadcast({ type: 'themes_changed' })
+  } catch {
+    /* not listening yet */
+  }
+})
+await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
+
 const updates = new UpdateService((status) => server.broadcast({ type: 'update_status', status }), {
   // On by default when nothing has been saved yet. Since the check is read-only and every failure
   // is swallowed, leaving it on costs nothing, while leaving it off traps **someone who never once
@@ -377,6 +389,7 @@ const server: HostServer = new HostServer({
   token,
   allowedOrigins,
   onRpc: createRpcHandler(mgr, adapters, {
+    themes,
     terminals,
     updates,
     commands: commandRuns,
@@ -549,6 +562,7 @@ async function stopServices(mode: LeaveMode, handOver: boolean): Promise<void> {
   await (mode === 'detach' ? mgr.detachAll() : mgr.disposeAll())
   await appsDown
   appChanges.dispose()
+  themes.close()
   inlineViews.dispose()
   await views.dispose()
   await server.close()

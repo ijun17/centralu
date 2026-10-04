@@ -584,6 +584,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('external_apps_changed') }),
   /**
+   * A file in the themes folder changed (#312) — saved from Settings, edited by hand or by an
+   * agent. As coarse as the others: the screen refetches `themes.list`.
+   */
+  z.object({ ...appScoped, type: z.literal('themes_changed') }),
+  /**
    * A capability question from a chain that started from a screen was raised or closed (M4 D-4).
    * The same coarseness: this carries nothing, and the receiving side refetches
    * `apps.questions`. A question from a chain that started from a session arrives as that

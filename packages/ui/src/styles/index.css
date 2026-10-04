@@ -18,6 +18,11 @@
  * This stays plain `@theme`, not `@theme inline`: every utility then reads `var(--color-…)` at
  * run time, which is what lets a theme switch by changing variables alone.
  *
+ * **These values are the Dark preset.** Another preset is a `[data-theme='…']` block below that
+ * sets the same names; a custom theme is the person's copy of a preset, written as inline
+ * properties on `<html>` (app/theme.ts). A token added here has to be added to THEME_TOKENS there
+ * too, or themes cannot reach it (a unit test checks the two lists agree).
+ *
  * The default theme is fully achromatic. There is not a single hue in the chrome, so hierarchy is
  * built entirely by brightness. So the rule holds literally:
  *   the brightest thing on screen = what is waiting for me right now (product-spec FR-12).
@@ -277,6 +282,7 @@
 
 @layer base {
   html {
+    /* Follows the side of the theme that is showing (app/theme.ts sets data-theme-base) */
     color-scheme: dark;
     /*
      * Overall text size (Settings → Appearance) is applied as a root zoom — but vh/vw are not
@@ -306,6 +312,9 @@
   /* The last link in the shell's % chain — without it App's h-full leans on auto and becomes 0 */
   #root {
     height: 100%;
+  }
+  html[data-theme-base='light'] {
+    color-scheme: light;
   }
   /*
    * WebKit rounds up every box's scrollWidth by 1px under a zoom factor
@@ -379,6 +388,12 @@
     border-color: var(--color-danger);
     --cc-check-bg: var(--color-danger);
     --cc-check-mark: var(--color-danger-bg);
+  }
+  /* The accent, when the person turns it on, also colours checked controls (#312) — never the
+     danger check, which keeps its red */
+  html[data-accent] input[type='checkbox']:not(.accent-danger) {
+    --cc-check-bg: var(--color-accent);
+    --cc-check-mark: var(--color-surface-floor);
   }
   input[type='checkbox']:checked {
     background: var(--cc-check-bg);

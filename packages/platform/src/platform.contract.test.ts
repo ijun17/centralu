@@ -4,7 +4,7 @@
  * added, it goes in as a third entry.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, posix, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +14,7 @@ import { SessionManager } from '../../agent-host/src/sessions/manager.js'
 import { Store } from '../../agent-host/src/dev-services/store.js'
 import { createRpcHandler } from '../../agent-host/src/rpc.js'
 import { UpdateService } from '../../agent-host/src/updates.js'
+import { ThemeFiles } from '../../agent-host/src/themes.js'
 import { ViewHost } from '../../agent-host/src/views/view-host.js'
 import { OriginPorts } from '../../agent-host/src/views/origin-ports.js'
 import { ExternalApps } from '../../agent-host/src/apps/external/runtime.js'
@@ -24,7 +25,7 @@ import { broadcastAppChanges } from '../../agent-host/src/app-change-events.js'
 import { storeRunLedger } from '../../agent-host/src/app-run-ledger.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
-import { APP_VERSION } from '@cc/protocol'
+import { APP_VERSION, DEFAULT_UI_PREFERENCES } from '@cc/protocol'
 import type { Platform } from './ports/index.js'
 import { createMockPlatform } from './mock/index.js'
 import { createWebPlatform } from './web/index.js'
@@ -67,6 +68,8 @@ type Harness = {
   cleanup: () => Promise<void>
   offerUpdate: (version: string) => void
   makeDir: (root: string, rel: string) => void
+  /** Puts a theme file somewhere outside the themes folder and answers its path (what Import is given) */
+  outsideThemeFile: (name: string, text: string) => string
 }
 
 async function makeWeb(): Promise<Harness> {
@@ -88,10 +91,14 @@ async function makeWeb(): Promise<Harness> {
         : { ok: true as const, version: registryVersion },
     run: async () => {},
   })
+  // The themes folder is a temp directory: the real service, never the person's data folder
+  const themesRoot = mkdtempSync(join(tmpdir(), 'cc-contract-themes-'))
+  const themes = new ThemeFiles(join(themesRoot, 'themes'), () => server.broadcast({ type: 'themes_changed' }))
+  await themes.start()
   const server = new HostServer({
     port: 0,
     token: 'contract',
-    onRpc: createRpcHandler(mgr, adapters, { updates }),
+    onRpc: createRpcHandler(mgr, adapters, { updates, themes }),
   })
   const port = await server.listen()
   const platform = createWebPlatform({
@@ -106,11 +113,18 @@ async function makeWeb(): Promise<Harness> {
       registryVersion = version
     },
     makeDir: (root, rel) => mkdirSync(join(root, rel), { recursive: true }),
+    outsideThemeFile: (name, text) => {
+      const path = join(themesRoot, name)
+      writeFileSync(path, text)
+      return path
+    },
     cleanup: async () => {
       await platform.dispose()
       await mgr.disposeAll()
       await server.close()
+      themes.close()
       store.close()
+      rmSync(themesRoot, { recursive: true, force: true })
     },
   }
 }
@@ -131,6 +145,11 @@ async function makeMock(): Promise<Harness> {
         { name: rel.slice(cut + 1), path: rel, isDir: true, ignored: false },
       ]
       platform.fsState.entries[rel] ??= []
+    },
+    outsideThemeFile: (name, text) => {
+      const path = `/elsewhere/${name}`
+      platform.themeImportSources.set(path, text)
+      return path
     },
     cleanup: async () => platform.dispose(),
   }
@@ -475,16 +494,44 @@ describe.each([
    * just the same right now — so it is pinned down here before the fields grow.
    */
   it('screen preferences start at defaults, and writing changes only what was written', async () => {
-    expect(await h.platform.prefs.load()).toEqual({ sendWithModifierEnter: false })
+    expect(await h.platform.prefs.load()).toEqual(DEFAULT_UI_PREFERENCES)
 
     expect(await h.platform.prefs.save({ sendWithModifierEnter: true })).toEqual({
+      ...DEFAULT_UI_PREFERENCES,
       sendWithModifierEnter: true,
     })
     // Asking again gives the same answer — meaning the answer comes from the record
-    expect(await h.platform.prefs.load()).toEqual({ sendWithModifierEnter: true })
-
+    expect(await h.platform.prefs.load()).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true })
     // A write with nothing in it reverts nothing
-    expect(await h.platform.prefs.save({})).toEqual({ sendWithModifierEnter: true })
+    expect(await h.platform.prefs.save({})).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true })
+    // The theme choice is one more field, written on its own
+    expect(await h.platform.prefs.save({ themeMode: 'system', accent: '#6ea8fe' })).toEqual({
+      ...DEFAULT_UI_PREFERENCES,
+      sendWithModifierEnter: true,
+      themeMode: 'system',
+      accent: '#6ea8fe',
+    })
+  })
+
+  /**
+   * Theme files (#312): a save is a file the list reads back, a second save of the same id
+   * replaces it, an import copies a file in under a fresh id, and every change is announced.
+   */
+  it('theme files: save, list, overwrite and import round-trip, and each change is announced', async () => {
+    const seen: NormalizedEvent[] = []
+    const off = h.platform.agents.subscribe((e) => seen.push(e))
+    const saved = await h.platform.themes.save(null, { name: 'Paper', base: 'light', tokens: { 'surface-floor': '#fafafa' } })
+    expect(saved).toMatchObject({ id: 'paper', name: 'Paper', base: 'light', tokens: { 'surface-floor': '#fafafa' }, broken: false })
+    await waitFor(() => seen.some((e) => e.type === 'themes_changed'))
+
+    await h.platform.themes.save('paper', { name: 'Paper', base: 'light', tokens: { ink: '#111111' } })
+    expect((await h.platform.themes.list()).map((t) => [t.id, t.tokens])).toEqual([['paper', { ink: '#111111' }]])
+
+    const path = h.outsideThemeFile('Shared.json', JSON.stringify({ name: 'Paper', base: 'light', tokens: { 'ink-faint': '#999999' } }))
+    const imported = await h.platform.themes.importFile(path)
+    expect(imported).toMatchObject({ id: 'paper-2', tokens: { 'ink-faint': '#999999' } })
+    expect((await h.platform.themes.list()).map((t) => t.id)).toEqual(['paper', 'paper-2'])
+    off()
   })
 
   it('unsubscribing works', async () => {

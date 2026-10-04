@@ -7,7 +7,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
-import { terminalStyle } from '../../components/terminalTheme.js'
+import { followTheme, terminalStyle } from '../../components/terminalTheme.js'
 import { useStore } from '../../store/store.js'
 import { TabActions } from './tabActions.jsx'
 
@@ -188,6 +188,7 @@ function CommandLog({ projectId, command, runId }: { projectId: string; command:
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
+    const unfollow = followTheme(term, el, 'log')
     const links = registerTerminalHttpLinks(term, (url) => {
       void platform.system
         .openUrl(url)
@@ -248,6 +249,7 @@ function CommandLog({ projectId, command, runId }: { projectId: string; command:
       ro.disconnect()
       offOutput()
       offExit()
+      unfollow()
       links.dispose()
       term.dispose()
     }
@@ -306,6 +308,7 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
+    const unfollow = followTheme(term, el, 'shell')
     const links = registerTerminalHttpLinks(term, (url) => {
       void platform.system
         .openUrl(url)
@@ -363,6 +366,7 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
       onData.dispose()
       offOutput()
       offExit()
+      unfollow()
       links.dispose()
       term.dispose()
       termRef.current = null

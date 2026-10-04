@@ -11,6 +11,7 @@ import { APPS } from '../../apps/registry.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { TrashSection } from './TrashSection.jsx'
+import { ThemeSection } from './ThemeSection.jsx'
 import type { BackgroundPort } from '@cc/platform/ports'
 
 type Rule = {
@@ -765,7 +766,8 @@ function AppearanceSection() {
   const setSpinIcon = useStore((s) => s.setSpinSessionIcon)
   return (
     <section>
-      <p className="text-xs leading-body text-ink-faint">Text size for the whole app.</p>
+      <ThemeSection />
+      <p className="mt-6 border-t border-line pt-4 text-xs leading-body text-ink-faint">Text size for the whole app.</p>
       <div className="mt-3 flex items-end gap-2" role="radiogroup" aria-label="Text size">
         {TEXT_SCALES.map((factor, i) => (
           <button

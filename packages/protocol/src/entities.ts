@@ -911,6 +911,9 @@ export type UpdateStatus = z.infer<typeof UpdateStatus>
  * that are read together at startup and never separately. This is a record so the next
  * preference costs one field.
  */
+export const ThemeMode = z.enum(['dark', 'light', 'system'])
+export type ThemeMode = z.infer<typeof ThemeMode>
+
 export const UiPreferences = z.object({
   /**
    * Enter writes a newline and ⌘/Ctrl+Enter sends, instead of the other way round.
@@ -927,6 +930,27 @@ export const UiPreferences = z.object({
    * a preference that changes under you is worse than both.
    */
   sendWithModifierEnter: z.boolean(),
+  /**
+   * Which side of the theme the screen shows (#312): always the dark one, always the light one,
+   * or whichever the OS is set to. The two sides are chosen separately (`themeDark`,
+   * `themeLight`) so that following the OS switches between two themes the person picked,
+   * rather than between whatever the app thinks dark and light should be.
+   */
+  themeMode: ThemeMode,
+  /**
+   * The theme for the dark side: a preset id (`dark`, …) or a theme file's id. Only the choice
+   * lives here; a custom theme itself is a file in the data folder's `themes/` (theme.ts), so it
+   * can be edited by hand or by an agent and shared as a file.
+   */
+  themeDark: z.string().max(80),
+  /** The theme for the light side: a preset id (`light`, …) or a theme file's id */
+  themeLight: z.string().max(80),
+  /**
+   * An accent colour, or null for none (the default: the app is achromatic, and brightness is
+   * what speaks urgency). When set it colours focus, selection, the working orbit and checked
+   * controls — never the signal colour, which stays the one thing reserved for "waiting for you".
+   */
+  accent: z.string().max(80).nullable(),
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 
@@ -944,6 +968,10 @@ export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
 /** What someone who has never opened Settings gets. Each field's reason is on the field. */
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   sendWithModifierEnter: false,
+  themeMode: 'dark',
+  themeDark: 'dark',
+  themeLight: 'light',
+  accent: null,
 }
 
 /**
@@ -956,6 +984,18 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
  * reason — that is what lets the record grow without a migration.
  */
 export function parseUiPreferences(raw: unknown): UiPreferences {
-  const parsed = UiPreferencesPatch.safeParse(raw)
-  return { ...DEFAULT_UI_PREFERENCES, ...(parsed.success ? parsed.data : {}) }
+  const out: UiPreferences = { ...DEFAULT_UI_PREFERENCES }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
+  const record = raw as Record<string, unknown>
+  /*
+   * **Field by field.** Parsing the record as a whole meant one bad field (a theme id an
+   * older build wrote differently, say) threw away every other preference with it. Each field
+   * falls back on its own.
+   */
+  for (const key of Object.keys(UiPreferences.shape) as (keyof UiPreferences)[]) {
+    if (!(key in record)) continue
+    const parsed = UiPreferences.shape[key].safeParse(record[key])
+    if (parsed.success) (out as Record<string, unknown>)[key] = parsed.data
+  }
+  return out
 }

@@ -1,4 +1,5 @@
 import { relative } from 'node:path'
+import { ThemeFiles } from './themes.js'
 import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
@@ -49,6 +50,8 @@ export type RpcServices = {
   inlineViews?: InlineViews
   /** Pids of the children the keeper holds for this host (#280 step 2) — never offered as strays */
   heldPids?: () => Promise<number[]>
+  /** The themes folder (#312, themes.ts) */
+  themes?: ThemeFiles
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -60,8 +63,12 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes }: RpcServices = {},
 ) {
+  const requireThemes = (): ThemeFiles => {
+    if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
+    return themes
+  }
   const held = async (): Promise<number[]> => (heldPids ? heldPids().catch(() => []) : [])
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
@@ -640,6 +647,13 @@ export function createRpcHandler(
     },
     'prefs.get': async () => mgr.uiPreferences(),
     'prefs.set': async (p) => mgr.setUiPreferences(RpcMethods['prefs.set'].params.parse(p).patch),
+    'themes.list': async () => requireThemes().list(),
+    'themes.save': async (p) => {
+      const { id, content } = RpcMethods['themes.save'].params.parse(p)
+      return requireThemes().save(id, content)
+    },
+    'themes.import': async (p) => requireThemes().importFrom(RpcMethods['themes.import'].params.parse(p).path),
+    'themes.resolve': async (p) => ({ path: requireThemes().pathOf(RpcMethods['themes.resolve'].params.parse(p).id) }),
     'approvals.rules': async () => mgr.listApprovalRules(),
     /*
      * The trash (#204). These are the person's: this handler is reached only over the UI's socket. The agents'

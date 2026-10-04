@@ -37,6 +37,8 @@ import type {
   QuestionAnswer,
   UiPreferences,
   UiPreferencesPatch,
+  ThemeFileContent,
+  ThemeFileEntry,
   UpdateStatus,
 } from '@cc/protocol'
 
@@ -350,6 +352,18 @@ export interface SystemPort {
    * Does nothing on the web.
    */
   startWindowDrag(): Promise<void>
+  /**
+   * Tells the window which side of the theme is showing (#312).
+   *
+   * `scheme` is `null` to follow the OS. It is what the webview's `prefers-color-scheme`
+   * answers with: a window held to one appearance reports that appearance to the page, so
+   * System mode can only see the OS once the window stops being held. `background` is the
+   * floor colour as a computed CSS colour, for the strip the window paints before or around the
+   * page (the first frame, a resize).
+   *
+   * Does nothing on the web, where the browser already follows the OS.
+   */
+  setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void>
 }
 
 export type PlatformCapabilities = {
@@ -538,6 +552,24 @@ export interface UpdatePort {
    * like a failure on screen. The rest arrives as events.
    */
   apply(): Promise<UpdateStatus>
+}
+
+/**
+ * Custom themes as files (#312): `<data>/themes/<id>.json`, read, written and watched by the host.
+ *
+ * The list arrives whole (a handful of small files); a change to the folder — from Settings, an
+ * editor or an agent — arrives as `themes_changed` on the event stream, and the screen refetches.
+ */
+export interface ThemesPort {
+  list(): Promise<ThemeFileEntry[]>
+  /** Writes a theme file atomically; `id` null creates one named after the theme */
+  save(id: string | null, content: ThemeFileContent): Promise<ThemeFileEntry>
+  /** Copies a theme file from a path on disk into the folder (Import) */
+  importFile(path: string): Promise<ThemeFileEntry>
+  /** Moves a theme file to the OS trash. Only the desktop app has a trash. */
+  remove(id: string): Promise<{ supported: boolean; reason?: string }>
+  /** Shows a theme file in the file manager (Export: the file is already a file) */
+  reveal(id: string): Promise<{ supported: boolean; reason?: string }>
 }
 
 /**
@@ -908,6 +940,7 @@ export interface Platform {
   trash: TrashPort
   workspace: WorkspacePort
   prefs: PreferencesPort
+  themes: ThemesPort
   updates: UpdatePort
   terminal: TerminalPort
   commands: CommandRunPort

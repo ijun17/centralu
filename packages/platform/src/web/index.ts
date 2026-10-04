@@ -271,6 +271,9 @@ class WebSystemPort implements SystemPort {
   async startWindowDrag(): Promise<void> {
     // A browser has no window to move
   }
+  async setWindowAppearance(): Promise<void> {
+    // A browser follows the OS on its own, and the page paints its own floor
+  }
 
   async pickDirectory(): Promise<string | null> {
     // A browser has no directory picker — a dev-only fallback
@@ -521,6 +524,24 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       would become the same as clearing preferences. A value the person chose has to live
       alongside conversations and projects to survive along with them.
     */
+    themes: {
+      list: () => rpc.call('themes.list', {}),
+      save: (id, content) => rpc.call('themes.save', { id, content }),
+      importFile: (path) => rpc.call('themes.import', { path }),
+      // The same two steps as fs.trash/reveal: the host resolves the path, the shell hands it to the OS
+      remove: async (id) => {
+        if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_TRASH }
+        const { path } = await rpc.call('themes.resolve', { id })
+        await opts.nativeFiles.trash(path)
+        return { supported: true }
+      },
+      reveal: async (id) => {
+        if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
+        const { path } = await rpc.call('themes.resolve', { id })
+        await opts.nativeFiles.reveal(path)
+        return { supported: true }
+      },
+    },
     prefs: {
       load: () => rpc.call('prefs.get', {}),
       save: (patch) => rpc.call('prefs.set', { patch }),

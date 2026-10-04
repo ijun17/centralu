@@ -144,6 +144,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'external_app_runs_changed', appId: 'timer', projectId: null },
   // The external app list changed (M4 A-8) — carries nothing. The receiving side refetches apps.list
   { type: 'external_apps_changed' },
+  // A file in the themes folder changed (#312) — the screen refetches the list
+  { type: 'themes_changed' },
   { type: 'external_app_questions_changed' },
   { type: 'worktree_pr', sessionId: 's1', pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' } },
   // A goal announcement (2026-09-07) — both the union-of-both-tools shape and the cleared state (null) are golden

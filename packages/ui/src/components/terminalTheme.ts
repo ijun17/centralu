@@ -58,3 +58,21 @@ export function terminalStyle(el: Element, kind: 'shell' | 'log'): { theme: IThe
     ...(fontSize > 0 ? { fontSize } : {}),
   }
 }
+
+/**
+ * Keeps an open terminal in step with the theme. xterm only reads its theme when told, so a
+ * terminal opened before a switch would keep the old colours until it was closed; applyTheme
+ * announces every switch with `cc-themechange`, and this re-reads the variables then.
+ * @returns stops following
+ */
+export function followTheme(
+  term: { options: { theme?: ITheme } },
+  el: Element,
+  kind: 'shell' | 'log',
+): () => void {
+  const update = () => {
+    term.options.theme = terminalStyle(el, kind).theme
+  }
+  window.addEventListener('cc-themechange', update)
+  return () => window.removeEventListener('cc-themechange', update)
+}
