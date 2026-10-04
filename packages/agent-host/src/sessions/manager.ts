@@ -1685,7 +1685,9 @@ export class SessionManager {
      *
      * The tool cannot be asked to "give a little less". codex's thread/read has no notion of a count
      * — measured: passing a limit is simply ignored and it still returns the same 48.6MB. It is all
-     * or nothing. So instead of receiving less, **we simply stop asking.**
+     * or nothing. So instead of receiving less, **we simply stop asking.** (Since #342 the codex
+     * reader pages `thread/turns/list` from the newest turn and stops at the limit, so a read that
+     * does happen costs the tail; not reading at all is still cheaper.)
      *
      * There is already something to ask instead: the `updatedAt` the list gives us, which the
      * externalGone check right before this already fetched and cached — free to use here.

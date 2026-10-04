@@ -6,7 +6,8 @@ import { CodexClient } from './client.js'
 /**
  * Reading a previous thread Codex has kept.
  *
- * **Only official app-server RPCs are used** (`thread/list`, `thread/read`). We do not parse
+ * **Only official app-server RPCs are used** (`thread/list`, `thread/turns/list`, and `thread/read` on a Codex that
+ * predates the paginated methods). We do not parse
  * `~/.codex/sessions/**\/rollout-*.jsonl` directly — the rollout format is an internal detail, and
  * chasing it ourselves would mean silently showing a wrong conversation every time codex ships an update.
  *
@@ -80,19 +81,77 @@ export async function readCodexHistory(
   limit: number,
   command: string,
 ): Promise<HistoryMessage[]> {
-  return withClient(cwd, command, async (client) => {
-    let res: { thread?: unknown }
-    try {
-      res = await client.request<{ thread?: unknown }>('thread/read', {
-        threadId: externalId,
-        includeTurns: true,
-      })
-    } catch (err) {
-      throw isUnknownMethod(err) ? new Error(UNSUPPORTED) : err
-    }
-    const thread = (res?.thread ?? {}) as Record<string, unknown>
-    return turnsToHistory(thread.turns, limit)
-  })
+  return withClient(cwd, command, (client) => readThreadHistory((method, params) => client.request(method, params), externalId, limit))
+}
+
+/** Turns per `thread/turns/list` page. A page is bounded by its turns' size, not by the whole thread's */
+export const HISTORY_PAGE_TURNS = 5
+
+/** A thread no message has reached yet has no turns to read (measured wording, codex-cli 0.160.0) */
+const NOT_MATERIALIZED = /unavailable before first user message|not materialized yet/i
+
+/**
+ * The last `limit` lines of a thread, newest pages first (#342).
+ *
+ * `thread/read` with `includeTurns` returned the whole history in one response, and Codex 0.160.0 deprecates that for
+ * paginated threads: measured on a five-turn scratch thread (gpt-5.6-luna, 2026-10-05), 1,205 KB in one line and a
+ * `deprecationNotice` ("Full-history hydration is deprecated for paginated threads; omit `includeTurns`…") that #304
+ * put in the conversation. A 775-turn thread was 48.6 MB (manager.ts). `thread/turns/list` pages backwards from the
+ * newest turn, so reading stops once `limit` lines are in hand: an import (200 lines) of a long thread reads its tail,
+ * not all of it.
+ *
+ * `itemsView: 'full'`, not `summary`: measured, `summary` gives a turn's user message and final answer but leaves the
+ * `contextCompaction` item out (a manual compaction's turn came back empty), and the compaction marker on read-back is
+ * #323's. `full` gives the same items `thread/read` did, in the same order, so `turnsToHistory` is unchanged.
+ *
+ * A Codex without `thread/turns/list` (it answers "method not found", or "not supported" for a thread its store cannot
+ * page) is read the old way, `thread/read` with turns: only paginated threads draw the deprecation.
+ */
+export async function readThreadHistory(
+  request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  threadId: string,
+  limit: number,
+): Promise<HistoryMessage[]> {
+  const newestFirst: unknown[] = []
+  let lines = 0
+  let cursor: string | null = null
+  try {
+    do {
+      const page = (await request('thread/turns/list', {
+        threadId,
+        limit: HISTORY_PAGE_TURNS,
+        sortDirection: 'desc',
+        itemsView: 'full',
+        ...(cursor ? { cursor } : {}),
+      })) as { data?: unknown; nextCursor?: unknown } | undefined
+      const turns = Array.isArray(page?.data) ? page.data : []
+      newestFirst.push(...turns)
+      lines += turnsToHistory(turns, Number.POSITIVE_INFINITY).length
+      cursor = typeof page?.nextCursor === 'string' && page.nextCursor && turns.length > 0 ? page.nextCursor : null
+    } while (cursor && lines < limit)
+  } catch (err) {
+    if (NOT_MATERIALIZED.test((err as Error | null)?.message ?? '')) return []
+    if (!isUnknownMethod(err)) throw err
+    return readWholeThread(request, threadId, limit)
+  }
+  return turnsToHistory(newestFirst.reverse(), limit)
+}
+
+/** The path for a Codex that predates `thread/turns/list`: the whole thread in one response */
+async function readWholeThread(
+  request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  threadId: string,
+  limit: number,
+): Promise<HistoryMessage[]> {
+  let res: { thread?: unknown } | undefined
+  try {
+    res = (await request('thread/read', { threadId, includeTurns: true })) as { thread?: unknown } | undefined
+  } catch (err) {
+    if (NOT_MATERIALIZED.test((err as Error | null)?.message ?? '')) return []
+    throw isUnknownMethod(err) ? new Error(UNSUPPORTED) : err
+  }
+  const thread = (res?.thread ?? {}) as Record<string, unknown>
+  return turnsToHistory(thread.turns, limit)
 }
 
 /**
@@ -128,7 +187,7 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
   return out
 }
 
-/** thread/read's turns into a list of conversation lines. Trims from the older side when it exceeds the limit */
+/** Turns, oldest first, into a list of conversation lines. Trims from the older side when it exceeds the limit */
 export function turnsToHistory(turns: unknown, limit: number): HistoryMessage[] {
   const list = Array.isArray(turns) ? turns : []
   const out: HistoryMessage[] = []

@@ -6,7 +6,9 @@ import {
   UNSUPPORTED as CLAUDE_UNSUPPORTED,
 } from './claude/history.js'
 import {
+  HISTORY_PAGE_TURNS,
   isUnknownMethod,
+  readThreadHistory,
   threadListToSummaries,
   turnsToHistory,
   UNSUPPORTED as CODEX_UNSUPPORTED,
@@ -217,5 +219,91 @@ describe('stripping injected blocks (measured: a title once came out as <system_
 
   it('leaves angle-bracket text the model actually wrote untouched', () => {
     expect(stripInjectedBlocks('<div>this is about code</div>')).toBe('<div>this is about code</div>')
+  })
+})
+
+/*
+ * Codex history without full-history hydration (#342). Measured (codex-cli 0.160.0, gpt-5.6-luna, 2026-10-05): on a
+ * paginated thread `thread/read` with turns answered 1,205 KB in one line and sent a deprecationNotice; `thread/turns/list`
+ * pages newest first with `nextCursor`, and `itemsView: 'full'` carries the same items, `contextCompaction` included
+ * (`summary` left it out). The fake below pages a thread the same way.
+ */
+describe('codex history read in pages (#342)', () => {
+  /** A thread of `n` turns, oldest first: each a question and an answer, with a manual compaction as turn 5 */
+  const thread = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      i === 5
+        ? { id: `t${i}`, startedAt: i, status: 'completed', items: [{ type: 'contextCompaction', id: 'c' }] }
+        : {
+            id: `t${i}`,
+            startedAt: i,
+            status: 'completed',
+            items: [
+              { type: 'userMessage', content: [{ type: 'text', text: `q${i}` }] },
+              { type: 'commandExecution', command: 'seq 1 40000', aggregatedOutput: '…' },
+              { type: 'agentMessage', text: `a${i}` },
+            ],
+          },
+    )
+
+  /** An app-server that pages `turns` newest first, as 0.160.0 does; `calls` records what was asked */
+  function pager(turns: unknown[], opts: { pages?: boolean; read?: boolean } = {}) {
+    const calls: { method: string; params: Record<string, unknown> }[] = []
+    const request = async (method: string, params: Record<string, unknown>) => {
+      calls.push({ method, params })
+      if (method === 'thread/turns/list') {
+        if (opts.pages === false) throw new Error('JSON-RPC error -32601: Method not found')
+        const newest = [...turns].reverse()
+        const from = typeof params.cursor === 'string' ? Number(params.cursor) : 0
+        const size = Number(params.limit)
+        const data = newest.slice(from, from + size)
+        return { data, nextCursor: from + size < newest.length ? String(from + size) : null, backwardsCursor: null }
+      }
+      if (method === 'thread/read' && opts.read !== false) return { thread: { id: 'x', turns: params.includeTurns ? turns : [] } }
+      throw new Error('JSON-RPC error -32601: Method not found')
+    }
+    return { request, calls }
+  }
+
+  it('reads the newest pages until it has the lines it needs, and gives what the whole read gave', async () => {
+    const turns = thread(40)
+    const { request, calls } = pager(turns)
+    // Two lines a turn: this many lines need a page and a half, so two pages, not all of them
+    const limit = 3 * HISTORY_PAGE_TURNS
+    const out = await readThreadHistory(request, 'x', limit)
+    expect(out).toEqual(turnsToHistory(turns, limit))
+    expect(calls.map((c) => c.method)).toEqual(['thread/turns/list', 'thread/turns/list'])
+    expect(calls[0]!.params).toEqual({ threadId: 'x', limit: HISTORY_PAGE_TURNS, sortDirection: 'desc', itemsView: 'full' })
+    expect(calls[1]!.params).toMatchObject({ cursor: String(HISTORY_PAGE_TURNS) })
+    expect(calls.some((c) => c.method === 'thread/read')).toBe(false)
+  })
+
+  it('keeps the compaction marker where it ran, across pages, and reads to the first turn when asked for more', async () => {
+    const turns = thread(23)
+    const { request, calls } = pager(turns)
+    const out = await readThreadHistory(request, 'x', 600)
+    expect(out).toEqual(turnsToHistory(turns, 600))
+    expect(out.filter((m) => m.role === 'system')).toEqual([{ role: 'system', marker: 'compaction', ts: 5000 }])
+    expect(calls).toHaveLength(Math.ceil(23 / HISTORY_PAGE_TURNS))
+  })
+
+  it('reads the whole thread the old way on a Codex without thread/turns/list', async () => {
+    const turns = thread(12)
+    const { request, calls } = pager(turns, { pages: false })
+    expect(await readThreadHistory(request, 'x', 200)).toEqual(turnsToHistory(turns, 200))
+    expect(calls.map((c) => c.method)).toEqual(['thread/turns/list', 'thread/read'])
+    expect(calls[1]!.params).toEqual({ threadId: 'x', includeTurns: true })
+  })
+
+  it('a Codex with neither says why; a thread no message reached is empty; another failure is thrown', async () => {
+    await expect(readThreadHistory(pager([], { pages: false, read: false }).request, 'x', 10)).rejects.toThrow(CODEX_UNSUPPORTED)
+    const notYet = async () => {
+      throw new Error('thread 01a1 is not materialized yet; thread/turns/list is unavailable before first user message')
+    }
+    expect(await readThreadHistory(notYet, 'x', 10)).toEqual([])
+    const broken = async () => {
+      throw new Error('no rollout found for thread id x')
+    }
+    await expect(readThreadHistory(broken, 'x', 10)).rejects.toThrow('no rollout found')
   })
 })
