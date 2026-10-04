@@ -74,10 +74,14 @@ export function watchDrags(win: EventTarget, set: (dragging: boolean) => void): 
     ['dragleave', leave],
     ['mousemove', move],
   ]
-  for (const [type, fn] of listeners) win.addEventListener(type, fn, true)
+  // An options object, not `true`: Node 22's EventTarget does not remove a listener added with a
+  // bare `true` when it is removed with `true` (the test environment's, not WebKit's), measured
+  // on 2026-10-04 with v22.23.3 against v26.9.0. The object form is removed in both.
+  const capture = { capture: true } as const
+  for (const [type, fn] of listeners) win.addEventListener(type, fn, capture)
   return () => {
     quiet()
-    for (const [type, fn] of listeners) win.removeEventListener(type, fn, true)
+    for (const [type, fn] of listeners) win.removeEventListener(type, fn, capture)
   }
 }
 
