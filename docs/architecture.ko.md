@@ -192,7 +192,7 @@ SIGHUP, 그다음 TERM, 그다음 KILL). *detach*는 키퍼 아래의 나머지 
 | 종류 | 다음 호스트가 넘겨받는 법 |
 |---|---|
 | claude | `spawnClaudeCodeProcess`가 쥐어 둔 프로세스를 돌려주는 새 `query()`. 측정: 다시 보낸 `initialize`가 기다리던 승인을 즉시 다시 전하고, 도는 턴의 나머지가 그것을 통해 온다. |
-| codex app-server | 같은 stdio. 두 번째 `initialize`는 해 없이 거절되고("Already initialized"), `thread/resume`이 도는 턴을 돌려주며 기다리던 승인을 같은 요청 id로 다시 보낸다. |
+| codex app-server | 같은 stdio. 두 번째 `initialize`는 해 없이 거절되고("Already initialized"), `thread/resume`이 기다리던 승인을 같은 요청 id로 다시 보내고, 도는 턴은 resume의 턴에서, resume이 턴을 달라고 하지 않게 된 뒤로는(#342) `thread/turns/list`에서 온다. |
 | 터미널, 명령 실행 | 같은 id나 실행 id. 키퍼가 다시 보내 준 링이 스크롤백이나 로그가 된다. 붙은 호스트가 없을 때 끝난 실행은 종료 코드와 함께 돌아온다. |
 
 쥐어 둔 프로세스가 있는 세션은 시작 시 재설정에서도 살아 있는 상태를 지키고, 대화록 따라잡기는 건너뛴다(버퍼에 담긴

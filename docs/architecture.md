@@ -192,7 +192,7 @@ tools: no deny for a waiting approval, no EOF, no signal.
 | Kind | How the next host takes it over |
 |---|---|
 | claude | A new `query()` whose `spawnClaudeCodeProcess` returns the kept process. Measured: its re-`initialize` re-delivers a pending approval at once and the rest of a running turn arrives through it. |
-| codex app-server | The same stdio. The second `initialize` is rejected ("Already initialized") harmlessly; `thread/resume` returns the running turn and re-sends a pending approval under the same request id. |
+| codex app-server | The same stdio. The second `initialize` is rejected ("Already initialized") harmlessly; `thread/resume` re-sends a pending approval under the same request id, and the running turn comes from the resume's turns or, since the resume asks for none (#342), from `thread/turns/list`. |
 | terminal, command run | Same id or run id; the keeper's replayed ring becomes the scrollback or log. A run that ended while no host was attached comes back with its exit code. |
 
 A session with a kept process keeps its live state through the startup reset, and the transcript catch-up is skipped

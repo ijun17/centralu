@@ -425,7 +425,7 @@ codex-cli 0.160.0 with `gpt-5.6-luna`, low effort):
 | tool | measured |
 |---|---|
 | claude | A new `query()` over the kept process: its `initialize` re-delivered the pending approval to the new `canUseTool` at once; answering it ran the command and finished the turn. Mid-turn, the remaining three Bash calls and the result arrived through the new host. |
-| codex | `initialize` again: `-32600 "Already initialized"`, nothing else changes. `thread/resume`: `thread.status` `active`/`waitingOnApproval`, the running turn in `thread.turns` (the id Stop needs), and the approval re-sent with the same request id (`0`); accepting it finished the turn. It does not restart the thread's MCP servers (a probe server configured on resume never started), which is why the bridge has the front door's address and token. |
+| codex | `initialize` again: `-32600 "Already initialized"`, nothing else changes. `thread/resume`: `thread.status` `active`/`waitingOnApproval`, the running turn in `thread.turns` (the id Stop needs), and the approval re-sent with the same request id (`0`); accepting it finished the turn. Since #342 the resume asks for no turns (`excludeTurns: true`), and the running turn comes from `thread/turns/list` (`limit: 1`, newest first, `itemsView: 'notLoaded'`), asked only when the thread is `active`; measured again on 0.160.0 (2026-10-05): the turn came back `inProgress`, and a pending approval was still re-sent under its id. A Codex that predates the flag answers with the turns, and those are read as before. It does not restart the thread's MCP servers (a probe server configured on resume never started), which is why the bridge has the front door's address and token. |
 
 **A lost in-process call.** A call to the host's own in-process tools (orchestrator `mcp__centralu__*`, app
 proxies `mcp__app-*`) in flight when the host died is never answered: measured, the adopted claude waited silently
@@ -558,11 +558,31 @@ breaks silently when the tool is upgraded, and you end up showing the wrong conv
 | | List | Read the conversation |
 |---|---|---|
 | Claude Code | SDK `listSessions({ dir })` | SDK `getSessionMessages(id, { dir })` |
-| Codex | app-server `thread/list { cwd }` | app-server `thread/read { threadId, includeTurns }` |
+| Codex | app-server `thread/list { cwd }` | app-server `thread/turns/list { threadId, sortDirection: 'desc', itemsView: 'full' }`, page by page; `thread/read { threadId, includeTurns }` on a Codex without it |
 
 Responsibility for version compatibility sits with the tool — each API reads the storage format its own version wrote.
 What we have to maintain is only **the conversion from a response into a conversation**, and that conversion is separated out
 as a pure function so it can be verified without starting the tool (`adapters/history.test.ts`).
+
+**Codex history is read in pages, newest first** ([#342](https://github.com/ijun17/centralu/issues/342)). Codex 0.160.0
+deprecates full-history hydration for paginated threads and says so in a `deprecationNotice` that reached the
+conversation. Measured on a scratch thread (gpt-5.6-luna, 2026-10-05, 19 turns with long command output):
+
+| Request | Answer | Notice |
+|---|---|---|
+| `thread/resume` (whole history) | 7,260 KB in one line | "Full-history hydration is deprecated…" |
+| `thread/resume { excludeTurns: true }` | 1.9 KB | none |
+| `thread/fork` (whole history) / `{ excludeTurns: true }` | 7,260 KB / 1.3 KB | the notice / none |
+| `thread/read { includeTurns: true }` | 7,260 KB in one line | "Full-history hydration is deprecated…" |
+| `thread/turns/list`, five turns a page, `full` | the newest page only, for the last 4 lines | none |
+
+| Decision | Why |
+|---|---|
+| Resume with `excludeTurns: true` | Nothing reads the history a resume returned except the running turn's id, which has its own one-turn query. One thread's answer was 23 MB (`architecture.md` §4) |
+| Page `thread/turns/list` newest first and stop once the lines are in hand | An import (200 lines) or a catch-up (600) of a long thread reads its tail, not all of it. The lines are the same `thread/read` gave, so catching up still finds our last message and attaches only what follows |
+| `itemsView: 'full'`, not `summary` | Measured, `summary` gives a turn's user message and final answer in about 0.2% of the bytes, but leaves the `contextCompaction` item out (a manual compaction's turn came back empty), and the compaction line is #303's. A page is still as large as its turns' command output |
+| A Codex without `thread/turns/list` reads the whole thread, as before | It answers `-32601`. Only paginated threads draw the deprecation, and older versions have none |
+| The contract checks the fields read back and the enum words sent | A renamed `nextCursor` or `inProgress` fails no request; it reads as absent, and every page after the first, or the running turn after a resume, would be lost silently (`codex-bindings.mjs`) |
 
 ### 8.2 Compatibility with older tool versions
 
@@ -590,8 +610,8 @@ Only when nothing is left after stripping is the line dropped.
 Tool calls and results are dropped, keeping only the name: the point of importing is to get the conversation back,
 not to resurrect the execution log.
 
-**Where the tool compacted is kept** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex's `thread/read`
-returns each compaction as a `{ type: 'contextCompaction', id }` item in the turn where it ran — a turn of its own for
+**Where the tool compacted is kept** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex's history (now
+`thread/turns/list` with full items, before #342 `thread/read`) returns each compaction as a `{ type: 'contextCompaction', id }` item in the turn where it ran — a turn of its own for
 `/compact`, ahead of the user's message for an automatic one (measured on codex-cli 0.147.0, 0.153.4 and 0.160.0,
 `scripts/probe-codex-compaction.mts`). The reader turns it into a compaction line (`HistoryMessage` with
 `role: 'system', marker: 'compaction'`), and the host stores that as exactly the row a live `compaction` event leaves

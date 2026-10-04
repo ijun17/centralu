@@ -378,7 +378,7 @@ sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId
 | 도구 | 측정 |
 |---|---|
 | claude | 쥐어 둔 프로세스 위의 새 `query()`: 그 `initialize`가 기다리던 승인을 새 `canUseTool`에 즉시 다시 전했고, 답하자 명령이 돌고 턴이 끝났다. 턴 도중이면 남은 Bash 호출 셋과 결과가 새 호스트를 통해 왔다. |
-| codex | `initialize`를 다시: `-32600 "Already initialized"`, 그 밖에 바뀌는 것 없음. `thread/resume`: `thread.status`는 `active`/`waitingOnApproval`, 도는 턴은 `thread.turns`에(Stop에 필요한 id), 승인은 같은 요청 id(`0`)로 다시 왔고, 수락하자 턴이 끝났다. 스레드의 MCP 서버는 다시 띄우지 않는다(resume에 설정한 탐침 서버는 뜨지 않았다). 브리지가 정문의 주소와 토큰을 갖는 이유가 이것이다. |
+| codex | `initialize`를 다시: `-32600 "Already initialized"`, 그 밖에 바뀌는 것 없음. `thread/resume`: `thread.status`는 `active`/`waitingOnApproval`, 도는 턴은 `thread.turns`에(Stop에 필요한 id), 승인은 같은 요청 id(`0`)로 다시 왔고, 수락하자 턴이 끝났다. #342부터 resume은 턴을 달라고 하지 않고(`excludeTurns: true`), 도는 턴은 스레드가 `active`일 때만 `thread/turns/list`(`limit: 1`, 최신부터, `itemsView: 'notLoaded'`)로 묻는다. 0.160.0에서 다시 측정(2026-10-05): 턴은 `inProgress`로 왔고, 기다리던 승인은 여전히 같은 id로 다시 왔다. 이 플래그를 모르는 Codex는 턴을 실어 답하고, 그것을 예전처럼 읽는다. 스레드의 MCP 서버는 다시 띄우지 않는다(resume에 설정한 탐침 서버는 뜨지 않았다). 브리지가 정문의 주소와 토큰을 갖는 이유가 이것이다. |
 
 **잃어버린 in-process 호출.** 호스트가 죽을 때 진행 중이던 호스트 자신의 in-process 도구 호출(오케스트레이터
 `mcp__centralu__*`, 앱 프록시 `mcp__app-*`)은 결코 답을 받지 못한다: 측정해 보니 넘겨받은 claude는 새 주인이
@@ -501,11 +501,31 @@ Centralu 밖에서 — 터미널에서 — 시작한 대화를 이어받는 경�
 | | 목록 | 대화 읽기 |
 |---|---|---|
 | Claude Code | SDK `listSessions({ dir })` | SDK `getSessionMessages(id, { dir })` |
-| Codex | app-server `thread/list { cwd }` | app-server `thread/read { threadId, includeTurns }` |
+| Codex | app-server `thread/list { cwd }` | app-server `thread/turns/list { threadId, sortDirection: 'desc', itemsView: 'full' }`를 쪽마다. 그것이 없는 Codex에서는 `thread/read { threadId, includeTurns }` |
 
 버전 호환의 책임은 도구 쪽에 있다 — 각 API는 자기 버전이 쓴 저장 포맷을 스스로 읽는다.
 우리가 유지해야 하는 것은 **응답을 대화로 변환하는 부분**뿐이며, 그 변환은 도구를 띄우지 않고도
 검증할 수 있도록 순수 함수로 분리되어 있다 (`adapters/history.test.ts`).
+
+**Codex의 기록은 최신부터 쪽으로 나눠 읽는다** ([#342](https://github.com/ijun17/centralu/issues/342)). Codex 0.160.0은
+paginated 스레드의 전체 기록 불러오기를 지원 중단하고, 그것을 대화까지 닿은 `deprecationNotice`로 알린다. 임시 스레드에서
+측정(gpt-5.6-luna, 2026-10-05, 긴 명령 출력이 있는 19턴):
+
+| 요청 | 답 | 알림 |
+|---|---|---|
+| `thread/resume` (전체 기록) | 한 줄에 7,260 KB | "Full-history hydration is deprecated…" |
+| `thread/resume { excludeTurns: true }` | 1.9 KB | 없음 |
+| `thread/fork` (전체 기록) / `{ excludeTurns: true }` | 7,260 KB / 1.3 KB | 알림 / 없음 |
+| `thread/read { includeTurns: true }` | 한 줄에 7,260 KB | "Full-history hydration is deprecated…" |
+| `thread/turns/list`, 한 쪽에 다섯 턴, `full` | 마지막 4줄에는 최신 한 쪽만 | 없음 |
+
+| 결정 | 이유 |
+|---|---|
+| `excludeTurns: true`로 재개한다 | resume이 돌려준 기록을 읽는 곳은 도는 턴의 id뿐이고, 그것은 한 턴짜리 질의로 따로 묻는다. 한 스레드의 답은 23 MB였다(`architecture.md` §4) |
+| `thread/turns/list`를 최신부터 넘기다 줄이 모이면 멈춘다 | 긴 스레드를 가져오거나(200줄) 따라잡을 때(600줄) 전부가 아니라 끝부분만 읽는다. 줄은 `thread/read`가 주던 것과 같아서, 따라잡기는 여전히 우리의 마지막 메시지를 찾아 그 뒤만 붙인다 |
+| `summary`가 아니라 `itemsView: 'full'` | 측정해 보니 `summary`는 턴의 사용자 메시지와 최종 답을 약 0.2%의 바이트로 주지만 `contextCompaction` 항목을 뺀다(수동 압축의 턴이 비어서 왔다). 압축 줄은 #303의 것이다. 한 쪽은 여전히 그 턴들의 명령 출력만큼 크다 |
+| `thread/turns/list`가 없는 Codex는 예전처럼 스레드 전체를 읽는다 | `-32601`로 답한다. 지원 중단 알림은 paginated 스레드에만 붙고, 옛 버전에는 없다 |
+| 계약은 되읽는 필드와 보내는 enum 단어도 확인한다 | 이름이 바뀐 `nextCursor`나 `inProgress`는 요청을 실패시키지 않고 없는 것으로 읽힌다. 그러면 첫 쪽 뒤의 모든 쪽이나 재개 뒤의 도는 턴이 소리 없이 사라진다(`codex-bindings.mjs`) |
 
 ### 8.2 구버전 도구와의 호환
 
@@ -533,7 +553,8 @@ UI는 `supported: false`를 에러가 아니라 안내로 그린다.
 도구 호출과 결과는 이름만 남기고 버린다: 가져오기의 목적은 대화를 되찾는 것이지,
 실행 로그를 되살리는 것이 아니다.
 
-**도구가 압축한 자리는 남긴다** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex의 `thread/read`는
+**도구가 압축한 자리는 남긴다** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex의 기록(지금은 full 항목의
+`thread/turns/list`, #342 전에는 `thread/read`)은
 압축 하나하나를 그것이 돈 턴 안의 `{ type: 'contextCompaction', id }` 항목으로 돌려준다 — `/compact`는 자기만의
 턴으로, 자동 압축은 사용자 메시지 앞에 (codex-cli 0.147.0, 0.153.4, 0.160.0에서 측정,
 `scripts/probe-codex-compaction.mts`). 읽는 쪽은 이것을 압축 줄(`role: 'system', marker: 'compaction'`인
