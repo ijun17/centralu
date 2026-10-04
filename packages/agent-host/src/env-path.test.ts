@@ -66,6 +66,24 @@ describe('CLI search path augmentation', () => {
     }
   })
 
+  it('a PATH with as many duplicates as new folders still gets the new folders, once each', () => {
+    const original = process.env.PATH
+    try {
+      // What this machine adds to an empty PATH (from the login shell, or the fallback folders)
+      process.env.PATH = ''
+      const added = ensureToolPath().path.split(delimiter).filter(Boolean)
+      if (added.length < 2) return // nothing to arrange on a machine that adds fewer than two
+      // Everything but the last folder, plus one duplicate: the same length as the full list
+      const inherited = [added[0]!, ...added.slice(0, -1)]
+      process.env.PATH = inherited.join(delimiter)
+      const dirs = ensureToolPath().path.split(delimiter)
+      expect(dirs).toContain(added.at(-1))
+      expect(new Set(dirs).size).toBe(dirs.length)
+    } finally {
+      process.env.PATH = original
+    }
+  })
+
   it('whichTool returns the actual executable path (the same job as `which`)', () => {
     ensureToolPath()
     const found = whichTool('node')

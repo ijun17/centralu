@@ -111,7 +111,15 @@ export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' |
 
   // The shell's own list might have duplicates — preserve order and keep each entry only once
   const merged = [...new Set([...current, ...candidates])]
-  if (merged.length === current.length) return { path: process.env.PATH ?? '', source: 'unchanged' }
+  /*
+   * "Unchanged" means the same list, not the same length. Comparing lengths read an inherited PATH
+   * holding duplicates, plus as many new folders as there were duplicates, as "nothing added": the
+   * new folders were dropped and the duplicates kept (seen on a Windows runner, whose PATH repeats
+   * entries, once its fallback folders existed, #14).
+   */
+  if (merged.length === current.length && merged.every((p, i) => p === current[i])) {
+    return { path: process.env.PATH ?? '', source: 'unchanged' }
+  }
 
   process.env.PATH = merged.join(delimiter)
   return { path: process.env.PATH, source }
