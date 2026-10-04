@@ -220,9 +220,10 @@ function hostContext(scale: number, el: Element | null, fill = false): McpUiHost
 }
 
 /**
- * The size of a filling view. A hidden slot (a pinned view while something else is being looked
- * at, `display: none`) is 0 — announcing 0 would make the view collapse itself. In that case, it
- * says "unknown" instead (only `maxHeight`).
+ * The size of a filling view. A slot with no size yet is 0 — announcing 0 would make the view
+ * collapse itself. In that case, it says "unknown" instead (only `maxHeight`). A pinned view while
+ * something else is looked at keeps a size: it is moved out of the window, never `display: none`
+ * (PinnedApps' OUT_OF_SIGHT).
  */
 function fillDimensions(el: Element | null): McpUiHostContext['containerDimensions'] {
   const h = el?.clientHeight ?? 0
@@ -431,8 +432,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   /*
    * A filling view is told whenever its slot's size changes (window size, sidebar width,
    * opening and closing the transcript panel). This also fires when it is hidden and shown
-   * again — because the 0 while hidden is never reported (fillDimensions), the size at the
-   * moment it becomes visible becomes the next notification.
+   * again: a hidden pinned view stands out of the window at the lane's size, and coming back
+   * into its panel or the main area is a size change like any other.
    */
   useEffect(() => {
     const box = boxRef.current

@@ -1,5 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
+import { expectOutOfSight } from './fixtures/project-screen.js'
 
 /**
  * Where external apps show up in the UI (M4 A-8, B-2, B-4, B-6, B-7) — real UI on a mock platform.
@@ -277,7 +278,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await page.getByTestId('new-session-alpha').click()
     await page.getByTestId('create-session-confirm').click()
     await expect(page.getByTestId('session-view')).toBeVisible()
-    await expect(pinned).toBeHidden()
+    await expectOutOfSight(pinned)
     await expect(row).not.toHaveAttribute('aria-current', 'page')
 
     // Come back — the keyboard follows the same row

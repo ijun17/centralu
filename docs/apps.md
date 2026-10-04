@@ -259,7 +259,9 @@ call.
 - `home` must declare a `ui://` view and be visible to `app`. Otherwise opening is refused **before
   anything is called**, so nobody sees the app's state change behind a screen that never appeared.
 - Going to a session and back keeps the same document (hidden, not unloaded). Every way a view goes
-  away sends teardown first. When Centralu starts again, the app that was on screen reopens (the
+  away sends teardown first. A hidden view is moved out of the window and made `inert`, never put
+  in `display: none` or `visibility: hidden`: in WKWebView a frame hidden either way and shown again
+  stops drawing the native scrollbars inside the app's document, leaving an empty gutter (#309). When Centralu starts again, the app that was on screen reopens (the
   host calls `home` again).
 - While the app starts, a skeleton; if it fails, the reason and Restart. Restart waits until the
   host has stopped the app before opening again.

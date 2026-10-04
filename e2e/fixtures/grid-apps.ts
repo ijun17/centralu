@@ -1,6 +1,6 @@
 import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
-import { expectCoveredInSight, expectFrameTakesPointer, newSession } from './project-screen.js'
+import { expectCoveredInSight, expectFrameTakesPointer, expectOutOfSight, hiddenAround, newSession } from './project-screen.js'
 
 /**
  * Apps on the grid (#288): an app's sidebar row dropped on the grid stands there as a panel, moves and leaves like a
@@ -334,6 +334,46 @@ export function gridAppTests(): void {
       await expect.poll(() => closed(page)).toEqual([gridInstance])
       await expect(onGrid).toHaveCount(0)
       await expect(onScreen).toHaveCount(1)
+    })
+
+    test('a view on another screen waits out of the window, never display: none or visibility: hidden, and comes back in the same document (#309)', async ({
+      page,
+    }) => {
+      const { pid } = await alphaWithSlider(page)
+      const app = `app:${pid}/slider`
+      const gridKey = `grid:${pid}/slider`
+      const pinnedKey = `${pid}/slider`
+      await page.evaluate(
+        (p) =>
+          (window as any).__store.getState().setGridPanels([{ kind: 'app', projectId: p, appId: 'slider' }]),
+        pid,
+      )
+      await page.getByTestId('grid-button').click()
+      const onGrid = page.getByTestId(`pinned-app-${gridKey}`)
+      await expect(onGrid.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+      await viewOf(page, gridKey).locator('#call').click()
+      await expect(viewOf(page, gridKey).locator('li[data-k="call-result"]')).toHaveCount(1)
+
+      // The project screen: the grid's view waits out of sight, and the project's view stands in its panel
+      await page.getByTestId('project-header-alpha').click()
+      await expectOutOfSight(onGrid)
+      const pinned = page.getByTestId(`pinned-app-${pinnedKey}`)
+      await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+
+      // The app view: the grid's view still out of sight; then the grid, where the app view's waits in turn
+      await page.getByTestId('project-open-app-slider').click()
+      await expect(pinned).toHaveAttribute('data-mode', 'full')
+      await expectOutOfSight(onGrid)
+      await page.getByTestId('grid-button').click()
+      await expectOutOfSight(pinned)
+
+      // Back over its panel, nothing around its frame hidden, and the same document as before
+      await expect(onGrid).toHaveAttribute('data-mode', 'slot')
+      await expectOverSlot(page, gridKey, page.getByTestId(`grid-slot-${app}`))
+      expect(await hiddenAround(onGrid)).toEqual([])
+      await expect(onGrid).not.toHaveAttribute('inert')
+      await expect(viewOf(page, gridKey).locator('li[data-k="call-result"]')).toHaveCount(1)
+      await expect(viewOf(page, gridKey).locator('li[data-k="connected"]')).toHaveCount(1)
     })
 
     test('an untrusted app and an invalid one say why in their panels instead of a blank frame, and open nothing', async ({

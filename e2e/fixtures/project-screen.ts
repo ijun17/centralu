@@ -82,6 +82,34 @@ export async function expectFrameTakesPointer(page: Page, view: Locator) {
 }
 
 /**
+ * What hides an app's view, from its frame (or the view itself, when it shows a notice instead) up to the root: every
+ * element with `display: none` or `visibility: hidden` on the way. In WKWebView a frame hidden either way and shown
+ * again stops drawing the native scrollbars inside the app's document (PinnedApps' OUT_OF_SIGHT), so a view must
+ * come back to an empty list. Playwright's WebKit forces overlay scrollbars, so the paint itself cannot be read here.
+ */
+export const hiddenAround = (view: Locator) =>
+  view.evaluate((el) => {
+    const found: string[] = []
+    for (let n: Element | null = el.querySelector('iframe') ?? el; n; n = n.parentElement) {
+      const cs = getComputedStyle(n)
+      if (cs.display === 'none' || cs.visibility === 'hidden')
+        found.push(`${n.tagName.toLowerCase()}[data-testid="${n.getAttribute('data-testid')}"] ${cs.display} ${cs.visibility}`)
+    }
+    return found
+  })
+
+/**
+ * A view hidden while another screen is looked at: out of the window, `inert` so nothing reaches it, and still not
+ * hidden by `display` or `visibility` on anything around its frame (see `hiddenAround`).
+ */
+export async function expectOutOfSight(view: Locator) {
+  await expect(view).toHaveAttribute('data-mode', 'hidden')
+  await expect(view).not.toBeInViewport()
+  expect(await view.evaluate((el) => (el as HTMLElement).inert)).toBe(true)
+  expect(await hiddenAround(view)).toEqual([])
+}
+
+/**
  * Drags panel `from` to one side of panel `to` and drops it there. `view` is the app view laid over `from` when it
  * is an app's panel: the view is not inside the panel; it stays in sight, dimmed under its panel's cover, while it is
  * dragged (dragShield.tsx).
@@ -527,7 +555,7 @@ export function appPanelTests(): void {
       await expect(pinned).toHaveAttribute('data-mode', 'full')
       // A session and back to the project screen: still the one document
       await page.getByTestId(`session-row-${s}`).click()
-      await expect(pinned).toBeHidden()
+      await expectOutOfSight(pinned)
       await page.getByTestId('project-header-alpha').click()
       await expect(pinned).toHaveAttribute('data-mode', 'slot')
       await expectOverSlot(page, key)

@@ -26,16 +26,36 @@ import { registerShieldHost } from './dragShield.jsx'
 type Mode = 'full' | 'slot' | 'hidden'
 
 /**
+ * How a hidden view is put out of sight: moved past the window's left edge at the lane's size, and
+ * `inert`, so neither the keyboard, the pointer nor assistive tech reaches it.
+ *
+ * Never `display: none` or `visibility: hidden`, on the view or on anything around it. In WKWebView
+ * (the desktop app) a frame hidden either way and shown again stops drawing the native scrollbars
+ * of the scrolling areas inside the app's document: the gutter keeps its width, nothing is drawn in
+ * it, and scrolling the area from script does not bring it back (#309). Measured with the system
+ * WebKit of macOS 27, legacy (always shown) scrollbars, a frame nested the way a view's is: both
+ * ways lost them; `opacity: 0`, and moving the frame out of the window and back, kept them. The
+ * grid, the project screen and the app view all hide views here, so going to a session and back
+ * left a board app on the grid with empty gutters, and so did dragging a panel while #294 hid every
+ * view for the length of a drag. Overlay scrollbars (a trackpad's default) take no gutter, and
+ * Playwright's WebKit forces them, which is why this never showed in e2e.
+ *
+ * `-200vw`: the lane starts at the sidebar's edge and is narrower than the window, so the whole box
+ * lies left of the window's edge. A negative offset adds nothing anyone can scroll to.
+ */
+const OUT_OF_SIGHT = 'absolute inset-y-0 -left-[200vw] flex w-full min-h-0 min-w-0 flex-col'
+
+/**
  * The pinned view (M4 B-2) — an app opened from the sidebar takes over the main area.
  *
- * **Every open view stays mounted.** Only one is visible; the rest are hidden with `display: none`.
- * Going to look at a session and coming back is still the same iframe, the same document, the same
- * instance. The spec's statement that a view holds no state means "it reads fresh when it comes back
- * up," not that it is fine to remount it. Remounting would drop whatever field was being typed in,
- * whatever list was expanded, and the scroll position, and the app would receive `home` all over
- * again. An iframe discards its document the moment it is detached from the DOM (even just moving it
- * causes a fresh read), while merely hiding it keeps the document alive. So this layer is always
- * rendered in App's center lane as **a child that never changes position.**
+ * **Every open view stays mounted.** Only one is visible; the rest are moved out of the window
+ * (`OUT_OF_SIGHT`). Going to look at a session and coming back is still the same iframe, the same
+ * document, the same instance. The spec's statement that a view holds no state means "it reads fresh
+ * when it comes back up," not that it is fine to remount it. Remounting would drop whatever field was
+ * being typed in, whatever list was expanded, and the scroll position, and the app would receive
+ * `home` all over again. An iframe discards its document the moment it is detached from the DOM (even
+ * just moving it causes a fresh read), while merely hiding it keeps the document alive. So this layer
+ * is always rendered in App's center lane as **a child that never changes position.**
  *
  * There are exactly three paths down, and all three send the spec's teardown first (AppFrame's
  * contract: called before detaching).
@@ -58,11 +78,13 @@ export function PinnedApps() {
   const modeOf = (key: string): Mode => (showing ? (key === focusedKey ? 'full' : 'hidden') : slots.has(key) ? 'slot' : 'hidden')
   return (
     /*
-      On the project screen and the grid this layer takes no room of its own (`contents`): its slotted views are
-      absolutely placed in the middle lane, over their panels. Only the class changes between the
-      three, never the parent, so no frame is ever taken out of the document.
+      Anywhere but the app view this layer takes no room of its own (`contents`): its slotted views are
+      absolutely placed in the middle lane, over their panels, and its hidden ones out of the window.
+      Never `hidden` (display: none), even with no view in sight — that would hide every frame in it
+      the way OUT_OF_SIGHT says it must not be. Only the class changes, never the parent, so no frame
+      is ever taken out of the document.
     */
-    <div className={showing ? 'flex min-h-0 min-w-0 flex-1' : slots.size ? 'contents' : 'hidden'} data-testid="pinned-apps">
+    <div className={showing ? 'flex min-h-0 min-w-0 flex-1' : 'contents'} data-testid="pinned-apps">
       {pinned.map((pv) => (
         <PinnedAppView key={pv.key} pv={pv} mode={modeOf(pv.key)} />
       ))}
@@ -252,8 +274,9 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           : mode === 'slot'
             ? // The slot is the panel's body: the panel's ground under it, and its rounded bottom corners inside the 1px border
               'absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-b-[7px] bg-void'
-            : 'hidden'
+            : OUT_OF_SIGHT
       }
+      inert={mode === 'hidden'}
       data-testid={`pinned-app-${pv.key}`}
       data-phase={pv.phase}
       data-mode={mode}
