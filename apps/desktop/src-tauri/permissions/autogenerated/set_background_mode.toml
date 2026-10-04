@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-background-mode"
+description = "Enables the set_background_mode command without any pre-configured scope."
+commands.allow = ["set_background_mode"]
+
+[[permission]]
+identifier = "deny-set-background-mode"
+description = "Denies the set_background_mode command without any pre-configured scope."
+commands.deny = ["set_background_mode"]

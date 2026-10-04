@@ -4,12 +4,43 @@
 //! the badge, shortcuts, opening the IDE) and window management. The conversation, state and
 //! screens all live on the webview side (docs/architecture.md §4).
 
+mod host_proc;
 mod ide;
+#[cfg(unix)]
+pub mod keeper;
 mod path_safety;
 mod sidecar;
 
 use path_safety::assert_safe_native_path;
-use sidecar::{HostInfo, Supervisor};
+use sidecar::{HostBuild, HostInfo, Supervisor};
+
+/// Whether this process was started as the keeper (`centralu --keeper`, #280). `main()` asks
+/// before anything else, so keeper mode never builds the Tauri app.
+pub fn is_keeper(args: &[String]) -> bool {
+    #[cfg(unix)]
+    {
+        keeper::is_keeper_invocation(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        false
+    }
+}
+
+/// Runs the keeper and returns its exit code.
+pub fn run_keeper(args: &[String]) -> i32 {
+    #[cfg(unix)]
+    {
+        keeper::server::run(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        eprintln!("the keeper needs a unix socket and is not available on this platform");
+        2
+    }
+}
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 /**
@@ -64,6 +95,40 @@ fn host_info(sup: State<'_, Supervisor>) -> Option<HostInfo> {
 #[tauri::command]
 fn host_error(sup: State<'_, Supervisor>) -> Option<String> {
     sup.last_error()
+}
+
+/// Which builds are involved (#280): this window's, the running host's, and whether they are
+/// the same one. `mode` is `keeper` or `direct`.
+#[tauri::command]
+fn host_build(sup: State<'_, Supervisor>) -> HostBuild {
+    sup.build()
+}
+
+/// Restarts the host from this window's build (#280). The UI confirms first that running turns
+/// will be cut.
+#[tauri::command]
+fn switch_host_build(sup: State<'_, Supervisor>) -> Result<(), String> {
+    sup.switch_build()
+}
+
+/// Background mode (#280): whether quitting leaves the agents running. Off by default.
+#[tauri::command]
+fn background_mode(sup: State<'_, Supervisor>) -> Result<bool, String> {
+    sup.background()
+}
+
+#[tauri::command]
+fn set_background_mode(sup: State<'_, Supervisor>, on: bool) -> Result<bool, String> {
+    sup.set_background(on)
+}
+
+/// "Quit and stop agents" (#280): stops the host whatever background mode says, then quits.
+#[tauri::command]
+fn quit_and_stop_agents(app: AppHandle, sup: State<'_, Supervisor>, approved: State<QuitApproved>) -> Result<(), String> {
+    sup.stop_agents()?;
+    approved.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.exit(0);
+    Ok(())
 }
 
 /// Retry from the failure screen (#184). Restarts a supervisor that has given up — merely
@@ -551,7 +616,12 @@ pub fn run() {
             window_controls_inset,
             shortcut_keys,
             quit_app,
-            take_app_links
+            take_app_links,
+            host_build,
+            switch_host_build,
+            background_mode,
+            set_background_mode,
+            quit_and_stop_agents
         ])
         /*
          * ⌘W and the red button both mean closing the window. Since this app has only one
@@ -619,7 +689,8 @@ pub fn run() {
                     return;
                 }
             }
-            // Make sure the sidecar is killed when the app closes (no zombie processes).
+            // Direct mode: make sure the sidecar is killed when the app closes (no zombie
+            // processes). Keeper mode: detach; the keeper applies background mode.
             if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
                 supervisor.shutdown();
                 let _ = app.emit("host-status", "shutdown");

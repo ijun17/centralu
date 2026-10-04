@@ -424,6 +424,7 @@ dependencies = [
 name = "centralu"
 version = "0.1.0-beta.6"
 dependencies = [
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

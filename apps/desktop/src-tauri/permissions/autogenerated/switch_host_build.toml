@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-switch-host-build"
+description = "Enables the switch_host_build command without any pre-configured scope."
+commands.allow = ["switch_host_build"]
+
+[[permission]]
+identifier = "deny-switch-host-build"
+description = "Denies the switch_host_build command without any pre-configured scope."
+commands.deny = ["switch_host_build"]

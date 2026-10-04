@@ -1,0 +1,1044 @@
+//! Running and supervising one agent host, with no Tauri in sight.
+//!
+//! Two callers share this module (#280, option C step 1):
+//!   - the app's **direct** path (`pnpm app:dev`, debug builds, non-unix targets), where the app
+//!     itself is the host's parent, as it always was;
+//!   - the **keeper** (`centralu --keeper`), a detached copy of the same executable that holds
+//!     the host so that quitting or replacing the app does not end it.
+//!
+//! The restart and backoff rules used to live inside `sidecar.rs`, tied to an `AppHandle`. They
+//! moved here unchanged so the keeper restarts a crashed host by exactly the same rules the app
+//! did: five consecutive failures, a 30 s stable-uptime reset, and an immediate stop when the
+//! host says another owner holds the data folder (#184). Only where the status goes differs, and
+//! that is the `StatusSink`.
+
+use std::io::{BufRead, BufReader};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HostInfo {
+    pub port: u16,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum HostStatus {
+    Starting,
+    Ready(HostInfo),
+    /// A restart is in progress (which attempt number this is).
+    Restarting { attempt: u32 },
+    /// Gave up trying to revive it — the UI has to tell the person.
+    Failed { message: String },
+}
+
+/// Where a supervisor's news goes: a Tauri event in the app, the attached windows in the keeper.
+pub trait StatusSink: Send + Sync + 'static {
+    fn status(&self, status: &HostStatus);
+    /// A JSON line on the host's stdout that is not the ready line. Returns true when the sink
+    /// used it, so it is not logged as the host's last words. The keeper reads the host's
+    /// activity report here; the app's direct path has no use for one.
+    fn json_line(&self, _line: &serde_json::Value) -> bool {
+        false
+    }
+}
+
+/// One way to run the host: a program, its arguments and the environment to add.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostLaunch {
+    pub program: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+/// Why a launch could not even be attempted.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LaunchError {
+    /// Retrying gets the same answer (Node is missing): say so at once instead of burning five
+    /// backoff rounds on it.
+    Fatal(String),
+    /// Worth another attempt after the backoff (a copy that failed half way, say).
+    Retry(String),
+}
+
+/// Builds the launch for the next attempt. Called once per attempt, so the keeper can change
+/// which build the next attempt runs (a switch) without restarting the supervisor.
+pub type Launcher = Arc<dyn Fn() -> Result<HostLaunch, LaunchError> + Send + Sync>;
+
+#[derive(Default)]
+struct Inner {
+    child: Option<Child>,
+    info: Option<HostInfo>,
+    status_text: Option<String>,
+    shutting_down: bool,
+    /// A watcher thread is running. This flag is what stops restart (#184) from launching a
+    /// second thread — if two of them alternate starting a host against the same data folder,
+    /// they end up blocking each other's lock.
+    running: bool,
+    /// The host about to exit was stopped on purpose to start another one (the keeper's build
+    /// switch). Its exit is not a crash: no backoff, no attempt counted.
+    bouncing: bool,
+    /// The last things the host said before it died (dogfooding: an installed build looked
+    /// stuck on "Starting…" forever, and the real reason — another instance was holding the
+    /// data — was something the host had spelled out plainly on stdout the whole time. The
+    /// words were there; they just never reached the screen.)
+    last_output: Vec<String>,
+}
+
+#[derive(Clone, Default)]
+pub struct Supervisor {
+    inner: Arc<Mutex<Inner>>,
+}
+
+/// The cap on restart backoff. Failing **consecutively** this many times is a problem a
+/// person has to look at.
+pub const MAX_RESTARTS: u32 = 5;
+
+/// Once it has stayed up this long, a death is a new incident, not part of "a run of failed
+/// launches".
+///
+/// If the counter were never reset, keeping the app open for days would eventually accumulate
+/// five rare, unrelated crashes and the supervisor would give up entirely — the cap must only
+/// apply to consecutive failures.
+pub const STABLE_UPTIME: Duration = Duration::from_secs(30);
+
+/// How long a host gets to run its own `shutdown()` after TERM before its group is killed.
+/// The old 300ms finished the process off before its WAL checkpoint had completed.
+pub const STOP_GRACE: Duration = Duration::from_secs(3);
+
+/// What the watcher does after one host run ended.
+#[derive(Debug, PartialEq)]
+pub enum AfterExit {
+    /// Start again after this attempt's backoff.
+    Retry { attempt: u32 },
+    /// Start again at once, from attempt zero (a deliberate bounce).
+    Again,
+    /// Give up and show this.
+    GiveUp(String),
+}
+
+/// The restart rule, pulled out so it can be tested without a process.
+pub fn after_exit(attempt: u32, uptime: Duration, bounced: bool, reason: &str, code: Option<i32>) -> AfterExit {
+    if bounced {
+        return AfterExit::Again;
+    }
+    /*
+     * If another instance is holding the data, or the data needs a newer Centralu, relaunching
+     * just gets the same answer — instead of cycling through five backoff rounds (about 15
+     * seconds) showing "Starting…", show the person right away exactly the reason the host gave
+     * (what to close or update is spelled out in that message).
+     */
+    if is_final_refusal(reason) {
+        return AfterExit::GiveUp(reason.to_string());
+    }
+    // If it stayed up long enough before dying, the earlier failure history no longer matters —
+    // start counting over from zero.
+    let attempt = if uptime >= STABLE_UPTIME { 1 } else { attempt + 1 };
+    let msg = if reason.is_empty() {
+        format!("agent-host exited (code {code:?})")
+    } else {
+        format!("agent-host exited (code {code:?})\n{reason}")
+    };
+    if attempt > MAX_RESTARTS {
+        AfterExit::GiveUp(msg)
+    } else {
+        AfterExit::Retry { attempt }
+    }
+}
+
+/// A host that exited with one of these sentences says the same thing on every relaunch, so the
+/// supervisor reports it at once instead of retrying. The phrases are the host's own:
+/// `lockConflictMessage` (instance-lock.ts) and `storeTooNewMessage` (store.ts, #292).
+pub fn is_final_refusal(reason: &str) -> bool {
+    reason.contains("already using this data") || reason.contains("written by a newer Centralu")
+}
+
+/// Exponential backoff (capped at 5 seconds).
+pub fn backoff(attempt: u32) -> Duration {
+    Duration::from_millis((200 * 2u64.pow(attempt.min(5))).min(5000))
+}
+
+impl Supervisor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn info(&self) -> Option<HostInfo> {
+        self.inner.lock().ok()?.info.clone()
+    }
+
+    pub fn last_error(&self) -> Option<String> {
+        self.inner.lock().ok()?.status_text.clone()
+    }
+
+    /// The running host's pid, if one is running.
+    pub fn pid(&self) -> Option<u32> {
+        self.inner.lock().ok()?.child.as_ref().map(|c| c.id())
+    }
+
+    /// Launches the host and starts the watcher thread. Returns false if one is already running.
+    pub fn start(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) -> bool {
+        if self.claim(false) {
+            self.watch(sink, launcher);
+            true
+        } else {
+            false
+        }
+    }
+
+    /**
+     * Starts again after giving up (#184 — Retry on the failure screen).
+     *
+     * The old Retry only reloaded the webview. The watcher thread had already ended once it
+     * emitted `Failed`, and `start` was only ever called from setup, so even after the person
+     * fixed the cause (closed another window, installed Node), the old message would show up
+     * again after a 30-second wait. There was no way out short of force-quitting.
+     *
+     * Does nothing if a watcher is still running (mid-backoff) — that thread will produce an
+     * answer soon. Returns true once one has started.
+     */
+    pub fn restart(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) -> bool {
+        if !self.claim(true) {
+            return false;
+        }
+        self.watch(sink, launcher);
+        true
+    }
+
+    /// Claims the right to launch a watcher thread. Returns false if one is already running or
+    /// the supervisor is shutting down. When `forget_error` is set, clears the old failure
+    /// message so a fresh attempt does not look like it failed instantly for the old reason.
+    fn claim(&self, forget_error: bool) -> bool {
+        let Ok(mut inner) = self.inner.lock() else {
+            return false;
+        };
+        if inner.running || inner.shutting_down {
+            return false;
+        }
+        inner.running = true;
+        if forget_error {
+            inner.status_text = None;
+        }
+        true
+    }
+
+    fn watch(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) {
+        let me = self.clone();
+        thread::spawn(move || {
+            // Clear the running flag no matter which path this ends on — otherwise Retry could
+            // never launch a new one.
+            let _running = Running(me.clone());
+            let mut attempt = 0u32;
+            loop {
+                if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
+                    return;
+                }
+                sink.status(&if attempt == 0 { HostStatus::Starting } else { HostStatus::Restarting { attempt } });
+
+                let launch = match launcher() {
+                    Ok(l) => l,
+                    Err(LaunchError::Fatal(message)) => {
+                        me.give_up(&*sink, message);
+                        return;
+                    }
+                    Err(LaunchError::Retry(message)) => {
+                        attempt += 1;
+                        if attempt > MAX_RESTARTS {
+                            me.give_up(&*sink, message);
+                            return;
+                        }
+                        thread::sleep(backoff(attempt));
+                        continue;
+                    }
+                };
+
+                let started = Instant::now();
+                match me.spawn_once(&*sink, &launch) {
+                    Ok(code) => {
+                        // A clean exit (the owner itself requested it) ends the watcher.
+                        if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
+                            return;
+                        }
+                        let bounced = me.inner.lock().map(|mut i| std::mem::take(&mut i.bouncing)).unwrap_or(false);
+                        // The last things the host said — if it died before ready, this is why.
+                        let reason = me.take_last_output();
+                        match after_exit(attempt, started.elapsed(), bounced, &reason, code) {
+                            AfterExit::Again => {
+                                attempt = 0;
+                                continue;
+                            }
+                            AfterExit::Retry { attempt: next } => attempt = next,
+                            AfterExit::GiveUp(message) => {
+                                me.give_up(&*sink, message);
+                                return;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        attempt += 1;
+                        if attempt > MAX_RESTARTS {
+                            me.give_up(&*sink, format!("failed to start agent-host: {e}"));
+                            return;
+                        }
+                    }
+                }
+                thread::sleep(backoff(attempt));
+            }
+        });
+    }
+
+    fn give_up(&self, sink: &dyn StatusSink, message: String) {
+        self.set_error(&message);
+        sink.status(&HostStatus::Failed { message });
+    }
+
+    /// Runs the host once → parses its ready line → waits for it to exit. The return value is
+    /// the exit code.
+    fn spawn_once(&self, sink: &dyn StatusSink, launch: &HostLaunch) -> Result<Option<i32>, String> {
+        // Clear this before starting so it does not mix with the previous launch's last words.
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_output.clear();
+        }
+        let mut cmd = Command::new(&launch.program);
+        // Keeping stdin open as a pipe is **the whole trick that prevents orphans.**
+        // Whatever reason the parent dies for (including a crash or SIGKILL), this pipe closes,
+        // and the host sees EOF and exits on its own (`--watch-parent`). Relying only on a
+        // shutdown hook leaves a zombie behind when the parent is force-quit. Under a keeper the
+        // parent is the keeper, so the host's life is tied to the keeper, not to the app.
+        cmd.args(&launch.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        for (k, v) in &launch.env {
+            cmd.env(k, v);
+        }
+
+        // Puts the child in a **process group where it is its own leader**.
+        // The node launcher (tsx) spawns children of its own, so killing only the direct child
+        // and not the whole group leaves the grandchild orphaned.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+
+        let mut child = cmd.spawn().map_err(|e| format!("failed to run {}: {e}", launch.program))?;
+
+        let stdout = child.stdout.take().ok_or("could not open stdout")?;
+
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.child = Some(child);
+        }
+
+        // Waits for the ready line. On startup the host prints one line of
+        // {"ready":true,"port":..,"token":".."}.
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                if v.get("ready").and_then(|r| r.as_bool()) == Some(true) {
+                    let info = HostInfo {
+                        port: v.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                        token: v.get("token").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                    };
+                    if let Ok(mut inner) = self.inner.lock() {
+                        inner.info = Some(info.clone());
+                        inner.status_text = None;
+                    }
+                    sink.status(&HostStatus::Ready(info));
+                    continue;
+                }
+                if sink.json_line(&v) {
+                    continue;
+                }
+            }
+            // Every other line is streamed to the log, but the last several are also kept —
+            // if it dies before ready, these lines are the only cause of death on record.
+            eprintln!("[agent-host] {line}");
+            if let Ok(mut inner) = self.inner.lock() {
+                if !line.trim().is_empty() {
+                    inner.last_output.push(line.clone());
+                    if inner.last_output.len() > 6 {
+                        inner.last_output.remove(0);
+                    }
+                }
+            }
+        }
+
+        // stdout closing means the process has ended.
+        // wait() blocks — waiting while holding the lock would stall IPC (info queries) and
+        // shutdown at the same time. Take the child out, release the lock, then wait.
+        let mut child = {
+            let mut guard = self.inner.lock().map_err(|_| "lock failed")?;
+            guard.info = None;
+            guard.child.take()
+        };
+        let code = child.as_mut().and_then(|c| c.wait().ok()).and_then(|s| s.code());
+        Ok(code)
+    }
+
+    fn set_error(&self, msg: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.status_text = Some(msg.to_string());
+        }
+    }
+
+    /// Takes and clears the last things a dead host said — so they do not mix with the next
+    /// launch's words.
+    fn take_last_output(&self) -> String {
+        self.inner
+            .lock()
+            .map(|mut i| std::mem::take(&mut i.last_output).join("\n"))
+            .unwrap_or_default()
+    }
+
+    /**
+     * Stops the running host so the watcher starts the next one at once, from attempt zero
+     * (the keeper's build switch). The launcher decides what the next one runs.
+     *
+     * The host is stopped the same way as on shutdown — TERM, a grace period for its own
+     * `shutdown()`, then the group — so a switch cuts running turns exactly as a quit always
+     * did, and no more than that. Returns false when no host is running.
+     */
+    pub fn bounce(&self) -> bool {
+        let pid = match self.inner.lock() {
+            Ok(mut inner) => match inner.child.as_ref().map(|c| c.id()) {
+                Some(id) => {
+                    inner.bouncing = true;
+                    inner.info = None;
+                    id
+                }
+                None => return false,
+            },
+            Err(_) => return false,
+        };
+        stop_pid_gracefully(pid, || self.pid() != Some(pid));
+        true
+    }
+
+    /// Stops the host for good. Kills it **as a whole group** — no zombies left behind.
+    pub fn shutdown(&self) {
+        // The lock is only held while taking the child out. Sleeping or calling wait() inside
+        // the lock would leave the watcher thread and IPC waiting on the same lock, and shutdown
+        // would block on them and vice versa.
+        let child = match self.inner.lock() {
+            Ok(mut inner) => {
+                inner.shutting_down = true;
+                inner.info = None;
+                inner.child.take()
+            }
+            Err(_) => None,
+        };
+        if let Some(mut child) = child {
+            let pid = child.id();
+            stop_pid_gracefully(pid, || matches!(child.try_wait(), Ok(Some(_))));
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/**
+ * TERM to the host alone, a grace period, then TERM to its whole group.
+ *
+ * Must not start by sending TERM to the whole group — measured (#57): on SIGTERM, codex
+ * app-server dies instantly and leaves behind its lock file (thread-writer-locks/<id>.lock),
+ * but on stdin EOF it removes the lock and exits on its own within 18ms. A group-wide TERM takes
+ * away the host's disposeAll's chance to close things via EOF and hits the codex children
+ * directly instead. The group-wide TERM that follows is only a zombie-prevention backstop that
+ * actually does anything when the host is stuck.
+ */
+fn stop_pid_gracefully(pid: u32, mut gone: impl FnMut() -> bool) {
+    kill_pid(pid);
+    let deadline = Instant::now() + STOP_GRACE;
+    while Instant::now() < deadline {
+        if gone() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    kill_group(pid);
+}
+
+/// Clears `running` when the watcher thread ends. There are several `return` points, so this is
+/// left to Drop.
+struct Running(Supervisor);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Ok(mut inner) = self.0.inner.lock() {
+            inner.running = false;
+        }
+    }
+}
+
+/// SIGTERM to the single host process only — children (codex, etc.) are cleaned up by the
+/// host itself via EOF (#57).
+#[cfg(unix)]
+pub fn kill_pid(pid: u32) {
+    let _ = Command::new("/bin/kill")
+        .arg("-TERM")
+        .arg(format!("{pid}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(unix))]
+pub fn kill_pid(_pid: u32) {}
+
+/// SIGTERM to the whole process group (a negative pid means the group).
+#[cfg(unix)]
+pub fn kill_group(pid: u32) {
+    let _ = Command::new("/bin/kill")
+        .arg("-TERM")
+        .arg(format!("-{pid}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(unix))]
+pub fn kill_group(_pid: u32) {}
+
+/// `CC_HOST_CMD`, split on whitespace: the escape hatch for running some other host.
+pub fn host_cmd_override() -> Option<(String, Vec<String>)> {
+    let cmd = std::env::var("CC_HOST_CMD").ok()?;
+    let mut parts = cmd.split_whitespace().map(String::from).collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    let program = parts.remove(0);
+    Some((program, parts))
+}
+
+/// The bundled host, run through the system Node (decision F-0a). Node SEA was excluded from
+/// the dogfooding scope because native addons made it too costly.
+pub fn bundled_launch(main_mjs: &Path, extra: &[String]) -> Result<HostLaunch, LaunchError> {
+    let node = resolve_node().map_err(LaunchError::Fatal)?;
+    let mut args = vec![
+        main_mjs.to_string_lossy().to_string(),
+        "--port".into(),
+        "0".into(),
+        "--watch-parent".into(),
+    ];
+    args.extend(extra.iter().cloned());
+    Ok(HostLaunch { program: node, args, env: Vec::new() })
+}
+
+/// dev: runs the source directly through the workspace's tsx.
+/// Marking it with CC_DEV makes the host use a **different data folder** than the release app
+/// — the two can be running at once without the session lists getting mixed up.
+///
+/// **Never goes through a package manager** — launching through the pnpm wrapper only kills
+/// the wrapper, leaving the actual host (a grandchild) orphaned (confirmed by measurement).
+pub fn source_launch(extra: &[String]) -> HostLaunch {
+    let root = workspace_root();
+    let mut args = vec![
+        format!("{root}/packages/agent-host/src/main.ts"),
+        "--port".into(),
+        "0".into(),
+        "--watch-parent".into(),
+    ];
+    args.extend(extra.iter().cloned());
+    HostLaunch {
+        program: format!("{root}/node_modules/.bin/tsx"),
+        args,
+        env: vec![("CC_DEV".into(), "1".into())],
+    }
+}
+
+pub fn workspace_root() -> String {
+    // Two levels up from src-tauri/ is apps/, three levels up is the workspace root.
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string())
+}
+
+/// The guidance shown to the person verbatim when Node cannot be found.
+///
+/// **A silent failure is the worst outcome.** It used to just run `"node"` bare when it
+/// could not find it, which left only `No such file or directory`, and that raw text is
+/// what showed up on screen. There was no way to tell apart Node truly being missing, Node
+/// being present but not found, and the version being too low.
+fn node_missing_message(looked: &[String]) -> String {
+    format!(
+        "Could not find Node.js. Centralu requires Node {MIN_NODE_MAJOR} or newer.\n\
+         Check with `node --version` in a terminal, and if it is missing, install it with \
+         {INSTALL_NODE_HINT} or from https://nodejs.org, then restart the app.\n\
+         Looked in: {}",
+        looked.join(", ")
+    )
+}
+
+/// Told to someone who has no Node at all, so it has to name a command they can actually
+/// run. `brew` was hardcoded, which on Linux points at a package manager that is not
+/// there — the one message whose whole job is to unblock a stuck user would have sent
+/// them somewhere else.
+#[cfg(target_os = "macos")]
+const INSTALL_NODE_HINT: &str = "`brew install node`";
+#[cfg(not(target_os = "macos"))]
+const INSTALL_NODE_HINT: &str = "your distribution's package manager (for example, `apt install nodejs`)";
+
+#[cfg(target_os = "macos")]
+const UPGRADE_NODE_HINT: &str = "`brew upgrade node`";
+#[cfg(not(target_os = "macos"))]
+const UPGRADE_NODE_HINT: &str = "your distribution's package manager";
+
+/// The host bundle's esbuild target is node22 — below that, even the syntax breaks.
+const MIN_NODE_MAJOR: u32 = 22;
+
+/// Finding Node takes around one second because it launches the whole login shell. Since the
+/// restart loop calls this every time, a successful find is cached. **A failed find is never
+/// cached** (#184) — someone who installs Node after opening the app and presses Retry must
+/// not be shown the old "not found" again.
+static NODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Finds the **absolute path** to the Node the release build will use to run the host.
+///
+/// **Why a fixed path does not work (measured):** a `.app` launched from the GUI does not
+/// inherit the login shell's PATH, and only gets
+/// `/usr/bin:/bin:/usr/sbin:/sbin`. This used to only check the two Homebrew locations and
+/// `/usr/bin`, but Node installed via nvm, mise or volta lives under the home directory, so
+/// **the app would not start even on a Mac where Node was perfectly well installed.** The
+/// claude and codex CLI lookups had already hit the same problem and were fixed to ask the
+/// login shell (`packages/agent-host/src/env-path.ts`); only node was left using the old
+/// approach.
+pub fn resolve_node() -> Result<String, String> {
+    remember_found(&NODE, || pick_node(probe_login_shell(), fallback_node_paths()))
+}
+
+/// Only caches a successful find. If it was not found, asks again next time.
+fn remember_found(
+    cache: &std::sync::OnceLock<String>,
+    probe: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
+    if let Some(found) = cache.get() {
+        return Ok(found.clone());
+    }
+    let found = probe()?;
+    Ok(cache.get_or_init(|| found).clone())
+}
+
+/// The selection rule pulled out on its own, so it can be tested with neither a shell nor a
+/// real filesystem.
+///
+/// Order: whatever the login shell knows about (the exact node the person already uses in a
+/// terminal), then the common install locations. **Does not stop just because it is old** — a
+/// Mac with nvm defaulting to v18 while Homebrew has v22 is common. But it carries forward the
+/// fact that it hit an old one, and shows that as the reason if nothing newer turns up
+/// ("needs an upgrade" is closer to what the person actually has to do than "not found").
+fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> Result<String, String> {
+    let mut looked = vec!["login shell PATH".to_string()];
+    let mut ordered: Vec<String> = from_shell.into_iter().collect();
+
+    for candidate in fallbacks {
+        looked.push(candidate.clone());
+        if Path::new(&candidate).exists() {
+            ordered.push(candidate);
+        }
+    }
+
+    let mut too_old: Option<String> = None;
+    for path in ordered {
+        match check_node_version(&path) {
+            Ok(found) => return Ok(found),
+            Err(why) => {
+                too_old.get_or_insert(why);
+            }
+        }
+    }
+
+    Err(too_old.unwrap_or_else(|| node_missing_message(&looked)))
+}
+
+/// Asks the login shell where node is. It has to be interactive (-i) for .zshrc's nvm/mise
+/// initialization to run.
+///
+/// Only the line carrying the marker is picked out, so it does not matter what else the shell
+/// configuration prints.
+fn probe_login_shell() -> Option<String> {
+    use std::io::Read;
+
+    let shell = std::env::var("SHELL").ok()?;
+    if !Path::new(&shell).exists() {
+        return None;
+    }
+
+    let mut cmd = Command::new(&shell);
+    cmd.args(["-ilc", "command -p echo \"__CC_NODE__:$(command -v node)\""])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        // So the shell's initialization script does not put up an interactive prompt.
+        .env("TERM", "dumb")
+        .env("CI", "1");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
+    let mut child = cmd.spawn().ok()?;
+    let pid = child.id();
+    let stdout = child.stdout.take()?;
+
+    // **Getting stuck here would fail the whole app's launch.** Shell configurations really do
+    // sometimes wait forever (waiting on prompt input, for example), so this cuts it off on a
+    // timer and kills the whole group.
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = BufReader::new(stdout).read_to_string(&mut buf);
+        let _ = tx.send(buf);
+    });
+    let out = match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(out) => out,
+        Err(_) => {
+            kill_group(pid);
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    };
+    let _ = child.wait();
+
+    parse_probe_output(&out)
+}
+
+/// Pulls the path out of the marked line among whatever the shell printed.
+fn parse_probe_output(out: &str) -> Option<String> {
+    out.lines()
+        .find_map(|l| l.trim().strip_prefix("__CC_NODE__:"))
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && Path::new(p).exists())
+        .map(str::to_string)
+}
+
+/// The fallback for when the shell cannot be used. Checks not just Homebrew but the common
+/// locations of version managers too.
+fn fallback_node_paths() -> Vec<String> {
+    node_paths_under(&std::env::var("HOME").unwrap_or_default())
+}
+
+fn node_paths_under(home: &str) -> Vec<String> {
+    let mut paths = vec![
+        "/opt/homebrew/bin/node".to_string(),
+        "/usr/local/bin/node".to_string(),
+        "/opt/local/bin/node".to_string(),
+        "/usr/bin/node".to_string(),
+    ];
+    if !home.is_empty() {
+        paths.push(format!("{home}/.volta/bin/node"));
+        paths.push(format!("{home}/.local/share/mise/shims/node"));
+        paths.push(format!("{home}/.asdf/shims/node"));
+        paths.push(format!("{home}/.local/bin/node"));
+        // nvm keeps a separate directory per version — pick the highest one.
+        paths.extend(nvm_versions(&format!("{home}/.nvm/versions/node")));
+    }
+    paths
+}
+
+/// `~/.nvm/versions/node/*/bin/node`, in descending version order.
+///
+/// The names look like `v22.3.1`, so a lexical sort would wrongly put v9 ahead of v22.
+/// Compared as numbers instead.
+fn nvm_versions(root: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut versions: Vec<(Vec<u32>, String)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let parts = version_parts(&name);
+            (!parts.is_empty()).then(|| (parts, format!("{root}/{name}/bin/node")))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions.into_iter().map(|(_, p)| p).collect()
+}
+
+/// `v22.3.1` → `[22, 3, 1]`. An empty vector if it does not parse as numbers.
+fn version_parts(raw: &str) -> Vec<u32> {
+    let trimmed = raw.trim().trim_start_matches('v');
+    let parts: Vec<u32> = trimmed.split('.').filter_map(|p| p.parse().ok()).collect();
+    if parts.is_empty() {
+        Vec::new()
+    } else {
+        parts
+    }
+}
+
+/// Checks whether the Node that was found is actually a usable version.
+///
+/// **A too-low version and a missing one call for different actions from the person** — an
+/// upgrade, not an install. So the messages are kept separate. If the version cannot be read,
+/// it is let through (there is no basis for blocking it).
+fn check_node_version(path: &str) -> Result<String, String> {
+    let Ok(out) = Command::new(path).arg("--version").stdin(Stdio::null()).output() else {
+        return Ok(path.to_string());
+    };
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let Some(&major) = version_parts(raw.trim()).first() else {
+        return Ok(path.to_string());
+    };
+    if major < MIN_NODE_MAJOR {
+        return Err(format!(
+            "Node {MIN_NODE_MAJOR} or newer is required, but {path} is {}.\n\
+             {UPGRADE_NODE_HINT}, or switch to {MIN_NODE_MAJOR} or newer with nvm or mise, then restart the app.",
+            raw.trim()
+        ));
+    }
+    Ok(path.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A store a newer Centralu wrote is reported at once, like a lock conflict; a plain crash is
+    /// still retried (#292).
+    #[test]
+    fn a_store_too_new_is_final_like_a_lock_conflict() {
+        assert!(is_final_refusal("[agent-host] Another Centralu is already using this data (pid 42)."));
+        assert!(is_final_refusal(
+            "[agent-host] This data was written by a newer Centralu.\n  It can be read from store version 45 on"
+        ));
+        assert!(!is_final_refusal("agent-host exited (code Some(1))\nTypeError: x is undefined"));
+        let too_new = "[agent-host] This data was written by a newer Centralu.";
+        assert_eq!(after_exit(0, Duration::ZERO, false, too_new, Some(1)), AfterExit::GiveUp(too_new.into()));
+    }
+
+    #[test]
+    fn counts_consecutive_failures_and_gives_up_after_five() {
+        let quick = Duration::from_secs(1);
+        assert_eq!(after_exit(0, quick, false, "", Some(1)), AfterExit::Retry { attempt: 1 });
+        assert_eq!(after_exit(4, quick, false, "", Some(1)), AfterExit::Retry { attempt: 5 });
+        match after_exit(5, quick, false, "boom", Some(1)) {
+            AfterExit::GiveUp(m) => assert!(m.contains("boom") && m.contains("Some(1)"), "{m}"),
+            other => panic!("expected to give up, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_death_after_a_stable_run_starts_the_count_over() {
+        assert_eq!(after_exit(5, STABLE_UPTIME, false, "", None), AfterExit::Retry { attempt: 1 });
+    }
+
+    #[test]
+    fn another_owner_of_the_data_is_reported_at_once() {
+        let reason = "[agent-host] Another Centralu is already using this data (pid 7).";
+        assert_eq!(after_exit(0, Duration::ZERO, false, reason, Some(1)), AfterExit::GiveUp(reason.into()));
+    }
+
+    /// The keeper's build switch stops the host on purpose; that exit must not count as a
+    /// crash, or five switches in a row would leave the person with "gave up".
+    #[test]
+    fn a_deliberate_bounce_starts_again_without_counting() {
+        assert_eq!(after_exit(5, Duration::ZERO, true, "anything", Some(0)), AfterExit::Again);
+    }
+
+    #[test]
+    fn backoff_doubles_and_stops_at_five_seconds() {
+        assert_eq!(backoff(1), Duration::from_millis(400));
+        assert_eq!(backoff(2), Duration::from_millis(800));
+        assert_eq!(backoff(9), Duration::from_millis(5000));
+    }
+
+    #[test]
+    fn bouncing_with_no_host_running_does_nothing() {
+        assert!(!Supervisor::new().bounce());
+    }
+
+    /// Retry can relaunch a supervisor that has given up, and does not launch a second one on
+    /// top of a running one (#184).
+    #[test]
+    fn a_supervisor_that_gave_up_can_be_claimed_again() {
+        let sup = Supervisor::new();
+        assert!(sup.claim(false), "starts for the first time");
+        assert!(!sup.claim(true), "does not launch a second one while the watcher thread is running");
+
+        // The watcher thread emitted Failed and ended.
+        sup.set_error("agent-host exited (code Some(1))");
+        drop(Running(sup.clone()));
+
+        assert!(sup.claim(true), "launches again once it has ended");
+        assert_eq!(sup.last_error(), None, "a fresh attempt must not look like it failed instantly for the old reason");
+    }
+
+    #[test]
+    fn no_restart_while_the_app_is_quitting() {
+        let sup = Supervisor::new();
+        sup.shutdown();
+        assert!(!sup.claim(true));
+    }
+
+    /// Installing Node after the app is open and pressing Retry must trigger a fresh search
+    /// (#184).
+    #[test]
+    fn a_missing_node_is_not_remembered_but_a_found_one_is() {
+        let cache = std::sync::OnceLock::new();
+        assert_eq!(
+            remember_found(&cache, || Err("could not find Node.js".into())),
+            Err("could not find Node.js".to_string())
+        );
+        assert_eq!(
+            remember_found(&cache, || Ok("/opt/homebrew/bin/node".into())),
+            Ok("/opt/homebrew/bin/node".to_string())
+        );
+        assert_eq!(
+            remember_found(&cache, || panic!("a successful find is not asked for again")),
+            Ok("/opt/homebrew/bin/node".to_string())
+        );
+    }
+
+    #[test]
+    fn picks_the_marked_line_only() {
+        // Only the marked line is checked, no matter what the shell configuration prints
+        // (banners, warnings).
+        let out = "Welcome to zsh!\n__CC_NODE__:/bin/sh\nsome trailing noise\n";
+        assert_eq!(parse_probe_output(out), Some("/bin/sh".to_string()));
+    }
+
+    #[test]
+    fn ignores_a_path_that_is_not_there() {
+        // `command -v` can return an empty string (not installed) or a dead symlink.
+        assert_eq!(parse_probe_output("__CC_NODE__:\n"), None);
+        assert_eq!(parse_probe_output("__CC_NODE__:/nope/node\n"), None);
+        assert_eq!(parse_probe_output("node not found\n"), None);
+    }
+
+    #[test]
+    fn compares_versions_as_numbers_not_text() {
+        // A lexical sort would make v9 > v22 and pick the old Node.
+        assert!(version_parts("v22.3.1") > version_parts("v9.11.2"));
+        assert_eq!(version_parts("v22.3.1"), vec![22, 3, 1]);
+        assert_eq!(version_parts("lts/*"), Vec::<u32>::new());
+        assert_eq!(version_parts(""), Vec::<u32>::new());
+    }
+
+    /// Sets up a script that pretends to be node and prints the given version.
+    fn fake_node(version: &str, name: &str) -> String {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, format!("#!/bin/sh\necho {version}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn rejects_a_node_that_is_too_old() {
+        // A low version is "needs an upgrade", not "missing" — the person has a different task.
+        let path = fake_node("v20.11.1", "cc-test-node-old");
+        let err = check_node_version(&path).unwrap_err();
+        assert!(err.contains("or newer is required"), "{err}");
+        assert!(err.contains("v20.11.1"), "{err}");
+    }
+
+    #[test]
+    fn accepts_a_node_that_is_new_enough() {
+        let path = fake_node("v22.3.1", "cc-test-node-ok");
+        assert_eq!(check_node_version(&path), Ok(path));
+    }
+
+    #[test]
+    fn passes_when_the_version_cannot_be_read() {
+        // No basis to block it, so it is not blocked (an unexpected output format).
+        let path = fake_node("banana", "cc-test-node-weird");
+        assert_eq!(check_node_version(&path), Ok(path));
+    }
+
+    /// Checks that this Mac's login shell's own node is actually picked out.
+    ///
+    /// A unit test alone cannot confirm "asks the shell instead of using a fixed path" — since
+    /// that is the entire point of this fix, this touches the real thing once. Passes silently
+    /// in an environment with no node (there is no basis to block it there).
+    #[test]
+    fn finds_the_node_this_shell_knows() {
+        let Ok(shell) = std::env::var("SHELL") else { return };
+        if !Path::new(&shell).exists() {
+            return;
+        }
+        let Ok(out) = Command::new(&shell).args(["-ilc", "command -v node"]).output() else {
+            return;
+        };
+        let expected = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if expected.is_empty() || !Path::new(&expected).exists() {
+            return;
+        }
+        assert_eq!(probe_login_shell(), Some(expected.clone()));
+        assert_eq!(resolve_node(), Ok(expected));
+    }
+
+    #[test]
+    fn moves_on_when_the_shell_node_is_too_old() {
+        // A Mac where nvm defaults to v18 but Homebrew has v22 — stopping here would fail to
+        // launch even though a usable Node exists.
+        let old = fake_node("v18.20.4", "cc-test-node-shell-old");
+        let new = fake_node("v22.9.0", "cc-test-node-brew-new");
+        assert_eq!(pick_node(Some(old), vec![new.clone()]), Ok(new));
+    }
+
+    #[test]
+    fn explains_the_old_version_when_there_is_nothing_newer() {
+        // If nothing newer ever turns up, say "old", not "missing" — the task is an upgrade,
+        // not an install.
+        let old = fake_node("v18.20.4", "cc-test-node-only-old");
+        let err = pick_node(Some(old), vec!["/nope/node".into()]).unwrap_err();
+        assert!(err.contains("v18.20.4"), "{err}");
+        assert!(!err.contains("Could not find"), "{err}");
+    }
+
+    #[test]
+    fn reports_every_place_it_looked_when_nothing_is_there() {
+        // Finding nothing anywhere is the moment the person is most stuck — list every place
+        // that was checked.
+        let err = pick_node(None, vec!["/nope/a/node".into(), "/nope/b/node".into()]).unwrap_err();
+        assert!(err.contains("login shell PATH"), "{err}");
+        assert!(err.contains("/nope/a/node") && err.contains("/nope/b/node"), "{err}");
+    }
+
+    #[test]
+    fn falls_back_to_a_real_path_when_the_shell_says_nothing() {
+        let ok = fake_node("v22.0.0", "cc-test-node-fallback");
+        assert_eq!(pick_node(None, vec!["/nope/node".into(), ok.clone()]), Ok(ok));
+    }
+
+    #[test]
+    fn looks_where_version_managers_actually_put_node() {
+        // This used to be only the two Homebrew locations and /usr/bin — nvm, mise and volta
+        // users got stuck here.
+        let paths = node_paths_under("/home/tester");
+        for expected in [
+            "/opt/homebrew/bin/node",
+            "/home/tester/.volta/bin/node",
+            "/home/tester/.local/share/mise/shims/node",
+            "/home/tester/.asdf/shims/node",
+        ] {
+            assert!(paths.iter().any(|p| p == expected), "{expected} is not among the candidates: {paths:?}");
+        }
+    }
+
+    #[test]
+    fn says_where_it_looked_when_there_is_no_node() {
+        let msg = node_missing_message(&["login shell PATH".into(), "/opt/homebrew/bin/node".into()]);
+        assert!(msg.contains("login shell PATH"));
+        assert!(msg.contains("/opt/homebrew/bin/node"));
+        assert!(msg.contains("22"));
+    }
+}
