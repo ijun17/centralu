@@ -547,20 +547,20 @@ describe('resets, notices, retries and refusals (#304)', () => {
     const content =
       'UserPromptSubmit operation blocked by hook:\n[node /tmp/cc304/block-hook.mjs]: Prompts containing BLOCKME are not allowed here.\n\nOriginal prompt: BLOCKME reply with ok'
     expect(n({ type: 'system', subtype: 'informational', content, level: 'warning', prevent_continuation: true })).toEqual([
-      { type: 'notice', sessionId: SID, level: 'warning', text: content },
+      { type: 'notice', sessionId: SID, level: 'warning', text: content, from: 'Claude Code', label: 'hook', audience: 'you' },
     ])
     expect(n({ type: 'system', subtype: 'informational', content: 'transcript-only detail', level: 'info' })).toEqual([])
     expect(n({ type: 'system', subtype: 'informational', content: 'Tip: try /compact', level: 'suggestion' })).toEqual([
-      { type: 'notice', sessionId: SID, level: 'info', text: 'Tip: try /compact' },
+      { type: 'notice', sessionId: SID, level: 'info', text: 'Tip: try /compact', from: 'Claude Code', label: 'notice' },
     ])
   })
 
   it("a notification becomes a notice at its urgency, except the compaction error the failure marker already says", () => {
     expect(
       n({ type: 'system', subtype: 'notification', key: 'fast-mode-overage-rejected', text: 'Fast mode disabled · usage credits not available', priority: 'immediate', color: 'error' }),
-    ).toEqual([{ type: 'notice', sessionId: SID, level: 'error', text: 'Fast mode disabled · usage credits not available' }])
+    ).toEqual([{ type: 'notice', sessionId: SID, level: 'error', text: 'Fast mode disabled · usage credits not available', from: 'Claude Code', label: 'notice' }])
     expect(n({ type: 'system', subtype: 'notification', key: 'k', text: 'Model access restricted', priority: 'high', color: 'warning' })).toEqual([
-      { type: 'notice', sessionId: SID, level: 'warning', text: 'Model access restricted' },
+      { type: 'notice', sessionId: SID, level: 'warning', text: 'Model access restricted', from: 'Claude Code', label: 'notice' },
     ])
     expect(
       n({ type: 'system', subtype: 'notification', key: 'error-compacting-conversation', text: 'Error compacting conversation', priority: 'immediate', color: 'error' }),
@@ -596,7 +596,7 @@ describe('resets, notices, retries and refusals (#304)', () => {
       original_model: 'claude-opus-4-8', fallback_model: 'claude-sonnet-4-6', request_id: 'req_1', content: '',
     })
     expect(out).toEqual([
-      { type: 'notice', sessionId: SID, level: 'warning', text: 'claude-opus-4-8 declined to answer, so Claude Code switched this session to claude-sonnet-4-6' },
+      { type: 'notice', sessionId: SID, level: 'warning', text: 'claude-opus-4-8 declined to answer, so Claude Code switched this session to claude-sonnet-4-6', from: 'Claude Code', label: 'model switch' },
       { type: 'settings_changed', sessionId: SID, model: 'claude-sonnet-4-6', effort: 'high', verbosity: null, serviceTier: null, by: 'tool' },
     ])
   })
@@ -631,7 +631,7 @@ describe('resets, notices, retries and refusals (#304)', () => {
     const quiet = new ClaudeStreamNormalizer(SID)
     quiet.push({ ...refused, api_refusal_explanation: 'This request looks like malware development.' })
     expect(quiet.push({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} })).toEqual([
-      { type: 'notice', sessionId: SID, level: 'warning', text: 'This request looks like malware development.' },
+      { type: 'notice', sessionId: SID, level: 'warning', text: 'This request looks like malware development.', from: 'Claude Code', label: 'refusal' },
       { type: 'turn_complete', sessionId: SID },
     ])
     // Said once: the next turn's result is its own

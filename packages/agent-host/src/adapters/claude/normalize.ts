@@ -258,7 +258,19 @@ export function normalizeMessage(
   if (type === 'system' && str(m.subtype) === 'informational') {
     const text = str(m.content).trim()
     const level = str(m.level)
-    if (text && level !== 'info') out.push({ type: 'notice', sessionId, level: level === 'warning' ? 'warning' : 'info', text })
+    if (text && level !== 'info') {
+      // Who is speaking and what kind (#342). A hook is part of the person's own setup (theirs or the project's)
+      const hook = /\bblocked by hook\b/.test(text)
+      out.push({
+        type: 'notice',
+        sessionId,
+        level: level === 'warning' ? 'warning' : 'info',
+        text,
+        from: 'Claude Code',
+        label: hook ? 'hook' : 'notice',
+        ...(hook ? { audience: 'you' as const } : {}),
+      })
+    }
     return out
   }
 
@@ -273,7 +285,7 @@ export function normalizeMessage(
     const color = str(m.color)
     const priority = str(m.priority)
     const level = color === 'error' ? 'error' : color === 'warning' || priority === 'high' || priority === 'immediate' ? 'warning' : 'info'
-    out.push({ type: 'notice', sessionId, level, text })
+    out.push({ type: 'notice', sessionId, level, text, from: 'Claude Code', label: 'notice' })
     return out
   }
 
@@ -1033,7 +1045,7 @@ export class ClaudeStreamNormalizer {
       str(m.content).trim() ||
       `${from} declined to answer, so Claude Code switched this session to ${to}${explanation ? `: ${explanation}` : ''}`
     return [
-      { type: 'notice', sessionId: this.sessionId, level: 'warning', text },
+      { type: 'notice', sessionId: this.sessionId, level: 'warning', text, from: 'Claude Code', label: 'model switch' },
       { type: 'settings_changed', sessionId: this.sessionId, ...this.settings(), model: to, by: 'tool' },
     ]
   }
@@ -1125,7 +1137,7 @@ export class ClaudeStreamNormalizer {
       const failed = events.some((e) => e.type === 'error')
       events = failed
         ? events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: refusal } } : e))
-        : [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text: refusal }, ...events]
+        : [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text: refusal, from: 'Claude Code', label: 'refusal' }, ...events]
     }
     /*
      * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in

@@ -1,4 +1,5 @@
 import type { ApprovalDetail, BackgroundTask, NormalizedEvent, SessionGoal, SubagentStep } from '@cc/protocol'
+import { noticeWords } from './notices.js'
 
 /**
  * Codex protocol to NormalizedEvent conversion (based on the method names confirmed in M0).
@@ -663,21 +664,23 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * ignored.\n…", details: null}` arrived while `thread/start` was answered, then `warning {threadId, message: <the
      * same text>}` for the thread. Both come again on every app-server start and every thread start or resume, saying the
      * same thing each time: `oncePerSession` lets the host keep one line per session. `deprecationNotice` has the
-     * `configWarning` shape (generated/v2/DeprecationNoticeNotification.ts); not exercised.
+     * `configWarning` shape (generated/v2/DeprecationNoticeNotification.ts); the owner saw the full-history one (#342).
+     * Each also carries who is speaking, what kind it is and who has to act, and a plain explanation for the ones we know
+     * (`noticeWords`, #342).
      */
     case 'warning': {
       const text = str(p.message).trim()
-      return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true }] : []
+      return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true, ...noticeWords('warning', text) }] : []
     }
     case 'configWarning':
     case 'deprecationNotice': {
       const text = [str(p.summary).trim(), str(p.details).trim()].filter(Boolean).join('\n')
-      return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true }] : []
+      return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true, ...noticeWords(n.method, text) }] : []
     }
     // The auto-review guardian's warning about an action (generated/v2/GuardianWarningNotification.ts); not exercised
     case 'guardianWarning': {
       const text = str(p.message).trim()
-      return text ? [{ type: 'notice', sessionId, level: 'warning', text }] : []
+      return text ? [{ type: 'notice', sessionId, level: 'warning', text, ...noticeWords('guardianWarning', text) }] : []
     }
 
     /*
@@ -691,7 +694,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       if (!to) return []
       const reason = str(p.reason) === 'highRiskCyberActivity' ? 'it was flagged as high-risk cyber activity' : str(p.reason)
       const text = `Codex answered this turn with ${to} instead of ${str(p.fromModel) || 'the selected model'}${reason ? ` because ${reason}` : ''}`
-      return [{ type: 'notice', sessionId, level: 'warning', text }]
+      return [{ type: 'notice', sessionId, level: 'warning', text, ...noticeWords('model/rerouted', text) }]
     }
 
     /*
@@ -706,7 +709,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const name = str(p.name) || 'an MCP server'
       const reauth = str(p.failureReason) === 'reauthenticationRequired' ? ' (it needs you to sign in again)' : ''
       const text = `${str(p.error).trim() || `MCP server \`${name}\` failed to start`}${reauth}`
-      return [{ type: 'notice', sessionId, level: 'warning', text }]
+      return [{ type: 'notice', sessionId, level: 'warning', text, ...noticeWords('mcpStartup', text, str(p.name)) }]
     }
 
     /*
@@ -831,7 +834,7 @@ export function threadSettingsChanged(
   return {
     next,
     events: [
-      { type: 'notice', sessionId, level: 'warning', text: `This thread's settings were changed outside Centralu: ${what}` },
+      { type: 'notice', sessionId, level: 'warning', text: `This thread's settings were changed outside Centralu: ${what}`, ...noticeWords('settings', '') },
       {
         type: 'settings_changed',
         sessionId,
