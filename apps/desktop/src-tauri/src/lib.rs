@@ -447,9 +447,11 @@ fn play_sound(kind: &str) {
 
 /// Deliberately silent, and deliberately not a compile error.
 ///
-/// Windows is not supported yet (issue #14 covers Linux only). Leaving `play_sound`
-/// undefined for it would break the build before anyone got as far as finding out what
-/// else is missing, so this arm exists to keep the failure where it belongs.
+/// Windows (#14) has no sound here yet: the alert still flashes the taskbar button
+/// (`request_user_attention`), and the notification plugin's toast is the other way to reach
+/// the person (neither has been seen on a Windows machine yet). A system sound
+/// (`PlaySoundW` with an alias such as `SystemAsterisk`) is the obvious next step once
+/// someone can hear it.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn play_sound(_kind: &str) {}
 
