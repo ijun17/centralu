@@ -27,6 +27,7 @@ import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
+import { isOsFileDrag, markInternalDrags } from '../features/files/dragPath.js'
 import { attachAppHost } from '../apps/host.js'
 import { storeAppHost } from '../store/app-host.js'
 
@@ -141,13 +142,17 @@ export function App({ platform }: { platform: Platform }) {
      * sweeps away text too. A drag that includes a file is still blocked over a text field.
      * Dropping a PDF into a search box is also a way for the webview to open a file, and closing
      * that path is the whole point of this floor.
+     *
+     * "A file" means one from outside the app (`isOsFileDrag`, #286). Selected conversation text
+     * with a screenshot in it can carry `Files` in WebKit, but it started in this window: it is
+     * the same editing action as plain text, not a file for the webview to open.
      */
     const editable = (target: EventTarget | null): boolean => {
       const el = target instanceof Element ? target : null
       return !!el?.closest('input, textarea, [contenteditable=""], [contenteditable="true"]')
     }
     const deny = (e: globalThis.DragEvent) => {
-      if (editable(e.target) && !e.dataTransfer?.types.includes('Files')) return
+      if (editable(e.target) && !isOsFileDrag([...(e.dataTransfer?.types ?? [])])) return
       e.preventDefault()
     }
     const opts = { capture: true } as const
@@ -160,6 +165,10 @@ export function App({ platform }: { platform: Platform }) {
       }
     }
   }, [])
+
+  // Every drag that starts in this window is marked as ours, so no drop target takes it for a
+  // file from the OS — see INTERNAL_DRAG_MIME (#286)
+  useEffect(() => markInternalDrags(window), [])
 
   useEffect(() => {
     /*

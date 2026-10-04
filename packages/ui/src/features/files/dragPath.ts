@@ -44,7 +44,62 @@ export function hasDragPath(dt: DataTransfer): boolean {
 
 /** Is this a file dragged in from the OS (#19's "drag it in from Finder")? */
 export function hasDragFiles(dt: DataTransfer): boolean {
-  return [...dt.types].includes('Files')
+  return isOsFileDrag([...dt.types])
+}
+
+/**
+ * The type every drag that starts in this window carries (#286), whatever was picked up.
+ *
+ * A drag that starts inside Centralu is never a file dropped in from the OS, whatever else the
+ * engine adds to it. WebKit adds the images inside a dragged element to the drag as files: in the
+ * packaged app, dragging a grid panel whose conversation showed a screenshot carried `Files` next
+ * to the session type, and the session panel it was dropped on attached the screenshot instead of
+ * the grid placing the session.
+ *
+ * Why a mark put on at `dragstart` rather than a list of our own types: a list only covers the
+ * draggables that remember to set one of them. The mark is put on by one listener on the window,
+ * in the capture phase (`markInternalDrags`), so it covers a draggable added later without anyone
+ * remembering this, and the drags no handler of ours starts at all: an image, a link or selected
+ * text dragged out of the conversation, which the engine may also carry as files. It sits under
+ * the same `application/x-cc-` prefix as our other types, so `isInternalDrag` is one rule for
+ * both, and a drag dispatched without a `dragstart` (a script, a test) is still told apart by its
+ * own type.
+ *
+ * What it cannot see: a drag that starts in another document, such as an app's frame.
+ */
+export const INTERNAL_DRAG_MIME = 'application/x-cc-internal'
+
+const INTERNAL_PREFIX = 'application/x-cc-'
+
+/**
+ * Marks every drag that starts in `win` as ours, until the returned function is called.
+ *
+ * Capture on the window, so it runs before any element's own `dragstart` and nothing below can
+ * stop it with `stopPropagation`. The data is not empty: an empty string is not reliably kept as a
+ * type.
+ */
+export function markInternalDrags(win: Window): () => void {
+  const mark = (e: DragEvent) => e.dataTransfer?.setData(INTERNAL_DRAG_MIME, '1')
+  const opts = { capture: true } as const
+  win.addEventListener('dragstart', mark, opts)
+  return () => win.removeEventListener('dragstart', mark, opts)
+}
+
+/**
+ * Did this drag start inside Centralu? Any type of ours says so: the mark, a session, a project,
+ * a panel, a panel tab, an app, a file-tree path.
+ */
+export function isInternalDrag(types: readonly string[]): boolean {
+  return types.some((t) => t.startsWith(INTERNAL_PREFIX))
+}
+
+/**
+ * Is this a file dropped in from outside the app, to be attached or imported?
+ *
+ * `Files` alone is not enough (#286): our own drags can carry it too, see `INTERNAL_DRAG_MIME`.
+ */
+export function isOsFileDrag(types: readonly string[]): boolean {
+  return types.includes('Files') && !isInternalDrag(types)
 }
 
 /**
@@ -72,7 +127,10 @@ export function appendPath(text: string, path: string): string {
  * The two things accepted do different work behind the scenes: an OS file becomes an attachment,
  * while a path dragged from the tree goes into the sentence (exactly the composer's own drop
  * handling). This function only decides "is this a drag this spot should answer."
+ *
+ * An OS file is `isOsFileDrag`, not `Files` alone: a session or panel dragged inside the app can
+ * carry `Files` too (#286), and its drop belongs to the grid.
  */
 export function isFileDrag(types: readonly string[]): boolean {
-  return types.includes('Files') || types.includes(PATH_MIME)
+  return types.includes(PATH_MIME) || isOsFileDrag(types)
 }

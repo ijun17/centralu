@@ -32,7 +32,7 @@ import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
 import { composingKey, isComposerSendKey } from './composerKeys.js'
-import { appendPath, isFileDrag, readDragPath } from '../files/dragPath.js'
+import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dragPath.js'
 import {
   anchorAt,
   decideFollow,
@@ -993,6 +993,13 @@ const Composer = memo(function Composer({
       })
       return true
     }
+    /*
+     * Only a file from outside the app is attached (#286). A session or panel dragged inside the
+     * app can carry the images it shows as files in WebKit; dropped here, that is the grid's drop,
+     * and attaching the screenshot it happened to show is the bug. Checked here, in the one place
+     * both the pane and the composer hand their drop to, so neither can miss it.
+     */
+    if (!isOsFileDrag([...dt.types])) return false
     return takeFiles(dt.files)
   }
   // No deps here — the closure above needs to see each render's draft and state, so the handle
@@ -1101,7 +1108,8 @@ const Composer = memo(function Composer({
         }`}
         onDragEnter={(e) => {
           e.preventDefault()
-          setDragging(true)
+          // Lit only for what it would take — a session dragged over it is the grid's (#286)
+          if (isFileDrag(e.dataTransfer.types)) setDragging(true)
         }}
         onDragOver={(e) => e.preventDefault()}
         onDragLeave={(e) => {

@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { appendPath, hasDragFiles, hasDragPath, isFileDrag, PATH_MIME } from './dragPath.js'
-import { PROJECT_MIME, SESSION_MIME } from '../sidebar/reorder.js'
+import {
+  appendPath,
+  hasDragFiles,
+  hasDragPath,
+  INTERNAL_DRAG_MIME,
+  isFileDrag,
+  isInternalDrag,
+  isOsFileDrag,
+  markInternalDrags,
+  PATH_MIME,
+} from './dragPath.js'
+import { APP_MIME, PANEL_MIME, PROJECT_MIME, SESSION_MIME } from '../sidebar/reorder.js'
+import { PANEL_TAB_MIME } from '../../store/panelLayout.js'
 
 /**
  * Drag-and-drop and `@` autocomplete must produce the same result —
@@ -87,5 +98,59 @@ describe('is this a drag the panel should accept', () => {
 
   it('accepts it as a file even with other types riding along — the OS carries text/uri-list alongside it', () => {
     expect(isFileDrag(['Files', 'text/uri-list', 'text/plain'])).toBe(true)
+  })
+})
+
+/**
+ * #286: in the packaged app, a grid panel dragged onto another session panel attached a screenshot
+ * from its conversation. WebKit adds the images inside a dragged element to the drag as files, so
+ * the drag carried `Files` next to the session type, and the panel took it for a file from the OS.
+ */
+describe('a drag that started inside the app is never a file from the OS', () => {
+  const dt = (types: string[]) => ({ types }) as unknown as DataTransfer
+
+  it('does not take a session, panel, project, panel tab or app drag for a file, even with Files riding along', () => {
+    for (const own of [SESSION_MIME, PANEL_MIME, PROJECT_MIME, PANEL_TAB_MIME, APP_MIME]) {
+      const types = [own, 'Files']
+      expect(isFileDrag(types), own).toBe(false)
+      expect(isOsFileDrag(types), own).toBe(false)
+      expect(hasDragFiles(dt(types)), own).toBe(false)
+    }
+  })
+
+  it('does not take a marked drag for a file — the drags no handler of ours sets a type on, such as an image or selected text', () => {
+    expect(isFileDrag([INTERNAL_DRAG_MIME, 'text/plain', 'Files'])).toBe(false)
+    expect(hasDragFiles(dt([INTERNAL_DRAG_MIME, 'Files']))).toBe(false)
+  })
+
+  it('still takes a plain OS file, and a file-tree path even though that started inside the app', () => {
+    expect(isFileDrag(['Files'])).toBe(true)
+    expect(isOsFileDrag(['Files'])).toBe(true)
+    expect(isFileDrag([PATH_MIME, INTERNAL_DRAG_MIME, 'text/plain'])).toBe(true)
+  })
+
+  it('marks every drag that starts in the window, in the capture phase, until stopped', () => {
+    type Listener = { type: string; fn: (e: DragEvent) => void; capture: boolean }
+    const listeners: Listener[] = []
+    const win = {
+      addEventListener: (type: string, fn: Listener['fn'], o: { capture: boolean }) =>
+        listeners.push({ type, fn, capture: o.capture }),
+      removeEventListener: (type: string, fn: Listener['fn']) =>
+        listeners.splice(
+          listeners.findIndex((l) => l.type === type && l.fn === fn),
+          1,
+        ),
+    } as unknown as Window
+    const stop = markInternalDrags(win)
+    expect(listeners).toEqual([expect.objectContaining({ type: 'dragstart', capture: true })])
+
+    const data = new Map<string, string>()
+    const e = { dataTransfer: { setData: (t: string, v: string) => data.set(t, v) } } as unknown as DragEvent
+    listeners[0]!.fn(e)
+    expect(isInternalDrag([...data.keys()])).toBe(true)
+    expect(isFileDrag([...data.keys(), 'Files'])).toBe(false)
+
+    stop()
+    expect(listeners).toEqual([])
   })
 })
