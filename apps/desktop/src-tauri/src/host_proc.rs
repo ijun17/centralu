@@ -14,7 +14,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -277,7 +277,8 @@ impl Supervisor {
     #[cfg_attr(not(unix), allow(dead_code))]
     pub fn stop_current(&self) -> bool {
         let Some(pid) = self.pid() else { return false };
-        stop_pid_gracefully(pid, || self.pid() != Some(pid));
+        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.stdin.take()));
+        stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
         true
     }
 
@@ -479,7 +480,8 @@ impl Supervisor {
             },
             Err(_) => return false,
         };
-        stop_pid_gracefully(pid, || self.pid() != Some(pid));
+        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.stdin.take()));
+        stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
         true
     }
 
@@ -498,7 +500,8 @@ impl Supervisor {
         };
         if let Some(mut child) = child {
             let pid = child.id();
-            stop_pid_gracefully(pid, || matches!(child.try_wait(), Ok(Some(_))));
+            let stdin = child.stdin.take();
+            stop_pid_gracefully(pid, stdin, || matches!(child.try_wait(), Ok(Some(_))));
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -542,6 +545,12 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
+    // Windows has no process groups to join; the tree is ended with `taskkill /T` instead
+    // (`kill_group`). What it does need is no console: the release app is a GUI-subsystem
+    // program, so `node.exe` would otherwise get a console window of its own, visible for as
+    // long as the host runs. The host's own children (git, codex, claude) inherit that
+    // windowless console rather than each opening one.
+    hide_console(&mut cmd);
 
     cmd.spawn().map_err(|e| format!("failed to run {}: {e}", launch.program))
 }
@@ -551,7 +560,8 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
 #[cfg_attr(not(unix), allow(dead_code))]
 pub fn stop_child(child: &mut Child) {
     let pid = child.id();
-    stop_pid_gracefully(pid, || matches!(child.try_wait(), Ok(Some(_))));
+    let stdin = child.stdin.take();
+    stop_pid_gracefully(pid, stdin, || matches!(child.try_wait(), Ok(Some(_))));
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -565,17 +575,35 @@ pub fn stop_child(child: &mut Child) {
  * away the host's disposeAll's chance to close things via EOF and hits the codex children
  * directly instead. The group-wide TERM that follows is only a zombie-prevention backstop that
  * actually does anything when the host is stuck.
+ *
+ * Windows has no TERM. There the polite request is **closing the host's stdin**: the host runs
+ * with `--watch-parent`, so EOF runs the same `shutdown()` a TERM does (agent-host main.ts).
+ * Before this, both kill functions were empty off unix and stdin stayed open, so every quit
+ * stalled the full grace period and then hard-killed the host, which never got to release
+ * `host.lock` (#14). On unix stdin is kept open until the end, so EOF does not race the signal
+ * into a second `shutdown()`.
  */
-fn stop_pid_gracefully(pid: u32, mut gone: impl FnMut() -> bool) {
+fn stop_pid_gracefully(pid: u32, stdin: Option<ChildStdin>, mut gone: impl FnMut() -> bool) {
+    #[cfg(unix)]
+    let _stdin_until_the_end = stdin;
+    #[cfg(not(unix))]
+    drop(stdin);
     kill_pid(pid);
     let deadline = Instant::now() + STOP_GRACE;
+    let mut ended = false;
     while Instant::now() < deadline {
         if gone() {
+            ended = true;
             break;
         }
         thread::sleep(Duration::from_millis(50));
     }
-    kill_group(pid);
+    // unix: the group outlives its leader and its number is not reused while anyone is in it, so
+    // it is signalled either way. Windows: `taskkill /T` walks the tree from a pid, and a pid that
+    // has ended may already belong to someone else — so only a host still running is ended.
+    if cfg!(unix) || !ended {
+        kill_group(pid);
+    }
 }
 
 /// Clears `running` when the watcher thread ends. There are several `return` points, so this is
@@ -602,6 +630,7 @@ pub fn kill_pid(pid: u32) {
         .status();
 }
 
+/// Windows: nothing to send. Closing stdin (in `stop_pid_gracefully`) is the request to stop.
 #[cfg(not(unix))]
 pub fn kill_pid(_pid: u32) {}
 
@@ -616,8 +645,38 @@ pub fn kill_group(pid: u32) {
         .status();
 }
 
-#[cfg(not(unix))]
+/// Windows: the host and every process under it, forcibly. `taskkill` is named by its full path
+/// under the system folder, so a `taskkill.exe` in the working directory or on PATH is never the
+/// one that runs.
+#[cfg(windows)]
+pub fn kill_group(pid: u32) {
+    let mut cmd = Command::new(windows_system_tool("taskkill.exe"));
+    cmd.args(["/PID", &pid.to_string(), "/T", "/F"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    hide_console(&mut cmd);
+    let _ = cmd.status();
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn kill_group(_pid: u32) {}
+
+/// `%SystemRoot%\System32\<name>`.
+#[cfg(windows)]
+fn windows_system_tool(name: &str) -> std::path::PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    std::path::PathBuf::from(root).join("System32").join(name)
+}
+
+/// Starts a console program with no console window (`CREATE_NO_WINDOW`). A no-op off Windows.
+pub fn hide_console(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
 
 /// `CC_HOST_CMD`, split on whitespace: the escape hatch for running some other host.
 pub fn host_cmd_override() -> Option<(String, Vec<String>)> {
@@ -659,11 +718,16 @@ pub fn source_launch(extra: &[String]) -> HostLaunch {
         "--watch-parent".into(),
     ];
     args.extend(extra.iter().cloned());
-    HostLaunch {
-        program: format!("{root}/node_modules/.bin/tsx"),
-        args,
-        env: vec![("CC_DEV".into(), "1".into())],
-    }
+    // Windows: `.bin/tsx` is a sh script, and its siblings `tsx.CMD` / `tsx.ps1` cannot be
+    // started without a shell either (Rust would hand the sh script to CreateProcessW and fail).
+    // So Node runs tsx's own entry directly, the file `.bin/tsx` points at anyway.
+    let program = if cfg!(windows) {
+        args.insert(0, format!("{root}/node_modules/tsx/dist/cli.mjs"));
+        resolve_node().unwrap_or_else(|_| "node".into())
+    } else {
+        format!("{root}/node_modules/.bin/tsx")
+    };
+    HostLaunch { program, args, env: vec![("CC_DEV".into(), "1".into())] }
 }
 
 pub fn workspace_root() -> String {
@@ -697,13 +761,23 @@ fn node_missing_message(looked: &[String]) -> String {
 /// them somewhere else.
 #[cfg(target_os = "macos")]
 const INSTALL_NODE_HINT: &str = "`brew install node`";
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+const INSTALL_NODE_HINT: &str = "`winget install OpenJS.NodeJS.LTS`";
+#[cfg(not(any(target_os = "macos", windows)))]
 const INSTALL_NODE_HINT: &str = "your distribution's package manager (for example, `apt install nodejs`)";
 
 #[cfg(target_os = "macos")]
 const UPGRADE_NODE_HINT: &str = "`brew upgrade node`";
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+const UPGRADE_NODE_HINT: &str = "`winget upgrade OpenJS.NodeJS.LTS`";
+#[cfg(not(any(target_os = "macos", windows)))]
 const UPGRADE_NODE_HINT: &str = "your distribution's package manager";
+
+/// The first place `pick_node` asks, named in the "looked in" list.
+#[cfg(unix)]
+const FIRST_LOOK: &str = "login shell PATH";
+#[cfg(not(unix))]
+const FIRST_LOOK: &str = "PATH";
 
 /// The host bundle's esbuild target is node22 — below that, even the syntax breaks.
 const MIN_NODE_MAJOR: u32 = 22;
@@ -724,8 +798,38 @@ static NODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// claude and codex CLI lookups had already hit the same problem and were fixed to ask the
 /// login shell (`packages/agent-host/src/env-path.ts`); only node was left using the old
 /// approach.
+///
+/// **Windows** has no login shell to ask, and does not need one: a program started from Explorer
+/// inherits the user's PATH from the registry, which is where the Node installer, nvm-windows,
+/// Volta and Scoop put themselves. So PATH is searched first, then the places those installers use.
 pub fn resolve_node() -> Result<String, String> {
-    remember_found(&NODE, || pick_node(probe_login_shell(), fallback_node_paths()))
+    remember_found(&NODE, || pick_node(probe_first(), fallback_node_paths()))
+}
+
+#[cfg(unix)]
+fn probe_first() -> Option<String> {
+    probe_login_shell()
+}
+
+#[cfg(not(unix))]
+fn probe_first() -> Option<String> {
+    let path = std::env::var_os("PATH")?;
+    first_on_path(std::env::split_paths(&path), "node.exe", |p| p.is_file())
+}
+
+/// The first `<dir>\<name>` that exists, over the absolute entries of PATH only: a relative entry
+/// would be resolved against whatever the working directory happens to be.
+#[cfg_attr(unix, allow(dead_code))]
+fn first_on_path(
+    dirs: impl IntoIterator<Item = std::path::PathBuf>,
+    name: &str,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<String> {
+    dirs.into_iter()
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(name))
+        .find(|p| exists(p))
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 /// Only caches a successful find. If it was not found, asks again next time.
@@ -749,7 +853,7 @@ fn remember_found(
 /// fact that it hit an old one, and shows that as the reason if nothing newer turns up
 /// ("needs an upgrade" is closer to what the person actually has to do than "not found").
 fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> Result<String, String> {
-    let mut looked = vec!["login shell PATH".to_string()];
+    let mut looked = vec![FIRST_LOOK.to_string()];
     let mut ordered: Vec<String> = from_shell.into_iter().collect();
 
     for candidate in fallbacks {
@@ -777,6 +881,7 @@ fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> Result<Strin
 ///
 /// Only the line carrying the marker is picked out, so it does not matter what else the shell
 /// configuration prints.
+#[cfg(unix)]
 fn probe_login_shell() -> Option<String> {
     use std::io::Read;
 
@@ -793,7 +898,6 @@ fn probe_login_shell() -> Option<String> {
         // So the shell's initialization script does not put up an interactive prompt.
         .env("TERM", "dumb")
         .env("CI", "1");
-    #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
@@ -827,6 +931,7 @@ fn probe_login_shell() -> Option<String> {
 }
 
 /// Pulls the path out of the marked line among whatever the shell printed.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn parse_probe_output(out: &str) -> Option<String> {
     out.lines()
         .find_map(|l| l.trim().strip_prefix("__CC_NODE__:"))
@@ -837,10 +942,70 @@ fn parse_probe_output(out: &str) -> Option<String> {
 
 /// The fallback for when the shell cannot be used. Checks not just Homebrew but the common
 /// locations of version managers too.
+#[cfg(unix)]
 fn fallback_node_paths() -> Vec<String> {
     node_paths_under(&std::env::var("HOME").unwrap_or_default())
 }
 
+#[cfg(not(unix))]
+fn fallback_node_paths() -> Vec<String> {
+    windows_node_paths(|name| std::env::var(name).ok().filter(|v| !v.is_empty()), nvm_windows_versions)
+}
+
+/// Where Windows installers put `node.exe`, read from the environment variables they set.
+///
+/// Built with `\` by hand rather than `Path::join`, so the list is the same string on every OS
+/// and its test runs anywhere. `versions` lists nvm-windows' installed versions, newest first.
+#[cfg_attr(unix, allow(dead_code))]
+fn windows_node_paths(env: impl Fn(&str) -> Option<String>, versions: impl Fn(&str) -> Vec<String>) -> Vec<String> {
+    let mut paths = Vec::new();
+    // The official installer (Chocolatey and winget wrap it), machine-wide.
+    for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Some(dir) = env(var) {
+            paths.push(format!("{dir}\\nodejs\\node.exe"));
+        }
+    }
+    if let Some(local) = env("LOCALAPPDATA") {
+        // A per-user install of the same.
+        paths.push(format!("{local}\\Programs\\nodejs\\node.exe"));
+        // Volta's per-user shims.
+        paths.push(format!("{local}\\Volta\\bin\\node.exe"));
+    }
+    // nvm-windows: the active version is a symlink at NVM_SYMLINK; every version sits in NVM_HOME.
+    if let Some(link) = env("NVM_SYMLINK") {
+        paths.push(format!("{link}\\node.exe"));
+    }
+    if let Some(home) = env("NVM_HOME") {
+        paths.extend(versions(&home).into_iter().map(|v| format!("{home}\\{v}\\node.exe")));
+    }
+    if let Some(profile) = env("USERPROFILE") {
+        paths.push(format!("{profile}\\scoop\\shims\\node.exe"));
+        paths.push(format!("{profile}\\scoop\\apps\\nodejs\\current\\node.exe"));
+        paths.push(format!("{profile}\\scoop\\apps\\nodejs-lts\\current\\node.exe"));
+    }
+    // ProgramFiles and ProgramW6432 are usually the same folder; Windows paths ignore case.
+    let mut seen = std::collections::HashSet::new();
+    paths.retain(|p| seen.insert(p.to_ascii_lowercase()));
+    paths
+}
+
+/// nvm-windows' version folders (`v22.3.1`), newest first, compared as numbers.
+#[cfg(not(unix))]
+fn nvm_windows_versions(home: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(home) else { return Vec::new() };
+    let mut versions: Vec<(Vec<u32>, String)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let parts = version_parts(&name);
+            (name.starts_with('v') && !parts.is_empty()).then_some((parts, name))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions.into_iter().map(|(_, n)| n).collect()
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
 fn node_paths_under(home: &str) -> Vec<String> {
     let mut paths = vec![
         "/opt/homebrew/bin/node".to_string(),
@@ -863,6 +1028,7 @@ fn node_paths_under(home: &str) -> Vec<String> {
 ///
 /// The names look like `v22.3.1`, so a lexical sort would wrongly put v9 ahead of v22.
 /// Compared as numbers instead.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn nvm_versions(root: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
@@ -896,7 +1062,10 @@ fn version_parts(raw: &str) -> Vec<u32> {
 /// upgrade, not an install. So the messages are kept separate. If the version cannot be read,
 /// it is let through (there is no basis for blocking it).
 fn check_node_version(path: &str) -> Result<String, String> {
-    let Ok(out) = Command::new(path).arg("--version").stdin(Stdio::null()).output() else {
+    let mut cmd = Command::new(path);
+    cmd.arg("--version").stdin(Stdio::null());
+    hide_console(&mut cmd);
+    let Ok(out) = cmd.output() else {
         return Ok(path.to_string());
     };
     let raw = String::from_utf8_lossy(&out.stdout);
@@ -1040,8 +1209,12 @@ mod tests {
 
     /// Sets up a script that pretends to be node and prints the given version.
     fn fake_node(version: &str, name: &str) -> String {
-        let path = std::env::temp_dir().join(name);
-        std::fs::write(&path, format!("#!/bin/sh\necho {version}\n")).unwrap();
+        // Windows cannot run a sh script; a batch file is what Rust's Command can start there.
+        #[cfg(windows)]
+        let (path, body) = (std::env::temp_dir().join(format!("{name}.cmd")), format!("@echo {version}\r\n"));
+        #[cfg(not(windows))]
+        let (path, body) = (std::env::temp_dir().join(name), format!("#!/bin/sh\necho {version}\n"));
+        std::fs::write(&path, body).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1077,6 +1250,7 @@ mod tests {
     /// A unit test alone cannot confirm "asks the shell instead of using a fixed path" — since
     /// that is the entire point of this fix, this touches the real thing once. Passes silently
     /// in an environment with no node (there is no basis to block it there).
+    #[cfg(unix)]
     #[test]
     fn finds_the_node_this_shell_knows() {
         let Ok(shell) = std::env::var("SHELL") else { return };
@@ -1118,8 +1292,54 @@ mod tests {
         // Finding nothing anywhere is the moment the person is most stuck — list every place
         // that was checked.
         let err = pick_node(None, vec!["/nope/a/node".into(), "/nope/b/node".into()]).unwrap_err();
-        assert!(err.contains("login shell PATH"), "{err}");
+        assert!(err.contains(FIRST_LOOK), "{err}");
         assert!(err.contains("/nope/a/node") && err.contains("/nope/b/node"), "{err}");
+    }
+
+    /// Windows (#14): Node discovery used to be the login shell plus unix folders under `$HOME`,
+    /// so a packaged Windows build could never find Node. These are the folders the installers
+    /// people actually use put it in.
+    #[test]
+    fn looks_where_windows_installers_put_node() {
+        let env = |name: &str| {
+            match name {
+                "ProgramFiles" | "ProgramW6432" => Some("C:\\Program Files"),
+                "LOCALAPPDATA" => Some("C:\\Users\\me\\AppData\\Local"),
+                "NVM_SYMLINK" => Some("C:\\nvm4w\\nodejs"),
+                "NVM_HOME" => Some("C:\\Users\\me\\AppData\\Local\\nvm"),
+                "USERPROFILE" => Some("C:\\Users\\me"),
+                _ => None,
+            }
+            .map(String::from)
+        };
+        let paths = windows_node_paths(env, |_| vec!["v22.3.1".into(), "v20.1.0".into()]);
+        assert_eq!(
+            paths,
+            vec![
+                "C:\\Program Files\\nodejs\\node.exe",
+                "C:\\Users\\me\\AppData\\Local\\Programs\\nodejs\\node.exe",
+                "C:\\Users\\me\\AppData\\Local\\Volta\\bin\\node.exe",
+                "C:\\nvm4w\\nodejs\\node.exe",
+                "C:\\Users\\me\\AppData\\Local\\nvm\\v22.3.1\\node.exe",
+                "C:\\Users\\me\\AppData\\Local\\nvm\\v20.1.0\\node.exe",
+                "C:\\Users\\me\\scoop\\shims\\node.exe",
+                "C:\\Users\\me\\scoop\\apps\\nodejs\\current\\node.exe",
+                "C:\\Users\\me\\scoop\\apps\\nodejs-lts\\current\\node.exe",
+            ],
+            "ProgramFiles and ProgramW6432 name the same folder, so it is listed once"
+        );
+        assert!(windows_node_paths(|_| None, |_| Vec::new()).is_empty(), "nothing set, nothing guessed");
+    }
+
+    /// PATH comes first on Windows, but only its absolute entries: `.` or `bin` on PATH would be
+    /// resolved against the working directory, which could be a cloned repository.
+    #[test]
+    fn a_relative_path_entry_is_never_searched() {
+        use std::path::PathBuf;
+        let base = std::env::temp_dir();
+        let dirs = vec![PathBuf::from("bin"), base.join("a"), base.join("b")];
+        let found = first_on_path(dirs, "node.exe", |p| p.starts_with("bin") || p.starts_with(base.join("b")));
+        assert_eq!(found, Some(base.join("b").join("node.exe").to_string_lossy().to_string()));
     }
 
     #[test]

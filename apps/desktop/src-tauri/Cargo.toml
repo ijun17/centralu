@@ -34,7 +34,13 @@ serde_json = "1"
 # and on Linux it implements the freedesktop trash spec 1.0 directly (common to GNOME, KDE and
 # XFCE). `chrono` is kept because the Linux side uses it to write the deletion time into the
 # trash info file — without it, "when it was deleted" shows up blank in file managers.
-trash = { version = "5", default-features = false, features = ["chrono"] }
+#
+# `coinit_apartmentthreaded` is the crate's other default, and on Windows it is not optional:
+# with neither COM mode selected, `trash`'s Windows backend fails to compile on purpose
+# (trash 5.2.6 windows.rs, "THIS IS AN ERROR ON PURPOSE"). macOS and Linux ignore it. The call
+# runs on a thread of its own (`send_to_trash` in lib.rs), so the apartment mode cannot clash
+# with whatever the calling thread already initialised.
+trash = { version = "5", default-features = false, features = ["chrono", "coinit_apartmentthreaded"] }
 
 # The keeper (#280) needs four calls `std` does not offer: `flock` (a lock the OS releases
 # when its holder dies), `setsid` (to start detached from the app), `umask`, and the peer uid of

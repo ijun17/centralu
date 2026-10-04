@@ -25,7 +25,9 @@ pub fn code_candidates(path_var: Option<&str>, home: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = path_var
         .map(|p| {
             std::env::split_paths(p)
-                .map(|dir| dir.join("code"))
+                // A relative entry would be looked up in the working directory.
+                .filter(|dir| dir.is_absolute())
+                .flat_map(|dir| CODE_NAMES.iter().map(move |name| dir.join(name)))
                 .collect()
         })
         .unwrap_or_default();
@@ -47,11 +49,30 @@ pub fn code_candidates(path_var: Option<&str>, home: &str) -> Vec<PathBuf> {
         out.push(PathBuf::from("/usr/local/bin/code"));
         out.push(PathBuf::from("/snap/bin/code"));
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    // Windows (#14): VS Code's installer puts `bin\code.cmd` on PATH, not `code` or `code.exe`,
+    // and the per-user install (the default) lives under LOCALAPPDATA. `home` is unused here;
+    // the folders come from the variables the installer itself reads.
+    #[cfg(windows)]
+    {
+        let _ = home;
+        for (var, sub) in [("LOCALAPPDATA", "Programs\\Microsoft VS Code"), ("ProgramFiles", "Microsoft VS Code")] {
+            if let Some(base) = std::env::var_os(var) {
+                out.push(PathBuf::from(base).join(sub).join("bin").join("code.cmd"));
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     let _ = home;
 
     out
 }
+
+/// The names `code` goes by on PATH. On Windows a bare `code` is a sh script (for Git Bash and
+/// WSL) that cannot be started, so only the batch file counts.
+#[cfg(windows)]
+const CODE_NAMES: &[&str] = &["code.cmd"];
+#[cfg(not(windows))]
+const CODE_NAMES: &[&str] = &["code"];
 
 /// Pick the first one that exists. `exists` is passed in so this can be tested without a real
 /// filesystem.
@@ -87,8 +108,10 @@ mod tests {
     use super::*;
 
     /// The PATH a GUI-launched app actually gets (measured in sidecar.rs).
+    #[cfg(unix)]
     const GUI_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
+    #[cfg(unix)]
     #[test]
     fn path_comes_first_when_it_has_code() {
         let found = pick_code(
@@ -96,6 +119,24 @@ mod tests {
             |p| p == Path::new("/somewhere/bin/code") || p == Path::new("/opt/homebrew/bin/code"),
         );
         assert_eq!(found, Ok(PathBuf::from("/somewhere/bin/code")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_path_entry_is_skipped() {
+        let found = pick_code(&code_candidates(Some("bin:/somewhere/bin"), "/Users/me"), |p| {
+            p == Path::new("bin/code") || p == Path::new("/somewhere/bin/code")
+        });
+        assert_eq!(found, Ok(PathBuf::from("/somewhere/bin/code")));
+    }
+
+    /// Windows (#14): the installer's `code.cmd`, never the sh script named `code` beside it.
+    #[cfg(windows)]
+    #[test]
+    fn windows_finds_the_batch_file_on_path() {
+        let dir = "C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\bin";
+        let found = pick_code(&code_candidates(Some(dir), ""), |p| p.extension().is_some_and(|e| e == "cmd"));
+        assert_eq!(found, Ok(Path::new(dir).join("code.cmd")));
     }
 
     #[cfg(target_os = "macos")]
@@ -119,6 +160,7 @@ mod tests {
         assert_eq!(found, Ok(PathBuf::from(bundled)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn not_found_says_where_it_looked() {
         let err = pick_code(&code_candidates(Some(GUI_PATH), "/Users/me"), |_| false).unwrap_err();

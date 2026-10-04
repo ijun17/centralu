@@ -184,12 +184,12 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
     // Passing the bare name fails to find it on an installed build — a GUI app's PATH does
     // not contain `code` (ide.rs, #159).
     let code = ide::find_code()?;
-    std::process::Command::new(&code)
-        .arg("-g")
-        .arg(&target)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("{}: {e}", code.display()))
+    let mut cmd = std::process::Command::new(&code);
+    cmd.arg("-g").arg(&target);
+    // Windows: `code.cmd` runs under cmd.exe, which would flash a console window. Rust quotes
+    // the arguments for cmd.exe itself, and refuses one it cannot pass safely.
+    host_proc::hide_console(&mut cmd);
+    cmd.spawn().map(|_| ()).map_err(|e| format!("{}: {e}", code.display()))
 }
 
 /// Shows the file in the file manager (the "Open in Finder" of #19).
@@ -243,14 +243,28 @@ fn send_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
     ctx.delete(path)
 }
 
-/// On Linux and Windows, the default backend already is the OS's own trash.
+/// On Linux, the default backend already is the OS's own trash.
 /// The Linux side is an implementation of the freedesktop trash spec 1.0, so GNOME, KDE and
 /// XFCE all land in the same place — per the spec, a file on a different mount point goes to
 /// that volume's own `.Trash-$uid`, and on a filesystem that cannot support that (FAT and the
 /// like) the failure is surfaced as-is. That is better than deleting silently.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn send_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
     trash::delete(path)
+}
+
+/// Windows: the Recycle Bin, through the shell's `IFileOperation`.
+///
+/// The crate initialises COM on the calling thread, single-threaded apartment, and **panics**
+/// when that fails — which it does on a thread already initialised as multithreaded. With
+/// `panic = "abort"` that would take the whole app down. A thread of our own has no COM state
+/// yet, so the call cannot meet a mode it did not choose.
+#[cfg(target_os = "windows")]
+fn send_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
+    let owned = path.to_path_buf();
+    std::thread::spawn(move || trash::delete(&owned))
+        .join()
+        .unwrap_or_else(|_| Err(trash::Error::Unknown { description: "the trash thread panicked".into() }))
 }
 
 /// What this desktop calls its file manager.
