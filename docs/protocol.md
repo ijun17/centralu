@@ -52,8 +52,10 @@ type NormalizedEvent =
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: the whole result text (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker: claude compact_boundary, codex a completed contextCompaction item (#303)
+  | { type: 'conversation_reset'; sessionId, trigger? }       // #304: the tool started a fresh conversation (Claude's /clear); a marker, and the gauge empties
+  | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession? }  // #304: text the tool wants read, one line
   // in-turn progress (display-only, never persisted)
-  | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting)
+  | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting, claude api_retry)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated snapshot
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: live command output tail; #98: a subagent's steps, on the Agent call that spawned it
   // what a native subagent did — kept apart from the conversation (#222)
@@ -70,7 +72,7 @@ type NormalizedEvent =
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: human-given, never overwritten
-  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: a non-human hand changed settings
+  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, by? }  // #30: a non-human hand changed settings; by 'tool': the agent tool switched by itself (#304)
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // the badge; codex announces it, claude's is read from the CLI's /goal replies and Stop hook feedback
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: the live set (REPLACE) and what just ended
@@ -109,6 +111,28 @@ names the child thread). A subagent that launches its own tags that one's steps 
 On the wire a step's tool `input` and `output` are stripped like the parent's (`withoutToolRecord` looks inside the
 wrapper). The steps are read back only by `messages.subagent`, which names one launch card; they are never in
 `messages.load`. A running Claude agent's card still gets one line per step through `tool_output_delta`.
+
+**What the agent tool tells its own user reaches the conversation as one line** ([#304](https://github.com/ijun17/centralu/issues/304)).
+The #58 survey found the tools saying things Centralu dropped: Claude's `/clear` started a new conversation while the
+screen carried on, a hook's block reason left a prompt unanswered with no word why, a Codex configuration warning
+reached nobody. Three shapes carry them:
+
+- `conversation_reset` is a marker, stored like `compaction`: the record keeps everything above it, the model knows none
+  of it. The host and the UI empty the context gauge; the tool reports the new reading when the command's turn ends.
+- `notice` is a marker too, in the tool's own words (`text`), with the tool's urgency folded into `level` (an unknown
+  word from a newer host reads as `info`). `oncePerSession` marks text the tool repeats on every start: the host stores
+  and sends it only if the session has no stored notice with the same text. Codex sends its configuration warning on
+  every app-server start and every thread start or resume, twice each time (`configWarning`, then `warning`).
+- `settings_changed` with `by: 'tool'` is a switch the tool made by itself — Claude Code's refusal fallback, another
+  Codex client changing the thread. A notice in the conversation says what and why; the event updates the model shown.
+
+| Decision | Why |
+|---|---|
+| A notice is a stored marker, not a live toast | The person may not be looking when it arrives, and the reason a turn went unanswered must still be there when they come back. A toast would also interrupt for something that needs nothing from them |
+| The tool's sentence as is | The same rule as an error marker: rewording it loses the cause |
+| `oncePerSession` is decided by the host, against the store | The repetition crosses process lifetimes (every wake of a Codex session repeats it); only the store remembers across them |
+| A `by: 'tool'` switch is recorded, not applied | The process already runs with the new value. The host takes only the fields that differ from what it launched, moves its launch record along (so it is not read as a change still to make), keeps a choice the person saved mid-turn, and leaves the project's remembered default alone. Without `by`, the event means the orchestrator, as before |
+| Events a starting session sends are held until it is registered | A new session is registered only once its adapter answers, and Codex's `configWarning` arrives while `thread/start` is answered (measured). It used to go out unnumbered and unstored |
 
 **An agent's background work is one level, not a pair of edges** ([#290](https://github.com/ijun17/centralu/issues/290)).
 `background_tasks.live` is every task running behind the session after a change, and replaces the last one; `ended`

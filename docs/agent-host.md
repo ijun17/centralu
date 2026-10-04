@@ -132,6 +132,27 @@ Implementation rules:
     whether a session's process can be swapped without losing work (#297): no turn, no pending approval or question,
     no running task that is not ambient, and never idle while a tool that cannot report background work holds a
     process.
+- **What the tool tells its own user goes out, in its own words** (#304): a fresh conversation as
+  `conversation_reset`, text meant to be read as `notice`, a setting the tool switched by itself as `settings_changed`
+  with `by: 'tool'` (its snapshot is what the process was launched with plus the switched field; the host applies only
+  what differs), a retry as the `retrying` activity until output flows again. Measured payloads (CLI 2.1.289 through SDK
+  0.3.263, codex-cli 0.160.0, 2026-10-04) unless marked otherwise:
+
+  | Tool | Message | Becomes |
+  |---|---|---|
+  | Claude | `conversation_reset {new_conversation_id, trigger: 'clear'}` on `/clear`; then an `init` with a new `session_id` | `conversation_reset` |
+  | Claude | `system/informational {content, level}` — a `UserPromptSubmit` hook's block reason arrived as level `warning`, `prevent_continuation: true` | `notice`; level `info` is left out (the CLI shows it only in transcript mode) |
+  | Claude | `system/notification {key, text, priority, color}` (not exercised) | `notice` at a level folded from colour and priority; "Error compacting conversation" is left to the failed-compaction marker |
+  | Claude | `system/api_retry {attempt, max_retries, retry_delay_ms, error_status, error}` — a 529 answered twice, then a synthetic "API Error" message and an error result | `retrying` once per episode plus a host.log line per attempt; the previous activity comes back on the next stream event or assistant message |
+  | Claude | `system/model_refusal_fallback` (not exercised; sdk.d.ts) | scope `session` or absent: a notice and a `settings_changed` with the fallback model. Scope `local` (a subagent): host.log only. `retracted_message_uuids` is not acted on |
+  | Claude | `system/model_refusal_no_fallback` (not exercised; the CLI sends `content: ""` on its main-thread paths) | held until the result: the failed turn's error message, or a notice if the turn did not fail. Text: `content`, else the refusal's explanation, else its category |
+  | Codex | `configWarning {summary, details}` while `thread/start` is answered, then `warning {threadId, message}` with the same text, on every start and resume | `notice` with `oncePerSession` |
+  | Codex | `deprecationNotice {summary, details}`, `guardianWarning {threadId, message}` (not exercised) | `notice` (the first once per session) |
+  | Codex | `mcpServer/startupStatus/updated` — a failing server goes `starting` → `failed {error}` twice on one thread start | one `notice` per server in Codex's words (`MCP client for \`x\` failed to start: …`), again only after it started in between |
+  | Codex | `model/rerouted {turnId, fromModel, toModel, reason}` (not exercised) | `notice` only: it names a turn, and the thread's settings do not change with it |
+  | Codex | `thread/settings/updated {threadSettings}` (not exercised) | measured against what `thread/start`/`thread/resume` answered (Codex answers a default with a concrete model), and only a real difference becomes a notice and a `settings_changed` |
+
+  A child thread's notifications stay out of the parent's conversation, as before.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
@@ -194,7 +215,7 @@ surface. They cannot notice a type we do not use *arriving*, and protocol.md §4
 know. So each adapter keeps a second list, of every type it maps or leaves out on purpose
 (`CLAUDE_KNOWN_TYPES` and `CODEX_KNOWN_NOTIFICATIONS`, grouped as in the #58 survey). The first time a session
 receives a type outside that list, `adapters/unmapped.ts` writes one host.log line:
-`[claude] 1a2b3c4d unmapped message type: conversation_reset`. Nothing on screen changes. Types the survey wants shown
+`[claude] 1a2b3c4d unmapped message type: system/permission_denied`. Nothing on screen changes. Types the survey wants shown
 but nobody has wired yet stay off the list on purpose, so their first real instance is a grep away. When you wire one,
 or decide it is noise, move it onto the list in the same PR. Server *requests* need no list: the Codex adapter already
 logs every request it answers with `{}`.

@@ -53,8 +53,10 @@ type NormalizedEvent =
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: 결과 글 전체 (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커: claude compact_boundary, codex 완료된 contextCompaction 항목 (#303)
+  | { type: 'conversation_reset'; sessionId, trigger? }       // #304: 도구가 새 대화를 시작했다(Claude의 /clear). 마커이며 게이지가 비워진다
+  | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession? }  // #304: 도구가 읽히길 바라는 글, 한 줄
   // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
-  | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중 / 재연결 중 (codex)
+  | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중 / 재시도 중 (codex 재연결, claude api_retry)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated 스냅샷
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: 실행 중 명령 출력의 꼬리 · #98: 서브에이전트의 걸음 (띄운 Agent 호출에)
   // 네이티브 서브에이전트가 한 일 — 대화와 따로 남는다 (#222)
@@ -71,7 +73,7 @@ type NormalizedEvent =
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: 사람이 지은 이름 — 자동 이름이 덮지 않는다
-  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: 사람 아닌 손이 설정을 바꿨다
+  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, by? }  // #30: 사람 아닌 손이 설정을 바꿨다. by 'tool': 에이전트 도구가 스스로 바꿨다 (#304)
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 충돌 감지, FR-5 하이라이트
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // 배지; codex는 알려 주고, claude는 CLI의 /goal 답과 Stop 훅 피드백에서 읽는다
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: 살아 있는 집합(REPLACE)과 방금 끝난 것
@@ -109,6 +111,28 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
 선 위에서 걸음의 도구 `input`과 `output`은 부모의 것처럼 걷힌다(`withoutToolRecord`가 감싼 안을 본다). 걸음을 다시
 읽는 것은 띄운 카드 하나를 지목하는 `messages.subagent`뿐이고, `messages.load`에는 결코 없다. 실행 중인 Claude 에이전트의
 카드는 여전히 `tool_output_delta`로 걸음마다 한 줄을 받는다.
+
+**에이전트 도구가 자기 사용자에게 하는 말은 대화에 한 줄로 닿는다** ([#304](https://github.com/ijun17/centralu/issues/304)).
+#58 조사에서 도구가 하는 말을 Centralu가 버리고 있었다는 것이 드러났다. Claude의 `/clear`는 새 대화를 시작하는데 화면은
+그대로 이어졌고, 훅이 프롬프트를 막으면 이유 한 마디 없이 답이 오지 않았고, Codex의 설정 경고는 아무에게도 닿지 않았다.
+세 가지 모양이 이것을 나른다.
+
+- `conversation_reset`은 마커이며 `compaction`처럼 저장된다. 기록은 그 위의 모든 것을 갖고 있지만 모델은 아무것도 모른다.
+  호스트와 UI는 컨텍스트 게이지를 비우고, 도구는 명령의 턴이 끝날 때 새 값을 알려 준다.
+- `notice`도 마커이며 도구 자신의 말(`text`)을 그대로 싣고, 도구의 긴급도는 `level`로 접힌다(더 새 호스트가 만든 모르는
+  단어는 `info`로 읽는다). `oncePerSession`은 도구가 시작할 때마다 되풀이하는 글을 표시한다. 호스트는 그 세션에 같은 글의
+  알림이 아직 저장돼 있지 않을 때만 저장하고 보낸다. Codex는 app-server가 시작할 때마다, 스레드를 시작하거나 재개할
+  때마다 설정 경고를 두 번씩(`configWarning`, 이어서 `warning`) 보낸다.
+- `by: 'tool'`인 `settings_changed`는 도구가 스스로 바꾼 것이다 — Claude Code의 거절 폴백, 다른 Codex 클라이언트가 스레드를
+  바꾼 경우. 대화의 알림이 무엇이 왜 바뀌었는지 말하고, 이벤트는 표시된 모델을 갱신한다.
+
+| 결정 | 이유 |
+|---|---|
+| 알림은 저장되는 마커이지 살아 있는 토스트가 아니다 | 알림이 올 때 사람이 보고 있지 않을 수 있고, 턴에 답이 오지 않은 이유는 돌아왔을 때도 거기 있어야 한다. 토스트는 사람에게 아무것도 요구하지 않는 일로 끼어들기도 한다 |
+| 도구의 문장 그대로 | 오류 마커와 같은 규칙: 고쳐 쓰면 원인이 사라진다 |
+| `oncePerSession`은 호스트가 저장소를 보고 정한다 | 되풀이는 프로세스 수명을 넘나든다(Codex 세션은 깨어날 때마다 되풀이한다). 그 사이를 기억하는 것은 저장소뿐이다 |
+| `by: 'tool'` 전환은 적용하지 않고 기록한다 | 프로세스는 이미 새 값으로 돈다. 호스트는 자신이 띄운 값과 다른 필드만 받아들이고, 띄운 기록을 함께 옮겨(아직 할 변경으로 읽히지 않게) 사람이 턴 도중 저장한 선택은 지키며, 프로젝트가 기억하는 기본값은 건드리지 않는다. `by`가 없으면 예전처럼 오케스트레이터를 뜻한다 |
+| 시작 중인 세션이 보낸 이벤트는 등록될 때까지 붙잡아 둔다 | 새 세션은 어댑터가 답한 뒤에야 등록되는데, Codex의 `configWarning`은 `thread/start`가 답해지는 동안 도착한다(측정). 예전에는 번호 없이 저장되지 않은 채 나갔다 |
 
 **에이전트의 백그라운드 작업은 가장자리 한 쌍이 아니라 수준 신호 하나다** ([#290](https://github.com/ijun17/centralu/issues/290)).
 `background_tasks.live`는 바뀐 뒤 세션 뒤에서 돌고 있는 작업 전부이며 지난 것을 갈아 끼운다. `ended`는 방금 빠진

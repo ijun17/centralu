@@ -305,7 +305,14 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - A context gauge in the session header: tokens used / context window (%). Updated from streaming usage events.
 - Threshold warning (e.g. at 80%, change the gauge colour + a "compaction/degradation may be near" tooltip).
 - Show a marker in the conversation view when compaction (summarisation) happens.
+- Show a marker when the tool starts a fresh conversation inside the session (Claude Code's `/clear`, #304), and empty
+  the gauge until the tool reports the new conversation's size.
 - Where the tool does not give exact numbers, state that it is an estimate (shown with ≈).
+- **What the tool tells its own user reaches the conversation** (#304): a hook's block reason, a configuration or
+  deprecation warning, an MCP server that failed to start, a model the tool switched to by itself and why. One quiet line
+  each in the conversation's marker style, in the tool's own words; nothing interrupts (no toast, no dialog). A warning
+  the tool repeats on every start is shown once per session. A model switch the tool made updates the model shown. While
+  the tool retries a failed API call, the session shows "retrying".
 
 ### 4.2 Requirements added by the usability review (FR-15 ~ FR-19)
 

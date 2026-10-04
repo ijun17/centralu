@@ -111,6 +111,26 @@ interface AdapterCapabilities {
     `applyBackgroundTasks`로 반영하며, UI의 리듀서와 mock도 같은 함수를 돌린다. `sessionIdle()`은 세션의 프로세스를
     잃는 것 없이 바꿀 수 있는지 말한다(#297): 턴이 없고, 기다리는 승인이나 질문이 없고, ambient가 아닌 실행 중 작업이
     없어야 한다. 백그라운드 작업을 알리지 못하는 도구가 프로세스를 쥐고 있는 동안에는 결코 idle이 아니다.
+- **도구가 자기 사용자에게 하는 말은 도구 자신의 말로 나간다** (#304): 새 대화는 `conversation_reset`, 읽히길 바라는
+  글은 `notice`, 도구가 스스로 바꾼 설정은 `by: 'tool'`인 `settings_changed`(스냅숏은 프로세스를 띄운 값에 바뀐 필드를
+  얹은 것이고, 호스트는 다른 것만 적용한다), 재시도는 출력이 다시 흐를 때까지 `retrying` 활동. 따로 적지 않은 것은 측정한
+  페이로드다(SDK 0.3.263을 거친 CLI 2.1.289, codex-cli 0.160.0, 2026-10-04).
+
+  | 도구 | 메시지 | 바뀌는 것 |
+  |---|---|---|
+  | Claude | `/clear`에 `conversation_reset {new_conversation_id, trigger: 'clear'}`, 이어서 새 `session_id`를 단 `init` | `conversation_reset` |
+  | Claude | `system/informational {content, level}` — `UserPromptSubmit` 훅이 막은 이유가 level `warning`, `prevent_continuation: true`로 왔다 | `notice`. level `info`는 뺀다(CLI도 트랜스크립트 모드에서만 보인다) |
+  | Claude | `system/notification {key, text, priority, color}` (실행하지 못함) | 색과 우선순위를 접은 level의 `notice`. "Error compacting conversation"은 압축 실패 마커에 맡긴다 |
+  | Claude | `system/api_retry {attempt, max_retries, retry_delay_ms, error_status, error}` — 529가 두 번 답한 뒤 합성 "API Error" 메시지와 오류 결과 | 한 번의 재시도 구간에 `retrying` 한 번과 시도마다 host.log 한 줄. 다음 스트림 이벤트나 assistant 메시지에서 이전 활동이 돌아온다 |
+  | Claude | `system/model_refusal_fallback` (실행하지 못함, sdk.d.ts) | scope가 `session`이거나 없으면 알림과 폴백 모델을 실은 `settings_changed`. scope `local`(서브에이전트)은 host.log만. `retracted_message_uuids`는 처리하지 않는다 |
+  | Claude | `system/model_refusal_no_fallback` (실행하지 못함, CLI는 메인 스레드 경로에서 `content: ""`로 보낸다) | 결과까지 붙잡았다가 실패한 턴의 오류 메시지로, 턴이 실패하지 않았으면 알림으로. 글은 `content`, 없으면 거절 설명, 없으면 분류 |
+  | Codex | `thread/start`가 답해지는 동안 `configWarning {summary, details}`, 이어서 같은 글의 `warning {threadId, message}`, 시작·재개 때마다 | `oncePerSession` 붙은 `notice` |
+  | Codex | `deprecationNotice {summary, details}`, `guardianWarning {threadId, message}` (실행하지 못함) | `notice` (앞의 것은 세션당 한 번) |
+  | Codex | `mcpServer/startupStatus/updated` — 실패하는 서버는 스레드 시작 한 번에 `starting` → `failed {error}`를 두 번 거친다 | 서버마다 Codex의 말로 된 `notice` 하나(`MCP client for \`x\` failed to start: …`). 그 사이에 한 번 시작된 뒤에야 다시 |
+  | Codex | `model/rerouted {turnId, fromModel, toModel, reason}` (실행하지 못함) | `notice`만. 턴 하나를 가리키고 스레드 설정은 바뀌지 않는다 |
+  | Codex | `thread/settings/updated {threadSettings}` (실행하지 못함) | `thread/start`·`thread/resume`이 답한 값과 비교한다(Codex는 기본값을 구체적인 모델로 답한다). 실제 차이만 알림과 `settings_changed`가 된다 |
+
+  자식 스레드의 알림은 예전처럼 부모의 대화에 들어오지 않는다.
 - 어댑터는 상태를 갖지 않는다 — 세션 상태 추적은 `sessions/`가 이벤트를 관찰하며 수행한다. 어댑터는 변환기일 뿐이다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).
