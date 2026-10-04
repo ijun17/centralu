@@ -223,6 +223,16 @@ export class MockPlatform implements Platform {
       return
     }
     if (event.type === 'background_tasks') this.backgroundTasks.set(event.sessionId, applyBackgroundTasks(this.backgroundOf(event.sessionId), event))
+    // Text the tool repeats on every start (#304) — like the host, one stored line per session
+    if (
+      event.type === 'notice' &&
+      event.oncePerSession &&
+      (this.messages.get(event.sessionId) ?? []).some(
+        (m) => m.kind === 'marker' && (m.payload as { type?: string; text?: string }).type === 'notice' && (m.payload as { text?: string }).text === event.text,
+      )
+    ) {
+      return
+    }
     let out: NormalizedEvent = event
     /*
      * An in-conversation screen (M4 B-1). Like the host: remembers the instance as belonging
@@ -300,6 +310,19 @@ export class MockPlatform implements Platform {
            */
           s.context = { used: event.used, window: event.window, exactness: event.exactness }
         }
+        // The same rule as the real thing (#304): a fresh conversation empties the gauge until the tool reports again
+        if (event.type === 'conversation_reset') s.context = null
+        /*
+         * A switch the agent tool made (#304) — like the host, recorded on the session so the list a reconnect reads
+         * shows it too. (The host applies only what differs from what the process was launched with; the mock has no
+         * process, so the snapshot is taken as it is.)
+         */
+        if (event.type === 'settings_changed' && event.by === 'tool') {
+          s.model = event.model
+          s.effort = event.effort
+          s.verbosity = event.verbosity
+          s.serviceTier = event.serviceTier ?? null
+        }
         /*
          * The same rule as the real thing (the host): an event that stays in the record gets a
          * seq within the session and carries it in the broadcast. The UI's unread tracking
@@ -322,7 +345,7 @@ export class MockPlatform implements Platform {
                       // holds both of them as-is, so restoring it (messagesToChat) brings back the same screen
                       event.type === 'user_message'
                       ? ('text' as const)
-                      : event.type === 'compaction'
+                      : event.type === 'compaction' || event.type === 'conversation_reset' || event.type === 'notice'
                         ? ('marker' as const)
                         : // Images persist too (#40, second pass). The real thing has a file plus a path, but the
                           // mock's disk is memory — leaving the bytes as-is in the payload lets loadMessages restore

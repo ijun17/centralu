@@ -212,6 +212,14 @@ describe('limits, context and errors', () => {
     expect(s.context).toEqual({ used: 84000, window: 200000, exactness: 'exact' })
   })
 
+  it('a conversation reset empties the context gauge without moving the state (#304)', () => {
+    let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)
+    s = applyEvent(s, ev({ type: 'context_update', used: 15967, window: 200000, exactness: 'exact' }), NOW)
+    s = applyEvent(s, ev({ type: 'conversation_reset', trigger: 'clear' }), NOW)
+    expect(s.context).toBeNull()
+    expect(s.state).toBe('working')
+  })
+
   it('an error leaves the error state and its message', () => {
     const s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: 'died', retryable: true } }), NOW)
     expect(s.state).toBe('error')

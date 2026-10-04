@@ -237,6 +237,12 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       return { ...next, usage: event.tokens }
     case 'context_update':
       return { ...next, context: { used: event.used, window: event.window, exactness: event.exactness } }
+    /*
+     * A fresh conversation inside the session (#304, Claude Code's /clear): the old reading describes a conversation
+     * the model no longer has. "Unknown" until the tool reports the new one, the same as a session with no turn yet.
+     */
+    case 'conversation_reset':
+      return { ...next, context: null }
     case 'limit_reached':
       return {
         ...next,

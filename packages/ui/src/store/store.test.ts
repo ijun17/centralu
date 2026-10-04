@@ -3579,3 +3579,61 @@ describe('a workspace save that fails is sent again', () => {
     }
   })
 })
+
+/**
+ * What the agent tools tell the person (#304): a fresh conversation and a notice are one quiet line each, live and
+ * after reopening; a model switch the tool made updates the model shown without a toast.
+ */
+describe('resets, notices and switches the tool made (#304)', () => {
+  const HOOK =
+    'UserPromptSubmit operation blocked by hook:\n[node block-hook.mjs]: Prompts containing BLOCKME are not allowed here.'
+
+  it('a reset and a notice each stand as one line, and the reset empties the context gauge', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('n-1', sessionInfo('n-1'))
+    await useStore.getState().attach(mock)
+
+    mock.emit({ type: 'context_update', sessionId: 'n-1', used: 15967, window: 200000, exactness: 'exact' })
+    mock.emit({ type: 'conversation_reset', sessionId: 'n-1', trigger: 'clear' })
+    mock.emit({ type: 'notice', sessionId: 'n-1', level: 'warning', text: HOOK })
+
+    const marks = (useStore.getState().chat['n-1'] ?? []).filter((i) => i.kind === 'mark').map((i) => (i as { text: string }).text)
+    expect(marks).toEqual(['Conversation cleared — the agent remembers nothing above this line', HOOK])
+    expect(useStore.getState().sessions['n-1']?.context).toBeNull()
+  })
+
+  it('the same lines come back after reopening — both are stored as markers', () => {
+    const items = messagesToChat([
+      { sessionId: 'n-2', seq: 3, role: 'system', kind: 'marker', ts: 1, payload: { type: 'conversation_reset', sessionId: 'n-2', trigger: 'clear' } },
+      { sessionId: 'n-2', seq: 4, role: 'system', kind: 'marker', ts: 2, payload: { type: 'conversation_reset', sessionId: 'n-2', trigger: 'plan_exit' } },
+      { sessionId: 'n-2', seq: 5, role: 'system', kind: 'marker', ts: 3, payload: { type: 'notice', sessionId: 'n-2', level: 'warning', text: HOOK } },
+    ])
+    expect(items.map((i) => (i as { text: string }).text)).toEqual([
+      'Conversation cleared — the agent remembers nothing above this line',
+      'The agent started a new conversation here — it remembers nothing above this line',
+      HOOK,
+    ])
+  })
+
+  it('a marker kind this build does not know is left out, not drawn as a compaction', () => {
+    const items = messagesToChat([
+      { sessionId: 'n-4', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: { type: 'from_a_newer_host', text: 'x' } },
+      { sessionId: 'n-4', seq: 2, role: 'system', kind: 'marker', ts: 2, payload: { type: 'compaction', failed: false } },
+    ])
+    expect(items.map((i) => (i as { text: string }).text)).toEqual(['Earlier messages were compacted here'])
+  })
+
+  it('a model switch the tool made updates the model shown without a toast; the orchestrator still raises one', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('n-3', sessionInfo('n-3', { model: 'opus' }))
+    await useStore.getState().attach(mock)
+    useStore.setState({ toast: null })
+
+    mock.emit({ type: 'settings_changed', sessionId: 'n-3', model: 'claude-sonnet-4-6', effort: null, verbosity: null, serviceTier: null, by: 'tool' })
+    expect(useStore.getState().sessions['n-3']?.model).toBe('claude-sonnet-4-6')
+    expect(useStore.getState().toast).toBeNull()
+
+    mock.emit({ type: 'settings_changed', sessionId: 'n-3', model: 'haiku', effort: null, verbosity: null, serviceTier: null })
+    expect(useStore.getState().toast).toMatch(/Orchestrator changed/)
+  })
+})

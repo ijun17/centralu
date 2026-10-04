@@ -2926,7 +2926,12 @@ export const useStore = create<AppState>((set, get) => ({
             serviceTier: e.serviceTier ?? null,
           },
         },
-        ...(what ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
+        /*
+         * A switch the agent tool made by itself (#304) updates the model shown without a toast: the tool's notice in
+         * the conversation already says what changed and why, and a toast would interrupt for something that needs
+         * nothing from the person.
+         */
+        ...(what && e.by !== 'tool' ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
       }))
       return
     }
@@ -5845,6 +5850,11 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // Where this session came from (#102). The note's full text lives only in the stored payload — this is a single line
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: handoffText(e) }]
+    // A fresh conversation inside the session (#304) and what the tool wanted read (#304): one quiet line each
+    case 'conversation_reset':
+    case 'notice':
+      if (holds(items, e.seq)) return items
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: markerText(e) }]
     /*
      * A failed turn is also kept in the conversation (#107).
      *
@@ -5888,6 +5898,36 @@ const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : Stri
  */
 export function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
   return `Handed off from "${e.from}" — the note is kept with this session`
+}
+
+/**
+ * The line a fresh conversation leaves (#304). What matters is that the model no longer knows anything above it — the
+ * record does, which is why the line exists at all.
+ */
+export function resetText(e: Extract<NormalizedEvent, { type: 'conversation_reset' }>): string {
+  return e.trigger === 'clear'
+    ? 'Conversation cleared — the agent remembers nothing above this line'
+    : 'The agent started a new conversation here — it remembers nothing above this line'
+}
+
+/** The stored marker kinds this build can word (`markerText`) */
+const KNOWN_MARKERS: ReadonlySet<string> = new Set(['compaction', 'handoff', 'error', 'conversation_reset', 'notice'])
+
+/** One stored or live marker's line — the live and restored paths must never word the same marker differently */
+export function markerText(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>): string {
+  switch (e.type) {
+    case 'handoff':
+      return handoffText(e)
+    case 'error':
+      return errorText(e)
+    case 'conversation_reset':
+      return resetText(e)
+    // The tool's own sentence, as is (#304) — the same rule as an error's
+    case 'notice':
+      return e.text
+    default:
+      return compactionText(e)
+  }
 }
 
 /** A failed turn's one line (#107) — carries the tool's own sentence as is. Rewording it into our own words would erase the cause */
@@ -6026,12 +6066,14 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       items.push({ kind: m.kind === 'text' ? 'assistant' : 'reasoning', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
       // The stored payload is the event itself — live and restored paths must never produce different wording
-      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' }>
-      const text =
-        e.type === 'handoff' ? handoffText(e)
-        : e.type === 'error' ? errorText(e)
-        : compactionText(e)
-      items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, text })
+      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>
+      /*
+       * A marker kind this build does not know (one a newer host stored) is left out. It used to be drawn as a
+       * compaction, the only marker there was at first — so a #304 notice read back by an older window would have said
+       * "Earlier messages were compacted here".
+       */
+      if (typeof e.type === 'string' && !KNOWN_MARKERS.has(e.type)) continue
+      items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, text: markerText(e) })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { callId?: string; summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary)
