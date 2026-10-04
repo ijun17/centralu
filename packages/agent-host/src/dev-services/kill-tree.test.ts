@@ -172,7 +172,10 @@ describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)',
   async function plantTree(jobControl: boolean): Promise<{ root: ChildProcess; rootExited: () => boolean; grandchild: number; groups: number[] }> {
     const grandchild = `trap '' TERM; echo $$; exec sleep 30`
     const child = `${jobControl ? 'set -m; ' : ''}sh -c ${quote(grandchild)} & wait`
-    const root = spawn('sh', ['-c', `sh -c ${quote(child)} & wait`], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    // `set -m` runs in bash, not sh: Linux's sh is dash, which turns job control off without a terminal, so the
+    // grandchild stayed in root's group and the job-control case was never built there (seen on CI, 2026-10-04)
+    const childShell = jobControl ? 'bash' : 'sh'
+    const root = spawn('sh', ['-c', `${childShell} -c ${quote(child)} & wait`], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] })
     planted.push(root.pid!)
     let exited = false
     root.once('exit', () => (exited = true))
