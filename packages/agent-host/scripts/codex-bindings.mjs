@@ -13,6 +13,10 @@
  *
  *   pnpm codex:bindings          — generates types (for local reference, gitignored) + verifies the contract
  *   pnpm codex:bindings --check  — verifies the contract only (for CI)
+ *
+ * What is checked: the method, notification, item-type and value names we use; the arguments we send to each request
+ * (both ways, see below); the fields we read from an answer (`responseFields`); and the enum words we send or compare
+ * (`enumValues`).
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, cpSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -138,6 +142,35 @@ for (const [method, spec] of Object.entries(contract.requestParams ?? {})) {
   }
 }
 
+/*
+ * What we read back, and the words we send or compare (#342). Moving off full-history hydration made the adapter
+ * depend on an answer's shape (a turns page's `data` and `nextCursor`, a turn's `status`) and on enum words
+ * (`itemsView: 'full'`, `'inProgress'`). A renamed field or word does not fail a request: it reads as absent, and
+ * the running turn's id after a resume (#313) or every page after the first would be lost without a sound.
+ */
+for (const [type, names] of Object.entries(contract.responseFields ?? {})) {
+  const src = sources.get(type)
+  const fields = src ? paramFields(src) : null
+  if (!fields) {
+    missing.push(`response type: ${type}`)
+    continue
+  }
+  const known = new Set(fields.map((f) => f.name))
+  for (const name of names) {
+    if (!known.has(name)) missing.push(`${type}: no field '${name}' (did the name change?)`)
+  }
+}
+for (const [type, values] of Object.entries(contract.enumValues ?? {})) {
+  const src = sources.get(type)
+  if (!src) {
+    missing.push(`enum type: ${type}`)
+    continue
+  }
+  for (const v of values) {
+    if (!src.includes(`"${v}"`)) missing.push(`${type}: no value "${v}"`)
+  }
+}
+
 if (missing.length > 0) {
   console.error(
     `[codex] the protocol has changed (${version}). ${missing.length} item(s) we depend on have disappeared:\n  ` +
@@ -158,7 +191,9 @@ if (KEEP) {
 } else {
   console.log(
     `[codex] contract verified (${version}) — all ${groups.reduce((n, [k]) => n + contract[k].length, 0)} dependent item(s) + ` +
-      `${Object.keys(contract.requestParams ?? {}).length} request param set(s) match`,
+      `${Object.keys(contract.requestParams ?? {}).length} request param set(s) + ` +
+      `${Object.keys(contract.responseFields ?? {}).length} response type(s) + ` +
+      `${Object.keys(contract.enumValues ?? {}).length} enum(s) match`,
   )
 }
 

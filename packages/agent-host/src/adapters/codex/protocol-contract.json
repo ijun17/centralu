@@ -19,7 +19,9 @@
     "skills/list",
     "thread/goal/set",
     "thread/goal/get",
-    "thread/goal/clear"
+    "thread/goal/clear",
+    "thread/read",
+    "thread/turns/list"
   ],
   "_requestParamsComment": [
     "우리가 각 요청에 **실제로 싣는 인자**. 이름만 대조하면 인자가 늘어난 것을 못 잡는다",
@@ -66,7 +68,71 @@
       "send": [
         "threadId"
       ]
+    },
+    "thread/resume": {
+      "type": "ThreadResumeParams",
+      "send": [
+        "threadId",
+        "config",
+        "excludeTurns"
+      ]
+    },
+    "thread/fork": {
+      "type": "ThreadForkParams",
+      "send": [
+        "threadId",
+        "excludeTurns"
+      ]
+    },
+    "thread/turns/list": {
+      "type": "ThreadTurnsListParams",
+      "send": [
+        "threadId",
+        "cursor",
+        "limit",
+        "sortDirection",
+        "itemsView"
+      ]
     }
+  },
+  "_responseFieldsComment": [
+    "Fields the adapter reads from an answer (#342). A renamed one reads as absent without an error: the running",
+    "turn's id after a resume would be lost (keeper re-attach, #313), or history would stop after its first page."
+  ],
+  "responseFields": {
+    "ThreadTurnsListResponse": [
+      "data",
+      "nextCursor"
+    ],
+    "Turn": [
+      "id",
+      "status",
+      "items"
+    ],
+    "Thread": [
+      "id",
+      "status",
+      "turns"
+    ]
+  },
+  "_enumValuesComment": [
+    "Values the adapter sends or compares by name (#342): history pages newest first with full items, the running",
+    "turn is asked for with no items and found by `inProgress`, and only an `active` thread is asked."
+  ],
+  "enumValues": {
+    "TurnItemsView": [
+      "full",
+      "notLoaded"
+    ],
+    "SortDirection": [
+      "desc"
+    ],
+    "TurnStatus": [
+      "inProgress"
+    ],
+    "ThreadStatus": [
+      "active"
+    ]
   },
   "clientNotifications": [
     "initialized"
