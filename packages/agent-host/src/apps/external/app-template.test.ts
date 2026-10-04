@@ -310,7 +310,7 @@ describe('centralu.agent (D-1)', () => {
     const dir = asker('waiter', { agent: true })
     const child = spawn('node', ['server.mjs'], {
       cwd: dir,
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe', 'overlapped'], // as the host spawns it (app-process.ts)
       env: { PATH: process.env.PATH!, CENTRALU_BROKER_IDLE_MS: '400' },
     })
     const fd3 = child.stdio[3] as Socket
@@ -368,7 +368,7 @@ describe('the shutdown promise (S-5)', () => {
   return server
 })`),
     )
-    const child = spawn('node', ['server.mjs'], { cwd: dir, stdio: ['pipe', 'pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH! } })
+    const child = spawn('node', ['server.mjs'], { cwd: dir, stdio: ['pipe', 'pipe', 'pipe', 'overlapped'], env: { PATH: process.env.PATH! } })
     const fd3 = child.stdio[3] as Socket
     // A real broker server on fd 3, playing the host's part — answers that any run id is open, and the desk answers with one line
     const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {}, refused: () => {} }, async () => ({

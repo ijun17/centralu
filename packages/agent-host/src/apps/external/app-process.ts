@@ -137,7 +137,15 @@ export class AppProcess {
     const child = spawn(launch.command, [...launch.args, ...spec.args], {
       cwd: spec.cwd,
       env: spec.env,
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      /*
+       * fd 3 is the broker pipe, and the one stdio pipe used in both directions. On Windows a plain
+       * 'pipe' reaches the child as a synchronous handle, and Windows serialises I/O on a
+       * synchronous handle: the app's read waiting on fd 3 holds back its own write of the request,
+       * so the host never sees it and every broker call timed out (the first Windows test run,
+       * #14). 'overlapped' hands the child an overlapped handle, which Node's net.Socket reads and
+       * writes at once; off Windows it is the same as 'pipe'. stdin and stdout each go one way.
+       */
+      stdio: ['pipe', 'pipe', 'pipe', 'overlapped'],
       /*
        * Gives it its own process group. kill-tree never signals the host's own group, so without a
        * separate group there would be no way to end the app and its descendants group-wide.
