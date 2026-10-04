@@ -28,7 +28,6 @@
  */
 import { build, version as esbuildVersion } from 'esbuild'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
@@ -269,7 +268,16 @@ const kib = (n) => `${(n / 1024).toFixed(1)} KiB`
 
 checkPins()
 if (process.argv.includes('--check')) {
-  const tmp = mkdtempSync(join(tmpdir(), 'cc-app-runtime-'))
+  /*
+   * Built under the repository's own node_modules, not the system temp folder: the source map's
+   * paths are relative from the output folder, and on Windows the temp folder can be on another
+   * drive (CI: C:\…\Temp against a checkout on D:\). A relative path cannot cross drives, so the
+   * sources resolved to C:\a\centralu\…, which does not exist, and the map lost every package
+   * version and our own embedded source (seen in the Windows job's log, #14).
+   */
+  const cache = join(ROOT, 'node_modules', '.cache')
+  mkdirSync(cache, { recursive: true })
+  const tmp = mkdtempSync(join(cache, 'cc-app-runtime-'))
   try {
     await buildInto(tmp)
     const stale = OUTPUTS.filter((f) => !existsSync(join(DEST, f)) || !readFileSync(join(tmp, f)).equals(readFileSync(join(DEST, f))))
