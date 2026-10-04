@@ -91,6 +91,22 @@ jobs:
             artifacts: |
               apps/desktop/src-tauri/target/release/bundle/macos/Centralu-app.tar.gz
               apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          # windows-x64 (#14, phase W1). Pinned like the others: `windows-latest` moves to a new
+          # Visual Studio and Windows SDK without warning.
+          #
+          # Two things come out, uploaded as two artifacts:
+          #   - `centralu-windows-x64`: a portable folder, `Centralu\centralu.exe` plus
+          #     `Centralu\resources\host\`. This is the shape the npm package can ship in W3, the
+          #     way the AppImage ships for Linux: npm can unpack a folder and start an exe, but
+          #     it cannot run an installer. Tauri resolves its resource folder next to the exe
+          #     when nothing is installed, so the folder runs as it is.
+          #   - `centralu-windows-x64-setup`: the NSIS installer (`tauri.windows.conf.json`),
+          #     per-user, no admin rights. The one thing it does that the folder cannot is
+          #     install the WebView2 runtime when a machine lacks it.
+          - target: windows-x64
+            runner: windows-2022
+            artifacts: |
+              apps/desktop/src-tauri/target/release/portable/
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -159,9 +175,74 @@ jobs:
         working-directory: apps/desktop/src-tauri/target/release/bundle/macos
         run: tar czf Centralu-app.tar.gz ./*.app
 
+      - name: Stage the portable Windows folder
+        if: runner.os == 'Windows'
+        # The host resources are taken from `src-tauri/resources`, which `bundle:host` has just
+        # written, rather than the copy under `target/release`: that copy is made by the build
+        # script, and a build script the cache let skip would leave an older host beside a new exe.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tauri = 'apps/desktop/src-tauri'
+          $out = "$tauri/target/release/portable/Centralu"
+          Remove-Item -Recurse -Force "$tauri/target/release/portable" -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force "$out/resources" | Out-Null
+          Copy-Item "$tauri/target/release/centralu.exe" $out
+          Copy-Item -Recurse "$tauri/resources/host" "$out/resources/host"
+          if (-not (Test-Path "$out/resources/host/main.mjs")) { throw 'the host bundle is missing from the portable folder' }
+          if (-not (Test-Path "$out/resources/host/node_modules/node-pty/prebuilds/win32-x64/conpty.node")) { throw 'conpty.node is missing: the terminal would not start' }
+          Get-ChildItem -Recurse $out | Measure-Object -Property Length -Sum | ForEach-Object { "portable folder: $($_.Count) files, $([math]::Round($_.Sum / 1MB, 1)) MB" }
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: centralu-${{ matrix.target }}
           path: ${{ matrix.artifacts }}
           # Without this, a build that silently bundles nothing looks like a green run.
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: runner.os == 'Windows'
+        with:
+          name: centralu-${{ matrix.target }}-setup
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      # The Rust unit tests, on the one platform where nobody can run them by hand. `dist/` and
+      # `resources/host/` exist by now, which `generate_context!` and the resource glob need.
+      - name: Rust unit tests
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+
+  # The TypeScript suite on Windows (#14, phase W1). Until this job existed `pnpm verify` ran only
+  # inside release.yml, on Linux and macOS, so nothing ever told us what breaks on Windows. It
+  # reports without blocking for now: the failures it finds are the W2 checklist, listed in the
+  # PR that added it, and the job turns blocking once that list is empty.
+  windows-tests:
+    name: windows tests
+    runs-on: windows-2022
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The four parts of `pnpm verify`, as separate steps that each run whatever the one before
+      # said, so one failure does not hide the next.
+      - run: pnpm lint
+      - if: ${{ !cancelled() }}
+        run: pnpm depcruise
+      - if: ${{ !cancelled() }}
+        run: pnpm typecheck
+      - name: pnpm test
+        if: ${{ !cancelled() }}
+        # Never the real data folder, on any OS (AGENTS.md).
+        env:
+          CC_DATA_DIR: ${{ runner.temp }}\centralu-data
+        run: pnpm test
