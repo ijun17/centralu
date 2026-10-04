@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { assertExistingPath, isMissingPathError } from './path-guard.js'
+import { programPath } from '../tool-launch.js'
 
 const exec = promisify(execFile)
 
@@ -36,7 +37,7 @@ const OK = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
  * original name intact (only quotes, backslashes and control characters are still escaped).
  */
 async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec('git', ['-c', 'core.quotePath=false', ...args], { cwd, ...OK })
+  const { stdout } = await exec(programPath('git'), ['-c', 'core.quotePath=false', ...args], { cwd, ...OK })
   return stdout
 }
 
@@ -568,7 +569,7 @@ export type BranchPr = {
  */
 export async function gitBranchPr(projectCwd: string, branch: string): Promise<BranchPr | 'unavailable' | null> {
   try {
-    const { stdout } = await exec('gh', ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK })
+    const { stdout } = await exec(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK })
     const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
     return {

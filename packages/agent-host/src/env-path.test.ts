@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { delimiter } from 'node:path'
-import { ensureToolPath, whichTool } from './env-path.js'
+import { ensureToolPath, fallbackDirs, whichTool } from './env-path.js'
 
 /**
  * Regression test for the packaged app not being able to find the CLI.
@@ -76,5 +76,43 @@ describe('CLI search path augmentation', () => {
 
   it('a nonexistent tool is null (so the caller can decide the guidance text)', () => {
     expect(whichTool('this-tool-does-not-exist')).toBeNull()
+  })
+})
+
+/**
+ * Windows (#14), simulated: the lookup takes the platform, the environment and the filesystem as
+ * arguments, so it runs the same on every OS.
+ */
+describe('finding a tool on Windows', () => {
+  const npm = 'C:\\Users\\me\\AppData\\Roaming\\npm'
+  // What `npm i -g @anthropic-ai/claude-code` leaves in that folder.
+  const files = new Set([`${npm}\\claude`, `${npm}\\claude.cmd`, `${npm}\\claude.ps1`])
+  const exists = (p: string) => files.has(p)
+
+  it('returns the .cmd, not the sh script npm writes beside it under the bare name', () => {
+    expect(whichTool('claude', { PATH: `C:\\Windows\\System32;${npm}` }, 'win32', exists)).toBe(`${npm}\\claude.cmd`)
+  })
+
+  it('tries the PATHEXT extensions in order, folder by folder', () => {
+    const local = 'C:\\Users\\me\\.local\\bin'
+    const both = new Set([`${local}\\claude.exe`, `${npm}\\claude.cmd`])
+    const env = { PATH: `${local};${npm}`, PATHEXT: '.COM;.EXE;.BAT;.CMD' }
+    expect(whichTool('claude', env, 'win32', (p) => both.has(p))).toBe(`${local}\\claude.exe`)
+  })
+
+  it('never searches a relative PATH entry, which would resolve against the working directory', () => {
+    const planted = new Set(['bin\\git.exe', 'git.exe'])
+    expect(whichTool('git', { PATH: 'bin;.' }, 'win32', (p) => planted.has(p))).toBeNull()
+  })
+
+  it('a name that already has an extension is looked up as it is', () => {
+    expect(whichTool('claude.cmd', { PATH: npm }, 'win32', exists)).toBe(`${npm}\\claude.cmd`)
+  })
+
+  it('falls back to the folders Windows installers write to, not unix ones', () => {
+    const dirs = fallbackDirs('win32', { APPDATA: 'C:\\Users\\me\\AppData\\Roaming', USERPROFILE: 'C:\\Users\\me' }, 'C:\\Users\\me')
+    expect(dirs).toContain(npm)
+    expect(dirs).toContain('C:\\Users\\me\\.local\\bin')
+    expect(dirs.some((d) => d.startsWith('/'))).toBe(false)
   })
 })

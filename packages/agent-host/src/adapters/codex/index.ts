@@ -17,6 +17,7 @@ import type {
   ToolDescriptor,
 } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
+import { launchFor } from '../../tool-launch.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
@@ -1288,7 +1289,8 @@ export class CodexAdapter implements AgentAdapter {
   async detect(): Promise<DetectResult> {
     const path = whichTool('codex')
     try {
-      const { stdout } = await exec(path ?? 'codex', ['--version'], { timeout: 5000 })
+      const launch = launchFor(path ?? 'codex')
+      const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000 })
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       // Login status is judged by whether the auth file exists (cheap — no need to start the CLI)
       const loggedIn = existsSync(join(codexHome(), 'auth.json'))

@@ -35,6 +35,7 @@ import type {
   ToolDescriptor,
 } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
+import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
 import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
@@ -327,7 +328,7 @@ class ClaudeSession implements SessionHandle {
          * the packaged app). This points directly at the `claude` the user already has installed.
          * It behaves the same way in dev.
          */
-        pathToClaudeCodeExecutable: whichTool('claude') ?? undefined,
+        pathToClaudeCodeExecutable: toolExecutable('claude') ?? undefined,
         /*
          * Reasoning effort. It only matters when the model supports it, so deciding support is
          * left to whatever provides the list (supportedModels) — this just passes through the
@@ -992,10 +993,10 @@ class ClaudeSession implements SessionHandle {
  * quo. An old CLI without an `auth` subcommand prints an error message instead of JSON, and that
  * means "unknown", not "not logged in".
  */
-async function claudeLoggedIn(bin: string): Promise<boolean> {
+async function claudeLoggedIn(bin: ToolLaunch): Promise<boolean> {
   let out = ''
   try {
-    out = (await exec(bin, ['auth', 'status', '--json'], { timeout: 5000 })).stdout
+    out = (await exec(bin.command, [...bin.args, 'auth', 'status', '--json'], { timeout: 5000 })).stdout
   } catch (e) {
     // Even with exit code 1 (= not logged in), the JSON on stdout can still be trusted.
     out = typeof (e as { stdout?: unknown }).stdout === 'string' ? (e as { stdout: string }).stdout : ''
@@ -1061,10 +1062,11 @@ export class ClaudeAdapter implements AgentAdapter {
   async detect(): Promise<DetectResult> {
     const path = whichTool('claude')
     try {
-      const { stdout } = await exec(path ?? 'claude', ['--version'], { timeout: 5000 })
+      const launch = launchFor(path ?? 'claude')
+      const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000 })
       // Shows which install is actually being used — reduces confusion in an environment with several versions installed.
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
-      const loggedIn = await claudeLoggedIn(path ?? 'claude')
+      const loggedIn = await claudeLoggedIn(launch)
       return {
         tool: 'claude',
         installed: true,

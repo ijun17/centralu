@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { launchFor } from '../../tool-launch.js'
 
 /**
  * A JSON-RPC client for `codex app-server` (stdio, newline-delimited).
@@ -43,11 +44,14 @@ export class CodexClient {
     private handlers: CodexClientHandlers,
     opts: { command?: string; args?: string[]; cwd?: string } = {},
   ) {
-    this.proc = spawn(opts.command ?? 'codex', opts.args ?? ['app-server'], {
+    // On Windows an npm-installed codex is a `.cmd` shim, which cannot be spawned without a shell (tool-launch.ts)
+    const launch = launchFor(opts.command ?? 'codex')
+    this.proc = spawn(launch.command, [...launch.args, ...(opts.args ?? ['app-server'])], {
       cwd: opts.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       // Kept in its own group so it gets cleaned up together if the parent dies (avoids a zombie — M1.5 defect 1 rule)
       detached: false,
+      windowsHide: true,
     })
 
     /**

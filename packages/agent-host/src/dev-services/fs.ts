@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writ
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
+import { programPath } from '../tool-launch.js'
 
 /**
  * The file tree and viewer service (C-1).
@@ -213,7 +214,7 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
    */
   const input = names.map((n) => wireJoin(rel, n)).join('\0')
   const stdout = await new Promise<string>((resolveOut) => {
-    const child = spawn('git', ['check-ignore', '--stdin', '-z'], { cwd: root })
+    const child = spawn(programPath('git'), ['check-ignore', '--stdin', '-z'], { cwd: root })
     let out = ''
     child.stdout.on('data', (d) => (out += String(d)))
     child.on('error', () => resolveOut(''))

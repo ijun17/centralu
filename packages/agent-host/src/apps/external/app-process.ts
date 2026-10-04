@@ -6,6 +6,7 @@ import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/cl
 import { CLIENT_INFO } from '@cc/protocol'
 import { KILL_GRACE_MS, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
 import { rotateIfLarge } from '../../log-file.js'
+import { resolveCommand } from '../../tool-launch.js'
 import { StreamTransport } from './stream-transport.js'
 
 /**
@@ -131,15 +132,23 @@ export class AppProcess {
   static async start(spec: SpawnSpec): Promise<AppProcess> {
     const log = new AppLog(spec.logPath, spec.logMaxBytes, spec.redact)
     log.note(`starting: ${spec.command} ${spec.args.join(' ')}`)
-    const child = spawn(spec.command, [...spec.args], {
+    // Windows: `npx` is `npx.cmd`, which cannot be spawned without a shell (tool-launch.ts)
+    const launch = resolveCommand(spec.command, spec.env)
+    const child = spawn(launch.command, [...launch.args, ...spec.args], {
       cwd: spec.cwd,
       env: spec.env,
       stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
       /*
        * Gives it its own process group. kill-tree never signals the host's own group, so without a
        * separate group there would be no way to end the app and its descendants group-wide.
+       *
+       * Not on Windows (#14): there `detached` means DETACHED_PROCESS, which leaves the app with no
+       * console at all, so every console program it starts opens a visible window of its own. Windows
+       * has no groups to gain, and its tree is ended with `taskkill /T` (kill-tree.ts). Attached and
+       * hidden, the app shares the host's windowless console.
        */
-      detached: true,
+      detached: process.platform !== 'win32',
+      windowsHide: true,
     })
     const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs)
     if (proc.fd3 && spec.serveFd3) proc.closeFd3Server = spec.serveFd3(proc.fd3, (line) => log.note(line))
