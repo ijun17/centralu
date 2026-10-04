@@ -118,7 +118,8 @@ describe('git path containment', () => {
     }
   })
 
-  it('treats option-looking filenames as paths when diffing and staging', async () => {
+  // The argv recorder is a sh script put first on a `:`-joined PATH, and Windows spawns git by its absolute path (#14)
+  it.skipIf(process.platform === 'win32')('treats option-looking filenames as paths when diffing and staging', async () => {
     const { d } = repo()
     const name = '--output=owned.patch'
     writeFileSync(join(d, name), 'content\n')
