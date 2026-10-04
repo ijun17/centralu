@@ -16,9 +16,12 @@ playwright-report/
 # 스파이크 실행 결과 (findings 문서는 docs/spikes에 남긴다)
 spike/**/out/
 
-# 앱이 프로젝트 안에 두는 것 — 지금은 인수인계 노트뿐이다 (.centralu/handoff/<세션 id>.md, #104).
-# 이 저장소로 도그푸딩할 때 생긴다.
-.centralu/
+# What Centralu writes inside a project while dogfooding with this repository: handoff notes
+# (.centralu/handoff/<session id>.md, #104) and the like. Not for the repository.
+# The exception is project apps (.centralu/apps/<id>/, docs/apps.md §2): they are code the
+# team shares by committing them. Their data and secrets live in the data folder, never here.
+.centralu/*
+!.centralu/apps/
 
 # 로컬 도구·로그
 .omc/

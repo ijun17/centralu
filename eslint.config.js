@@ -12,8 +12,9 @@ export default tseslint.config(
   // here, none of the path-scoped blocks below match them (3,422 false errors on 2026-10-03,
   // with two agents at work); each worktree runs its own lint.
   { ignores: ['.claude/**','**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', '**/*.app/**',
-    // The app template's runtime — a minified build artifact (scripts/build-app-runtime.mjs).
-    'packages/agent-host/app-template/runtime/**'] },
+    // The app template's runtime — a minified build artifact (scripts/build-app-runtime.mjs) —
+    // and its copy in each project app committed here.
+    'packages/agent-host/app-template/runtime/**', '.centralu/apps/*/runtime/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -136,6 +137,8 @@ export default tseslint.config(
       'scripts/**/*.{mts,mjs}',
       // Scripts that GitHub Actions workflows run.
       '.github/scripts/**/*.mjs',
+      // Project apps' servers (docs/apps.md): Node processes Centralu starts.
+      '.centralu/apps/*/*.mjs',
     ],
     languageOptions: { globals: globals.node },
   },
