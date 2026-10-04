@@ -24,7 +24,7 @@ export const APP_ID = 'app.centralu'
  * The version says beta up front. "0.1.0" reads like a finished first release, while
  * "0.1.0-beta.1" lowers expectations on its own — the reader knows even without reading the docs.
  */
-export const APP_VERSION = '0.1.0-beta.6'
+export const APP_VERSION = '0.1.0-beta.7'
 
 /** The machine-read name — unlike the display name, it stays lowercase and hyphenated. */
 export const APP_SLUG = 'centralu'
