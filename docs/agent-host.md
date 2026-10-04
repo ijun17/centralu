@@ -57,6 +57,7 @@ interface SessionHandle {
   send(input: UserInput): void
   respondApproval(requestId: string, decision: Decision, scope?: Scope): void
   interrupt(): void
+  stopBackgroundTask?(taskId: string): Promise<void>  // #290: stop one background task alone
   dispose(): Promise<void>
   events: Emitter<NormalizedEvent>         // emits protocol types only
 }
@@ -68,6 +69,8 @@ interface AdapterCapabilities {
   autoTitle: boolean
   attachments: ('image' | 'file')[]
   verbosities: string[]         // response-length steps; empty = the tool has no such knob (#54)
+  exclusiveWriter: boolean      // nobody else can write the conversation while we hold it
+  backgroundTasks: boolean      // reports its background work as `background_tasks` (#290)
 }
 ```
 
@@ -90,6 +93,28 @@ Implementation rules:
   transcript files. The manager stores the steps in `subagent_messages`, apart from the conversation, and sends them on
   as cards. A file a subagent changed is still reported as the session's (`files_touched`), and a commit it made is
   attributed to the session (#50).
+- **Background work is reported as one level, `background_tasks`** (#290): every live task after a change (REPLACE
+  semantics, so a missed message cannot leave a task "running"), and the tasks that just ended with their status
+  (`completed`, `failed`, `stopped`). Each task carries `{ id, kind: agent | shell | mcp | other, description,
+  parentCallId?, ambient?, stopsWithTurn?, stoppable? }`. `stopsWithTurn` is what interrupting the turn does to it,
+  **as measured for that tool**, and absent where it was not measured; it is what the session's Stop control says
+  before it is pressed. An adapter that cannot see its background work declares `capabilities.backgroundTasks: false`
+  and sends nothing rather than guessing. An adapter that reports it also releases it: when its process goes away it
+  sends the live set empty, with what it held ended as `stopped`.
+  - **Claude** reads `system/background_tasks_changed` (the level; no tool_use_id), `task_started` (the launching
+    call, `owned_by_subagent`), `task_updated` and `task_notification` (the ending). Measured
+    (`scripts/probe-background-tasks.mts`, CLI 2.1.282, SDK 0.3.263): `interrupt()` mid-turn stops a background
+    subagent (`task_notification` stopped, in the same millisecond) and **leaves a backgrounded shell running**;
+    `stopTask(id)` stops one task with the same three messages; `close()` kills what is left and emits nothing.
+  - **Codex** lists each child thread a `spawnAgent` item named while the thread is active, and ends it with the
+    child's `turn/completed` status. Measured (`scripts/probe-codex-background.mts`, codex-cli 0.160.0):
+    `turn/interrupt` on the parent's turn **leaves the child running**; `turn/interrupt` on the child's own turn stops
+    it, which is the per-task stop. Codex's interrupt does not kill a command the child was running.
+  - The manager keeps the list per session (`SessionInfo.backgroundTasks`, live-only like `goal`), applying each
+    event with `applyBackgroundTasks` — the same function the UI's reducer and the mock run. `sessionIdle()` says
+    whether a session's process can be swapped without losing work (#297): no turn, no pending approval or question,
+    no running task that is not ambient, and never idle while a tool that cannot report background work holds a
+    process.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).

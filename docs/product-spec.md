@@ -488,6 +488,18 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
     it is the only mark a folded project (#205) has room for. The grid, the orchestrator, a session with no
     project and an app in the user folder tint nothing — none of them is a project. Both layers are colour only, so selecting moves no row.
 - Focus view: one session at full width. Bottom tabs switch to the file tree/git/viewer — at full width each tab is actually a usable size.
+  - **Background work** ([#290](https://github.com/ijun17/centralu/issues/290)). When the agent runs tasks behind the
+    turn — subagents, backgrounded shells, MCP tasks — the session header counts the running ones ("2 background";
+    what the tool calls ambient is not counted) and opens a list: each task's kind and description, what stopping the
+    turn does to it ("stops with the turn" / "survives Stop"), and a Stop for that task alone where the tool can do it.
+    A task that ended stays listed with how it ended (done, failed, stopped) until the person clears it, and an agent's
+    row opens the steps its launch card keeps (#222). The sidebar row and the control rail carry the same count; the
+    rail lists a session whose turn ended while its background work runs.
+  - **Stop says what it stops.** While a turn runs, the Stop control states what interrupting it does to the
+    background work, from what was measured per tool: "Also stops 1 background task · 1 background task keeps
+    running". Claude stops a background subagent with the turn and leaves a shell running; Codex leaves a child agent
+    running. The incident behind it (2026-10-04): an interrupt to rephrase a message stopped two background subagents,
+    and nothing on screen said so for four hours.
 
 ### 5.2 Inbox (⌘I)
 

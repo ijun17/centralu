@@ -57,6 +57,7 @@ interface SessionHandle {
   send(input: UserInput): void
   respondApproval(requestId: string, decision: Decision, scope?: Scope): void
   interrupt(): void
+  stopBackgroundTask?(taskId: string): Promise<void>  // #290: 백그라운드 작업 하나만 멈춘다
   dispose(): Promise<void>
   events: Emitter<NormalizedEvent>         // emits protocol types only
 }
@@ -68,6 +69,8 @@ interface AdapterCapabilities {
   autoTitle: boolean
   attachments: ('image' | 'file')[]
   verbosities: string[]         // 응답 길이 단계. 비어 있으면 이 도구에는 그 노브가 없다 (#54)
+  exclusiveWriter: boolean      // 우리가 쥐고 있는 동안 다른 누구도 대화에 쓸 수 없다
+  backgroundTasks: boolean      // 백그라운드 작업을 `background_tasks`로 알린다 (#290)
 }
 ```
 
@@ -87,6 +90,27 @@ interface AdapterCapabilities {
   다시 흘린다. 공식 경로만 쓴다 — SDK의 스트림과 app-server의 알림이며, 도구의 대화 파일은 읽지 않는다. 매니저는 걸음을
   대화와 따로 `subagent_messages`에 남기고 카드로 내보낸다. 서브에이전트가 바꾼 파일은 여전히 세션의 것으로 알리고
   (`files_touched`), 서브에이전트가 만든 커밋은 세션에 귀속한다(#50).
+- **백그라운드 작업은 하나의 수준 신호 `background_tasks`로 알린다** (#290): 바뀐 뒤 살아 있는 작업 전부(REPLACE
+  의미라서, 메시지 하나를 놓쳐도 작업이 "실행 중"으로 남지 않는다)와, 방금 끝난 작업과 그 상태(`completed`, `failed`,
+  `stopped`). 작업마다 `{ id, kind: agent | shell | mcp | other, description, parentCallId?, ambient?, stopsWithTurn?,
+  stoppable? }`를 싣는다. `stopsWithTurn`은 턴을 중단하면 그 작업이 어떻게 되는지를 **그 도구에서 측정한 대로** 적은
+  것이고, 측정하지 않은 곳에서는 비워 둔다. 세션의 중지 버튼이 누르기 전에 말해 주는 것이 이것이다. 자기 백그라운드
+  작업을 볼 수 없는 어댑터는 `capabilities.backgroundTasks: false`를 선언하고, 짐작하는 대신 아무것도 보내지 않는다.
+  알리는 어댑터는 놓아주기도 한다: 프로세스가 사라지면 살아 있는 집합을 비워서 보내고, 쥐고 있던 것은 `stopped`로
+  끝난 것으로 보낸다.
+  - **Claude**는 `system/background_tasks_changed`(수준 신호, tool_use_id 없음), `task_started`(띄운 호출,
+    `owned_by_subagent`), `task_updated`, `task_notification`(끝)을 읽는다. 측정
+    (`scripts/probe-background-tasks.mts`, CLI 2.1.282, SDK 0.3.263): 턴 도중의 `interrupt()`는 백그라운드
+    서브에이전트를 멈추고(같은 밀리초에 `task_notification` stopped) **백그라운드 셸은 계속 돌게 둔다**.
+    `stopTask(id)`는 같은 세 메시지로 작업 하나를 멈춘다. `close()`는 남은 것을 죽이고 아무것도 보내지 않는다.
+  - **Codex**는 `spawnAgent` 항목이 가리킨 자식 스레드를, 그 스레드가 active인 동안 목록에 올리고, 자식의
+    `turn/completed` 상태로 끝낸다. 측정(`scripts/probe-codex-background.mts`, codex-cli 0.160.0): 부모 턴에 대한
+    `turn/interrupt`는 **자식을 계속 돌게 둔다**. 자식 자신의 턴에 대한 `turn/interrupt`는 자식을 멈추며, 이것이
+    작업 하나를 멈추는 방법이다. Codex의 중단은 자식이 돌리던 명령을 죽이지 않는다.
+  - 매니저는 세션마다 목록을 쥔다(`SessionInfo.backgroundTasks`, `goal`처럼 살아 있는 동안만). 이벤트마다
+    `applyBackgroundTasks`로 반영하며, UI의 리듀서와 mock도 같은 함수를 돌린다. `sessionIdle()`은 세션의 프로세스를
+    잃는 것 없이 바꿀 수 있는지 말한다(#297): 턴이 없고, 기다리는 승인이나 질문이 없고, ambient가 아닌 실행 중 작업이
+    없어야 한다. 백그라운드 작업을 알리지 못하는 도구가 프로세스를 쥐고 있는 동안에는 결코 idle이 아니다.
 - 어댑터는 상태를 갖지 않는다 — 세션 상태 추적은 `sessions/`가 이벤트를 관찰하며 수행한다. 어댑터는 변환기일 뿐이다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).

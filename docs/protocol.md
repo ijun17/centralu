@@ -71,6 +71,7 @@ type NormalizedEvent =
   | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: a non-human hand changed settings
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // the badge; codex announces it, claude's is read from the CLI's /goal replies and Stop hook feedback
+  | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: the live set (REPLACE) and what just ended
   | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
   | { type: 'session_deleted';  sessionId }
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
@@ -107,6 +108,36 @@ On the wire a step's tool `input` and `output` are stripped like the parent's (`
 wrapper). The steps are read back only by `messages.subagent`, which names one launch card; they are never in
 `messages.load`. A running Claude agent's card still gets one line per step through `tool_output_delta`.
 
+**An agent's background work is one level, not a pair of edges** ([#290](https://github.com/ijun17/centralu/issues/290)).
+`background_tasks.live` is every task running behind the session after a change, and replaces the last one; `ended`
+carries the tasks that just left, each with how it ended. A task is `BackgroundTask`:
+
+```ts
+type BackgroundTask = {
+  id: string
+  kind: 'agent' | 'shell' | 'mcp' | 'other'  // an unknown word reads as 'other'
+  description: string
+  parentCallId?: string    // the call that started it; for an agent, the key of its steps (#222)
+  ambient?: boolean        // housekeeping the tool says is not activity — listed, never counted
+  stopsWithTurn?: boolean  // what interrupting the turn does to it, as measured per tool; absent = not measured
+  stoppable?: boolean      // agents.stopBackgroundTask can stop it alone
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  summary?: string         // how it ended, in the tool's words
+}
+```
+
+`SessionInfo.backgroundTasks` holds the running tasks and then the ended ones still listed (at most 10, until
+`agents.clearBackgroundTasks`). It is live-only, like `goal`: the tool process holds these tasks. Host, UI reducer and
+mock all move the list with one function, `applyBackgroundTasks`.
+
+| Decision | Why |
+|---|---|
+| A level with REPLACE semantics, not started/ended pairs | Claude's own `background_tasks_changed` is a level for this reason (sdk.d.ts): a missed bookend cannot leave a task "running" forever. The endings ride along, because a level alone cannot say a task was stopped |
+| `stopsWithTurn` per task, not per tool | The tools differ within themselves: Claude stops a subagent with the turn and leaves a shell running; Codex leaves a child agent running (measured, [agent-host.md](agent-host.md) §2). Stop has to say which |
+| Absent means not measured | A task the adapter has not measured gets "may keep running" on screen, not a promise either way |
+| Ended tasks stay until cleared | The 2026-10-04 incident: two subagents stopped with an interrupt and nothing on screen said so for four hours |
+| `capabilities.backgroundTasks` beside the event | Silence from an adapter that cannot see background work is not "none running"; the idle check (#297) must tell the two apart |
+
 `ApprovalDetail` is **structured in advance by the adapter** so it carries what is needed to judge in-place banner approval (FR-3):
 
 ```ts
@@ -123,6 +154,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 | Group | Methods | Notes |
 |---|---|---|
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession` moves the session to the trash (FR-22) |
+| background tasks | `agents.stopBackgroundTask, agents.clearBackgroundTasks` | #290: stop one task the adapter marked `stoppable` (its ending arrives as `background_tasks`); take the ended ones off the list |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | the way out of the trash (FR-22). The person's alone: no agent tool or app capability reaches it |
 | messages | `messages.load, messages.subagent, messages.search` | a history page; one launch card's subagent steps, read when the person opens them (#222); search over what was said |
 | grid | `grid.get, grid.set` | the grid's panels in order, written whole (product spec §5.4). Each is a `GridPanel`: `{ kind: 'session', sessionId }` or `{ kind: 'app', projectId: string \| null, appId }` (`null` is a user-folder app) — #288. Expanded, not replaced (§4), so `PROTOCOL_VERSION` stays 1: `grid.get { tagged: true }` and `grid.set { panels }` speak panels; without them both speak the pre-#288 shape, bare session ids (an older UI's `grid.set { sessionIds }` replaces the list with its sessions). The UI sends `sessionIds` next to `panels` and reads a bare id list as session panels, so a UI and a host one build apart keep working both ways; the old fields go one release later. `grid.set` takes at most 256 and answers what it stored: duplicates, unknown sessions and an app of an unregistered project left out. Whether an app exists is not checked — the app list can lag behind its folder, and the screen leaves out an app it cannot find. The shape is the panel's identity alone, so it can move to the client unchanged (#82) |

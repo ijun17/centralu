@@ -72,6 +72,7 @@ type NormalizedEvent =
   | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: 사람 아닌 손이 설정을 바꿨다
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 충돌 감지, FR-5 하이라이트
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // 배지; codex는 알려 주고, claude는 CLI의 /goal 답과 Stop 훅 피드백에서 읽는다
+  | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: 살아 있는 집합(REPLACE)과 방금 끝난 것
   | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
   | { type: 'session_deleted';  sessionId }
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
@@ -107,6 +108,36 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
 읽는 것은 띄운 카드 하나를 지목하는 `messages.subagent`뿐이고, `messages.load`에는 결코 없다. 실행 중인 Claude 에이전트의
 카드는 여전히 `tool_output_delta`로 걸음마다 한 줄을 받는다.
 
+**에이전트의 백그라운드 작업은 가장자리 한 쌍이 아니라 수준 신호 하나다** ([#290](https://github.com/ijun17/centralu/issues/290)).
+`background_tasks.live`는 바뀐 뒤 세션 뒤에서 돌고 있는 작업 전부이며 지난 것을 갈아 끼운다. `ended`는 방금 빠진
+작업을, 각각 어떻게 끝났는지와 함께 싣는다. 작업 하나는 `BackgroundTask`다:
+
+```ts
+type BackgroundTask = {
+  id: string
+  kind: 'agent' | 'shell' | 'mcp' | 'other'  // 모르는 말은 'other'로 읽는다
+  description: string
+  parentCallId?: string    // 그것을 시작한 호출. 에이전트라면 그 걸음의 열쇠 (#222)
+  ambient?: boolean        // 도구가 활동이 아니라고 하는 살림 작업 — 목록에는 있지만 세지 않는다
+  stopsWithTurn?: boolean  // 턴을 중단하면 어떻게 되는지, 도구마다 측정한 대로. 없으면 측정하지 않은 것
+  stoppable?: boolean      // agents.stopBackgroundTask로 그것만 멈출 수 있다
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  summary?: string         // 어떻게 끝났는지, 도구의 말로
+}
+```
+
+`SessionInfo.backgroundTasks`는 실행 중인 작업 다음에 아직 목록에 남은 끝난 작업을 쥔다(최대 10개,
+`agents.clearBackgroundTasks` 전까지). `goal`처럼 살아 있는 동안만 있다: 이 작업을 쥔 것은 도구의 프로세스다. host,
+UI 리듀서, mock 모두 한 함수 `applyBackgroundTasks`로 목록을 움직인다.
+
+| 결정 | 이유 |
+|---|---|
+| started/ended 쌍이 아니라 REPLACE 의미의 수준 신호 | Claude의 `background_tasks_changed`가 수준 신호인 이유가 이것이다(sdk.d.ts): 끝 알림 하나를 놓쳐도 작업이 영원히 "실행 중"으로 남지 않는다. 끝은 함께 싣는다. 수준 신호만으로는 작업이 멈췄다고 말할 수 없기 때문이다 |
+| `stopsWithTurn`을 도구가 아니라 작업마다 | 도구 안에서도 다르다: Claude는 턴과 함께 서브에이전트를 멈추고 셸은 계속 돌게 둔다. Codex는 자식 에이전트를 계속 돌게 둔다(측정, [agent-host.md](agent-host.md) §2). 중지 버튼은 어느 것인지 말해야 한다 |
+| 없으면 측정하지 않은 것 | 어댑터가 측정하지 않은 작업은 화면에서 "계속 돌 수도 있다"가 된다. 어느 쪽으로도 약속하지 않는다 |
+| 끝난 작업은 지울 때까지 남는다 | 2026-10-04 사고: 서브에이전트 둘이 중단과 함께 멈췄는데 네 시간 동안 화면 어디에도 그 말이 없었다 |
+| 이벤트 옆에 `capabilities.backgroundTasks` | 백그라운드 작업을 볼 수 없는 어댑터의 침묵은 "돌고 있는 것 없음"이 아니다. idle 판단(#297)은 둘을 구별해야 한다 |
+
 `ApprovalDetail`은 인라인 배너 승인(FR-3)의 판단에 필요한 것을 담도록 **어댑터가 미리 구조화**한다:
 
 ```ts
@@ -123,6 +154,7 @@ type ApprovalDetail =
 | 그룹 | 메서드 | 비고 |
 |---|---|---|
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession`은 세션을 휴지통으로 보낸다 (FR-22) |
+| 백그라운드 작업 | `agents.stopBackgroundTask, agents.clearBackgroundTasks` | #290: 어댑터가 `stoppable`로 표시한 작업 하나를 멈춘다(그 끝은 `background_tasks`로 온다). 끝난 것을 목록에서 걷는다 |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색 |
 | grid | `grid.get, grid.set` | 그리드의 패널들, 순서대로, 통째로 쓴다 (product spec §5.4). 하나하나가 `GridPanel`이다: `{ kind: 'session', sessionId }` 또는 `{ kind: 'app', projectId: string \| null, appId }` (`null`은 사용자 폴더의 앱) — #288. 바꾸지 않고 넓혔으므로 (§4) `PROTOCOL_VERSION`은 1 그대로다: `grid.get { tagged: true }`와 `grid.set { panels }`는 패널로 말하고, 그것이 없으면 둘 다 #288 이전의 모양, 세션 id만의 목록으로 말한다 (이전 UI의 `grid.set { sessionIds }`는 목록을 그 세션들로 바꾼다). UI는 `panels` 옆에 `sessionIds`도 보내고 id만의 목록을 세션 패널로 읽으므로, 한 빌드 차이의 UI와 host는 어느 쪽으로든 계속 함께 돈다; 이전 필드는 한 릴리스 뒤에 빠진다. `grid.set`은 최대 256개를 받고 저장한 것을 돌려준다: 중복, 모르는 세션, 등록되지 않은 프로젝트의 앱은 빠진다. 앱이 있는지는 확인하지 않는다 — 앱 목록은 폴더보다 늦을 수 있고, 찾지 못한 앱은 화면이 빼고 그린다. 모양은 패널의 정체성뿐이라 그대로 클라이언트로 옮겨 갈 수 있다 (#82) |
