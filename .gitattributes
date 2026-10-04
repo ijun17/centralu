@@ -1,3 +1,10 @@
+# Every text file is LF in the repository and stays LF in a Windows checkout (#14). Windows
+# runners and most Windows installs of git set core.autocrlf=true, which rewrites text files to
+# CRLF on checkout. That broke byte-for-byte checks (the app runtime below is compared with what
+# its source builds), test fixtures and snapshots, while nothing here needs CRLF. Every file in
+# the index was already LF when this line was added, so it renormalises nothing.
+* text=auto eol=lf
+
 # 앱 템플릿의 런타임은 스크립트가 만든 생성물이다 (pnpm build:app-runtime) — 검토하지 않고 diff도 보이지 않는다.
 # 손으로 고치지 않는다: 테스트(app-template.test.ts)와 번들 스크립트가 소스로 다시 만든 것과 바이트까지 대조한다.
 packages/agent-host/app-template/runtime/** linguist-generated=true -diff
