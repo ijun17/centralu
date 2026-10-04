@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { SessionManager } from './manager.js'
 import { Store } from '../dev-services/store.js'
@@ -24,11 +25,11 @@ describe('session creation failure', () => {
   it('a session is not saved if the adapter fails (preventing ghost sessions)', async () => {
     const store = new Store()
     const mgr = new SessionManager(store, new Map([['claude', failingAdapter]]), () => {})
-    await mgr.addProject('/tmp')
+    await mgr.addProject(tmpdir())
 
     const project = (await mgr.listProjects())[0]!
     await expect(
-      mgr.createSession({ projectId: project.id, cwd: '/tmp', tool: 'claude', permissionPreset: 'normal' }),
+      mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' }),
     ).rejects.toThrow('Could not start')
 
     expect(mgr.listSessions()).toHaveLength(0)
@@ -39,10 +40,10 @@ describe('session creation failure', () => {
   it('the failure reason is passed through as-is (the user needs to know the cause to fix it)', async () => {
     const store = new Store()
     const mgr = new SessionManager(store, new Map([['claude', failingAdapter]]), () => {})
-    await mgr.addProject('/tmp')
+    await mgr.addProject(tmpdir())
     const project = (await mgr.listProjects())[0]!
     await expect(
-      mgr.createSession({ projectId: project.id, cwd: '/tmp', tool: 'claude', permissionPreset: 'normal' }),
+      mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' }),
     ).rejects.toThrow('Native CLI binary')
     store.close()
   })

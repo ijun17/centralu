@@ -30,9 +30,12 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 const TAURI = 'apps/desktop/src-tauri'
 const url = (p: string) => new URL(`../${p}`, import.meta.url)
 const read = (p: string) => readFileSync(url(p), 'utf8')
-/** Every file under a directory (as a path relative to that directory). */
+/** Every file under a directory (as a `/` path relative to that directory; recursive readdir answers `\` on Windows). */
 const files = (dir: string) =>
-  (readdirSync(url(dir), { recursive: true }) as string[]).filter((f) => statSync(url(`${dir}/${f}`)).isFile()).sort()
+  (readdirSync(url(dir), { recursive: true }) as string[])
+    .map((f) => f.split('\\').join('/'))
+    .filter((f) => statSync(url(`${dir}/${f}`)).isFile())
+    .sort()
 /** Strips Rust comments — so a name or bracket inside a comment is not read as part of a list. */
 const stripRustComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 /** Command name → permission name (tauri-utils 2.9.3 acl/build.rs `autogenerate_command_permissions`). */
