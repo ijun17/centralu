@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { ensureToolPath } from '../env-path.js'
-import { shellPath } from './terminal.js'
+import { commandShell } from './terminal.js'
 import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 
 /**
@@ -33,7 +33,7 @@ type Pty = {
   resize(cols: number, rows: number): void
   kill(signal?: string): void
 }
-type PtyModule = { spawn(file: string, args: string[], opts: Record<string, unknown>): Pty }
+type PtyModule = { spawn(file: string, args: string[] | string, opts: Record<string, unknown>): Pty }
 
 /** The same cap as a terminal — a single build log commonly reaches tens of MB */
 const LOG_BYTES = 256 * 1024
@@ -192,11 +192,12 @@ export class CommandRunner {
 
     try {
       /*
-       * Runs through a login shell with -lc: the user's aliases and PATH survive intact. The
+       * Runs through a login shell with -lc (cmd.exe on Windows, see commandShell): the user's aliases and PATH survive intact. The
        * reason this is a PTY is color — launched over a pipe, most tools print with color turned
        * off, and for a dev server's log, color is what makes it readable.
        */
-      const handle = pty.spawn(shellPath(), ['-lc', e.command], {
+      const shell = commandShell(e.command)
+      const handle = pty.spawn(shell.file, shell.args, {
         name: 'xterm-256color',
         cols,
         rows,

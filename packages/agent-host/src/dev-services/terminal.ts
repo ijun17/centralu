@@ -1,7 +1,8 @@
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { ensureToolPath } from '../env-path.js'
+import { win32 } from 'node:path'
+import { ensureToolPath, whichTool } from '../env-path.js'
 import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 
 /**
@@ -28,7 +29,7 @@ type Pty = {
   kill(signal?: string): void
 }
 type PtyModule = {
-  spawn(file: string, args: string[], opts: Record<string, unknown>): Pty
+  spawn(file: string, args: string[] | string, opts: Record<string, unknown>): Pty
 }
 
 /**
@@ -212,7 +213,8 @@ export class TerminalService {
     ensureToolPath()
 
     try {
-      const handle = pty.spawn(shellPath(), ['-l'], {
+      const shell = interactiveShell()
+      const handle = pty.spawn(shell.file, shell.args, {
         name: 'xterm-256color',
         cols,
         rows,
@@ -255,7 +257,51 @@ export class TerminalService {
   }
 }
 
-/** The shell the user normally uses. This is what keeps their aliases and prompt showing up as-is */
+/** A program and its arguments, as node-pty takes them. A string is a ready-made Windows command line, passed verbatim */
+export type ShellLaunch = { file: string; args: string[] | string }
+
+type ShellEnv = Record<string, string | undefined>
+
+function systemFolder(env: ShellEnv): string {
+  return win32.join(env.SystemRoot || 'C:\\Windows', 'System32')
+}
+
+/**
+ * The shell a terminal tab runs.
+ *
+ * On macOS and Linux, the person's login shell with `-l`, so their PATH, aliases and prompt are
+ * there. **Windows (#14)** has no login shell: PowerShell 7 (`pwsh`) when it is installed, else
+ * the Windows PowerShell every Windows ships. Never with `-l` — Windows PowerShell 5.1 has no such
+ * parameter, takes the first unknown argument as the start of `-Command`, runs `-l`, fails and
+ * exits, so the tab died at once.
+ */
+export function interactiveShell(
+  platform: NodeJS.Platform = process.platform,
+  env: ShellEnv = process.env,
+  find: (name: string) => string | null = (name) => whichTool(name),
+): ShellLaunch {
+  if (platform !== 'win32') return { file: shellPath(), args: ['-l'] }
+  const pwsh = find('pwsh')
+  if (pwsh) return { file: pwsh, args: ['-NoLogo'] }
+  return { file: win32.join(systemFolder(env), 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoLogo'] }
+}
+
+/**
+ * How a project command (the Run button) runs.
+ *
+ * macOS and Linux: the login shell with `-lc`. **Windows (#14)**: `cmd.exe /d /s /c "<command>"`,
+ * which is what npm runs package scripts with and what Node's `shell: true` does. Not PowerShell:
+ * there `npm` resolves to `npm.ps1` first, which the default execution policy refuses to run, and
+ * `powershell -lc` did not run the command at all (the same `-l` parse as above). `/d` skips the
+ * AutoRun registry hook; `/s` makes cmd strip exactly the outer quotes and run the rest as typed.
+ * The command line is handed to node-pty as a string so nothing re-quotes it.
+ */
+export function commandShell(command: string, platform: NodeJS.Platform = process.platform, env: ShellEnv = process.env): ShellLaunch {
+  if (platform !== 'win32') return { file: shellPath(), args: ['-lc', command] }
+  return { file: env.ComSpec || win32.join(systemFolder(env), 'cmd.exe'), args: `/d /s /c "${command}"` }
+}
+
+/** The shell the user normally uses (macOS and Linux). This is what keeps their aliases and prompt showing up as-is */
 export function shellPath(): string {
   const fromEnv = process.env.SHELL
   if (fromEnv && existsSync(fromEnv)) return fromEnv

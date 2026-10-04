@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { killTargets, parsePs, stopTree, survivorTargets } from './kill-tree.js'
+import { killTargets, killTree, parsePs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
 
 /**
  * Choosing targets for a tree kill (the conclusion of what was measured on 2026-09-07).
@@ -225,4 +225,68 @@ describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)',
   it('even when the grandchild is in its own group from job control — with a caller that saw root end', async () => {
     await expectTreeGone(true, 'until-it-exits')
   }, 15_000)
+})
+
+/**
+ * Windows (#14), simulated with the OS passed in. node-pty's Windows `kill(signal)` throws
+ * "Signals not supported on windows.", so Stop and restart did nothing there, and a pty not yet
+ * ready turned the throw into an uncaught exception that shut the host down.
+ */
+describe('ending a tree on Windows', () => {
+  /** A pty that behaves like node-pty's WindowsTerminal: any signal argument throws */
+  const windowsPty = (pid: number | undefined) => {
+    const calls: (string | undefined)[] = []
+    return {
+      calls,
+      handle: {
+        pid,
+        kill(signal?: string) {
+          if (signal !== undefined) throw new Error('Signals not supported on windows.')
+          calls.push(signal)
+        },
+      },
+    }
+  }
+  const fakeOs = () => {
+    const ended: number[] = []
+    const os: KillOs = { platform: 'win32', taskkill: (pid) => void ended.push(pid) }
+    return { os, ended }
+  }
+
+  it('the tree goes with taskkill, and the pty is closed without a signal', () => {
+    const { os, ended } = fakeOs()
+    const pty = windowsPty(4242)
+    killTree(pty.handle, 'SIGKILL', os)
+    expect(ended).toEqual([4242])
+    expect(pty.calls).toEqual([undefined])
+  })
+
+  it('Stop is one forceful shot: no second shot by pid after the grace period', async () => {
+    const { os, ended } = fakeOs()
+    const pty = windowsPty(4242)
+    stopTree(pty.handle, 10, () => true, os)
+    await new Promise((r) => setTimeout(r, 40))
+    expect(ended).toEqual([4242])
+    expect(pty.calls).toEqual([undefined])
+  })
+
+  it('a handle with no pid is still closed', () => {
+    const { os, ended } = fakeOs()
+    const pty = windowsPty(undefined)
+    killTree(pty.handle, 'SIGTERM', os)
+    expect(ended).toEqual([])
+    expect(pty.calls).toEqual([undefined])
+  })
+
+  it('a taskkill that fails (the process already ended) does not stop the pty from closing', () => {
+    const pty = windowsPty(4242)
+    const os: KillOs = {
+      platform: 'win32',
+      taskkill: () => {
+        throw new Error('ERROR: The process "4242" not found.')
+      },
+    }
+    expect(() => killTree(pty.handle, 'SIGTERM', os)).not.toThrow()
+    expect(pty.calls).toEqual([undefined])
+  })
 })

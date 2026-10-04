@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { join } from 'node:path'
 
 /**
  * Kills a process **tree** — shared by the command runner, terminal tabs, and app processes
@@ -143,10 +144,64 @@ function snapshot(): ProcRow[] {
   }
 }
 
-/** Fires one signal at the tree, and returns the tree seen at that moment (root's and descendants' rows) — the list the second shot will carry */
-function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL'): ProcRow[] {
+/**
+ * What this module needs from the OS on Windows, as a parameter so the Windows path can be tested
+ * on any OS.
+ */
+export type KillOs = {
+  platform: NodeJS.Platform
+  /** Ends a process and every process under it, forcibly */
+  taskkill: (pid: number) => void
+}
+
+/**
+ * Windows (#14) has no process groups and no signals. `taskkill /T /F` ends a pid and its
+ * descendants (it walks the parent links itself), which is the one tool for the job. It is named by
+ * its full path under the system folder: a bare `taskkill` would be looked up in the working
+ * directory first.
+ */
+const REAL_OS: KillOs = {
+  platform: process.platform,
+  taskkill: (pid) => {
+    const exe = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe')
+    execFileSync(exe, ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: 5000, windowsHide: true })
+  },
+}
+
+/**
+ * The Windows shot. There is nothing polite to send, so the first shot is already the last: the
+ * tree goes with `taskkill /T /F`, then the handle itself is closed.
+ *
+ * `kill()` is called **without a signal.** node-pty's Windows `kill()` throws "Signals not
+ * supported on windows." when given one (windowsTerminal.js), and every caller passed one: Stop,
+ * restart, a removed project's terminals and shutdown all silently did nothing, and a throw from a
+ * pty that was not ready yet surfaced later as an uncaught exception that shut the whole host down.
+ * Without a signal, a pty closes its console and a ChildProcess is terminated.
+ */
+function shootWindows(handle: KillablePty, os: KillOs): void {
   const pid = handle.pid
-  if (process.platform === 'win32' || typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) {
+  if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+    try {
+      os.taskkill(pid)
+    } catch {
+      // already gone (taskkill exits non-zero for a pid that is not there)
+    }
+  }
+  try {
+    handle.kill()
+  } catch {
+    // already dead
+  }
+}
+
+/** Fires one signal at the tree, and returns the tree seen at that moment (root's and descendants' rows) — the list the second shot will carry */
+function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = REAL_OS): ProcRow[] {
+  if (os.platform === 'win32') {
+    shootWindows(handle, os)
+    return []
+  }
+  const pid = handle.pid
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) {
     try {
       handle.kill(signal)
     } catch {
@@ -177,9 +232,9 @@ function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL'): ProcRow[] {
   return rows.filter((r) => tree.has(r.pid))
 }
 
-/** Fires one signal at the tree. Falls back to pty.kill as before when the pid is unknown (a fake pty, win32) */
-export function killTree(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL'): void {
-  shoot(handle, signal)
+/** Fires one signal at the tree. Falls back to pty.kill as before when the pid is unknown (a fake pty). On Windows, taskkill (shootWindows) */
+export function killTree(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = REAL_OS): void {
+  shoot(handle, signal, os)
 }
 
 /**
@@ -192,8 +247,11 @@ export function killTree(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL'): vo
  * belong to someone else — only the root is excluded from the list. The remaining descendants are
  * hit regardless.
  */
-export function stopTree(handle: KillablePty, graceMs: number, alive: () => boolean): void {
-  const first = shoot(handle, 'SIGTERM')
+export function stopTree(handle: KillablePty, graceMs: number, alive: () => boolean, os: KillOs = REAL_OS): void {
+  const first = shoot(handle, 'SIGTERM', os)
+  // Windows: the first shot was already forceful. A second one, by pid after the grace period, could
+  // only reach whoever has been given that number since.
+  if (os.platform === 'win32') return
   const t = setTimeout(() => finish(handle, first, alive()), graceMs)
   t.unref?.()
 }

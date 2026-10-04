@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { TerminalService, shellPath, shortCwd } from './terminal.js'
+import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd } from './terminal.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -222,8 +222,36 @@ describe('when a shell ends or fails to launch', () => {
 })
 
 describe('shell selection', () => {
-  it('picks the shell the user actually uses (so their aliases and prompt show up as-is)', () => {
+  it.skipIf(process.platform === 'win32')('picks the shell the user actually uses (so their aliases and prompt show up as-is)', () => {
     expect(shellPath()).toMatch(/\/(zsh|bash|sh|fish)$/)
+  })
+
+  it('a terminal tab runs the login shell with -l off Windows', () => {
+    expect(interactiveShell('darwin')).toEqual({ file: shellPath(), args: ['-l'] })
+  })
+
+  /*
+   * Windows (#14), simulated. Windows PowerShell 5.1 has no `-l`: it read it as the start of
+   * `-Command`, failed and exited, so the tab died and the Run button never ran anything.
+   */
+  it('on Windows a tab runs PowerShell 7 when it is installed, with no -l', () => {
+    const shell = interactiveShell('win32', {}, (name) => (name === 'pwsh' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : null))
+    expect(shell).toEqual({ file: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: ['-NoLogo'] })
+  })
+
+  it('on Windows without PowerShell 7, the Windows PowerShell under the system folder', () => {
+    const shell = interactiveShell('win32', { SystemRoot: 'C:\\Windows' }, () => null)
+    expect(shell).toEqual({ file: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', args: ['-NoLogo'] })
+    expect(shell.args).not.toContain('-l')
+  })
+
+  it('a project command runs under the login shell off Windows, and cmd.exe on Windows', () => {
+    expect(commandShell('npm run dev', 'linux')).toEqual({ file: shellPath(), args: ['-lc', 'npm run dev'] })
+    expect(commandShell('npm run dev -- --port 3000', 'win32', { ComSpec: 'C:\\Windows\\system32\\cmd.exe' })).toEqual({
+      file: 'C:\\Windows\\system32\\cmd.exe',
+      // One string: node-pty passes it verbatim, so the command is not re-quoted on its way to cmd
+      args: '/d /s /c "npm run dev -- --port 3000"',
+    })
   })
 
   it('shortens the home path to ~', () => {
