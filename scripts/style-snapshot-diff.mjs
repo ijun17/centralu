@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Compares two folders written by e2e/style-snapshot.spec.ts and prints every colour that moved.
+ * Compares two folders written by e2e/style-snapshot.spec.ts and prints every value that moved.
  *
  *   node scripts/style-snapshot-diff.mjs <before> <after>
  *

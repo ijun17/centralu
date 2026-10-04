@@ -4,13 +4,15 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * A record of every colour the main screens paint, for changes that must not move a pixel (#312).
+ * A record of every colour and type metric the main screens paint, for changes that must not move
+ * a pixel — or must move only the pixels they mean to (#312).
  *
- * Renaming the colour tokens, collapsing arbitrary values onto tokens, or building a theme engine
- * on top of them is only safe if the screen comes out the same. This walks the demo scenes and
- * records, for every element and its pseudo-elements, the computed value of each colour-bearing
- * property (including the scrollbar thumb and the selection highlight where the engine reports
- * them), plus one screenshot per scene to look at. Run it before and after a change and compare
+ * Renaming the tokens, collapsing arbitrary values onto a scale, or building a theme engine on top
+ * of them is only safe if the screen comes out the same, or differs exactly where intended. This
+ * walks the demo scenes and records, for every element and its pseudo-elements, the computed value
+ * of each colour-bearing property, the type metrics (size, line height, weight, tracking, family)
+ * and the corner radii (including the scrollbar thumb and the selection highlight where the engine
+ * reports them), plus one screenshot per scene to look at. Run it before and after a change and compare
  * the two folders:
  *
  *   STYLE_SNAPSHOT_OUT=/tmp/before pnpm exec playwright test --config e2e/style-snapshot.config.ts
@@ -35,7 +37,10 @@ test.beforeEach(async ({ page }) => {
   await page.clock.install({ time: CLOCK_START })
 })
 
-/** Everything that can carry a colour. Layout and opacity are left out: they are not what a colour change moves. */
+/**
+ * Everything that can carry a colour, plus the type metrics and radii the theme's scales set.
+ * Layout and opacity are left out: a token change moves them only through these.
+ */
 const PROPS = [
   'color',
   'background-color',
@@ -55,15 +60,24 @@ const PROPS = [
   'stroke',
   'stop-color',
   'column-rule-color',
+  'font-size',
+  'line-height',
+  'font-weight',
+  'letter-spacing',
+  'font-family',
+  'border-top-left-radius',
+  'border-top-right-radius',
+  'border-bottom-right-radius',
+  'border-bottom-left-radius',
 ] as const
 
 /**
- * Collects the computed colours of every element in the page. Values that are the property's
+ * Collects the computed values of every element in the page. Values that are the property's
  * "nothing here" are dropped to keep the file small; a value that appears or disappears still
  * shows up as a difference, because the key is then missing on one side.
  */
 function collect(props: readonly string[]): Record<string, Record<string, string>> {
-  const EMPTY = new Set(['none', 'rgba(0, 0, 0, 0)', 'transparent', 'auto', 'normal', ''])
+  const EMPTY = new Set(['none', 'rgba(0, 0, 0, 0)', 'transparent', 'auto', 'normal', '0px', ''])
   const out: Record<string, Record<string, string>> = {}
   const keyOf = (el: Element): string => {
     const parts: string[] = []
@@ -173,6 +187,12 @@ async function openSession(page: Page, name: string): Promise<void> {
   await page.locator('[data-testid^="session-row-"]', { hasText: name }).click()
   await expect(page.getByTestId('session-view')).toBeVisible()
 }
+
+test('first-run intro', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('intro-role')).toBeVisible()
+  await snapshot(page, 'intro')
+})
 
 test('focus view', async ({ page }) => {
   await openDemo(page)
