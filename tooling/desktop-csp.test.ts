@@ -46,7 +46,11 @@ describe('desktop CSP', () => {
     expect(d.has('child-src')).toBe(false)
   })
 
-  it('still loads scripts only from our own screen', () => {
-    expect(csp().get('script-src')).toEqual(["'self'"])
+  it('still loads scripts only from our own screen — plus the one first-paint script, by hash (#340)', () => {
+    // Which hash, and that it matches the script, is first-paint.test.ts's to check
+    const [self, ...rest] = csp().get('script-src') ?? []
+    expect(self).toBe("'self'")
+    expect(rest).toHaveLength(1)
+    expect(rest[0]).toMatch(/^'sha256-[A-Za-z0-9+/]+=*'$/)
   })
 })

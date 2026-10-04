@@ -113,3 +113,19 @@ since the preferences arrive a round trip later; without it a light theme would 
 flash. The desktop window is told the side too (`SystemPort.setWindowAppearance`): a window held
 to one appearance reports that appearance to the page, so System mode hands it back to the OS.
 `tauri.conf.json` no longer forces the window to Dark.
+
+**The first paint comes before all of that** ([#340](https://github.com/ijun17/centralu/issues/340)). With the window no
+longer forced to Dark, WKWebView painted its own default until the bundle loaded, and under a light OS appearance that
+default is white. `main.tsx` runs only after the bundle, so a small inline script in `index.html` (desktop and web, the
+same text) runs before any stylesheet or module: it reads the same `cc-theme` cache, picks the side the same way, and
+sets `background-color` and `color-scheme` on `<html>` to that theme's floor (a custom theme's own floor token, else its
+preset's). Nothing cached paints the stylesheet's Dark, `#141414`. `applyTheme` removes the two inline values, because
+from then on the stylesheet owns them, and a leftover inline `color-scheme` would outrank `html[data-theme-base]`
+after a switch.
+
+| Decision | Why |
+|---|---|
+| A script, not an inline `<style>` | The floor depends on the cache, which only a script can read. The values go in through the CSSOM, which no CSP governs, so `style-src` is untouched |
+| The desktop CSP allows it by hash (`script-src 'self' 'sha256-…'`) | `script-src 'self'` refuses inline scripts. A hash allows exactly this text and nothing else. `tooling/first-paint.test.ts` fails with the new hash when the script changes |
+| The preset floors are written into the script | The stylesheet has not loaded yet, so there is nothing to read them from. The same test compares them with `index.css` |
+| The native window does not read the cache at launch | Rust would need a cached value of its own, written by the page. The document loads from the bundle's embedded assets, and the script paints with its first frame. Only the gap before that frame is left, and it is not worth a second cache |

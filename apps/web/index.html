@@ -4,6 +4,35 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Centralu</title>
+    <!--
+      First paint (#340). Runs before any stylesheet or module, so the very first frame is the floor
+      of the theme the last run showed instead of the webview's own default, which is white under a
+      light OS appearance. It reads the same cache app/theme.ts writes (`cc-theme`) and picks the
+      side the same way; nothing cached is the stylesheet's Dark. The two values are set through
+      the CSSOM, which no CSP governs, and applyTheme takes them back off <html> once a theme is
+      applied. The same text is in apps/web/index.html, and its hash is in the desktop CSP's
+      script-src: change a byte and tooling/first-paint.test.ts names what to update.
+    -->
+    <script>
+      ;(function () {
+        var floors = { dark: '#141414', light: '#f2f2f2', 'hc-dark': '#000000', 'hc-light': '#ffffff' }
+        var t = null
+        try {
+          var c = JSON.parse(localStorage.getItem('cc-theme') || 'null')
+          var m = c && c.mode
+          var light = m === 'light' || (m === 'system' && typeof matchMedia === 'function' && !matchMedia('(prefers-color-scheme: dark)').matches)
+          t = c && (light ? c.light : c.dark)
+        } catch (e) {}
+        var isLight = !!t && t.base === 'light'
+        var floor = t && t.tokens && t.tokens['--color-surface-floor']
+        if (typeof floor !== 'string' || !CSS.supports('color', floor)) {
+          floor = t && Object.prototype.hasOwnProperty.call(floors, t.preset) ? floors[t.preset] : isLight ? floors.light : floors.dark
+        }
+        var root = document.documentElement.style
+        root.backgroundColor = floor
+        root.colorScheme = isLight ? 'light' : 'dark'
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

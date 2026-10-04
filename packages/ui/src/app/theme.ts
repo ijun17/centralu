@@ -145,6 +145,13 @@ let written: string[] = []
 /** Puts a theme on the page. Cheap enough to run on every change: a few attribute and property writes. */
 export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.documentElement): void {
   for (const name of written) root.style.removeProperty(name)
+  /*
+   * The first-paint script in index.html (#340) put the last theme's floor and colour scheme inline
+   * on <html>, before any stylesheet. From here the stylesheet owns both; left in place, the inline
+   * colour scheme would outrank `html[data-theme-base='light']` after a switch.
+   */
+  root.style.removeProperty('background-color')
+  root.style.removeProperty('color-scheme')
   root.dataset.theme = theme.preset
   root.dataset.themeBase = theme.base
   // The accent goes on top of the theme's own tokens: when it is on, it is what focus, selection
