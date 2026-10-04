@@ -39,6 +39,17 @@ script rehearses by default and why nothing publishes automatically.
   the bundles as artifacts. Since nobody on the project owns a Linux machine, this is the
   only place a Linux build is ever exercised. Download the artifact to try it; GitHub
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
+- The same workflow builds **windows-x64** (#14) and uploads two artifacts:
+  `centralu-windows-x64`, a portable folder (`Centralu\centralu.exe` beside
+  `Centralu\resources\host\`), and `centralu-windows-x64-setup`, the NSIS installer
+  (per-user, no admin rights). The folder is what an npm package can ship, the way the
+  AppImage ships for Linux: npm can unpack a folder and start an exe, but cannot run an
+  installer. The installer's one advantage is that it installs the WebView2 runtime on a
+  machine without it. Neither is signed, so SmartScreen asks before the first start. The
+  Windows job also runs the Rust unit tests, and a separate `windows tests` job runs the
+  four parts of `pnpm verify`. That job reports without blocking until its known failures
+  (listed in the PR that added it) are fixed; then it should turn blocking. No Windows
+  package goes to npm yet (that is W3 of #14), so `release.yml` does not build Windows.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes all three
   packages, in order, from one run. `workflow_dispatch` rehearses the same thing without a
   tag (`dry_run`, default on). See below.

@@ -20,6 +20,7 @@ agent-host/src/
 ├─ dev-services/        # git/fs/store (the store is not dev-only — it is where messages live)
 ├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
+├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
 ├─ data-dir.ts          # locating and migrating the data directory
 └─ updates.ts           # update checks
 ```
@@ -35,6 +36,22 @@ is what `log-file.ts` tees to `~/.centralu/host.log` — and a `.app` launched f
 no stdout destination at all, so a `console.log` here reaches nobody in production while
 looking fine in a terminal. `no-console` in `eslint.config.js` enforces this everywhere in
 the package except that one line.
+
+**On Windows (#14)** the host runs on the direct path (there is no keeper), started by the app
+with no console window; its children share that windowless console. Processes differ in four
+ways, each in one place:
+
+| What | macOS and Linux | Windows | Where |
+|---|---|---|---|
+| Finding a tool | PATH, augmented from the login shell | PATH with PATHEXT, absolute entries only; npm/pnpm `.cmd` shims read for the `.js` or `.exe` they start | `env-path.ts`, `tool-launch.ts` |
+| `git`, `gh`, an app's command | by name | by absolute path: given a bare name, Windows looks in the working directory (the project) first | `tool-launch.ts` `programPath`, `resolveCommand` |
+| Ending a tree | process groups, TERM then KILL | `taskkill /T /F`, one shot; a pty's `kill()` gets no signal | `dev-services/kill-tree.ts` |
+| Terminal / Run button | login shell `-l` / `-lc` | `pwsh` or Windows PowerShell, `-NoLogo` / `cmd.exe /d /s /c` | `dev-services/terminal.ts` |
+
+Quitting closes the host's stdin (it runs with `--watch-parent`, so EOF runs the same shutdown as
+TERM) and ends its tree with `taskkill` only if it is still running after the grace period. A
+worktree setup command runs under `cmd.exe`, so it reads `%CENTRALU_WORKTREE%`, not
+`$CENTRALU_WORKTREE`.
 
 The one addition (#280): under the keeper (`CC_KEEPER=1`), the host also writes
 `{"activity":{"busy":true|false}}` to stdout, once at start and whenever it changes

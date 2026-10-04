@@ -315,7 +315,8 @@ Limits:
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message. It never lists a session in the trash (FR-22), and no app capability or
   agent tool restores or deletes one for good — only the person, in Settings.
-- fd 3 on Windows is untested (spike S-5).
+- fd 3 on Windows is an overlapped pipe (apps.md §10). The broker suites pass in the Windows CI
+  job with Node apps; nobody has run a Python app or the packaged app on Windows.
 
 ## Imported apps and app links
 
@@ -536,3 +537,36 @@ Limits:
 
 Do not expand the scope of these claims without stronger implementation and platform-level
 validation. In particular, do not describe these checks as complete filesystem isolation.
+
+## Windows (#14)
+
+Nothing here has been run on a Windows machine by a person yet; the Windows CI job runs the unit
+tests. What differs from macOS and Linux, and what holds it:
+
+- **Programs run by name in a project.** Given a bare name, Windows process creation looks in the
+  child's working directory before PATH. Every git call runs in the project, so a `git.exe`
+  committed at a repository's root would run on the first status read. `git`, `gh` and an app's
+  manifest command are spawned by the absolute path found on PATH (`tool-launch.ts` `programPath`,
+  `resolveCommand`; tests in `tool-launch.test.ts`), and PATH lookups skip relative entries
+  (`env-path.ts`, and `node`/`code` in the Rust shell).
+- **Tool shims are read, not shelled.** npm and pnpm install a tool as a `.cmd` file, which Node
+  starts only through `cmd.exe`, and cmd.exe would read `%`, `^`, `&` and quotes in our arguments
+  (JSON, prompts) as its own syntax. The shim is read for the `.js` or `.exe` it starts, and that
+  is spawned without a shell. Project commands (the Run button) do run under `cmd.exe /d /s /c`,
+  because the command is the person's own text.
+- **Paths.** `path-guard.ts` refuses a path whose `relative()` from the root is absolute (another
+  drive, a UNC share), instead of walking its segments inside the root (`path-guard.test.ts`, with
+  `path.win32`). Windows paths ignore case; containment uses `relative()`, which does too.
+
+Limits:
+
+- If git is not installed at all, the bare name is used, and a planted `git.exe` in the project
+  folder would run. The same holds for `codex` when it is not installed.
+- The files written `0600` here (`app-secrets.json`, `app-imports.json`) get no mode on Windows,
+  which has no mode bits; they are as private as the folder they are in. The default data folder
+  is in the user's profile, which only that user (and administrators) can read. A `CC_DATA_DIR`
+  elsewhere gets that folder's ACL.
+- Junctions are reported as links by `lstat` and so are treated like symlinks, but no containment
+  test creates one yet (creating a symlink on Windows needs Developer Mode or administrator
+  rights; a junction does not).
+- The keeper does not run on Windows (no named-pipe control socket), so the direct path is used.

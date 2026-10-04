@@ -135,7 +135,7 @@ either to act.
 | One instance | Per (project, app) | Worktrees share the root's app |
 | Idle | No open view and no call in progress for 5 minutes: stopped | A process nobody calls has no reason to run. An open view holds its app |
 | Crash | Nothing restarts it by itself; the next need does, not earlier than 1 s, then 2 s after. The third consecutive failure stops the app (`failed`) with its reason, until Restart, `check`, a changed manifest, or its builder's turn ending with the folder changed (§8). An app that ran 60 s before dying starts the count again | Retrying forever hides a broken app |
-| Stop | stdin and fd 3 closed together; after 2 s the whole process tree is terminated (SIGTERM, then SIGKILL). The app's process group is signalled even after a clean exit | Spike S-5: closing stdin alone left Node and Python apps running |
+| Stop | stdin and fd 3 closed together; after 2 s the whole process tree is terminated (SIGTERM, then SIGKILL). The app's process group is signalled even after a clean exit. Windows has neither groups nor signals: the app is not started detached (that would give it no console, and every console program it starts a window of its own), and its tree is ended with `taskkill /T /F` (#14) | Spike S-5: closing stdin alone left Node and Python apps running |
 | Host shutdown | Every app stopped with a 1 s grace, without waiting for SIGKILL | Tauri gives the host 3 s |
 | Manifest changed | A new entry replaces the old one; the old process stops **after its calls in progress finish**. While the app's builder is in a turn, the change waits for the turn's end (§8); `check` reads it at once | Editing a file must not cut someone's call, and a half-edited manifest must not restart the app under the person |
 
@@ -545,6 +545,11 @@ through a **broker**. The host starts every app with a fourth pipe, fd 3. On it 
 server and the app its client. Only the process holding the pipe can call, so there is no token,
 and the pipe says which app is calling (spike S-5).
 
+On Windows fd 3 is created `overlapped` (#14). A plain pipe reaches the child as a synchronous
+handle, and Windows serialises I/O on one: the app's read waiting on fd 3 held back its own write
+of the request, so every broker call timed out on the first Windows test run. stdin and stdout go
+one way each and are unaffected.
+
 A request passes, in order: the gate (run id), the manifest's declaration, the person's permission,
 the runaway limits, then the work, and it leaves a run record however it ends. All of it after the
 gate happens in one place, the broker desk (`desk.ts`).
@@ -751,8 +756,9 @@ from there it is an ordinary import, turned off unless the person enables it.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
 - The Codex path is unverified by a run (§9.2), and so is `run_agent` on Codex (its `outputSchema`
-  is checked against the app-server protocol and a fake adapter only). fd 3 on Windows is untested
-  (spike S-5).
+  is checked against the app-server protocol and a fake adapter only). fd 3 on Windows (spike
+  S-5, §10) passes the broker test suites in the Windows CI job with Node apps; a Python app, and
+  any app in the packaged Windows app, have not been tried.
 - The broker answers only while the app handles a call: an app cannot ask by itself (a timer, a
   watcher). The host data list has two names.
 - Export (plan E-2) and sharing through a team server are not built: an app is shared by sending
