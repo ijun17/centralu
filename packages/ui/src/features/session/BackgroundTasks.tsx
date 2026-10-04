@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { backgroundCount } from '@cc/core'
 import type { BackgroundTask } from '@cc/protocol'
+import { useAnchoredPlacement } from '../../components/anchored.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { useStore } from '../../store/store.js'
 
@@ -46,16 +48,21 @@ export function BackgroundTasksBadge({
   renderSteps?: (callId: string) => ReactNode
 }) {
   const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLSpanElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const count = backgroundCount(tasks)
   const ended = tasks.filter((t) => t.status !== 'running')
   const shown = count > 0 || ended.length > 0
 
-  // Closes on an outside click or Esc, like the session settings menu — an open list must not wall off the header
+  /*
+   * Closes on an outside click or Esc, like the session settings menu — an open list must not wall off the header.
+   * "Outside" is outside both the button and the list: the list is not inside the button's box in the DOM any more.
+   */
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (!buttonRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
@@ -76,8 +83,9 @@ export function BackgroundTasksBadge({
 
   if (!shown) return null
   return (
-    <span className="relative flex shrink-0 items-center" ref={rootRef}>
+    <span className="flex shrink-0 items-center">
       <button
+        ref={buttonRef}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -93,9 +101,21 @@ export function BackgroundTasksBadge({
         {badgeText(tasks)}
         <ChevronIcon open={open} size={9} />
       </button>
-      {open && (
-        <BackgroundTaskList sessionId={sessionId} tasks={tasks} renderSteps={renderSteps} />
-      )}
+      {/*
+        In body, not under the button: a grid panel is overflow-hidden, and a list hung off the header as an absolute
+        child lost its right side — Stop included — to the panel's edge (anchored.ts).
+      */}
+      {open &&
+        createPortal(
+          <BackgroundTaskList
+            sessionId={sessionId}
+            tasks={tasks}
+            renderSteps={renderSteps}
+            anchorRef={buttonRef}
+            listRef={listRef}
+          />,
+          document.body,
+        )}
     </span>
   )
 }
@@ -104,19 +124,35 @@ function BackgroundTaskList({
   sessionId,
   tasks,
   renderSteps,
+  anchorRef,
+  listRef,
 }: {
   sessionId: string
   tasks: readonly BackgroundTask[]
   renderSteps?: (callId: string) => ReactNode
+  anchorRef: RefObject<HTMLElement | null>
+  listRef: RefObject<HTMLDivElement | null>
 }) {
   const clear = useStore((s) => s.clearBackgroundTasks)
   const hasEnded = tasks.some((t) => t.status !== 'running')
+  const at = useAnchoredPlacement(anchorRef, listRef, true)
   return (
     <div
+      ref={listRef}
       role="dialog"
       aria-label="Background tasks"
       data-testid="background-list"
-      className="absolute left-0 top-full z-30 mt-1 max-h-96 w-96 max-w-[80vw] overflow-y-auto rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)"
+      /*
+        The width gives way to a window narrower than the list (vw divided by the zoom, as in Modal — vw does not know
+        about it), and the title in each row is what truncates, so the status and Stop always have their room.
+      */
+      className="fixed z-40 w-96 max-w-[calc(100vw/var(--text-zoom)_-_1rem)] overflow-y-auto rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)"
+      style={{
+        top: at?.top ?? 0,
+        left: at?.left ?? 0,
+        maxHeight: at ? `min(24rem, ${at.maxHeight}px)` : '24rem',
+        visibility: at ? 'visible' : 'hidden',
+      }}
     >
       <div className="flex items-center gap-2 border-b border-line px-2.5 py-1.5">
         <span className="text-xs text-ink-muted">Background tasks</span>
@@ -163,7 +199,11 @@ function BackgroundTaskRow({
     <li className="border-b border-line px-2.5 py-1.5 last:border-b-0" data-testid={`background-task-${task.id}`} data-status={task.status}>
       <div className="flex items-baseline gap-2">
         <span className="readout shrink-0 text-2xs text-ink-faint">{KIND[task.kind]}</span>
-        <span className={`min-w-0 flex-1 truncate text-xs ${running ? 'text-ink' : 'text-ink-muted'}`} title={task.description}>
+        <span
+          className={`min-w-0 flex-1 truncate text-xs ${running ? 'text-ink' : 'text-ink-muted'}`}
+          title={task.description}
+          data-testid={`background-title-${task.id}`}
+        >
           {task.description}
         </span>
         <span className="readout shrink-0 text-2xs text-ink-faint" data-testid={`background-status-${task.id}`}>
