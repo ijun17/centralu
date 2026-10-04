@@ -296,9 +296,23 @@ externalApps.refresh()
 onExternalAppListChanged(externalApps, () => server.broadcast({ type: 'external_apps_changed' }))
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
 mgr.useExternalApps(externalApps)
-const terminals = new TerminalService((f) => server.pushTerminal(f), held?.ptys)
+/*
+ * Terminal and command output can arrive before `server` below exists. Under the keeper, an
+ * adopted pty replays its buffered output as soon as it is attached, and any `await` between here
+ * and `new HostServer` lets that output in (the themes folder's start, #329, is one). Reaching
+ * `server` then touched it before its declaration ran: every host restart that held a terminal or
+ * a dev server crashed with "Cannot read properties of undefined (reading 'pushTerminal')", five
+ * times, until the keeper gave up (found 2026-10-05 by scripts/keeper-children-integration.mjs).
+ * Until the server is up nobody is connected, so a frame is simply not sent; the services keep
+ * their own scrollback, which a screen reads when it attaches.
+ */
+let serverUp = false
+const toScreens = (f: Parameters<HostServer['pushTerminal']>[0]) => {
+  if (serverUp) server.pushTerminal(f)
+}
+const terminals = new TerminalService(toScreens, held?.ptys)
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
-const commandRuns = new CommandRunner((f) => server.pushTerminal(f), held?.ptys)
+const commandRuns = new CommandRunner(toScreens, held?.ptys)
 if (held) {
   terminals.adopt(held.kept.terminals)
   commandRuns.adopt(held.kept.runs)
@@ -405,6 +419,7 @@ const server: HostServer = new HostServer({
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })
+serverUp = true
 
 let port: number
 try {
