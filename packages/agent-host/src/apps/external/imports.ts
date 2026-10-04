@@ -69,8 +69,13 @@ export type ImportSource = { kind: 'path'; path: string; label: string } | { kin
  * accepted. Plain http can be altered in transit, and any other scheme is something we do not know
  * how to open. A path must be absolute — a relative path's meaning would depend on the host's
  * working folder.
+ *
+ * A Windows drive path (`C:\Users\me\notes`) looks like a URL scheme (`C:`) to the scheme check
+ * below, which refused every path on Windows as an unknown scheme (#14). A single letter followed
+ * by `:\` or `:/` is a drive, never a scheme; whether it is absolute is still `isAbs`'s question
+ * (a parameter so the Windows rule can be tested on any OS).
  */
-export function classifySource(raw: string): ImportSource {
+export function classifySource(raw: string, isAbs: (path: string) => boolean = isAbsolute): ImportSource {
   const s = raw.trim()
   if (!s) throw new ImportRefused('Choose a folder, a .zip file, or an https link to a .zip')
   if (s.includes('\0')) throw new ImportRefused('The source contains a NUL character')
@@ -94,8 +99,9 @@ export function classifySource(raw: string): ImportSource {
     }
     return { kind: 'path', path, label: path }
   }
-  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) throw new ImportRefused(`Only folders and .zip files on this machine, or https links, can be imported: ${s}`)
-  if (!isAbsolute(s)) throw new ImportRefused(`Use the full path of the folder or .zip file: ${s}`)
+  const drive = /^[a-z]:[\\/]/i.test(s)
+  if (!drive && /^[a-z][a-z0-9+.-]*:/i.test(s)) throw new ImportRefused(`Only folders and .zip files on this machine, or https links, can be imported: ${s}`)
+  if (!isAbs(s)) throw new ImportRefused(`Use the full path of the folder or .zip file: ${s}`)
   return { kind: 'path', path: s, label: s }
 }
 
