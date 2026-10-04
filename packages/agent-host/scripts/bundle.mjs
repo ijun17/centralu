@@ -9,11 +9,11 @@
  * Output (apps/desktop/src-tauri/resources/host/):
  *   main.mjs                     — the bundled host (only better-sqlite3 kept external)
  *   schema.sql                   — the store looks for this next to the bundle
- *   codex-orchestrator-bridge.mjs — codex launches this directly with node (not bundled)
+ *   codex-orchestrator-bridge.mjs — codex launches this directly with node (bundled with `ws` inside)
  *   node_modules/better-sqlite3  — the native addon (only the files needed)
  */
 import { build } from 'esbuild'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, cpSync, mkdirSync, rmSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -70,14 +70,43 @@ await build({
 // 2) Bundle the schema — store.ts checks next to the build output first
 cpSync(join(ROOT, 'packages/protocol/src/schema/schema.sql'), join(OUT, 'schema.sql'))
 /*
- * The stdio bridge for the Codex orchestrator.
- * Since codex launches it directly with `node <path>`, it is kept **as a plain file** rather than
- * being bundled.
+ * The stdio bridge for the Codex orchestrator. Codex launches it directly with `node <path>`, so it
+ * stays one plain `.mjs` file next to the host, but it is **bundled**, with `ws` inside.
+ *
+ * It used to be copied as is, and its `import { WebSocket } from 'ws'` then had nothing to resolve
+ * against: the host folder carries `node_modules` only for the two native addons. Measured while
+ * building #280 step 3: `node resources/host/codex-orchestrator-bridge.mjs` died at once with
+ * `ERR_MODULE_NOT_FOUND: Cannot find package 'ws'`. From source it worked, because the workspace's
+ * `node_modules` was up the tree, which is why nothing caught it; in the app (and in the keeper's
+ * per-build copy) every Codex orchestrator tool call would have failed to start its bridge.
+ * `ws`'s two optional speed-ups are left out: it loads them in a try/catch and runs without them.
  */
-cpSync(
-  join(ROOT, 'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs'),
-  join(OUT, 'codex-orchestrator-bridge.mjs'),
-)
+await build({
+  entryPoints: [join(ROOT, 'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs')],
+  outfile: join(OUT, 'codex-orchestrator-bridge.mjs'),
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  format: 'esm',
+  external: ['bufferutil', 'utf-8-validate'],
+  banner: {
+    js: "import { createRequire as __cr } from 'node:module';const require = __cr(import.meta.url);",
+  },
+  logLevel: 'warning',
+})
+// The bridge has to start from the bundle alone: run it with no environment and expect its own
+// "required" message, not a module error
+{
+  const r = spawnSync(process.execPath, [join(OUT, 'codex-orchestrator-bridge.mjs')], {
+    cwd: OUT,
+    env: { PATH: process.env.PATH ?? '' },
+    encoding: 'utf8',
+    timeout: 10_000,
+  })
+  if (!/are required/.test(r.stderr ?? '')) {
+    throw new Error(`the bundled Codex bridge does not start on its own:\n${r.stderr}`)
+  }
+}
 /*
  * The app template (M4 C-1) — the scaffold expanded when a new app is created. `scaffold.ts` looks
  * for it next to the build output (`app-template/`).
