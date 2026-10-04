@@ -392,6 +392,15 @@ class CodexSession implements SessionHandle {
         res = await this.client.request<Record<string, unknown>>('thread/resume', {
           threadId: this.opts.resumeExternalId,
           /*
+           * Metadata only, not the whole history (#342). Nothing here reads the history the resume used to return
+           * except the running turn's id, and that has its own one-turn query below. Measured (codex-cli 0.160.0,
+           * gpt-5.6-luna, a five-turn scratch thread, 2026-10-05): 1,206 KB / 761 ms and a `deprecationNotice`
+           * ("Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`…") that #304 put
+           * in the conversation, against 1.9 KB / 351 ms and no notice. One long thread's answer was 23 MB
+           * (client.ts). A Codex that predates the flag ignores it and answers with the turns, as before.
+           */
+          excludeTurns: true,
+          /*
            * Verbosity has to be carried through on resume too (#54). turn/start has no place for
            * it (unlike effort), so these two spots where the thread is started are the only
            * place — leaving it out here becomes the quiet kind of loss where settings reset every
@@ -453,8 +462,8 @@ class CodexSession implements SessionHandle {
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       this.threadSettings = threadSettingsOf(res)
-      // An adopted thread may be mid-turn: Stop needs that turn's id (measured: `thread.turns` lists it as inProgress)
-      if (adopted) this.turnId ??= runningTurnOf(res)
+      // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
+      if (adopted) this.turnId ??= runningTurnOf(res) ?? (await this.latestRunningTurn(res))
       /*
        * The goal is a live field (2026-09-07) — for the badge to stay accurate after a restart,
        * we ask again on resume. Older codex has no such method: a failure lies down quietly as
@@ -1264,6 +1273,30 @@ class CodexSession implements SessionHandle {
   }
 
   /**
+   * The turn an adopted thread is still running, asked for on its own (#342): a resume with `excludeTurns` answers
+   * with no turns. Measured (codex-cli 0.160.0, 2026-10-05), a second `thread/resume` on the same connection while a
+   * turn ran said `status: {type: 'active'}` and `turns: []`; `thread/turns/list` with `limit: 1`, newest first and
+   * `itemsView: 'notLoaded'` named that turn as `inProgress` in 0.5 KB. Asked only for an active thread. A Codex
+   * without the method answers with the turns in the resume itself, which `runningTurnOf` read first.
+   */
+  private async latestRunningTurn(res: Record<string, unknown>): Promise<string | null> {
+    const status = (res.thread as { status?: { type?: unknown } } | undefined)?.status
+    if (status?.type !== 'active' || !this.threadId) return null
+    try {
+      const page = await this.client.request<{ data?: unknown }>('thread/turns/list', {
+        threadId: this.threadId,
+        limit: 1,
+        sortDirection: 'desc',
+        itemsView: 'notLoaded',
+      })
+      return runningTurnOf({ thread: { turns: page?.data } })
+    } catch (err) {
+      console.error(`[codex] ${this.sessionId.slice(0, 8)} could not ask for the running turn: ${(err as Error).message}`)
+      return null
+    }
+  }
+
+  /**
    * Lets go of the app-server without closing it (#280 step 2). No deny for a waiting approval —
    * the next host's `thread/resume` gets it re-sent under the same id — and no EOF, which would make
    * codex exit. The bridge processes codex started for this thread stay with codex.
@@ -1295,7 +1328,7 @@ function appApprovalDetail(server: string, message: unknown, meta: unknown): App
   return { kind: 'other', raw: `${server} · ${title}${params}` }
 }
 
-/** The turn `thread/resume` reports as still running, if any (`thread.turns[].status === 'inProgress'`) */
+/** The turn reported as still running, if any (`thread.turns[].status === 'inProgress'`) — a resume's, or a turns page's */
 function runningTurnOf(res: Record<string, unknown> | undefined): string | null {
   const turns = (res?.thread as { turns?: unknown } | undefined)?.turns
   if (!Array.isArray(turns)) return null
@@ -1416,7 +1449,8 @@ export class CodexAdapter implements AgentAdapter {
         capabilities: null,
       })
       client.notify('initialized')
-      const res = await client.request<Record<string, unknown>>('thread/fork', { threadId: externalId })
+      // Only the new id is read: the forked history stays with Codex (#342, the same deprecation as resume's)
+      const res = await client.request<Record<string, unknown>>('thread/fork', { threadId: externalId, excludeTurns: true })
       const forked = threadIdOf(res)
       // Claiming a fork happened without giving a new id leaves nothing to continue from — falling back to the original silently would just be locked again
       if (!forked) throw new Error('codex forked the conversation but returned no thread id')
@@ -1493,7 +1527,9 @@ export class CodexAdapter implements AgentAdapter {
      * thread took 3 seconds in the CLI, 13+ seconds on our path. We cannot remove the cost of
      * thread/resume re-reading the whole file, but there is no reason to make the person pay that
      * cost in front of a "Waking…" screen — resume already knows the thread id, so handing out the
-     * handle early loses nothing. send gets queued on ready).
+     * handle early loses nothing. send gets queued on ready). Since #342 the answer no longer carries
+     * the history (`excludeTurns`); what Codex itself spends loading a long rollout was not measured
+     * again, so the early handle stays.
      *
      * We do wait synchronously for 3 seconds, though: a lock error ("already has an active writer")
      * arrives immediately (measured ~0.3s), so it has to be thrown within this window for the
