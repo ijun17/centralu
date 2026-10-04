@@ -71,6 +71,7 @@ centralu/
 │        └─ mcp/                # MCP server for the orchestrator (M3)
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination)
+├─ .centralu/apps/              # project apps committed with this repository (apps.md §2): project-board
 └─ tooling/                     # eslint config, dependency-cruiser rules, shared tsconfig
 ```
 

@@ -1,0 +1,8 @@
+{
+  "owner": "ijun17",
+  "number": 1,
+  "repository": "ijun17/centralu",
+  "fields": { "status": "Status", "priority": "Priority", "area": "Area" },
+  "decisionStatus": "Needs decision",
+  "cacheSeconds": 30
+}

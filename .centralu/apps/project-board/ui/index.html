@@ -1,0 +1,354 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Project board</title>
+    <style>
+      /*
+       * Centralu's palette, achromatic: brightness is urgency. The host sends its colours under the
+       * MCP Apps variable names (applied below); these fallbacks are the same values.
+       */
+      :root {
+        --bg: var(--color-background-primary, #141414);
+        --surface: var(--color-background-secondary, #1d1d1d);
+        --raised: var(--color-background-tertiary, #353535);
+        --ink: var(--color-text-primary, #e9e9e9);
+        --ink-2: var(--color-text-secondary, #909090);
+        --ink-3: var(--color-text-tertiary, #5c5c5c);
+        --edge: var(--color-border-primary, #292929);
+        --beacon: #ffffff;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        font: 13px/1.45 var(--font-sans, -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
+        color: var(--ink);
+        background: transparent;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 12px 16px 10px;
+        border-bottom: 1px solid var(--edge);
+      }
+      h1 { font-size: 14px; font-weight: 600; margin: 0; }
+      h1 a { color: inherit; text-decoration: none; }
+      h1 a:hover { text-decoration: underline; text-decoration-color: var(--ink-3); }
+      .sub { color: var(--ink-3); }
+      .spacer { flex: 1; }
+      select, button {
+        font: inherit;
+        color: var(--ink);
+        background: var(--surface);
+        border: 1px solid var(--edge);
+        border-radius: 6px;
+        padding: 3px 8px;
+      }
+      button { cursor: pointer; }
+      select:hover, button:hover { border-color: var(--raised); }
+      button:disabled { color: var(--ink-3); cursor: default; }
+      :focus-visible { outline: 1px solid var(--ink-2); outline-offset: 1px; }
+      .stamp { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+      .notice {
+        margin: 12px 16px 0;
+        padding: 10px 12px;
+        border: 1px solid var(--raised);
+        border-radius: 8px;
+        background: var(--surface);
+        white-space: pre-wrap;
+      }
+      .notice strong { color: var(--beacon); font-weight: 600; }
+      .notice button { margin-left: 8px; }
+      .notice code { font-family: var(--font-mono, ui-monospace, monospace); }
+
+      .board {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        gap: 12px;
+        padding: 12px 16px 16px;
+        overflow-x: auto;
+      }
+      .column {
+        flex: 1 0 210px;
+        max-width: 340px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border: 1px solid transparent;
+        border-radius: 10px;
+      }
+      .column.drop { border-color: var(--ink-3); }
+      /* The decision column is what waits on the owner: first, framed, and in the one pure white. */
+      .column.decision { border-color: var(--raised); background: var(--surface); }
+      .column.decision .col-head { color: var(--beacon); }
+      .col-head {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 8px 10px 6px;
+        color: var(--ink-2);
+        font-weight: 600;
+      }
+      .col-head .mark { width: 1em; text-align: center; }
+      .col-head .count { color: var(--ink-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+      .cards { flex: 1; overflow-y: auto; padding: 0 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+      .empty { color: var(--ink-3); padding: 4px 4px 8px; }
+
+      .card {
+        background: var(--bg);
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+        padding: 8px 10px;
+        cursor: grab;
+      }
+      .column:not(.decision) .card { background: var(--surface); }
+      .card:hover { border-color: var(--raised); }
+      .card.saving { opacity: 0.5; }
+      .card .title { color: var(--ink); text-decoration: none; display: block; overflow-wrap: anywhere; }
+      .card .title:hover { text-decoration: underline; text-decoration-color: var(--ink-3); }
+      .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; color: var(--ink-2); }
+      .num { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: var(--ink-2); }
+      .tag { border: 1px solid var(--edge); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+      .p-High { color: var(--ink); border-color: var(--ink-3); }
+      .p-Medium { color: var(--ink-2); }
+      .p-Low { color: var(--ink-3); }
+      .move { margin-left: auto; font-size: 12px; padding: 1px 4px; color: var(--ink-2); max-width: 118px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1><a id="title" href="#">Project board</a></h1>
+      <span class="sub" id="sub"></span>
+      <span class="spacer"></span>
+      <select id="area" aria-label="Filter by Area"><option value="">All areas</option></select>
+      <select id="priority" aria-label="Filter by Priority"><option value="">All priorities</option></select>
+      <span class="stamp" id="stamp"></span>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+    <div id="notice" hidden></div>
+    <main class="board" id="board" aria-live="polite"></main>
+
+    <!-- Centralu replaces this tag with the MCP App bridge (runtime/mcp-app.js). Keep it. -->
+    <script src="centralu:mcp-app.js"></script>
+    <script>
+      // The screen holds no board of its own: it draws what the server read from GitHub, and asks
+      // again when Centralu says the app's state changed (someone moved an item).
+      const app = new McpApp.App({ name: 'project-board', version: '0.1.0' })
+      const $ = (id) => document.getElementById(id)
+      const MARK = { 'Needs decision': '●', 'In progress': '◆', 'In review': '◆', 'On hold': '▬', Done: '○' }
+
+      let state = null // the last structuredContent from show
+      const saving = new Set() // item ids with a write in flight
+      let notice = null // { strong, text }
+
+      function el(tag, props = {}, ...children) {
+        const n = document.createElement(tag)
+        for (const [k, v] of Object.entries(props)) {
+          if (k === 'class') n.className = v
+          else if (k.startsWith('on')) n.addEventListener(k.slice(2), v)
+          else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v === true ? '' : v)
+        }
+        for (const c of children) if (c !== null && c !== undefined) n.append(c)
+        return n
+      }
+      // A 24-hour local clock, so an English label never carries another language's AM/PM
+      const clock = (iso) => {
+        const d = new Date(iso)
+        return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
+      }
+      const textOf = (r) => (r?.content ?? []).map((c) => c.text ?? '').join('\n')
+      const open = (url) => url && app.openLink({ url }).catch(() => {})
+
+      function fillFilter(select, values, label) {
+        const keep = select.value
+        select.replaceChildren(el('option', { value: '' }, label), ...values.map((v) => el('option', { value: v }, v)))
+        select.value = values.includes(keep) ? keep : ''
+      }
+
+      function renderNotice() {
+        const box = $('notice')
+        if (!notice) {
+          box.hidden = true
+          box.replaceChildren()
+          return
+        }
+        box.hidden = false
+        box.className = 'notice'
+        box.replaceChildren(
+          ...[
+            el('strong', {}, notice.strong),
+            ' ',
+            notice.text,
+            notice.dismiss ? el('button', { type: 'button', onclick: () => ((notice = null), renderNotice()) }, 'Dismiss') : null,
+          ].filter((c) => c !== null),
+        )
+      }
+
+      function render() {
+        renderNotice()
+        const board = $('board')
+        if (!state || !state.ok) {
+          board.replaceChildren()
+          return
+        }
+        $('title').textContent = state.project.title
+        $('title').href = state.project.url
+        $('sub').textContent = `GitHub Project #${state.project.number} of ${state.project.owner}`
+        $('stamp').textContent = `Read from GitHub at ${clock(state.fetchedAt)}`
+        fillFilter($('area'), state.options.area, 'All areas')
+        fillFilter($('priority'), state.options.priority, 'All priorities')
+        const area = $('area').value
+        const priority = $('priority').value
+        const visible = state.items.filter((i) => (!area || i.area === area) && (!priority || i.priority === priority))
+        const rank = Object.fromEntries(state.options.priority.map((p, n) => [p, n]))
+        const cols = [...state.columns, ...(visible.some((i) => !i.status) ? [null] : [])]
+        board.replaceChildren(
+          ...cols.map((status) => {
+            const items = visible
+              .filter((i) => i.status === status)
+              .sort((a, b) => (rank[a.priority] ?? 99) - (rank[b.priority] ?? 99) || (b.number ?? 0) - (a.number ?? 0))
+            return column(status, items)
+          }),
+        )
+      }
+
+      function column(status, items) {
+        const col = el(
+          'section',
+          { class: `column${status === state.decisionStatus ? ' decision' : ''}`, 'data-status': status ?? '', 'aria-label': status ?? 'No status' },
+          el(
+            'div',
+            { class: 'col-head' },
+            el('span', { class: 'mark', 'aria-hidden': 'true' }, MARK[status] ?? ''),
+            el('span', {}, status ?? 'No status'),
+            el('span', { class: 'count' }, String(items.length)),
+          ),
+          el('div', { class: 'cards' }, ...(items.length ? items.map(card) : [el('div', { class: 'empty' }, 'No items')])),
+        )
+        if (status) {
+          col.addEventListener('dragover', (e) => {
+            if (!e.dataTransfer.types.includes('text/x-item')) return
+            e.preventDefault()
+            col.classList.add('drop')
+          })
+          col.addEventListener('dragleave', (e) => {
+            if (!col.contains(e.relatedTarget)) col.classList.remove('drop')
+          })
+          col.addEventListener('drop', (e) => {
+            e.preventDefault()
+            col.classList.remove('drop')
+            const id = e.dataTransfer.getData('text/x-item')
+            const item = state.items.find((i) => i.itemId === id)
+            if (item && item.status !== status) move(item, status)
+          })
+        }
+        return col
+      }
+
+      function card(item) {
+        const ref = item.number == null ? 'Draft' : `#${item.number}`
+        const kind = item.type === 'pull' ? (item.draft ? 'Draft PR' : 'PR') : null
+        const movable = item.number != null && !saving.has(item.itemId)
+        const select = el(
+          'select',
+          { class: 'move', 'aria-label': `Status of ${ref}`, disabled: !movable, title: movable ? 'Change status' : 'Draft items are moved on GitHub' },
+          ...state.columns.map((s) => el('option', { value: s, selected: s === item.status }, s)),
+        )
+        if (!item.status) select.prepend(el('option', { value: '', selected: true }, 'No status'))
+        select.addEventListener('change', () => move(item, select.value))
+        const node = el(
+          'article',
+          { class: `card${saving.has(item.itemId) ? ' saving' : ''}`, draggable: movable ? 'true' : 'false', 'data-number': item.number ?? '' },
+          item.url
+            ? el('a', { class: 'title', href: item.url, onclick: (e) => (e.preventDefault(), open(item.url)) }, item.title)
+            : el('span', { class: 'title' }, item.title),
+          el(
+            'div',
+            { class: 'meta' },
+            el('span', { class: 'num' }, ref),
+            kind ? el('span', { class: 'tag' }, kind) : null,
+            item.priority ? el('span', { class: `tag p-${item.priority}` }, item.priority) : null,
+            item.area ? el('span', { class: 'tag' }, item.area) : null,
+            saving.has(item.itemId) ? el('span', {}, 'Saving…') : select,
+          ),
+        )
+        node.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/x-item', item.itemId)
+          e.dataTransfer.effectAllowed = 'move'
+        })
+        return node
+      }
+
+      async function move(item, status) {
+        saving.add(item.itemId)
+        render()
+        try {
+          const r = await app.callServerTool({ name: 'set_item_fields', arguments: { item: `${item.repository}#${item.number}`, status } })
+          if (r?.isError) notice = { strong: `Could not move #${item.number}.`, text: textOf(r), dismiss: true }
+        } catch (e) {
+          notice = { strong: `Could not move #${item.number}.`, text: String(e?.message ?? e), dismiss: true }
+        } finally {
+          saving.delete(item.itemId)
+        }
+        await load(false)
+      }
+
+      function show(result) {
+        const sc = result?.structuredContent
+        if (!sc) {
+          notice = { strong: 'The board could not be read.', text: textOf(result) || 'The app gave no answer.' }
+          state = null
+        } else if (!sc.ok) {
+          // Not an empty board: say why there is no board.
+          notice = { strong: 'No board: it could not be read from GitHub.', text: sc.error?.message ?? textOf(result) }
+          state = null
+          $('stamp').textContent = ''
+        } else {
+          if (notice && !notice.dismiss) notice = null
+          state = sc
+        }
+        render()
+      }
+
+      async function load(refresh) {
+        $('refresh').disabled = true
+        try {
+          show(await app.callServerTool({ name: 'show', arguments: refresh ? { refresh: true } : {} }))
+        } catch (e) {
+          notice = { strong: 'The board could not be read.', text: String(e?.message ?? e) }
+          state = null
+          render()
+        } finally {
+          $('refresh').disabled = false
+        }
+      }
+
+      // Match the host's theme and colours (MCP Apps host context).
+      const theme = (ctx) => {
+        if (ctx?.theme) document.documentElement.style.colorScheme = ctx.theme
+        for (const [k, v] of Object.entries(ctx?.styles?.variables ?? {})) if (v) document.documentElement.style.setProperty(k, v)
+      }
+      app.onhostcontextchanged = theme
+      app.ontoolresult = (params) => show(params)
+      // Centralu's own notification (not part of the MCP Apps standard): the app's state changed.
+      app.fallbackNotificationHandler = async (n) => {
+        if (n.method === 'centralu/notifications/changed') await load(false)
+      }
+      $('refresh').onclick = () => load(true)
+      $('area').onchange = render
+      $('priority').onchange = render
+      app.connect().then(() => {
+        theme(app.getHostContext())
+        if (!state) return load(false)
+      })
+    </script>
+  </body>
+</html>
