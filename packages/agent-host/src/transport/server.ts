@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http'
 import {
   PROTOCOL_VERSION,
   ProtocolErrorCode,
+  type HostBuild,
   type NormalizedEvent,
   type ProtocolError,
   parseClientFrame,
@@ -78,6 +79,8 @@ export type HostServerOptions = {
   replayBudgetBytes?: number
   /** How long a socket gets to finish the close handshake on shutdown before it is cut (#82) */
   closeGraceMs?: number
+  /** Which build this host is, sent in every `hello_ok` (#280) */
+  build?: HostBuild
 }
 
 /**
@@ -451,6 +454,7 @@ export class HostServer {
         resyncRequired,
         currentSeq: this.log.currentSeq,
         streamEpoch: this.log.streamEpoch,
+        ...(this.opts.build ? { build: this.opts.build } : {}),
       })
     const window = this.log.since(afterSeq, streamEpoch)
     const frames = window.events.map((e) => JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))

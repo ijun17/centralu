@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
-import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
+import { PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, parseAllowedOrigins, type HostServerOptions } from './server.js'
 import { sameSecret, type HttpRoute } from './http.js'
 
@@ -133,6 +133,19 @@ describe('handshake', () => {
     c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
     await c.wait(() => c.frames.length > 0)
     expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false })
+    c.ws.close()
+  })
+
+  /** A window of another build can attach to this host through the keeper, and must be able to tell (#280) */
+  it('hello_ok says which build the host is and where it came from', async () => {
+    const build = { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, bundlePath: '/Applications/Centralu.app' }
+    const { port } = await start(undefined, { build })
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', build })
+    expect(parseServerFrame(c.frames[0]).success).toBe(true)
     c.ws.close()
   })
 

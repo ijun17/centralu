@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
+import { hostBuild, startActivityReport } from './keeper-link.js'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { ViewHost } from './views/view-host.js'
@@ -38,6 +39,16 @@ import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './lo
  */
 declare const __CC_BUILD__: string | undefined
 const BUILD = typeof __CC_BUILD__ === 'string' ? __CC_BUILD__ : 'dev'
+
+/*
+ * What the keeper hands over (#280, keeper-link.ts), read once and then taken out of the
+ * environment: everything this host spawns (agents, terminals, commands) inherits it otherwise,
+ * and none of them has any use for it.
+ */
+const underKeeper = process.env.CC_KEEPER === '1'
+const keeperSource = process.env.CC_HOST_SOURCE
+delete process.env.CC_KEEPER
+delete process.env.CC_HOST_SOURCE
 
 const { values } = parseArgs({
   options: {
@@ -291,6 +302,8 @@ const server: HostServer = new HostServer({
   onRpc: createRpcHandler(mgr, adapters, { terminals, updates, commands: commandRuns, externalApps, views, inlineViews }),
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
+  // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)
+  build: hostBuild(BUILD, keeperSource),
 })
 
 let port: number
@@ -312,6 +325,23 @@ console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
  * this app open for days at a time, the recurring check afterward is still needed.
  */
 updates.start()
+
+/*
+ * The activity report the keeper's idle rule reads (#280, keeper-link.ts). Only under a keeper:
+ * stdout is otherwise the ready line's alone.
+ */
+const stopActivity =
+  underKeeper
+    ? startActivityReport(
+        () => ({
+          sessions: mgr.listSessions(),
+          terminals: terminals.liveCount(),
+          commandRuns: commandRuns.liveCount(),
+        }),
+        // The same stream as the ready line, so the two keep their order
+        (line) => void process.stdout.write(`${line}\n`),
+      )
+    : () => {}
 
 /**
  * A single rejection does not kill this process.
@@ -357,6 +387,7 @@ process.on('uncaughtException', (err) => {
 
 const shutdown = async () => {
   updates.stop()
+  stopActivity()
   /*
    * **The PTY is cut off first.** This used to come after awaiting mgr.disposeAll(), but the Tauri
    * supervisor's budget is 3 seconds, and if this does not finish within that, the host gets

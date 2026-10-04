@@ -148,6 +148,13 @@ export class CommandRunner {
     }
   }
 
+  /** Command runs still running — counted by the keeper's idle rule (#280, keeper-link.ts) */
+  liveCount(): number {
+    let n = 0
+    for (const e of this.entries.values()) if (e.pty) n++
+    return n
+  }
+
   disposeAll(): void {
     // the app is shutting down — there is no process left to wait out a grace period for. An orphaned dev server is the worst case, so this goes straight to SIGKILL
     for (const e of this.entries.values()) if (e.pty) killTree(e.pty, 'SIGKILL')

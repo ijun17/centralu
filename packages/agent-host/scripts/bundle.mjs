@@ -190,11 +190,25 @@ if (existsSync(helper)) {
  * which is the case that actually came up — a `.app` had to be identified without launching
  * it, and the fallback was matching binary mtimes against commit times. That is a guess.
  */
+/*
+ * `protocolVersion` is the WebSocket protocol the bundled host speaks. The keeper (#280) records
+ * it for each host it runs, so a window can see that a running host from another build speaks a
+ * different protocol before it tries to talk to it. Read from the source rather than imported:
+ * this script runs on plain Node, and the constant lives in TypeScript.
+ */
+function protocolVersion() {
+  const src = readFileSync(join(ROOT, 'packages/protocol/src/envelope.ts'), 'utf8')
+  const m = /export const PROTOCOL_VERSION = (\d+)/.exec(src)
+  if (!m) throw new Error('could not find PROTOCOL_VERSION in packages/protocol/src/envelope.ts')
+  return Number(m[1])
+}
+
 writeFileSync(
   join(OUT, 'bundle-info.json'),
   JSON.stringify(
     {
       commit: buildId(),
+      protocolVersion: protocolVersion(),
       builtAt: new Date().toISOString(),
       runtime: 'system-node',
       platform: process.platform,

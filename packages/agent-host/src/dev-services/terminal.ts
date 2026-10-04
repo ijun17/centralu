@@ -158,6 +158,13 @@ export class TerminalService {
    * unchanged — the exact symptom of a port still held after the app was closed (measured
    * 2026-09-07).
    */
+  /** Open terminals with a live shell — counted by the keeper's idle rule (#280, keeper-link.ts) */
+  liveCount(): number {
+    let n = 0
+    for (const e of this.byId.values()) if (e.pty) n++
+    return n
+  }
+
   disposeAll(): void {
     for (const e of this.byId.values()) if (e.pty) killTree(e.pty, 'SIGKILL')
     this.byCwd.clear()
