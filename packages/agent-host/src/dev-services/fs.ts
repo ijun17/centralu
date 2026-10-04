@@ -376,7 +376,10 @@ export async function copyTree(
    */
   if (!existed) await rm(dst, { recursive: true, force: true })
   const { cpSync } = await import('node:fs')
-  cpSync(src, dst, { recursive: true })
+  // verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
+  // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,
+  // 2026-10-04). macOS took the clone path above, which keeps links as they are.
+  cpSync(src, dst, { recursive: true, verbatimSymlinks: true })
 }
 
 /** A macOS clonefile copy. Returns false wherever it cannot happen (a different volume, not APFS, not macOS) */
