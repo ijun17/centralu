@@ -211,6 +211,51 @@ export function backgroundTasksTests(): void {
       await expect(list).toHaveCount(0)
     })
 
+    /*
+     * The owner's second screenshot (0.1.0-beta.9): in a narrow panel the working row's background notice squeezed
+     * the status label onto three lines and the activity dot into a sliver. The notice is what gives way.
+     */
+    test('in a narrow grid panel the working row keeps the dot, the label and the elapsed time whole, and the notice gives way', async ({ page }) => {
+      await page.setViewportSize({ width: 1100, height: 760 })
+      await setup(page, ['/tmp/alpha'])
+      const ids = [await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha')]
+      const id = ids[2]!
+      await emit(page, id, { type: 'tool_call', callId: AGENT.parentCallId, summary: { tool: 'Agent', title: AGENT.description, readOnly: true, paths: [] } })
+      await emit(page, id, { type: 'background_tasks', live: [AGENT, SHELL] })
+      await expect.poll(() => page.evaluate((sid) => (window as any).__store.getState().sessions[sid]?.state, id)).toBe('working')
+      await page.evaluate(([sid, all]) => {
+        const store = (window as any).__store
+        store.setState((s: any) => ({
+          sessions: { ...s.sessions, [sid]: { ...s.sessions[sid], thinkingTokens: 50 } },
+          workingSince: { ...s.workingSince, [sid]: Date.now() - 17_000 },
+        }))
+        store.getState().setGridPanels(all.map((sessionId) => ({ kind: 'session', sessionId })))
+      }, [id, ids] as const)
+      await page.getByTestId('grid-button').click()
+
+      const row = page.getByTestId(`grid-panel-${id}`).getByTestId('activity-row')
+      const label = row.getByTestId('activity-label')
+      await expect(label).toHaveText('Thinking · ~50 tokens')
+      await expect(row.getByTestId('activity-elapsed')).toHaveText(/^\d+s$/)
+      for (const [name, el] of [
+        ['label', label],
+        ['elapsed time', row.getByTestId('activity-elapsed')],
+      ] as const) {
+        const lines = await el.evaluate((node) => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight)))
+        expect.soft(lines, `lines the ${name} takes`).toBe(1)
+      }
+      const dot = (await row.getByTestId('activity-dot').boundingBox())!
+      expect.soft({ width: dot.width, height: dot.height }, "the activity dot's size").toEqual({ width: 6, height: 6 })
+
+      // The notice is cut short, its whole text on hover, and Stop is still whole and clickable
+      const note = row.getByTestId('interrupt-background-note')
+      const full = 'Also stops 1 background task · 1 background task keeps running'
+      await expect(note).toHaveText(full)
+      await expect(note).toHaveAttribute('title', full)
+      expect(await note.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+      await expectTakesPointer(row.getByTestId('activity-interrupt'))
+    })
+
     test('the control rail lists a session whose turn ended while its background work runs, with the mark', async ({ page }) => {
       const id = await start(page)
       await emit(page, id, { type: 'turn_complete' })

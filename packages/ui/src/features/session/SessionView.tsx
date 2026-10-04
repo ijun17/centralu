@@ -2304,14 +2304,20 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
           ))}
         </ul>
       )}
+      {/*
+        What gives way in a narrow panel is the background notice, and only it (0.1.0-beta.9, the owner's screenshot):
+        with every part free to shrink, the notice's long line squeezed the label onto three lines and the dot into a
+        sliver. The dot, the label, the elapsed time and Stop keep their size; the notice takes what is left, cut short
+        with its whole text on hover, down to nothing before anything else wraps.
+      */}
       <div className="flex items-center gap-2">
-        <span className="size-1.5 animate-pulse rounded-full bg-ink" aria-hidden />
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-ink" aria-hidden data-testid="activity-dot" />
         {/*
         Not the same kind of "waiting". Compacting has been measured to take up to 39 seconds,
         and with the same wording, someone waiting has no way to tell whether it has stopped or
         is just taking a while.
       */}
-        <span className="text-sm text-ink-muted" data-testid="activity-label">
+        <span className="shrink-0 whitespace-nowrap text-sm text-ink-muted" data-testid="activity-label">
           {activity === 'compacting'
             ? 'Compacting context'
             : activity === 'reviewing'
@@ -2325,12 +2331,16 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
         </span>
         {/* Showing a number for a one-second wait would just be noise */}
         {seconds >= 2 && (
-          <span className="readout text-xs text-ink-faint" data-testid="activity-elapsed">
+          <span className="readout shrink-0 whitespace-nowrap text-xs text-ink-faint" data-testid="activity-elapsed">
             {formatElapsed(seconds)}
           </span>
         )}
         {notice && (
-          <span className="ml-auto truncate text-xs text-ink-muted" data-testid="interrupt-background-note">
+          <span
+            className="min-w-0 flex-1 truncate text-right text-xs text-ink-muted"
+            title={notice}
+            data-testid="interrupt-background-note"
+          >
             {notice}
           </span>
         )}
