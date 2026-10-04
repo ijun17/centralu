@@ -213,6 +213,29 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 
+  # `pnpm verify` on every pull request (2026-10-05). Until this job existed the full suite ran
+  # only inside release.yml, so a change merged with a partial local run surfaced in the release
+  # rehearsal instead: #333 renamed the Windows package, and tooling/release-workflow.test.ts,
+  # which derived the old name, failed the 0.1.0-beta.9 rehearsal on all three Unix platforms.
+  # Linux, because it is also where the Unix-only surprises live (dash as sh, relative symlinks,
+  # Node 22's EventTarget all failed there first).
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm verify
+
   # The TypeScript suite on Windows (#14, phase W1). Until this job existed `pnpm verify` ran only
   # inside release.yml, on Linux and macOS, so nothing ever told us what breaks on Windows.
   #
