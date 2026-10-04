@@ -324,7 +324,10 @@ A summary; the reasoning is in security-boundaries.md, "App views".
 
 - The UI asks the host for a frame address (`apps.viewFrame`). The host serves a **sandbox proxy**
   page on its loopback port, behind a secret made at every launch. The proxy creates the inner frame
-  with its `sandbox` set first, then gives it the app's HTML through `srcdoc`.
+  with its `sandbox` set first, then gives it the app's HTML through `srcdoc`. Under the keeper the
+  address names the front door's port and a secret derived from the keeper's token, and open
+  instances are handed to the next host, so a view stays as it was across a build switch
+  ([agent-host.md](agent-host.md) §4.2).
 - **Opaque origin** (default): the inner frame gets `allow-scripts allow-forms` only. No browser
   storage, so no two views share any. **Per-app origin** (`view.origin: "app"`): the inner frame is
   `allow-same-origin` on `http://127.0.0.1:<port>`, a port fixed for that (project, app) and never

@@ -418,15 +418,24 @@ A view is an app's HTML running inside the desktop window, isolated in layers. B
 
 **The proxy sits behind a per-launch secret.** Every HTTP route on the host's loopback port is
 behind a 32-byte random path segment made at each launch, a different value from the WebSocket
-token (`transport/http.ts`). Without it, or with a wrong one, a request gets the same 404 as a path
+token (`transport/http.ts`). Under the keeper the segment is instead derived from the keeper's token
+(HMAC-SHA256 under a fixed label, base64url, 43 characters; `deriveHttpSecret`), so that every host
+the keeper starts has the same one and a view's address survives a build switch (#280 step 4). It
+is still a different value from the token, and one-way from it: a leaked view address gives nothing
+toward the RPC door. The other direction was never a boundary, since whoever holds the token can
+already ask `apps.viewFrame` for an address carrying the secret. It lives as long as the keeper's
+token, and a keeper restart changes both. Without it, or with a wrong one, a request gets the same 404 as a path
 that does not exist, in status, body and headers (77 method and path combinations in #150;
 `server.test.ts` "reaching it without the secret is nothing but 404, indistinguishable between a
 wrong secret and a nonexistent route"). The comparison is constant-time over hashes. Every
 response sends `Referrer-Policy: no-referrer`, so a view cannot read the secret from its referrer.
 A frame address is given only to a parent on the WebSocket origin allowlist (`view-host.ts`
 `frame`; "gives no address to a parent origin outside the allow list, and 404s even when the
-address is tampered with"). The desktop CSP opens frames to `http://127.0.0.1:*` and nothing wider
-(`tooling/desktop-csp.test.ts`): the port changes every launch, and the secret locks the path.
+address is tampered with"). Under the keeper the address names the front door's port rather than
+the host's (`swap-control.ts` `viewPort`); the door relays the request unread, so the host applies
+exactly the same secret and allowlist checks. The desktop CSP opens frames to `http://127.0.0.1:*`
+and nothing wider (`tooling/desktop-csp.test.ts`): the port changes every launch, and the secret
+locks the path.
 
 **Opaque origin by default.** The proxy page, on the host port's origin rather than our UI's,
 creates the inner frame with `sandbox="allow-scripts allow-forms"` set **before** it gives the
@@ -506,6 +515,13 @@ Limits:
   declared in `connectDomains`. Not measured yet (#150).
 - A declared `connectDomains` entry is a real way out for anything the view holds. The CSP limits
   where data can go, not what.
+- Open view instances survive a planned hand-over under the keeper (`view-handover.ts`): the
+  leaving host writes each instance's id, app and `ui://` address (nothing the app returned) to the
+  store under `views.handover`, and the next host reopens them under the same ids if the record is
+  at most ten minutes old, then deletes it. Each reopened instance holds its app as a fresh one
+  does and must still match its app on every request; a view in a conversation is re-bound to its
+  card so its messages still go only there. An instance id is a bearer handle to that one view for
+  whoever holds the WebSocket token, as it was before; it now lives across the swap too.
 
 ## Desktop command permissions
 

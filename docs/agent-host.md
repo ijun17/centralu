@@ -305,6 +305,21 @@ stops its children here, as a stop does.
 **Taking over.** After `activate` the host takes the lock and opens the store with `swap: true`: expand steps run
 now, heavy and breaking steps run after its ready line (§5.1).
 
+**Open app views** (#280 step 4). A view's frame address names the front door's port (`swap-control.ts`, `viewPort`)
+and a secret derived from the keeper's token (`transport/http.ts`, `deriveHttpSecret`), so every host the keeper
+runs gives out the same address for the same instance; without a keeper both stay as before (the host's port, a
+random secret). The instances themselves live in memory, so a planned ending — the drain above, or a signal while
+the host has the keeper's child service — writes each open one's id, app and `ui://` address to `app_settings`
+(`views.handover`, `view-handover.ts`), first thing in `stopServices`. The next host started under the keeper reads
+the record before it listens, deletes it, and if it is at most ten minutes old reopens them under the same ids:
+each holds its app again as `open()` does, an app that no longer exists is skipped, and a view in a conversation
+is re-bound to its card (`InlineViews.adopt`) so its messages still go only there. What a conversation's view does
+not keep is its call's input and result (never written down), so once closed it offers "open app", as after any
+restart. A crash writes nothing and its views are lost, as before. Per-app origin ports are bound lazily by the new
+host the first time `apps.viewFrame` or the proxy page needs them. On the UI side, every open `AppFrame` asks for
+its address again after a resync (`hostResyncs` in the store): the same address leaves the view and its state
+alone, another one is loaded, a failure takes the first load's failure path.
+
 ### 4.3 The children the keeper holds, seen from the host (#280, option C step 2)
 
 The design is in [architecture.md](architecture.md) §4.3. Under the keeper (`CC_KEEPER=1`) the host connects to
