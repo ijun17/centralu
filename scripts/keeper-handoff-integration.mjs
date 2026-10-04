@@ -26,6 +26,8 @@
  *     has exited, and `keeper.lock` is held by B (a third keeper is turned away);
  *   - an app view opened before the handoff (a user-folder app from the bundled template) is served
  *     at the same address through the front door after it, and again after the host swap below;
+ *   - build A's executable is deleted and written anew while keeper A runs (what `tauri build` does
+ *     to a bundle), and keeper A goes on serving and hands over from it;
  *   - B starting keeper C, killed before the commit: B rolls back and serves everything as before;
  *   - "Switch to this build" from build C (`switch` with `keeper`): the keeper moves to C and C
  *     swaps the host to build C, the terminal and dev server still the same processes;
@@ -366,6 +368,13 @@ async function scenario() {
   heldPids.add(hostPid)
   const livePids = before.filter((c) => c.alive).map((c) => c.pid)
   log(`  (host pid ${hostPid}; held ${before.map((c) => `${c.tag?.kind}:${c.pid}`).join(', ')})`)
+
+  // ---- the bundle rewritten under a running keeper: delete, then write anew (tauri build's way)
+  log('\nrewriting build A on disk while keeper A runs')
+  rmSync(A.exe)
+  cpSync(BIN, A.exe)
+  await sleep(500)
+  check(alive(keeperA.pid) && (await status(sock).catch(() => null))?.keeper?.pid === keeperA.pid, 'keeper A keeps running and answering from its unlinked executable')
 
   // ---- the handoff A -> B
   log('\nhanding keeper A over to keeper B')
