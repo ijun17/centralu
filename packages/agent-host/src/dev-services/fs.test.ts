@@ -115,7 +115,7 @@ describe('baseName — a path cannot pass itself off as a name', () => {
    * checkable on every platform is the invariant behind both answers — whatever comes back is
    * never something this machine would read as a path.
    */
-  it('the separator decision is left to the platform — here `\\` is part of the name', () => {
+  it.skipIf(process.platform === 'win32')('the separator decision is left to the platform — here `\\` is part of the name', () => {
     expect(baseName('src/a\\b.txt')).toBe('a\\b.txt')
     for (const input of ['src/app/a.ts', 'a\\b.txt', '../../.ssh/authorized_keys', 'x.md']) {
       let name: string

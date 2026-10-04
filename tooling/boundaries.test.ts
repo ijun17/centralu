@@ -8,15 +8,16 @@ import { describe, expect, it } from 'vitest'
 import { ESLint } from 'eslint'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL('..', import.meta.url).pathname
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const PROTOCOL_SRC = join(ROOT, 'packages/protocol/src/')
 
 /** Block and line comments, so prose that explains a rule cannot trip it. */
 const stripComments = (code: string) =>
   code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 
-const eslint = new ESLint({ cwd: new URL('..', import.meta.url).pathname })
+const eslint = new ESLint({ cwd: ROOT })
 
 async function lint(filePath: string, code: string) {
   const [res] = await eslint.lintText(code, { filePath, warnIgnored: false })

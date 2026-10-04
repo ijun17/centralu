@@ -38,7 +38,8 @@ let outDir = ''
 
 beforeAll(() => {
   outDir = mkdtempSync(join(tmpdir(), 'cc-css-'))
-  execFileSync('pnpm', ['exec', 'vite', 'build', '--outDir', outDir, '--emptyOutDir'], {
+  // vite's own entry through this Node: `pnpm` is a .cmd on Windows, which execFile cannot start (#14)
+  execFileSync(process.execPath, [join(ROOT, 'node_modules/vite/bin/vite.js'), 'build', '--outDir', outDir, '--emptyOutDir'], {
     cwd: join(ROOT, 'apps/web'),
     stdio: 'pipe',
     /*

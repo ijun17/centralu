@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, sep } from 'node:path'
 import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd } from './terminal.js'
 
 /**
@@ -255,7 +255,8 @@ describe('shell selection', () => {
   })
 
   it('shortens the home path to ~', () => {
-    expect(shortCwd(`${process.env.HOME}/work`)).toBe('~/work')
+    // homedir(), not $HOME: Windows has no HOME (#14)
+    expect(shortCwd(join(homedir(), 'work'))).toBe(`~${sep}work`)
     expect(shortCwd('/opt/x')).toBe('/opt/x')
   })
 })

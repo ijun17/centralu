@@ -135,7 +135,8 @@ describe('CommandRunner', () => {
  * The contract: given a pid, SIGTERM goes to the process **group** (-pid); if it has not died
  * within the grace period, SIGKILL follows.
  */
-describe('CommandRunner — tree kill', () => {
+// Process groups and signals: unix. Windows ends the tree with taskkill (kill-tree.test.ts, #14).
+describe.skipIf(process.platform === 'win32')('CommandRunner — tree kill', () => {
   /*
    * The pid has to be **genuinely alive.** killTree walks the tree with ps, and if ps was read but
    * that pid is missing from it, it is treated as "already dead" and nothing is fired at all (the

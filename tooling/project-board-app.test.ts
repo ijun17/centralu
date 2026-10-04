@@ -161,7 +161,9 @@ const mutations = () => queries().filter((q) => q.startsWith('query=mutation'))
 const setMode = (mode: string) => writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), mode }))
 const stored = (id: string) => (JSON.parse(readFileSync(statePath, 'utf8')) as ReturnType<typeof project>).items.find((i) => i.id === id)
 
-describe('the project board app', { timeout: 30_000 }, () => {
+// The fake `gh` is a sh script, node is reached through a symlink and PATH is joined with `:`; the
+// board app is this repository's own tool, run from macOS. Not on Windows (#14).
+describe.skipIf(process.platform === 'win32')('the project board app', { timeout: 30_000 }, () => {
   it('passes check: every tool annotated, the screen served with its bridge, show as an app-only home', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])

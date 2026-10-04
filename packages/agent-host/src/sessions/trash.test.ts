@@ -1,6 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ApprovalDecision, ProjectInfo, SessionInfo, ToolName, TrashedSession } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
@@ -161,7 +162,7 @@ describe('who can delete for good', () => {
   })
 
   it('only the RPC handler calls the purge', () => {
-    const src = join(new URL('.', import.meta.url).pathname, '..')
+    const src = join(fileURLToPath(new URL('.', import.meta.url)), '..')
     const callers: string[] = []
     const walk = (dir: string) => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {

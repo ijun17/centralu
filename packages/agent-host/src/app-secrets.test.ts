@@ -215,6 +215,7 @@ describe('the value is left nowhere inside the host', () => {
     // The one place the value lives is this file, with mode 0600
     const file = join(dataRoot, SECRETS_FILE)
     expect(readFileSync(file, 'utf8')).toContain(VALUE)
-    expect(statSync(file).mode & 0o777).toBe(0o600)
+    // Windows has no mode bits (Node reports 0o666); the file is guarded by the profile folder's ACL there
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
   })
 })
