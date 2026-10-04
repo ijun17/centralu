@@ -24,11 +24,13 @@ import {
   closeSync,
   cpSync,
   existsSync,
+  mkdirSync,
   openSync,
   readFileSync,
   readSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -91,10 +93,17 @@ const alsoLatest = process.argv.includes('--also-latest')
  */
 const tag = APP_VERSION.includes('-') ? 'beta' : 'latest'
 
+/**
+ * On Windows `npm` and `pnpm` are `.cmd` files, which Node will only start through a shell
+ * (EINVAL otherwise, since the April 2024 security releases). Every argument this script
+ * passes them is a fixed token or a version, so the shell's re-parsing has nothing to
+ * mangle. Real executables (git) keep going without one.
+ */
+const viaShell = (cmd: string) => process.platform === 'win32' && (cmd === 'npm' || cmd === 'pnpm')
 const sh = (cmd: string, args: string[], cwd = ROOT) =>
-  execFileSync(cmd, args, { cwd, stdio: 'inherit', encoding: 'utf8' })
+  execFileSync(cmd, args, { cwd, stdio: 'inherit', encoding: 'utf8', shell: viaShell(cmd) })
 const out = (cmd: string, args: string[], cwd = ROOT) =>
-  execFileSync(cmd, args, { cwd, encoding: 'utf8' }).trim()
+  execFileSync(cmd, args, { cwd, encoding: 'utf8', shell: viaShell(cmd) }).trim()
 
 function step(msg: string) {
   console.log(`\n\x1b[1m▶ ${msg}\x1b[0m`)
@@ -139,6 +148,13 @@ type Target = {
   id: string
   /** `tauri build --bundles` override; omitted where tauri.conf.json already names the right targets */
   bundles?: string
+  /** `tauri build --no-bundle`: what ships is the compiled exe itself, not any installer */
+  noBundle?: true
+  /**
+   * The root scripts that stand in for `pnpm verify` on this host. Omitted means `verify`
+   * itself; anything shorter has to say in its comment why, and where the rest runs.
+   */
+  verify?: string[]
   /** the name the artifact takes inside the npm package — fixed, so the launcher can find it */
   artifact: string
   /** locate what the build just produced */
@@ -298,6 +314,84 @@ const TARGETS: Record<string, Target | undefined> = {
       console.log(`  ${arch.split(',')[0]}`)
     },
   },
+
+  /*
+   * #14, W3. The package ships the same portable folder `build.yml` uploads as the
+   * `centralu-windows-x64` artifact (W1, #307): `Centralu\centralu.exe` beside
+   * `Centralu\resources\host\`. npm can unpack a folder and start an exe; it cannot run an
+   * installer, so the NSIS bundle is not built here at all (`--no-bundle`), by the same
+   * rule as the other targets — a release builds what it publishes and nothing else.
+   *
+   * The host is taken from `src-tauri/resources/host`, which the build's
+   * `beforeBuildCommand` (`bundle:host`) has just written, rather than from a copy under
+   * `target/`: that copy is made by the Rust build script, and a build the cache let skip it
+   * would leave an older host beside a new exe. Same choice, same reason, as `build.yml`.
+   */
+  'win32-x64': {
+    id: 'win32-x64',
+    noBundle: true,
+    artifact: APP_NAME,
+    /*
+     * Not `pnpm verify`: its unit tests have known failures on Windows, the W2 checklist in
+     * #307, which `build.yml`'s `windows tests` job reports on every PR without blocking.
+     * Lint, dependency rules and types do pass on Windows and still gate the release here.
+     * The full `pnpm verify` runs on the same commit in the linux and darwin platform jobs
+     * and in the shim job, and the shim cannot go out unless all of them succeed. Drop this
+     * line once the W2 list is empty, the same day `continue-on-error` leaves `build.yml`.
+     */
+    verify: ['lint', 'depcruise', 'typecheck'],
+    locate: () => join(ROOT, 'apps/desktop/src-tauri/target/release/centralu.exe'),
+    install: (exe, dest) => {
+      rmSync(dest, { recursive: true, force: true })
+      mkdirSync(join(dest, 'resources'), { recursive: true })
+      cpSync(exe, join(dest, 'centralu.exe'))
+      // `dereference`: npm drops symlinks from a tarball without a word, so anything linked
+      // would arrive as a hole in the host's node_modules.
+      cpSync(join(ROOT, 'apps/desktop/src-tauri/resources/host'), join(dest, 'resources/host'), {
+        recursive: true,
+        dereference: true,
+      })
+      // The size check stands in for the copy being whole — the npm tarball is built from
+      // this copy, not from the build output.
+      if (statSync(exe).size !== statSync(join(dest, 'centralu.exe')).size) fail('centralu.exe was copied short')
+    },
+    check: (dest) => {
+      /*
+       * (a) There is no code signature to verify on Windows yet (unsigned; SmartScreen asks).
+       *     What the signature check stood in for — this is the binary we think it is — is
+       *     the PE header: `MZ`, the `PE\0\0` signature where `e_lfanew` points, and a sane
+       *     header. Read from the copy in the package, which is what npm will pack.
+       */
+      const exe = join(dest, 'centralu.exe')
+      if (!existsSync(exe)) fail(`executable is missing: ${exe}`)
+      const pe = head(exe, 4096)
+      if (pe.subarray(0, 2).toString('latin1') !== 'MZ') fail(`not a Windows executable (no MZ header): ${exe}`)
+      const at = pe.readUInt32LE(0x3c)
+      if (at + 94 > pe.length || pe.subarray(at, at + 4).toString('latin1') !== 'PE\0\0') {
+        fail(`no PE signature at 0x${at.toString(16)}: ${exe}`)
+      }
+      console.log('  PE header ok')
+
+      /*
+       * (b) Windows has no exec bit; what the exec-bit check guarded against was "installs,
+       *     then nothing opens". Here that is the exe being a console program — it would
+       *     open a console window beside the app on every start (#14 audit, W11) — or the
+       *     host missing from beside it. Subsystem 2 is IMAGE_SUBSYSTEM_WINDOWS_GUI, at
+       *     offset 68 of the optional header (the same offset in PE32 and PE32+).
+       */
+      const subsystem = pe.readUInt16LE(at + 24 + 68)
+      if (subsystem !== 2) fail(`centralu.exe is not a GUI program (subsystem ${subsystem}) — it would open a console window`)
+      for (const rel of ['resources/host/main.mjs', 'resources/host/node_modules/node-pty/prebuilds/win32-x64/conpty.node']) {
+        if (!existsSync(join(dest, rel))) fail(`${rel} is missing from the package — the app would not start its host or its terminal`)
+      }
+      console.log('  GUI subsystem, host and conpty present')
+
+      // (c) machine type — 0x8664 is IMAGE_FILE_MACHINE_AMD64, the field right after `PE\0\0`
+      const machine = pe.readUInt16LE(at + 4)
+      if (machine !== 0x8664) fail(`not x86-64: PE machine 0x${machine.toString(16)}`)
+      console.log('  PE32+ x86-64')
+    },
+  },
 }
 
 // ── 1. Is this a state it is safe to publish from ──────────────────────
@@ -333,7 +427,7 @@ if (publish) {
   }
 }
 
-sh('pnpm', ['verify'])
+for (const script of target?.verify ?? ['verify']) sh('pnpm', [script])
 
 console.log(
   `  ${target?.id ?? 'centralu (shim only)'} · version ${APP_VERSION} · tag ${tag} · commit ${out('git', ['rev-parse', '--short', 'HEAD'])}`,
@@ -353,6 +447,7 @@ if (target && ARCH_PKG) {
       'tauri',
       'build',
       ...(target.bundles ? ['--bundles', target.bundles] : []),
+      ...(target.noBundle ? ['--no-bundle'] : []),
     ])
   }
   const built = target.locate()
