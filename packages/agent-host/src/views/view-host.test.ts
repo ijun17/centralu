@@ -14,6 +14,7 @@ import { PROXY_SCRIPT, PROXY_SCRIPT_HASH } from './proxy-page.js'
 import { MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, type ViewSource } from './view-host.js'
 import { VIEW_MIME_TYPE } from './view-document.js'
 import { createHash } from 'node:crypto'
+import { connect, createServer, type Server as NetServer } from 'node:net'
 
 const SECRET = 'view-host-test-secret-0123456789abcdef'
 const HOST_ORIGIN = 'http://127.0.0.1:5174'
@@ -45,7 +46,7 @@ function fakeSource(docs: Record<string, Doc>, modes: Record<string, OriginMode>
   return { source, reads }
 }
 
-async function start(source: ViewSource | null) {
+async function start(source: ViewSource | null, opts: { addressPort?: () => number } = {}) {
   let port: number | null = null
   const book: { raw: string | null } = { raw: null }
   views = new ViewHost({
@@ -59,7 +60,7 @@ async function start(source: ViewSource | null) {
       },
       { log: () => {} },
     ),
-    hostPort: () => port,
+    hostPort: () => opts.addressPort?.() ?? port,
     log: () => {},
   })
   server = new HostServer({ port: 0, token: 'tok', onRpc: async () => ({}), http: { secret: SECRET, routes: views.routes } })
@@ -70,7 +71,8 @@ async function start(source: ViewSource | null) {
 function get(url: string) {
   return new Promise<{ status: number; body: string; csp: string | undefined; referrer: string | undefined }>((resolve, reject) => {
     const u = new URL(url)
-    const req = request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method: 'GET' }, (res) => {
+    // Each request on its own connection: a kept-alive one may be a relay to a host the test has just closed
+    const req = request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method: 'GET', agent: false }, (res) => {
       let body = ''
       res.on('data', (d) => (body += d))
       res.on('end', () =>
@@ -304,5 +306,88 @@ describe('ViewHost — an open view holds the app open', () => {
     expect(held.get('p1/notes')).toBe(MAX_INSTANCES)
     await v.dispose()
     expect(held.get('p1/notes')).toBe(0)
+  })
+})
+
+/**
+ * The keeper's front door as far as views care (apps/desktop/src-tauri/src/keeper/front_door.rs):
+ * one loopback port that relays bytes, unread, to whichever host is current.
+ */
+async function frontDoor(): Promise<{ port: number; pointAt(port: number): void; close(): Promise<void> }> {
+  let target = 0
+  const door: NetServer = createServer((client) => {
+    const host = connect(target, '127.0.0.1')
+    client.pipe(host).pipe(client)
+    // One side gone closes the other, as the keeper closes what is relayed through it on a swap
+    client.on('close', () => host.destroy())
+    host.on('close', () => client.destroy())
+    client.on('error', () => {})
+    host.on('error', () => {})
+  })
+  await new Promise<void>((r) => door.listen(0, '127.0.0.1', () => r()))
+  const port = (door.address() as { port: number }).port
+  return {
+    port,
+    pointAt: (p) => void (target = p),
+    close: () => new Promise<void>((r) => door.close(() => r())),
+  }
+}
+
+describe('ViewHost — a planned hand-over (#280 step 4)', () => {
+  it('a view handed to the next host behind the same front door keeps its id and its address, and that address still serves it', async () => {
+    const { source } = fakeSource({ 'notes ui://notes/board': { html: '<p>board</p>' } })
+    const door = await frontDoor()
+    try {
+      const first = await start(source, { addressPort: () => door.port })
+      door.pointAt(first.port)
+      const { instanceId } = first.views.open(NOTES, 'ui://notes/board')
+      const before = await first.views.frame({ app: NOTES, instanceId, hostOrigin: HOST_ORIGIN })
+      expect(new URL(before.url).port).toBe(String(door.port))
+      expect((await get(before.url)).status).toBe(200)
+      const handed = first.views.list()
+      await views!.dispose()
+      await server!.close()
+
+      // The next host: the same derived secret, behind the same door
+      const second = await start(source, { addressPort: () => door.port })
+      door.pointAt(second.port)
+      expect(second.port).not.toBe(first.port)
+      expect(second.views.restore(handed)).toEqual([instanceId])
+      // The address the UI already holds is served by the new host, and asking again gives the same one
+      const page = await get(before.url)
+      expect(page.status).toBe(200)
+      expect(pageConfig(page.body).html).toBe('<p>board</p>')
+      expect((await second.views.frame({ app: NOTES, instanceId, hostOrigin: HOST_ORIGIN })).url).toBe(before.url)
+      expect(second.views.describe(instanceId)).toEqual({ app: NOTES, uri: 'ui://notes/board' })
+    } finally {
+      await door.close()
+    }
+  })
+
+  it('a restored view holds its app again; an app that no longer exists, a malformed id and an id already open are skipped', async () => {
+    const held = new Map<string, number>()
+    const source: ViewSource = {
+      readResource: async (_a, uri) => ({ contents: [{ uri, mimeType: VIEW_MIME_TYPE, text: 'x' }] }),
+      retain(app) {
+        if (app.appId === 'ghost') throw new Error('no such app')
+        held.set(app.appId, (held.get(app.appId) ?? 0) + 1)
+        return () => void held.set(app.appId, (held.get(app.appId) ?? 0) - 1)
+      },
+    }
+    const { views: v } = await start(source)
+    const open = v.open(OTHER, 'ui://other/main').instanceId
+    const restored = v.restore([
+      { id: 'a'.repeat(22), app: NOTES, uri: 'ui://notes/board' },
+      { id: 'b'.repeat(22), app: { projectId: 'p1', appId: 'ghost' }, uri: 'ui://ghost/main' },
+      { id: 'not/an/id', app: NOTES, uri: 'ui://notes/board' },
+      { id: open, app: NOTES, uri: 'ui://notes/board' },
+    ])
+    expect(restored).toEqual(['a'.repeat(22)])
+    expect(held.get('notes')).toBe(1)
+    // The id already open still belongs to the app it was opened for
+    expect(v.describe(open)?.app).toEqual(OTHER)
+    expect(v.describe('b'.repeat(22))).toBeNull()
+    v.close('a'.repeat(22))
+    expect(held.get('notes')).toBe(0)
   })
 })

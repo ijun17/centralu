@@ -9,6 +9,7 @@ import { connectHeldChildren } from './keeper/held-children.js'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { deriveHttpSecret } from './transport/http.js'
+import { recordViewHandover, restoreViewHandover } from './view-handover.js'
 import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
@@ -359,6 +360,18 @@ const views = new ViewHost({
  * go out through the manager's record and broadcast path (inline-views.ts).
  */
 const inlineViews = attachInlineViews(mgr, externalApps, views)
+/*
+ * The views the previous host had open, if it handed them over in a planned ending (#280 step 4,
+ * view-handover.ts). Before listen(), so the first client to reconnect already finds them.
+ */
+if (underKeeper) {
+  try {
+    const { restored, skipped } = restoreViewHandover(store, views, inlineViews)
+    if (restored + skipped > 0) console.error(`[agent-host] app views handed over: ${restored} restored, ${skipped} not`)
+  } catch (err) {
+    console.error(`[agent-host] could not restore the app views handed over: ${(err as Error).stack ?? err}`)
+  }
+}
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
@@ -488,15 +501,28 @@ const onSignalMode: LeaveMode = held ? 'detach' : 'stop'
 process.on('unhandledRejection', (reason) => record('Unhandled rejection', reason))
 process.on('uncaughtException', (err) => {
   record('Uncaught exception', err)
-  void shutdown(onSignalMode)
+  // A crash: nothing is handed over, the state that threw is not one to carry forward (view-handover.ts)
+  void shutdown(onSignalMode, false)
 })
 
 /**
  * Stops or hands off everything this host holds, without exiting (see LeaveMode). `detach` is also
  * the swap's hook (#280 step 3, onDrain below): the draining host lets go of keeper-held agents,
  * terminals and commands, and the next host re-attaches to them.
+ *
+ * `handOver` marks a planned ending under the keeper, after which the keeper starts the next host:
+ * the open app views are written down for it (view-handover.ts). First, before anything below
+ * closes them.
  */
-async function stopServices(mode: LeaveMode): Promise<void> {
+async function stopServices(mode: LeaveMode, handOver: boolean): Promise<void> {
+  if (handOver) {
+    try {
+      const n = recordViewHandover(store, views, inlineViews)
+      if (n > 0) console.error(`[agent-host] ${n} open app views handed over to the next host`)
+    } catch (err) {
+      console.error(`[agent-host] could not hand the open app views over: ${(err as Error).stack ?? err}`)
+    }
+  }
   updates.stop()
   stopActivity()
   if (mode === 'detach') {
@@ -531,20 +557,25 @@ async function stopServices(mode: LeaveMode): Promise<void> {
 }
 
 let leaving: LeaveMode | null = null
-const shutdown = async (mode: LeaveMode) => {
+const shutdown = async (mode: LeaveMode, handOver: boolean) => {
   // A second signal while leaving changes nothing: the first decided what happens to the children
   if (leaving) return
   leaving = mode
-  await stopServices(mode)
+  await stopServices(mode, handOver)
   // Why it ended becomes the first line of the next investigation — it never disappears silently
   console.error(`[agent-host] shutting down (pid ${process.pid}, ${mode === 'detach' ? 'agents, terminals and commands left running in the keeper' : 'stopped'})`)
   stopLog()
   process.exit(0)
 }
-process.on('SIGINT', () => void shutdown(onSignalMode))
-process.on('SIGTERM', () => void shutdown(onSignalMode))
-// The keeper is stopping for good and asks this host to stop its children the way it always did
-held?.children.on('stop', () => void shutdown('stop'))
+/*
+ * With the keeper's child service, a signal is a restart: stopping for good comes as `stop` below,
+ * first, so a signal after it changes nothing. The next host takes the open views over. Without the
+ * service the two cannot be told apart, and nothing is handed over.
+ */
+process.on('SIGINT', () => void shutdown(onSignalMode, onSignalMode === 'detach'))
+process.on('SIGTERM', () => void shutdown(onSignalMode, onSignalMode === 'detach'))
+// The keeper is stopping for good and asks this host to stop its children the way it always did. No next host to hand views to
+held?.children.on('stop', () => void shutdown('stop', false))
 
 /*
  * The keeper's drain (#280 step 3, swap-control.ts): finish or cut what the host serves itself,
@@ -557,7 +588,8 @@ if (control) {
     detach: async () => {
       // A signal arriving mid-drain must not run a second, different ending
       leaving = held ? 'detach' : 'stop'
-      await stopServices(leaving)
+      // A swap: the next host is already waiting, and it takes the open views over whether or not it takes the agents
+      await stopServices(leaving, true)
     },
     keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
     release: lock.release,
@@ -584,7 +616,8 @@ if (values['watch-parent']) {
   process.stdin.resume()
   const onParentGone = () => {
     console.error('[agent-host] parent process exited; shutting down')
-    void shutdown(onSignalMode)
+    // The keeper (or the supervisor) is gone: nothing is known to start a next host
+    void shutdown(onSignalMode, false)
   }
   process.stdin.on('end', onParentGone)
   process.stdin.on('close', onParentGone)

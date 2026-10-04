@@ -16,6 +16,7 @@ import { SessionManager } from './sessions/manager.js'
 import { FIXTURE_APP } from './sessions/session-apps.test-helpers.js'
 import { OriginPorts } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
+import { recordViewHandover, restoreViewHandover, VIEW_HANDOVER_KEY } from './view-handover.js'
 
 /**
  * App views inside a conversation (M4 B-1) — end to end on the host's side.
@@ -72,6 +73,7 @@ let mgr: SessionManager
 let rpc: ReturnType<typeof createRpcHandler>
 let projectId = ''
 let events: NormalizedEvent[] = []
+let hostAdapters = new Map<ToolName, AgentAdapter>()
 let logged: string[] = []
 
 type AppView = Extract<NormalizedEvent, { type: 'app_view' }>
@@ -88,6 +90,7 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
   store = new Store()
   const adapter = new CapturingAdapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+  hostAdapters = adapters
   mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   rt = new ExternalApps({
@@ -518,5 +521,75 @@ describe('the list a reopened UI asks for', () => {
     // There is nothing in the other conversation
     const other = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     expect(await rpc('apps.inlineViews', { sessionId: other.id })).toEqual([])
+  })
+})
+
+/**
+ * A planned hand-over to the next host (#280 step 4, view-handover.ts). What a host holds about
+ * open views in memory (ViewHost's instances, this layer's slots) is thrown away and built again on
+ * the same store, the way the next host starts; the session and the app stay as they were.
+ */
+describe('a planned hand-over to the next host', () => {
+  /** The view memory of a new host: a fresh ViewHost, InlineViews and RPC door over the same store, manager and runtime */
+  function nextHost() {
+    views = new ViewHost({
+      secret: 'inline-views-test-secret-0123456789abcdef',
+      allowedOrigins: [HOST_ORIGIN],
+      source: runtimeViewSource(rt),
+      ports: new OriginPorts({ load: () => null, save: () => {} }, { log: () => {} }),
+      hostPort: () => 1,
+      log: () => {},
+    })
+    inline = attachInlineViews(mgr, rt, views, { log: (line) => logged.push(line) })
+    rpc = createRpcHandler(mgr, hostAdapters, { externalApps: rt, views, inlineViews: inline })
+  }
+
+  it('a view in a conversation and a fixed view keep their ids, and calls, reads and messages through them work as before — still bound to their own conversation', async () => {
+    const { sessionId, apps } = await start()
+    await apps.call('app-viewer', 'show', { q: 'x' }, { callId: 'toolu_H1' })
+    await until(appViews, (v) => v.some((e) => e.phase === 'result'))
+    const inlineId = appViews()[0]!.instanceId!
+    const pinnedId = views.open({ projectId, appId: 'viewer' }, 'ui://viewer/main').instanceId
+
+    expect(recordViewHandover(store, views, inline)).toBe(2)
+    inline.dispose()
+    await views.dispose()
+    nextHost()
+    expect(restoreViewHandover(store, views, inline)).toEqual({ restored: 2, skipped: 0 })
+    // Read once: a later start never reopens them again
+    expect(store.appSetting(VIEW_HANDOVER_KEY)).toBeNull()
+
+    const app = { appId: 'viewer', projectId }
+    await expect(rpc('apps.viewFrame', { ...app, instanceId: inlineId, hostOrigin: HOST_ORIGIN })).resolves.toMatchObject({
+      url: expect.stringContaining(`/views/${inlineId}/`),
+    })
+    await expect(rpc('apps.readResource', { ...app, uri: 'ui://viewer/main', instanceId: inlineId })).resolves.toMatchObject({
+      contents: [{ uri: 'ui://viewer/main', text: expect.stringContaining('viewer view') }],
+    })
+    await expect(rpc('apps.invoke', { ...app, name: 'show', args: { q: 'again' }, instanceId: inlineId })).resolves.toMatchObject({
+      text: 'shown again',
+      isError: false,
+    })
+
+    // The view in a conversation still belongs to its card: its message goes only there, as that conversation's view
+    expect(inline.owner(inlineId)).toMatchObject({ sessionId, callId: 'toolu_H1', tool: 'show' })
+    const other = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    await expect(rpc('apps.viewMessage', { sessionId: other.id, instanceId: inlineId, text: 'hi' })).rejects.toThrow(/not open in that conversation/)
+    await expect(rpc('apps.viewMessage', { sessionId, instanceId: inlineId, text: 'from the card' })).resolves.toEqual({ ok: true })
+    await expect(rpc('apps.viewMessage', { sessionId, instanceId: pinnedId, text: 'from the pin' })).resolves.toEqual({ ok: true })
+    expect(sentToAgent.get(sessionId)).toEqual([
+      expect.stringContaining('sent this message from its view in this conversation'),
+      expect.stringContaining('sent this message from its own view, outside this conversation'),
+    ])
+    expect(sentToAgent.get(other.id)).toBeUndefined()
+
+    // What does not survive: the call's input and result, so once closed the card offers "open app", not "Reopen"
+    expect(await rpc('apps.inlineViews', { sessionId })).toEqual([
+      { callId: 'toolu_H1', appId: 'viewer', projectId, tool: 'show', kept: false, instanceId: inlineId },
+    ])
+    // Deleting the session still closes its view
+    await rpc('agents.deleteSession', { sessionId })
+    await until(() => inline.owner(inlineId), (o) => o === null)
+    await expect(rpc('apps.viewFrame', { ...app, instanceId: inlineId, hostOrigin: HOST_ORIGIN })).rejects.toThrow(/not open/)
   })
 })

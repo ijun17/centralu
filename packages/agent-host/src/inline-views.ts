@@ -208,9 +208,38 @@ export class InlineViews {
   }
 
   /** Which session and which card this instance's view belongs to — null if it is not a view inside a conversation */
-  owner(instanceId: string): { sessionId: string; callId: string; ref: AppRef } | null {
+  owner(instanceId: string): { sessionId: string; callId: string; ref: AppRef; tool: string } | null {
     const v = this.byInstance.get(instanceId)
-    return v ? { sessionId: v.sessionId, callId: v.callId, ref: v.ref } : null
+    return v ? { sessionId: v.sessionId, callId: v.callId, ref: v.ref, tool: v.tool } : null
+  }
+
+  /**
+   * Takes back a view the previous host had open in a conversation, after a planned hand-over
+   * (view-handover.ts; ViewHost has already opened the instance under its old id). Without this,
+   * the instance would still serve its view but belong to no conversation: its messages would go
+   * out as a fixed view's, to whichever conversation the caller named, and deleting the session
+   * would not close it.
+   *
+   * The slot is **not kept for reopening.** Its input and result were never written down (see
+   * InlineLimits), so once this view is closed its card offers "open app", as after any restart.
+   * A conversation's live cap is not applied again: these were within it on the previous host.
+   */
+  adopt(v: { sessionId: string; callId: string; ref: AppRef; tool: string; uri: string; instanceId: string }): void {
+    if (this.disposed || this.byInstance.has(v.instanceId)) return
+    this.track({
+      sessionId: v.sessionId,
+      callId: v.callId,
+      ref: { projectId: v.ref.projectId ?? null, appId: v.ref.appId },
+      tool: v.tool,
+      uri: v.uri,
+      instanceId: v.instanceId,
+      openedAt: ++this.seq,
+      toolInput: {},
+      toolResult: null,
+      cancelled: null,
+      kept: false,
+      bytes: 0,
+    })
   }
 
   dispose(): void {

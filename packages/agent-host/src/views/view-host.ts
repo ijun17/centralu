@@ -53,6 +53,9 @@ export type ViewFrame = {
   sandbox: { csp: Required<ViewCspDomains>; permissions: ViewPermissions }
 }
 
+/** An open instance as one host hands it to the next (view-handover.ts): what it takes to serve it again */
+export type OpenView = { id: string; app: AppRef; uri: string }
+
 type Instance = {
   id: string
   app: AppRef
@@ -70,7 +73,11 @@ export type ViewHostOptions = {
   /** null if the runtime does not exist yet. In that case a view request fails with a reason */
   source: ViewSource | null
   ports: OriginPorts
-  /** Only decided after listen() */
+  /**
+   * The port the view's address points at. Only decided after listen(). Under the keeper this is
+   * the front door's port rather than the host's own (swap-control.ts `viewPort`), so an address
+   * given out by one host still reaches whichever host is current after a swap
+   */
   hostPort: () => number | null
   log?: (line: string) => void
 }
@@ -139,6 +146,42 @@ export class ViewHost {
 
   close(instanceId: string): void {
     this.drop(instanceId)
+  }
+
+  /** Every open instance, oldest first — what a planned hand-over records (view-handover.ts) */
+  list(): OpenView[] {
+    return [...this.instances.values()].map((i) => ({ id: i.id, app: { ...i.app }, uri: i.uri }))
+  }
+
+  /**
+   * Opens again, **under their old ids**, the instances a previous host handed over (#280: a build
+   * switch replaces the host while the window stays open). The id is what the UI holds; keeping it
+   * means an open view's next call, or its next `apps.viewFrame`, finds its instance as if no swap
+   * had happened.
+   *
+   * Each one holds its app again, exactly as `open()` does, and one whose app no longer exists is
+   * skipped (`retain` throws) — its view gets "not open" and the UI's failure path, as before. An
+   * id that is malformed or already open is skipped too: the record is a file, and an id must
+   * never be shared by two instances. Returns the ids opened.
+   */
+  restore(views: readonly OpenView[]): string[] {
+    const opened: string[] = []
+    for (const v of views) {
+      if (typeof v?.id !== 'string' || !INSTANCE_ID.test(v.id) || this.instances.has(v.id)) continue
+      if (typeof v.uri !== 'string' || typeof v.app?.appId !== 'string') continue
+      if (this.instances.size >= MAX_INSTANCES) break
+      const ref = { projectId: v.app.projectId ?? null, appId: v.app.appId }
+      let release: (() => void) | null
+      try {
+        release = this.opts.source?.retain?.(ref) ?? null
+      } catch (err) {
+        this.log(`[agent-host] view ${v.uri} (${ViewHost.originKey(ref)}) not restored: ${(err as Error).message}`)
+        continue
+      }
+      this.instances.set(v.id, { id: v.id, app: ref, uri: v.uri, doc: null, release })
+      opened.push(v.id)
+    }
+    return opened
   }
 
   /**
