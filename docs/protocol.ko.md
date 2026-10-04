@@ -7,7 +7,8 @@
 ## 1. 전송 계층
 
 - WebSocket, 텍스트 프레임 1개 = JSON 메시지 1개.
-- 연결 직후 핸드셰이크: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → 불일치 시 즉시 종료(에러 코드와 함께), 성공하면 `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch }`. 토큰은 호스트가 시작될 때 생성되며, dev에서는 환경 변수로 전달된다.
+- 연결 직후 핸드셰이크: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → 불일치 시 즉시 종료(에러 코드와 함께), 성공하면 `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch, build? }`. 토큰은 호스트가 시작될 때 생성되며, dev에서는 환경 변수로 전달된다.
+- `hello_ok.build`(#280)는 호스트가 어떤 빌드이고 어디서 왔는지 말한다: `{ commit, protocolVersion, version?, bundlePath?, copyDir? }`. 키퍼 아래에서는 한 빌드의 창이 다른 빌드의 호스트에 붙을 수 있고, 클라이언트는 이것으로 안다. 커밋은 호스트 자신에 컴파일된 것이고, 나머지는 키퍼가 호스트를 복사해 온 번들의 기록이다([agent-host.ko.md](agent-host.ko.md) §4.1). 선택 필드다: 옛 호스트는 보내지 않고, 소스로 띄운 호스트는 `commit: 'dev'`를 보낸다.
 - **`hello_ok` 전에는 hello 말고 아무것도 나가지 않는다** (#82). 클라이언트는 `hello_ok`가 온 뒤에야 `connected`를 알리고 쌓아 둔 호출을 만든 순서대로 보낸다. 그 전에 온 다른 프레임은 무시한다. 열렸는데 답이 없는 소켓은 10초 뒤 버리고 다시 시도하며, 호스트는 10초 안에 올바른 hello를 보내지 않은 소켓을 닫는다(4001). #82 전에는 소켓이 열리는 순간 큐를 쏟아, 거절된 핸드셰이크가 호스트가 실행한 적 없는 호출을 "연결이 끊김, 호스트에 닿았을 수 있음"으로 만들었다.
 - 방향에 따라 두 종류: **RPC**(요청/응답, UI→host)와 **이벤트 스트림**(host→UI, 단방향 푸시).
 

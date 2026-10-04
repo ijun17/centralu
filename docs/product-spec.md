@@ -222,6 +222,13 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   - Session processes are **resumed where resume is possible** (Claude Agent SDK resume, `codex resume`); where not, offer "view the record only + start a new session"
 - Make explicit that an agent turn that was in flight is interrupted when the process dies (restore is "continue the conversation", not "continue the turn").
 - Crash safety: the snapshot is saved on every state change, not at exit.
+- **Background mode** (#280, decision 1 — a setting, off by default). Off: quitting the app stops the host and its
+  agents, as before. On: closing or quitting the app leaves the host and its running turns going, and reopening the
+  app re-attaches to them with nothing to restore — a waiting approval is still waiting. **Quit and stop agents** in
+  the quit dialog stops them either way. An unwatched host stops by itself after 30 minutes with no window open and
+  nothing running. A reopened app of a different build says so and offers to restart the host on its own build,
+  which cuts running turns (said in the confirmation). Desktop only; it needs the keeper
+  ([architecture.md](architecture.md) §4.1).
 
 #### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
@@ -499,7 +506,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 
 - **Usage dashboard**: weekly bar chart (daily), breakdown by tool/model/project, estimated cost, limit window status.
 - **Session creation dialog**: tool → model → permission preset → starting prompt. Includes the concurrent-session warning (FR-2).
-- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, theme, **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22).
+- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, theme, **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22), **background** — whether quitting leaves agents running (FR-10, desktop only).
 
 ### 5.4 Grid view (**experimental**)
 
@@ -585,8 +592,14 @@ the host does the work, and the UI talks to the host over one WebSocket that is 
 
 ```
 ┌─────────────────────────── Tauri app (Rust) ──────────────────────────┐
-│  · window/tray/notifications      · sidecar supervisor                │
+│  · window/tray/notifications      · attaches to the keeper            │
 └──────────────────────────────┬────────────────────────────────────────┘
+                               │ unix socket (attach, host info, stop, switch)
+┌──────────────────────────────┴────────────────────────────────────────┐
+│  keeper — the same executable as `centralu --keeper`, detached         │
+│  · launches, watches and restarts the host · per-build host copies    │
+└──────────────────────────────┬────────────────────────────────────────┘
+                               │ the UI talks to the host directly over
                                │ WebSocket (same protocol dev and prod)
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │                      Node sidecar (Agent Host)                        │

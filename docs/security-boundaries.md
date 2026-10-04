@@ -183,6 +183,29 @@ outbound backlog passes 64 MiB is cut, so a connection cannot make the host hold
 an endless slot (#82; `transport/server.ts`, `TRANSPORT_LIMITS`). An authenticated socket's hello is
 answered once; a repeat is ignored.
 
+## The keeper's control socket
+
+The keeper (`centralu --keeper`, #280) is a new trust boundary: through its socket a process can read the host's
+port and token, stop the host, and make the keeper run a host from another folder (`switch`). The rule is the same
+as for the token itself, which only this user can read: **only this user's processes get in.**
+
+- The socket is `<data>/keeper.sock`, created under `umask 077` so it is born `0600`, with no window before a chmod.
+- Every connection's peer uid is read from the kernel (`getpeereid` on macOS, `SO_PEERCRED` on Linux) and the
+  connection is dropped unless it is the keeper's own uid.
+- A request line is capped at 256 KiB, and a connection that sends nothing in 5 seconds is closed (except an
+  attach, which is held open on purpose).
+- `keeper.json`, `keeper-settings.json` and `keeper.log` are written `0600` and hold no token. The host's stderr goes
+  to `keeper.log` as well as `host.log`; the host never writes its token to stderr.
+- Per-build copies live in `<data>/hosts/` (folders created `0700`). A build key is limited to
+  `[A-Za-z0-9_-]`, so a commit string cannot name a path outside that folder.
+
+Limits:
+
+- `switch` runs `main.mjs` from whatever host folder the request names. Any process of this user can therefore make
+  the keeper run code of its choosing — which that process could do by itself anyway. It is not a privilege
+  boundary between processes of the same user, and is not meant to be one.
+- The socket is local only. Windows has no keeper yet (named pipes and their ACLs are not written).
+
 ## App servers
 
 An app's server is code running as the user, with the user's files, network and processes. The
@@ -445,7 +468,7 @@ invoke key stood in the way. Remote origins, a loopback app frame among them, we
 (tauri ≥ 2.11.1).
 
 Now `apps/desktop/src-tauri/build.rs` declares an app manifest, which creates a permission per
-command (`allow-<command>`), and `capabilities/default.json` grants the 13 commands **only to the
+command (`allow-<command>`), and `capabilities/default.json` grants the 19 commands **only to the
 window `main` on local origins**: no `remote`, no wildcard window. The granted set is exactly what
 the frontend calls. `tooling/desktop-permissions.test.ts` holds the manifest, the `invoke_handler`,
 the grants and the call sites to each other, and fails on `remote` or a wildcard. Plugin
@@ -454,7 +477,8 @@ a plugin, or widening one, is a change to that list. It also holds the app-link 
 one URL scheme, `centralu`, and no deep-link plugin.
 
 Measured on a real Tauri instance (#186, when there were 12; `take_app_links` came with app links,
-M4 E-4, and has not been measured this way): all 12 answer from the main page, in dev and in a
+M4 E-4, and the five keeper commands came with #280 — `host_build`, `switch_host_build`, `background_mode`,
+`set_background_mode`, `quit_and_stop_agents` — and none of those has been measured this way): all 12 answer from the main page, in dev and in a
 `tauri://localhost` debug build. From an app frame holding a leaked invoke key, 60 of 60 calls were
 refused by the permission check and none reached a handler.
 

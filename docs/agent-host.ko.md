@@ -2,7 +2,7 @@
 
 > 영어 원본: [agent-host.md](agent-host.md) — 설계가 바뀌면 두 문서를 같은 PR에서 함께 갱신한다.
 
-독립 실행되는 Node 프로세스다. dev에서는 개발자가 직접 띄우고(`pnpm host`), prod에서는 Tauri가 spawn하고 감시한다. **UI가 있든 없든 동일하게 동작해야 한다** — UI는 여러 번 닫혔다 다시 열릴 수 있고(재연결), 그동안 호스트는 세션을 계속 유지한다.
+독립 실행되는 Node 프로세스다. dev에서는 개발자가 직접 띄우고(`pnpm host`), 패키지된 앱에서는 키퍼(`centralu --keeper`, §4.1)가, `pnpm app:dev`에서는 Tauri 앱이 spawn하고 감시한다. **UI가 있든 없든 동일하게 동작해야 한다** — UI는 여러 번 닫혔다 다시 열릴 수 있고(재연결), 그동안 호스트는 세션을 계속 유지한다.
 
 ## 1. 내부 구조
 
@@ -36,6 +36,10 @@ claude는 인프로세스, codex는 stdio 다리.
 것이 stderr이고, Finder로 띄운 `.app`의 stdout은 **닿는 곳이 아예 없기** 때문이다 — 그래서
 이 패키지의 `console.log`는 터미널에서는 멀쩡해 보이면서 배포에서만 아무에게도 닿지 않는다.
 `eslint.config.js`의 `no-console`이 그 한 줄만 빼고 전부 막는다.
+
+추가 하나(#280): 키퍼 아래에서(`CC_KEEPER=1`) 호스트는 `{"activity":{"busy":true|false}}`도 stdout에
+쓴다, 시작할 때 한 번과 바뀔 때마다(`keeper-link.ts`). 키퍼의 유휴 규칙이 읽는 것이 이것이다. 다른 방법으로
+띄우면 호스트는 준비 줄 말고 아무것도 쓰지 않는다.
 
 ## 2. AgentAdapter 계약 (product spec §6.2의 구현 명세)
 
@@ -139,11 +143,55 @@ UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
 host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
                 → attempt resume with the externalId from the store (the same path as FR-10)
+app quits       → background mode off (default): the keeper stops the host, as above
+                → background mode on: nothing happens to the host; a relaunched app re-attaches
 ```
 
 이 설계 덕분에 FR-10의 절반(재시작 시 복원)은 평범한 재연결과 같은 코드 경로다 — 특별한 경우가 아니라 기본 동작이다. 커서·재생 예산·전송 한도의 규칙은 [protocol.ko.md](protocol.ko.md) §1에 있다.
 
 **데이터 폴더 하나에 호스트 하나** (`dev-services/instance-lock.ts`). 한 폴더에 호스트가 둘이면 각자 제 세션 목록을 들고 같은 `store.db`에 쓴다. 소유권은 호스트가 살아 있는 내내 쥐는 배타적 SQLite 트랜잭션이다(`host-ownership.sqlite`에 `BEGIN EXCLUSIVE`, DELETE 저널 모드) (#82). 잡는 일은 원자적이고, 두 번째 호스트는 곧바로 거절되며, 호스트가 어떻게 죽든 운영체제가 풀어 주므로 크래시가 낡은 흔적을 남기지 않는다. `host.lock`(pid와 시작 시각)은 충돌 메시지에 주인을 적는 설명으로, 그리고 그 파일만 아는 옛 호스트를 위해 남는다: 살아 있고 맞아떨어지는 `host.lock`은 여전히 시작을 거절한다. #82 전에는 파일 하나를 확인하고 나서 쓰는 방식이라, 동시에 띄운 호스트 8개에서 주인이 2개 나왔다. 한 기계 안의 소유권이다 — 분산 임대가 아니고, 네트워크 파일시스템 위의 데이터 폴더용도 아니다.
+
+### 4.1 호스트를 쥐는 쪽: 키퍼 (#280, 옵션 C 1단계)
+
+패키지된 앱에서 호스트의 부모는 앱이 아니라 키퍼다(`centralu --keeper`, 앱 실행 파일의 한 모드;
+[architecture.ko.md](architecture.ko.md) §4.1). 키퍼는 호스트를 `--port 0 --watch-parent --db <data>/store.db`와
+`CC_DATA_DIR=<data>`로 띄우고, stdin 파이프를 쥐며, 앱이 쓰던 규칙 그대로 다시 띄운다: 연속 실패 다섯 번,
+30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc.rs`,
+키퍼와 앱의 직접 경로가 함께 쓴다). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
+
+**빌드별 사본.** 띄울 때마다 키퍼는 번들의 `resources/host` 폴더를 `<data>/hosts/<key>/`에 복사하고(임시 폴더에
+쓴 뒤 rename) 거기서 `main.mjs`를 돌린다. key는 `bundle-info.json`에 찍힌 커밋이다. `-dirty`나 `unknown`
+빌드는 빌드 시각을 덧붙여, 서로 다른 dirty 빌드가 사본을 함께 쓰지 않는다. 호스트가 준비되면 도는 호스트의
+것 말고 다른 사본은 지운다.
+
+**어디서 왔는가.** 키퍼는 도는 호스트에 대해 `{ commit, builtAt, version, protocolVersion, bundlePath, hostDir,
+copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토큰 없음)에 쓰고, 호스트에 `CC_HOST_SOURCE`로
+넘긴다. 호스트는 이것을 모든 `hello_ok`에 `build`로 싣는다([protocol.ko.md](protocol.ko.md) §1). 커밋은 언제나
+호스트 자신에 컴파일된 것이다.
+
+**제어 소켓.** `<data>/keeper.sock`, `umask 077` 아래에서 `0600`으로 만든다. 모든 연결의 상대 uid가 키퍼 자신의
+것이어야 한다. 줄 단위 JSON이고, `attach` 말고는 연결 하나에 요청 하나다:
+
+| 요청 | 답 |
+|---|---|
+| `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 포트와 토큰, 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동 |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다 |
+| `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit and stop agents") |
+| `{"op":"switch","source":…}` | 그 빌드로 호스트를 다시 띄운다(빌드 표식은 그 폴더에서 다시 읽는다) |
+| `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry |
+| `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |
+
+**데이터 폴더 하나에 키퍼 하나.** `<data>/keeper.lock`에 `flock`, 키퍼가 어떻게 끝나든 OS가 푼다. 앞선 키퍼가
+소켓에서 답하면 두 번째 키퍼는 코드 3으로 끝나고 호스트를 띄우지 않는다. 앞선 키퍼가 잠금을 쥐었는데 답하지
+않으면(내려가는 중) 15초까지 기다린다.
+
+**언제 끝나는가.** `keeper/mod.rs`의 `idle_decision`: 창이 붙어 있으면 끝나지 않는다. 백그라운드 모드가 꺼져
+있으면 마지막 창이 떨어질 때. 켜져 있으면 창도 없고 호스트가 보고한 활동(일하거나 기다리는 세션, 터미널, 명령
+실행)도 없이 30분이 지났을 때. 시작하고 60초 안에 아무 창도 붙지 않은 키퍼도 끝난다: 그것을 띄운 앱이 먼저
+죽은 것이다.
+
+`scripts/keeper-integration.mjs`가 진짜 바이너리(`cargo build`, `/tmp`로)와 진짜 번들 호스트로 임시
+`CC_DATA_DIR`에서 이것을 전부 몰아 본다.
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 

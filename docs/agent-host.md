@@ -1,6 +1,6 @@
 # Agent Host — the Node sidecar design
 
-A standalone Node process. In dev the developer starts it directly (`pnpm host`); in prod Tauri spawns and watches it. **It has to behave the same whether or not a UI is there** — the UI can be closed and reopened many times (reconnecting) and the host keeps its sessions.
+A standalone Node process. In dev the developer starts it directly (`pnpm host`); in the packaged app the keeper (`centralu --keeper`, §4.1) spawns and watches it, and in `pnpm app:dev` the Tauri app does. **It has to behave the same whether or not a UI is there** — the UI can be closed and reopened many times (reconnecting) and the host keeps its sessions.
 
 ## 1. Internal structure
 
@@ -35,6 +35,11 @@ is what `log-file.ts` tees to `~/.centralu/host.log` — and a `.app` launched f
 no stdout destination at all, so a `console.log` here reaches nobody in production while
 looking fine in a terminal. `no-console` in `eslint.config.js` enforces this everywhere in
 the package except that one line.
+
+The one addition (#280): under the keeper (`CC_KEEPER=1`), the host also writes
+`{"activity":{"busy":true|false}}` to stdout, once at start and whenever it changes
+(`keeper-link.ts`). That is what the keeper's idle rule reads. Started any other way, the host
+writes nothing but the ready line.
 
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
@@ -145,11 +150,56 @@ UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
 host restarts   → session processes die → a new streamEpoch → reconnecting UIs resync
                 → attempt resume with the externalId from the store (the same path as FR-10)
+app quits       → background mode off (default): the keeper stops the host, as above
+                → background mode on: nothing happens to the host; a relaunched app re-attaches
 ```
 
 Thanks to this design, half of FR-10 (restore on restart) is the same code path as an ordinary reconnect — it is the default behaviour, not a special case. The rules for the cursor, the replay budget and the transport bounds are in [protocol.md](protocol.md) §1.
 
 **One host per data folder** (`dev-services/instance-lock.ts`). Two hosts on one folder would each hold their own session list and write to the same `store.db`. Ownership is an exclusive SQLite transaction (`BEGIN EXCLUSIVE` on `host-ownership.sqlite`, DELETE journal mode) that the host holds for its whole lifetime (#82): taking it is atomic, a second host is refused at once, and the operating system releases it when the host dies, however it dies, so a crash leaves nothing stale. `host.lock` (pid and start time) remains as the description of the owner in the conflict message, and for older hosts that know only that file: a live, matching `host.lock` still refuses the start. Before #82 ownership was the file alone, checked and then written: 8 hosts started at once produced 2 owners. This is single-machine ownership — not a distributed lease, and not for a data folder on a network filesystem.
+
+### 4.1 Who holds the host: the keeper (#280, option C step 1)
+
+In the packaged app the host's parent is the keeper (`centralu --keeper`, the app's own executable in a
+mode; [architecture.md](architecture.md) §4.1), not the app. The keeper launches the host with
+`--port 0 --watch-parent --db <data>/store.db` and `CC_DATA_DIR=<data>`, keeps its stdin pipe, and restarts
+it by the rules the app used before: five consecutive failures, a 30 s stable-uptime reset, and an
+immediate stop on a lock conflict or a store only a newer build can read (`host_proc.rs`, shared by the
+keeper and the app's direct path). If the keeper dies, the host sees EOF on that pipe and shuts down.
+
+**Per-build copies.** Before each launch the keeper copies the bundle's `resources/host` folder to
+`<data>/hosts/<key>/` (temporary folder, then rename) and runs `main.mjs` from there. The key is the commit
+stamped into `bundle-info.json`; a `-dirty` or `unknown` build gets its build time appended, so two different
+dirty builds never share a copy. Copies other than the running host's are removed once a host is ready.
+
+**Where it came from.** The keeper keeps, for the running host, `{ commit, builtAt, version,
+protocolVersion, bundlePath, hostDir, copyDir }`, returns it on the control socket, writes it to
+`<data>/keeper.json` (no token), and passes it to the host as `CC_HOST_SOURCE`. The host adds it to every
+`hello_ok` as `build` ([protocol.md](protocol.md) §1), with the commit always its own compiled-in one.
+
+**Control socket.** `<data>/keeper.sock`, created `0600` under `umask 077`; every connection's peer uid must
+be the keeper's own. Newline-delimited JSON, one request per connection except `attach`:
+
+| request | answer |
+|---|---|
+| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, port and token, build source, background mode, attached windows, activity |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach |
+| `{"op":"stop"}` | stops the host and the keeper ("Quit and stop agents") |
+| `{"op":"switch","source":…}` | restarts the host from that build (the build stamp is re-read from its folder) |
+| `{"op":"restart"}` | Retry after the host gave up |
+| `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
+
+**One keeper per data folder.** `flock` on `<data>/keeper.lock`, released by the OS however the keeper ends.
+A second keeper whose predecessor answers on the socket exits with code 3 and starts no host; one whose
+predecessor holds the lock but does not answer (on its way out) waits up to 15 s for it.
+
+**When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. With background mode off,
+when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
+host (a working or waiting session, a terminal, a command run). A keeper no window attached to within 60 s of
+starting ends too: the app that launched it died first.
+
+`scripts/keeper-integration.mjs` drives all of this with the real binary (`cargo build` into `/tmp`) and the
+real bundled host against a temporary `CC_DATA_DIR`.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

@@ -88,10 +88,38 @@ agent-host (node, run standalone)         ▼
                                           └─ (dev-services replaced by Rust)
 ```
 
-- **AgentPort 구현은 하나로 유지된다** — dev와 prod가 같은 WS 클라이언트를 쓴다. Tauri의 역할은 통신이 아니라 **프로세스 감독**(spawn, 크래시 감지, 재시작)이다. stdio 릴레이(Rust를 거치는 이중 직렬화)는 만들지 않는다.
+- **AgentPort 구현은 하나로 유지된다** — dev와 prod가 같은 WS 클라이언트를 쓴다. Tauri의 역할은 통신이 아니라 **프로세스 감독**(spawn, 크래시 감지, 재시작)이다 — 패키지된 앱에서는 키퍼를 통해서(§4.1). stdio 릴레이(Rust를 거치는 이중 직렬화)는 만들지 않는다.
 - 보안: 임의 포트 + 시작 시 생성한 토큰으로 하는 핸드셰이크, loopback에만 바인딩. 브라우저/WebView 클라이언트는 명시된 dev/Tauri origin allowlist에도 들어야 한다. `Origin` 헤더가 없는 네이티브 클라이언트도 토큰은 필요하고, literal `Origin: null`은 거부한다.
 - dev 모드에서는 git/fs/store를 agent-host 안의 `dev-services` 모듈(Node로 구현)이 제공한다. Tauri 전환 시점에 이 부분만 Rust(invoke)로 바뀌고 **포트는 그대로 유지된다**(C2). 전환의 순서와 방법은 [platform-abstraction.ko.md](platform-abstraction.ko.md) §5에 있다.
 - 이 구조 덕분에 M0~M1을 Rust 툴체인 없이 브라우저에서 핫 리로드로 개발하고, Playwright로 E2E를 돌릴 수 있다.
+
+### 4.1 키퍼: 호스트가 창보다 오래 산다 (#280, 옵션 C 1단계)
+
+패키지된 앱에서는 Tauri 앱이 더 이상 호스트의 부모가 아니다. 호스트는 **키퍼**가 쥔다: 같은 Centralu 실행 파일을
+`centralu --keeper`로 띄운 것으로, 앱에서 떨어져 자기 세션에서 돈다.
+
+```
+Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own session)
+   │                 unix socket     │ launch · watch · restart (the old supervisor)
+   │                 <data>/keeper.sock, 0600
+   │                                 ▼
+   └──── WebSocket ws://127.0.0.1:PORT ────▶ agent-host (node, from <data>/hosts/<build>/)
+```
+
+| 결정 | 이유 |
+|---|---|
+| 키퍼는 두 번째 바이너리가 아니라 앱 실행 파일의 한 모드다 | 서명하고 내보낼 것이 하나이고, 서명과 번들 식별자가 같으므로 macOS가 개인정보 권한을 새 프로그램이 아니라 Centralu에 돌릴 것이다(#220). `main()`이 Tauri 앱을 만들기 전에 갈라지므로 키퍼 모드는 창을 열지도 웹뷰를 띄우지도 않는다. |
+| 앱이 떼어서 띄운다 (`setsid`, stdin `/dev/null`) | 앱이 끝나든 죽든 바뀌든 키퍼에게는 아무것도 가지 않는다. launchd와 `SMAppService`는 나중 선택지이고 1단계가 아니다. |
+| 호스트는 키퍼에 묶인다 (키퍼의 파이프에 `--watch-parent`) | 키퍼가 어떻게 죽든 호스트를 데려간다: 주인 없는 호스트는 생기지 않는다. |
+| 모든 호스트는 빌드별 사본 `<data>/hosts/<commit>/`에서 돈다 | 다시 빌드하거나 업데이트하면 번들이 바뀐다. 번들에서 돌던 호스트는 Codex 브리지·`schema.sql`·`app-template/`을 필요할 때 읽어 두 빌드를 섞을 수 있었다(2026-10-03). 아무 호스트도 쓰지 않는 사본은 호스트가 뜨면 지운다. |
+| 백그라운드 모드는 설정이고 기본은 꺼짐 | 꺼짐: 마지막 창이 떨어지면 키퍼와 호스트가 멈춘다, 앱을 끄던 그대로. 켜짐: 계속 돌고, 다시 연 앱이 다시 붙는다. "Quit and stop agents"는 어느 쪽이든 멈춘다. |
+| 백그라운드 모드에서 지켜보는 이 없는 키퍼는 창도 활동도 없이 30분이 지나면 끝난다 | 아무도 보지 않는 호스트를 끝낼 무언가가 있어야 한다. 활동(일하거나 기다리는 세션, 터미널, 명령 실행)은 호스트가 stdout에 내는 자기 보고이고, 키퍼는 그 밖에 아무것도 해석하지 않는다. 도는 턴이나 기다리는 승인은 얼마가 걸리든 키퍼를 살려 둔다. |
+| 다른 빌드의 창은 도는 호스트에 붙고 바꾸기를 권한다 | 키퍼는 두 빌드를 다 안다. 바꾸면 도는 턴이 끊긴다는 확인을 거친 뒤 창의 빌드로 호스트를 다시 띄운다. 끊김 없는 교체는 3단계다. |
+| 디버그 빌드(`pnpm app:dev`)는 직접 경로를 유지한다 | 거기서는 앱이 호스트의 부모다, 예전 그대로. `CC_USE_KEEPER=1`이면 디버그 빌드도 키퍼를 쓴다. unix가 아닌 대상에는 아직 키퍼가 없다. |
+
+키퍼가 아직 하지 않는 일: 에이전트·터미널·프로젝트 명령을 쥐는 일(2단계), 턴을 끊지 않고 호스트를 바꾸는 일(3단계).
+호스트를 다시 띄우면 여전히 호스트의 자식이 모두 끝난다. 제어 소켓과 그 프로토콜, 신뢰 규칙은
+[agent-host.ko.md](agent-host.ko.md) §4.1과 [security-boundaries.md](security-boundaries.md)에 있다.
 
 ## 5. 데이터 흐름 (요약 — 상세는 [state-management.ko.md](state-management.ko.md))
 

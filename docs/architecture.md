@@ -86,10 +86,38 @@ agent-host (node, run standalone)         ▼
                                           └─ (dev-services replaced by Rust)
 ```
 
-- **The AgentPort implementation stays single** — dev and prod use the same WS client. Tauri's role is not communication but **process supervision** (spawn, crash detection, restart). We do not build a stdio relay (double serialisation via Rust).
+- **The AgentPort implementation stays single** — dev and prod use the same WS client. Tauri's role is not communication but **process supervision** (spawn, crash detection, restart) — in the packaged app through the keeper (§4.1). We do not build a stdio relay (double serialisation via Rust).
 - Security: an arbitrary port + a handshake with a token generated at startup, bound to loopback only. Browser/WebView clients must also come from the explicit dev/Tauri origin allowlist; native clients without an `Origin` header still need the token, and literal `Origin: null` is rejected.
 - In dev mode, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node). At the Tauri migration only these switch to Rust (invoke), and **the ports stay the same** (C2). The order and method of the migration is in [platform-abstraction.md](platform-abstraction.md) §5.
 - This structure is what lets M0~M1 be developed in a browser with hot reload and no Rust toolchain, and run E2E with Playwright.
+
+### 4.1 The keeper: the host outlives the window (#280, option C step 1)
+
+In the packaged app the Tauri app is no longer the host's parent. The host is held by the **keeper**: the
+same Centralu executable started as `centralu --keeper`, detached from the app into its own session.
+
+```
+Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own session)
+   │                 unix socket     │ launch · watch · restart (the old supervisor)
+   │                 <data>/keeper.sock, 0600
+   │                                 ▼
+   └──── WebSocket ws://127.0.0.1:PORT ────▶ agent-host (node, from <data>/hosts/<build>/)
+```
+
+| Decision | Why |
+|---|---|
+| The keeper is the app's own executable in a mode, not a second binary | One thing to sign and ship, and the same signature and bundle identifier, so macOS should attribute privacy permissions to Centralu rather than to a new program (#220). `main()` branches before the Tauri app is built, so keeper mode never opens a window or loads the webview. |
+| The app launches it detached (`setsid`, stdin `/dev/null`) | Quitting, crashing or replacing the app sends it nothing. launchd and `SMAppService` are later options, not step 1. |
+| The host is tied to the keeper (`--watch-parent` on the keeper's pipe) | A keeper that dies, however it dies, still takes its host with it: there is never an unowned host. |
+| Every host runs from a per-build copy, `<data>/hosts/<commit>/` | A rebuild or update rewrites the bundle; a host running from it read the Codex bridge, `schema.sql` and `app-template/` on demand and could mix two builds (2026-10-03). Copies no host uses are removed once a host is up. |
+| Background mode is a setting, off by default | Off: the last window detaching stops the keeper and host, as quitting always did. On: they keep running, and a relaunched app re-attaches. "Quit and stop agents" stops them either way. |
+| An unwatched keeper in background mode exits after 30 minutes with no window and no activity | Something has to end a host nobody is watching. Activity (a working or waiting session, a terminal, a command run) is the host's own report on its stdout; the keeper parses nothing else. A running turn or a waiting approval keeps it alive however long that takes. |
+| A window of another build attaches to the running host and offers to switch | The keeper knows both builds. Switching restarts the host from the window's build after a confirmation that running turns are cut. Swapping without a cut is step 3. |
+| Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a debug build in. Non-unix targets have no keeper yet. |
+
+What the keeper does not do yet: hold agents, terminals or project commands (step 2), or swap hosts without
+cutting turns (step 3). A host restart still ends every child of the host. The control socket, its protocol
+and its trust rule are in [agent-host.md](agent-host.md) §4.1 and [security-boundaries.md](security-boundaries.md).
 
 ## 5. Data flow (summary — detail in [state-management.md](state-management.md))
 

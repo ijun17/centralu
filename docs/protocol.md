@@ -5,7 +5,8 @@
 ## 1. Transport layer
 
 - WebSocket, 1 text frame = 1 JSON message.
-- Handshake immediately after connecting: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → on mismatch, close immediately (with an error code); on success `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch }`. The token is generated when the host starts; in dev it is passed through an environment variable.
+- Handshake immediately after connecting: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → on mismatch, close immediately (with an error code); on success `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch, build? }`. The token is generated when the host starts; in dev it is passed through an environment variable.
+- `hello_ok.build` (#280) says which build the host is and where it came from: `{ commit, protocolVersion, version?, bundlePath?, copyDir? }`. Under the keeper a window of one build can be attached to a host of another, and this is how a client tells. The commit is the host's own compiled-in one; the rest is the keeper's record of the bundle it copied the host from ([agent-host.md](agent-host.md) §4.1). Optional: an older host sends none, and a host run from source sends `commit: 'dev'`.
 - **Nothing but hello goes out before `hello_ok`** (#82). The client reports `connected` and sends its queued calls, in the order they were made, only once `hello_ok` arrives; before that it ignores every other frame. A socket that opens but never answers is dropped after 10 seconds and retried, and the host closes a socket that has not sent a valid hello within 10 seconds (4001). Before #82 the client flushed its queue the moment the socket opened, so a refused handshake turned calls the host never ran into "connection lost, may have reached the host".
 - Two kinds, by direction: **RPC** (request/response, UI→host) and the **event stream** (host→UI, one-way push).
 
