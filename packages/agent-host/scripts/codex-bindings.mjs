@@ -59,6 +59,7 @@ const groups = [
   ['clientNotifications', 'client notification'],
   ['serverNotifications', 'server notification'],
   ['serverRequests', 'server request (approval)'],
+  ['threadItemTypes', 'thread item type'],
   ['approvalDecisions', 'approval decision value'],
   ['approvalPolicies', 'approval policy value'],
   ['mcpToolApprovalModes', 'MCP tool approval mode'],

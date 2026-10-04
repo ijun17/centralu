@@ -5,7 +5,7 @@
     "'프로토콜이 우리가 쓰는 방식으로 여전히 존재하는가'뿐이어야 하기 때문이다.",
     "`pnpm codex:bindings --check`가 최신 생성물과 대조해 사라진 항목을 알린다 (변경 축 C4)."
   ],
-  "verifiedWith": "codex-cli 0.153.4",
+  "verifiedWith": "codex-cli 0.160.0",
   "clientRequests": [
     "initialize",
     "thread/start",
@@ -89,6 +89,25 @@
     "thread/goal/updated",
     "thread/goal/cleared",
     "item/fileChange/patchUpdated"
+  ],
+  "_threadItemTypesComment": [
+    "ThreadItem `type` values the adapter branches on by name (normalize.ts, history.ts, index.ts).",
+    "#303: the compaction marker now comes from a completed `contextCompaction` item, because no measured CLI",
+    "(0.147.0, 0.153.4, 0.160.0) sends `thread/compacted`. A renamed item type is dropped as unknown, without an error."
+  ],
+  "threadItemTypes": [
+    "userMessage",
+    "agentMessage",
+    "reasoning",
+    "contextCompaction",
+    "enteredReviewMode",
+    "exitedReviewMode",
+    "imageView",
+    "commandExecution",
+    "fileChange",
+    "mcpToolCall",
+    "collabAgentToolCall",
+    "webSearch"
   ],
   "serverRequests": [
     "item/commandExecution/requestApproval",
