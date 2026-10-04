@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { SessionInfo, StoredMessage } from '@cc/protocol'
+import type { GridPanel, SessionInfo, StoredMessage } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22, v23 and v24 broke the same six assertions one after another: if the version is written
  * six times, every migration bills six small chores.
  */
-const LATEST_SCHEMA = 41
+const LATEST_SCHEMA = 42
 
 function seeded() {
   const s = new Store()
@@ -25,6 +25,19 @@ function seeded() {
     ...sessionLiveDefaults(),
   })
   return s
+}
+
+/** A session's grid panel (#288) */
+const sp = (sessionId: string): GridPanel => ({ kind: 'session', sessionId })
+
+/** A plain worker session in `projectId`, for the grid's tests */
+function gridSession(s: Store, id: string, projectId: string) {
+  s.upsertSession({
+    id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
+    lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
+    verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+  })
 }
 
 /** A trash record that removes nothing outside the store when purged */
@@ -512,14 +525,14 @@ describe('migration v9 — the grid layout', () => {
         ...sessionLiveDefaults(),
       })
     }
-    s.setGridView(['s3', 's1'])
-    expect(s.listGridView()).toEqual(['s3', 's1'])
+    s.setGridView([sp('s3'), sp('s1')])
+    expect(s.listGridView()).toEqual([sp('s3'), sp('s1')])
     s.close()
   })
 
   it('rewrites the whole thing — adding, removing and reordering all come through the same call', () => {
     const s = seeded()
-    s.setGridView(['s1'])
+    s.setGridView([sp('s1')])
     s.setGridView([])
     expect(s.listGridView()).toEqual([])
     s.close()
@@ -527,18 +540,86 @@ describe('migration v9 — the grid layout', () => {
 
   it('the layout stays put even after resaving a session', () => {
     const s = seeded()
-    s.setGridView(['s1'])
+    s.setGridView([sp('s1')])
     const before = s.listSessions()[0]!
     s.upsertSession({ ...before, name: 'renamed' })
-    expect(s.listGridView()).toEqual(['s1'])
+    expect(s.listGridView()).toEqual([sp('s1')])
     s.close()
   })
 
   it('deleting a session drops it from the layout too — it must not try to draw something that no longer exists', async () => {
     const s = seeded()
-    s.setGridView(['s1'])
+    s.setGridView([sp('s1')])
     await s.trashSession('s1', KEEP_ALL)
     expect(s.listGridView()).toEqual([])
+    s.close()
+  })
+})
+
+/**
+ * v42: apps stand on the grid too (#288). The table is rebuilt, so the panels a person already
+ * arranged are moved through a real v41-shaped table — a grid that comes back empty after an
+ * update reads as the app forgetting.
+ */
+describe('migration v42 — the grid holds apps as well as sessions', () => {
+  const ap = (projectId: string | null, appId: string): GridPanel => ({ kind: 'app', projectId, appId })
+
+  it('a v41 grid of session ids comes back as the same sessions, in the same order', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v42-'))
+    const file = join(dir, 'store.db')
+    try {
+      const fresh = new Store(file)
+      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      for (const id of ['s1', 's2', 's3']) gridSession(fresh, id, 'p1')
+      fresh.close()
+      // Take the grid back to v41: one row per session id
+      const raw = new Database(file)
+      raw.exec(`
+        DROP TABLE grid_panels;
+        CREATE TABLE grid_panels (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL);
+        INSERT INTO grid_panels (session_id, position) VALUES ('s3', 0), ('s1', 1), ('s2', 2);
+      `)
+      // A row whose session is gone, written with the key unenforced: never shown, and it must not stop the move
+      raw.pragma('foreign_keys = OFF')
+      raw.exec(`INSERT INTO grid_panels (session_id, position) VALUES ('vanished', 3)`)
+      raw.pragma('user_version = 41')
+      raw.close()
+
+      const s = new Store(file)
+      expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+      expect(s.migrationsRun).toBe(LATEST_SCHEMA - 41)
+      expect(s.listGridView()).toEqual([sp('s3'), sp('s1'), sp('s2')])
+      // Now an app can stand between them
+      s.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      expect(s.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      s.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('sessions, a project’s app and a user-folder app keep one order, and a panel named twice keeps its first place', () => {
+    const s = seeded()
+    s.setGridView([ap(null, 'notes'), sp('s1'), ap('p1', 'slider'), ap('p1', 'slider'), ap(null, 'notes')])
+    expect(s.listGridView()).toEqual([ap(null, 'notes'), sp('s1'), ap('p1', 'slider')])
+    s.close()
+  })
+
+  it('two projects’ apps with the same id are two panels', () => {
+    const s = seeded()
+    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.setGridView([ap('p1', 'slider'), ap('p2', 'slider')])
+    expect(s.listGridView()).toEqual([ap('p1', 'slider'), ap('p2', 'slider')])
+    s.close()
+  })
+
+  it('deleting a project takes its apps off the grid and leaves the rest where they were', () => {
+    const s = seeded()
+    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    s.deleteProject('p2')
+    expect(s.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
     s.close()
   })
 })
@@ -654,7 +735,7 @@ describe('v13 migration — the old-named table becomes grid_panels', () => { //
     const store = new Store(file)
 
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.listGridView()).toEqual(['s1'])
+    expect(store.listGridView()).toEqual([sp('s1')])
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -1553,7 +1634,7 @@ describe('the trash (#204)', () => {
     const s = seeded()
     s.appendMessages(galaxy('s1', 5))
     s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
-    s.setGridView(['s1'])
+    s.setGridView([sp('s1')])
     session(s, 'orch', null, { kind: 'orchestrator' })
     expect(s.orchestratorId()).toBe('orch')
 

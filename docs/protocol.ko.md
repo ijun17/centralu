@@ -124,6 +124,7 @@ type ApprovalDetail =
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession`은 세션을 휴지통으로 보낸다 (FR-22) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색 |
+| grid | `grid.get, grid.set` | 그리드의 패널들, 순서대로, 통째로 쓴다 (product spec §5.4). 하나하나가 `GridPanel`이다: `{ kind: 'session', sessionId }` 또는 `{ kind: 'app', projectId: string \| null, appId }` (`null`은 사용자 폴더의 앱) — #288; 그 전에는 세션 id만의 목록이었고, UI는 그것도 세션 패널로 읽는다. `grid.set`은 `{ panels }`(최대 256)를 받고 저장한 것을 돌려준다: 중복, 모르는 세션, 등록되지 않은 프로젝트의 앱은 빠진다. 앱이 있는지는 확인하지 않는다 — 앱 목록은 폴더보다 늦을 수 있고, 찾지 못한 앱은 화면이 빼고 그린다. 모양은 패널의 정체성뿐이라 그대로 클라이언트로 옮겨 갈 수 있다 (#82) |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |

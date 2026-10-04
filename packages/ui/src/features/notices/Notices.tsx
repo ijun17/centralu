@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { gridSessionIds } from '@cc/core'
 import { projectScreenSessions, useStore, type Notice } from '../../store/store.js'
 import { isOnScreen } from '../../app/onscreen.js'
 
@@ -23,7 +24,8 @@ export function Notices() {
   const appFocused = useStore((s) => s.appFocused)
   const focusedSessionId = useStore((s) => s.focusedSessionId)
   const orchestratorId = useStore((s) => s.orchestratorId)
-  const gridPanels = useStore((s) => s.gridPanels)
+  // Joined for the same reason as below — the grid's sessions, derived from its panels (#288)
+  const gridSessions = useStore((s) => gridSessionIds(s.gridPanels).join(' '))
   const builderPaneSessionId = useStore((s) => s.builderPaneSessionId)
   // Joined into one string: a selector that returns a new array on every call never settles
   const projectScreen = useStore((s) => projectScreenSessions(s).join(' '))
@@ -51,14 +53,14 @@ export function Notices() {
           isOnScreen(view, n.sessionId, {
             focusedSessionId,
             orchestratorId,
-            gridPanels,
+            gridSessions: gridSessions ? gridSessions.split(' ') : [],
             builderPaneSessionId,
             projectScreen: projectScreen ? projectScreen.split(' ') : [],
           }),
         )
         .map((n) => n.sessionId),
     )
-  }, [notices, appFocused, view, focusedSessionId, orchestratorId, gridPanels, builderPaneSessionId, projectScreen, dismiss])
+  }, [notices, appFocused, view, focusedSessionId, orchestratorId, gridSessions, builderPaneSessionId, projectScreen, dismiss])
 
   if (notices.length === 0) return null
 

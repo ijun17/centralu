@@ -7,6 +7,7 @@ import type {
   Attachment,
   CommandRunInfo,
   ExternalAppInfo,
+  GridPanel,
   NormalizedEvent,
   SavedCommand,
   PermissionPreset,
@@ -34,6 +35,10 @@ import {
   markRead as markReadPure,
   rename as renamePure,
   appPanelId,
+  appKeyOf,
+  gridPanelKey,
+  gridSessionIds,
+  sanitizeGridPanels,
   sanitizeArrangements,
   sessionPanelId,
   type ProjectArrangement,
@@ -182,7 +187,24 @@ function fitWidth(px: number, minReal: number, max: number, otherLane: number, z
  * host's scope name and never collides with a project id (a UUID).
  */
 export function externalAppKey(projectId: string | null | undefined, appId: string): string {
-  return `${projectId ?? '_user'}/${appId}`
+  return appKeyOf(projectId, appId)
+}
+
+/**
+ * The key of an app's view on the grid (#288) — a pinned view of its own, apart from the app's
+ * pinned view (`externalAppKey`) that the app view and its project screen share.
+ *
+ * Owner decision (2026-10-04): the same app can stand in more than one place at once, and each
+ * place is its own view while the app's process is shared. The grid and the project screen are
+ * different screens with different lives — × on the grid must not tear down the view a person left
+ * on the project screen, and the other way round — so the grid's entry is keyed apart. Everything
+ * else about it is a pinned view's: opened by `home`, laid over its panel (`pinned-app/slots.ts`),
+ * hidden rather than unloaded while another screen is looked at, followed to new code, and torn
+ * down first whenever it goes. `grid:` cannot begin an app key, whose first segment is a project
+ * id or `_user`.
+ */
+export function gridAppViewKey(projectId: string | null, appId: string): string {
+  return `grid:${appKeyOf(projectId, appId)}`
 }
 
 /**
@@ -1356,6 +1378,11 @@ export type AppState = {
    * the sidebar are one instance in one frame, and moving between them keeps the document.
    */
   ensurePinnedView(projectId: string | null, appId: string): void
+  /**
+   * Gives an app on the grid its view (#288), keyed `gridAppViewKey` — apart from the app's pinned view, so the grid
+   * and the project screen each keep their own document. Does nothing if it already has one.
+   */
+  ensureGridAppView(projectId: string | null, appId: string): void
   /** Closes a pinned view from outside its own header (the project screen's ×) — teardown first, as every way down does */
   dismissPinnedView(key: string): Promise<void>
   /**
@@ -1418,7 +1445,8 @@ export type AppState = {
    * Kept in the workspace snapshot — this screen appears exactly once, on first run.
    */
   introSeen: boolean
-  gridPanels: string[]
+  /** The grid's panels, sessions and apps, in order (#288) — as stored by the host, unknown ones included (GridView leaves those out) */
+  gridPanels: GridPanel[]
   setView(view: 'focus' | 'grid' | 'orchestrator'): void
   /**
    * Opens the orchestrator **screen**. Does not create a session (#63, deferred startup) — attaches
@@ -1434,7 +1462,11 @@ export type AppState = {
   askOrchestrator(text: string): Promise<boolean>
   /** Passes the intro screen (#63): records the tool choice with the host, and goes to the orchestrator screen */
   completeIntro(tool: ToolName): Promise<void>
-  setGridPanels(sessionIds: string[]): Promise<void>
+  /**
+   * Saves the grid's panels whole — adding, removing and reordering are all this one call. An app panel no longer in
+   * the list has its view closed, teardown first, as the project screen's × does.
+   */
+  setGridPanels(panels: GridPanel[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
 }
@@ -1898,6 +1930,19 @@ export function projectScreenAppKeys(
 }
 
 /**
+ * The apps the grid shows as panels right now, as their grid view keys (#288, `gridAppViewKey`). PinnedApps lays exactly
+ * these over the grid's panels, and GridView opens a view for each, so the two read this one answer. An app the list does
+ * not have is not a panel (`visibleGridPanels`), so it gets no view either.
+ */
+export function gridScreenAppKeys(s: Pick<AppState, 'view' | 'gridPanels' | 'externalApps'>): string[] {
+  if (s.view !== 'grid') return []
+  const listed = new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId)))
+  return s.gridPanels.flatMap((p) =>
+    p.kind === 'app' && listed.has(appKeyOf(p.projectId, p.appId)) ? [gridAppViewKey(p.projectId, p.appId)] : [],
+  )
+}
+
+/**
  * Whether leaving the app view for this pinned view lands on a screen that shows it in a panel (#203): the view is
  * the one on screen, and the focus lane it goes back to is its project's screen with the app not hidden there.
  */
@@ -2177,7 +2222,7 @@ export function usageTools(s: AppState): ToolName[] {
 
   // The grid is the case where "the session you are looking at" is not singular
   if (s.view === 'grid') {
-    for (const id of s.gridPanels) add(s.sessions[id]?.tool)
+    for (const id of gridSessionIds(s.gridPanels)) add(s.sessions[id]?.tool)
     return out
   }
 
@@ -2331,7 +2376,7 @@ export const useStore = create<AppState>((set, get) => ({
   pinnedViews: [] as PinnedView[],
   inlineViews: {} as Record<string, Record<string, InlineView>>,
   inlineFramesVersion: 0,
-  gridPanels: [] as string[],
+  gridPanels: [] as GridPanel[],
   builderPaneSessionId: null,
   orchestratorId: null as string | null,
   orchestratorWaking: false,
@@ -2437,7 +2482,8 @@ export const useStore = create<AppState>((set, get) => ({
       platform.projects.list(),
       platform.agents.listSessions(),
       // The app must come up even if the layout cannot be read — the grid just looks empty
-      platform.agents.grid().catch(() => [] as string[]),
+      // Sanitized: a host from before apps could stand on the grid answers bare session ids, which still read as sessions
+      platform.agents.grid().then(sanitizeGridPanels).catch(() => [] as GridPanel[]),
       // Same reason: the tool list must not block the app either — if it cannot be read, only names show, with no label
       platform.agents.detect().catch(() => [] as ToolStatus[]),
       /*
@@ -2679,7 +2725,7 @@ export const useStore = create<AppState>((set, get) => ({
      * path is introduced.
      */
     void (async () => {
-      for (const id of get().gridPanels) {
+      for (const id of gridSessionIds(get().gridPanels)) {
         if (get().connection !== 'connected') return // Stop if disconnected — the reconnect path picks it back up
         await get().wake(id)
       }
@@ -2916,7 +2962,7 @@ export const useStore = create<AppState>((set, get) => ({
         isOnScreen(s.view, sessionId, {
           focusedSessionId: s.focusedSessionId,
           orchestratorId: s.orchestratorId,
-          gridPanels: s.gridPanels,
+          gridSessions: gridSessionIds(s.gridPanels),
           builderPaneSessionId: s.builderPaneSessionId,
           projectScreen: projectScreenSessions(s),
         })
@@ -3239,7 +3285,7 @@ export const useStore = create<AppState>((set, get) => ({
      * place, not at each caller.
      */
     // If the session is already on the grid, the grid is the destination (see the `preferGrid` comment above)
-    const onGrid = !!id && !!opts?.preferGrid && get().gridPanels.includes(id)
+    const onGrid = !!id && !!opts?.preferGrid && gridSessionIds(get().gridPanels).includes(id)
     const orchestrator = !!id && (id === get().orchestratorId || get().sessions[id]?.kind === 'orchestrator')
     /*
      * If the picked session's project is folded, it is unfolded (#205) — a picked session must also
@@ -4717,8 +4763,10 @@ export const useStore = create<AppState>((set, get) => ({
        * grid if it was on the grid).
        */
       const grid = get().gridPanels
-      if (grid.includes(sessionId)) {
-        await get().setGridPanels(grid.map((id) => (id === sessionId ? info.id : id)))
+      if (gridSessionIds(grid).includes(sessionId)) {
+        await get().setGridPanels(
+          grid.map((p) => (p.kind === 'session' && p.sessionId === sessionId ? { kind: 'session', sessionId: info.id } : p)),
+        )
         get().focusSession(info.id, { preferGrid: true })
       }
 
@@ -4985,6 +5033,17 @@ export const useStore = create<AppState>((set, get) => ({
     }))
   },
 
+  ensureGridAppView(projectId, appId) {
+    const key = gridAppViewKey(projectId, appId)
+    if (get().pinnedViews.some((p) => p.key === key)) return
+    set((s) => ({
+      pinnedViews: [
+        ...s.pinnedViews,
+        { key, projectId, appId, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null },
+      ],
+    }))
+  },
+
   async dismissPinnedView(key) {
     await pinnedFrames.get(key)?.teardown().catch(() => {})
     get().closeApp(key)
@@ -5231,13 +5290,24 @@ export const useStore = create<AppState>((set, get) => ({
    * the server before settling into place, the hand would feel like it stumbled. A failure reverts to
    * whatever the host says is true.
    */
-  async setGridPanels(sessionIds) {
+  async setGridPanels(panels) {
     const platform = get().platform
     if (!platform) return
     const before = get().gridPanels
-    set({ gridPanels: sessionIds })
+    /*
+     * An app panel taken off the grid closes its view, teardown first — the project screen's × rule (#288). Here
+     * rather than at the grid's ×, so every way a panel leaves the list (the ×, a test, a future caller) takes its view
+     * with it instead of leaving a frame alive behind a screen that no longer shows it. The view is not inside the
+     * panel (it is laid over it from PinnedApps), so the panel leaving first does not cut teardown off: the frame stays
+     * in the document, hidden, until `dismissPinnedView` has had its answer.
+     */
+    const kept = new Set(panels.map(gridPanelKey))
+    for (const p of before) {
+      if (p.kind === 'app' && !kept.has(gridPanelKey(p))) void get().dismissPinnedView(gridAppViewKey(p.projectId, p.appId))
+    }
+    set({ gridPanels: panels })
     try {
-      set({ gridPanels: await platform.agents.setGridView(sessionIds) })
+      set({ gridPanels: sanitizeGridPanels(await platform.agents.setGridView(panels)) })
     } catch (e) {
       set({ gridPanels: before, toast: `Could not save layout: ${(e as Error).message}` })
     }

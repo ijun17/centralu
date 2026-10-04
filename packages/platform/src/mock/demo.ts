@@ -271,7 +271,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     talk(mock, extra.id, [['user', "Write release notes from this week's commits."]])
     mock.emit({ type: 'state_change', sessionId: extra.id, state: 'working' })
     const panels = [working.id, approving.id, asking.id, extra.id]
-    await mock.agents.setGridView(panels)
+    await mock.agents.setGridView(panels.map((sessionId) => ({ kind: 'session' as const, sessionId })))
     /*
      * If the scene's name is `grid`, opens it in grid view. The way of looking belongs to the
      * workspace snapshot, so it is written here — since the mock's ids grow in the same order
@@ -518,7 +518,7 @@ async function seedShot(mock: MockPlatform): Promise<void> {
    * The panel order is left mixed by state: working, waiting for approval, waiting for a
    * question, done.
    */
-  await mock.agents.setGridView([working.id, approving.id, asking.id, done.id])
+  await mock.agents.setGridView([working.id, approving.id, asking.id, done.id].map((sessionId) => ({ kind: 'session' as const, sessionId })))
   const saved = (await mock.workspace.load()) ?? {}
   await mock.workspace.save({ ...saved, view: 'grid', focusedSessionId: approving.id })
 }

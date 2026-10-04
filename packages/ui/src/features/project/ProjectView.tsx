@@ -2,16 +2,17 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent }
 import { appPanelId, arrangePanels, columnsFor, parsePanelId, rowsFor, sessionPanelId, withHidden, withOrder } from '@cc/core'
 import { externalAppKey, useStore } from '../../store/store.js'
 import { useSessionsOf } from '../../store/selectors.js'
-import { useProjectApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { useProjectApps } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
-import { AppIcon, CloseIcon, PlusIcon } from '../../components/icons.jsx'
+import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { PANEL_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { GRID_GAP, wholePixelTracks } from '../grid/tracks.js'
 import { useRealSize } from '../grid/real-size.js'
-import { placeSlots, registerSlot } from '../pinned-app/slots.js'
+import { placeSlots } from '../pinned-app/slots.js'
+import { AppPanel } from '../pinned-app/AppPanel.jsx'
 import { dragVerdict, droppedArrangement, droppedPanelId } from './drop.js'
 
 /**
@@ -50,6 +51,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const ensurePinned = useStore((s) => s.ensurePinnedView)
   const dismissPinned = useStore((s) => s.dismissPinnedView)
   const openNewSession = useStore((s) => s.openNewSession)
+  const openApp = useStore((s) => s.openApp)
   const foldComposer = useStore((s) => s.foldComposer)
   const ref = useRef<HTMLDivElement>(null)
   // Real pixels, as in GridView: the text scale enlarges letters, not the minimum panel (real-size.ts)
@@ -114,9 +116,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   // After every render: a panel can move without changing size (a drag's preview), which no
   // resize observer reports, and the app view laid over it has to move with it
-  useLayoutEffect(() => placeSlots(projectId, dragging, inbound))
+  useLayoutEffect(() => placeSlots(dragging !== null, inbound))
   // Leaving the screen lets the frames take the pointer again, whatever a drag left behind
-  useEffect(() => () => placeSlots(projectId, null), [projectId])
+  useEffect(() => () => placeSlots(false), [projectId])
 
   /*
    * Every app panel shows the app's pinned view, so every app on the screen has one. Opening it is
@@ -364,10 +366,12 @@ export function ProjectView({ projectId }: { projectId: string }) {
                     <AppPanel
                       app={appsById.get(p.id)}
                       appId={p.id}
-                      projectId={projectId}
+                      viewKey={externalAppKey(projectId, p.id)}
                       onDragStart={(e) => startDrag(id, e)}
-                      onHide={() => hide(id)}
-                      hideTestId={`project-hide-${id}`}
+                      onOpen={() => openApp(projectId, p.id)}
+                      remove={{ label: 'Hide from this screen (closes its view)', testId: `project-hide-${id}`, onClick: () => hide(id) }}
+                      slotTestId={`project-slot-${p.id}`}
+                      openTestId={`project-open-app-${p.id}`}
                     />
                   ) : null}
                 </div>
@@ -377,66 +381,5 @@ export function ProjectView({ projectId }: { projectId: string }) {
         )}
       </div>
     </section>
-  )
-}
-
-/**
- * An app's panel: a header that moves the panel, and a slot its pinned view is laid over.
- *
- * The pinned view's own header (Runs, Secrets, Versions, Builder, close) is not drawn in a panel —
- * each of those opens a side panel a slot has no room for. "Open" goes to the app view, where they
- * are, on the same instance.
- */
-function AppPanel({
-  app,
-  appId,
-  projectId,
-  onDragStart,
-  onHide,
-  hideTestId,
-}: {
-  app: ExternalCatalogApp | undefined
-  appId: string
-  projectId: string
-  onDragStart: (e: DragEvent<HTMLElement>) => void
-  onHide: () => void
-  hideTestId: string
-}) {
-  const openApp = useStore((s) => s.openApp)
-  const slot = useRef<HTMLDivElement>(null)
-  const key = externalAppKey(projectId, appId)
-  useLayoutEffect(() => {
-    const el = slot.current
-    if (!el) return
-    return registerSlot(key, el)
-  }, [key])
-  return (
-    <>
-      <div
-        className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b border-edge px-4 active:cursor-grabbing"
-        draggable
-        onDragStart={onDragStart}
-        data-testid="pane-header"
-      >
-        <span className="text-ash">
-          <AppIcon />
-        </span>
-        <span className="truncate text-[13px] font-medium tracking-tight text-chalk">{app?.title ?? appId}</span>
-        {app && <span className="readout shrink-0 text-[10px] text-slate">{app.status.label}</span>}
-        <button
-          type="button"
-          className="ml-auto shrink-0 rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
-          onClick={() => openApp(projectId, appId)}
-          title="Open this app on its own, with its runs, secrets and versions"
-          data-testid={`project-open-app-${appId}`}
-        >
-          Open
-        </button>
-        <IconButton label="Hide from this screen (closes its view)" onClick={onHide} testId={hideTestId} align="right">
-          <CloseIcon size={14} />
-        </IconButton>
-      </div>
-      <div ref={slot} className="min-h-0 flex-1" data-testid={`project-slot-${appId}`} />
-    </>
   )
 }

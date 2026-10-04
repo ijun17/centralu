@@ -1,16 +1,21 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { columnsFor, rowsFor, visiblePanels } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import type { GridPanel } from '@cc/protocol'
+import { appKeyOf, columnsFor, gridPanelKey, parseAppKey, rowsFor, visibleGridPanels } from '@cc/core'
+import { gridAppViewKey, useStore } from '../../store/store.js'
+import { buildCatalog } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
-import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
+import { APP_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
+import { AppPanel } from '../pinned-app/AppPanel.jsx'
+import { placeSlots } from '../pinned-app/slots.js'
 import { GRID_GAP, wholePixelTracks } from './tracks.js'
 import { useRealSize } from './real-size.js'
+import { droppedGridList, droppedGridPanel, gridTakes } from './drop.js'
 
 /**
- * Grid — several sessions on one screen.
+ * Grid — several sessions, and apps, on one screen.
  *
  * The spec (§5.4) originally left the grid out of v1. The first of three reasons given —
  * "at 600×400 per panel, neither the conversation nor the composer reads well" — still holds.
@@ -24,10 +29,31 @@ import { useRealSize } from './real-size.js'
  * A panel uses the **same component (SessionPane)** as the focus view. A separate copy would
  * let a model change here leave the sidebar holding a stale value — two screens, but there has
  * to be one truth.
+ *
+ * An app can stand here too (#288), dropped from its sidebar row like a session, and moved and
+ * removed the same way. Its panel shows the app's view the way the project screen does — opened by
+ * the app's `home`, laid over the panel from PinnedApps (an iframe that moves loses its document),
+ * hidden rather than unloaded while another screen is looked at, torn down first when it is removed
+ * — but it is the grid's own view, not the one the app view and the project screen share
+ * (`gridAppViewKey`): the same app can stand in both places, each its own document, one process.
+ * Nothing puts an app here but a hand; the grid stays "only what was put there".
+ *
+ * Each app panel costs a view instance on the host and a frame (the sandbox proxy and the app's
+ * document inside it) in the page, kept while the grid is left for another screen. Nothing caps
+ * their number beyond what the screen fits: the grid holds only what a person put on it, and
+ * every panel already needs the minimum width.
  */
 export function GridView() {
   const panels = useStore((s) => s.gridPanels)
   const sessions = useStore((s) => s.sessions)
+  const externalApps = useStore((s) => s.externalApps)
+  // The app list, keyed the way a dragged app row names its app (`externalAppKey`)
+  const appsByKey = useMemo(
+    () => new Map(buildCatalog([], {}, externalApps).external.map((a) => [a.key, a] as const)),
+    [externalApps],
+  )
+  const ensureGridAppView = useStore((s) => s.ensureGridAppView)
+  const openApp = useStore((s) => s.openApp)
   /*
    * The selected panel. For a long time "selected" meant nothing in the grid — reasonably so,
    * since twelve panels stand there identically and it is a screen for looking, not reading. It
@@ -103,9 +129,15 @@ export function GridView() {
     }
   }
 
-  // Do not draw a deleted session even if it is still in the layout (leave the stored value as is)
+  /*
+   * Do not draw a deleted session, or an app the list does not have, even if it is still in the layout (leave the
+   * stored value as is). The screen works in panel keys (core's `gridPanelKey`): a session's is its id, an app's
+   * `app:<project | _user>/<appId>`.
+   */
   const known = new Set(Object.keys(sessions))
-  const visible = visiblePanels(panels, known)
+  const shown = visibleGridPanels(panels, known, new Set(appsByKey.keys()))
+  const byKey = new Map(shown.map((p) => [gridPanelKey(p), p] as const))
+  const visible = shown.map(gridPanelKey)
   const cols = columnsFor(width, height, visible.length)
   const rows = rowsFor(visible.length, cols)
 
@@ -134,20 +166,89 @@ export function GridView() {
     (components/orbit.ts). Bringing a session that is already spinning into the grid later would
     otherwise make the panel's orbit start over from zero on its own.
   */
-  useOrbitSync(visible.filter((id) => sessions[id]?.state === 'working').join(' '))
+  useOrbitSync(
+    visible.filter((id) => byKey.get(id)?.kind === 'session' && sessions[id]?.state === 'working').join(' '),
+  )
 
-  /** Accept a session dragged in from the sidebar — if it is already there, move it to that spot */
-  const dropSession = (id: string, targetId: string | null, before: boolean) => {
-    if (!known.has(id)) return
-    const next = panels.includes(id)
-      ? targetId
-        ? reorderIds(panels, id, targetId, before)
-        : panels
-      : targetId
-        ? reorderIds([...panels, id], id, targetId, before)
-        : [...panels, id]
-    void setGridPanels(next)
+  /*
+   * Every app panel shows its view, so every app on the grid has one. Opening it is the view's own business (it calls
+   * `home` when the app can run), so an untrusted, invalid or stopped app stands here with its reason and its button.
+   */
+  const appKeys = shown.flatMap((p) => (p.kind === 'app' ? [appKeyOf(p.projectId, p.appId)] : [])).join('\n')
+  useEffect(() => {
+    for (const key of appKeys ? appKeys.split('\n') : []) {
+      const app = parseAppKey(key)
+      if (app) ensureGridAppView(app.projectId, app.appId)
+    }
+  }, [appKeys, ensureGridAppView])
+
+  /*
+   * A sidebar row is being dragged in. Its drag starts outside this screen, so the screen hears of it at the
+   * document: the app views laid over the panels step aside for it, as on the project screen (slots.ts) — in WebKit a
+   * drag goes into a frame whatever its pointer-events say. Its end also clears the panel it was last over: a row let
+   * go somewhere else never reaches this screen's own dragend, and a target left behind would be the next panel drag's
+   * preview before the hand has moved.
+   */
+  const [inbound, setInbound] = useState(false)
+  useEffect(() => {
+    const start = (e: globalThis.DragEvent) => {
+      // One of this grid's own panels is a reorder, not a row coming in
+      if (e.target instanceof Node && ref.current?.contains(e.target)) return
+      if (e.dataTransfer && gridTakes([...e.dataTransfer.types])) setInbound(true)
+    }
+    const end = () => {
+      setInbound(false)
+      setOver(null)
+    }
+    document.addEventListener('dragstart', start)
+    document.addEventListener('dragend', end)
+    return () => {
+      document.removeEventListener('dragstart', start)
+      document.removeEventListener('dragend', end)
+    }
+  }, [])
+
+  // After every render: a panel can move without changing size (a drag's preview), and the view laid over it has to move with it
+  useLayoutEffect(() => placeSlots(dragging !== null, inbound))
+  // Leaving the grid lets the frames take the pointer again, whatever a drag left behind
+  useEffect(() => () => placeSlots(false), [])
+
+  /** What a drop on the grid stands for — a session or an app that exists, or null (drop.ts) */
+  const dropped = (e: DragEvent<HTMLElement>): GridPanel | null =>
+    droppedGridPanel((type) => e.dataTransfer.getData(type), known, appsByKey)
+
+  /** Accept a session or app dragged in from the sidebar — if it is already there, move it to that spot */
+  const dropPanel = (panel: GridPanel, targetId: string | null, before: boolean) => {
+    void setGridPanels(droppedGridList(panels, panel, targetId, before))
   }
+
+  /** Commits the order the screen shows while a panel is dragged — the drop must not change the screen (#53) */
+  const commitPreview = (order: string[]) => void setGridPanels(order.map((k) => byKey.get(k)!))
+
+  /** A panel's header picked up — the panel carries what its sidebar row carries (drop.ts) */
+  const startDrag = (id: string, e: DragEvent<HTMLElement>) => {
+    const p = byKey.get(id)
+    if (!p) return
+    if (p.kind === 'session') e.dataTransfer.setData(SESSION_MIME, p.sessionId)
+    else e.dataTransfer.setData(APP_MIME, appKeyOf(p.projectId, p.appId))
+    e.dataTransfer.effectAllowed = 'move'
+    /*
+       What is being dragged is **the panel**, not the header.
+       Because the draggable element is the header, the browser picked up only the
+       header and carried it around — the panel stayed put and only a thin strip
+       followed the pointer, so nobody could tell what was actually being moved
+       (dogfooding). This swaps the drag image over to the panel.
+     */
+    const card = cards.current.get(id)
+    if (card) {
+      const r = card.getBoundingClientRect()
+      e.dataTransfer.setDragImage(card, e.clientX - r.left, e.clientY - r.top)
+    }
+    setDragging(id)
+  }
+
+  /** Removing only takes it off the screen — see the session panel's × below */
+  const removePanel = (id: string) => void setGridPanels(panels.filter((p) => gridPanelKey(p) !== id))
 
   return (
     <section
@@ -159,22 +260,22 @@ export function GridView() {
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-deck p-2"
       data-testid="grid"
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes(SESSION_MIME)) e.preventDefault()
+        if (gridTakes(e.dataTransfer.types)) e.preventDefault()
       }}
       onDrop={(e) => {
-        const id = e.dataTransfer.getData(SESSION_MIME)
-        if (!id) return
+        const panel = dropped(e)
+        if (!panel) return
         e.preventDefault()
         snapshotScroll()
         /*
           Dropping a grid panel on the padding or a gap: the screen is showing the preview,
-          so that is what must survive the drop. Falling through to dropSession here would
+          so that is what must survive the drop. Falling through to dropPanel here would
           append-or-ignore — the arrangement the user is looking at would silently revert.
         */
-        if (id === dragging && preview) {
-          void setGridPanels(preview)
+        if (gridPanelKey(panel) === dragging && preview) {
+          commitPreview(preview)
         } else {
-          dropSession(id, null, false)
+          dropPanel(panel, null, false)
         }
         setOver(null)
         setDragging(null)
@@ -183,7 +284,7 @@ export function GridView() {
       {visible.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-center" data-testid="grid-empty">
           <p className="text-[13px] leading-relaxed text-ash">
-            Drag sessions here from the sidebar
+            Drag sessions and apps here from the sidebar
             <span className="mt-1 block text-[11px] text-slate">
               They keep running — this is another way to look at them
             </span>
@@ -206,20 +307,23 @@ export function GridView() {
             gridTemplateRows: wholePixelTracks(rows),
           }}
         >
-          {order.map((id) => (
-            <div
-              key={id}
-              ref={(el) => {
-                if (el) cards.current.set(id, el)
-                else cards.current.delete(id)
-              }}
-              /*
+          {order.map((id) => {
+            const panel = byKey.get(id)!
+            const isWorking = panel.kind === 'session' && sessions[id]?.state === 'working'
+            return (
+              <div
+                key={id}
+                ref={(el) => {
+                  if (el) cards.current.set(id, el)
+                  else cards.current.delete(id)
+                }}
+                /*
                 A panel that is answering gets a spinning border (the same orbit as the sidebar
                 indicator). With several panels on screen, a single small indicator is not
                 something the eye can track to find which one is spinning — the grid is a screen
                 for **looking**, not reading, so it has to be caught out of the corner of the eye.
               */
-              /*
+                /*
                 The selected panel is not highlighted with a border (the conclusion of two
                 rounds of dogfooding). The first time, it failed to update, so a single panel
                 stayed lit for days; once that was fixed to follow the hand, the judgment came
@@ -227,14 +331,14 @@ export function GridView() {
                 focus outline already say where the person is typing. Only the "answering"
                 indicator (cc-orbit-ring) remains.
               */
-              /*
+                /*
                 The panel's border is brighter than any line inside the panel (user's
                 observation, 2026-09-11). Before, the panel was `edge` and the folded input card
                 was `graphite`, so **what was inside was brighter than the vessel holding it**,
                 and the eye went to the card's curve before the panel's boundary. The two are
                 swapped — the panel goes up to `graphite` and the card goes down to `edge`.
               */
-              /*
+                /*
                 isolate: the panel contains its own stacking layer.
                 The spinning border sits at z-30, because it has to be above the folded composer
                 (z-20) inside the panel. But without the panel forming a stacking context, that
@@ -244,12 +348,12 @@ export function GridView() {
                 "highest within the panel" to actually be true, the panel has to be a fence —
                 exactly the method .cc-orbit in the same file uses for the badge.
               */
-              className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-graphite bg-void transition-opacity ${
-                sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
-              } ${dragging === id ? 'opacity-40' : ''}`}
-              data-focused={focusedSessionId === id || undefined}
-              data-testid={`grid-panel-${id}`}
-              /*
+                className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-graphite bg-void transition-opacity ${
+                  isWorking ? 'cc-orbit-ring' : ''
+                } ${dragging === id ? 'opacity-40' : ''}`}
+                data-focused={(panel.kind === 'session' && focusedSessionId === id) || undefined}
+                data-testid={`grid-panel-${id}`}
+                /*
                 The panel the hand touches is the selected panel (dogfooding: on launch it
                 stayed frozen on whichever session had been restored, and never moved). It is no
                 longer used for drawing anything, but the value still does real work: markRead
@@ -261,63 +365,82 @@ export function GridView() {
                 and expanding it every time someone types into the panel would make collapsing
                 pointless.
               */
-              onFocusCapture={() => {
-                if (focusedSessionId !== id) focusSession(id, { preferGrid: true, reveal: false })
-              }}
-              /*
+                onFocusCapture={() => {
+                  // An app's panel holds no session to select
+                  if (panel.kind === 'session' && focusedSessionId !== id)
+                    focusSession(id, { preferGrid: true, reveal: false })
+                }}
+                /*
                 Where the dragged thing lands relative to this panel. The edge line that used
                 to draw this is gone — the reflow shows it — but tests and assistive tech
                 still need the relation as a value, not as a pixel position to reverse-engineer.
               */
-              data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}
-              onDragOver={(e) => {
-                if (!e.dataTransfer.types.includes(SESSION_MIME)) return
-                e.preventDefault()
-                e.stopPropagation()
-                /*
+                data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}
+                onDragOver={(e) => {
+                  if (!gridTakes(e.dataTransfer.types)) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  /*
                   Over the dragged panel itself: keep the last target instead of clearing it.
                   The reflow routinely puts the dragged panel under the pointer (hover B's far
                   half → the panels swap → the pointer is now on the dragged panel). Clearing
                   here would snap the preview back and the two orders would flicker in a loop.
                 */
-                if (dragging === id) return
-                const r = e.currentTarget.getBoundingClientRect()
-                const before = dropsBefore({ top: r.left, height: r.width }, e.clientX)
-                // dragover fires continuously, even with the pointer still — only re-render on change
-                if (over?.id === id && over.before === before) return
-                snapshotScroll()
-                setOver({ id, before })
-              }}
-              onDragEnd={() => {
-                // Fires with or without a drop — Escape and dropping outside land here too,
-                // and clearing `over` *is* the rollback (the preview is derived from it)
-                snapshotScroll()
-                setDragging(null)
-                setOver(null)
-              }}
-              onDrop={(e) => {
-                const dragged = e.dataTransfer.getData(SESSION_MIME)
-                snapshotScroll()
-                setOver(null)
-                setDragging(null)
-                if (!dragged) return
-                e.preventDefault()
-                e.stopPropagation()
-                // A grid panel commits exactly what the preview shows — anything else could
-                // make the drop change the screen, which is what #53 removes
-                if (dragged === dragging && preview) return void setGridPanels(preview)
-                const r = e.currentTarget.getBoundingClientRect()
-                dropSession(dragged, id, dropsBefore({ top: r.left, height: r.width }, e.clientX))
-              }}
-            >
-              {/*
+                  if (dragging === id) return
+                  const r = e.currentTarget.getBoundingClientRect()
+                  const before = dropsBefore({ top: r.left, height: r.width }, e.clientX)
+                  // dragover fires continuously, even with the pointer still — only re-render on change
+                  if (over?.id === id && over.before === before) return
+                  snapshotScroll()
+                  setOver({ id, before })
+                }}
+                onDragEnd={() => {
+                  // Fires with or without a drop — Escape and dropping outside land here too,
+                  // and clearing `over` *is* the rollback (the preview is derived from it)
+                  snapshotScroll()
+                  setDragging(null)
+                  setOver(null)
+                }}
+                onDrop={(e) => {
+                  const dragged = dropped(e)
+                  snapshotScroll()
+                  setOver(null)
+                  setDragging(null)
+                  if (!dragged) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  // A grid panel commits exactly what the preview shows — anything else could
+                  // make the drop change the screen, which is what #53 removes
+                  if (gridPanelKey(dragged) === dragging && preview) return commitPreview(preview)
+                  const r = e.currentTarget.getBoundingClientRect()
+                  dropPanel(dragged, id, dropsBefore({ top: r.left, height: r.width }, e.clientX))
+                }}
+              >
+                {/*
                 The spinning border is actually drawn by a child layer (cc-orbit-ring-layer in
                 styles/index.css). The panel's cc-orbit-ring class remains as a marker that "this
                 panel is spinning" — so tests and assistive technology can read the state as a
                 value, not as pixels.
               */}
-              {sessions[id]?.state === 'working' && <div className="cc-orbit-ring-layer" aria-hidden />}
-              {/*
+                {isWorking && <div className="cc-orbit-ring-layer" aria-hidden />}
+                {panel.kind === 'app' ? (
+                  <AppPanel
+                    app={appsByKey.get(appKeyOf(panel.projectId, panel.appId))}
+                    appId={panel.appId}
+                    viewKey={gridAppViewKey(panel.projectId, panel.appId)}
+                    onDragStart={(e) => startDrag(id, e)}
+                    onOpen={() => openApp(panel.projectId, panel.appId)}
+                    // Removing takes the panel off the screen and closes its view, teardown first (the store's setGridPanels)
+                    remove={{
+                      label: 'Remove from the grid (closes this view)',
+                      testId: `grid-remove-${id}`,
+                      onClick: () => removePanel(id),
+                    }}
+                    slotTestId={`grid-slot-${id}`}
+                    openTestId={`grid-open-app-${id}`}
+                  />
+                ) : (
+                  /*
                 Removing only takes it off the screen — the session stays in the sidebar and
                 keeps running. That is why it is called "remove", not "delete".
 
@@ -325,17 +448,17 @@ export function GridView() {
                 panel, which left its size and height out of sync with the header's restart
                 button (12px vs 14px, different flow). Placed on the same line, there is nothing
                 left to line up.
-              */}
-              <SessionPane
-                sessionId={id}
-                /*
+              */
+                  <SessionPane
+                    sessionId={id}
+                    /*
                   Folding the composer exists **only in the grid** (user request, 2026-09-10).
                   The setting came from the reading space being tight in a two-row grid, so
                   folding it in the focus view too, where there is plenty of room, would only
                   leave the person having to unfold it again every time.
                 */
-                fold={foldComposer}
-                /*
+                    fold={foldComposer}
+                    /*
                   The **only** handle for moving a panel is the header.
                   The whole panel used to be draggable, but with a draggable ancestor the
                   browser will not let text inside it be selected — selecting text in the
@@ -345,36 +468,22 @@ export function GridView() {
                   focus view the header doubles as the title bar, but not here — left as is,
                   trying to move a panel dragged the whole app window instead (dogfooding).
                 */
-                headerDrag={(e) => {
-                  e.dataTransfer.setData(SESSION_MIME, id)
-                  e.dataTransfer.effectAllowed = 'move'
-                  /*
-                     What is being dragged is **the panel**, not the header.
-                     Because the draggable element is the header, the browser picked up only the
-                     header and carried it around — the panel stayed put and only a thin strip
-                     followed the pointer, so nobody could tell what was actually being moved
-                     (dogfooding). This swaps the drag image over to the panel.
-                   */
-                  const card = cards.current.get(id)
-                  if (card) {
-                    const r = card.getBoundingClientRect()
-                    e.dataTransfer.setDragImage(card, e.clientX - r.left, e.clientY - r.top)
-                  }
-                  setDragging(id)
-                }}
-                headerExtra={
-                  <IconButton
-                    label="Remove from the grid (the session keeps running)"
-                    onClick={() => void setGridPanels(panels.filter((x) => x !== id))}
-                    testId={`grid-remove-${id}`}
-                    align="right"
-                  >
-                    <CloseIcon size={14} />
-                  </IconButton>
-                }
-              />
-            </div>
-          ))}
+                    headerDrag={(e) => startDrag(id, e)}
+                    headerExtra={
+                      <IconButton
+                        label="Remove from the grid (the session keeps running)"
+                        onClick={() => removePanel(id)}
+                        testId={`grid-remove-${id}`}
+                        align="right"
+                      >
+                        <CloseIcon size={14} />
+                      </IconButton>
+                    }
+                  />
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </section>

@@ -70,7 +70,7 @@ async function workingGrid(page: Page): Promise<string[]> {
   const ids = [await newSession(page, 'one'), await newSession(page, 'two'), await newSession(page, 'three')]
   await page.evaluate((l: string[]) => {
     const store = (window as never as { __store: any }).__store
-    store.getState().setGridPanels(l)
+    store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId })))
     store.setState((s: any) => {
       const sessions = { ...s.sessions }
       for (const id of l) sessions[id] = { ...sessions[id], state: 'working' }

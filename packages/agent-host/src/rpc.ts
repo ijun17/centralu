@@ -473,7 +473,7 @@ export function createRpcHandler(
     },
     'grid.get': async () => mgr.grid(),
     'grid.set': async (p) =>
-      mgr.setGridView(RpcMethods['grid.set'].params.parse(p).sessionIds),
+      mgr.setGridView(RpcMethods['grid.set'].params.parse(p).panels),
     'processes.strays': async () => findStrays(mgr.folderRoots()),
     'processes.stop': async (p) =>
       stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots()),

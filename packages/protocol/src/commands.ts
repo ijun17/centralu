@@ -20,6 +20,7 @@ import {
   AppVersions,
   UsageSnapshot,
   GitFileStatus,
+  GridPanel,
   ModelOption,
   PermissionPreset,
   Question,
@@ -987,13 +988,6 @@ export const RpcMethods = {
     result: z.array(SessionInfo),
   },
   /**
-   * The sessions placed on the grid (order included).
-   *
-   * Since this is an auto-flow grid, layout and order are the same single thing. So **adding,
-   * removing and reordering are all expressed by this one operation** — "make the list look
-   * like this."
-   */
-  /**
    * The app's single orchestrator. **Calling this creates one if it does not exist.**
    * Creating it ahead of time would leave a session nobody uses holding onto a tool process.
    */
@@ -1515,10 +1509,19 @@ export const RpcMethods = {
       structuredContent: z.record(z.string(), z.unknown()).optional(),
     }),
   },
-  'grid.get': { params: z.object({}), result: z.array(z.string()) },
+  /**
+   * The panels placed on the grid, in order — sessions and apps (`GridPanel`, #288).
+   *
+   * Since this is an auto-flow grid, layout and order are the same single thing. So **adding,
+   * removing and reordering are all expressed by this one operation** — "make the list look
+   * like this." The answer is the list as stored: a session the host does not know, a duplicate,
+   * or an app of a project that is not registered is left out. An app is not checked against the
+   * app list, which can lag behind its folder; the screen leaves out one it cannot find.
+   */
+  'grid.get': { params: z.object({}), result: z.array(GridPanel) },
   'grid.set': {
-    params: z.object({ sessionIds: z.array(z.string()) }),
-    result: z.array(z.string()),
+    params: z.object({ panels: z.array(GridPanel).max(256) }),
+    result: z.array(GridPanel),
   },
   'projects.list': { params: z.object({}), result: z.array(ProjectInfo) },
   'projects.gitStatus': { params: z.object({ projectId: ProjectId }), result: ProjectInfo },

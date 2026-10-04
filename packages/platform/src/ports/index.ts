@@ -21,6 +21,7 @@ import type {
   GitCommit,
   GitDiff,
   GitFileStatus,
+  GridPanel,
   NormalizedEvent,
   ProjectInfo,
   SavedCommand,
@@ -93,9 +94,12 @@ export interface AgentPort {
   orchestratorPeek(): Promise<SessionInfo | null>
   /** The tool the central orchestrator runs on (#63, the card choice on the intro screen). Only meaningful before it is created */
   configureOrchestrator(tool: ToolName): Promise<void>
-  /** Grid layout — adding, removing and reordering all come through this one call */
-  grid(): Promise<string[]>
-  setGridView(sessionIds: string[]): Promise<string[]>
+  /**
+   * Grid layout — sessions and apps, in order (#288). Adding, removing and reordering all come
+   * through this one call; the answer is the list as stored (unknown sessions left out).
+   */
+  grid(): Promise<GridPanel[]>
+  setGridView(panels: GridPanel[]): Promise<GridPanel[]>
   /** The models available to pick and each model's reasoning strength (what the tool reports through its official API) */
   models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
   /** Restarts only the agent attached to the session (the conversation stays as is) */

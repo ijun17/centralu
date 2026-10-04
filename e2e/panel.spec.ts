@@ -66,7 +66,7 @@ async function newSession(
 
 async function openGrid(page: Page, ids: string[]) {
   await page.evaluate(
-    (l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l),
+    (l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))),
     ids,
   )
   await page.getByTestId('grid-button').click()
@@ -1329,7 +1329,7 @@ async function cancelDrag(page: Page, from: string) {
 }
 
 const storedPanels = (page: Page): Promise<string[]> =>
-  page.evaluate(() => (window as never as { __store: any }).__store.getState().gridPanels)
+  page.evaluate(() => (window as never as { __store: any }).__store.getState().gridPanels.map((p: any) => p.sessionId))
 
 /*
  * ── Panel tabs: reorder, split, and one global arrangement (#20) ─────

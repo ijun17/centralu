@@ -1,6 +1,3 @@
-import { parsePanelId } from '@cc/core'
-import { externalAppKey } from '../../store/store.js'
-
 /**
  * Where a pinned view stands while the project screen shows it (#203).
  *
@@ -17,17 +14,16 @@ import { externalAppKey } from '../../store/store.js'
  * which is what follows a panel that moved without changing size (a drag's preview order).
  *
  * Slots and views are keyed by the pinned view's key (`externalAppKey`, `<project>/<appId>`). The
- * project screen speaks in panel ids (`app:<appId>`, `session:<id>`); `placeSlots` is where one
- * becomes the other.
+ * grid lays its app panels' views out the same way (#288), keyed by the grid's own view of the app
+ * (`gridAppViewKey`, `grid:<project>/<appId>`). Only one of the two screens is ever on show, so they
+ * share the drag state below.
  */
 
 const slots = new Map<string, HTMLElement>()
 const views = new Map<string, HTMLElement>()
-/** Whether a panel is being dragged on the project screen — see `placeSlots` */
+/** Whether a panel is being dragged on the screen showing the views — see `place` */
 let panelDragged = false
-/** The key of the view whose panel is being dragged, when that panel is an app's — see `placeSlots` */
-let draggedView: string | null = null
-/** A drag from outside the screen that the screen takes (one of its project's sidebar rows) — see `place` */
+/** A drag from outside the screen that the screen takes (a sidebar row) — see `place` */
 let inbound = false
 
 /**
@@ -55,20 +51,24 @@ function place(key: string): void {
    */
   view.style.pointerEvents = panelDragged || inbound ? 'none' : ''
   /*
-   * A row dragged in from the sidebar needs more: the views are hidden until it is dropped. In
+   * And more than that: while anything is dragged, the views are hidden until it is dropped. In
    * WebKit a drag goes into a frame whatever the frame's pointer-events say — measured in
    * Playwright's WebKit, a row dragged over an app's view went quiet on the page the moment it
    * crossed the frame's edge, and its drop never arrived; with the view hidden the page heard
-   * every dragover and the drop. A panel drag gets by, because its preview moves a panel under the
-   * hand; a row gets no preview (GridView), so without this it could not land beside an app. Hidden
-   * is not unloaded: the documents stay, and show again when the drag ends.
+   * every dragover and the drop.
+   *
+   * A panel drag was once thought to get by, because its preview moves a panel under the hand. It
+   * does only when the hand happens to reach an app panel through its header: measured again for
+   * #288, a session panel dragged sideways into an app's view went just as quiet, on the grid and
+   * on the project screen, and a drop let go over the dragged app panel's own view would be lost
+   * the same way, taking the preview with it. So a panel drag hides them too — the dragged app
+   * panel's view included, which used to be dimmed with its panel and now steps aside with the
+   * rest. Hidden is not unloaded: the documents stay, and show again when the drag ends.
    */
-  view.style.visibility = inbound ? 'hidden' : ''
-  // The dragged panel is dimmed (ProjectView); its view is not inside it, so it is dimmed here
-  view.style.opacity = draggedView === key ? '0.4' : ''
+  view.style.visibility = panelDragged || inbound ? 'hidden' : ''
 }
 
-/** The project screen's panel body for this app. Returns the function that removes it */
+/** A panel's body for this app (the project screen's or the grid's). Returns the function that removes it */
 export function registerSlot(key: string, el: HTMLElement): () => void {
   slots.set(key, el)
   const ro = new ResizeObserver(() => place(key))
@@ -86,24 +86,18 @@ export function registerSlottedView(key: string, el: HTMLElement): () => void {
   place(key)
   return () => {
     if (views.get(key) === el) views.delete(key)
-    for (const p of ['left', 'top', 'width', 'height', 'pointerEvents', 'visibility', 'opacity'] as const) el.style[p] = ''
+    for (const p of ['left', 'top', 'width', 'height', 'pointerEvents', 'visibility'] as const) el.style[p] = ''
   }
 }
 
 /**
- * Places every slotted view again — the project screen calls this after each render.
- * `draggingPanel` is the panel id being dragged on project `projectId`'s screen (`app:<appId>` or
- * `session:<id>`); `rowDragged` is a drag from outside the screen that the screen takes (one of its
- * project's sidebar rows).
- *
- * The panel id is turned into the view's key here. They used to be compared as they came, and
- * `app:<appId>` never equals `<project>/<appId>`, so the view of a dragged app panel was never
- * dimmed while its panel was.
+ * Places every slotted view again — the project screen and the grid call this after each render.
+ * `panelDragged` is whether one of the screen's own panels is being dragged; `rowDragged` is a drag
+ * from outside the screen that the screen takes (a sidebar row). While either is true, every view
+ * steps aside (`place`).
  */
-export function placeSlots(projectId: string, draggingPanel: string | null, rowDragged = false): void {
-  const panel = draggingPanel ? parsePanelId(draggingPanel) : null
-  panelDragged = draggingPanel !== null
-  draggedView = panel?.kind === 'app' ? externalAppKey(projectId, panel.id) : null
+export function placeSlots(panelDraggedNow: boolean, rowDragged = false): void {
+  panelDragged = panelDraggedNow
   inbound = rowDragged
   for (const key of views.keys()) place(key)
 }

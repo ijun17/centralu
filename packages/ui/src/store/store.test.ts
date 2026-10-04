@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
-import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
+import { DEFAULT_NOTIFY_POLICY, sessionGridPanel, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import {
   composerTarget,
   droppedQuestionsText,
   externalAppKey,
+  gridAppViewKey,
+  gridScreenAppKeys,
   handoffPrompt,
   inlineViewsFromHistory,
   messagesToChat,
@@ -1722,7 +1724,7 @@ describe('warming up grid sessions', () => {
     const mock = new MockPlatform()
     mock.sessions.set('warm-a', sessionInfo('warm-a', { live: false }))
     mock.sessions.set('warm-b', sessionInfo('warm-b', { live: false }))
-    await mock.agents.setGridView(['warm-a', 'warm-b'])
+    await mock.agents.setGridView(['warm-a', 'warm-b'].map(sessionGridPanel))
     await useStore.getState().attach(mock)
 
     await vi.waitFor(() => {
@@ -1735,7 +1737,7 @@ describe('warming up grid sessions', () => {
     const mock = new MockPlatform()
     mock.sessions.set('warm-c', sessionInfo('warm-c', { live: false }))
     mock.unresumable.add('warm-c')
-    await mock.agents.setGridView(['warm-c'])
+    await mock.agents.setGridView([sessionGridPanel('warm-c')])
     await useStore.getState().attach(mock)
 
     await vi.waitFor(() => {
@@ -1973,6 +1975,90 @@ describe('project trust (M4)', () => {
 })
 
 /**
+ * Apps on the grid (#288). The grid's list holds tagged references, and an app's panel shows a view of its own,
+ * apart from the app's pinned view that the app view and the project screen share (owner decision: the same app can
+ * stand in more than one place, each its own view, one process).
+ */
+describe('apps on the grid (#288)', () => {
+  const live = async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/grid-apps')
+    mock.sessions.set('ga-s1', sessionInfo('ga-s1', { projectId: p.id }))
+    mock.externalAppList = [appInfo('slider', { projectId: p.id }), appInfo('notes', { projectId: null })]
+    await useStore.getState().attach(mock)
+    useStore.setState({ pinnedViews: [], focusedApp: null })
+    return { mock, pid: p.id }
+  }
+  const app = (projectId: string | null, appId: string) => ({ kind: 'app' as const, projectId, appId })
+  const keys = () => useStore.getState().pinnedViews.map((p) => p.key)
+
+  it('a list of bare session ids from a host older than this build is read as session panels', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('ga-old', sessionInfo('ga-old'))
+    // What `grid.get` answered before apps could stand on the grid
+    Object.assign(mock.agents, { grid: async () => ['ga-old'] })
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().gridPanels).toEqual([sessionGridPanel('ga-old')])
+  })
+
+  it('sessions, a project’s app and a user-folder app are saved in one order and come back from the host', async () => {
+    const { mock, pid } = await live()
+    const list = [app(null, 'notes'), sessionGridPanel('ga-s1'), app(pid, 'slider')]
+    await useStore.getState().setGridPanels(list)
+    expect(useStore.getState().gridPanels).toEqual(list)
+    expect(await mock.agents.grid()).toEqual(list)
+  })
+
+  it('an app on the grid gets a view of its own, apart from its pinned view, and each opens its own instance', async () => {
+    const { mock, pid } = await live()
+    useStore.getState().ensureGridAppView(pid, 'slider')
+    useStore.getState().ensureGridAppView(pid, 'slider')
+    useStore.getState().ensurePinnedView(pid, 'slider')
+    expect(keys()).toEqual([gridAppViewKey(pid, 'slider'), externalAppKey(pid, 'slider')])
+    for (const k of keys()) await useStore.getState().startPinnedView(k)
+    expect(mock.openedViews).toEqual([
+      { appId: 'slider', projectId: pid },
+      { appId: 'slider', projectId: pid },
+    ])
+    expect(new Set(useStore.getState().pinnedViews.map((p) => p.instanceId)).size).toBe(2)
+  })
+
+  it('taking an app panel off the grid tears its view down first, then releases it, and leaves the app’s pinned view alone', async () => {
+    const { mock, pid } = await live()
+    await useStore.getState().setGridPanels([app(pid, 'slider'), sessionGridPanel('ga-s1')])
+    useStore.getState().ensureGridAppView(pid, 'slider')
+    useStore.getState().ensurePinnedView(pid, 'slider')
+    for (const k of keys()) await useStore.getState().startPinnedView(k)
+    const gridView = useStore.getState().pinnedViews.find((p) => p.key === gridAppViewKey(pid, 'slider'))!
+    const order: string[] = []
+    const off = registerPinnedFrame(gridView.key, {
+      teardown: async () => {
+        order.push(`teardown, ${mock.closedViews.length} closed`)
+        return 'answered'
+      },
+    })
+
+    await useStore.getState().setGridPanels([sessionGridPanel('ga-s1')])
+    await vi.waitFor(() => expect(keys()).toEqual([externalAppKey(pid, 'slider')]))
+    off()
+    expect(order).toEqual(['teardown, 0 closed'])
+    expect(mock.closedViews).toEqual([gridView.instanceId])
+    expect(useStore.getState().gridPanels).toEqual([sessionGridPanel('ga-s1')])
+  })
+
+  it('the grid lays views over its app panels only while it is on show, and only for apps the list has', async () => {
+    const { pid } = await live()
+    useStore.setState({
+      gridPanels: [app(pid, 'slider'), sessionGridPanel('ga-s1'), app(pid, 'removed'), app(null, 'notes')],
+      view: 'focus',
+    })
+    expect(gridScreenAppKeys(useStore.getState())).toEqual([])
+    useStore.setState({ view: 'grid' })
+    expect(gridScreenAppKeys(useStore.getState())).toEqual([gridAppViewKey(pid, 'slider'), gridAppViewKey(null, 'notes')])
+  })
+})
+
+/**
  * A pinned view (M4 B-2): an opened view survives a focus change. Its instance is created once by the
  * host calling `home`, and released when closed. If it was closed while opening, the just-opened
  * instance is released too — otherwise a view nobody watches would hold onto the app forever.
@@ -2198,7 +2284,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-g1', sessionInfo('ho-g1', { projectId: proj.id }))
     mock.sessions.set('ho-g2', sessionInfo('ho-g2', { projectId: proj.id, name: 'Middle' }))
     mock.sessions.set('ho-g3', sessionInfo('ho-g3', { projectId: proj.id }))
-    await mock.agents.setGridView(['ho-g1', 'ho-g2', 'ho-g3'])
+    await mock.agents.setGridView(['ho-g1', 'ho-g2', 'ho-g3'].map(sessionGridPanel))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-g2')
@@ -2212,7 +2298,7 @@ describe('handing off and starting fresh', () => {
 
     const heir = [...mock.sessions.values()].find((r) => r.name === 'Middle' && r.id !== 'ho-g2')!
     // The middle panel keeps its successor in place — a panel disappearing and reappearing would scramble the arrangement (dogfooding)
-    expect(useStore.getState().gridPanels).toEqual(['ho-g1', heir.id, 'ho-g3'])
+    expect(useStore.getState().gridPanels).toEqual(['ho-g1', heir.id, 'ho-g3'].map(sessionGridPanel))
     expect(useStore.getState().focusedSessionId).toBe(heir.id)
   })
 

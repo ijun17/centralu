@@ -135,6 +135,28 @@ export const AppId = z.string()
 export type AppId = z.infer<typeof AppId>
 
 /**
+ * One panel placed on the grid (#288): a session, or an app.
+ *
+ * Tagged rather than a bare id, because the grid holds both in one order and a session id and an
+ * app id can collide. An app is named by its project and its id, the same pair that identifies it
+ * everywhere else (`ExternalAppInfo`): `projectId: null` is a user-folder app, and two projects can
+ * each have an app with the same id.
+ *
+ * The shape says nothing about the host's tables on purpose. The grid is a way of looking, and #82
+ * moves `grid_panels` to the client with the remote mode; a reference made only of the panel's
+ * identity is something the client can store as it is.
+ *
+ * The app id is not checked against the manifest's character rule here: this is a layout entry,
+ * never a path or a server name, and an app the grid names that does not exist (deleted, or not
+ * listed yet) is simply not drawn. The length cap only keeps a value that is not an id out.
+ */
+export const GridPanel = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('session'), sessionId: SessionId }),
+  z.object({ kind: z.literal('app'), projectId: ProjectId.nullable(), appId: AppId.min(1).max(128) }),
+])
+export type GridPanel = z.infer<typeof GridPanel>
+
+/**
  * An external app's status (M4 A).
  *
  *   invalid     the manifest is missing or invalid — `error` states why

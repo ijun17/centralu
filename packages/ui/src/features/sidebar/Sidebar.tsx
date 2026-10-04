@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { handoffBlockedBy, useStore } from '../../store/store.js'
+import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { APPS } from '../../apps/registry.js'
@@ -27,6 +27,7 @@ import { useOrbitSync } from '../../components/orbit.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { APP_MIME, PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo, projectItemMime } from './reorder.js'
 import { foldSummary, type FoldSummaryState } from './fold.js'
+import { droppedGridList, droppedGridPanel, gridTakes } from '../grid/drop.js'
 
 /**
  * Drag-to-reorder.
@@ -377,7 +378,7 @@ function HomelessSessions() {
  * watching**. Wrapping it in a rounded box sets it apart from the list — the shape says it is a
  * different kind of thing before the text does.
  *
- * Dropping a session here switches into the grid and adds that session to it. If the person had to
+ * Dropping a session or an app (#288) here switches into the grid and adds it there. If the person had to
  * open the screen first and then drag it in separately, that would be doing the work twice, so
  * dropping it here handles both steps at once.
  *
@@ -413,19 +414,26 @@ function GridButton() {
         onClick={() => setView('grid')}
         aria-pressed={active}
         data-testid="grid-button"
-        title="See sessions side by side."
+        title="See sessions and apps side by side."
         onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes(SESSION_MIME)) return
+          // A session or an app (#288), from the sidebar or from a panel — the grid's own rule (grid/drop.ts)
+          if (!gridTakes(e.dataTransfer.types)) return
           e.preventDefault()
           setOver(true)
         }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => {
-          const id = e.dataTransfer.getData(SESSION_MIME)
           setOver(false)
-          if (!id) return
+          const st = useStore.getState()
+          const panel = droppedGridPanel(
+            (type) => e.dataTransfer.getData(type),
+            new Set(Object.keys(st.sessions)),
+            new Map(st.externalApps.map((a) => [externalAppKey(a.projectId, a.appId), a] as const)),
+          )
+          if (!panel) return
           e.preventDefault()
-          if (!panels.includes(id)) void setGridPanels([...panels, id])
+          // At the end; one already on the grid stays where it is
+          void setGridPanels(droppedGridList(panels, panel, null, false))
           setView('grid')
         }}
       >
@@ -986,15 +994,15 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
     <li
       className="relative"
       /*
-        A project's app can be dragged onto its project screen, like a session row (#203): hidden
-        there, it comes back where it is dropped. A user-folder app belongs to no project and no
-        screen takes an app otherwise — the grid shows sessions — so it is not draggable at all.
+        An app row is dragged like a session row: onto the grid, any app (#288), or onto its
+        project screen, a project's app (#203), where a hidden one comes back where it is dropped.
+        A user-folder app carries no project type, so every project screen refuses it while it is
+        still being dragged.
       */
-      draggable={!!projectId}
+      draggable
       onDragStart={(e) => {
-        if (!projectId) return
         e.dataTransfer.setData(APP_MIME, app.key)
-        e.dataTransfer.setData(projectItemMime(projectId), projectId)
+        if (projectId) e.dataTransfer.setData(projectItemMime(projectId), projectId)
         e.dataTransfer.effectAllowed = 'move'
       }}
     >

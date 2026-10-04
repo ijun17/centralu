@@ -269,9 +269,16 @@ call.
   moved iframe loses its document), the view is laid over the panel's slot and only its style
   changes (`pinned-app/slots.ts`). In a panel the view has no header; the panel's Open goes to the
   app view, and hiding the panel closes the view, teardown first. The app's sidebar row dropped on
-  the screen brings a hidden panel back where it lands. While one of the project's rows is dragged
-  in, the view is hidden, not unloaded: in WebKit a drag goes into a frame whatever its
-  pointer-events say, and the row would land in the app instead of beside it.
+  the screen brings a hidden panel back where it lands. While anything is dragged over the screen
+  (one of the project's rows, or one of its panels), the view is hidden, not unloaded: in WebKit a
+  drag goes into a frame whatever its pointer-events say, and the row or panel would land in the
+  app instead of beside it.
+- **On the grid** (product-spec §5.4, #288) an app placed there by hand gets **a view of its own**:
+  the same hosting (opened by `home`, laid over the panel's slot, hidden rather than unloaded on
+  another screen, teardown first when the panel is removed), but a separate entry and instance
+  from the pinned view above, so the same app can stand on the grid and on its project screen at
+  once, each keeping its document, with one app process behind both. Each grid view costs one
+  instance and one frame; nothing caps their number.
 - **`ui/message`** from a pinned view asks the person which session to send it to. Nothing is sent
   before a choice, and cancelling tells the view it was not sent. Once picked, it goes the inline
   view's way (`apps.viewMessage`): stored as the app's message, and framed as the app's text for the

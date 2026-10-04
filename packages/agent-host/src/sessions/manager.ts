@@ -25,6 +25,7 @@ import type {
   ApprovalScope,
   CreateSessionParams,
   ExternalAppInfo,
+  GridPanel,
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
@@ -1092,8 +1093,8 @@ export class SessionManager {
     return this.listSessions()
   }
 
-  /** Grid layout */
-  grid(): string[] {
+  /** Grid layout — sessions and apps, in order (#288) */
+  grid(): GridPanel[] {
     return this.store.listGridView()
   }
 
@@ -1102,11 +1103,21 @@ export class SessionManager {
    *
    * **Unknown sessions are filtered out.** If a deleted session's id stays in the layout and comes
    * back, the screen tries to draw something that no longer exists — filtering once at save time
-   * means nobody has to worry about it afterward.
+   * means nobody has to worry about it afterward. An app panel is kept while its project is
+   * registered (a user-folder app has none). Whether the app itself exists is the screen's
+   * question: the app list is read from folders and can lag behind, and a panel dropped here for
+   * that reason would not come back once the list caught up.
    */
-  setGridView(sessionIds: readonly string[]): string[] {
+  setGridView(panels: readonly GridPanel[]): GridPanel[] {
     const known = new Set(this.meta.keys())
-    const clean = [...new Set(sessionIds.filter((id) => known.has(id)))]
+    const projects = new Set(this.store.listProjects().map((p) => p.id))
+    const seen = new Set<string>()
+    const clean = panels.filter((p) => {
+      const key = p.kind === 'session' ? `session:${p.sessionId}` : `app:${p.projectId ?? '_user'}/${p.appId}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return p.kind === 'session' ? known.has(p.sessionId) : p.projectId === null || projects.has(p.projectId)
+    })
     this.store.setGridView(clean)
     return clean
   }

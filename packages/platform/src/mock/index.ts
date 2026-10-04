@@ -14,6 +14,7 @@ import type {
   GitCommit,
   GitDiff,
   GitFileStatus,
+  GridPanel,
   ApprovalDecision,
   ApprovalDetail,
   ApprovalScope,
@@ -94,7 +95,30 @@ export type MockOptions = {
 export class MockPlatform implements Platform {
   private projectsList: ProjectInfo[] = []
   sessions = new Map<string, SessionInfo>()
-  private gridPanels: string[] = []
+  /**
+   * The grid's panels, sessions and apps (#288). `null` until first read: the list also survives a
+   * reload through localStorage, like the workspace snapshot below, because the real host keeps it
+   * on disk and "the grid comes back after a restart" is otherwise untestable against this mock.
+   */
+  private gridList: GridPanel[] | null = null
+  private get gridPanels(): GridPanel[] {
+    if (this.gridList) return this.gridList
+    try {
+      const raw = localStorage.getItem('cc-mock-grid')
+      this.gridList = raw ? (JSON.parse(raw) as GridPanel[]) : []
+    } catch {
+      this.gridList = [] // node, or storage denied — the in-memory copy still works
+    }
+    return this.gridList
+  }
+  private set gridPanels(list: GridPanel[]) {
+    this.gridList = list
+    try {
+      localStorage.setItem('cc-mock-grid', JSON.stringify(list))
+    } catch {
+      /* node, or storage denied — the in-memory copy still works */
+    }
+  }
   /** Messages saved per session — left open so a test can build a "session with an already-long history" */
   messages = new Map<string, StoredMessage[]>()
   /** A subagent's steps per launch card (#222), keyed `<session id> <launch call id>` — left open like `messages` */
@@ -459,7 +483,7 @@ export class MockPlatform implements Platform {
     })
     this.sessions.delete(sessionId)
     this.messages.delete(sessionId)
-    this.gridPanels = this.gridPanels.filter((id) => id !== sessionId)
+    this.gridPanels = this.gridPanels.filter((p) => !(p.kind === 'session' && p.sessionId === sessionId))
     this.emit({ type: 'session_deleted', sessionId })
   }
 
@@ -1836,9 +1860,20 @@ export class MockPlatform implements Platform {
     configureOrchestrator: async (tool: ToolName) => {
       this.orchestratorTool = tool
     },
-    grid: async () => [...this.gridPanels],
-    setGridView: async (sessionIds: string[]) => {
-      this.gridPanels = sessionIds.filter((id) => this.sessions.has(id))
+    // The host's rule (store.listGridView): a session panel only while its session is live, an app panel while its project is registered
+    grid: async () =>
+      this.gridPanels.filter((p) =>
+        p.kind === 'session' ? this.sessions.has(p.sessionId) : p.projectId === null || this.projectsList.some((x) => x.id === p.projectId),
+      ),
+    // The host's rule (manager.setGridView): unknown sessions and an app of an unregistered project are left out, and a panel named twice keeps its first place
+    setGridView: async (panels: GridPanel[]) => {
+      const seen = new Set<string>()
+      this.gridPanels = panels.filter((p) => {
+        const key = p.kind === 'session' ? `session:${p.sessionId}` : `app:${p.projectId ?? '_user'}/${p.appId}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return p.kind === 'session' ? this.sessions.has(p.sessionId) : p.projectId === null || this.projectsList.some((x) => x.id === p.projectId)
+      })
       return [...this.gridPanels]
     },
     models: async (tool: ToolName) => ({
@@ -2166,6 +2201,8 @@ export class MockPlatform implements Platform {
         this.moveToTrash(s.id, false, false)
       }
       this.projectsList.splice(at, 1)
+      // The project's apps leave the grid with it, as in the host's store
+      this.gridPanels = this.gridPanels.filter((p) => !(p.kind === 'app' && p.projectId === projectId))
       return { ok: true as const }
     },
     /**

@@ -38,7 +38,7 @@ test('clicking a project name shows only that project’s sessions as panels, an
     button.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
     header.dispatchEvent(new DragEvent('dragend', { dataTransfer: dt, bubbles: true }))
   }, `session:${a}`)
-  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().gridPanels)).toEqual([a])
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().gridPanels.map((p: any) => p.sessionId))).toEqual([a])
   await expect(page.getByTestId(`grid-panel-${a}`)).toBeVisible()
   await page.getByTestId('project-header-alpha').click()
   expect(await panels(page)).toEqual([`session:${b}`, `session:${a}`])
@@ -52,7 +52,7 @@ test('the order survives a reload, and the global grid keeps its own', async ({ 
   // The demo scene grows the same ids on every load, so what was arranged by hand comes back (CONTRIBUTING)
   await page.goto('/?demo=grid')
   await expect(page.getByTestId('grid')).toBeVisible()
-  const gridBefore = await page.evaluate(() => (window as any).__store.getState().gridPanels as string[])
+  const gridBefore = await page.evaluate(() => (window as any).__store.getState().gridPanels.map((p: any) => p.sessionId) as string[])
   expect(gridBefore.length).toBe(4)
 
   await page.getByTestId('project-header-centralu').click()
@@ -65,7 +65,7 @@ test('the order survives a reload, and the global grid keeps its own', async ({ 
   await page.reload()
   await expect(page.getByTestId('grid')).toBeVisible()
   // The grid is untouched by the project screen: the same panels, in the same order
-  expect(await page.evaluate(() => (window as any).__store.getState().gridPanels as string[])).toEqual(
+  expect(await page.evaluate(() => (window as any).__store.getState().gridPanels.map((p: any) => p.sessionId) as string[])).toEqual(
     gridBefore,
   )
   const gridOrder = await page.evaluate(() =>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isOnScreen } from './onscreen.js'
 
-const ctx = { focusedSessionId: 'a', orchestratorId: 'orc', gridPanels: ['b', 'c'] }
+const ctx = { focusedSessionId: 'a', orchestratorId: 'orc', gridSessions: ['b', 'c'] }
 
 describe('the gust only blows when a session on screen finishes', () => {
   it('focus view — the session being looked at', () => {

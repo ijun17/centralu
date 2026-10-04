@@ -96,10 +96,16 @@ const saved = (page: Page) =>
   page.evaluate(() => ((window as any).__mock.savedAttachments as { name: string }[]).map((a) => a.name))
 
 const gridPanels = (page: Page) =>
-  page.evaluate(() => (window as any).__store.getState().gridPanels as string[])
+  page.evaluate(() => (window as any).__store.getState().gridPanels.map((p: any) => p.sessionId) as string[])
 
 async function openGrid(page: Page, ids: string[]) {
-  await page.evaluate((l) => (window as any).__store.getState().setGridPanels(l), ids)
+  await page.evaluate(
+    (l) =>
+      (window as any).__store
+        .getState()
+        .setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))),
+    ids,
+  )
   await page.getByTestId('grid-button').click()
   for (const id of ids) await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
 }

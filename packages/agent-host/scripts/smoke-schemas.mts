@@ -114,7 +114,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'orchestrator.get': {},
   'orchestrator.tools': {},
   'grid.get': {},
-  'grid.set': { sessionIds: [S] },
+  'grid.set': { panels: [{ kind: 'session', sessionId: S }] },
   'workspace.save': { layout: { focusedSessionId: S } },
   'workspace.load': {},
   'approvals.rules': {},

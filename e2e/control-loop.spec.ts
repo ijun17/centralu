@@ -2088,7 +2088,7 @@ test("Settings: changing the text size does not change the grid's column count",
   await page.evaluate(() => {
     const store = (window as never as { __store: any }).__store
     const ids = Object.keys(store.getState().sessions)
-    store.getState().setGridPanels(ids)
+    store.getState().setGridPanels(ids.map((sessionId: string) => ({ kind: 'session', sessionId })))
   })
   await page.getByTestId('grid-button').click()
 
@@ -3181,7 +3181,7 @@ test('Grid — a collapsed composer expands in the panel it was dropped into', a
   await newSession(page, 'alpha', 'b')
   const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, b])
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids.map((sessionId: string) => ({ kind: 'session', sessionId }))), [a, b])
   await page.getByTestId('grid-button').click()
   const cell = page.getByTestId(`grid-panel-${a}`)
   await expect(cell).toBeVisible()
@@ -3224,7 +3224,7 @@ test('Grid — making the panel a drop target does not break reordering sessions
   await newSession(page, 'alpha', 'b')
   const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, b])
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids.map((sessionId: string) => ({ kind: 'session', sessionId }))), [a, b])
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
 
@@ -3257,7 +3257,7 @@ test('Grid — making the panel a drop target does not break reordering sessions
     { from: a!, to: b! },
   )
 
-  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().gridPanels)).toEqual([b, a])
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().gridPanels.map((p: any) => p.sessionId))).toEqual([b, a])
 })
 
 test('Old conversation can still be read back through even after compaction', async ({ page }) => {
@@ -3481,7 +3481,7 @@ test('A session whose events arrive first: an older-conversation path stands eve
   )
 
   // View only through a grid panel — never focus it
-  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, g])
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids.map((sessionId: string) => ({ kind: 'session', sessionId }))), [a, g])
   await page.getByTestId('grid-button').click()
   const cell = page.getByTestId(`grid-panel-${g}`)
   await expect(cell.getByTestId('chat-stream')).toContainText('reply that arrived before opening')
@@ -5968,7 +5968,7 @@ test('Even with many panels, they fit the screen exactly and no scroll appears',
     await newSession(page, 'alpha', name)
     ids.push(await page.evaluate(() => (window as any).__store.getState().focusedSessionId))
   }
-  await page.evaluate((list) => (window as any).__store.getState().setGridPanels(list), ids)
+  await page.evaluate((list) => (window as any).__store.getState().setGridPanels(list.map((sessionId: string) => ({ kind: 'session', sessionId }))), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[4]}`)).toBeVisible()
 
@@ -6083,7 +6083,7 @@ test('A session never opened before still shows its conversation in the grid', a
   }, id)
 
   // Add it to the grid directly, without going through the sidebar
-  await page.evaluate((sid) => (window as any).__store.getState().setGridPanels([sid]), id)
+  await page.evaluate((sid) => (window as any).__store.getState().setGridPanels([{ kind: 'session', sessionId: sid }]), id)
   await page.getByTestId('grid-button').click()
 
   await expect(page.getByTestId(`grid-panel-${id}`)).toContainText('a saved old answer')
@@ -6254,7 +6254,7 @@ test('The drop position is shown left or right while dragging a panel', async ({
   await newSession(page, 'alpha', 'b')
   const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, b])
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids.map((sessionId: string) => ({ kind: 'session', sessionId }))), [a, b])
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
 
@@ -8098,7 +8098,7 @@ test('Closing and restarting from the grid returns to the grid', async ({ page }
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
-  await page.evaluate((sid: string) => (window as any).__store.getState().setGridPanels([sid]), id)
+  await page.evaluate((sid: string) => (window as any).__store.getState().setGridPanels([{ kind: 'session', sessionId: sid }]), id)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId('grid')).toBeVisible()
 
@@ -9037,7 +9037,7 @@ test("A spinning panel's border does not leak over the files/git screen", async 
 
   await page.evaluate((sid) => {
     const store = (window as any).__store
-    store.getState().setGridPanels([sid])
+    store.getState().setGridPanels([{ kind: 'session', sessionId: sid }])
     store.setState((s: any) => ({
       sessions: { ...s.sessions, [sid]: { ...s.sessions[sid], state: 'working' } },
     }))

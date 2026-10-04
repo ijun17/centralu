@@ -151,7 +151,7 @@ test('1 focus view (baseline)', async ({ page }) => {
 
 test('grid, 4 panels, all streaming', async ({ page }) => {
   const ids = await boot(page, 4)
-  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[3]}`)).toBeVisible()
   show('Grid 4 panels · 4 streaming', await streamAndMeasure(page, ids, 120))
@@ -159,7 +159,7 @@ test('grid, 4 panels, all streaming', async ({ page }) => {
 
 test('grid, 9 panels, all streaming', async ({ page }) => {
   const ids = await boot(page, 9)
-  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
   show('Grid 9 panels · 9 streaming', await streamAndMeasure(page, ids, 120))
@@ -167,7 +167,7 @@ test('grid, 9 panels, all streaming', async ({ page }) => {
 
 test('grid, 9 panels, only 1 streaming (the steady-state load from §5.4)', async ({ page }) => {
   const ids = await boot(page, 9)
-  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
   show('Grid 9 panels · only 1 streaming', await streamAndMeasure(page, [ids[0]!], 120))
@@ -175,7 +175,7 @@ test('grid, 9 panels, only 1 streaming (the steady-state load from §5.4)', asyn
 
 test('can the person type while 9 panels are streaming', async ({ page }) => {
   const ids = await boot(page, 9)
-  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
 
@@ -229,7 +229,7 @@ test('time to first open 9 panels', async ({ page }) => {
     }
     const store = (window as never as { __store: any }).__store
     store.setState({ chat: {} })
-    store.getState().setGridPanels(list)
+    store.getState().setGridPanels(list.map((sessionId: string) => ({ kind: 'session', sessionId })))
   }, ids)
 
   const t0 = Date.now()
@@ -266,7 +266,7 @@ test('time to first open 9 panels', async ({ page }) => {
 for (const n of [4, 6, 9]) {
   test(`drag reflow with ${n} panels`, async ({ page }) => {
     const ids = await boot(page, n)
-    await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+    await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))), ids)
     await page.getByTestId('grid-button').click()
     await expect(page.getByTestId(`grid-panel-${ids[n - 1]}`)).toBeVisible()
 

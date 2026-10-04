@@ -16,7 +16,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
+import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -675,7 +675,7 @@ describe('deleting a session', () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
     await rpc('agents.send', { sessionId: s.id, text: 'the codename is BLUEBIRD' })
-    await rpc('grid.set', { sessionIds: [s.id] })
+    await rpc('grid.set', { panels: [{ kind: 'session', sessionId: s.id }] })
     const orch = await mgr.orchestrator()
     // The reply may still be streaming when the session is deleted; it is written out then, so its time moves
     const said = (rows: unknown) => (rows as StoredMessage[]).map(({ seq, role, kind, payload }) => ({ seq, role, kind, payload }))
@@ -683,7 +683,7 @@ describe('deleting a session', () => {
     expect(before.length).toBeGreaterThan(0)
     const reach = async () => ({
       sessions: ((await rpc('sessions.list', {})) as SessionInfo[]).some((x) => x.id === s.id),
-      grid: ((await rpc('grid.get', {})) as string[]).includes(s.id),
+      grid: ((await rpc('grid.get', {})) as GridPanel[]).some((x) => x.kind === 'session' && x.sessionId === s.id),
       search: ((await rpc('messages.search', { query: 'BLUEBIRD' })) as unknown[]).length > 0,
       listTool: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'list_sessions', {})).includes(s.id),
       recall: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'recall', { query: 'BLUEBIRD' })).includes(s.id),

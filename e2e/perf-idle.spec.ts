@@ -160,7 +160,7 @@ test('how much does the app spend while sitting idle', async ({ page }) => {
   await page.waitForTimeout(500)
   show('Focus view · all 4 working', await measure(page, 8))
 
-  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId }))), ids)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[3]}`)).toBeVisible()
   await page.waitForTimeout(500)

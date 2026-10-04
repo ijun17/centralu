@@ -18,7 +18,8 @@ export type View = 'focus' | 'grid' | 'orchestrator' | 'app'
 export type Onscreen = {
   focusedSessionId: string | null
   orchestratorId: string | null
-  gridPanels: readonly string[]
+  /** The sessions on the grid (#288: the grid also holds apps, which never finish a turn) */
+  gridSessions: readonly string[]
   /** The builder session whose conversation is open beside the visible pinned screen (M4 B-2)
    * (BuilderPane) — null if there is none */
   builderPaneSessionId?: string | null
@@ -44,5 +45,5 @@ export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolea
    */
   if (view === 'app') return !!ctx.builderPaneSessionId && ctx.builderPaneSessionId === sessionId
   // The grid shows several at once — even one of them finishing counts as finishing on screen
-  return ctx.gridPanels.includes(sessionId)
+  return ctx.gridSessions.includes(sessionId)
 }

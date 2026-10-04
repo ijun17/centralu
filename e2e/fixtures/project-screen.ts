@@ -46,7 +46,7 @@ export const panels = (page: Page) =>
 
 /**
  * Drags panel `from` to one side of panel `to` and drops it there. `view` is the app view laid over `from` when it
- * is an app's panel: the view is not inside the panel, so it has to be dimmed with it on its own (slots.ts).
+ * is an app's panel: the view is not inside the panel, and steps aside (hidden, not unloaded) while it is dragged (slots.ts).
  */
 export async function dragPanel(page: Page, from: string, to: string, side: 'before' | 'after', view?: Locator) {
   await page.evaluate((id) => {
@@ -57,7 +57,7 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
       .dispatchEvent(new DragEvent('dragstart', { dataTransfer: w.__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`project-panel-${from}`)).toHaveClass(/opacity-40/)
-  if (view) await expect(view).toHaveCSS('opacity', '0.4')
+  if (view) await expect(view).toHaveCSS('visibility', 'hidden')
   await page.evaluate(
     ({ to, side }) => {
       const card = document.querySelector(`[data-testid="project-panel-${to}"]`)!
@@ -89,7 +89,7 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
       .dispatchEvent(new DragEvent('dragend', { dataTransfer: (window as any).__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`project-panel-${from}`)).not.toHaveClass(/opacity-40/)
-  if (view) await expect(view).toHaveCSS('opacity', '1')
+  if (view) await expect(view).toHaveCSS('visibility', 'visible')
 }
 
 /** Where a sidebar row is dropped: one half of a panel, or the screen's own padding (the empty screen's middle) */
@@ -161,7 +161,7 @@ const projectIdOf = (page: Page, name: string) =>
     name,
   )
 
-const gridPanels = (page: Page) => page.evaluate(() => (window as any).__store.getState().gridPanels as string[])
+const gridPanels = (page: Page) => page.evaluate(() => (window as any).__store.getState().gridPanels.map((p: any) => p.sessionId) as string[])
 
 /**
  * Sidebar rows dropped on the project screen, the way sessions are dropped on the grid — only this project's.
@@ -448,7 +448,7 @@ export function appPanelTests(): void {
       await v.locator('#call').click()
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
 
-      // The panel moves, dimmed with its view while it is dragged; the view follows it without being taken out of the document
+      // The panel moves, its view hidden while it is dragged; the view follows it without being taken out of the document
       await dragPanel(page, 'app:slider', `session:${s}`, 'before', pinned)
       expect(await panels(page)).toEqual(['app:slider', `session:${s}`])
       await expectOverSlot(page, key)
@@ -588,6 +588,64 @@ export function appPanelTests(): void {
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
       expect(await opened(page)).toBe(2)
       expect(await gridPanels(page)).toEqual([])
+    })
+
+    /*
+     * #288: a session's panel carried into an app's panel from the side, not through its header. In WebKit the frame
+     * took the drag whatever its pointer-events said, so the page heard nothing more and the panel could not land
+     * there; the views now step aside for a panel drag as they do for a sidebar row (slots.ts).
+     */
+    test('a session panel carried sideways into an app’s view lands beside the app, and the view comes back as it was', async ({
+      page,
+    }) => {
+      await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
+      await page.getByTestId('add-project').click()
+      await page.getByTestId('trust-ask-yes-alpha').click()
+      const pid = await projectIdOf(page, 'alpha')
+      await page.evaluate(
+        (p) =>
+          (window as any).__mock.setExternalApps([
+            {
+              appId: 'slider',
+              projectId: p,
+              dir: '/tmp/alpha/.centralu/apps/slider',
+              name: 'Slider',
+              version: '0.1.0',
+              description: null,
+              home: 'home',
+              trusted: true,
+              status: 'stopped',
+              error: null,
+              warnings: [],
+            },
+          ]),
+        pid,
+      )
+      const s = await newSession(page, 'alpha')
+      const key = `${pid}/slider`
+      const pinned = page.getByTestId(`pinned-app-${key}`)
+      await page.getByTestId('project-header-alpha').click()
+      expect(await panels(page)).toEqual([`session:${s}`, 'app:slider'])
+      await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+      const v = viewOf(page, key)
+      await v.locator('#call').click()
+      await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
+
+      // Down the session's own panel first, then across into the app's view: the hand never touches the app's header
+      const from = (await page.getByTestId(`project-panel-session:${s}`).getByTestId('pane-header').boundingBox())!
+      const to = (await page.getByTestId('project-slot-slider').boundingBox())!
+      await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(from.x + from.width / 2, to.y + to.height / 2, { steps: 6 })
+      await page.mouse.move(to.x + to.width * 0.8, to.y + to.height / 2, { steps: 8 })
+      await expect(page.getByTestId('project-panel-app:slider')).toHaveAttribute('data-drop', 'after')
+      await expect(pinned).toHaveCSS('visibility', 'hidden')
+      await page.mouse.up()
+      await expect.poll(() => panels(page)).toEqual(['app:slider', `session:${s}`])
+      await expect(pinned).toHaveCSS('visibility', 'visible')
+      await expectOverSlot(page, key)
+      await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
+      expect(await opened(page)).toBe(1)
     })
   })
 }

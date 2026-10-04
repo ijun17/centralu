@@ -3,6 +3,7 @@ import type {
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
+  GridPanel,
   NormalizedEvent,
   SavedCommand,
   ToolName,
@@ -93,8 +94,8 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call('grid.get', {})
   }
 
-  setGridView(sessionIds: string[]) {
-    return this.rpc.call('grid.set', { sessionIds })
+  setGridView(panels: GridPanel[]) {
+    return this.rpc.call('grid.set', { panels })
   }
 
   models(tool: ToolName) {

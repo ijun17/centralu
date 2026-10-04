@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { externalAppKey, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
+import { externalAppKey, gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
@@ -19,7 +19,7 @@ import { registerSlottedView } from './slots.js'
 /**
  * Where a pinned view is drawn.
  *   full    the app view — the main area is this app
- *   slot    laid over its panel on the project screen (#203, slots.ts) — the frame and what stands on it, no header
+ *   slot    laid over its panel on the project screen (#203) or the grid (#288, slots.ts) — the frame and what stands on it, no header
  *   hidden  alive and out of sight
  */
 type Mode = 'full' | 'slot' | 'hidden'
@@ -47,13 +47,17 @@ export function PinnedApps() {
   const pinned = useStore((s) => s.pinnedViews)
   const showing = useStore((s) => s.view === 'app')
   const focusedKey = useStore((s) => (s.focusedApp ? externalAppKey(s.focusedApp.projectId, s.focusedApp.appId) : null))
-  // Joined into one string: a selector that returns a new array on every call never settles
-  const slotted = useStore((s) => projectScreenAppKeys(s).join('\n'))
+  /*
+   * The views laid over panels: the project screen's apps, or the grid's (#288). Only one of the two screens shows at a
+   * time, so at most one of these lists is not empty. Joined into one string: a selector that returns a new array on
+   * every call never settles
+   */
+  const slotted = useStore((s) => [...projectScreenAppKeys(s), ...gridScreenAppKeys(s)].join('\n'))
   const slots = new Set(slotted ? slotted.split('\n') : [])
   const modeOf = (key: string): Mode => (showing ? (key === focusedKey ? 'full' : 'hidden') : slots.has(key) ? 'slot' : 'hidden')
   return (
     /*
-      On the project screen this layer takes no room of its own (`contents`): its slotted views are
+      On the project screen and the grid this layer takes no room of its own (`contents`): its slotted views are
       absolutely placed in the middle lane, over their panels. Only the class changes between the
       three, never the parent, so no frame is ever taken out of the document.
     */
