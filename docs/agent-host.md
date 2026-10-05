@@ -31,6 +31,55 @@ per-account usage lives in `adapters/<tool>/usage.ts` (it is a per-tool question
 orchestrator's tools are defined once in `sessions/orchestrator-tools.ts` and exposed per
 adapter — in-process for claude, over a stdio bridge for codex.
 
+### 1.1 Who gets Centralu's own tools (tool profiles)
+
+Every session gets one bundle of the `centralu` server's tools, or none. The manager decides which
+(`toolProfileOf`, and the same rule at create and wake); `profileAllows` decides both what the
+bundle exposes and what its calls may run, so a name the bundle leaves out is refused even through
+the Codex bridge.
+
+| Profile | Who | View | Tools | Instructions |
+|---|---|---|---|---|
+| `orchestrator` | the one orchestrator | every session | all but the manager's and builder's | role and usage |
+| `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
+| `scoped` | a lead (coordinator, #80) | its members | list, read, send | its boundary |
+| `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
+| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide` | none |
+
+The `reader` set is read-only: its tools object refuses sending, creating and settings outright,
+not only by name. It is never given to an agent session an app stood up (M4 D-1), whose answer goes
+back to the app. Settings → Orchestrator turns it off (`sessionTools`, on by default): a new session
+then gets no bundle, and a live one's calls are refused at once. For provenance (#90) a reader is
+still an ordinary worker — `directs()` counts every profile but `reader`.
+
+**Its size is the design constraint**, because it rides in every session on every turn. Measured
+against the real CLI (haiku, CLI 2.1.289, `scripts/probe-reader-tools.mts`; first request's input
+tokens over a run with no `centralu` server, claude.ai connectors off):
+
+| Shape | Characters | Tokens |
+|---|---|---|
+| `list_sessions`, `read_session`, `recall`, `app_guide` in the orchestrator's words | 2,493 | +672 |
+| the same four, re-worded | 1,138 | +338 |
+| listing merged into `read_session` (three tools, all loaded) | 897 | +267 |
+| **as shipped**: `app_guide` deferred behind tool search | 897 | **+192** |
+| all three deferred | 897 | +28 |
+
+Per tool, loaded: `read_session` 239 → 98, `recall` 182 → 84, `app_guide` 148 → 85,
+`list_sessions` 103 → 75 before it was merged away. A tool costs about 55 tokens before its first
+word (name and schema envelope), which is why merging beat trimming. Deferring the whole set was
+refused: asked about an earlier conversation, the model never called `recall` (the orchestrator
+had measured the same for `send_to_session`, which is why its tools are `alwaysLoad`). Deferred,
+`app_guide` was found through tool search 4 times in 5, against 5 in 5 loaded; the miss is an answer
+from a guess about the app, and the orchestrator has the guide loaded. Codex has no deferral and
+gets all three. `orchestrator-tools.test.ts` fails if the serialized set and its instructions pass
+`READER_BUDGET_CHARS` (1,000).
+
+A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts
+one more node process (about 40 MB resident, idle). The bridge sets
+`default_tools_approval_mode: 'approve'`: our tools are never asked about, as on the Claude side,
+and without it Codex in auto (`approvalPolicy: never`) refused every call on its own.
+`scripts/smoke-reader.mts` runs the set end to end with a real model (`TOOL=codex` for Codex).
+
 **stdout is reserved.** `main.ts` prints exactly one line to it: the handshake the Tauri
 supervisor parses for the port and auth token. Everything else goes to stderr, because that
 is what `log-file.ts` tees to `~/.centralu/host.log` — and a `.app` launched from Finder has

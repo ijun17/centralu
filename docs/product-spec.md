@@ -271,6 +271,13 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   `create_session`, `update_session_settings`) plus a **compiled-in app guide** (overview/sessions/orchestrator/approvals/
   settings/updates) — compiled in, not read from `docs/` at runtime, because runtime doc reads are an AGENTS.md-style
   injection surface one level sideways.
+- **Ordinary sessions get a light, read-only set** (#320, owner decision 2026-10-05, on by default): their
+  own project's other sessions and conversations (`read_session`, which lists them when called without an id), a
+  search of that project's past conversations (`recall`) and the app guide (`app_guide`). Another project's sessions
+  are out of reach, sending, creating and proposing stay with the orchestrator, and no role-changing instructions go
+  with it. It rides in every session on every turn, so it was measured and cut: the four candidates in the
+  orchestrator's words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
+  §1.1). Settings → Orchestrator → "Let sessions look at their own project" turns it off.
 - **The permission preset is deliberately inexpressible** in the orchestrator's settings tool schema — an orchestrator
   must not be able to quietly widen another session's approval back door.
 - Settings changes surface as a `settings_changed` event + toast, so the human sees

@@ -267,6 +267,12 @@ come back to the desk
   `create_session`, `update_session_settings`)와 **컴파일 시점에 내장된 앱 가이드**(overview/sessions/orchestrator/approvals/
   settings/updates)를 노출한다 — 런타임에 `docs/`를 읽지 않고 컴파일 시점에 내장하는데, 런타임 문서 읽기는
   한 단계 옆의 AGENTS.md류 인젝션 표면이기 때문이다.
+- **평범한 세션도 가벼운 읽기 전용 묶음을 받는다**(#320, 2026-10-05 소유자 결정, 기본 켜짐): 자기 프로젝트의
+  다른 세션 목록과 대화(`read_session`, id 없이 부르면 목록), 그 프로젝트의 지난 대화 검색(`recall`), 앱 가이드
+  (`app_guide`). 다른 프로젝트의 세션은 볼 수 없고, 보내기·만들기·제안은 오케스트레이터에 남으며, 역할을 바꾸는
+  지침도 함께 가지 않는다. 모든 세션의 모든 턴에 실리므로 크기를 재서 줄였다: 후보 넷을 오케스트레이터 문구 그대로
+  붙이면 요청마다 입력 +672토큰, 출시본은 +192토큰(측정과 근거는 agent-host.md §1.1). 설정 → 오케스트레이터의
+  "Let sessions look at their own project"로 끈다.
 - **권한 프리셋은 오케스트레이터의 settings 도구 스키마에서 의도적으로 표현할 수 없다** — 오케스트레이터가
   다른 세션의 승인 뒷문을 조용히 넓힐 수 있어서는 안 된다.
 - 설정 변경은 `settings_changed` 이벤트 + 토스트로 드러나서,

@@ -8,10 +8,13 @@ process ("App servers"); an app's screen is sandboxed ("App views"). The app mod
 ## Inter-agent content
 
 Worker reports retain their provenance in stored history and the UI. Reports from
-unprofiled workers to privileged/profiled sessions become host-authored notifications;
-ordinary orchestrator/manager/coordinator instructions retain their content and attachments.
-Worker-originated records are excluded from privileged conversation memory. Read-session,
-preview and recall text is framed as structured untrusted data, not human authorization.
+workers to directing sessions become host-authored notifications; ordinary
+orchestrator/manager/coordinator instructions retain their content and attachments. A worker
+holding the read-only `reader` set (#320) is still a worker here: the gate asks whether the
+source directs sessions, not whether it has tools. Worker-originated records are excluded from
+privileged conversation memory. Read-session, preview and recall text is framed as structured
+untrusted data, not human authorization — that now includes what one ordinary session reads of
+another in the same project; the reader set reads no other project and cannot send.
 
 JSON framing prevents ambiguous transcript-line assembly; it does **not** make text safe
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
