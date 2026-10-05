@@ -40,6 +40,8 @@
     "smoke:orphan": "tsx packages/agent-host/scripts/smoke-orphan.mts",
     "smoke:strays": "tsx packages/agent-host/scripts/smoke-strays.mts",
     "perf:idle": "node packages/agent-host/scripts/idle-perf.mjs",
+    "perf:memory": "node --import tsx e2e/perf-memory.mts",
+    "seed:store": "node --import tsx e2e/seed-store.mts",
     "release:npm": "tsx scripts/release-npm.mts",
     "icon": "tsx scripts/render-icon.mts",
     "smoke:goal": "tsx packages/agent-host/scripts/smoke-goal.mts",
