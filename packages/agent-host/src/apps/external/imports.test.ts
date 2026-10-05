@@ -190,7 +190,7 @@ describe('an imported app arrives disabled and never starts before the person en
     expect(JSON.parse(readFileSync(join(dataRoot, IMPORTS_FILE), 'utf8'))).toHaveProperty('notes')
     // No mark inside the app folder — the app's own code cannot delete or edit it
     expect(readdirSync(join(dataRoot, 'apps', 'notes'))).toEqual([MANIFEST_FILE])
-    rt.removeUserApp(userRef('notes'))
+    await rt.removeUserApp(userRef('notes'))
     const again = join(dataRoot, 'apps', 'notes')
     mkdirSync(again, { recursive: true })
     writeFileSync(join(again, MANIFEST_FILE), JSON.stringify(manifest('notes')))

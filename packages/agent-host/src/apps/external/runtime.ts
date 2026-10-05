@@ -398,6 +398,8 @@ export class ExternalApps {
    * disabled).
    */
   private spawned = new Set<AppProcess>()
+  /** Apps being removed (`removeUserApp`, by `holdKey`) — none of them starts again while its folder moves */
+  private removing = new Set<string>()
   /**
    * Open run → the person denied this run's request (or one further down its chain) (D-4) — recorded
    * by the desk. If that run ends in failure, this is attached to that failure's error bundle (it is
@@ -1264,20 +1266,30 @@ export class ExternalApps {
    * survive (a removed app's records are still readable — `runs`). **This never removes a project
    * app** — that is a file in a repository, and the place to withdraw it is git.
    *
-   * Rescanned immediately after moving: a running process shuts down, and an attached session detaches
-   * (appsChanged). A Claude session drops it from its server set without restarting, and a Codex
-   * thread keeps the tool name until its next thread, but calling it is refused with "not an attached
-   * app" (attaching to a session re-checks on every call).
+   * A running app is stopped, and waited for, **before** the folder moves (#14). Windows refuses to
+   * move a folder that a process has as its working directory, and an app runs in its own folder:
+   * moving first failed with EBUSY and left the app in place and running. Nothing starts it again
+   * meanwhile (`removing`). Rescanned after moving: an attached session detaches (appsChanged). A
+   * Claude session drops it from its server set without restarting, and a Codex thread keeps the
+   * tool name until its next thread, but calling it is refused with "not an attached app"
+   * (attaching to a session re-checks on every call).
    */
-  removeUserApp(ref: AppRef): void {
+  async removeUserApp(ref: AppRef): Promise<void> {
     if (ref.projectId !== null) {
       throw new AppUnavailableError("A project app is part of the project's repository — remove it there")
     }
     this.rescanUser()
     const e = this.require(ref)
-    const trash = join(this.deps.dataRoot, 'app-trash')
-    mkdirSync(trash, { recursive: true })
-    renameSync(e.dir, join(trash, `${ref.appId}-${Date.now()}`))
+    const key = this.holdKey(ref)
+    this.removing.add(key)
+    try {
+      await this.halt(e, 'app removed', { awaitTree: true })
+      const trash = join(this.deps.dataRoot, 'app-trash')
+      mkdirSync(trash, { recursive: true })
+      renameSync(e.dir, join(trash, `${ref.appId}-${Date.now()}`))
+    } finally {
+      this.removing.delete(key)
+    }
     // Also drops the imported-app mark (E-3) — a folder restored from the trash is one a person moved back by hand (decision 3: a user-folder app is trusted)
     this.handover.forget(ref.appId)
     this.rescanUser()
@@ -1601,6 +1613,7 @@ export class ExternalApps {
     // An imported app never starts before a person reviews and enables it (E-3) — checked on every call: if server or uses changes after being enabled, it is blocked starting from the next startup
     const held = this.held(e)
     if (held) throw new AppUnavailableError(held)
+    if (this.removing.has(this.holdKey(e.ref))) throw new AppUnavailableError('This app is being removed')
     if (L.gaveUp) {
       throw new AppUnavailableError(
         `The app stopped after failing ${this.timing.maxFailures} times in a row — fix it, then restart it.\n${L.lastError ?? ''}`,

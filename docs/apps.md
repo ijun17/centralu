@@ -59,7 +59,7 @@ visibility is not read as the default: the side that is wrong stays closed.
 | | Folder | Whose tools | Removing it |
 |---|---|---|---|
 | Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9) | Through git. Centralu has no button for it |
-| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator | Settings > Apps, after one confirmation. The folder moves to `<data folder>/app-trash/`; runs, data, secrets and kept versions stay, an imported app's mark goes |
+| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
 
 - Only the **registered project root** is scanned, never a worktree. A worktree carries its own copy
   of the folder, but the app runs once per project and worktree sessions use the root's app.

@@ -375,7 +375,7 @@ export function createRpcHandler(
     },
     'apps.remove': async (p) => {
       const { appId, projectId } = RpcMethods['apps.remove'].params.parse(p)
-      requireExternalApps().removeUserApp({ appId, projectId })
+      await requireExternalApps().removeUserApp({ appId, projectId })
       return { ok: true as const }
     },
     'apps.setSecret': async (p) => {
