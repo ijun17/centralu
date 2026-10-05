@@ -335,6 +335,16 @@ describe('handshake', () => {
     expect(refusal?.error.message).toContain('update Centralu where the host runs')
   })
 
+  it('hands the host protocol and version to the refused client as data, for a hub to read without parsing (#82)', async () => {
+    const { port } = await start(undefined, { build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: '0.1.0-beta.11' } })
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION + 1 })
+    expect(await c.closed()).toBe(4002)
+    const refusal = c.frames.find((f) => f.kind === 'res') as { error: { data?: unknown } } | undefined
+    expect(refusal?.error.data).toEqual({ protocolVersion: PROTOCOL_VERSION, version: '0.1.0-beta.11' })
+  })
+
   it('tells an older app that the app is the side to update, naming the host version', () => {
     const message = versionMismatchMessage(3, 2, '0.2.0')
     expect(message).toContain('Centralu 0.2.0 speaks protocol 3, the app speaks protocol 2')
@@ -397,6 +407,22 @@ describe('RPC round trip', () => {
     expect(c.frames.find((f) => f.kind === 'res')).toMatchObject({
       ok: false,
       error: { code: 'internal', message: "ENOENT: no such file or directory, stat '/p/item.yml'" },
+    })
+    c.ws.close()
+  })
+
+  it('a call the hub could not pass to an away machine says to retry, and which machine, in data (#82)', async () => {
+    const { port } = await start(async () => {
+      throw Object.assign(new Error('Remote box is not reachable right now'), { code: 'internal', retryable: true, data: { machine: 'm1', reason: 'unreachable' } })
+    })
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    c.send({ kind: 'rpc', id: 'r1', method: 'agents.send', params: {} })
+    await c.wait(() => c.frames.some((f) => f.kind === 'res'))
+    expect(c.frames.find((f) => f.kind === 'res')).toMatchObject({
+      ok: false,
+      error: { code: 'internal', retryable: true, data: { machine: 'm1', reason: 'unreachable' } },
     })
     c.ws.close()
   })

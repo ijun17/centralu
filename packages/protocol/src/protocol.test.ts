@@ -175,6 +175,12 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'themes_changed' },
   { type: 'external_app_questions_changed' },
   { type: 'project_consents_changed' },
+  // A linked machine's link changed state, and what the UI holds about it has to be read again (#82)
+  {
+    type: 'machine_status',
+    machine: { id: 'ubuntu', name: 'Ubuntu server', sshTarget: 'ubuntu', status: 'unreachable', error: 'ssh could not reach ubuntu' },
+  },
+  { type: 'machine_resync', machineId: 'ubuntu' },
   { type: 'worktree_pr', sessionId: 's1', pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' } },
   // A goal announcement (2026-09-07) — both the union-of-both-tools shape and the cleared state (null) are golden
   {

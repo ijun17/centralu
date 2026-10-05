@@ -406,6 +406,11 @@ export class HostServer {
             code: 'version_mismatch',
             message: versionMismatchMessage(PROTOCOL_VERSION, frame.data.protocolVersion, this.opts.build?.version),
             retryable: false,
+            /*
+             * The same facts for a program to read (#82): a hub linking to this host shows the
+             * version prompt from them (docs/plans/remote-hub.md §4) instead of parsing the sentence.
+             */
+            data: { protocolVersion: PROTOCOL_VERSION, ...(this.opts.build?.version ? { version: this.opts.build.version } : {}) },
           })
           ws.close(4002, 'version mismatch')
           return
@@ -430,12 +435,17 @@ export class HostServer {
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {
-        const e = err as Error & { code?: unknown }
+        const e = err as Error & { code?: unknown; retryable?: unknown; data?: unknown }
         this.sendError(ws, id, {
           code: errorCode(e.code),
           message: e.message ?? 'Unknown error',
-          // Only a swap's refusal or cut says "send it again": the next host will take it (#280)
-          retryable: err instanceof DrainCut,
+          /*
+           * A swap's refusal or cut says "send it again": the next host will take it (#280). So does
+           * a call the hub could not pass to a linked machine because it is away (#82, links/router.ts),
+           * which says which machine in `data`.
+           */
+          retryable: err instanceof DrainCut || e.retryable === true,
+          ...(e.data !== undefined ? { data: e.data } : {}),
         })
       }
     })

@@ -15,6 +15,7 @@ import {
   ToolSummary,
   UpdateStatus,
 } from './entities.js'
+import { MachineInfo } from './machines.js'
 
 /**
  * Normalized events flowing adapter → app (docs/protocol.md §2).
@@ -679,6 +680,20 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * Settings refetches `projectConsents.list`.
    */
   z.object({ ...appScoped, type: z.literal('project_consents_changed') }),
+  /**
+   * A linked machine's link changed state (#82, docs/plans/remote-hub.md): connecting, connected,
+   * unreachable, waiting on a version decision. Carries the whole record, the same shape
+   * `machines.list` answers, so the receiving side replaces its row rather than patching it.
+   */
+  z.object({ ...appScoped, type: z.literal('machine_status'), machine: MachineInfo }),
+  /**
+   * What the UI holds about one linked machine has to be read again (#82): the link (re)connected,
+   * the remote host restarted, or the machine was removed. The UI re-reads `sessions.list` and
+   * `projects.list` and runs its reconnect recovery for that machine's sessions alone: a session it
+   * held as live that the fresh list says is not is woken, the others are left as they are. The
+   * events of the gap are not replayed through the hub; the conversations are read again.
+   */
+  z.object({ ...appScoped, type: z.literal('machine_resync'), machineId: z.string() }),
   /**
    * Something changed in a watched directory (#34 — Finder, a terminal, an agent, regardless of
    * source).

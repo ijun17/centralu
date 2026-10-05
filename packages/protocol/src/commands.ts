@@ -43,9 +43,23 @@ import {
   UpdateStatus,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
+import { MachineId, MachineInfo, RemoteShell } from './machines.js'
 import { parseTolerant } from './tolerant.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
+
+/**
+ * Which linked machine a row comes from (#82, docs/plans/remote-hub.md). Absent or null: the hub's
+ * own. Set by the hub on what it passes on from another machine, whose ids then read
+ * `<machine>.<id>`; the UI groups by this field and never parses the prefix.
+ */
+const machineField = { machine: z.string().nullable().optional() }
+
+/**
+ * The machine a per-machine question is for (#82): its agent CLIs, its usage, its folders. Absent:
+ * the hub's own, which is what every call meant before linked machines existed.
+ */
+const machineParam = { machine: MachineId.optional() }
 
 export const CreateSessionParams = z.object({
   projectId: ProjectId,
@@ -309,6 +323,13 @@ export const SessionInfo = z.object({
    * that predates it needs no change: absent and null read the same.
    */
   askedBy: z.string().nullable().optional(),
+  ...machineField,
+  /**
+   * The hub could not reach this session's machine, and answered from what it last heard (#82): the
+   * headers mirror. `live` is then the last-known value, not a fact, so the UI must neither drop the
+   * session nor try to wake it; it waits for that machine's `machine_resync`.
+   */
+  unreachable: z.boolean().optional(),
   /**
    * **Facts valid only while the process is alive** — these come from the host's memory, not
    * the database.
@@ -492,6 +513,9 @@ export const ProjectInfo = z.object({
     })
     .nullable()
     .default(null),
+  ...machineField,
+  /** The same mark as `SessionInfo.unreachable`: last heard, not current (#82) */
+  unreachable: z.boolean().optional(),
 })
 export type ProjectInfo = z.infer<typeof ProjectInfo>
 
@@ -582,6 +606,7 @@ export const TrashedSession = z.object({
   conversationFile: z.enum(['remove', 'keep', 'none']),
   /** The session's worktree, kept in place while it is in the trash; `remove` if deleting for good removes it */
   worktree: z.object({ path: z.string(), branch: z.string(), remove: z.boolean() }).nullable(),
+  ...machineField,
 })
 export type TrashedSession = z.infer<typeof TrashedSession>
 
@@ -826,9 +851,9 @@ export const RpcMethods = {
       sessions: z.array(ExternalSession),
     }),
   },
-  'agents.capabilities': { params: z.object({ tool: ToolName }), result: AdapterCapabilities },
+  'agents.capabilities': { params: z.object({ tool: ToolName, ...machineParam }), result: AdapterCapabilities },
   'agents.detect': {
-    params: z.object({}),
+    params: z.object({ ...machineParam }),
     result: z.array(ToolStatus),
   },
   /**
@@ -837,12 +862,12 @@ export const RpcMethods = {
    * `package.json` says the version), so this is cheap either way.
    */
   'agents.versions': {
-    params: z.object({ force: z.boolean().default(false) }),
+    params: z.object({ force: z.boolean().default(false), ...machineParam }),
     result: AgentVersions,
   },
   /** "Move idle sessions to a newly installed agent CLI" on or off (#297). On by default */
   'agents.setAutoApplyVersions': {
-    params: z.object({ enabled: z.boolean() }),
+    params: z.object({ enabled: z.boolean(), ...machineParam }),
     result: AgentVersions,
   },
   /**
@@ -851,7 +876,7 @@ export const RpcMethods = {
    * background tasks is left as it is and listed in `busy`; with `autoApply` on it moves once it is idle.
    */
   'agents.applyVersions': {
-    params: z.object({}),
+    params: z.object({ ...machineParam }),
     result: z.object({ restarted: z.array(z.string()).default([]), busy: z.array(z.string()).default([]) }),
   },
   'git.status': { params: z.object({ projectId: ProjectId }), result: z.array(GitFileStatus) },
@@ -973,7 +998,7 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   'workspace.load': { params: z.object({}), result: z.record(z.string(), z.unknown()).nullable() },
-  'projects.add': { params: z.object({ path: z.string() }), result: ProjectInfo },
+  'projects.add': { params: z.object({ path: z.string(), ...machineParam }), result: ProjectInfo },
   /**
    * **Deletes** a project — not just removing it from the list, but erasing it from this app's
    * records entirely (its sessions, conversations, search index, approval rules, even usage
@@ -1676,7 +1701,7 @@ export const RpcMethods = {
    * API. An older tool may not know this, so it comes back as supported=false plus a reason.
    */
   'agents.models': {
-    params: z.object({ tool: ToolName }),
+    params: z.object({ tool: ToolName, ...machineParam }),
     result: z.object({
       supported: z.boolean(),
       reason: z.string().optional(),
@@ -1684,7 +1709,7 @@ export const RpcMethods = {
     }),
   },
   'agents.usage': {
-    params: z.object({ tool: ToolName }),
+    params: z.object({ tool: ToolName, ...machineParam }),
     result: z.object({ supported: z.boolean(), reason: z.string().optional(), usage: UsageSnapshot.nullable() }),
   },
   /** File search for `@` autocomplete (within the project only) */
@@ -1696,12 +1721,12 @@ export const RpcMethods = {
    * **shows it** and lets the person choose.
    */
   'processes.strays': {
-    params: z.object({}),
+    params: z.object({ ...machineParam }),
     result: z.array(z.object({ pid: z.number(), command: z.string(), cwd: z.string() })),
   },
   /** Stops the chosen ones (SIGTERM). The host re-measures the condition right before killing them */
   'processes.stop': {
-    params: z.object({ pids: z.array(z.number()) }),
+    params: z.object({ pids: z.array(z.number()), ...machineParam }),
     result: z.object({ stopped: z.number() }),
   },
   'files.search': {
@@ -1876,9 +1901,38 @@ export const RpcMethods = {
         /** Which project or session this rule belongs to — the same rule from two different projects used to look like one identical row in Settings (#183) */
         projectId: z.string().nullable().default(null),
         sessionId: z.string().nullable().default(null),
+        /** A rule of a linked machine (#82): its `id` is then folded into a negative number the hub maps back */
+        ...machineField,
       }),
     ),
   },
+  /**
+   * Linked machines (#82, docs/plans/remote-hub.md). The hub's own: these are never forwarded.
+   * Adding one is the consent for this computer to reach that machine (plan §3.2): the person can
+   * already open an SSH connection to it. The link uses the person's own `ssh` and keys
+   * (`BatchMode`), and expects `centralu serve` running there (docs/agent-host.md §4.7).
+   */
+  'machines.list': { params: z.object({}), result: z.array(MachineInfo) },
+  'machines.add': {
+    params: z.object({
+      name: z.string().min(1).max(64),
+      sshTarget: z.string().min(1).max(255),
+      shell: RemoteShell.default('posix'),
+      wslDistro: z.string().max(64).nullable().optional(),
+      command: z.string().max(1024).nullable().optional(),
+    }),
+    result: MachineInfo,
+  },
+  /** Unlinks a machine: its sessions and projects leave this computer's lists. Nothing on the machine changes */
+  'machines.remove': { params: z.object({ machineId: MachineId }), result: z.object({ ok: z.literal(true) }) },
+  /** Tries the link again now instead of waiting out its backoff */
+  'machines.reconnect': { params: z.object({ machineId: MachineId }), result: MachineInfo },
+  /**
+   * Connects although the two sides run different versions of one protocol: the person declined to
+   * align them (plan §4). Remembered for this pair of versions only; when either side moves, the
+   * question comes again. Refused when the protocols differ.
+   */
+  'machines.acceptVersions': { params: z.object({ machineId: MachineId }), result: MachineInfo },
   /**
    * The trash (#204). Only the person reaches these: the RPC is the UI's channel, and neither the agents' tools nor
    * the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.

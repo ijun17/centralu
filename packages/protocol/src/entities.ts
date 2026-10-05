@@ -308,6 +308,8 @@ export const ExternalAppInfo = z.object({
    * (whether a field is empty). Setting and clearing a value goes through `apps.setSecret`.
    */
   secrets: z.array(z.object({ name: z.string(), set: z.boolean() })).optional(),
+  /** Which linked machine the app lives on (#82); absent or null for the hub's own (a user-folder app is otherwise ambiguous) */
+  machine: z.string().nullable().optional(),
   /**
    * For a user-folder app imported from outside, its provenance (M4 E-3) — where it came from,
    * when, and when the person turned it on (null if not turned on). The host keeps this marker
@@ -618,6 +620,8 @@ export const ProjectConsent = z.object({
   toName: z.string(),
   kind: ProjectConsentKind,
   decidedAt: z.number(),
+  /** A consent kept by a linked machine (#82); absent or null for the hub's own */
+  machine: z.string().nullable().optional(),
 })
 export type ProjectConsent = z.infer<typeof ProjectConsent>
 
