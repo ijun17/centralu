@@ -113,6 +113,11 @@ export type SessionSummary = {
    */
   backgroundTasks: BackgroundTask[]
   /**
+   * The version of the agent CLI this session's process runs (#297), or null when unknown. Compared with the installed
+   * one (the store's `agentVersions`) to say the session runs an older CLI. Only meaningful while `live`.
+   */
+  agentVersion: string | null
+  /**
    * The running total of the estimated tokens the model spent thinking in this turn (#58 — claude's thinking
    * text is encrypted, so this number is all there is to show). Same lifetime as activity: it dies when the
    * session leaves working.
@@ -135,7 +140,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
-    permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, pr: null, goal: null, backgroundTasks: [], thinkingTokens: null, plan: null, kind: 'worker' as const,
+    permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, pr: null, goal: null, backgroundTasks: [], agentVersion: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
     appId: null,
     tool: 'claude' as const, ...init,
   }
@@ -267,6 +272,8 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       return { ...next, goal: event.goal }
     case 'background_tasks':
       return { ...next, backgroundTasks: applyBackgroundTasks(s.backgroundTasks, event) }
+    case 'agent_version':
+      return { ...next, agentVersion: event.version }
     case 'session_title':
       if (event.auto !== false) return s.autoNamed ? { ...next, name: event.title } : next
       return { ...next, name: event.title, autoNamed: false }

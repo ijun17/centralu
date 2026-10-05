@@ -26,6 +26,7 @@ import { Markdown } from './Markdown.jsx'
 import { InlineViewSlot } from './InlineView.jsx'
 import { RunMenu } from './RunMenu.jsx'
 import { BackgroundTasksBadge } from './BackgroundTasks.jsx'
+import { AgentVersionNotice } from './AgentVersionNotice.jsx'
 import { NoticeMark } from './NoticeMark.jsx'
 import { CommandRunnerOverlay } from './CommandRunner.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
@@ -348,6 +349,9 @@ export function SessionPane({
           <SubagentSteps sessionId={session.id} callId={callId} projectRoot={projectRoot} projectId={session.projectId} />
         )}
       />
+
+      {/* The agent CLI installed is newer than the one this session's process runs (#297) */}
+      <AgentVersionNotice session={session} />
 
       {/*
         Stop is not placed here — it already sits next to "waiting for a response" at the

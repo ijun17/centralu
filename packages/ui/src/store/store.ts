@@ -22,6 +22,7 @@ import type {
   UiPreferencesPatch,
   ThemeFileEntry,
   UpdateStatus,
+  AgentVersions,
 } from '@cc/protocol'
 import {
   allDoneNotification,
@@ -1041,6 +1042,11 @@ export type AppState = {
    */
   update: UpdateStatus | null
   /**
+   * The agent CLIs installed on this machine, and whether idle sessions move to a newer one by themselves (#297).
+   * Owned by the host like `update`; null until the host has answered, or when it is too old to know.
+   */
+  agentVersions: AgentVersions | null
+  /**
    * What this person has chosen about the screen (protocol's `UiPreferences`).
    *
    * **Fetched once at startup and seated here.** Letting the consumer (the composer) ask on demand
@@ -1139,6 +1145,15 @@ export type AppState = {
   setUpdateAuto(enabled: boolean): Promise<void>
   /** "Apply updates automatically when idle" on and off (#352) */
   setUpdateAutoApply(enabled: boolean): Promise<void>
+  /**
+   * Reads the installed agent CLIs (#297). `force: false` is the window gaining focus: the host answers with a reading
+   * from moments ago rather than reading again. Never throws; an older host that does not know it leaves this null.
+   */
+  checkAgentVersions(force?: boolean): Promise<void>
+  /** "Move idle sessions to a newly installed agent CLI" on and off (#297) */
+  setAgentAutoApply(enabled: boolean): Promise<void>
+  /** Restarts every idle session that runs an older CLI on the installed one (#297) — the header's action */
+  applyAgentVersions(): Promise<void>
   /**
    * Changes screen settings — sends **only what changed**.
    *
@@ -1706,9 +1721,19 @@ function handoffOpening(predecessor: string, note: string, path: string): string
  * payload and the approval never shows up on screen. Not spread whole, because `SessionInfo` has
  * fields `SessionSummary` does not (`externalId`, `createdAt`, …) that must not leak in.
  */
+/** What the header's "Update idle sessions" did (#297), in one line: how many moved, and how many were busy */
+export function appliedVersionsText(restarted: number, busy: number): string {
+  const sessions = (n: number) => (n === 1 ? '1 session' : `${n} sessions`)
+  const keep = busy === 1 ? 'keeps its version' : 'keep their version'
+  if (restarted === 0 && busy === 0) return 'Every session already runs the installed version'
+  if (restarted === 0) return `Nothing restarted: ${sessions(busy)} busy ${keep} for now`
+  const moved = `Restarted ${sessions(restarted)} on the installed version`
+  return busy === 0 ? moved : `${moved}; ${busy} busy ${keep} for now`
+}
+
 function liveFactsOf(
   s: SessionInfo,
-): Pick<SessionSummary, 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks'> {
+): Pick<SessionSummary, 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks' | 'agentVersion'> {
   return {
     pendingApproval: s.pendingApproval,
     pendingQuestions: s.pendingQuestions,
@@ -1718,6 +1743,8 @@ function liveFactsOf(
     context: s.context,
     // Background work (#290) lives in the host's memory too — a reconnect reads back what was running and what ended
     backgroundTasks: s.backgroundTasks,
+    // So does the CLI version the process runs (#297)
+    agentVersion: s.agentVersion,
   }
 }
 
@@ -2464,6 +2491,7 @@ export const useStore = create<AppState>((set, get) => ({
   notifyPolicy: DEFAULT_NOTIFY_POLICY,
   importDialog: null as { source: string; fromLink: boolean; at: number } | null,
   update: null,
+  agentVersions: null,
   prefs: DEFAULT_UI_PREFERENCES,
 
   async attach(platform) {
@@ -2509,6 +2537,8 @@ export const useStore = create<AppState>((set, get) => ({
           workspaceSave.attempt = 0
           flushWorkspace(get)
           void get().recoverAfterReconnect()
+          // A new host (a restart, a switched build) read the installed CLIs before this window was back (#297)
+          void get().checkAgentVersions(false)
         }
       }),
       /*
@@ -2649,6 +2679,8 @@ export const useStore = create<AppState>((set, get) => ({
      * whoever arrives late has to ask once for itself.
      */
     void get().checkUpdate(false)
+    // The installed agent CLIs (#297), for the same reason: the host read them before this window attached
+    void get().checkAgentVersions(false)
 
     // Come back to where you were (C-3). A session that no longer exists is quietly skipped.
     restoringWorkspace = true
@@ -2869,6 +2901,8 @@ export const useStore = create<AppState>((set, get) => ({
      * exactly as stale as before, which is the bug.
      */
     if (returning) for (const id of Object.keys(get().projects)) get().refreshProjectGit(id)
+    // The same signal for an agent CLI updated in a terminal (#297): the host reads the installed versions again
+    if (returning) void get().checkAgentVersions(false)
   },
 
   dismissNotices(sessionIds) {
@@ -2891,6 +2925,11 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'update_status') {
       set({ update: e.status })
+      return
+    }
+    // App-wide like update_status (#297): the installed agent CLIs, read on the host's own schedule
+    if (e.type === 'agent_versions') {
+      set({ agentVersions: e.status })
       return
     }
 
@@ -3697,6 +3736,37 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       // An older host does not know the setting; say so rather than leave the box ticked
       set({ toast: `Could not save that: ${(e as Error).message}` })
+    }
+  },
+
+  async checkAgentVersions(force = false) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ agentVersions: await platform.agents.versions(force) })
+    } catch {
+      // An older host does not know it: the headers stay quiet rather than the screen breaking
+    }
+  },
+
+  async setAgentAutoApply(enabled) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ agentVersions: await platform.agents.setAutoApplyVersions(enabled) })
+    } catch (e) {
+      set({ toast: `Could not save that: ${(e as Error).message}` })
+    }
+  },
+
+  async applyAgentVersions() {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const { restarted, busy } = await platform.agents.applyVersions()
+      set({ toast: appliedVersionsText(restarted.length, busy.length) })
+    } catch (e) {
+      set({ toast: `Could not restart the sessions: ${(e as Error).message}` })
     }
   },
 

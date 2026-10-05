@@ -34,6 +34,7 @@ import type {
   UiPreferences,
   UiPreferencesPatch,
   UpdateStatus,
+  AgentVersions,
   ThemeFileContent,
   ThemeFileEntry,
 } from '@cc/protocol'
@@ -44,6 +45,8 @@ import {
   builderRequestFrame,
   newAppIdProblem,
   isNewerVersion,
+  liveBackgroundTasks,
+  runsOlderCli,
   parseUiPreferences,
   textSizeFromLegacyStep,
   parseThemeFile,
@@ -320,6 +323,8 @@ export class MockPlatform implements Platform {
         }
         // The same rule as the real thing (#304): a fresh conversation empties the gauge until the tool reports again
         if (event.type === 'conversation_reset') s.context = null
+        // The same rule as the real thing (#297): the CLI version the process reports stays on the session
+        if (event.type === 'agent_version') s.agentVersion = event.version
         /*
          * A switch the agent tool made (#304) — like the host, recorded on the session so the list a reconnect reads
          * shows it too. (The host applies only what differs from what the process was launched with; the mock has no
@@ -2183,6 +2188,42 @@ export class MockPlatform implements Platform {
       backgroundTasks: true,
     }),
     detect: async () => this.detected,
+    // Like the host (#297): the reading is the host's; this mock never reads a real CLI
+    versions: async () => ({ ...this.agentVersions, installed: { ...this.agentVersions.installed } }),
+    setAutoApplyVersions: async (enabled: boolean) => {
+      this.agentVersions = { ...this.agentVersions, autoApply: enabled }
+      this.emit({ type: 'agent_versions', status: { ...this.agentVersions } })
+      return { ...this.agentVersions }
+    },
+    /**
+     * Like the host (#297): a live session that runs an older CLI is restarted on the installed one when it is idle by
+     * the shared rule (no turn, no approval or question, no background work), and listed as busy otherwise.
+     */
+    applyVersions: async () => {
+      const restarted: string[] = []
+      const busy: string[] = []
+      for (const s of this.sessions.values()) {
+        const to = this.agentVersions.installed[s.tool]
+        if (!s.live || !to || !runsOlderCli(s.agentVersion, to)) continue
+        const holds =
+          s.state === 'working' ||
+          s.state === 'waiting_approval' ||
+          s.pendingApproval !== null ||
+          s.pendingQuestions.length > 0 ||
+          liveBackgroundTasks(this.backgroundOf(s.id)).length > 0
+        if (holds) {
+          busy.push(s.id)
+          continue
+        }
+        const from = s.agentVersion!
+        this.restarted.push(s.id)
+        this.emit({ type: 'agent_version', sessionId: s.id, version: to })
+        const label = this.detected.find((t) => t.name === s.tool)?.label ?? s.tool
+        this.emit({ type: 'notice', sessionId: s.id, level: 'info', from: 'Centralu', label: 'agent update', text: `${label} restarted on ${to} (was ${from}). The conversation continues.` })
+        restarted.push(s.id)
+      }
+      return { restarted, busy }
+    },
     subscribe: (handler: (e: NormalizedEvent) => void): Unsubscribe => {
       this.handlers.add(handler)
       return () => this.handlers.delete(handler)
@@ -2853,6 +2894,15 @@ export class MockPlatform implements Platform {
     })
     this.installIfAutomatic()
     return { ...this.updateStatus }
+  }
+
+  /** The installed agent CLIs and the "move idle sessions" setting (#297) — on by default, like the host */
+  agentVersions: AgentVersions = { installed: {}, autoApply: true, checkedAt: null }
+
+  /** Scenario helper (#297): as if the host read these installed versions (used from Playwright) */
+  setInstalledVersions(installed: Record<string, string | null>): void {
+    this.agentVersions = { ...this.agentVersions, installed: { ...installed }, checkedAt: this.now() }
+    this.emit({ type: 'agent_versions', status: { ...this.agentVersions, installed: { ...installed } } })
   }
 
   private setUpdateStatus(patch: Partial<UpdateStatus>): void {

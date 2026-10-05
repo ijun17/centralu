@@ -338,7 +338,12 @@ export function Settings() {
             )}
 
             {/* Updates (issue #43) */}
-            {category === 'updates' && <UpdatesSection />}
+            {category === 'updates' && (
+              <>
+                <UpdatesSection />
+                <AgentCliUpdates />
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1111,6 +1116,50 @@ function UpdatesSection() {
           </p>
         </>
       )}
+    </section>
+  )
+}
+
+/**
+ * The agent CLIs (#297): which versions are installed, and whether idle sessions move to a newer one by themselves.
+ *
+ * Next to the app's own update because it is the same errand — "am I on the new version" — for the other programs
+ * this app runs. Unlike the app's update this one is **on by default** (the owner's decision, 2026-10-05): nothing is
+ * installed here, the CLIs update themselves or through npm, and moving a session waits until nothing in it would be
+ * lost. Its conversation continues, and a line in it says that it moved.
+ */
+function AgentCliUpdates() {
+  const versions = useStore((s) => s.agentVersions)
+  const tools = useStore((s) => s.tools)
+  const setAutoApply = useStore((s) => s.setAgentAutoApply)
+  const check = useStore((s) => s.checkAgentVersions)
+  useEffect(() => {
+    void check(false)
+  }, [check])
+  const installed = Object.entries(versions?.installed ?? {})
+    .filter(([, v]) => v)
+    .map(([tool, v]) => `${tools.find((t) => t.name === tool)?.label ?? tool} ${v}`)
+  return (
+    <section className="mt-5 border-t border-line pt-4" data-testid="settings-agent-versions">
+      <p className="text-sm text-ink-muted" data-testid="agent-versions-installed">
+        {versions === null ? 'Agent CLIs: not checked yet' : installed.length > 0 ? `Installed: ${installed.join(' · ')}` : 'No agent CLI version found'}
+      </p>
+      <label className="mt-2 flex items-center gap-2 text-sm text-ink-muted">
+        <input
+          type="checkbox"
+          className="accent-line-strong"
+          data-testid="agent-versions-auto-apply"
+          checked={versions?.autoApply ?? true}
+          disabled={versions === null}
+          onChange={(e) => void setAutoApply(e.target.checked)}
+        />
+        Move idle sessions to a newly installed agent CLI
+      </label>
+      <p className="mt-1 text-xs leading-body text-ink-faint">
+        Each session runs its own Claude Code or Codex process, which keeps the version it started with. With this on, a
+        session restarts on the newer one once it is not working, not waiting for you and not running background tasks.
+        The conversation continues, and a line in it says the session moved.
+      </p>
     </section>
   )
 }

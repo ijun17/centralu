@@ -14,6 +14,7 @@ import { SessionManager } from '../../agent-host/src/sessions/manager.js'
 import { Store } from '../../agent-host/src/dev-services/store.js'
 import { createRpcHandler } from '../../agent-host/src/rpc.js'
 import { UpdateService } from '../../agent-host/src/updates.js'
+import { AgentVersionService } from '../../agent-host/src/agent-versions.js'
 import { ThemeFiles } from '../../agent-host/src/themes.js'
 import { ViewHost } from '../../agent-host/src/views/view-host.js'
 import { OriginPorts } from '../../agent-host/src/views/origin-ports.js'
@@ -95,10 +96,16 @@ async function makeWeb(): Promise<Harness> {
   const themesRoot = mkdtempSync(join(tmpdir(), 'cc-contract-themes-'))
   const themes = new ThemeFiles(join(themesRoot, 'themes'), () => server.broadcast({ type: 'themes_changed' }))
   await themes.start()
+  // No tool reads an installed version here: this suite never runs a real CLI (#297)
+  const agentVersions = new AgentVersionService({
+    tools: () => [],
+    sessions: mgr,
+    publish: (status) => server.broadcast({ type: 'agent_versions', status }),
+  })
   const server = new HostServer({
     port: 0,
     token: 'contract',
-    onRpc: createRpcHandler(mgr, adapters, { updates, themes }),
+    onRpc: createRpcHandler(mgr, adapters, { updates, themes, agentVersions }),
   })
   const port = await server.listen()
   const platform = createWebPlatform({
@@ -482,6 +489,17 @@ describe.each([
 
     await waitFor(() => events.some((e) => e.type === 'update_status' && e.status.phase === 'restart_required'))
     expect((await h.platform.updates.status(false)).phase).toBe('restart_required')
+  })
+
+  /**
+   * Moving idle sessions to a newly installed agent CLI (#297) starts on — the owner's decision — and the switch sticks.
+   * With nothing installed newer, the app-wide action restarts nothing.
+   */
+  it('moving idle sessions to a new agent CLI starts on, the switch sticks, and nothing older restarts nothing (#297)', async () => {
+    expect((await h.platform.agents.versions(true)).autoApply).toBe(true)
+    expect((await h.platform.agents.setAutoApplyVersions(false)).autoApply).toBe(false)
+    expect((await h.platform.agents.versions(false)).autoApply).toBe(false)
+    expect(await h.platform.agents.applyVersions()).toEqual({ restarted: [], busy: [] })
   })
 
   /**

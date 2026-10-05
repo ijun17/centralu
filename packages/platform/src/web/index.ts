@@ -213,6 +213,15 @@ class WebAgentPort implements AgentPort {
   detect() {
     return this.rpc.call('agents.detect', {})
   }
+  versions(force = false) {
+    return this.rpc.call('agents.versions', { force })
+  }
+  setAutoApplyVersions(enabled: boolean) {
+    return this.rpc.call('agents.setAutoApplyVersions', { enabled })
+  }
+  applyVersions() {
+    return this.rpc.call('agents.applyVersions', {})
+  }
   subscribe(handler: (e: NormalizedEvent) => void): Unsubscribe {
     return this.rpc.onEvent(handler)
   }

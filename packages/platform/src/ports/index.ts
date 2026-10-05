@@ -40,6 +40,7 @@ import type {
   ThemeFileContent,
   ThemeFileEntry,
   UpdateStatus,
+  AgentVersions,
 } from '@cc/protocol'
 
 /**
@@ -194,6 +195,15 @@ export interface AgentPort {
   /** Account usage and limits (FR-9). Handles only subscription limits */
   usage(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }>
   detect(): Promise<ToolStatus[]>
+  /**
+   * The agent CLIs installed now, and whether idle sessions move to a newer one by themselves (#297). `force: false`
+   * (the window gaining focus) takes a reading from moments ago.
+   */
+  versions(force?: boolean): Promise<AgentVersions>
+  /** "Move idle sessions to a newly installed agent CLI" on or off (#297) */
+  setAutoApplyVersions(enabled: boolean): Promise<AgentVersions>
+  /** Restarts every idle session that runs an older CLI on the installed one; the busy ones are listed (#297) */
+  applyVersions(): Promise<{ restarted: string[]; busy: string[] }>
   /** Event stream — receives events from the moment of subscription onward */
   subscribe(handler: (event: NormalizedEvent) => void): Unsubscribe
   onConnectionChange(handler: (state: ConnectionState) => void): Unsubscribe

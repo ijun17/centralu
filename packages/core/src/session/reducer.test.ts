@@ -316,3 +316,12 @@ describe('plan', () => {
     expect(after.plan).toEqual(steps)
   })
 })
+
+describe('the CLI version a session runs (#297)', () => {
+  it('starts unknown and takes what the process reports, without touching the state', () => {
+    expect(s0().agentVersion).toBeNull()
+    const s = replay([...TURN, ev({ type: 'agent_version', version: '2.1.290' })])
+    expect(s.agentVersion).toBe('2.1.290')
+    expect(s.state).toBe('waiting_input')
+  })
+})

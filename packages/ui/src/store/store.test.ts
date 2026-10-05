@@ -5,6 +5,7 @@ import { DEFAULT_NOTIFY_POLICY, sessionGridPanel, type NotifyPolicy } from '@cc/
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import {
+  appliedVersionsText,
   composerTarget,
   droppedQuestionsText,
   externalAppKey,
@@ -1178,6 +1179,29 @@ describe('update status (#43)', () => {
  * through the same door. A failure is only left in `wakeError`, never raised as a toast (focus is not
  * an action), and if it is already alive, nothing happens.
  */
+/** The installed agent CLIs (#297) — app-wide like update status, so the same door applies */
+describe('agent CLI versions (#297)', () => {
+  it('the installed versions reach the store though they belong to no session', () => {
+    useStore.getState().dispatchEvent({ type: 'agent_versions', status: { installed: { claude: '2.1.290' }, autoApply: true, checkedAt: 1 } })
+    expect(useStore.getState().agentVersions?.installed.claude).toBe('2.1.290')
+  })
+
+  it('coming back to the window asks the host to read the installed versions again', async () => {
+    const platform = new MockPlatform()
+    platform.setInstalledVersions({ claude: '2.1.291' })
+    useStore.setState({ platform, appFocused: false, agentVersions: null })
+    useStore.getState().setAppFocused(true)
+    await vi.waitFor(() => expect(useStore.getState().agentVersions?.installed.claude).toBe('2.1.291'))
+  })
+
+  it('the header action’s line says how many moved and how many were busy', () => {
+    expect(appliedVersionsText(2, 0)).toBe('Restarted 2 sessions on the installed version')
+    expect(appliedVersionsText(1, 1)).toBe('Restarted 1 session on the installed version; 1 busy keeps its version for now')
+    expect(appliedVersionsText(0, 2)).toBe('Nothing restarted: 2 sessions busy keep their version for now')
+    expect(appliedVersionsText(0, 0)).toBe('Every session already runs the installed version')
+  })
+})
+
 describe('wake — silently waking along the focus path', () => {
   it('wakes a sleeping session and marks it live', async () => {
     const platform = new MockPlatform()
