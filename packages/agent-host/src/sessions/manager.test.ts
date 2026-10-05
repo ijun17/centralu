@@ -1947,7 +1947,12 @@ describe("the orchestrator's tools see only this app's sessions", () => {
    */
   it('only the orchestrator can open the tool-execution door', async () => {
     const { a, orc } = await setup()
-    await expect(mgr.runOrchestratorTool(a.id, 'list_sessions', {})).rejects.toThrow(/Only the orchestrator/)
+    // An ordinary session holds only the reader set (#320): the orchestrator's tools stay shut to it
+    await expect(mgr.runOrchestratorTool(a.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session/)
+    await expect(mgr.runOrchestratorTool(a.id, 'send_to_session', { sessionId: orc.id, text: 'x' })).rejects.toThrow(/Not a tool of this session/)
+    // With the set turned off it has no door at all
+    await rpc('prefs.set', { patch: { sessionTools: false } })
+    await expect(mgr.runOrchestratorTool(a.id, 'read_session', {})).rejects.toThrow(/Only the orchestrator/)
     const r = await mgr.runOrchestratorTool(orc.id, 'list_sessions', {})
     expect(r.text).toContain(a.id)
   })
@@ -2037,8 +2042,9 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     expect(codexAdapter.lastOpts?.permissionPreset).toBe('safe')
   })
 
-  it('a plain session gets no tools attached — only the orchestrator receives them', async () => {
+  it('a plain session gets no tools attached when the reader set is turned off — only the orchestrator receives them', async () => {
     const p = await addProject()
+    await rpc('prefs.set', { patch: { sessionTools: false } })
     await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })
     expect(adapter.lastOrchestratorTools).toBeUndefined()
   })
@@ -2059,6 +2065,120 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     expect(joined).toContain('message #15')
     // Evidence it did not just cut the tail — the very end must not be in the window.
     expect(joined).not.toContain('message #30')
+  })
+})
+
+/**
+ * The light, read-only set every ordinary session gets (#320).
+ *
+ * Owner decision 2026-10-05: on by default, no role-changing instructions, sending and creating stay
+ * with the orchestrator. The boundary that matters is the project: a session reads its own project's
+ * sessions and nothing else — not another project's, not the orchestrator's.
+ */
+describe("an ordinary session's reader set (#320)", () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+  const project = async () => {
+    const path = mkdtempSync(join(tmpdir(), 'cc-reader-'))
+    dirs.push(path)
+    return (await rpc('projects.add', { path })) as { id: string; path: string }
+  }
+  const session = async (p: { id: string; path: string }, name: string) => {
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await rpc('sessions.rename', { sessionId: s.id, name })
+    return { id: s.id, tools: adapter.lastOrchestratorTools!, opts: adapter.lastOpts! }
+  }
+  const setup = async () => {
+    const shop = await project()
+    const other = await project()
+    const orc = await mgr.orchestrator()
+    const b = await session(other, 'other-project')
+    await rpc('agents.send', { sessionId: b.id, text: 'the zanzibar secret lives here' })
+    const a2 = await session(shop, 'sibling')
+    await rpc('agents.send', { sessionId: a2.id, text: 'we chose pgdump for the backup' })
+    const a1 = await session(shop, 'me')
+    return { shop, other, orc, a1, a2, b }
+  }
+
+  it('is attached at creation and at wake, with no instructions and none of the orchestrator\'s tools', async () => {
+    const { a1 } = await setup()
+    expect(a1.opts.toolProfile).toBe('reader')
+    expect(a1.tools).toBeDefined()
+    // No role is handed over with it — an ordinary session stays an ordinary session
+    expect(a1.opts.systemPromptAppend).toBeUndefined()
+    expect(mgr.toolProfileOf(a1.id)).toBe('reader')
+
+    await mgr.disposeAll()
+    await rpc('agents.send', { sessionId: a1.id, text: 'wake up' })
+    expect(adapter.lastOpts?.sessionId).toBe(a1.id)
+    expect(adapter.lastOpts?.toolProfile).toBe('reader')
+
+    // What the bridge (Codex) is offered: exactly the reader set
+    const offered = ((await rpc('orchestrator.tools', { sessionId: a1.id })) as { name: string }[]).map((t) => t.name)
+    expect(offered).toEqual(['read_session', 'recall', 'app_guide'])
+  })
+
+  it('lists, reads and recalls only its own project — another project\'s session cannot be reached', async () => {
+    const { a1, a2, b, orc } = await setup()
+    const listed = (await a1.tools.listSessions()).map((s) => s.sessionId)
+    expect(listed).toEqual([a2.id])
+    expect(listed).not.toContain(b.id)
+    expect(listed).not.toContain(orc.id)
+
+    expect((await a1.tools.readSession(a2.id)).ok).toBe(true)
+    expect(await a1.tools.readSession(b.id)).toEqual({ ok: false, error: `Not a session in this project: ${b.id}` })
+    expect((await a1.tools.readSession(orc.id)).ok).toBe(false)
+
+    expect((await a1.tools.recall('pgdump')).hits.map((h) => h.sessionId)).toEqual([a2.id])
+    expect((await a1.tools.recall('zanzibar')).hits).toEqual([])
+
+    // The same boundary through the bridge's door, by name — what a Codex session would call
+    const viaBridge = await mgr.runOrchestratorTool(a1.id, 'read_session', { sessionId: b.id })
+    expect(viaBridge.isError).toBe(true)
+    expect(viaBridge.text).not.toContain('zanzibar')
+    const listedViaBridge = await mgr.runOrchestratorTool(a1.id, 'read_session', {})
+    expect(listedViaBridge.text).toContain(a2.id)
+    expect(listedViaBridge.text).not.toContain(b.id)
+    const recalled = await mgr.runOrchestratorTool(a1.id, 'recall', { query: 'zanzibar' })
+    expect(recalled.text).not.toContain(b.id)
+  })
+
+  it('cannot act: no send, create or settings tool by name, and the object it holds refuses them too', async () => {
+    const { a1, a2 } = await setup()
+    for (const name of ['send_to_session', 'create_session', 'update_session_settings', 'list_sessions', 'propose_skill', 'create_app']) {
+      await expect(mgr.runOrchestratorTool(a1.id, name, { sessionId: a2.id, text: 'do it' })).rejects.toThrow(/Not a tool of this session/)
+    }
+    expect(await a1.tools.sendToSession(a2.id, 'do it')).toMatchObject({ ok: false })
+    expect((await a1.tools.createSession({ project: 'x' })).ok).toBe(false)
+    expect(adapter.handleOf(a2.id)?.sent ?? []).not.toContain('do it')
+  })
+
+  /*
+   * Provenance (#90) asks "does the source direct sessions?", not "does it have any tools". A reader
+   * holds tools but directs nothing, so words it is the source of still reach a directing session as
+   * a host-authored notice, exactly as they did when ordinary sessions had no tools at all.
+   */
+  it("is still an ordinary worker to provenance: words it sources reach the orchestrator as a notice, not as text", async () => {
+    const { a1, orc } = await setup()
+    await mgr.send(orc.id, 'READER_SOURCED_SENTINEL', undefined, { sessionId: a1.id, name: 'me' })
+    const sent = adapter.handleOf(orc.id)!.sent
+    expect(sent.some((t) => t.includes('READER_SOURCED_SENTINEL'))).toBe(false)
+    expect(sent.some((t) => t.includes('sourceSessionId') && t.includes(a1.id))).toBe(true)
+  })
+
+  it('turned off in Settings: a new session gets nothing, and a live one stops answering at once', async () => {
+    const { shop, a1, a2 } = await setup()
+    await rpc('prefs.set', { patch: { sessionTools: false } })
+    expect(await a1.tools.listSessions()).toEqual([])
+    expect((await a1.tools.readSession(a2.id)).ok).toBe(false)
+    expect(mgr.toolProfileOf(a1.id)).toBeNull()
+    expect(await rpc('orchestrator.tools', { sessionId: a1.id })).toEqual([])
+
+    await rpc('agents.createSession', { projectId: shop.id, cwd: shop.path, tool: 'claude' })
+    expect(adapter.lastOpts?.orchestratorTools).toBeUndefined()
+    expect(adapter.lastOpts?.toolProfile).toBeUndefined()
   })
 })
 

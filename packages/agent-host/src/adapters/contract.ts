@@ -12,6 +12,7 @@ import type {
   ToolDescriptor,
 } from '@cc/protocol'
 import type { Readable, Writable } from 'node:stream'
+import type { ToolProfile } from '../apps/contract.js'
 
 /**
  * The adapter contract (docs/agent-host.md §2).
@@ -472,12 +473,12 @@ export type CreateSessionOpts = {
   outputSchema?: Record<string, unknown>
   /**
    * Which bundle of tools is received (#69). 'orchestrator' gets all of them; 'manager' gets a
-   * subset of the worktree manager's (propose, query, instruct). Only meaningful when
-   * orchestratorTools is present. Both exposure and execution use the same decision
+   * subset of the worktree manager's (propose, query, instruct); 'reader' is an ordinary session's
+   * light, read-only set (#320). Only meaningful when orchestratorTools is present. Both exposure and execution use the same decision
    * (profileAllows) — narrowing only the exposure would let a caller who already knows the name
    * just call it anyway.
    */
-  toolProfile?: 'orchestrator' | 'manager' | 'scoped' | 'builder'
+  toolProfile?: ToolProfile
   /**
    * The role description the app vouches for. **Appended** to the tool's default prompt.
    *

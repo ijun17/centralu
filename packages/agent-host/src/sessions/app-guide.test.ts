@@ -84,6 +84,7 @@ const SEATS: { profile: ToolProfile; heading: string }[] = [
   { profile: 'orchestrator', heading: 'Tools the orchestrator calls' },
   { profile: 'manager', heading: 'Tools the worktree manager calls' },
   { profile: 'scoped', heading: 'Tools the lead calls' },
+  { profile: 'reader', heading: 'Tools every other session calls' },
 ]
 
 describe('the app guide speaks only of tools that exist in the registry', () => {

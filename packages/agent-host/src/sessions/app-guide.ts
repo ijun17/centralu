@@ -29,14 +29,15 @@ export type AppGuideTopic = (typeof APP_GUIDE_TOPICS)[number]
 export type GuideTool = { name: string; description: string }
 
 /**
- * The tools each of the three directing seats can call **right now**.
+ * The tools each of the three directing seats can call **right now**, and the light, read-only set
+ * every other session gets (#320).
  *
  * The caller (orchestrator-tools.ts) fills this in from the registry's decisions
  * (profileAllows, appToolEntries). Why this file does not import the registry: the registry
  * imports this file's topic list to draw the app_guide schema — wiring the import the other way
  * too would create a cycle.
  */
-export type GuideSeats = { orchestrator: GuideTool[]; manager: GuideTool[]; scoped: GuideTool[] }
+export type GuideSeats = { orchestrator: GuideTool[]; manager: GuideTool[]; scoped: GuideTool[]; reader: GuideTool[] }
 
 const STATIC: Record<Exclude<AppGuideTopic, 'orchestrator'>, string> = {
   overview: `# Centralu overview
@@ -126,7 +127,7 @@ Every session has a permission preset: Safe (ask for everything), Normal (ask wh
 Changing a live session's settings restarts the conversation in place — the change applies from
 the next turn on.
 App settings (the Settings button in the top bar): Orchestrator (change the orchestrator's tools
-and approved skills), Apps, Notifications, Appearance, Permissions (saved approval rules),
+and approved skills, and whether every session can look at its own project), Apps, Notifications, Appearance, Permissions (saved approval rules),
 Shortcuts (the shortcut list), and Updates.`,
 
   updates: `# Updates
@@ -184,7 +185,11 @@ ${toolLines(seats.orchestrator)}
 ${toolLines(seats.manager)}
 
 ## Tools the lead calls
-${toolLines(seats.scoped)}`
+${toolLines(seats.scoped)}
+
+## Tools every other session calls
+Read-only, and only that session's own project. Settings → Orchestrator can turn them off.
+${toolLines(seats.reader)}`
 }
 
 /**

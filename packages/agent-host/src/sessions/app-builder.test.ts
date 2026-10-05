@@ -261,8 +261,11 @@ describe('a building session tries out its own app (C-3)', () => {
     const orch = await mgr.orchestrator()
     expect(((await rpc('orchestrator.tools', { sessionId: orch.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
-    expect(mgr.toolProfileOf(worker.id)).toBeNull()
-    expect(claude.last().toolProfile).toBeUndefined()
+    // An ordinary session has the reader set (#320) — read-only, and no check in it
+    expect(mgr.toolProfileOf(worker.id)).toBe('reader')
+    expect(claude.last().toolProfile).toBe('reader')
+    expect(((await rpc('orchestrator.tools', { sessionId: worker.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
+    await expect(mgr.runOrchestratorTool(worker.id, 'check', {})).rejects.toThrow(/Not a tool of this session/)
   })
 })
 

@@ -15,9 +15,17 @@ import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNamePro
 /**
  * The set of tools a session receives (#69). The orchestrator gets all of them, the worktree manager
  * gets a subset, a coordination session gets the three within its scope, and an app's building
- * session (M4 C-3) gets exactly one, `check`, to check its own app.
+ * session (M4 C-3) gets exactly one, `check`, to check its own app. Every other session gets the
+ * light, read-only `reader` set (#320): it sees its own project's sessions and directs none of them.
  */
-export type ToolProfile = 'orchestrator' | 'manager' | 'scoped' | 'builder'
+export type ToolProfile = 'orchestrator' | 'manager' | 'scoped' | 'builder' | 'reader'
+
+/**
+ * The profiles an app's tools may name — every one but `reader`. An ordinary session's set is the
+ * host's own read-only three (#320); an app tool riding on it would put an app in every session,
+ * which is the "never a worker" rule below said by the type instead of by a reviewer.
+ */
+export type AppToolProfile = Exclude<ToolProfile, 'reader'>
 
 /** Whoever called an app tool — sessionId=null means a person (the UI). An app uses this to judge its own permissions */
 export type AppToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
@@ -70,10 +78,10 @@ export type HostAppModule = {
   /** An open-ended string, the same as the UI's half (M4 P-1) — an external app must also appear on the same registry */
   id: AppId
   tools?: {
-    /** Which profiles see these tools — never a worker, under any circumstances */
-    profiles: readonly ToolProfile[]
+    /** Which profiles see these tools — never a worker, under any circumstances (so never `reader`, #320) */
+    profiles: readonly AppToolProfile[]
     /** If a def has its own profiles, it overrides the group default — needed by an app (control) whose tools each want a different scope */
-    defs: readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; profiles?: readonly ToolProfile[] }[]
+    defs: readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; profiles?: readonly AppToolProfile[] }[]
     run(ctx: HostAppContext, name: string, args: Record<string, unknown>, caller: AppToolCaller): Promise<ToolOutput>
   }
   /**

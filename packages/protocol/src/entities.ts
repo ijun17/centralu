@@ -1041,6 +1041,15 @@ export const UiPreferences = z.object({
    * lands on the nearest step, so a value from another build never throws the record away.
    */
   textSize: z.number().transform(nearestTextSize),
+  /**
+   * Whether ordinary sessions get Centralu's light, read-only tools (#320): their own project's
+   * sessions (`read_session`, which lists them when given no id), a search of that project's past
+   * conversations (`recall`) and the app guide. **On by default** (owner decision, 2026-10-05) — a
+   * session asked "what did the other session do?" should be able to look. Not a screen
+   * preference, but this is the one record the person's settings already live in; the host reads
+   * it when a session starts and on each call.
+   */
+  sessionTools: z.boolean(),
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 
@@ -1066,6 +1075,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   codeFont: '',
   lineHeight: 'normal',
   textSize: 1,
+  sessionTools: true,
 }
 
 /**

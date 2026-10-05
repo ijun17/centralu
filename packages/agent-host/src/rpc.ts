@@ -480,8 +480,10 @@ export function createRpcHandler(
     'orchestrator.tools': async (p) => {
       const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
       // The full list when no session is given (for compatibility) — only that session's bundle when one is known (#69: the manager takes a subset)
-      const profile = sessionId ? mgr.toolProfileOf(sessionId) : 'orchestrator'
-      return orchestratorToolSchemas(profile ?? 'orchestrator')
+      if (!sessionId) return orchestratorToolSchemas('orchestrator')
+      // A session with no bundle is offered nothing — the full list here would advertise tools its calls are refused
+      const profile = mgr.toolProfileOf(sessionId)
+      return profile ? orchestratorToolSchemas(profile) : []
     },
     'orchestrator.tool': async (p) => {
       const { sessionId, name, args } = RpcMethods['orchestrator.tool'].params.parse(p)

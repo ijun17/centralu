@@ -94,12 +94,13 @@ afterEach(async () => {
 })
 
 describe('apps handed to a session by the manager (decision 4)', () => {
-  it('an ordinary worker receives its own project\'s external apps — it still does not receive the built-in app tools', async () => {
+  it('an ordinary worker receives its own project\'s external apps — and of the built-in tools only the reader set', async () => {
     await create()
     const o = adapter.last()
     expect(servers(o)).toEqual(['app-notes'])
-    expect(o.orchestratorTools).toBeUndefined()
-    expect(o.toolProfile).toBeUndefined()
+    // The light, read-only set (#320) — not the orchestrator's, and no app tool rides on it
+    expect(o.toolProfile).toBe('reader')
+    expect(o.orchestratorTools).toBeDefined()
     // The path back to the host is still received — Codex's app bridge returns to this address
     expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
   })

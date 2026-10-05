@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
-import type { AppToolCaller, ToolOutput, ToolProfile } from '../apps/contract.js'
+import type { AppToolCaller, AppToolProfile, ToolOutput, ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
 function trustedJsonText(value: string): string {
@@ -244,6 +244,67 @@ const MANAGER_ONLY_TOOL_NAMES = ['delete_worktree_session'] as const satisfies r
  */
 export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly OrchestratorToolName[]
 
+/**
+ * The light set every ordinary session gets (#320) — read-only, and only its own project.
+ *
+ * **Its own definitions, not the orchestrator's text.** The names and the execution are shared
+ * (runOrchestratorTool), but the orchestrator's descriptions talk about managing, reportBack and
+ * send_to_session — a role this seat does not have, and words an ordinary session would read as
+ * a hint to start directing. They are also the cost: these schemas ride in every session's
+ * context on every turn, so each word was weighed against a measurement (haiku, CLI 2.1.289,
+ * scripts/probe-reader-tools.mts; the table is in docs/agent-host.md):
+ *
+ *   - Each tool costs about 55 tokens before its first word (its name and schema envelope:
+ *     list_sessions, with no arguments and a one-line description, cost 75), so the tool that
+ *     earned least was merged rather than trimmed: listing is read_session without a sessionId.
+ *     The four candidates re-worded cost +338 tokens; merged, +267. Asked about the project's
+ *     other sessions, the model called read_session with no id (5 of 5).
+ *   - app_guide is deferred behind tool search (`deferred` below; Claude only — Codex has no
+ *     deferral and gets it loaded): it is the one a session rarely needs, and it is 75 of those
+ *     tokens (+192 with it deferred). Asked how to do something in Centralu, the model found it
+ *     through tool search 4 of 5 times (5 of 5 loaded); the miss is an answer from a guess, and
+ *     the orchestrator still has the guide loaded. Deferring the whole set was measured and
+ *     refused: recall was never called (asked about an earlier conversation, the model said it
+ *     had no memory), the same failure the orchestrator measured for send_to_session.
+ *   - What is left out of the schemas still runs (read_session's `limit` and `tools`, recall's
+ *     `limit`): the runner reads the same arguments for every profile, and the defaults are what
+ *     a session wants nearly every time. `around` goes unexplained: recall's own answer spells
+ *     out the call (`read_session(sessionId=…, around=…)`).
+ *
+ * No instructions go with this set (READER_INSTRUCTIONS is empty): the descriptions are enough to
+ * choose a tool, and server instructions are where a role would creep in.
+ */
+export const READER_TOOLS = [
+  {
+    name: 'read_session',
+    description: "Reads one of this project's other Centralu sessions. No sessionId: lists them.",
+    schema: z.object({ sessionId: z.string().optional(), around: z.number().optional() }),
+  },
+  {
+    name: 'recall',
+    description: "Searches this project's past conversations. One word works best.",
+    schema: z.object({ query: z.string() }),
+  },
+  {
+    name: 'app_guide',
+    description: "Centralu's user guide. Read it before answering how Centralu works.",
+    schema: z.object({ topic: z.string().optional() }),
+    deferred: true,
+  },
+] as const satisfies readonly { name: OrchestratorToolName; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+
+/** No server instructions for the reader set — see READER_TOOLS */
+export const READER_INSTRUCTIONS = ''
+
+/**
+ * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
+ * description and JSON schema, plus the instructions — the deferred app_guide included, since
+ * Codex loads it. The set is 897 today (the four candidates in the orchestrator's words were
+ * 2,493); the measured tokens are in docs/agent-host.md. Raising it is a decision about every
+ * session's context, not a number to bump when a test fails.
+ */
+export const READER_BUDGET_CHARS = 1000
+
 /** The building session's MCP guide — the role (the app's place and rules) is applied by roleAppend */
 export const BUILDER_INSTRUCTIONS = [
   "You are the session that builds one Centralu app. This server's check inspects your app.",
@@ -326,6 +387,27 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'the conversation you had with the person is the memory that crosses projects, and that memory is reached only by search.',
 ].join('\n')
 
+async function listSessionsText(tools: OrchestratorTools, caller: AppToolCaller): Promise<ToolOutput> {
+  const list = await tools.listSessions()
+  if (list.length === 0) {
+    return { text: caller.profile === 'reader' ? 'There are no other sessions in this project.' : 'There are no sessions under management.' }
+  }
+  return {
+    text: list
+      .map(
+        (s) =>
+          `- ${s.name} [${s.sessionId}] · project ${s.project} · ${s.tool} · ${s.state}` +
+          // If merge status is not shown, the manager keeps assigning work to a finished branch (#69, dogfooding)
+          (s.merged ? ' · merged' : '') +
+          // PR status (#76 stage 3) — assigning new work to a branch awaiting review pollutes the PR
+          (s.pr ? ` · PR #${s.pr.number}(${s.pr.state})` : '') +
+          (s.lastActive ? ` · last ${s.lastActive}` : '') +
+          (s.preview ? `\n    recent (JSON): ${trustedJsonText(s.preview)}` : ''),
+      )
+      .join('\n'),
+  }
+}
+
 /**
  * Runs one tool and turns the result into **text for the model to read**.
  *
@@ -353,24 +435,7 @@ export async function runOrchestratorTool(
     return app.run(parsed.data as Record<string, unknown>, caller)
   }
 
-  if (name === 'list_sessions') {
-    const list = await tools.listSessions()
-    if (list.length === 0) return { text: 'There are no sessions under management.' }
-    return {
-      text: list
-        .map(
-          (s) =>
-            `- ${s.name} [${s.sessionId}] · project ${s.project} · ${s.tool} · ${s.state}` +
-            // If merge status is not shown, the manager keeps assigning work to a finished branch (#69, dogfooding)
-            (s.merged ? ' · merged' : '') +
-            // PR status (#76 stage 3) — assigning new work to a branch awaiting review pollutes the PR
-            (s.pr ? ` · PR #${s.pr.number}(${s.pr.state})` : '') +
-            (s.lastActive ? ` · last ${s.lastActive}` : '') +
-            (s.preview ? `\n    recent (JSON): ${trustedJsonText(s.preview)}` : ''),
-        )
-        .join('\n'),
-    }
-  }
+  if (name === 'list_sessions') return listSessionsText(tools, caller)
 
   if (name === 'recall') {
     const query = String(args.query ?? '')
@@ -394,6 +459,8 @@ export async function runOrchestratorTool(
   }
 
   if (name === 'read_session') {
+    // The reader set has no list_sessions — listing is read_session without an id (#320, see READER_TOOLS)
+    if (caller.profile === 'reader' && !args.sessionId) return listSessionsText(tools, caller)
     const r = await tools.readSession(String(args.sessionId ?? ''), args.limit as number | undefined, {
       around: typeof args.around === 'number' ? args.around : undefined,
       tools: args.tools === true,
@@ -410,7 +477,8 @@ export async function runOrchestratorTool(
     const head =
       r.state === 'working'
         ? '⏳ This session is still answering. Below is the conversation so far, and the final answer may be missing.\n' +
-          '   If you want to know once it is done, use send_to_session\'s reportBack.\n\n'
+          // A reader (#320) has no send_to_session — pointing it at reportBack would name a tool it cannot call
+          (caller.profile === 'reader' ? '\n' : '   If you want to know once it is done, use send_to_session\'s reportBack.\n\n')
         : ''
     return { text: head + (r.lines?.join('\n') || '(no conversation)') }
   }
@@ -624,7 +692,7 @@ export type AppToolEntry = {
   name: string
   description: string
   schema: z.ZodObject<z.ZodRawShape>
-  profiles: readonly ToolProfile[]
+  profiles: readonly AppToolProfile[]
   enabled(): boolean
   run(args: Record<string, unknown>, caller: AppToolCaller): Promise<ToolOutput>
 }
@@ -643,7 +711,8 @@ function appToolFor(name: string): AppToolEntry | undefined {
 /** Whether this profile allows the tool — both exposure (schemas) and execution (run) are decided by this */
 export function profileAllows(profile: ToolProfile, name: string): boolean {
   const app = appToolFor(name)
-  if (app) return app.profiles.includes(profile)
+  if (app) return (app.profiles as readonly ToolProfile[]).includes(profile)
+  if (profile === 'reader') return READER_TOOLS.some((t) => t.name === name)
   if (profile === 'orchestrator') {
     return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name) && !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   }
@@ -654,7 +723,33 @@ export function profileAllows(profile: ToolProfile, name: string): boolean {
 
 /** The app tools that are currently on and allowed for this profile — the MCP, the bridge and the schema all use the same list */
 export function appToolEntries(profile: ToolProfile): AppToolEntry[] {
-  return appTools.filter((t) => t.enabled() && t.profiles.includes(profile))
+  return appTools.filter((t) => t.enabled() && (t.profiles as readonly ToolProfile[]).includes(profile))
+}
+
+/**
+ * The built-in tool definitions this profile is given — the one list the in-process MCP, the
+ * bridge's schemas and the guide all read. The reader set (#320) has its own words; every other
+ * profile is a filter over the orchestrator's.
+ */
+export function toolDefsFor(
+  profile: ToolProfile,
+): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
+  if (profile === 'reader') return READER_TOOLS
+  return ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name))
+}
+
+/**
+ * The server instructions for a profile, or undefined for none. In one place so the size test
+ * measures the exact text the adapter sends.
+ */
+export function instructionsFor(profile: ToolProfile): string | undefined {
+  switch (profile) {
+    case 'manager': return MANAGER_INSTRUCTIONS
+    case 'scoped': return SCOPED_INSTRUCTIONS
+    case 'builder': return BUILDER_INSTRUCTIONS
+    case 'reader': return READER_INSTRUCTIONS || undefined
+    default: return ORCHESTRATOR_INSTRUCTIONS
+  }
 }
 
 /**
@@ -664,29 +759,19 @@ export function appToolEntries(profile: ToolProfile): AppToolEntry[] {
  * removed.
  */
 function toolsFor(profile: ToolProfile): GuideTool[] {
-  return [
-    ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)),
-    ...appToolEntries(profile),
-  ].map((t) => ({ name: t.name, description: t.description }))
+  return [...toolDefsFor(profile), ...appToolEntries(profile)].map((t) => ({ name: t.name, description: t.description }))
 }
 
 function guideSeats(): GuideSeats {
-  return { orchestrator: toolsFor('orchestrator'), manager: toolsFor('manager'), scoped: toolsFor('scoped') }
+  return { orchestrator: toolsFor('orchestrator'), manager: toolsFor('manager'), scoped: toolsFor('scoped'), reader: toolsFor('reader') }
 }
 
 export function orchestratorToolSchemas(
   profile: ToolProfile = 'orchestrator',
 ): { name: string; description: string; inputSchema: unknown }[] {
-  return [
-    ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: z.toJSONSchema(t.schema),
-    })),
-    ...appToolEntries(profile).map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: z.toJSONSchema(t.schema),
-    })),
-  ]
+  return [...toolDefsFor(profile), ...appToolEntries(profile)].map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: z.toJSONSchema(t.schema),
+  }))
 }

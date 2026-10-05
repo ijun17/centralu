@@ -1485,11 +1485,14 @@ export class SessionManager {
             : info.kind === 'coordinator' ? this.orchestratorToolsFor(id, undefined, info.scopeSessionIds ?? [])
             // Builder session (M4 C-3): just its own app's check — the bundle (builder) blocks the rest
             : params.builderOf ? this.orchestratorToolsFor(id)
+            // Every other session: its own project, read-only (#320)
+            : this.readsOwnProject(info) ? this.readerToolsFor(id)
             : undefined,
           toolProfile:
             info.kind === 'orchestrator' ? 'orchestrator'
             : info.kind === 'coordinator' ? 'scoped'
             : params.builderOf ? 'builder'
+            : this.readsOwnProject(info) ? 'reader'
             : undefined,
           systemPromptAppend:
             info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt()
@@ -1499,7 +1502,9 @@ export class SessionManager {
           // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
           // (M4 A-5)
           orchestratorBridge:
-            info.kind === 'orchestrator' || info.kind === 'coordinator' || params.builderOf || apps ? (this.endpoint?.() ?? undefined) : undefined,
+            info.kind === 'orchestrator' || info.kind === 'coordinator' || params.builderOf || apps || this.readsOwnProject(info)
+              ? (this.endpoint?.() ?? undefined)
+              : undefined,
           // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
           apps,
           // The answer schema an app supplied when it asked for this (M4 D-1) — Claude gets it on this
@@ -2092,12 +2097,17 @@ export class SessionManager {
                   : // Worktree manager (#69): having children makes it a manager, receiving child-only tools
                     this.isWorktreeManager(sessionId)
                     ? this.orchestratorToolsFor(sessionId, sessionId)
-                    : undefined,
+                    : // Every other session: its own project, read-only (#320)
+                      this.readsOwnProject(m)
+                      ? this.readerToolsFor(sessionId)
+                      : undefined,
           toolProfile:
             m.kind === 'orchestrator' ? 'orchestrator'
             : m.kind === 'coordinator' ? 'scoped'
             : builds ? 'builder'
-            : this.isWorktreeManager(sessionId) ? 'manager' : undefined,
+            : this.isWorktreeManager(sessionId) ? 'manager'
+            : this.readsOwnProject(m) ? 'reader'
+            : undefined,
           /*
            * This is **where memory is handed over.** Switching tools breaks externalId, which routes
            * things down this path (a new process), and that is when the past conversation rides along
@@ -2113,7 +2123,7 @@ export class SessionManager {
                 // for a builder session (C-2) even if the app is broken
                 (m.roleAppend ?? undefined),
           orchestratorBridge:
-            m.kind === 'orchestrator' || m.kind === 'coordinator' || builds || this.isWorktreeManager(sessionId) || apps
+            m.kind === 'orchestrator' || m.kind === 'coordinator' || builds || this.isWorktreeManager(sessionId) || apps || this.readsOwnProject(m)
               ? (this.endpoint?.() ?? undefined)
               : undefined,
           // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
@@ -3401,7 +3411,7 @@ export class SessionManager {
      */
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
-      : from && (relayed || (this.toolProfileOf(sessionId) && !this.toolProfileOf(from.sessionId)))
+      : from && (relayed || (this.directs(sessionId) && !this.directs(from.sessionId)))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
@@ -4365,6 +4375,40 @@ export class SessionManager {
   }
 
   /**
+   * The light set an ordinary session gets (#320): its own project's sessions, read-only.
+   *
+   * Only the three readers are taken from the project-scoped view; everything that acts is a refusal
+   * here, not just a name the profile leaves out. profileAllows already stops both exposure and the
+   * bridge's calls, but a read-only seat should not be holding a working sendToSession behind one
+   * check — the object itself cannot act.
+   */
+  private readerToolsFor(sessionId: string): OrchestratorTools {
+    const view = this.orchestratorToolsFor(sessionId, undefined, undefined, true)
+    const error = 'This session can only read other sessions'
+    const refuse = async () => ({ ok: false, error })
+    /*
+     * The setting is asked again on every call. Its schemas stay until the session next starts (a live
+     * session's tool list does not change), but a person who turned the set off must not keep seeing it
+     * work in a running Claude session — the bridge already refuses through toolProfileOf.
+     */
+    const off = () => !this.uiPreferences().sessionTools
+    const offError = 'Turned off in Settings'
+    return {
+      listSessions: async () => (off() ? [] : view.listSessions()),
+      readSession: async (...a) => (off() ? { ok: false, error: offError } : view.readSession(...a)),
+      recall: async (...a) => (off() ? { hits: [] } : view.recall(...a)),
+      sendToSession: refuse,
+      deleteWorktreeSession: refuse,
+      createSession: refuse,
+      updateSessionSettings: refuse,
+      proposeMcpServer: refuse,
+      proposeSkill: refuse,
+      checkApp: async () => ({ ok: false, text: error }),
+      createApp: refuse,
+    }
+  }
+
+  /**
    * The tools given to an orchestrator (FR-11).
    *
    * **There is no way to reach outside the sessions this app manages.** Since it only ever looks at
@@ -4372,7 +4416,7 @@ export class SessionManager {
    * files, or a project directory — not because a blocking rule was written for it, but because that
    * is the entire extent of what it can see.
    */
-  private orchestratorToolsFor(orchestratorId: string, childrenOf?: string, scopeIds?: string[]): OrchestratorTools {
+  private orchestratorToolsFor(orchestratorId: string, childrenOf?: string, scopeIds?: string[], ownProject?: boolean): OrchestratorTools {
     const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
     /**
      * There are only two possible views. The **central orchestrator** sees everything, and a
@@ -4383,14 +4427,21 @@ export class SessionManager {
      * project had its own session-directing slot alongside a manager, even the people who built it
      * confused the two (a dogfooding finding). It was one concept too many.
      */
+    /*
+     * The reader's view (#320) is its own project, read when the call runs. A session with no project
+     * sees nothing: `null === null` must not become "every session without a project".
+     */
+    const ownProjectId = () => this.meta.get(orchestratorId)?.projectId ?? null
     const inScope = (s: SessionInfo) =>
       childrenOf !== undefined ? s.parentSessionId === childrenOf
       // Coordinator session (#80, #81): the allow list is its entire view
       : scopeIds !== undefined ? scopeIds.includes(s.id)
+      : ownProject ? (ownProjectId() !== null && s.projectId === ownProjectId())
       : true
     const scopeError = (id: string) =>
       childrenOf !== undefined ? `Not a worktree session of this manager: ${id}`
       : scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
+      : ownProject ? `Not a session in this project: ${id}`
       : `Not a session this app manages: ${id}`
 
     return {
@@ -5568,6 +5619,7 @@ export class SessionManager {
     const tools =
       profile === 'manager' ? this.orchestratorToolsFor(sessionId, sessionId)
       : profile === 'scoped' ? this.orchestratorToolsFor(sessionId, undefined, m.scopeSessionIds ?? [])
+      : profile === 'reader' ? this.readerToolsFor(sessionId)
       : this.orchestratorToolsFor(sessionId)
     return runOrchestratorTool(tools, name, args, { sessionId, profile })
   }
@@ -5676,7 +5728,31 @@ export class SessionManager {
     // Builder session (M4 C-3) — checked before manager: the bundle that session received (check) has to
     // match the bundle the bridge asks about
     if (this.builderRefOf(m)) return 'builder'
-    return this.isWorktreeManager(sessionId) ? 'manager' : null
+    if (this.isWorktreeManager(sessionId)) return 'manager'
+    return this.readsOwnProject(m) ? 'reader' : null
+  }
+
+  /**
+   * Does this ordinary session get the light, read-only set (#320)? On unless the person turned it off
+   * in Settings, and never for an agent session an app stood up (M4 D-1): that agent hands its answer
+   * back to the app, so reading the project's conversations would carry them out to an app that was
+   * never given them (the same reason it gets no apps, appsFor).
+   *
+   * The schemas are attached when the session starts, like every other bundle; turning the setting off
+   * stops the calls at once (readerToolsFor and the bridge both ask again) and takes the schemas away
+   * the next time the session starts.
+   */
+  private readsOwnProject(m: SessionInfo): boolean {
+    return m.kind === 'worker' && !!m.projectId && !this.isAppAgentSession(m) && this.uiPreferences().sessionTools
+  }
+
+  /**
+   * A profile that directs other sessions — every profile but the reader. The reader set (#320)
+   * cannot send, so for provenance (#90) its session is still an ordinary worker.
+   */
+  private directs(sessionId: string): boolean {
+    const p = this.toolProfileOf(sessionId)
+    return p !== null && p !== 'reader'
   }
 
   /**

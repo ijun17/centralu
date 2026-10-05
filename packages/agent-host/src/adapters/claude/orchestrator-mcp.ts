@@ -1,15 +1,11 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { OrchestratorTools } from '../contract.js'
 import {
-  BUILDER_INSTRUCTIONS,
-  MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_MCP_NAME,
-  ORCHESTRATOR_INSTRUCTIONS,
-  SCOPED_INSTRUCTIONS,
-  ORCHESTRATOR_TOOLS,
   appToolEntries,
-  profileAllows,
+  instructionsFor,
   runOrchestratorTool,
+  toolDefsFor,
 } from '../../sessions/orchestrator-tools.js'
 import type { ToolProfile } from '../../apps/contract.js'
 import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
@@ -50,19 +46,17 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
      * work.
      *
      * For the orchestrator these tools are not a side feature; they are the reason it exists.
+     *
+     * The reader set (#320) is loaded tool by tool instead: all but app_guide (deferring them made
+     * recall go unused, measured), while app_guide waits behind tool search — it rides in every
+     * ordinary session, and the person rarely asks one of them about the app.
      */
-    alwaysLoad: true,
-    instructions:
-      profile === 'manager' ? MANAGER_INSTRUCTIONS
-      : profile === 'scoped' ? SCOPED_INSTRUCTIONS
-      : profile === 'builder' ? BUILDER_INSTRUCTIONS
-      : ORCHESTRATOR_INSTRUCTIONS,
+    alwaysLoad: profile !== 'reader',
+    // None for the reader set (#320): server instructions are where a role would creep in
+    instructions: instructionsFor(profile),
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
     // App tools (#81) join the same list: execution routes through runOrchestratorTool's registry either way.
-    tools: [
-      ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)),
-      ...appToolEntries(profile),
-    ].map((t) =>
+    tools: [...toolDefsFor(profile), ...appToolEntries(profile)].map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) =>
         // Served by the host itself, so a planned swap waits for it, within a bound (#280, drain.ts)
         hostDrain
@@ -74,6 +68,7 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
             if (e instanceof DrainCut) return drainToolResult(e)
             throw e
           }),
+        profile === 'reader' && !('deferred' in t && t.deferred) ? { alwaysLoad: true } : undefined,
       ),
     ),
   })
