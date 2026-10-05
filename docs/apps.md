@@ -429,8 +429,12 @@ Recommended, never checked:
 
 The template's page follows this (its buttons wrap, its margin shrinks on a narrow frame), and the
 project-board app is the worked example: its status columns sit side by side when there is room and
-stack under 520px, with the decision column first, so every card reads in full in a grid panel
-(`e2e/fixtures/app-theme.ts` checks it at about 380px).
+stack under 520px, with the decision column first, so every card reads in full in a grid panel.
+Stacked, the board is one long page, so a row of tabs above it, one per status with its count,
+jumps to that section, and the tab of the section in view is marked as the board scrolls (a tab
+just clicked keeps the mark until the person scrolls, so a short last section still reads as the one
+chosen). The tabs are buttons with an explicit `tabindex`, since WebKit's Tab skips buttons unless
+the system's keyboard navigation is on (`e2e/fixtures/app-theme.ts` checks all of it at about 380px).
 
 ### 6.7 Dragging an item out of a view (#308)
 
