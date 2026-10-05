@@ -79,6 +79,27 @@ when an agent's call started it, on this app's screen when the screen did — an
 until the manifest's `uses` changes. The call waits while the person decides (up to 5 minutes). A
 refusal comes back as that error: show it plainly instead of retrying.
 
+## Dragging an item out of the screen
+
+An item the person may want to hand to a session (a card, a row, a record) should be draggable and
+carry two standard types, set in its `dragstart` handler:
+
+```js
+node.draggable = true
+node.addEventListener('dragstart', (e) => {
+  e.dataTransfer.setData('text/uri-list', item.url)          // the item's address
+  e.dataTransfer.setData('text/plain', `#${item.id} ${item.title}`) // one line naming it
+  e.dataTransfer.effectAllowed = 'copyMove'
+})
+```
+
+Dropped on a session, it goes into the message at the caret as a Markdown link,
+`[#12 Fix login](https://…)`; with no address, the text goes in as it is. Nothing else is needed:
+the browser does not hand a drag from the screen's frame to Centralu, so Centralu carries it out
+itself. Keep your own types next to these two for drags inside the screen (a card moved between
+columns), and keep the title to one line. If the session cannot use this app's tools (another
+project's session, an untrusted project), the link still goes in and Centralu tells the person why.
+
 ## The screen's look
 
 Centralu sends the person's theme to the screen (light or dark, their colours), and sends it again

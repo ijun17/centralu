@@ -429,6 +429,73 @@ project-board app is the worked example: its status columns sit side by side whe
 stack under 520px, with the decision column first, so every card reads in full in a grid panel
 (`e2e/fixtures/app-theme.ts` checks it at about 380px).
 
+### 6.7 Dragging an item out of a view (#308)
+
+An item in a view (a board card, a row) can be dragged onto a session, and goes into its message as
+a link the agent reads and can open.
+
+**The contract for an app** is two standard drag types, set in the item's `dragstart`:
+`text/uri-list` (the item's address) and `text/plain` (one line naming it, such as
+`#306 App panels too narrow`). Nothing Centralu-specific; the template's `AGENTS.md` says so, and
+the project-board app's cards carry both (with its own `text/x-item` for moves between columns).
+
+**What lands.** Dropped anywhere on a session's pane, the link goes into its composer **at the
+caret**, in place of a selection, as a Markdown link: `[#306 App panels too narrow](https://…/306)`.
+The title is `text/plain` when it is one line and differs from the address, otherwise the address.
+Only `http(s)` and `mailto` addresses become links; text with no address goes in as it is. A space
+keeps it off neighbouring words, and the caret ends after it. The same rule takes a link or text
+dropped on the composer itself (a link dragged from a browser, a selection from the conversation),
+and a link from outside the window anywhere on the pane. A drag carrying a session, panel, project
+or path type is still the grid's or the tree's (#286), and an OS file is still an attachment even
+when it carries its `file:` address as a uri-list.
+
+**Why the drag's own data is not enough.** A drag that starts in a document of one origin is not
+delivered to a document of another origin in the same page. Measured on 2026-10-05 in Playwright
+1.62.1's Chromium and WebKit: a card setting both types in a frame, dragged onto a textarea in the
+page, reached it from a same-origin `srcdoc` frame; from a frame on another host, on the same host
+and another port, and from a sandboxed (opaque) `srcdoc` frame, the page heard **nothing**, not
+even `dragenter`. Only the frame's `dragend` fired. Both engines carry the same rule (WebKit's
+`SecurityOrigin::canReceiveDragData`, kept by Blink), and a view is always another origin (§6.4).
+So the page never sees the drag, and the DragShield (§6.2) never goes up for it.
+
+**The route instead.** The host adds a small relay to every view's document, before its last
+`</body>` (`views/drag-relay.ts`; the view's CSP already allows inline script). In the view's own
+window it reads the two types at `dragstart`, after the item's handler, and posts them through the
+view's bridge as `centralu/notifications/drag` (`{ phase: "start", uri, text }`); at that drag's
+`dragend` it posts where the drag ended in the view's coordinates, with the view's size (`{ phase:
+"end", x, y, width, height }`). The proxy passes both on unchanged. The UI (`app-frame/dragRelay.ts`)
+turns the end into a point in the page and dispatches `cc-app-link-drop` on the element there; a
+session pane takes it. Added by the host rather than the app runtime, it reaches every app, older
+runtimes and apps built for other hosts included, and the contract stays the standard one.
+
+| Decision | Why |
+|---|---|
+| The end point, not a drop event | The page gets no drop. The `dragend` in the view is the only place that knows where the hand let go |
+| The point's coordinates depend on the engine | Measured with a frame 50 px right and 30 px down, a drop at (80, 440): WebKit's `dragend` said (30, 410), the frame's own coordinates as the spec has it; Chromium's said (80, 440), the page's, in every frame tried, while its `mousedown` and `dragstart` were in the frame's. The UI tells Chromium (WebView2 on Windows) by `navigator.userAgentData`, an API only Chromium has; the user agent string names both engines in each |
+| Scaled by the frame's box over the view's size | The text size setting zooms the root; the frame's content box against the view's reported `innerWidth`/`innerHeight` maps the point whatever the zoom |
+| An end inside the source frame, or over another frame, is ignored | Inside, it is the app's own drop (a card moved between columns); over a frame, it landed on a view, not on the page |
+| The messages are the app's words | Shape-checked; an end counts only after a start from the same view and within 2 minutes, and only while that frame holds the page's focus (pressing on an item gives its frame focus: in both engines `document.activeElement` was the frame after the drag). A view that just posts the two messages puts nothing in (e2e). The link only goes into a draft the person sees and sends themselves |
+
+**When the session cannot reach the app.** The link goes in either way, and the composer asks the
+host whether this session can use the app's tools (`apps.reach`). If not, a quiet line under the
+composer names the app, why, and what fixes it; it goes on send, on dismiss, on the next drop, or
+when the composer shows another session. The host answers from decision 4 (§9.1) and then from the
+live agent:
+
+| `reason` | When | The line says |
+|---|---|---|
+| `other-project` | Another project's app, a user-folder app outside the orchestrator, or a session an app stood up | Ask in a session of that project (or: only the orchestrator can use your apps) |
+| `untrusted` | The app's project, which is this session's, is not trusted | Trust the project |
+| `app-unusable` | The app is `invalid`, `unconfirmed` or `failed` (`status`) | Fix the manifest, turn it on, or restart it |
+| `restart` | A Codex thread started before the app was attached: Codex keeps the servers a thread started with (§9.2). The adapter answers from the servers it configured (`appAttachment`) | Restart the session |
+| `bridge-failed` | Codex reported the app's bridge failed to start (`mcpServer/startupStatus/updated`), until it reports it ready | Restart the session |
+| `unavailable` | No app runtime, or the app is gone | That the app is not available |
+
+A session that is not running answers from decision 4 alone: it attaches what the rule gives it when
+it wakes, and a Codex resume carries the current servers. Claude follows the attached set live
+through in-process proxies, so its sessions never answer `restart`. A host from before this answers
+nothing, and the line stays off.
+
 ## 7. What is standard and what is Centralu's
 
 | Layer | What | With an app built for another host |
@@ -706,6 +773,7 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.openView`, `apps.closeView` | Open a pinned view (calls `home`); close any view instance |
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver a view's message once the person agreed (an inline view's to its conversation, a pinned view's to the session picked) |
 | `apps.runs`, `apps.errors` | Run records with their chains; the latest error bundles |
+| `apps.reach` | Whether a session can use one app's tools now, and if not why (§6.7) |
 | `apps.questions`, `apps.answerQuestion` | Capability questions waiting on a pinned view (chains a view started); answer one |
 | `apps.permissions`, `apps.forgetPermission` | The answers kept for one app; forget one |
 | `apps.usage` | One app's agent use over the last day and 30 days |
@@ -844,3 +912,6 @@ from there it is an ordinary import, turned off unless the person enables it.
   its folder or a zip of it, or by committing a project app.
 - App links arrive on macOS only, and have been exercised by hand, not in CI (§12.3). An https
   host given by name is not checked for resolving to a private address.
+- Dragging an item out of a view (§6.7) has run only in Playwright's Chromium and WebKit, not in the
+  packaged app's WKWebView or in WebView2; the end point's coordinates there are taken from those
+  engines' measurements. During such a drag the page hears nothing, so no drop target lights up.

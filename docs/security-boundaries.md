@@ -542,6 +542,14 @@ Limits:
   declared in `connectDomains`. Not measured yet (#150).
 - A declared `connectDomains` entry is a real way out for anything the view holds. The CSP limits
   where data can go, not what.
+- The host adds a drag relay to every view's document (#308, apps.md §6.7): a few lines that post a
+  dragged item's `text/uri-list` and `text/plain`, and where the drag ended, to the view's parent.
+  It runs with the view's own privileges and posts nothing the view could not post itself. The UI
+  reads both messages as the app's words: it checks their shape, counts an end only after a start
+  from the same frame and while that frame holds the page's focus (a press in it), and only ever
+  puts a link or text into a composer's draft, never sends it. An app the person is pressing in at
+  that moment could still post an end pointing at a session of its choosing; what it gets is text
+  in a draft the person sees before sending.
 - Open view instances survive a planned hand-over under the keeper (`view-handover.ts`): the
   leaving host writes each instance's id, app and `ui://` address (nothing the app returned) to the
   store under `views.handover`, and the next host reopens them under the same ids if the record is
