@@ -67,11 +67,31 @@ const middle = async (l: Locator) => {
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
 }
 
-/** Drags board card #306 onto the middle of a session's panel (its conversation: the composer is folded on the grid) */
-async function dragCardTo(page: Page, pid: string, sessionId: string) {
+/**
+ * Where a hand presses to pick up board card #306: the middle of the part of it the frame shows, after scrolling the
+ * board to it. The grid's board panel is short, and the board's header and status tabs take most of it, so the card can
+ * stand partly below the frame's edge: a press at its own middle would land on whatever is under the frame, and no drag
+ * would start.
+ */
+async function cardGrip(page: Page, pid: string): Promise<{ x: number; y: number }> {
   const card = boardView(page, pid).locator('.card[data-number="306"]')
   await expect(card).toBeVisible()
-  await drag(page, await middle(card), await middle(page.getByTestId(`grid-panel-${sessionId}`).getByTestId('session-view')))
+  await card.scrollIntoViewIfNeeded()
+  const c = (await card.boundingBox())!
+  const f = (await page.getByTestId(`pinned-app-${viewKey(pid)}`).getByTestId('app-frame-iframe').boundingBox())!
+  const top = Math.max(c.y, f.y)
+  const bottom = Math.min(c.y + c.height, f.y + f.height)
+  const left = Math.max(c.x, f.x)
+  const right = Math.min(c.x + c.width, f.x + f.width)
+  // Enough of the card in sight to press on
+  expect(bottom - top).toBeGreaterThan(8)
+  expect(right - left).toBeGreaterThan(8)
+  return { x: (left + right) / 2, y: (top + bottom) / 2 }
+}
+
+/** Drags board card #306 onto the middle of a session's panel (its conversation: the composer is folded on the grid) */
+async function dragCardTo(page: Page, pid: string, sessionId: string) {
+  await drag(page, await cardGrip(page, pid), await middle(page.getByTestId(`grid-panel-${sessionId}`).getByTestId('session-view')))
 }
 
 /** Sets a session's draft and puts the caret at `caret`, as if the person had typed it and clicked there */
@@ -204,7 +224,7 @@ export function appDragTests(): void {
       // A grid panel is narrow, so the board stacks its columns (#306): the next column's head is just below the card
       const head = v.locator('.column[data-status="In progress"] .col-head')
       await expect(head).toBeInViewport()
-      await drag(page, await middle(v.locator('.card[data-number="306"]')), await middle(head))
+      await drag(page, await cardGrip(page, pid), await middle(head))
       await expect
         .poll(() => page.evaluate(() => ((window as any).__mock.appToolCalls as { tool: string }[]).filter((c) => c.tool === 'set_item_fields').length))
         .toBe(1)
