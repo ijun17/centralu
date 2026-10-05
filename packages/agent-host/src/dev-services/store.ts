@@ -1501,6 +1501,39 @@ export class Store {
           if (!cols.has('span_rows')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN span_rows INTEGER`)
         },
       },
+      {
+        to: 44,
+        breaksOlderReaders: false,
+        /**
+         * The person's consent for one project to reach another (#371) — `project_consents`, one row per
+         * (from, to, kind) the person allowed "always".
+         *
+         *   from_project_id  the project whose session asks
+         *   to_project_id    the project it reaches
+         *   kind             what it may do there: 'delegate' (ask_project starts a session in the target, part B) or
+         *                    'apps' (the target's apps attach to the caller's session, part A). One table for both, so
+         *                    Settings lists every cross-project consent in one place and revoking reads the same row
+         *   decided_at       when the person said "always"
+         *
+         * Only "always" is stored: "once" lives for that call, and a denial is not remembered (the next call asks
+         * again, the same as a denied approval). Both project ids are foreign keys with CASCADE (better-sqlite3 turns
+         * the pragma on for every connection), so a project deleted takes its consents with it either way round, and a
+         * folder registered again is asked again.
+         *
+         * **Expand only (#292's rule).** A new table; an older host never reads it.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS project_consents (
+              from_project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+              to_project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+              kind            TEXT NOT NULL,
+              decided_at      INTEGER NOT NULL,
+              PRIMARY KEY (from_project_id, to_project_id, kind)
+            )
+          `)
+        },
+      },
     ]
   }
 
@@ -3085,7 +3118,51 @@ export class Store {
       )
       .all(appKey) as AppPermissionRecord[]
   }
+
+  // ── The person's "always" for one project reaching another (#371) — see migration v44 ──
+
+  getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ProjectConsent | null {
+    const row = this.db
+      .prepare(
+        `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
+           FROM project_consents WHERE from_project_id = ? AND to_project_id = ? AND kind = ?`,
+      )
+      .get(fromProjectId, toProjectId, kind) as ProjectConsent | undefined
+    return row ?? null
+  }
+
+  setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_consents (from_project_id, to_project_id, kind, decided_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(from_project_id, to_project_id, kind) DO UPDATE SET decided_at = excluded.decided_at`,
+      )
+      .run(fromProjectId, toProjectId, kind, Date.now())
+  }
+
+  forgetProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): boolean {
+    return (
+      this.db
+        .prepare(`DELETE FROM project_consents WHERE from_project_id = ? AND to_project_id = ? AND kind = ?`)
+        .run(fromProjectId, toProjectId, kind).changes > 0
+    )
+  }
+
+  listProjectConsents(): ProjectConsent[] {
+    return this.db
+      .prepare(
+        `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
+           FROM project_consents ORDER BY decided_at DESC`,
+      )
+      .all() as ProjectConsent[]
+  }
 }
+
+/** What a remembered cross-project consent allows (#371): 'delegate' is part B's ask_project, 'apps' part A's app tools */
+export type ProjectConsentKind = 'delegate' | 'apps'
+
+/** One remembered "always" from one project to another (#371, migration v44) */
+export type ProjectConsent = { fromProjectId: string; toProjectId: string; kind: ProjectConsentKind; decidedAt: number }
 
 /**
  * What a session in the trash remembers (`sessions.trash`, #204).

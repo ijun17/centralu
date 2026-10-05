@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22, v23 and v24 broke the same six assertions one after another: if the version is written
  * six times, every migration bills six small chores.
  */
-const LATEST_SCHEMA = 43
+const LATEST_SCHEMA = 44
 
 function seeded() {
   const s = new Store()
@@ -1961,5 +1961,40 @@ describe('the trash (#204)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * v44: the person's "always" for one project reaching another (#371). One row per (from, to, kind), revocable, and
+ * gone with either project.
+ */
+describe('migration v44 — consent from one project to another', () => {
+  it('remembers a pair per direction and kind, lists it, and forgets it on revoke', () => {
+    const s = seeded()
+    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    expect(s.getProjectConsent('p1', 'p2', 'delegate')).toBeNull()
+    s.setProjectConsent('p1', 'p2', 'delegate')
+    expect(s.getProjectConsent('p1', 'p2', 'delegate')).toMatchObject({ fromProjectId: 'p1', toProjectId: 'p2', kind: 'delegate' })
+    // The other direction and the other kind are separate consents
+    expect(s.getProjectConsent('p2', 'p1', 'delegate')).toBeNull()
+    expect(s.getProjectConsent('p1', 'p2', 'apps')).toBeNull()
+    s.setProjectConsent('p1', 'p2', 'delegate')
+    expect(s.listProjectConsents()).toHaveLength(1)
+    expect(s.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(true)
+    expect(s.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(false)
+    expect(s.listProjectConsents()).toEqual([])
+    s.close()
+  })
+
+  it('a deleted project takes the consents to and from it', () => {
+    const s = seeded()
+    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
+    s.setProjectConsent('p1', 'p2', 'delegate')
+    s.setProjectConsent('p2', 'p3', 'apps')
+    s.setProjectConsent('p1', 'p3', 'delegate')
+    s.deleteProject('p2')
+    expect(s.listProjectConsents().map((c) => `${c.fromProjectId}>${c.toProjectId}`)).toEqual(['p1>p3'])
+    s.close()
   })
 })
