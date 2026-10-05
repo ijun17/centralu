@@ -126,15 +126,25 @@ export class Store {
   ) {
     const path = dbPath
     this.db = new Database(path)
-    /*
-     * Before anything writes: not the WAL switch, not schema.sql, not a migration. schema.sql alone would already
-     * recreate, empty, whatever a newer build dropped (v13's lesson), so a store this host cannot read is left exactly
-     * as the newer build wrote it.
-     */
-    this.refuseIfTooNew()
-    this.db.pragma('journal_mode = WAL')
-    this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
-    this.migrate()
+    try {
+      /*
+       * Before anything writes: not the WAL switch, not schema.sql, not a migration. schema.sql alone would already
+       * recreate, empty, whatever a newer build dropped (v13's lesson), so a store this host cannot read is left exactly
+       * as the newer build wrote it.
+       */
+      this.refuseIfTooNew()
+      this.db.pragma('journal_mode = WAL')
+      this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
+      this.migrate()
+    } catch (e) {
+      /*
+       * A store that is refused or fails a step is closed before the error leaves: nobody holds this object to close it
+       * later. On Windows an open file cannot be deleted or renamed, so the handle would keep store.db (and its -wal)
+       * locked until the process ended (#14).
+       */
+      this.db.close()
+      throw e
+    }
     /*
      * Fold any inherited WAL here. Measured (2026-08-26): a 91MB store.db sat next to a
      * 97MB store.db-wal — bigger than the database itself. close() folds the WAL, but if the
