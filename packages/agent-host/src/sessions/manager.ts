@@ -5987,6 +5987,8 @@ export class SessionManager {
     // Even if one fails, the rest are still cleaned up — one rejection blocking the whole cleanup during
     // shutdown would leave orphans behind
     await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
+    // The closed processes get a moment to leave on their own before the host's exit takes them along (#353)
+    await Promise.allSettled([...this.adapters.values()].map((a) => a.settle?.()))
     // Closed once the processes are down, so their last deltas grow the open rows instead of opening new ones (#213)
     for (const id of [...this.streams.keys()]) this.closeStream(id)
     // Stamped after dispose finishes (see the comment on stampExternalSynced). Never stamped on a

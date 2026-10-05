@@ -34,8 +34,11 @@ import type {
   QuestionAnswer,
   ToolDescriptor,
 } from '@cc/protocol'
+import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
 import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
+import { ClaudeLinks, ClaudePlaceholderError, type ExeFs } from './exe-link.js'
+import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
@@ -232,6 +235,48 @@ function settingSourcesFor(opts: Pick<CreateSessionOpts, 'noSettingFiles' | 'pro
   return { settingSources: ['user'] }
 }
 
+/**
+ * Claude Code's words when a process lost the race to refresh the sign-in (#353). Read in the CLI
+ * (2.1.289): the error is an API error message the CLI writes itself (`error: "server_error"`), in
+ * one of two wordings — the first in a headless session like ours, the second in the terminal:
+ *
+ *   Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. …
+ *   Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · …
+ *
+ * The turn then ends with an error result carrying the same text.
+ */
+const REFRESH_RACE = /another Claude Code process is refreshing/i
+
+type RaceMsg = { type?: string; subtype?: unknown; is_error?: unknown; result?: unknown; errors?: unknown; message?: { content?: unknown } }
+
+/** The text of a result or an assistant message, if it is the refresh race */
+function refreshRaceText(m: RaceMsg): string | null {
+  const texts: string[] = []
+  if (typeof m.result === 'string') texts.push(m.result)
+  if (Array.isArray(m.errors)) texts.push(...m.errors.filter((x): x is string => typeof x === 'string'))
+  if (m.type === 'assistant' && Array.isArray(m.message?.content)) {
+    for (const b of m.message.content as { type?: string; text?: unknown }[]) if (b?.type === 'text' && typeof b.text === 'string') texts.push(b.text)
+  }
+  return texts.find((t) => REFRESH_RACE.test(t)) ?? null
+}
+
+/**
+ * How this adapter starts Claude processes, shared by every session it creates (#353): where the
+ * program runs from, the spacing between starts, and the processes still closing.
+ */
+type ClaudeLaunch = {
+  platform: NodeJS.Platform
+  /** The `claude` found on PATH, as the SDK takes it */
+  executable: () => string | null
+  links: ClaudeLinks
+  gate: StartGate
+  /** How long to wait before resending a turn that lost the sign-in refresh race */
+  retryDelay: () => number
+  /** Disposed sessions whose process has not ended yet: what `settle` waits for */
+  closing: Set<Promise<void>>
+  exitGraceMs: number
+}
+
 class ClaudeSession implements SessionHandle {
   externalId: string | null = null
   private queue: string[] = []
@@ -277,12 +322,27 @@ class ClaudeSession implements SessionHandle {
   private adopted = false
   /** Letting go of the process for the next host: its stream ending is not a crash */
   private detaching = false
+  /** The messages the CLI has read since its last result: what a retried turn sends again (#353) */
+  private inTurn: string[] = []
+  /** This turn already went again once after losing the sign-in refresh race */
+  private raceRetried = false
+  /** An assistant message in the current turn carried the refresh-race error */
+  private raceSeen: string | null = null
+  /** A resend waiting out its delay, and what it will send */
+  private retry: { timer: ReturnType<typeof setTimeout>; texts: string[] } | null = null
+  /** The link folder this session's process runs from, released when the process is gone */
+  private runKey: string | null = null
+  /** Settles once the stream ended: the CLI process is gone, or this host let go of it */
+  readonly ended: Promise<void>
+  private markEnded: () => void = () => {}
 
   constructor(
     readonly sessionId: string,
     private opts: CreateSessionOpts,
     private emit: EventSink,
+    private launch: ClaudeLaunch,
   ) {
+    this.ended = new Promise<void>((resolve) => (this.markEnded = resolve))
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
     this.stream = new ClaudeStreamNormalizer(sessionId, () => ({
       model: opts.model ?? null,
@@ -301,6 +361,15 @@ class ClaudeSession implements SessionHandle {
     const preset = this.opts.permissionPreset
 
     /*
+     * What to start (#353). On Windows a hard link of npm's claude.exe in the data folder, so a Claude
+     * Code update can replace npm's file while this session runs; npm's placeholder is refused here
+     * with the fix, instead of a spawn error Windows words as "16-bit program". Elsewhere the path
+     * found on PATH, as before.
+     */
+    const exe = this.launch.executable()
+    const run = exe ? this.launch.links.prepare(exe) : null
+
+    /*
      * External apps (M4 A-5) — one proxy server per app. Loads whatever is currently attached,
      * and follows along without restarting the session when an app comes, goes, or its tools
      * change (syncApps).
@@ -313,10 +382,19 @@ class ClaudeSession implements SessionHandle {
     }
     const servers = this.mcpServers()
 
+    /*
+     * Spaced out on Windows, so processes started together (the orchestrator waking its sessions, a
+     * grid) do not all refresh an expired sign-in at once (#353). An adopted process is already running.
+     */
+    if (!this.opts.processSource?.adopt) await this.launch.gate.turn()
+    this.runKey = run?.key ?? null
+    this.launch.links.acquire(this.runKey)
+
     async function* input() {
       while (!self.closed) {
         const next = self.queue.shift()
         if (next !== undefined) {
+          self.inTurn.push(next)
           yield {
             type: 'user' as const,
             parent_tool_use_id: null,
@@ -341,7 +419,7 @@ class ClaudeSession implements SessionHandle {
          * the packaged app). This points directly at the `claude` the user already has installed.
          * It behaves the same way in dev.
          */
-        pathToClaudeCodeExecutable: toolExecutable('claude') ?? undefined,
+        pathToClaudeCodeExecutable: run?.path ?? undefined,
         /*
          * Under the keeper (#280 step 2) the CLI is spawned there, or an already running one is
          * adopted, so the process outlives this host. Measured (CLI 2.1.282, SDK 0.3.263, haiku,
@@ -564,10 +642,15 @@ class ClaudeSession implements SessionHandle {
             this.settleGoalKnown()
           }
           this.noteAppCalls(msg)
+          if (m.type === 'assistant') this.raceSeen ??= refreshRaceText(msg as RaceMsg)
           if (m.type === 'result') this.turnOpen = false
-          for (const e of this.stream.push(msg)) this.emit(e)
+          let events = this.stream.push(msg)
+          const retrying = m.type === 'result' && this.retryAfterRefreshRace(msg as RaceMsg)
+          // The turn goes again instead of failing: its error marker would end the turn on screen
+          if (retrying) events = events.filter((e) => e.type !== 'error')
+          for (const e of events) this.emit(e)
           // Once a turn ends, asks what is currently in the context window (FR-14).
-          if (m.type === 'result') void this.reportContext(q)
+          if (m.type === 'result' && !retrying) void this.reportContext(q)
         }
         /*
          * **If the stream ended and we did not close it, the CLI died.**
@@ -606,8 +689,76 @@ class ClaudeSession implements SessionHandle {
           sessionId: this.sessionId,
           error: { code: 'adapter_crashed', message: (err as Error).message, retryable: true },
         })
+      } finally {
+        // The process is gone (or another host holds it now): its link may go once nothing else runs from it
+        this.launch.links.release(this.runKey)
+        this.runKey = null
+        this.markEnded()
       }
     })()
+  }
+
+  /**
+   * A turn that lost the race to refresh the sign-in goes again once, after a few seconds (#353).
+   *
+   * Claude Code lets one process at a time refresh an expired sign-in; another process that needs it
+   * at that moment ends its turn with "another Claude Code process is refreshing it", which the CLI
+   * itself calls transient. By the time the delay is over the other process has written the new
+   * token, and the resent turn reads it. The person sees why in the conversation: the CLI's own words
+   * and a notice that the message goes again, instead of a failed turn. A second loss in a row is
+   * reported as the failure it is.
+   *
+   * What goes again is what the CLI read since its last result. The CLI has already recorded those
+   * messages in its conversation, so the model reads them twice, next to each other — the cost of
+   * not losing what the person sent.
+   *
+   * @returns whether the turn goes again (its error is then not reported)
+   */
+  private retryAfterRefreshRace(result: RaceMsg): boolean {
+    const sent = this.inTurn.splice(0)
+    const seen = this.raceSeen
+    this.raceSeen = null
+    const failed = result.is_error === true || result.subtype !== 'success'
+    const race = failed ? (refreshRaceText(result) ?? seen) : null
+    if (!race) {
+      this.raceRetried = false
+      return false
+    }
+    if (this.raceRetried || sent.length === 0 || this.closed) {
+      this.raceRetried = false
+      return false
+    }
+    this.raceRetried = true
+    const delay = Math.max(0, this.launch.retryDelay())
+    this.emit({
+      type: 'notice',
+      sessionId: this.sessionId,
+      level: 'warning',
+      from: 'Claude Code',
+      label: 'sign-in',
+      audience: 'centralu',
+      text: race,
+      summary: `Claude Code could not refresh its sign-in because another Claude Code process was refreshing it at the same moment. Centralu sends the message again in ${Math.max(1, Math.round(delay / 1000))} s.`,
+    })
+    const timer = setTimeout(() => {
+      this.retry = null
+      if (this.closed) return
+      this.queue.push(...sent)
+      this.turnOpen = true
+      this.notify?.()
+      this.notify = null
+    }, delay)
+    this.retry = { timer, texts: sent }
+    return true
+  }
+
+  /** A resend still waiting out its delay is called off; returns how many messages it would have sent */
+  private cancelRetry(): number {
+    if (!this.retry) return 0
+    clearTimeout(this.retry.timer)
+    const n = this.retry.texts.length
+    this.retry = null
+    return n
   }
 
   /**
@@ -931,6 +1082,8 @@ class ClaudeSession implements SessionHandle {
      * it was doing.
      */
     this.opts.apps?.cancelAll()
+    // A turn waiting to go again after the sign-in race (#353) is stopped as well: it is the same turn
+    this.cancelRetry()
     for (const [id, p] of this.pending) {
       p.resolve({ behavior: 'deny', message: 'Stopped by user' })
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
@@ -990,8 +1143,10 @@ class ClaudeSession implements SessionHandle {
      * shows it as sent (the manager records it first), dropping it silently would quietly create
      * a "sent, but the agent never read it" state.
      */
-    if (this.queue.length > 0) {
-      const n = this.queue.length
+    // A turn waiting out its delay after the sign-in race (#353) holds messages the same way
+    const held = this.queue.length + this.cancelRetry()
+    if (held > 0) {
+      const n = held
       this.queue.length = 0
       this.emit({
         type: 'error',
@@ -1017,10 +1172,21 @@ class ClaudeSession implements SessionHandle {
      * process and the new process ended up both writing into the same conversation. `close()`
      * closes stdin and sends SIGTERM if it has not ended (sdk.d.ts: "Close the query and
      * terminate the underlying process"). The usage window is also reclaimed here.
+     *
+     * On Windows there is no SIGTERM to send: the SDK (0.3.263, sdk.mjs `close`) ends stdin, waits
+     * 2 s, then another 5 s, and only then kills a process that is still there. A CLI that is not mid-
+     * turn leaves on the EOF by itself, so a sign-in refresh it may be writing (#353) gets to finish.
+     * While the host keeps running that is all it takes; when the host is on its way out, `settle`
+     * waits for these processes, because the host's own exit would take them along at once.
      */
     if (this.query) {
       ClaudeAdapter.liveQueries.delete(this.query)
       this.query.close()
+      const ended = this.ended
+      if (!this.launch.closing.has(ended)) {
+        this.launch.closing.add(ended)
+        void ended.then(() => this.launch.closing.delete(ended))
+      }
     }
   }
 
@@ -1090,8 +1256,57 @@ async function claudeLoggedIn(bin: ToolLaunch): Promise<boolean> {
   }
 }
 
+/** What a test can change about how the adapter starts Claude; the host passes nothing */
+export type ClaudeAdapterOptions = {
+  platform?: NodeJS.Platform
+  /** The data folder; the Windows links live under `<data>/tools/claude` */
+  dataRoot?: () => string
+  /** The `claude` on PATH, as the SDK takes it */
+  executable?: () => string | null
+  fs?: ExeFs
+  /** Time between two Claude process starts. Default: 1.5 s on Windows, none elsewhere */
+  startGapMs?: number
+  /** Delay before resending a turn that lost the sign-in refresh race. Default: 3 to 6 s */
+  retryDelay?: () => number
+  /** How long `settle` waits on Windows. Default: 1.5 s, inside the app's 3 s stop grace */
+  exitGraceMs?: number
+}
+
+/**
+ * Why 1.5 s between starts on Windows (#353): a refresh is one request to the sign-in server and a
+ * file write, well under a second on a working connection, and a Claude process takes about as
+ * long to start on a laptop before it looks at the sign-in. Five sessions started together are all
+ * running within six seconds. macOS keeps the sign-in in the keychain and has not shown the race,
+ * so nothing waits there.
+ */
+const WINDOWS_START_GAP_MS = 1500
+
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
+  private readonly launch: ClaudeLaunch
+
+  constructor(options: ClaudeAdapterOptions = {}) {
+    const platform = options.platform ?? process.platform
+    const executable = options.executable ?? (() => toolExecutable('claude'))
+    this.launch = {
+      platform,
+      executable,
+      links: new ClaudeLinks({ platform, root: options.dataRoot ?? dataRoot, fs: options.fs }),
+      gate: new StartGate(options.startGapMs ?? (platform === 'win32' ? WINDOWS_START_GAP_MS : 0)),
+      retryDelay: options.retryDelay ?? (() => 3000 + Math.floor(Math.random() * 3000)),
+      closing: new Set(),
+      exitGraceMs: options.exitGraceMs ?? 1500,
+    }
+    /*
+     * Host start (Windows): links an earlier run left behind go, except the one the installed Claude
+     * Code would start from. Nothing runs from them any more — the processes of the previous host
+     * ended with it, and Windows refuses to delete one that still runs.
+     */
+    if (platform === 'win32') {
+      this.launch.links.keep(executable())
+      this.launch.links.sweep()
+    }
+  }
 
   readonly descriptor: ToolDescriptor = {
     name: 'claude',
@@ -1143,7 +1358,21 @@ export class ClaudeAdapter implements AgentAdapter {
   async detect(): Promise<DetectResult> {
     const path = whichTool('claude')
     try {
-      const launch = launchFor(path ?? 'claude')
+      let launch = launchFor(path ?? 'claude')
+      /*
+       * On Windows the version and sign-in are asked of the program sessions will start (#353): the
+       * link, placed here already, so the first session does not wait for it, and npm's file is never
+       * the one held. npm's placeholder is named as what it is, with the fix, rather than "not found".
+       */
+      const exe = this.launch.platform === 'win32' ? this.launch.executable() : null
+      if (exe && /\.exe$/i.test(exe)) {
+        try {
+          launch = { command: this.launch.links.prepare(exe).path, args: [] }
+        } catch (err) {
+          if (!(err instanceof ClaudePlaceholderError)) throw err
+          return { tool: 'claude', installed: false, loggedIn: false, detail: err.message }
+        }
+      }
       const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000 })
       // Shows which install is actually being used — reduces confusion in an environment with several versions installed.
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
@@ -1197,9 +1426,27 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
-    const s = new ClaudeSession(opts.sessionId, opts, emit)
+    const s = new ClaudeSession(opts.sessionId, opts, emit, this.launch)
     await s.start()
     return s
+  }
+
+  /**
+   * The host is on its way out (#353). On Windows a Node process takes its children with it when it
+   * exits (libuv puts them in a job object that kills on close), so a Claude process that just got
+   * EOF from `dispose` would be ended at once, possibly in the middle of writing a refreshed sign-in
+   * — which leaves the next Claude process with a lock it waits out or fails on. This gives the
+   * closed processes up to `exitGraceMs` to leave by themselves. Elsewhere nothing waits: the SDK
+   * sends them SIGTERM on the host's exit, which they handle.
+   */
+  async settle(): Promise<void> {
+    if (this.launch.platform !== 'win32' || this.launch.closing.size === 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      Promise.allSettled([...this.launch.closing]),
+      new Promise<void>((resolve) => (timer = setTimeout(resolve, this.launch.exitGraceMs))),
+    ])
+    clearTimeout(timer)
   }
 }
 

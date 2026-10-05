@@ -57,6 +57,8 @@ class Adapter implements AgentAdapter {
   /** When set, createSession holds until `release()` is called — the window during which a session is waking up */
   gate: Promise<void> | null = null
   private open: (() => void) | null = null
+  /** Set by a test: what the host waits for on its way out (#353) */
+  settle?: () => Promise<void>
   constructor(readonly tool: ToolName) {}
   hold() {
     this.gate = new Promise((r) => (this.open = r))
@@ -571,5 +573,22 @@ describe('when a tool\'s list is full, being absent from the list does not mean 
     const r = (await rpc('agents.resumeSession', { sessionId: id })) as { resumed: boolean; reason?: string }
     expect(r.resumed).toBe(false)
     expect(r.reason).toContain('529 overloaded')
+  })
+})
+
+describe('shutting down gives closed processes a moment to leave (#353)', () => {
+  it('asks each adapter to settle once every handle is disposed, and waits for it', async () => {
+    await newSession()
+    const order: string[] = []
+    claude.last.lastWords = () => order.push('disposed')
+    let settled = false
+    claude.settle = async () => {
+      order.push('settle')
+      await new Promise((r) => setTimeout(r, 10))
+      settled = true
+    }
+    await mgr.disposeAll()
+    expect(order).toEqual(['disposed', 'settle'])
+    expect(settled).toBe(true)
   })
 })

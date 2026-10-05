@@ -658,4 +658,12 @@ export interface AgentAdapter {
    * that a concurrent resume simply works).
    */
   forkConversation?(externalId: string, cwd: string): Promise<string>
+
+  /**
+   * Called once by the host on its way out, after every session was disposed: waits a moment for
+   * the processes those disposals closed to leave by themselves, so the host's own exit does not end
+   * them mid-write. Resolves quickly when there is nothing to wait for, and never takes longer than
+   * the adapter's own short cap. Unimplemented: nothing to wait for.
+   */
+  settle?(): Promise<void>
 }
