@@ -170,8 +170,10 @@ describe('a broken app states what is wrong and where', () => {
 
 describe('a check never leaves the app in a strange state', () => {
   // Eight real node starts (seven that fail, one that passes) take ~1.8 s alone; a loaded machine
-  // has stretched them 2.5x, so this test gets more room than vitest's 5 s default
-  it('checking an app that fails to start repeatedly never pushes it to a stopped (failed) state, and once fixed, it passes and stays running', { timeout: 10_000 }, async () => {
+  // has stretched them 2.5x, so this test gets more room than vitest's 5 s default. Windows gets three
+  // times that, like every limit in vitest.config.ts (#368): on windows-2022 each start took 1.0 to
+  // 1.8 s, with a process listing for leftovers after every failed one, and the eight ran past 10 s.
+  it('checking an app that fails to start repeatedly never pushes it to a stopped (failed) state, and once fixed, it passes and stays running', { timeout: 10_000 * (process.platform === 'win32' ? 3 : 1) }, async () => {
     const dir = app('fixme', `serveStdio(() => { throw new Error('not yet') })`)
     // This server stays alive after throwing (S-6), so each of the seven failed starts below waits
     // out startExitWaitMs for an exit that never comes — at the product's 250 ms, ~1.75 s of nothing
