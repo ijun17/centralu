@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
+import type { ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
@@ -327,9 +328,11 @@ if (held) {
  * older than the app, and it skips the stale launcher entirely.
  *
  * The check result **only informs** the person. Swapping out the running app is irreversible, so
- * it is never done silently — it happens only when they click it.
+ * it is never done silently — it happens only when they click it, or when they turned on
+ * "Apply updates automatically when idle" (#352), and then only once nothing is running.
  */
 const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
+const AUTO_APPLY_UPDATES_KEY = 'updates.autoApply'
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
 // (The watcher can fire before `server` below exists; a change that early has no screen to tell yet.)
 const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => {
@@ -348,6 +351,9 @@ const updates = new UpdateService((status) => server.broadcast({ type: 'update_s
   // stale.
   readAuto: () => store.appSetting(AUTO_UPDATE_CHECK_KEY) !== 'false',
   writeAuto: (enabled) => store.setAppSetting(AUTO_UPDATE_CHECK_KEY, String(enabled)),
+  // Off unless the person turned it on (#352): installing without a click is asked for, never assumed
+  readAutoApply: () => store.appSetting(AUTO_APPLY_UPDATES_KEY) === 'true',
+  writeAutoApply: (enabled) => store.setAppSetting(AUTO_APPLY_UPDATES_KEY, String(enabled)),
 })
 // The escape hatch for the origin allow list — the rejection log states exactly the value to put
 // here. An app view's proxy uses the same list too: only a parent able to connect over WebSocket
@@ -464,14 +470,20 @@ if (held) void mgr.adoptKept(held.kept.agents)
  * The activity report the keeper's idle rule reads (#280, keeper-link.ts). Only under a keeper:
  * stdout is otherwise the ready line's alone.
  */
+/**
+ * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
+ * the switch's question and applying an update when idle (#352) all read it through the activity
+ * report; an agent CLI update (#297) can call `hostBusy(activity())` here directly.
+ */
+const activity = (): ActivitySnapshot => ({
+  sessions: mgr.listSessions(),
+  terminals: terminals.liveCount(),
+  commandRuns: commandRuns.liveCount(),
+})
 const stopActivity =
   underKeeper
     ? startActivityReport(
-        () => ({
-          sessions: mgr.listSessions(),
-          terminals: terminals.liveCount(),
-          commandRuns: commandRuns.liveCount(),
-        }),
+        activity,
         // The same stream as the ready line, so the two keep their order
         (line) => void process.stdout.write(`${line}\n`),
       )

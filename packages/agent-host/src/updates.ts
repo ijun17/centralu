@@ -14,9 +14,12 @@ import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, type UpdateStatus } fr
  * check that runs in the host ships *with the app*, so it is never older than the app
  * it is checking, and it bypasses every stale launcher on the way.
  *
- * **Notify, never apply.** The check is read-only and its failures are swallowed;
- * replacing the running program is not, so it happens only when someone asks. And even
- * then the app does not restart itself — `restart_required` is where this stops.
+ * **Notify; install when asked.** The check is read-only and its failures are swallowed;
+ * replacing the running program is not, so it happens only when someone asks — by clicking,
+ * or by turning on "Apply updates automatically when idle" (#352, `autoApply`), which asks in
+ * advance. Either way the host stops at `restart_required`: relaunching into the new build is
+ * the window's step ("Apply now"), because only the window knows whether someone is typing,
+ * and the keeper's switch afterwards is what keeps every running turn.
  */
 
 /** The registry is the update channel — no server of ours, no signing keys (same as the launcher) */
@@ -68,6 +71,9 @@ export type UpdateDeps = {
   /** Where the persisted "check automatically" answer lives across restarts */
   readAuto?: () => boolean
   writeAuto?: (enabled: boolean) => void
+  /** Where "Apply updates automatically when idle" lives across restarts (#352) */
+  readAutoApply?: () => boolean
+  writeAutoApply?: (enabled: boolean) => void
 }
 
 /**
@@ -140,6 +146,9 @@ export class UpdateService {
       // passes in.
       readAuto: deps.readAuto ?? (() => true),
       writeAuto: deps.writeAuto ?? (() => {}),
+      // Off unless saved on: installing by itself is something a person has to ask for (#352)
+      readAutoApply: deps.readAutoApply ?? (() => false),
+      writeAutoApply: deps.writeAutoApply ?? (() => {}),
     }
     this.status = {
       /*
@@ -155,6 +164,7 @@ export class UpdateService {
       latest: null,
       newer: false,
       auto: this.deps.readAuto(),
+      autoApply: this.deps.readAutoApply(),
       phase: 'idle',
       error: null,
       checkedAt: null,
@@ -209,6 +219,30 @@ export class UpdateService {
     }
     this.startTimer()
     return this.check(true)
+  }
+
+  /**
+   * "Apply updates automatically when idle" on or off (#352).
+   *
+   * Turning it on with a newer version already known installs it now rather than at the next
+   * check, hours away: the person just said they want updates applied without asking. The
+   * install itself is safe while agents work (the keeper and every host run from their own
+   * copies; the bundle on disk is what changes). Applying it is the window's, once idle.
+   */
+  setAutoApply(enabled: boolean): UpdateStatus {
+    if (this.status.autoApply === enabled) return this.current()
+    this.status = { ...this.status, autoApply: enabled }
+    this.deps.writeAutoApply(enabled)
+    this.emit()
+    if (enabled) this.installIfAutomatic()
+    return this.current()
+  }
+
+  /** With `autoApply` on and a newer version known, install it — once, not over an install or a finished one */
+  private installIfAutomatic(): void {
+    if (!this.status.autoApply || !this.status.newer || !this.status.latest) return
+    if (this.status.phase !== 'idle') return
+    this.apply()
   }
 
   /**
@@ -279,11 +313,14 @@ export class UpdateService {
       checkedAt: this.deps.now(),
     }
     this.emit()
+    // Asked for in advance (#352): a newer version found is installed without a click
+    this.installIfAutomatic()
     return this.current()
   }
 
   /**
-   * Install the newer version, then say so. **Does not restart the app.**
+   * Install the newer version, then say so. **Does not restart the app** — that is the
+   * window's step (#352).
    *
    * Returns the moment the work starts. `npm i -g` regularly takes longer than the RPC
    * deadline, and a caller that has already given up cannot be told how it went; the

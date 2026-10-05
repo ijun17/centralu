@@ -75,6 +75,49 @@ export function switchPlan(b: { keepsAgents?: boolean; busy?: boolean; sameBuild
   }
 }
 
+export type AutoSwitchInput = {
+  build: {
+    keepsAgents?: boolean
+    busy?: boolean
+    sameBuild?: boolean
+    keeperSameBuild?: boolean
+    /** Started by "Apply now" (#352): the keeper held on through the relaunch and said so */
+    relaunched?: boolean
+    swap?: SwapView
+  }
+  /** "Apply updates automatically when idle" is on (#352) */
+  autoApply: boolean
+  /** This window already switched or asked once by itself; it never does so twice */
+  tried: boolean
+  /** The person dismissed the bar ("Not now") */
+  dismissed: boolean
+}
+
+/**
+ * What a window of a newer build than its keeper or host does by itself (#352):
+ *
+ * - `switch`: switch now, without a click. Only for a window started by "Apply now", or with
+ *   "Apply updates automatically when idle" on, and only when the plan says nothing can be lost
+ *   (`switchPlan`: nothing running, or only the keeper behind).
+ * - `ask`: something can be lost, and the person pressed "Apply now" a moment ago: open the
+ *   question now rather than leave them to find the bar.
+ * - `wait`: something can be lost and nobody pressed anything (the automatic mode): wait until it
+ *   cannot, which the next activity report brings.
+ * - `none`: the bar as before.
+ *
+ * Never while a swap runs, never twice from one window (a failure stays on the bar with "Try
+ * again"), and never after "Not now".
+ */
+export function autoSwitch(i: AutoSwitchInput): 'switch' | 'ask' | 'wait' | 'none' {
+  const b = i.build
+  const behind = b.sameBuild === false || b.keeperSameBuild === false
+  if (!behind || i.tried || i.dismissed || swapRunning(b.swap)) return 'none'
+  if (!b.relaunched && !i.autoApply) return 'none'
+  if (!switchPlan(b).confirm) return 'switch'
+  if (i.autoApply) return 'wait'
+  return 'ask'
+}
+
 /** One line for the bar while a swap runs, or after it failed; null when there is nothing to show */
 export function swapProgressText(s: SwapView | undefined): string | null {
   if (!s) return null

@@ -38,6 +38,8 @@
     "allow-switch-host-build",
     "allow-background-mode",
     "allow-set-background-mode",
-    "allow-quit-and-stop-agents"
+    "allow-quit-and-stop-agents",
+    "allow-relaunch-info",
+    "allow-apply-update-relaunch"
   ]
 }

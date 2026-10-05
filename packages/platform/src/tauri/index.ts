@@ -3,11 +3,11 @@ import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AlertKind, Platform, ShortcutKeys, SystemPort } from '../ports/index.js'
+import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort } from '../ports/index.js'
 import { createWebPlatform } from '../web/index.js'
 import type { SwapView } from './switch-plan.js'
 
-export { swapProgressText, swapRunning, switchPlan, type SwapView, type SwitchPlan } from './switch-plan.js'
+export { autoSwitch, swapProgressText, swapRunning, switchPlan, type SwapView, type SwitchPlan } from './switch-plan.js'
 
 /**
  * The Tauri implementation (docs/platform-abstraction.md §5, migration playbook steps 2-3).
@@ -158,6 +158,11 @@ export type HostBuild = {
   keepsAgents?: boolean
   /** A session working or waiting, a terminal or a command running: what a switch could cost */
   busy?: boolean
+  /**
+   * This window was started by "Apply now" (#352): the keeper held on through the relaunch and
+   * said so when the window attached. The window then switches by itself when nothing can be lost.
+   */
+  relaunched?: boolean
 }
 
 export async function hostBuild(): Promise<HostBuild> {
@@ -322,6 +327,32 @@ export async function pickDirectory(): Promise<string | null> {
   return typeof picked === 'string' ? picked : null
 }
 
+/**
+ * "Apply now" (#352) through the Rust shell: `relaunch_info` says whether this window's bundle on
+ * disk now holds another build, `apply_update_relaunch` tells the keeper and relaunches, and the
+ * keeper's activity report (in `host-build`) is what an automatic apply waits on.
+ */
+export function tauriRelaunchPort(): RelaunchPort {
+  return {
+    check: () => invoke<RelaunchCheck>('relaunch_info').catch((e) => ({ ready: false, reason: String(e) })),
+    relaunch: () => invoke<void>('apply_update_relaunch').catch(rethrowAsError),
+    watchBusy: (cb) => {
+      let stopped = false
+      const push = (b: HostBuild) => {
+        if (!stopped) cb(typeof b.busy === 'boolean' ? b.busy : null)
+      }
+      void hostBuild()
+        .then(push)
+        .catch(() => !stopped && cb(null))
+      const un = onHostBuild(push)
+      return () => {
+        stopped = true
+        un()
+      }
+    },
+  }
+}
+
 export async function createTauriPlatform(): Promise<Platform> {
   const { port, token } = await waitForHost()
 
@@ -385,6 +416,7 @@ export async function createTauriPlatform(): Promise<Platform> {
             get: () => invoke<boolean>('background_mode').catch(rethrowAsError),
             set: (on: boolean) => invoke<boolean>('set_background_mode', { on }).catch(rethrowAsError),
           },
+          relaunch: tauriRelaunchPort(),
         }
       : {}),
     system: new TauriSystemPort(),

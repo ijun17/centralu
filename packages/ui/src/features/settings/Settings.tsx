@@ -12,6 +12,7 @@ import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { TrashSection } from './TrashSection.jsx'
 import { ThemeSection } from './ThemeSection.jsx'
+import { applyOffer, useRelaunchCheck, type ApplyOffer } from './apply-update.js'
 import type { BackgroundPort } from '@cc/platform/ports'
 
 type Rule = {
@@ -952,9 +953,10 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
  * Updates (issue #43).
  *
  * This screen says three sentences: this is what is currently running, that is what is out
- * there, and whether to upgrade is for the person to decide. **It never upgrades
- * automatically** — swapping out the running app is not reversible, and this app does not do
- * irreversible things quietly.
+ * there, and whether to upgrade is for the person to decide. **It never upgrades on its own
+ * unless asked to in advance** ("Apply updates automatically when idle", #352, off by default) —
+ * swapping out the running app is not reversible, and this app does not do irreversible things
+ * quietly. Even then it waits until nothing is running and nobody is typing.
  *
  * The check is done by the host. The launcher has the same code too, but what actually runs is
  * a copy already installed on the person's machine, and that copy's comparison logic was wrong
@@ -965,7 +967,11 @@ function UpdatesSection() {
   const update = useStore((s) => s.update)
   const checkUpdate = useStore((s) => s.checkUpdate)
   const setUpdateAuto = useStore((s) => s.setUpdateAuto)
+  const setUpdateAutoApply = useStore((s) => s.setUpdateAutoApply)
   const applyUpdate = useStore((s) => s.applyUpdate)
+  const applyUpdateNow = useStore((s) => s.applyUpdateNow)
+  const relaunch = useRelaunchCheck()
+  const offer = update?.phase === 'restart_required' ? applyOffer(update, APP_VERSION, relaunch) : null
 
   /*
    * Even before the host has answered, **the current version can already be stated.**
@@ -982,15 +988,15 @@ function UpdatesSection() {
     <section>
       <p className="text-xs leading-body text-ink-faint">
         Centralu updates through npm, the same way it was installed. Checking only asks the
-        registry which version is newest; installing happens when you ask for it, and never
-        restarts the app for you.
+        registry which version is newest; installing happens when you ask for it. Applying it
+        relaunches the window, and running agents, terminals and commands keep going.
       </p>
 
       <p className="mt-3 text-sm text-ink-muted" data-testid="update-current">
         Running {current}
       </p>
       <p className="mt-1 text-sm text-ink-faint" data-testid="update-state">
-        {describe(update)}
+        {describe(update, offer)}
       </p>
 
       <div className="mt-2 flex items-center gap-3">
@@ -1010,6 +1016,15 @@ function UpdatesSection() {
             onClick={() => void applyUpdate()}
           >
             Update to {update.latest}
+          </button>
+        )}
+        {offer?.kind === 'apply' && (
+          <button
+            className="rounded-md border border-line px-2 py-1 text-xs text-ink transition-colors hover:bg-surface-hover/50"
+            data-testid="update-apply-now-settings"
+            onClick={() => void applyUpdateNow()}
+          >
+            Apply now
           </button>
         )}
       </div>
@@ -1034,6 +1049,31 @@ function UpdatesSection() {
         registry for one version number and nothing else; if it cannot reach it, nothing
         happens and nothing interrupts you.
       </p>
+
+      {/*
+        Only where the window can apply an update without cutting anything (#352: the desktop app
+        with the keeper). Elsewhere a box that installs and then waits for a restart nobody does
+        would only leave a stale window behind.
+      */}
+      {relaunch !== undefined && (
+        <>
+          <label className="mt-3 flex items-center gap-2 text-sm text-ink-muted">
+            <input
+              type="checkbox"
+              className="accent-line-strong"
+              data-testid="update-auto-apply"
+              checked={update?.autoApply ?? false}
+              onChange={(e) => void setUpdateAutoApply(e.target.checked)}
+            />
+            Apply updates automatically when idle
+          </label>
+          <p className="mt-1 text-xs leading-body text-ink-faint">
+            A newer version is installed as soon as it is found, and applied once no session is
+            working or waiting for you, no terminal or command is running, and you are not typing.
+            Applying relaunches the window; agents keep running through it.
+          </p>
+        </>
+      )}
     </section>
   )
 }
@@ -1046,12 +1086,15 @@ function UpdatesSection() {
  * drop gets read back as "you are up to date," the check erases its own finding (this is
  * exactly how #42 stayed hidden for an entire release).
  */
-function describe(u: UpdateStatus | null): string {
+function describe(u: UpdateStatus | null, offer: ApplyOffer | null): string {
   if (!u) return 'Not checked yet'
   if (u.phase === 'checking') return 'Checking…'
   if (u.phase === 'updating') return `Installing ${u.latest ?? 'the new version'}…`
   if (u.phase === 'restart_required') {
-    return `Installed ${u.latest ?? 'the new version'}. Restart Centralu to use it.`
+    const v = u.latest ?? 'the new version'
+    if (offer?.kind === 'current') return `This window runs ${v}. The agent host switches to it from the bar above.`
+    if (offer?.kind === 'apply') return `Installed ${v}. Apply it to relaunch into it.`
+    return `Installed ${v}. Restart Centralu to use it.`
   }
   if (u.phase === 'failed') return `Update failed: ${u.error ?? 'unknown reason'}`
   if (u.newer && u.latest) return `${u.latest} is available`

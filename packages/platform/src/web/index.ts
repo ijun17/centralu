@@ -557,6 +557,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     updates: {
       status: (force = false) => rpc.call('updates.status', { force }),
       setAuto: (enabled) => rpc.call('updates.setAuto', { enabled }),
+      setAutoApply: (enabled) => rpc.call('updates.setAutoApply', { enabled }),
       apply: () => rpc.call('updates.apply', {}),
     },
     capabilities: {

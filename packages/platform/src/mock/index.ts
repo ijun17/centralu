@@ -71,6 +71,8 @@ import type {
   InlineViewReopened,
   NewAppSpec,
   Platform,
+  RelaunchCheck,
+  RelaunchPort,
   PreferencesPort,
   ThemesPort,
   ProjectPort,
@@ -2724,6 +2726,7 @@ export class MockPlatform implements Platform {
     latest: null,
     newer: false,
     auto: true,
+    autoApply: false,
     phase: 'idle',
     error: null,
     checkedAt: null,
@@ -2754,25 +2757,70 @@ export class MockPlatform implements Platform {
       // Someone who just turned it on is asking right now — not six hours from now
       return enabled ? this.runUpdateCheck() : { ...this.updateStatus }
     },
-    apply: async () => {
-      if (this.updateStatus.phase === 'updating') return { ...this.updateStatus }
-      const latest = this.updateStatus.latest
-      if (!this.updateStatus.newer || !latest) {
-        this.setUpdateStatus({ phase: 'failed', error: 'There is no newer version to install' })
-        return { ...this.updateStatus }
-      }
-      this.setUpdateStatus({ phase: 'updating', error: null })
-      /*
-       * The end is announced **after** the response is given. Installing routinely exceeds
-       * the RPC timeout, and the real thing behaves the same way, so "installing → please
-       * restart" only ever arrives as an event.
-       */
-      setTimeout(() => {
-        if (this.updateFails) this.setUpdateStatus({ phase: 'failed', error: this.updateFails })
-        else this.setUpdateStatus({ phase: 'restart_required', error: null })
-      }, 0)
+    // Same as the real thing (#352): turning it on installs a newer version already known
+    setAutoApply: async (enabled: boolean) => {
+      if (this.updateStatus.autoApply === enabled) return { ...this.updateStatus }
+      this.setUpdateStatus({ autoApply: enabled })
+      if (enabled) this.installIfAutomatic()
       return { ...this.updateStatus }
     },
+    apply: async () => this.installUpdate(),
+  }
+
+  private installIfAutomatic(): void {
+    const u = this.updateStatus
+    if (u.autoApply && u.newer && u.latest && u.phase === 'idle') void this.installUpdate()
+  }
+
+  private installUpdate(): UpdateStatus {
+    if (this.updateStatus.phase === 'updating') return { ...this.updateStatus }
+    const latest = this.updateStatus.latest
+    if (!this.updateStatus.newer || !latest) {
+      this.setUpdateStatus({ phase: 'failed', error: 'There is no newer version to install' })
+      return { ...this.updateStatus }
+    }
+    this.setUpdateStatus({ phase: 'updating', error: null })
+    /*
+     * The end is announced **after** the response is given. Installing routinely exceeds
+     * the RPC timeout, and the real thing behaves the same way, so "installing → please
+     * restart" only ever arrives as an event.
+     */
+    setTimeout(() => {
+      if (this.updateFails) this.setUpdateStatus({ phase: 'failed', error: this.updateFails })
+      else this.setUpdateStatus({ phase: 'restart_required', error: null })
+    }, 0)
+    return { ...this.updateStatus }
+  }
+
+  /**
+   * "Apply now" (#352), as the desktop app with the keeper offers it. Nothing is relaunched here:
+   * the count says how often the screen asked, and a test sets what `check` answers and what the
+   * keeper's activity report says.
+   */
+  relaunchCheck: RelaunchCheck = { ready: false, reason: 'The mock does not relaunch until a test says so' }
+  relaunches = 0
+  /** For tests: the relaunch is refused with this reason */
+  relaunchFails: string | null = null
+  private hostBusy: boolean | null = false
+  private busyWatchers = new Set<(busy: boolean | null) => void>()
+
+  readonly relaunch: RelaunchPort = {
+    check: async () => ({ ...this.relaunchCheck }),
+    relaunch: async () => {
+      if (this.relaunchFails) throw new Error(this.relaunchFails)
+      this.relaunches++
+    },
+    watchBusy: (cb) => {
+      this.busyWatchers.add(cb)
+      cb(this.hostBusy)
+      return () => void this.busyWatchers.delete(cb)
+    },
+  }
+
+  /** Scenario helper: what the keeper's activity report says (a session working, a terminal…) */
+  setHostBusy(busy: boolean | null): void {
+    this.hostBusy = busy
+    for (const cb of this.busyWatchers) cb(busy)
   }
 
   private runUpdateCheck(): UpdateStatus {
@@ -2788,6 +2836,7 @@ export class MockPlatform implements Platform {
       error: null,
       checkedAt: this.now(),
     })
+    this.installIfAutomatic()
     return { ...this.updateStatus }
   }
 

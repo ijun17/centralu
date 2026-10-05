@@ -43,6 +43,8 @@ fn main() {
             "background_mode",
             "set_background_mode",
             "quit_and_stop_agents",
+            "relaunch_info",
+            "apply_update_relaunch",
         ]),
     ))
     .expect("failed to run tauri-build");

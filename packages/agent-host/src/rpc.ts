@@ -677,6 +677,8 @@ export function createRpcHandler(
     'trash.empty': async () => mgr.emptyTrash(),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
     'updates.setAuto': async (p) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
+    'updates.setAutoApply': async (p) =>
+      requireUpdates().setAutoApply(RpcMethods['updates.setAutoApply'].params.parse(p).enabled),
     // Answers once the install has started, not once it has finished — see the note on
     // `updates.apply` in the protocol. The rest arrives as `update_status` events.
     'updates.apply': async () => requireUpdates().apply(),

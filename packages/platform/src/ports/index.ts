@@ -536,14 +536,16 @@ export interface TrashPort {
  * machine is the one that answers — that stale copy's comparison being wrong is what #42 was.
  *
  * The port carries exactly one thing: status. The screen only needs to know "where are we
- * right now", and **this side never restarts anything** — the app tells the person and stops
- * there.
+ * right now". Relaunching into what was installed is not this port's: only a desktop window
+ * can do it, through `RelaunchPort` (#352).
  */
 export interface UpdatePort {
   /** What is known right now. With `force`, asks the registry again (Settings' "Check now") */
   status(force?: boolean): Promise<UpdateStatus>
   /** Turns periodic checking on and off */
   setAuto(enabled: boolean): Promise<UpdateStatus>
+  /** "Apply updates automatically when idle" on and off (#352); the host installs, the window applies */
+  setAutoApply(enabled: boolean): Promise<UpdateStatus>
   /**
    * Installs the new version. **Only when the person clicks it.**
    *
@@ -928,6 +930,37 @@ export interface BackgroundPort {
   set(on: boolean): Promise<boolean>
 }
 
+/** Whether relaunching starts the update just installed (#352), and why not when it does not */
+export type RelaunchCheck = {
+  ready: boolean
+  /** Why not, for the update line's tooltip */
+  reason?: string
+  /** The version a relaunch would start, when the bundle says */
+  version?: string
+}
+
+/**
+ * "Apply now" (#352): relaunching the window into the version the host just installed.
+ *
+ * Only a desktop app whose host is held by the keeper can offer this: the keeper is told first and
+ * holds the host and every agent through the relaunch, whatever background mode says, and the new
+ * window then switches the keeper and host to its build. A platform that cannot leaves
+ * `Platform.relaunch` undefined, and the update line keeps saying "restart to finish".
+ */
+export interface RelaunchPort {
+  /** Whether a relaunch now would start a different build than this window (the bundle on disk was replaced) */
+  check(): Promise<RelaunchCheck>
+  /** Announces the relaunch to the keeper, then relaunches. Rejects, saying why, when the agents could not be held */
+  relaunch(): Promise<void>
+  /**
+   * Whether the host is running anything a person would lose (the keeper's activity report: a
+   * session working or waiting, a terminal, a command), null while unknown. Called now and on every
+   * change. What "Apply updates automatically when idle" waits for.
+   * @returns unsubscribes
+   */
+  watchBusy(cb: (busy: boolean | null) => void): Unsubscribe
+}
+
 export interface Platform {
   agents: AgentPort
   apps: AppsPort
@@ -947,6 +980,8 @@ export interface Platform {
   processes: ProcessPort
   /** Present only where the host outlives the window (desktop, through the keeper — #280) */
   background?: BackgroundPort
+  /** Present only in the desktop app with the keeper: relaunching into an installed update (#352) */
+  relaunch?: RelaunchPort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>
 }

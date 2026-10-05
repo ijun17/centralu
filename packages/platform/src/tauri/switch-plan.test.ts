@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { swapProgressText, swapRunning, switchPlan, type SwapView } from './switch-plan.js'
+import { autoSwitch, swapProgressText, swapRunning, switchPlan, type AutoSwitchInput, type SwapView } from './switch-plan.js'
 
 describe('what switching builds costs (#280 step 3)', () => {
   it('switches without asking when nothing is running', () => {
@@ -62,5 +62,46 @@ describe('a swap’s progress in the bar (#280 step 3)', () => {
     )
     const after = swapProgressText(swap({ phase: 'failed', message: 'x', rolledBack: true }))
     expect(after).toContain('previous build was started again')
+  })
+})
+
+/** The window "Apply now" started, or the automatic mode, switching by itself (#352) */
+describe('switching by itself after an update (#352)', () => {
+  const quiet: AutoSwitchInput = {
+    build: { keepsAgents: true, busy: false, sameBuild: false, keeperSameBuild: false, relaunched: true },
+    autoApply: false,
+    tried: false,
+    dismissed: false,
+  }
+
+  it('the window "Apply now" started switches without a click when nothing can be lost', () => {
+    expect(autoSwitch(quiet)).toBe('switch')
+  })
+
+  it('asks at once when something can be lost, since the person just pressed "Apply now"', () => {
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: true } })).toBe('ask')
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: undefined } })).toBe('ask')
+  })
+
+  it('a keeper alone behind moves without a question, busy or not', () => {
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: true, sameBuild: true } })).toBe('switch')
+  })
+
+  it('the automatic mode switches when idle and waits while busy, never asking', () => {
+    const auto = { ...quiet, autoApply: true, build: { ...quiet.build, relaunched: false } }
+    expect(autoSwitch(auto)).toBe('switch')
+    expect(autoSwitch({ ...auto, build: { ...auto.build, busy: true } })).toBe('wait')
+  })
+
+  it('a window opened by hand, with the automatic mode off, leaves it to the bar', () => {
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, relaunched: false } })).toBe('none')
+  })
+
+  it('never twice, never after "Not now", never during a swap, never when nothing is behind', () => {
+    expect(autoSwitch({ ...quiet, tried: true })).toBe('none')
+    expect(autoSwitch({ ...quiet, dismissed: true })).toBe('none')
+    const swap: SwapView = { phase: 'draining', target: { commit: 'b' }, startedAt: 1 }
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, swap } })).toBe('none')
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, sameBuild: true, keeperSameBuild: true } })).toBe('none')
   })
 })

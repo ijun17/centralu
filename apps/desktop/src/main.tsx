@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App, ShellBanner, applyCachedTheme, confirmKeyAction } from '@cc/ui'
+import { App, ShellBanner, applyCachedTheme, confirmKeyAction, useStore } from '@cc/ui'
 import {
+  autoSwitch,
   createTauriPlatform,
   focusWindow,
   hostBuild,
@@ -196,6 +197,28 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
     setSwitchError(null)
     void switchHostBuild().catch((e: Error) => setSwitchError(e.message))
   }
+  /*
+   * Applying an update by itself (#352). A window started by "Apply now" (the keeper held on
+   * through the relaunch and said so: `build.relaunched`), or any window with "Apply updates
+   * automatically when idle" on, switches the keeper and then the host to its build without a
+   * click when nothing can be lost. When something can, the window "Apply now" started asks at
+   * once, and the automatic mode waits for the next activity report that says idle. Once per
+   * window: a failure stays on the bar with "Try again". Progress shows in the bar as for a click.
+   */
+  const autoApply = useStore((s) => s.update?.autoApply ?? false)
+  const autoTried = useRef(false)
+  useEffect(() => {
+    if (!build || build.mode !== 'keeper') return
+    const next = autoSwitch({ build, autoApply, tried: autoTried.current, dismissed })
+    if (next === 'switch') {
+      autoTried.current = true
+      setSwitchError(null)
+      void switchHostBuild().catch((e: Error) => setSwitchError(e.message))
+    } else if (next === 'ask') {
+      autoTried.current = true
+      setAskSwitch(true)
+    }
+  }, [build, autoApply, dismissed])
 
   const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {

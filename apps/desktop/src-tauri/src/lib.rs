@@ -12,7 +12,7 @@ mod path_safety;
 mod sidecar;
 
 use path_safety::assert_safe_native_path;
-use sidecar::{HostBuild, HostInfo, Supervisor};
+use sidecar::{HostBuild, HostInfo, RelaunchInfo, Supervisor};
 
 /// Whether this process was started as the keeper (`centralu --keeper`, #280). `main()` asks
 /// before anything else, so keeper mode never builds the Tauri app.
@@ -128,6 +128,45 @@ fn quit_and_stop_agents(app: AppHandle, sup: State<'_, Supervisor>, approved: St
     sup.stop_agents()?;
     approved.0.store(true, std::sync::atomic::Ordering::SeqCst);
     app.exit(0);
+    Ok(())
+}
+
+/// Whether "Apply now" can relaunch this window into the update just installed (#352).
+#[tauri::command]
+fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
+    sup.relaunch_info()
+}
+
+/**
+ * "Apply now" (#352): relaunches the app from its bundle, which `centralu install` has just
+ * replaced, so the new window is the new build.
+ *
+ * The keeper is told first, so the window closing is not "the last window left" even with
+ * background mode off; the new window attaches within the keeper's grace and is told it is the
+ * relaunched one, then applies the switch (keeper, then host) by itself when nothing can be lost.
+ * A keeper too old to hold on is acceptable only with background mode on, where a window closing
+ * never stopped anything; with it off this refuses, rather than cutting every turn.
+ *
+ * `request_restart`, not `restart`: a command runs on the main thread, where `restart` skips the
+ * exit events and so the detach below. Through `ExitRequested` with a code (our quit gate lets a
+ * programmatic exit through) and `Exit`, Tauri then runs this executable's path again, reading the
+ * executable's name from the bundle's new `Info.plist` (`tauri::process::restart`, 2.11.5).
+ */
+#[tauri::command]
+fn apply_update_relaunch(app: AppHandle, sup: State<'_, Supervisor>, approved: State<QuitApproved>) -> Result<(), String> {
+    let info = sup.relaunch_info();
+    if !info.ready {
+        return Err(info.reason.unwrap_or_else(|| "relaunching would not start the new version".into()));
+    }
+    if let Err(e) = sup.announce_relaunch() {
+        if sup.background() != Ok(true) {
+            return Err(format!(
+                "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
+            ));
+        }
+    }
+    approved.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.request_restart();
     Ok(())
 }
 
@@ -641,7 +680,9 @@ pub fn run() {
             switch_host_build,
             background_mode,
             set_background_mode,
-            quit_and_stop_agents
+            quit_and_stop_agents,
+            relaunch_info,
+            apply_update_relaunch
         ])
         /*
          * ⌘W and the red button both mean closing the window. Since this app has only one

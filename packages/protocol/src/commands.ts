@@ -1742,7 +1742,17 @@ export const RpcMethods = {
     result: UpdateStatus,
   },
   /**
-   * Install the newer version. **Explicitly asked for — never automatic.**
+   * "Apply updates automatically when idle" on or off (#352). The host holds it for the same
+   * reason as `updates.setAuto`: the host is what installs. Turning it on with a newer version
+   * already known starts the install at once; the window applies it once nothing is busy.
+   */
+  'updates.setAutoApply': {
+    params: z.object({ enabled: z.boolean() }),
+    result: UpdateStatus,
+  },
+  /**
+   * Install the newer version. Asked for by the person, or by `autoApply` (#352) when a check
+   * finds a newer version — never otherwise.
    *
    * Answers as soon as the work has *started*, not when it has finished: `npm i -g`
    * routinely outruns the 30s RPC deadline, and a call that times out while the

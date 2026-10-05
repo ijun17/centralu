@@ -878,12 +878,22 @@ export const UpdateStatus = z.object({
   /** Whether the host re-checks on its own schedule. Settings turns this on and off */
   auto: z.boolean().default(true),
   /**
+   * "Apply updates automatically when idle" (#352). Off by default. With it on, the host
+   * installs a newer version as soon as a check finds one, and the desktop window applies it
+   * (relaunch, then the keeper and host switch) once nothing is busy.
+   *
+   * Defaults to false so a window attached to an older host that sends no such field reads
+   * it as off (protocol.md §4: a field added to a host payload carries a default).
+   */
+  autoApply: z.boolean().default(false),
+  /**
    * What the update is doing right now.
    *
-   * `restart_required` is a terminal state on purpose: the new version is on disk and
-   * the running process is still the old one. **The app never restarts itself** —
-   * replacing a running program out from under someone mid-turn is the kind of quiet
-   * irreversible act this app does not do.
+   * `restart_required` is where the host stops: the new version is on disk and the running
+   * process is still the old one. The host never replaces the running app itself. What
+   * comes next is the window's (#352): "Apply now" relaunches it from the updated bundle, or,
+   * with `autoApply`, it does so by itself once no session is working or waiting and no
+   * terminal or command is running — never mid-turn.
    */
   phase: z.enum(['idle', 'checking', 'updating', 'restart_required', 'failed']).default('idle'),
   /**

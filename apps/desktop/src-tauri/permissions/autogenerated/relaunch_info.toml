@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-relaunch-info"
+description = "Enables the relaunch_info command without any pre-configured scope."
+commands.allow = ["relaunch_info"]
+
+[[permission]]
+identifier = "deny-relaunch-info"
+description = "Denies the relaunch_info command without any pre-configured scope."
+commands.deny = ["relaunch_info"]

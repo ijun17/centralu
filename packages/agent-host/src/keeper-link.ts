@@ -1,4 +1,5 @@
-import { PROTOCOL_VERSION, type HostBuild, type SessionInfo, type SessionState } from '@cc/protocol'
+import { PROTOCOL_VERSION, type HostBuild } from '@cc/protocol'
+import { hostBusy, type ActivitySnapshot } from './idle.js'
 
 /**
  * What the host tells the keeper, and what it says about its own build (#280, option C step 1).
@@ -37,28 +38,8 @@ export function hostBuild(commit: string, sourceJson: string | undefined): HostB
   return { ...build, ...(version ? { version } : {}), ...(bundlePath ? { bundlePath } : {}), ...(copyDir ? { copyDir } : {}) }
 }
 
-/** The states in which someone would lose something if the host went away */
-const BUSY_STATES: ReadonlySet<SessionState> = new Set(['working', 'waiting_approval', 'waiting_input'])
-
-export type ActivitySnapshot = {
-  sessions: Pick<SessionInfo, 'state' | 'live'>[]
-  terminals: number
-  commandRuns: number
-}
-
-/**
- * Whether the host is doing anything a person would lose if it stopped now.
- *
- * - a live session that is working, waiting for an approval, or waiting on a question — an
- *   approval left in background mode is exactly what a person comes back for;
- * - an open terminal or a running project command (a dev server).
- *
- * External app processes do not count: they start on demand and are restarted with the host
- * (#280, decision 2).
- */
-export function hostBusy(s: ActivitySnapshot): boolean {
-  return s.terminals > 0 || s.commandRuns > 0 || s.sessions.some((x) => x.live === true && BUSY_STATES.has(x.state))
-}
+// The rule itself lives in idle.ts, shared with every decision that waits for a quiet moment (#352)
+export { hostBusy, type ActivitySnapshot } from './idle.js'
 
 /** How often the host looks. The keeper's idle limit is 30 minutes, so seconds of lag cost nothing */
 export const ACTIVITY_POLL_MS = 5_000

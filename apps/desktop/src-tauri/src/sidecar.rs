@@ -60,6 +60,28 @@ pub struct HostBuild {
     /// A session working or waiting, a terminal or a command running: what a switch could cost.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub busy: Option<bool>,
+    /// This window was started by "Apply now" (#352): the keeper held on through the relaunch and
+    /// said so when this window attached. The window then applies the switch by itself when
+    /// nothing can be lost.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub relaunched: bool,
+}
+
+/// Whether "Apply now" can relaunch this window into the update just installed (#352), and why
+/// not when it cannot.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelaunchInfo {
+    pub ready: bool,
+    /// Why not, in words the update line can show.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The version now in this window's bundle on disk, when it can be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The bundle the relaunch starts from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle_path: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -237,6 +259,37 @@ impl Supervisor {
         }
     }
 
+    /// Whether "Apply now" can relaunch this window into the update just installed (#352). Only
+    /// with the keeper: in direct mode the host is this process's child and a relaunch would stop
+    /// every agent, exactly the quit the update is meant to avoid.
+    pub fn relaunch_info(&self) -> RelaunchInfo {
+        match self.choice() {
+            #[cfg(unix)]
+            Choice::Keeper => self.link().map(|l| l.relaunch_info()).unwrap_or_else(|| RelaunchInfo {
+                reason: Some("not attached to the background keeper".into()),
+                ..Default::default()
+            }),
+            _ => RelaunchInfo {
+                reason: Some(
+                    "This build holds the agent host itself, so relaunching would stop running agents. Quit and open Centralu again to finish."
+                        .into(),
+                ),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Tells the keeper the window is about to relaunch (#352), so it holds the host and agents
+    /// until the new window attaches, whatever background mode says. Errs when the keeper cannot
+    /// (one older than #352 answers "unknown op").
+    pub fn announce_relaunch(&self) -> Result<u64, String> {
+        match self.choice() {
+            #[cfg(unix)]
+            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.announce_relaunch(),
+            _ => Err("the host is not held by a keeper in this build".into()),
+        }
+    }
+
     /// "Quit and stop agents": tells the keeper to stop the host and itself, whatever background
     /// mode says. In direct mode quitting already does that.
     pub fn stop_agents(&self) -> Result<(), String> {
@@ -273,6 +326,56 @@ fn direct_launcher(bundled: Option<PathBuf>) -> Launcher {
     })
 }
 
+/**
+ * Whether relaunching starts a different build than this window (#352), from what is on disk now.
+ *
+ * - No bundle around the executable (`pnpm app:dev`, a bare binary): a relaunch starts the same
+ *   build, and the update went to the installed app, not here.
+ * - Nothing readable on disk where the build should be: the bundle is half replaced or gone, and a
+ *   relaunch could start nothing at all.
+ * - The same build on disk as this window: the update did not replace this bundle. This is the
+ *   case of `pnpm app:open`, which runs the build output in place while `centralu install` writes
+ *   `/Applications/Centralu.app`.
+ */
+#[cfg(unix)]
+pub(crate) fn relaunch_decision(
+    app: &crate::keeper::source::BuildSource,
+    on_disk: Option<&crate::keeper::source::BuildSource>,
+    in_bundle: bool,
+    bundle: &str,
+) -> RelaunchInfo {
+    let not = |reason: String| RelaunchInfo { reason: Some(reason), bundle_path: Some(bundle.to_string()), ..Default::default() };
+    if !in_bundle {
+        return not("This window does not run from an app bundle, so relaunching would start the same build. Open the installed Centralu to finish.".into());
+    }
+    let Some(on_disk) = on_disk else {
+        return not(format!("The app at {bundle} is incomplete right now, so relaunching could start nothing. Open Centralu again by hand."));
+    };
+    if on_disk.same_build(app) {
+        return not(format!(
+            "This window runs from {bundle}, which the update did not replace. Open the installed Centralu to use the new version."
+        ));
+    }
+    RelaunchInfo { ready: true, reason: None, version: None, bundle_path: Some(bundle.to_string()) }
+}
+
+/// The version in a bundle's `Info.plist` (`CFBundleShortVersionString`), read as text: Tauri
+/// writes an XML plist, and this is for showing a version, so an unreadable one is just absent.
+#[cfg(unix)]
+pub(crate) fn bundle_version(bundle: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(bundle.join("Contents/Info.plist")).ok()?;
+    plist_string(&text, "CFBundleShortVersionString")
+}
+
+#[cfg(unix)]
+fn plist_string(text: &str, key: &str) -> Option<String> {
+    let after = &text[text.find(&format!("<key>{key}</key>"))?..];
+    let start = after.find("<string>")? + "<string>".len();
+    let end = after[start..].find("</string>")?;
+    let v = after[start..start + end].trim();
+    (!v.is_empty() && v.len() <= 64).then(|| v.to_string())
+}
+
 #[cfg(unix)]
 mod link {
     //! The app attached to a keeper.
@@ -290,6 +393,9 @@ mod link {
         error: Option<String>,
         view: Option<KeeperView>,
         same_build: Option<bool>,
+        /// The keeper said this window is the one an announced relaunch started (#352). Kept for
+        /// the window's life: a later re-attach (the keeper restarted) does not undo it.
+        relaunched: bool,
         attached: Option<client::Attached>,
         running: bool,
         shutting_down: bool,
@@ -351,7 +457,40 @@ mod link {
                 swap: st.view.as_ref().and_then(|v| v.swap.clone()),
                 keeps_agents: st.view.as_ref().and_then(|v| v.keeps_agents),
                 busy: st.view.as_ref().map(|v| v.busy),
+                relaunched: st.relaunched,
             }
+        }
+
+        /// What "Apply now" would start (#352): Tauri's restart runs this window's own executable
+        /// path again, inside the same bundle. `centralu install` replaced that bundle (`rmSync`,
+        /// then `ditto`), so the path now names the new build — unless this window runs from a
+        /// bundle the update did not touch (`pnpm app:open` opens the build output in place) or from
+        /// no bundle at all (`pnpm app:dev`).
+        pub fn relaunch_info(&self) -> RelaunchInfo {
+            let exe = std::env::current_exe().unwrap_or_default();
+            let bundle = client::bundle_of(&exe);
+            let in_bundle = bundle != exe;
+            let on_disk = self
+                .host_dir
+                .as_ref()
+                .filter(|d| !self.dev && d.join("main.mjs").is_file() && exe.is_file())
+                .map(|d| BuildSource::from_host_dir(d, Some(bundle.to_string_lossy().to_string()), None));
+            let mut info = super::relaunch_decision(&self.app_build, on_disk.as_ref(), in_bundle, &bundle.to_string_lossy());
+            if info.ready {
+                info.version = super::bundle_version(&bundle);
+            }
+            info
+        }
+
+        pub fn announce_relaunch(&self) -> Result<u64, String> {
+            let v = client::request(&self.sock, &json!({ "op": "relaunching" }), Duration::from_secs(5)).map_err(|e| {
+                if e.contains("unknown op") {
+                    "the background keeper is from an older build and cannot hold the agents through a relaunch".to_string()
+                } else {
+                    e
+                }
+            })?;
+            Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
         }
 
         fn launch_keeper(&self) -> std::io::Result<()> {
@@ -444,8 +583,10 @@ mod link {
                 },
             )?;
             let same = first.get("sameBuild").and_then(Value::as_bool);
+            let relaunched = first.get("relaunched").and_then(Value::as_bool) == Some(true);
             if let Ok(mut st) = self.state.lock() {
                 st.same_build = same;
+                st.relaunched |= relaunched;
                 st.attached = Some(attached);
             }
             self.on_view(app, first.get("view"));
@@ -578,6 +719,30 @@ mod tests {
         if cfg!(debug_assertions) && std::env::var("CC_USE_KEEPER").is_err() && std::env::var("CC_HOST_CMD").is_err() {
             assert!(!use_keeper());
         }
+    }
+
+    /// #352: "Apply now" is only offered when relaunching starts the build the update installed.
+    #[cfg(unix)]
+    #[test]
+    fn apply_now_relaunches_only_into_a_different_build_on_disk() {
+        use crate::keeper::source::BuildSource;
+        let build = |commit: &str| BuildSource { commit: commit.into(), ..Default::default() };
+        let app = build("aaaaaaa");
+        let ready = relaunch_decision(&app, Some(&build("bbbbbbb")), true, "/Applications/Centralu.app");
+        assert!(ready.ready, "the bundle now holds another build: relaunching applies it");
+        let same = relaunch_decision(&app, Some(&build("aaaaaaa")), true, "/x/target/release/bundle/macos/Centralu.app");
+        assert!(!same.ready, "pnpm app:open: the update did not replace this bundle");
+        assert!(same.reason.unwrap().contains("did not replace"));
+        assert!(!relaunch_decision(&app, Some(&build("bbbbbbb")), false, "/x/centralu").ready, "no bundle: the same binary again");
+        assert!(!relaunch_decision(&app, None, true, "/Applications/Centralu.app").ready, "nothing on disk to start");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reads_the_version_from_an_xml_plist() {
+        let plist = "<dict>\n\t<key>CFBundleName</key>\n\t<string>Centralu</string>\n\t<key>CFBundleShortVersionString</key>\n\t<string>0.1.0-beta.11</string>\n</dict>";
+        assert_eq!(plist_string(plist, "CFBundleShortVersionString").as_deref(), Some("0.1.0-beta.11"));
+        assert_eq!(plist_string(plist, "CFBundleVersion"), None);
     }
 
     #[test]

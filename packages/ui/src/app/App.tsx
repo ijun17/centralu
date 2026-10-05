@@ -25,6 +25,7 @@ import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
 import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
+import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
@@ -425,6 +426,9 @@ const EDGE_PADDING = 16
 
 function TopBar() {
   const counts = useCounts()
+  // "Apply updates automatically when idle" (#352): the top bar is always mounted, so it runs on
+  // every screen, and the update line it feeds lives here
+  const autoApplyWaiting = useAutoApplyUpdate()
   const toggleInbox = useStore((s) => s.toggleInbox)
 
   // Leave room in the top-left if the window buttons occupy it. Since the title bar is hidden,
@@ -541,7 +545,7 @@ function TopBar() {
           state — "this app is not up to date right now" is a question the dashboard should be
           able to answer.
         */}
-        <UpdateLine />
+        <UpdateLine waiting={autoApplyWaiting} />
         {/*
           Usage is one donut per tool, not a text button (user request, 2026-09-09). The dashboard
           is a place where the answer should already be there before anyone asks, and the detail

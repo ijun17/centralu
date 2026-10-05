@@ -1159,7 +1159,7 @@ describe('whether a conversation stood at the bottom (issue #31)', () => {
  */
 describe('update status (#43)', () => {
   const status = {
-    current: '0.1.0-beta.2', latest: '9999.0.0', newer: true, auto: true,
+    current: '0.1.0-beta.2', latest: '9999.0.0', newer: true, auto: true, autoApply: false,
     phase: 'idle' as const, error: null, checkedAt: 1,
   }
 

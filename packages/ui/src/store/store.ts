@@ -1119,6 +1119,8 @@ export type AppState = {
   checkUpdate(force?: boolean): Promise<void>
   /** Turns periodic checking on and off */
   setUpdateAuto(enabled: boolean): Promise<void>
+  /** "Apply updates automatically when idle" on and off (#352) */
+  setUpdateAutoApply(enabled: boolean): Promise<void>
   /**
    * Changes screen settings — sends **only what changed**.
    *
@@ -1129,6 +1131,12 @@ export type AppState = {
   setPrefs(patch: UiPreferencesPatch): Promise<void>
   /** Installs the new version. **Does not restart** — it tells the person and stops when done */
   applyUpdate(): Promise<void>
+  /**
+   * "Apply now" (#352): relaunches the desktop window into the installed version. The keeper is
+   * told first and holds every agent through it. A refusal (the keeper too old to hold on with
+   * background mode off, the bundle not replaced) is shown, never silent.
+   */
+  applyUpdateNow(): Promise<void>
   setNotifyPolicy(p: NotifyPolicy): void
   /** Attaches something not yet sent to a session (removed if it is empty) */
   setDraft(sessionId: string, draft: Draft): void
@@ -3655,6 +3663,17 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  async setUpdateAutoApply(enabled) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ update: await platform.updates.setAutoApply(enabled) })
+    } catch (e) {
+      // An older host does not know the setting; say so rather than leave the box ticked
+      set({ toast: `Could not save that: ${(e as Error).message}` })
+    }
+  },
+
   async refreshThemes() {
     const platform = get().platform
     if (!platform) return
@@ -3684,6 +3703,16 @@ export const useStore = create<AppState>((set, get) => ({
       set({ update: await platform.updates.apply() })
     } catch (e) {
       set({ toast: `Could not update: ${(e as Error).message}` })
+    }
+  },
+
+  async applyUpdateNow() {
+    const relaunch = get().platform?.relaunch
+    if (!relaunch) return
+    try {
+      await relaunch.relaunch()
+    } catch (e) {
+      set({ toast: `Could not apply the update: ${(e as Error).message}` })
     }
   },
   setNotifyPolicy(notifyPolicy) {

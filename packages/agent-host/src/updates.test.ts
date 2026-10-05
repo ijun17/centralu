@@ -8,9 +8,12 @@ import { UpdateService, type LatestResult } from './updates.js'
  * **None of these tests reach out to the registry or run `npm i -g`.** Both pass only through
  * injected seams, and that is the guarantee that this file cannot alter this machine.
  */
-function make(opts: { registry?: string | null; run?: (file: string, args: string[]) => Promise<void> } = {}) {
+function make(
+  opts: { registry?: string | null; run?: (file: string, args: string[]) => Promise<void>; autoApply?: boolean } = {},
+) {
   const published: UpdateStatus[] = []
   const calls: [string, string[]][] = []
+  const saved: boolean[] = []
   let registry = opts.registry ?? null
   let fetches = 0
   const svc = new UpdateService((s) => published.push(s), {
@@ -22,11 +25,14 @@ function make(opts: { registry?: string | null; run?: (file: string, args: strin
       calls.push([file, args])
       await (opts.run?.(file, args) ?? Promise.resolve())
     },
+    readAutoApply: () => opts.autoApply ?? false,
+    writeAutoApply: (enabled) => saved.push(enabled),
   })
   return {
     svc,
     published,
     calls,
+    saved,
     get fetches() {
       return fetches
     },
@@ -154,5 +160,63 @@ describe('UpdateService', () => {
     h.svc.apply()
     await settle()
     expect((await h.svc.check(true)).phase).toBe('restart_required')
+  })
+
+  /**
+   * "Apply updates automatically when idle" (#352): off by default, and with it on a newer version
+   * found by any check is installed without a click. Applying it stays the window's, once idle.
+   */
+  describe('automatic apply', () => {
+    it('is off by default, and a newer version found is only reported', async () => {
+      const h = make({ registry: '9999.0.0' })
+      expect(h.svc.current().autoApply).toBe(false)
+      await h.svc.check(true)
+      await settle()
+      expect(h.calls).toEqual([])
+      expect(h.svc.current().phase).toBe('idle')
+    })
+
+    it('installs a newer version as soon as a check finds it', async () => {
+      const h = make({ registry: '9999.0.0', autoApply: true })
+      expect((await h.svc.check(true)).phase).toBe('updating')
+      await settle()
+      expect(h.calls[0]).toEqual(['npm', ['i', '-g', 'centralu@9999.0.0']])
+      expect(h.svc.current().phase).toBe('restart_required')
+    })
+
+    it('does nothing when the registry has nothing newer', async () => {
+      const h = make({ registry: '0.0.1', autoApply: true })
+      await h.svc.check(true)
+      await settle()
+      expect(h.calls).toEqual([])
+    })
+
+    it('turning it on installs what is already known, and is saved', async () => {
+      const h = make({ registry: '9999.0.0' })
+      await h.svc.check(true)
+      expect(h.svc.setAutoApply(true).phase).toBe('updating')
+      expect(h.saved).toEqual([true])
+      await settle()
+      expect(h.svc.current()).toMatchObject({ autoApply: true, phase: 'restart_required' })
+    })
+
+    it('does not install twice: a check after the install leaves the restart pending', async () => {
+      const h = make({ registry: '9999.0.0', autoApply: true })
+      await h.svc.check(true)
+      await settle()
+      await h.svc.check(true)
+      await settle()
+      expect(h.calls.filter(([f]) => f === 'npm')).toHaveLength(1)
+      expect(h.svc.current().phase).toBe('restart_required')
+    })
+
+    it('turning it off saves that and installs nothing', async () => {
+      const h = make({ registry: '9999.0.0', autoApply: true })
+      h.svc.setAutoApply(false)
+      expect(h.saved).toEqual([false])
+      await h.svc.check(true)
+      await settle()
+      expect(h.calls).toEqual([])
+    })
   })
 })
