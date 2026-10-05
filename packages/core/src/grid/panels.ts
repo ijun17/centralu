@@ -1,4 +1,5 @@
-import type { GridPanel } from '@cc/protocol'
+import type { GridPanel, GridSpan } from '@cc/protocol'
+import { sanitizeGridSpan } from './span.js'
 
 /**
  * The grid's panels (#288) — sessions and apps in one order.
@@ -42,6 +43,19 @@ export const appGridPanel = (projectId: string | null, appId: string): GridPanel
   projectId,
   appId,
 })
+
+/**
+ * The list with the app panel keyed `key` given this span for its placement (#306), or its choice taken away
+ * (`null`: the panel falls back to the person's setting for the app, then the app's recommendation). Any other panel,
+ * and a session's, is left as it is: a session panel is always 1 × 1.
+ */
+export function withPanelSpan(panels: readonly GridPanel[], key: string, span: GridSpan | null): GridPanel[] {
+  return panels.map((p) => {
+    if (p.kind !== 'app' || gridPanelKey(p) !== key) return p
+    const { span: _old, ...rest } = p
+    return span ? { ...rest, span } : rest
+  })
+}
 
 /** The panel's key on the screen — see the file comment */
 export function gridPanelKey(p: GridPanel): string {
@@ -97,7 +111,7 @@ export function sanitizeGridPanels(raw: unknown): GridPanel[] {
       continue
     }
     if (!item || typeof item !== 'object') continue
-    const v = item as { kind?: unknown; sessionId?: unknown; projectId?: unknown; appId?: unknown }
+    const v = item as { kind?: unknown; sessionId?: unknown; projectId?: unknown; appId?: unknown; span?: unknown }
     if (v.kind === 'session' && typeof v.sessionId === 'string' && v.sessionId)
       put(sessionGridPanel(v.sessionId))
     else if (
@@ -106,7 +120,9 @@ export function sanitizeGridPanels(raw: unknown): GridPanel[] {
       v.appId &&
       (v.projectId === null || (typeof v.projectId === 'string' && v.projectId))
     ) {
-      put(appGridPanel(v.projectId as string | null, v.appId))
+      // The span chosen for this placement (#306) comes along when it is one; anything else reads as none chosen
+      const span = sanitizeGridSpan(v.span)
+      put({ ...appGridPanel(v.projectId as string | null, v.appId), ...(span ? { span } : {}) })
     }
   }
   return out

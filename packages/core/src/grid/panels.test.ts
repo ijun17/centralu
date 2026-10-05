@@ -8,6 +8,7 @@ import {
   sanitizeGridPanels,
   sessionGridPanel,
   visibleGridPanels,
+  withPanelSpan,
 } from './panels.js'
 
 describe('grid panel keys', () => {
@@ -97,5 +98,37 @@ describe('sanitizeGridPanels', () => {
 
   it('answers an empty list for something that is not a list at all', () => {
     for (const raw of [undefined, null, 'x', {}, 3]) expect(sanitizeGridPanels(raw)).toEqual([])
+  })
+})
+
+// #306: an app panel's span rides on its placement, and only an app panel has one
+describe('an app panel’s span', () => {
+  it('survives sanitizing, clamped; one that is not a span reads as none chosen', () => {
+    expect(
+      sanitizeGridPanels([
+        { kind: 'app', projectId: 'p1', appId: 'board', span: { cols: 2, rows: 1 } },
+        { kind: 'app', projectId: null, appId: 'wide', span: { cols: 9, rows: 1 } },
+        { kind: 'app', projectId: null, appId: 'odd', span: { cols: 'two', rows: 1 } },
+        { kind: 'session', sessionId: 's1', span: { cols: 2, rows: 1 } },
+      ]),
+    ).toEqual([
+      { kind: 'app', projectId: 'p1', appId: 'board', span: { cols: 2, rows: 1 } },
+      { kind: 'app', projectId: null, appId: 'wide', span: { cols: 4, rows: 1 } },
+      { kind: 'app', projectId: null, appId: 'odd' },
+      { kind: 'session', sessionId: 's1' },
+    ])
+  })
+
+  it('withPanelSpan sets or clears one app panel’s span and leaves every other panel as it was', () => {
+    const list = [sessionGridPanel('s1'), appGridPanel('p1', 'board'), appGridPanel(null, 'notes')]
+    const set = withPanelSpan(list, 'app:p1/board', { cols: 2, rows: 1 })
+    expect(set).toEqual([
+      sessionGridPanel('s1'),
+      { ...appGridPanel('p1', 'board'), span: { cols: 2, rows: 1 } },
+      appGridPanel(null, 'notes'),
+    ])
+    expect(withPanelSpan(set, 'app:p1/board', null)).toEqual(list)
+    // A session's key changes nothing: a session panel is always 1 × 1
+    expect(withPanelSpan(list, 's1', { cols: 2, rows: 1 })).toEqual(list)
   })
 })
