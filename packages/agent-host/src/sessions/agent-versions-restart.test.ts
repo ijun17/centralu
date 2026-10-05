@@ -78,19 +78,31 @@ class Adapter implements AgentAdapter {
   }
 }
 
-let keeper: FakeKeeper
-let store: Store
+let keeper: FakeKeeper | undefined
+let store: Store | undefined
 const helds: HeldChildren[] = []
 
+/*
+ * The keeper is macOS and Linux only: on Windows the host runs on the direct path and nothing connects to a keeper
+ * (docs/agent-host.md). Its service is a unix-domain socket, which the fake cannot listen on there (EACCES) (#14).
+ * What #297 needs on Windows — reading the installed version and the idle rule — is in cli-version.test.ts and
+ * agent-versions.test.ts, which run everywhere.
+ */
+const keeperless = process.platform === 'win32'
+
 beforeEach(async () => {
+  if (keeperless) return
   keeper = await FakeKeeper.start()
   store = new Store()
 })
 
+// Safe when setup never ran or failed half-way: a failed start must not hide behind a second error here
 afterEach(async () => {
   for (const h of helds.splice(0)) h.children.close()
-  await keeper.close()
-  store.close()
+  await keeper?.close()
+  store?.close()
+  keeper = undefined
+  store = undefined
 })
 
 async function until(ok: () => boolean): Promise<void> {
@@ -100,13 +112,13 @@ async function until(ok: () => boolean): Promise<void> {
 
 /** One host under the keeper: what it took over, its manager, and the version service wired as main.ts wires it */
 async function host(adapter: Adapter) {
-  const held = (await connectHeldChildren(keeper.dir))!
+  const held = (await connectHeldChildren(keeper!.dir))!
   helds.push(held)
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
   const events: NormalizedEvent[] = []
   const ref: { svc?: AgentVersionService } = {}
   const mgr = new SessionManager(
-    store,
+    store!,
     adapters,
     (e) => {
       events.push(e)
@@ -127,19 +139,19 @@ async function host(adapter: Adapter) {
   return { held, mgr, svc, events, rpc: createRpcHandler(mgr, adapters, { agentVersions: svc }) }
 }
 
-const childIds = () => keeper.ops('spawn').length
+const childIds = () => keeper!.ops('spawn').length
 
-describe('moving a session to a newly installed CLI under the keeper (#297)', () => {
+describe.skipIf(keeperless)('moving a session to a newly installed CLI under the keeper (#297)', () => {
   it('stops the held child and spawns a new one from the installed CLI — nothing is re-attached', async () => {
     const adapter = new Adapter()
     const a = await host(adapter)
     await a.svc.check(true)
     const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
-    await until(() => keeper.alive('c1'))
+    await until(() => keeper!.alive('c1'))
     expect(a.mgr.listSessions().find((x) => x.id === s.id)!.agentVersion).toBe('2.1.282')
     // The spawn is tagged with the version it was started from, for the next host
-    expect(keeper.ops('spawn')[0]!.tag).toEqual({ kind: 'agent', tool: 'claude', sessionId: s.id, version: '2.1.282' })
+    expect(keeper!.ops('spawn')[0]!.tag).toEqual({ kind: 'agent', tool: 'claude', sessionId: s.id, version: '2.1.282' })
 
     // `claude` is updated in a terminal
     adapter.cli = '2.1.290'
@@ -147,12 +159,12 @@ describe('moving a session to a newly installed CLI under the keeper (#297)', ()
     expect(await a.rpc('agents.applyVersions', {})).toEqual({ restarted: [s.id], busy: [] })
 
     // The old child is gone, through the keeper: its stdin was closed and it was signalled
-    await until(() => !keeper.alive('c1'))
-    expect(keeper.ops('close_stdin').some((r) => r.id === 'c1')).toBe(true)
+    await until(() => !keeper!.alive('c1'))
+    expect(keeper!.ops('close_stdin').some((r) => r.id === 'c1')).toBe(true)
     // A second child was spawned for the session, from the installed CLI, and the session runs it
     expect(childIds()).toBe(2)
-    expect(keeper.ops('spawn')[1]!.tag).toEqual({ kind: 'agent', tool: 'claude', sessionId: s.id, version: '2.1.290' })
-    await until(() => keeper.alive('c2'))
+    expect(keeper!.ops('spawn')[1]!.tag).toEqual({ kind: 'agent', tool: 'claude', sessionId: s.id, version: '2.1.290' })
+    await until(() => keeper!.alive('c2'))
     expect(adapter.created.at(-1)!.opts.processSource?.adopt).toBeUndefined()
     expect(a.mgr.listSessions().find((x) => x.id === s.id)!.agentVersion).toBe('2.1.290')
     // The conversation says it moved
@@ -165,7 +177,7 @@ describe('moving a session to a newly installed CLI under the keeper (#297)', ()
     await a.svc.check(true)
     const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
-    await until(() => keeper.alive('c1'))
+    await until(() => keeper!.alive('c1'))
     // The host leaves for a restart; the keeper keeps the agent
     await a.mgr.detachAll()
     a.held.children.close()
@@ -175,12 +187,12 @@ describe('moving a session to a newly installed CLI under the keeper (#297)', ()
     expect(b.held.kept.agents.map((k) => k.version)).toEqual(['2.1.282'])
     await b.mgr.adoptKept(b.held.kept.agents)
     // Adopted, not restarted: the same child, which does not announce its version again
-    expect(keeper.alive('c1')).toBe(true)
+    expect(keeper!.alive('c1')).toBe(true)
     expect(b.mgr.listSessions().find((x) => x.id === s.id)!.agentVersion).toBe('2.1.282')
 
     await b.svc.check(true)
     expect((await b.svc.applyNow()).restarted).toEqual([s.id])
-    await until(() => !keeper.alive('c1'))
+    await until(() => !keeper!.alive('c1'))
     expect(childIds()).toBe(2)
     expect(b.mgr.listSessions().find((x) => x.id === s.id)!.agentVersion).toBe('2.1.290')
   })
@@ -191,19 +203,19 @@ describe('moving a session to a newly installed CLI under the keeper (#297)', ()
     await a.svc.check(true)
     const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
-    await until(() => keeper.alive('c1'))
+    await until(() => keeper!.alive('c1'))
     const agent = adapter.created.at(-1)!
     // A background shell is running in the agent
     agent.emit({ type: 'background_tasks', sessionId: s.id, live: [{ id: 't1', kind: 'shell', description: 'sleep 100', status: 'running' }] })
     adapter.cli = '2.1.290'
     await a.svc.check(true)
     expect(await a.svc.applyNow()).toEqual({ restarted: [], busy: [s.id] })
-    expect(keeper.alive('c1')).toBe(true)
+    expect(keeper!.alive('c1')).toBe(true)
     expect(childIds()).toBe(1)
 
     agent.emit({ type: 'background_tasks', sessionId: s.id, live: [], ended: [{ id: 't1', kind: 'shell', description: 'sleep 100', status: 'completed' }] })
     // With the setting on (the default) it moves by itself once quiet (quietMs is 0 here)
     await until(() => childIds() === 2)
-    await until(() => !keeper.alive('c1'))
+    await until(() => !keeper!.alive('c1'))
   })
 })
