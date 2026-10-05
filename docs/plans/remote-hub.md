@@ -1,7 +1,6 @@
 # Remote mode as linked hosts: design draft
 
-> **Status: draft for the owner's review (2026-10-05). Nothing here is decided until it is
-> recorded on #82.** It replaces the "multi-host client" shape decided on 2026-10-03
+> **Status: decided by the owner on 2026-10-05 (§9), recorded on #82.** It replaces the "multi-host client" shape decided on 2026-10-03
 > (decision 1 on #82) with linked hosts, after the owner asked on 2026-10-05 why the UI should
 > hold several hosts at all.
 
@@ -57,17 +56,22 @@ machine it runs on.
 1. **A host only exports its own data.** It never re-exports what it sees from another host. Each
    pair is a direct link; there is no relaying, so there are no loops and no duplicates however
    the machines are connected.
-2. **Permissions per direction.** By default the side with the UI (the hub) controls the other.
-   The reverse direction (a remote host asking the Mac for something) is **off**, and is turned on
-   per pair with consent shown **on the machine being asked**, the same model as #371's
-   project-to-project consent. A compromised server must not be able to reach the Mac by default.
+2. **Permissions per direction, decided by the side that connects** (owner, 2026-10-05). Being
+   able to open an SSH connection to a machine already shows the person owns it, so the consent is
+   given **once, on the connecting side**, when the link is added. The connecting side controls the
+   other. The reverse direction (the remote host asking the connecting machine for something) is
+   **off by default**, and only the connecting side can turn it on for that link. A compromised
+   server must not be able to reach the Mac by default.
 3. **Machine-qualified ids.** Remote ids are shown to the hub's UI as `<machine>.<id>`. The
    protocol's id pattern already allows `.` after the first character, and every parser in the UI
    splits on `/` or `:`, so the prefix passes unchanged. Per-host counters (`term-N`, `run-N`,
    approval rule integers, pids) need the prefix too.
-4. **Items with no project stay home.** A remote host's orchestrator, coordinators, user-folder
-   apps and their agents are not shown on the hub. The hub has one orchestrator and its own
-   user-folder apps.
+4. **One orchestrator, apps from every machine.** A remote host's orchestrator and coordinators are
+   not shown on the hub; the hub has one orchestrator. A remote host's **user-folder apps are
+   shown** (owner, 2026-10-05), grouped by machine and qualified by it (`_user/<appId>` collides
+   across machines otherwise). They run on their own machine; their views need the proxy of
+   phase 2, so in phase 1 they are listed and their tools work, and their views say they open in a
+   later version.
 
 ## 4. Versions: align before connecting (owner, 2026-10-05)
 
@@ -160,16 +164,15 @@ wakes sessions that were live. So the hub must:
 | 4 | Where should the ssh process live? | Keeper child vs `ControlPersist` across a blue-green hub swap: does the link survive, how long to reconnect |
 | 5 | How does a version mismatch behave? | Two builds with different `protocolVersion`; what the handshake reports |
 
-## 9. Questions for the owner
+## 9. Decisions (owner, 2026-10-05)
 
-1. **Linked hosts (C) instead of the UI holding several hosts (B)?** Recommended: yes.
-2. **Remote orchestrators and user-folder apps hidden on the hub?** Recommended: yes (§3.4).
-3. **Reverse direction off by default, per-pair consent on the asked machine?** Recommended: yes.
-4. **Any device can be the hub** (the laptop connecting to the same server)? Recommended: yes; it
-   falls out of symmetric peers.
-5. **Version alignment** as in §4. Decided by the owner on 2026-10-05; the details in §4 need a
-   yes.
-6. **Phase order:** is phase 3 (remote install and update) needed before phase 2, given §4 needs
-   remote updates? Recommended: phase 1 with hub-side updates only and a manual `npm i -g` on the
-   remote, then phase 3, then phase 2.
-7. **Where the ssh process lives:** decide after probe 4.
+1. **Linked hosts (C)** instead of the UI holding several hosts (B). Replaces decision 1 of
+   2026-10-03 on #82.
+2. **The remote orchestrator is hidden; remote user-folder apps are shown** (§3.4).
+3. **Consent on the connecting side; the reverse direction off by default**, turned on only by the
+   connecting side (§3.2).
+4. **Any device can be the hub.**
+5. **Versions are aligned before connecting**, asking the person, as in §4.
+6. **Phase order: 1 → 3 → 2.** Phase 1 updates only the hub side and expects a manual
+   `npm i -g centralu` on the remote; phase 3 (install and update over ssh) comes before phase 2.
+7. **Where the ssh process lives** is decided by probe 4.
