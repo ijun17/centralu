@@ -254,6 +254,8 @@ export const BUILDER_INSTRUCTIONS = [
    * it still works, it only stops matching the person's theme.
    */
   "Style the screen with the theme Centralu sends (the MCP Apps style variables and Centralu's own, applied by the template's applyTheme), each with a fallback, instead of fixed colours, so it follows the person's light or dark theme. Keep the template's scrollbar stylesheet. Use --color-text-warning only for what waits on the person.",
+  /* Narrow first (#306, option B): a panel on the grid is about 360-480px wide, and Centralu does not enlarge it. */
+  'Build the screen to work in a narrow grid panel (about 360px) first and spread out when there is room: no wide fixed widths, rows that wrap, side-by-side parts stacked below about 520px.',
 ].join('\n')
 
 /** The guide given to the manager — worktree-management context (including the #69 design's three-tier rule) */

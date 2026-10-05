@@ -385,13 +385,37 @@ accent; [themes.md](themes.md)), so an app can look like Centralu without knowin
 
 **What the template does, and what an app should do** (recommended, never checked; owner
 decision 7): the template's page applies everything it receives on `<html>` (the colour scheme, the
-standard variables and Centralu's own), on connect and on every change, and its styles read the
-variables with Centralu's dark values as fallbacks. It also ships **Centralu's scrollbar**: a small
+standard variables and Centralu's own), on connect and on every change. Its styles read only the
+variables, type and shape as well as colour (sizes, line heights, fonts, weights, radii, the border
+width), through one `:root` block at the top that names each with Centralu's dark value as its
+fallback, for the moment before the host context arrives; nothing below that block has a colour or
+size of its own. Spacing has no variable in the standard and stays literal. It also ships **Centralu's scrollbar**: a small
 stylesheet that draws `::-webkit-scrollbar` from the `--centralu-scrollbar-*` variables the way
 Centralu draws its own, with `scrollbar-color` and `scrollbar-width` only where `::-webkit-scrollbar`
 does not exist (where it does, Chromium lets `scrollbar-color` switch it off). The project-board app
-uses the same pieces. An app built for another host that applies the standard variables gets
-Centralu's colours too, and draws its own scrollbars.
+uses the same pieces, and reads its type and shape from the theme the same way, so the font, line
+height and text size in Settings → Appearance reshape it as they reshape Centralu. An app built for
+another host that applies the standard variables gets Centralu's colours too, and draws its own
+scrollbars.
+
+### 6.6 Narrow first (#306)
+
+A view is often narrow: a grid or project-screen panel is one cell, about 360–480px wide on a laptop
+screen, and the inline view under a tool card is the conversation's width. Centralu does not enlarge
+a panel or let an app ask for a bigger one (#306 decided against both for now); **an app is built to
+work at a panel's width first and to spread out when there is room.** Recommended, never checked:
+
+- Nothing has a fixed width wider than about 320px; rows of controls wrap (`flex-wrap`) instead of
+  overflowing, and long text wraps (`overflow-wrap: anywhere`).
+- Below about 520px, a layout of side-by-side parts becomes one column that scrolls as a page
+  (a media query in the view's own document measures the frame, so it is the panel's width).
+- What waits on the person stays first in the narrow order.
+- Check it at 360px as well as full width.
+
+The template's page follows this (its buttons wrap, its margin shrinks on a narrow frame), and the
+project-board app is the worked example: its status columns sit side by side when there is room and
+stack under 520px, with the decision column first, so every card reads in full in a grid panel
+(`e2e/fixtures/app-theme.ts` checks it at about 380px).
 
 ## 7. What is standard and what is Centralu's
 

@@ -85,12 +85,20 @@ when they switch. The template's `ui/index.html` already uses it; keep these whe
   `--font-sans`, `--font-text-md-size`, `--border-radius-md`, …) and Centralu's own
   (`--centralu-signal`, `--centralu-scrollbar-*`). It reads `app.getHostContext()`, because a change
   notification carries only what changed.
-- **Style with those variables**, each with a fallback (`color: var(--color-text-primary, #e9e9e9)`),
-  instead of fixed colours. Then the screen follows light and dark and sits on Centralu's background
-  (keep `background: transparent` on the page). The roles: `primary` / `secondary` / `tertiary` for
+- **Style with those variables only** — colours, and type and shape too (`--font-text-md-size`,
+  `--font-text-md-line-height`, `--font-sans`, `--font-weight-semibold`, `--border-radius-md`,
+  `--border-width-regular`, …) — instead of fixed values. Give each its fallback once, in the
+  `:root` block at the top of the stylesheet (Centralu's dark values, for the moment before the theme
+  arrives), and use those names everywhere below. Then the screen follows light and dark, the
+  person's font, line height and text size, and sits on Centralu's background (keep
+  `background: transparent` on the page). Spacing has no variable; keep it literal. The roles: `primary` / `secondary` / `tertiary` for
   text and surfaces in falling order; `--color-text-danger` for errors; `--color-text-warning` (the
   same as `--centralu-signal`) only for what waits on the person — it is Centralu's signal colour,
   the strongest thing on screen.
+- **Narrow first.** The screen is often a grid panel about 360–480px wide, or the inline view under
+  a tool card. Make it work at that width first: no fixed width over about 320px, rows that wrap
+  (`flex-wrap`), and below about 520px side-by-side parts stacked into one column (a media query in
+  this page measures the panel). Keep what waits on the person first. Check it at 360px.
 - **The "Centralu's scrollbar" block** in the stylesheet. It draws scrollbars the way Centralu
   does, from the theme. Do not add `scrollbar-color` or `scrollbar-width` outside its `@supports`
   guard: in Chromium they switch the styled scrollbar off.
