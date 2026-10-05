@@ -184,7 +184,7 @@ export async function resolveExisting(root: string, rel: string): Promise<string
    * (#121), but a safeguard that cannot be observed is a different matter.
    */
   safeJoin(rootReal, relative(rootReal, canonical))
-  const current = await lstat(canonical)
+  const current = await lstat(canonical, { bigint: true })
   if (current.isSymbolicLink() || current.dev !== expected.dev || current.ino !== expected.ino) {
     throw new UnsafePathError('Path changed while resolving the file')
   }
@@ -271,30 +271,32 @@ export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
 
 export async function readTextFile(root: string, rel: string): Promise<FsFile> {
   const file = await resolveExisting(root, rel)
-  const pathInfo = await stat(file)
+  // bigint: on NTFS two different files' ids can be equal as Numbers (path-guard.ts, #368)
+  const pathInfo = await stat(file, { bigint: true })
   if (!pathInfo.isFile()) fail('Path is not a regular file')
 
   const handle = await open(file, READ_TEXT_FLAGS)
   try {
-    const info = await handle.stat()
-    if (!info.isFile()) fail('Path is not a regular file')
-    if (info.dev !== pathInfo.dev || info.ino !== pathInfo.ino) {
+    const opened = await handle.stat({ bigint: true })
+    if (!opened.isFile()) fail('Path is not a regular file')
+    if (opened.dev !== pathInfo.dev || opened.ino !== pathInfo.ino) {
       throw new UnsafePathError('Path changed while opening the file')
     }
+    const size = Number(opened.size)
 
     const mime = imageMime(rel)
-    if (mime && mime !== 'image/svg+xml' && info.size > MAX_IMAGE_PREVIEW) {
+    if (mime && mime !== 'image/svg+xml' && size > MAX_IMAGE_PREVIEW) {
       return {
         text: '',
         truncated: false,
         binary: true,
-        bytes: info.size,
-        previewError: `Image is too large to preview (${(info.size / 1_000_000).toFixed(1)}MB; limit is ${MAX_IMAGE_PREVIEW / 1_000_000}MB)`,
+        bytes: size,
+        previewError: `Image is too large to preview (${(size / 1_000_000).toFixed(1)}MB; limit is ${MAX_IMAGE_PREVIEW / 1_000_000}MB)`,
       }
     }
 
     const readLimit = mime && mime !== 'image/svg+xml' ? MAX_IMAGE_PREVIEW : MAX_TEXT
-    const buf = Buffer.allocUnsafe(Math.min(info.size, readLimit) + 1)
+    const buf = Buffer.allocUnsafe(Math.min(size, readLimit) + 1)
     let total = 0
     while (total < buf.length) {
       const { bytesRead } = await handle.read(buf, total, buf.length - total, total)
@@ -316,23 +318,23 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
           text: (truncated ? bytes.subarray(0, MAX_TEXT) : bytes).toString('utf8'),
           truncated,
           binary: false,
-          bytes: info.size,
+          bytes: size,
           image: { mime, data: bytes.toString('base64') },
         }
       }
-      return { text: '', truncated: false, binary: true, bytes: info.size, image: { mime, data: bytes.toString('base64') } }
+      return { text: '', truncated: false, binary: true, bytes: size, image: { mime, data: bytes.toString('base64') } }
     }
 
     // A null byte anywhere is treated as binary (the same heuristic git uses)
     const head = bytes.subarray(0, 8000)
-    if (head.includes(0)) return { text: '', truncated: false, binary: true, bytes: info.size }
+    if (head.includes(0)) return { text: '', truncated: false, binary: true, bytes: size }
 
     const truncated = total > MAX_TEXT
     return {
       text: (truncated ? bytes.subarray(0, MAX_TEXT) : bytes).toString('utf8'),
       truncated,
       binary: false,
-      bytes: info.size,
+      bytes: size,
     }
   } finally {
     await handle.close()
