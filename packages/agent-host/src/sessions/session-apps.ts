@@ -119,6 +119,24 @@ const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 type Hit = { ref: AppRef; server: string }
 
 /**
+ * Apps a session attached **itself**, outside decision 4's scope (#371 part A, `attach_app`): a
+ * project app another project shares, or a user-folder app attached to a project's session. The
+ * hub does not keep them or judge them; it asks this port (sessions/app-access.ts) every time it
+ * counts a session's apps, so the answer is never a copy that outlives the person's choice.
+ *
+ *   attached   what the session attached, with the server name chosen when it did (stable for the
+ *              session, so a Codex thread and a later call agree on it)
+ *   allowed    whether the session may still use it: the app still shared, the pair of projects still
+ *              allowed. Asked again on every count and therefore on every call (`find`), the same
+ *              way trust is: turning sharing off takes the tools away from a Claude session at once,
+ *              and a Codex thread that still holds the names is refused at the call
+ */
+export type OnDemandApps = {
+  attached(sessionId: string): readonly Hit[]
+  allowed(session: AppSessionKey, app: ExternalAppInfo): boolean
+}
+
+/**
  * Decision 4's scope, apart from the app's state: whether this session is ever given this app. The
  * orchestrator gets the user-folder apps, a project's sessions that project's apps, and a building
  * session its own app as well (see `refsFor`).
@@ -146,7 +164,7 @@ export class SessionAppsHub {
 
   constructor(
     readonly rt: ExternalApps,
-    readonly opts: { toolListWaitMs?: number; callJoinWaitMs?: number } = {},
+    readonly opts: { toolListWaitMs?: number; callJoinWaitMs?: number; onDemand?: OnDemandApps } = {},
   ) {
     this.stopListening = rt.onAppsChanged(() => {
       for (const a of [...this.live.values()]) a.recheck()
@@ -233,6 +251,15 @@ export class SessionAppsHub {
     }
   }
 
+  /**
+   * A session attached or detached an app itself (#371 part A) — recount what its live handle sees.
+   * Claude follows at once (`setMcpServers`); a Codex thread keeps what it started with, and the
+   * caller restarts it when the turn ends.
+   */
+  sessionAppsChanged(sessionId: string): void {
+    this.live.get(sessionId)?.recheck()
+  }
+
   /** @internal A closed attachment vacates its spot — does not touch it if a new handle has already taken over */
   release(a: Attachment): void {
     if (this.live.get(a.session.id) === a) this.live.delete(a.session.id)
@@ -255,12 +282,26 @@ export class SessionAppsHub {
    * keep answering "yes" even after trust is revoked.
    */
   refsFor(session: AppSessionKey): Hit[] {
-    return this.rt
-      .list()
-      .filter((a) => !UNUSABLE.has(a.status))
+    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status))
+    const hits = usable
       .filter((a) => givesApp(session, a))
       .map((a) => ({ ref: { projectId: a.projectId, appId: a.appId }, server: appMcpServerName(a.appId) }))
       .sort((x, y) => x.server.localeCompare(y.server))
+    /*
+     * Then what the session attached itself (#371 part A), after decision 4's apps and in the order it
+     * attached them. One the rule already gives is not added twice, and one whose server name is taken
+     * (an app that later appeared in the session's own project under the same name) steps back: the
+     * session's own app keeps its name, which every earlier turn of the conversation used.
+     */
+    const taken = new Set(hits.map((h) => h.server))
+    for (const x of this.opts.onDemand?.attached(session.id) ?? []) {
+      const app = usable.find((a) => a.appId === x.ref.appId && a.projectId === x.ref.projectId)
+      if (!app || taken.has(x.server) || hits.some((h) => sameRef(h.ref, x.ref))) continue
+      if (!this.opts.onDemand!.allowed(session, app)) continue
+      hits.push({ ref: x.ref, server: x.server })
+      taken.add(x.server)
+    }
+    return hits
   }
 
   /**
@@ -275,10 +316,14 @@ export class SessionAppsHub {
   reach(session: AppSessionKey | null, ref: AppRef, live?: Pick<SessionHandle, 'appAttachment'>): AppReach {
     const app = this.rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
     if (!app) return { reachable: false, reason: 'unavailable' }
-    if (!session || !givesApp(session, app)) return { reachable: false, reason: 'other-project' }
+    // An app the session attached itself (#371 part A) counts like one the rule gives, under the name it was given
+    const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
+    const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
+    if (!session || (!givesApp(session, app) && !onDemand)) return { reachable: false, reason: 'other-project' }
     if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
     if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
-    const attached = live?.appAttachment?.(appMcpServerName(app.appId)) ?? 'attached'
+    const server = givesApp(session, app) ? appMcpServerName(app.appId) : own!.server
+    const attached = live?.appAttachment?.(server) ?? 'attached'
     if (attached === 'restart') return { reachable: false, reason: 'restart' }
     if (attached === 'failed') return { reachable: false, reason: 'bridge-failed' }
     return { reachable: true }
@@ -614,6 +659,10 @@ class Attachment implements SessionApps {
 }
 
 type RuntimeTool = Awaited<ReturnType<ExternalApps['tools']>>[number]
+
+function sameRef(a: AppRef, b: AppRef): boolean {
+  return a.appId === b.appId && a.projectId === b.projectId
+}
 
 /**
  * The comparison key for arguments — JSON that ignores key order. The arguments the adapter sees

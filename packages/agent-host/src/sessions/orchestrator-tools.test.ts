@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import {
+  APP_ACCESS_BUDGET_CHARS,
+  APP_ACCESS_TOOLS,
   DELEGATE_BUDGET_CHARS,
   DELEGATE_TOOLS,
   ORCHESTRATOR_MCP_NAME,
@@ -91,8 +93,9 @@ function sentChars(defs: readonly { name: string; description: string; schema: z
  * and how big it is are pinned here.
  */
 describe('the reader set', () => {
-  it('holds the reading tools and ask_project — nothing of the orchestrator\'s that sends, creates, changes or proposes', () => {
-    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['read_session', 'recall', 'app_guide', 'ask_project'])
+  it('holds the reading tools, ask_project and the app-access set — nothing of the orchestrator\'s that sends, creates, changes or proposes', () => {
+    // The app-access set (#371 part A) changes only the calling session's own tools
+    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['read_session', 'recall', 'app_guide', 'ask_project', 'find_apps', 'attach_app', 'detach_app'])
     for (const t of ORCHESTRATOR_TOOLS) {
       expect(profileAllows('reader', t.name), t.name).toBe(['read_session', 'recall', 'app_guide'].includes(t.name))
     }
@@ -106,6 +109,17 @@ describe('the reader set', () => {
    */
   it(`stays within ${READER_BUDGET_CHARS} characters`, () => {
     expect(sentChars(READER_TOOLS) + (instructionsFor('reader') ?? '').length).toBeLessThanOrEqual(READER_BUDGET_CHARS)
+  })
+
+  /*
+   * The app-access set (#371 part A) rides with the reader set but has its own ceiling: the two are
+   * different decisions about every session's context, and one growing must not hide in the other's
+   * headroom.
+   */
+  it(`keeps the app-access set within ${APP_ACCESS_BUDGET_CHARS} characters, beside the reader set`, () => {
+    expect(sentChars(APP_ACCESS_TOOLS)).toBeLessThanOrEqual(APP_ACCESS_BUDGET_CHARS)
+    // Everything the reader seat is sent is in one counted set or another — nothing rides uncounted
+    expect(orchestratorToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name).sort())
   })
 
   it('lists with read_session and no id — only for the reader; the orchestrator still has to name a session', async () => {

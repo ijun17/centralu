@@ -25,7 +25,16 @@ describe('the Claude in-process server', () => {
    */
   it('loads the reader set except app_guide, and ask_project with it, and sends it no instructions', () => {
     expect(registered('reader')).toEqual({
-      tools: { read_session: 'loaded', recall: 'loaded', app_guide: 'deferred', ask_project: 'loaded' },
+      tools: {
+        read_session: 'loaded',
+        recall: 'loaded',
+        app_guide: 'deferred',
+        ask_project: 'loaded',
+        // Another project's apps, on demand (#371 part A): found through tool search, each result naming the next
+        find_apps: 'deferred',
+        attach_app: 'deferred',
+        detach_app: 'deferred',
+      },
       instructions: undefined,
     })
   })

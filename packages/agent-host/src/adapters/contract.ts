@@ -239,6 +239,22 @@ export type OrchestratorTools = {
     builder?: { sessionId: string; name: string }
     builderError?: string
   }>
+  /**
+   * Another project's app tools, on demand (#371 part A, sessions/app-access.ts) — for a project's
+   * ordinary session. `findApps` lists what it could attach (apps other projects share, and the
+   * person's own user-folder apps), `attachApp` attaches one (asking the person once per pair of
+   * projects for another project's app), `detachApp` takes it away again. `when` says when the agent
+   * has the change: `now` (Claude) or `next_turn` (a Codex thread restarts once the turn ends).
+   * Every other seat answers with a refusal.
+   */
+  findApps(query?: string): Promise<
+    | { ok: true; apps: { ref: string; name: string; project: string | null; description: string; tools: string[] | null }[] }
+    | { ok: false; error: string }
+  >
+  attachApp(app: string): Promise<
+    { ok: true; server: string; tools: string[]; when: 'now' | 'next_turn'; already?: boolean } | { ok: false; error: string }
+  >
+  detachApp(app: string): Promise<{ ok: true; server: string; when: 'now' | 'next_turn' } | { ok: false; error: string }>
 }
 
 /**

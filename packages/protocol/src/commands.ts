@@ -1482,6 +1482,17 @@ export const RpcMethods = {
     }),
   },
   /**
+   * Shares a project app with the person's other projects, or stops sharing it (#371 part A). Off by
+   * default: a project app is that project's own. A shared app can be found and attached by a session
+   * in another project (`find_apps`, `attach_app`), after the person allows that pair of projects once.
+   * Turning it off detaches it from every session that attached it. A user-folder app is the person's
+   * own and available everywhere already, so it has no such switch (refused).
+   */
+  'apps.setShared': {
+    params: z.object({ appId: AppId, projectId: ProjectId, shared: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * Sets, changes (`value`) or removes (`null`) one of an app's secret values (M4 E, the secrets
    * field). The value lives only in a 0600 file on this machine — never in the response, the
    * list, logs or run history (the list only says whether each name is present or not,

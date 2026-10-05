@@ -393,6 +393,12 @@ export function createRpcHandler(
       requireExternalApps().updateSecret({ appId, projectId }, name, value)
       return { ok: true as const }
     },
+    'apps.setShared': async (p) => {
+      // Sharing a project app with the person's other projects (#371 part A) — the manager stores it and recounts sessions
+      const { appId, projectId, shared } = RpcMethods['apps.setShared'].params.parse(p)
+      mgr.setAppShared({ projectId, appId }, shared)
+      return { ok: true as const }
+    },
     // Import (M4 E-3) — prepare (waiting room) → the person looks it over → admit (disabled at first,
     // with a review step if requested). All the judgment calls are made by the runtime's handoff
     'apps.importPrepare': async (p) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { storeRunLedger } from '../app-run-ledger.js'
-import { ExternalApps, type RuntimeTiming } from '../apps/external/runtime.js'
+import { ExternalApps, type ExternalAppsDeps, type RuntimeTiming } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
 
 /**
@@ -49,7 +49,7 @@ export type AttachWorld = {
   dispose(): Promise<void>
 }
 
-export function attachWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}): AttachWorld {
+export function attachWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}, deps: Pick<ExternalAppsDeps, 'shared'> = {}): AttachWorld {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-attach-')))
   const dataRoot = join(root, 'data')
   const roots = { p1: join(root, 'p1'), p2: join(root, 'p2') }
@@ -67,6 +67,7 @@ export function attachWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}):
     watchFlushMs: 40,
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, ...timing },
     runs: storeRunLedger(store),
+    ...deps,
   })
   rt.refresh()
   const world: AttachWorld = {

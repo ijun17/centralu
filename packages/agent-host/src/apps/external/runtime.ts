@@ -234,6 +234,13 @@ export type ExternalAppsDeps = {
   builderBusy?: (ref: AppRef) => boolean
   /** Handover's (E) limits and download — reduced and replaced with a fake by tests. Uses the product's values if absent */
   handover?: HandoverOptions
+  /**
+   * Whether the person shares this project app with their other projects (#371 part A) — read from
+   * the store on every `list()`, like trust. Absent means nothing is shared. The runtime only reports
+   * it (`ExternalAppInfo.shared`); who may attach a shared app is decided by the session side
+   * (sessions/app-access.ts), and every call is checked there again.
+   */
+  shared?: (ref: AppRef) => boolean
 }
 
 type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
@@ -691,6 +698,15 @@ export class ExternalApps {
   onAppsChanged(listener: () => void): () => void {
     this.appsListeners.add(listener)
     return () => void this.appsListeners.delete(listener)
+  }
+
+  /**
+   * The person turned an app's sharing on or off (#371 part A). Nothing about the app itself changed,
+   * so nothing restarts: the list is announced again, and the session side recounts which apps are
+   * attached (a session that attached the app from another project loses it when sharing goes off).
+   */
+  sharingChanged(): void {
+    this.appsChanged()
   }
 
   private appsChanged(): void {
@@ -1919,6 +1935,8 @@ export class ExternalApps {
       ...(m?.view?.span ? { span: m.view.span } : {}),
       ...this.secretSlots(e),
       ...this.importMark(e),
+      // A user-folder app is available to every project already, so only a project app carries the mark (#371)
+      ...(e.ref.projectId !== null && this.deps.shared?.(e.ref) ? { shared: true } : {}),
     }
   }
 

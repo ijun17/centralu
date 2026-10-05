@@ -5,6 +5,7 @@ import { proposedMcpServerNameError, profileAllows, runOrchestratorTool } from '
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { SessionAppsHub } from './session-apps.js'
+import { AppAccess, writeShared } from './app-access.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, CapabilityQuestion, ExternalApps, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, underGrant } from './ask-project.js'
@@ -449,6 +450,14 @@ export class SessionManager {
    * service.
    */
   private appsHub: SessionAppsHub | null = null
+  /** Another project's apps, attached on demand (#371 part A) — null exactly when `appsHub` is */
+  private appAccess: AppAccess | null = null
+  /**
+   * Codex sessions whose attached apps changed mid-turn (#371 part A) — restarted through resume when
+   * the turn ends, beside `restartAfterTurn`'s settings drift: a Codex thread keeps the MCP servers it
+   * started with, so the restart is what gives it (or takes away) an app it attached or detached.
+   */
+  private appsRestartAfterTurn = new Set<string>()
   /**
    * The installed version of a tool as last read (#297, agent-versions.ts), or null. A process started now runs it,
    * so a session carries it as its `agentVersion` until the process reports its own; it is also what the keeper's
@@ -2813,8 +2822,10 @@ export class SessionManager {
     if (e.type === 'approval_resolved' && e.sessionId) this.raiseHostAsks(e.sessionId)
     // Applies a setting that changed mid-turn now (#164) — if it was reverted in between there is no drift,
     // so nothing happens
-    if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId) && this.settingsDrifted(e.sessionId) && this.handles.has(e.sessionId)) {
-      void this.restartSession(e.sessionId).catch(() => {})
+    if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId)) {
+      // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
+      const apps = this.appsRestartAfterTurn.delete(e.sessionId)
+      if ((apps || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) void this.restartSession(e.sessionId).catch(() => {})
     }
   }
 
@@ -4293,8 +4304,9 @@ export class SessionManager {
    * process.
    */
   async restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    // Applying a deferred settings change (#164) is also done by this same restart
+    // Applying a deferred settings change (#164) is also done by this same restart, and so is an app set's (#371)
     this.restartAfterTurn.delete(sessionId)
+    this.appsRestartAfterTurn.delete(sessionId)
     const h = this.handles.get(sessionId)
     if (h) {
       await h.dispose().catch(() => {})
@@ -4347,6 +4359,10 @@ export class SessionManager {
       proposeSkill: refuse,
       checkApp: async () => ({ ok: false, text: error }),
       createApp: refuse,
+      // Another project's apps, on demand (#371 part A) — the one thing this seat may change, and only for itself
+      findApps: async (query) => (off() ? { ok: false, error: offError } : this.requireAppAccess().find(sessionId, query)),
+      attachApp: async (app) => (off() ? { ok: false, error: offError } : this.requireAppAccess().attach(sessionId, app)),
+      detachApp: async (app) => (off() ? { ok: false, error: offError } : this.requireAppAccess().detach(sessionId, app)),
     }
   }
 
@@ -4776,6 +4792,11 @@ export class SessionManager {
           return { ok: false, error: (e as Error).message }
         }
       },
+
+      // On-demand app attachment is a project session's (#371 part A, readerToolsFor) — no profile here exposes it
+      findApps: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
+      attachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
+      detachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     }
   }
 
@@ -5031,7 +5052,10 @@ export class SessionManager {
 
   /** Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish */
   revokeProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
-    if (this.store.forgetProjectConsent(fromProjectId, toProjectId, kind)) this.emit({ type: 'project_consents_changed' })
+    if (!this.store.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
+    this.emit({ type: 'project_consents_changed' })
+    // Apps attached under that "always" step back now (#371 part A): the sessions recount, and the app is gone from them
+    if (kind === 'apps') this.appsHub?.rt.sharingChanged()
   }
 
   /** Whether a session may read this path because another project handed it back (#371, `CreateSessionOpts.mayRead`) */
@@ -5883,9 +5907,33 @@ export class SessionManager {
     })
   }
 
-  useExternalApps(rt: ExternalApps, opts?: ConstructorParameters<typeof SessionAppsHub>[1]): void {
+  useExternalApps(rt: ExternalApps, opts?: Omit<NonNullable<ConstructorParameters<typeof SessionAppsHub>[1]>, 'onDemand'>): void {
+    this.appAccess?.dispose()
     this.appsHub?.dispose()
-    this.appsHub = new SessionAppsHub(rt, opts)
+    /*
+     * What a session attached itself (#371 part A) is counted by the hub on every count, through this
+     * port — the hub keeps no copy, so the person's sharing switch and consent are read fresh each time.
+     */
+    this.appsHub = new SessionAppsHub(rt, {
+      ...opts,
+      onDemand: {
+        attached: (id) => this.appAccess?.attached(id) ?? [],
+        allowed: (session, app) => this.appAccess?.allowed(session, app) ?? false,
+      },
+    })
+    this.appAccess = new AppAccess({
+      hub: this.appsHub,
+      store: this.store,
+      session: (id) => {
+        const m = this.meta.get(id)
+        if (!m || this.isAppAgentSession(m)) return null
+        return { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.builderRefOf(m) }
+      },
+      projects: () => this.store.listProjects().map((p) => ({ id: p.id, name: p.name, trusted: p.trusted })),
+      ensureAccess: (id, to, what, signal) => this.ensureProjectAccess(id, to, 'apps', what, signal),
+      attachedChanged: (id) => this.sessionAppsChanged(id),
+      ...(opts?.toolListWaitMs !== undefined ? { toolListWaitMs: opts.toolListWaitMs } : {}),
+    })
     /*
      * Progress text sent by a session's app call (M4 D) — a line like "waiting on the person to
      * approve in session X" is attached as running output to that call's tool card
@@ -5943,6 +5991,47 @@ export class SessionManager {
   recordAppView(e: Extract<NormalizedEvent, { type: 'app_view' }>): void {
     if (!this.meta.has(e.sessionId)) return
     this.onEvent(e)
+  }
+
+  /**
+   * A session attached or detached an app itself (#371 part A). Claude follows its set live, so the
+   * tools are there now. A Codex thread keeps the servers it started with (`appAttachment`), so it is
+   * restarted through resume: when the turn ends if it is in one (the tool call that asked is), at once
+   * otherwise. Every call is checked against the current set either way, so a detached app's name
+   * that lingers in the thread until then is refused.
+   */
+  private sessionAppsChanged(sessionId: string): 'now' | 'next_turn' {
+    this.appsHub?.sessionAppsChanged(sessionId)
+    const handle = this.handles.get(sessionId)
+    if (!handle) return 'next_turn'
+    if (!handle.appAttachment) return 'now'
+    const m = this.meta.get(sessionId)
+    if (m && inTurn(m.state)) {
+      this.restartAfterTurn.add(sessionId)
+      this.appsRestartAfterTurn.add(sessionId)
+    } else {
+      void this.restartSession(sessionId).catch(() => {})
+    }
+    return 'next_turn'
+  }
+
+  /**
+   * Shares a project app with the person's other projects, or stops (#371 part A, `apps.setShared`).
+   * Stored beside the person's other settings; the runtime reads it into the app list, and turning it
+   * off detaches the app from every session that attached it (the hub's count asks again).
+   */
+  setAppShared(ref: { projectId: string; appId: string }, shared: boolean): void {
+    const rt = this.requireAppsHub().rt
+    if (!rt.list().some((a) => a.projectId === ref.projectId && a.appId === ref.appId)) {
+      throw Object.assign(new Error(`No such app: ${ref.appId}`), { code: 'internal' })
+    }
+    writeShared(this.store, ref, shared)
+    rt.sharingChanged()
+  }
+
+  private requireAppAccess(): AppAccess {
+    if (!this.appAccess) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    return this.appAccess
   }
 
   private requireAppsHub(): SessionAppsHub {
@@ -6337,6 +6426,7 @@ export class SessionManager {
     this.hostAsks.clear()
     for (const q of [...this.appQuestions.values()]) q.resolve(null)
     this.appQuestions.clear()
+    this.appAccess?.dispose()
     this.appsHub?.dispose()
     // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
     // Written, not closed: the supervisor may kill the host before the processes are down
@@ -6374,6 +6464,7 @@ export class SessionManager {
     this.hostAsks.clear()
     for (const q of [...this.appQuestions.values()]) q.resolve(null)
     this.appQuestions.clear()
+    this.appAccess?.dispose()
     this.appsHub?.dispose()
     await Promise.allSettled([...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())))
     for (const [id, run] of this.streams) this.flushStream(id, run)

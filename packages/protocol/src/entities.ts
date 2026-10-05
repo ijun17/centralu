@@ -321,6 +321,12 @@ export const ExternalAppInfo = z.object({
    * their setting for the app both come first, and an app without one stands at 1 × 1 as before.
    */
   span: GridSpan.optional(),
+  /**
+   * A project app the person shares with their other projects (#371 part A, `apps.setShared`) — true
+   * only when on. Absent means not shared, and a user-folder app never carries it (it is available to
+   * every project already). An older host never sends it, which reads as off: the safe default.
+   */
+  shared: z.boolean().optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 

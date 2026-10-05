@@ -25,7 +25,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { OrchestratorTools } from '../src/adapters/contract.js'
 import { orchestratorMcp } from '../src/adapters/claude/orchestrator-mcp.js'
-import { DELEGATE_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, runOrchestratorTool } from '../src/sessions/orchestrator-tools.js'
+import { APP_ACCESS_TOOLS, DELEGATE_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, runOrchestratorTool } from '../src/sessions/orchestrator-tools.js'
 
 const claude = execFileSync('which', ['claude']).toString().trim()
 const cwd = mkdtempSync(join(tmpdir(), 'cc-reader-'))
@@ -92,6 +92,11 @@ const VARIANTS: Record<string, () => Record<string, unknown>> = {
   '#320 set, before ask_project': () => ({ centralu: server(READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t) })), false) }),
   'ask_project deferred': () => ({
     centralu: server([...READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t) })), ...DELEGATE_TOOLS.map((t) => ({ ...t, load: false }))], false),
+  }),
+  // #371 part A: the shipped server carries the app-access set too (deferred); these two rows say what it adds
+  'shipped before #371': () => ({ centralu: server(READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t && t.deferred) })), false) }),
+  'app-access set loaded (Codex)': () => ({
+    centralu: server([...READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t && t.deferred) })), ...APP_ACCESS_TOOLS.map((t) => ({ ...t, load: true }))], false),
   }),
 }
 

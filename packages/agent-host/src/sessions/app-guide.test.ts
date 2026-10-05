@@ -3,6 +3,7 @@ import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { APP_GUIDE_TOPICS } from './app-guide.js'
 import {
+  APP_ACCESS_TOOLS,
   MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
@@ -42,8 +43,8 @@ async function wholeGuide(): Promise<string> {
   return parts.join('\n')
 }
 
-/** Every tool name in the registry */
-const KNOWN = new Set<string>([...ORCHESTRATOR_TOOLS.map((t) => t.name), ...DELEGATE_TOOLS.map((t) => t.name)])
+/** Every tool name in the registry, and the sets beside the reader set (#371: ask_project, and the app-access tools) */
+const KNOWN = new Set<string>([...ORCHESTRATOR_TOOLS.map((t) => t.name), ...DELEGATE_TOOLS.map((t) => t.name), ...APP_ACCESS_TOOLS.map((t) => t.name)])
 
 function toolLikeWords(text: string): string[] {
   return [...new Set(text.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])]

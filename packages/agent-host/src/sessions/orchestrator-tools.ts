@@ -314,6 +314,47 @@ export const DELEGATE_TOOLS = [
 /** The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host.md */
 export const DELEGATE_BUDGET_CHARS = 400
 
+/**
+ * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
+ * ordinary session has it, and is counted against its own ceiling below (READER_TOOLS keeps #320's).
+ *
+ * Three tools rather than one with a mode: each one's schema is a single string, and the model picks a
+ * verb by name. They are all deferred behind tool search on Claude (Codex loads them): a session
+ * rarely needs another project's app, and the result of each one names the next (`find_apps` says
+ * "attach_app", `attach_app` says "detach_app"), so a model that found the first finds the rest. The
+ * measurement that this is enough is in docs/apps.md §9.4.
+ */
+export const APP_ACCESS_TOOLS = [
+  {
+    name: 'find_apps',
+    description: "Finds Centralu apps from the person's other projects that this session can attach.",
+    schema: z.object({ query: z.string().optional() }),
+    deferred: true,
+  },
+  {
+    name: 'attach_app',
+    description: 'Attaches an app find_apps listed to this session, adding its tools.',
+    schema: z.object({ app: z.string() }),
+    deferred: true,
+  },
+  {
+    name: 'detach_app',
+    description: 'Detaches an app attach_app added, removing its tools.',
+    schema: z.object({ app: z.string() }),
+    deferred: true,
+  },
+] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+
+export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
+
+/**
+ * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and
+ * schema; the deferred ones included, since Codex loads them). The set is 874 today, of which about
+ * 210 per tool is the name and schema envelope rather than words — why it is three short tools and
+ * not three explained ones. Claude defers all three, so there it costs the names in tool search only.
+ */
+export const APP_ACCESS_BUDGET_CHARS = 900
+
 /** No server instructions for the reader set — see READER_TOOLS */
 export const READER_INSTRUCTIONS = ''
 
@@ -639,6 +680,8 @@ export async function runOrchestratorTool(
     }
   }
 
+  if (name === 'find_apps' || name === 'attach_app' || name === 'detach_app') return runAppAccess(tools, name, args)
+
   if (name === 'app_guide') {
     // Does not go through the manager — text baked into the build plus the tool registry is the whole guide (#30, M4 P-4)
     return appGuide(typeof args.topic === 'string' ? args.topic : undefined, guideSeats())
@@ -695,6 +738,62 @@ export async function runOrchestratorTool(
   return { text: `Unknown tool: ${name}`, isError: true }
 }
 
+/**
+ * The app-access tools' texts (#371 part A). Each result names what to do next, because the tools
+ * are deferred: the model that found find_apps learns attach_app from its answer, and detach_app from
+ * attach_app's. Names an app or a project chose are JSON-quoted, like a worker's text (#121): a
+ * description is the app author's words, not ours.
+ */
+async function runAppAccess(tools: OrchestratorTools, name: AppAccessToolName, args: Record<string, unknown>): Promise<ToolOutput> {
+  if (name === 'find_apps') {
+    const query = typeof args.query === 'string' ? args.query.trim() : ''
+    const r = await tools.findApps(query || undefined)
+    if (!r.ok) return { text: r.error, isError: true }
+    if (r.apps.length === 0) {
+      return {
+        text: query
+          ? `No app matches ${trustedJsonText(query)}. Try find_apps with no query to see every app you can attach.`
+          : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).",
+      }
+    }
+    return {
+      text:
+        r.apps
+          .map(
+            (a) =>
+              `- ${a.ref} · ${a.project === null ? "the person's own app" : `project ${trustedJsonText(a.project)}`}` +
+              `\n    ${trustedJsonText(a.name)}${a.description ? `: ${trustedJsonText(a.description)}` : ''}` +
+              `\n    tools: ${a.tools ? a.tools.join(', ') || '(none)' : '(listed once attached)'}`,
+          )
+          .join('\n') + '\nAttach one with attach_app(app="<the name before ·>").',
+    }
+  }
+  const app = String(args.app ?? '').trim()
+  if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
+  if (name === 'attach_app') {
+    const r = await tools.attachApp(app)
+    if (!r.ok) return { text: `Not attached: ${r.error}`, isError: true }
+    const names = r.tools.length ? r.tools.map((t) => `mcp__${r.server}__${t}`).join(', ') : '(it listed none yet)'
+    const when =
+      r.when === 'now'
+        ? 'Its tools are available now.'
+        : "This agent keeps the tools its thread started with, so the session restarts its thread when this turn ends and the tools are there from the next turn. Finish this turn and tell the person the app is attached."
+    return {
+      text:
+        `${r.already ? 'Already attached' : 'Attached'}: ${app} as the ${r.server} server. Tools: ${names}. ${when}\n` +
+        `When you no longer need it, call detach_app(app=${trustedJsonText(app)}) so its tools stop taking up context.`,
+    }
+  }
+  const r = await tools.detachApp(app)
+  if (!r.ok) return { text: `Not detached: ${r.error}`, isError: true }
+  return {
+    text:
+      r.when === 'now'
+        ? `Detached ${app}: the ${r.server} tools are gone.`
+        : `Detached ${app}: calls to the ${r.server} tools are refused from now on, and the names leave when this turn ends (the thread restarts).`,
+  }
+}
+
 /** The shape the bridge (a separate process) can put into tools/list */
 /**
  * The base tools for a scoped coordinating session (#80/#81, physically). There is no notion of
@@ -719,9 +818,11 @@ export const SCOPED_INSTRUCTIONS = [
 
 /** Whether this profile allows the tool — both exposure (schemas) and execution (run) are decided by this */
 export function profileAllows(profile: ToolProfile, name: string): boolean {
-  if (profile === 'reader') return READER_TOOLS.some((t) => t.name === name) || DELEGATE_TOOLS.some((t) => t.name === name)
-  // ask_project (#371) is a reader's alone: every directing seat already sends work inside its own view
-  if (DELEGATE_TOOLS.some((t) => t.name === name)) return false
+  if (profile === 'reader') {
+    return READER_TOOLS.some((t) => t.name === name) || DELEGATE_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)
+  }
+  // ask_project and the app-access tools (#371) are a reader's alone: every directing seat already works inside its own view
+  if (DELEGATE_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return false
   if (profile === 'orchestrator') {
     return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name) && !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   }
@@ -738,7 +839,7 @@ export function profileAllows(profile: ToolProfile, name: string): boolean {
 export function toolDefsFor(
   profile: ToolProfile,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
-  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS]
+  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS]
   return ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name))
 }
 

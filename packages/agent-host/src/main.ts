@@ -15,6 +15,7 @@ import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
+import { readShared } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
@@ -299,6 +300,8 @@ const externalApps = new ExternalApps({
   emitRunsChanged: appRunChanges.emit,
   // Even if the app folder changes, if the building session is mid-turn it waits until the turn ends (C-4) — the manager tells the runtime when the turn ends
   builderBusy: (ref) => mgr.builderBusy(ref),
+  // Whether the person shares a project app with their other projects (#371 part A) — read fresh, like trust
+  shared: (ref) => readShared(store, ref),
 })
 externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
