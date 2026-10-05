@@ -1,3 +1,4 @@
+import { sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as kit from '../apps/external/test-helpers.js'
 import { AppAccess, readShared, writeShared, type AppAccessStore } from './app-access.js'
@@ -163,8 +164,8 @@ describe('attaching and detaching', () => {
     expect(out.isError).toBe(false)
     const rows = w.rt.runs({ projectId: 'p2', appId: 'board' })
     expect(rows[0]).toMatchObject({ tool: 'poke', callerKind: 'session', callerSessionId: 'w1', status: 'ok' })
-    // One process, started in its own folder in the other project
-    expect(w.records('board').find((r) => r.t === 'start')).toMatchObject({ cwd: expect.stringContaining('/p2/') })
+    // One process, started in its own folder in the other project. `sep`, because Windows reports `\p2\`
+    expect(w.records('board').find((r) => r.t === 'start')).toMatchObject({ cwd: expect.stringContaining(`${sep}p2${sep}`) })
   })
 
   it("names an app from another project apart from this project's own app of the same id", async () => {
