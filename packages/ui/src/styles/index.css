@@ -273,14 +273,14 @@
  * the eye sees at the dark end better than hex steps do:
  *   Dark   sidebar #1a1a1a, conversation #141414: ΔL* 2.9, what the lifted conversation had from
  *          the old sidebar (#1d1d1d and #171717, ΔL* 3.0). The old #171717 would be ΔL* 1.4.
- *   Light  sidebar #ececec, conversation #f2f2f2: ΔL* 2.1, the sidebar a recess below the floor
+ *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
  *          as it was before.
  * The hairline on the sidebar's edge stays; it was never enough on its own.
  *
  * The other constraint is the approval card: lifted enough to be a component without becoming a
- * signal. Raised sits ΔL* 4.5 above the floor in Dark (#1d1d1d on #141414) and in Light
- * (#ffffff on #f2f2f2), less than the lifted conversation gave its cards (6.3), and the card's
- * `line` border (ΔL* 10.3 and 7.0 off the floor) and its signal edge carry the rest, as the
+ * signal. Raised sits ΔL* 4.5 above the floor in Dark (#1d1d1d on #141414) and 4.2 in Light
+ * (#f4f4f4 on #e8e8e8), less than the lifted conversation gave its cards (6.3), and the card's
+ * `line` border (ΔL* 10.3 and 7.1 off the floor) and its signal edge carry the rest, as the
  * board's borders do. The signal ink keeps the highest contrast on every surface
  * (app/theme.ts `urgencyBreaks`, checked for every preset).
  */
@@ -302,28 +302,35 @@
  * checks for every preset. Raised surfaces are lighter than the floor, so in light "lifting" a
  * card means moving it toward white.
  *
+ * Light sits a step down from white (#362): the owner found the near-white version (floor
+ * #f2f2f2, conversation #f8f8f8, cards #ffffff) too bright. The floor is #e8e8e8 and raised
+ * #f4f4f4, never pure white, and every other surface, line and ink moved by the same lightness
+ * it had from the floor before (line ΔL* 7, line-strong 16.5, hover 8.5), so the steps read as
+ * they did. The two quieter inks are a little darker to keep their contrast on the dimmer floor:
+ * muted 6.1:1 (was 6.0), faint 3.3:1 (was 3.1).
+ *
  * The high-contrast presets push every step further apart: black or white floors, borders that
  * meet a 3:1 contrast against the floor, and inks that all clear 4.5:1, with the order intact.
  */
 [data-theme='light'] {
-  --color-surface-floor: #f2f2f2;
-  --color-surface-side: #ececec;
-  --color-surface-raised: #ffffff;
-  --color-surface-selected: #e2e2e2;
-  --color-surface-hover: #dadada;
+  --color-surface-floor: #e8e8e8;
+  --color-surface-side: #e0e0e0;
+  --color-surface-raised: #f4f4f4;
+  --color-surface-selected: #d8d8d8;
+  --color-surface-hover: #d0d0d0;
   /* The grid's floor is darker than the panels here: what was a brighter plate in dark is a
      deeper one in light, so the panels still read as cut out of it */
-  --color-surface-deck: #dcdcdc;
-  --color-surface-reading: #f2f2f2;
-  --color-surface-reading-raised: #ffffff;
+  --color-surface-deck: #d2d2d2;
+  --color-surface-reading: #e8e8e8;
+  --color-surface-reading-raised: #f4f4f4;
 
-  --color-line: #dedede;
-  --color-line-strong: #c4c4c4;
+  --color-line: #d4d4d4;
+  --color-line-strong: #bababa;
 
   --color-ink-signal: #000000;
   --color-ink: #1f1f1f;
-  --color-ink-muted: #5c5c5c;
-  --color-ink-faint: #8a8a8a;
+  --color-ink-muted: #555555;
+  --color-ink-faint: #7f7f7f;
 
   --color-diff-add: #1a7f37;
   --color-diff-add-bg: #dafbe1;
@@ -332,16 +339,16 @@
   --color-danger: #cf222e;
   --color-danger-bg: #ffebe9;
 
-  --color-focus: #5c5c5c;
+  --color-focus: #555555;
   /* Translucent black: it darkens whatever is under it by the same amount, as the white does in dark */
   --color-selection: rgb(0 0 0 / 0.14);
-  --color-scrollbar-thumb: #cfcfcf;
-  --color-scrollbar-thumb-hover: #b5b5b5;
+  --color-scrollbar-thumb: #c5c5c5;
+  --color-scrollbar-thumb-hover: #acacac;
   --color-scrim-thin: color-mix(in oklab, #000 25%, transparent);
 
-  --color-keycap-top: #ffffff;
-  --color-keycap-bottom: #ececec;
-  --color-keycap-border: #c4c4c4;
+  --color-keycap-top: #f4f4f4;
+  --color-keycap-bottom: #e2e2e2;
+  --color-keycap-border: #bababa;
   /* A halo does not make black text stand out; it only blurs it */
   --color-signal-glow: transparent;
 
@@ -352,12 +359,12 @@
   --color-activity-4: #e8701f;
   --color-activity-5: #13a8a2;
 
-  /* The terminal: GitHub's light palette, readable on near-white */
-  --color-term-bg: #fafafa;
-  --color-term-log-bg: #ffffff;
+  /* The terminal: GitHub's light palette, on the light grey the rest of the preset uses */
+  --color-term-bg: #f0f0f0;
+  --color-term-log-bg: #f4f4f4;
   --color-term-fg: #1f1f1f;
   --color-term-cursor: #1f1f1f;
-  --color-term-selection: #d6d6d6;
+  --color-term-selection: #cccccc;
   --color-term-black: #24292f;
   --color-term-red: #cf222e;
   --color-term-green: #116329;

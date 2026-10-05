@@ -497,7 +497,7 @@ export function gridAppTests(): void {
       // Dark and Light by value; the high-contrast presets only have to agree with themselves
       const presets = [
         { id: 'dark', base: 'dark', floor: '#141414', raised: '#1d1d1d' },
-        { id: 'light', base: 'light', floor: '#f2f2f2', raised: '#ffffff' },
+        { id: 'light', base: 'light', floor: '#e8e8e8', raised: '#f4f4f4' },
         { id: 'hc-dark', base: 'dark' },
         { id: 'hc-light', base: 'light' },
       ] as const

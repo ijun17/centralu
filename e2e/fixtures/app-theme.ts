@@ -18,7 +18,7 @@ const BOARD = new URL('../../.centralu/apps/project-board/', import.meta.url)
 
 /** Dark and Light values from styles/index.css, as the browser computes them */
 const DARK = { floor: '#141414', ink: 'rgb(233, 233, 233)', signal: 'rgb(255, 255, 255)', danger: 'rgb(255, 161, 152)', thumb: 'rgb(41, 41, 41)' }
-const LIGHT = { floor: '#f2f2f2', ink: 'rgb(31, 31, 31)', signal: 'rgb(0, 0, 0)', danger: 'rgb(207, 34, 46)', thumb: 'rgb(207, 207, 207)' }
+const LIGHT = { floor: '#e8e8e8', ink: 'rgb(31, 31, 31)', signal: 'rgb(0, 0, 0)', danger: 'rgb(207, 34, 46)', thumb: 'rgb(197, 197, 197)' }
 
 /** A board with more cards than its column can show, so the column scrolls */
 const BOARD_STATE = {
@@ -197,7 +197,7 @@ export function appThemeTests() {
     const [changed] = await entries(v, 'host-context-changed')
     expect(changed.theme).toBe('light')
     expect(changed.styles.variables).toMatchObject({ '--color-background-primary': LIGHT.floor, '--color-text-primary': '#1f1f1f', '--color-text-warning': '#000000' })
-    expect(changed.centralu.variables).toMatchObject({ '--centralu-signal': '#000000', '--centralu-scrollbar-thumb': '#cfcfcf' })
+    expect(changed.centralu.variables).toMatchObject({ '--centralu-signal': '#000000', '--centralu-scrollbar-thumb': '#c5c5c5' })
     // Nothing that did not change goes out again
     expect(changed).not.toHaveProperty('locale')
 
@@ -371,7 +371,7 @@ export function appThemeTests() {
     await expect.poll(() => schemeOf(v)).toBe('light')
     await expect(v.locator('#count')).toBeVisible()
     const { inside, outside } = await insideAndOutside(page)
-    expect(outside, `page rgb(${outside.join(', ')})`).toEqual([242, 242, 242])
+    expect(outside, `page rgb(${outside.join(', ')})`).toEqual([232, 232, 232])
     // Neither a dark canvas from a proxy stuck on dark nor a white one: exactly the page under it
     expect(inside, `frame rgb(${inside.join(', ')})`).toEqual(outside)
   })

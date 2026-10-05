@@ -42,7 +42,7 @@ export function firstPaintTests() {
     test('with a light theme cached, the page is the light floor before any stylesheet or module loads', async ({ page }) => {
       await page.emulateMedia({ colorScheme: 'dark' })
       const shown = await beforeTheBundle(page, LIGHT_CHOICE)
-      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(242, 242, 242)', scheme: 'light' })
+      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(232, 232, 232)', scheme: 'light' })
     })
 
     test('once a theme is applied the stylesheet owns the colours again, so a switch is not held to the first side', async ({ page }) => {

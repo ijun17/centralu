@@ -75,13 +75,13 @@ export function presetTests() {
     await openDemo(page)
     await openAppearance(page)
     await page.getByTestId('settings-theme-mode-light').click()
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f2f2f2')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#e8e8e8')
     expect(await token(page, '--color-ink-signal')).toBe('#000000')
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('light')
-    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'light', background: 'rgb(242, 242, 242)' })
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'light', background: 'rgb(232, 232, 232)' })
     // The conversation is on the floor, as in Dark (#362)
-    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#f2f2f2')
+    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#e8e8e8')
   })
 
   test('Follow system picks the light preset when the OS is light', async ({ page }) => {

@@ -77,11 +77,11 @@ describe('the first paint (#340)', () => {
   })
 
   it('paints the light floor for a cached light theme', () => {
-    expect(firstPaint(choice('light'))).toEqual({ backgroundColor: '#f2f2f2', colorScheme: 'light' })
+    expect(firstPaint(choice('light'))).toEqual({ backgroundColor: '#e8e8e8', colorScheme: 'light' })
   })
 
   it('in System mode, picks the side the OS shows, as applyCachedTheme does', () => {
-    expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#f2f2f2', colorScheme: 'light' })
+    expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#e8e8e8', colorScheme: 'light' })
     expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#141414', colorScheme: 'dark' })
   })
 
@@ -91,6 +91,6 @@ describe('the first paint (#340)', () => {
     expect(firstPaint(choice('light', undefined, custom))).toEqual({ backgroundColor: '#fdf6e3', colorScheme: 'light' })
     // A value the browser cannot use falls back to the preset's floor
     const broken = { ...side('mine', 'light', { '--color-surface-floor': 'url(x)' }), preset: 'light' }
-    expect(firstPaint(choice('light', undefined, broken))).toEqual({ backgroundColor: '#f2f2f2', colorScheme: 'light' })
+    expect(firstPaint(choice('light', undefined, broken))).toEqual({ backgroundColor: '#e8e8e8', colorScheme: 'light' })
   })
 })

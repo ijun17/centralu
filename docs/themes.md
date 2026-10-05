@@ -41,8 +41,9 @@ Dark is a dark floor (`#141414`) with raised boxes (`#1d1d1d`). The sidebar (`#1
 apart from the conversation by lightness, not only by its edge line: a reader once saw the two as
 "the same colour" at three steps apart with the line between them, so the gap is kept at ΔL* 2.9.
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
-is waiting for you, and raised surfaces move toward white: the floor is `#f2f2f2`, cards are white,
-and the sidebar is a recess at `#ececec`. The comments in `styles/index.css` record the measurements. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
+is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
+is `#e8e8e8`, raised `#f4f4f4`, the sidebar a recess at `#e0e0e0` (ΔL* 2.8 below the conversation),
+and no surface is pure white. The comments in `styles/index.css` record the measurements. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
 more against every reading surface. A test checks the urgency order (below) for every preset, and
 those two thresholds for the high-contrast ones.
 
