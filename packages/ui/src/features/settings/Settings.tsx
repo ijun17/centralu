@@ -11,6 +11,7 @@ import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
 import { TrashSection } from './TrashSection.jsx'
+import { ProjectConsentsSection } from './ProjectConsentsSection.jsx'
 import { ThemeSection } from './ThemeSection.jsx'
 import { TypographySection } from './TypographySection.jsx'
 import { applyOffer, useRelaunchCheck, type ApplyOffer } from './apply-update.js'
@@ -317,6 +318,7 @@ export function Settings() {
                     ))}
                   </ul>
                 )}
+                <ProjectConsentsSection />
               </section>
             )}
 

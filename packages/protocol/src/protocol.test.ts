@@ -175,6 +175,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // A file in the themes folder changed (#312) — the screen refetches the list
   { type: 'themes_changed' },
   { type: 'external_app_questions_changed' },
+  { type: 'project_consents_changed' },
   { type: 'worktree_pr', sessionId: 's1', pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' } },
   // A goal announcement (2026-09-07) — both the union-of-both-tools shape and the cleared state (null) are golden
   {

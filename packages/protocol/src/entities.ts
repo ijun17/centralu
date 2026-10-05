@@ -548,6 +548,10 @@ export type PermissionPreset = z.infer<typeof PermissionPreset>
 export const ApprovalDecision = z.enum(['allow', 'deny', 'always'])
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>
 
+/** How one project may reach another (#371): 'delegate' is ask_project (part B), 'apps' another project's app tools (part A) */
+export const ProjectConsentKind = z.enum(['delegate', 'apps'])
+export type ProjectConsentKind = z.infer<typeof ProjectConsentKind>
+
 export const ApprovalScope = z.enum(['session', 'project'])
 export type ApprovalScope = z.infer<typeof ApprovalScope>
 
@@ -580,8 +584,36 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     /** A single line for a person to read — what it is trying to do ("run an agent (Claude Code) in a new session") */
     text: z.string(),
   }),
+  /**
+   * One project reaching another (#371) — raised by **the host** in the calling session, the first time a session of
+   * `from` asks to reach `to`. `access` says how: 'delegate' starts a session in `to` and gives it a task
+   * (ask_project, part B); 'apps' attaches one of `to`'s apps to the caller (part A, with `app` naming it).
+   *
+   * Unlike `capability`, this one has all three answers: allow once (this call only), always (remembered for this
+   * pair and kind, revocable in Settings), deny (not remembered — the next call asks again).
+   */
+  z.object({
+    kind: z.literal('project_access'),
+    access: ProjectConsentKind,
+    from: z.object({ id: z.string(), name: z.string() }),
+    to: z.object({ id: z.string(), name: z.string() }),
+    /** One line for a person to read: what the caller wants done there (the task, cut short; or the app's use) */
+    text: z.string(),
+    app: z.object({ appId: z.string(), name: z.string() }).optional(),
+  }),
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>
+
+/** One remembered "always" from one project to another (#371) — a row of Settings' list, with the names as they are now */
+export const ProjectConsent = z.object({
+  fromProjectId: z.string(),
+  fromName: z.string(),
+  toProjectId: z.string(),
+  toName: z.string(),
+  kind: ProjectConsentKind,
+  decidedAt: z.number(),
+})
+export type ProjectConsent = z.infer<typeof ProjectConsent>
 
 /**
  * Choices an agent presents to a person (AskUserQuestion).

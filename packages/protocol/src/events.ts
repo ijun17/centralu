@@ -682,6 +682,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('external_app_questions_changed') }),
   /**
+   * A remembered cross-project consent was added or revoked (#371). The same coarseness: this carries nothing, and
+   * Settings refetches `projectConsents.list`.
+   */
+  z.object({ ...appScoped, type: z.literal('project_consents_changed') }),
+  /**
    * Something changed in a watched directory (#34 — Finder, a terminal, an agent, regardless of
    * source).
    *

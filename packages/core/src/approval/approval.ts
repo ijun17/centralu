@@ -75,3 +75,13 @@ export function previewMatches(matcher: string, history: readonly string[]): str
 export function suggestMatcher(command: string): string {
   return command.trim()
 }
+
+/**
+ * The question a cross-project consent card asks (#371) — one sentence, the same on the card, in the conversation
+ * row and in a notification, so the person reads one thing wherever it stands. The caller is named first: the card
+ * stands in the caller's session, and what is being allowed is what that project may do to the other one.
+ */
+export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'project_access' }>): string {
+  if (d.access === 'apps') return `Let ${d.from.name} use ${d.app ? `the app ${d.app.name} from ` : 'apps from '}${d.to.name}?`
+  return `Let ${d.from.name} ask ${d.to.name} to ${d.text}?`
+}

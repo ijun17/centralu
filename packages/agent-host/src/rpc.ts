@@ -467,6 +467,13 @@ export function createRpcHandler(
       requireExternalApps().forgetPermission({ appId, projectId }, capability)
       return { ok: true as const }
     },
+    // Cross-project consents (#371) — the host owns them; Settings lists and revokes
+    'projectConsents.list': async () => mgr.projectConsents(),
+    'projectConsents.revoke': async (p) => {
+      const { fromProjectId, toProjectId, kind } = RpcMethods['projectConsents.revoke'].params.parse(p)
+      mgr.revokeProjectConsent(fromProjectId, toProjectId, kind)
+      return { ok: true as const }
+    },
     'apps.usage': async (p) => {
       const { appId, projectId } = RpcMethods['apps.usage'].params.parse(p)
       return requireExternalApps().agentUse({ appId, projectId })

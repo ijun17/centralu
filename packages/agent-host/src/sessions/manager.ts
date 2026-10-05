@@ -16,6 +16,8 @@ import type {
   AppQuestion,
   AppReach,
   ApprovalDetail,
+  ProjectConsent,
+  ProjectConsentKind,
   ModelOption,
   ApprovalDecision,
   CommandInfo,
@@ -460,13 +462,12 @@ export class SessionManager {
    */
   private agentRuns = new Map<string, AgentRunWait>()
   /**
-   * Capability question standing in as a session's approval card (M4 D-4) — requestId -> question.
-   * It uses the same slot as the adapter's card (the session's `pendingApproval`), so if the
-   * adapter's card is already up, this one is raised only after that one closes
-   * (`raiseCapabilityAsks`). The answer (`respondApproval`) never reaches the adapter — it is
-   * resolved right here.
+   * A card the host raises in a session's approval slot — requestId -> question: an app's capability question (M4
+   * D-4), or one project reaching another (#371). It uses the same slot as the adapter's card (the session's
+   * `pendingApproval`), so if the adapter's card is already up, this one is raised only after that one closes
+   * (`raiseHostAsks`). The answer (`respondApproval`) never reaches the adapter — it is resolved right here.
    */
-  private capabilityAsks = new Map<string, { requestId: string; sessionId: string; detail: Extract<ApprovalDetail, { kind: 'capability' }>; shown: boolean; resolve: (d: 'allow' | 'deny' | null) => void }>()
+  private hostAsks = new Map<string, HostAsk>()
   /**
    * requestId of an approval response that reached the adapter (#158) — request id -> session id. If
    * a second response arrives for the same request (double key press, or the card and the rail both
@@ -2282,9 +2283,9 @@ export class SessionManager {
     }
     // A capability question raised on this session has nowhere left to be answered (D-4) — it is ended with
     // no answer (the window does not remember it, just declines)
-    for (const ask of [...this.capabilityAsks.values()]) {
+    for (const ask of [...this.hostAsks.values()]) {
       if (ask.sessionId !== sessionId) continue
-      this.capabilityAsks.delete(ask.requestId)
+      this.hostAsks.delete(ask.requestId)
       ask.resolve(null)
     }
     const handle = this.handles.get(sessionId)
@@ -2781,7 +2782,7 @@ export class SessionManager {
     if (e.sessionId) this.agentRuns.get(e.sessionId)?.onEvent(e)
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
-    if (e.type === 'approval_resolved' && e.sessionId) this.raiseCapabilityAsks(e.sessionId)
+    if (e.type === 'approval_resolved' && e.sessionId) this.raiseHostAsks(e.sessionId)
     // Applies a setting that changed mid-turn now (#164) — if it was reverted in between there is no drift,
     // so nothing happens
     if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId) && this.settingsDrifted(e.sessionId) && this.handles.has(e.sessionId)) {
@@ -3437,13 +3438,13 @@ export class SessionManager {
   ): void {
     const m = this.meta.get(sessionId)
 
-    // A card standing in for a capability question (M4 D-4) — the adapter has never heard of this
-    // card, so it is resolved right here. "Always allow" is treated as allow (the answer gets remembered
-    // regardless)
-    const ask = this.capabilityAsks.get(requestId)
+    // A card the host raised (M4 D-4, #371) — the adapter has never heard of this card, so it is resolved right here.
+    // For a capability question "always allow" is treated as allow (the answer gets remembered regardless); a
+    // cross-project consent keeps all three (always is the pair remembered)
+    const ask = this.hostAsks.get(requestId)
     if (ask && ask.sessionId === sessionId) {
-      this.capabilityAsks.delete(requestId)
-      const answer = decision === 'deny' ? 'deny' : 'allow'
+      this.hostAsks.delete(requestId)
+      const answer = ask.detail.kind === 'capability' && decision === 'always' ? 'allow' : decision
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
       ask.resolve(answer)
       // The agent is still inside that tool call — if there are no other pending questions, it is working
@@ -4914,28 +4915,111 @@ export class SessionManager {
    * requesting app's own slot instead. If the signal fires (timed out, canceled), the card or question
    * is torn down and this ends with null.
    */
+  /**
+   * Whether a session of one project may reach another (#371) — the one gate for both parts: 'delegate'
+   * (ask_project) and 'apps' (another project's app tools). Same project needs no consent. A remembered "always" for
+   * the pair and kind passes at once; otherwise a card stands in the calling session (the same slot as an approval,
+   * so it waits behind one already up) until the person answers or `signal` fires.
+   *
+   *   allow once   passes this call only
+   *   always       remembered for (caller's project, target, kind) — listed and revoked in Settings
+   *   deny         refused, and not remembered: the next call asks again, like a denied approval
+   *
+   * The refusal is worded for the model that called: what happened and that it should not retry on its own.
+   */
+  async ensureProjectAccess(
+    callerSessionId: string,
+    toProjectId: string,
+    access: ProjectConsentKind,
+    what: { text: string; app?: { appId: string; name: string } },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const caller = this.meta.get(callerSessionId)
+    if (!caller) return { ok: false, error: 'The calling session is gone' }
+    const fromId = caller.projectId
+    if (!fromId) return { ok: false, error: 'This session belongs to no project, so it cannot reach another project' }
+    if (fromId === toProjectId) return { ok: true }
+    const projects = this.store.listProjects()
+    const from = projects.find((p) => p.id === fromId)
+    const to = projects.find((p) => p.id === toProjectId)
+    if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
+    if (this.store.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
+    const decision = await new Promise<HostAskAnswer>((resolve) => {
+      if (signal?.aborted) return resolve(null)
+      const requestId = `xp-${randomUUID()}`
+      const ask: HostAsk = {
+        requestId,
+        sessionId: callerSessionId,
+        detail: {
+          kind: 'project_access',
+          access,
+          from: { id: from.id, name: from.name },
+          to: { id: to.id, name: to.name },
+          text: what.text,
+          ...(what.app ? { app: what.app } : {}),
+        },
+        shown: false,
+        resolve,
+      }
+      this.hostAsks.set(requestId, ask)
+      signal?.addEventListener('abort', () => {
+        if (!this.hostAsks.delete(requestId)) return
+        // An unanswerable card is never left behind
+        const m = this.meta.get(callerSessionId)
+        if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId: callerSessionId, requestId, decision: 'deny' })
+        resolve(null)
+      }, { once: true })
+      this.raiseHostAsks(callerSessionId)
+    })
+    if (decision === 'always') {
+      this.store.setProjectConsent(fromId, toProjectId, access)
+      this.emit({ type: 'project_consents_changed' })
+      return { ok: true }
+    }
+    if (decision === 'allow') return { ok: true }
+    if (decision === 'deny') {
+      return { ok: false, error: `The person did not allow ${from.name} to reach ${to.name} this way. Do not ask again unless they tell you to.` }
+    }
+    return { ok: false, error: `The question to the person was withdrawn before they answered, so ${to.name} was not reached.` }
+  }
+
+  /** Every remembered cross-project consent, with the projects' names as they are now (#371, Settings) */
+  projectConsents(): ProjectConsent[] {
+    const names = new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+    return this.store.listProjectConsents().map((c) => ({
+      ...c,
+      fromName: names.get(c.fromProjectId) ?? '(project no longer exists)',
+      toName: names.get(c.toProjectId) ?? '(project no longer exists)',
+    }))
+  }
+
+  /** Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish */
+  revokeProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
+    if (this.store.forgetProjectConsent(fromProjectId, toProjectId, kind)) this.emit({ type: 'project_consents_changed' })
+  }
+
   private askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null> {
     return new Promise((resolve) => {
       if (signal.aborted) return resolve(null)
       const app = { appId: q.app.appId, projectId: q.app.projectId, name: q.appName }
       if (q.origin.kind === 'session' && this.meta.has(q.origin.sessionId)) {
         const requestId = `cap-${randomUUID()}`
-        const ask = {
+        const ask: HostAsk = {
           requestId,
           sessionId: q.origin.sessionId,
           detail: { kind: 'capability' as const, app, capability: q.capability, text: q.text },
           shown: false,
-          resolve,
+          resolve: (d) => resolve(d === 'always' ? 'allow' : d),
         }
-        this.capabilityAsks.set(requestId, ask)
+        this.hostAsks.set(requestId, ask)
         signal.addEventListener('abort', () => {
-          if (!this.capabilityAsks.delete(requestId)) return
+          if (!this.hostAsks.delete(requestId)) return
           // If the card is still showing, it is closed — an unanswerable card is never left behind
           const m = this.meta.get(ask.sessionId)
           if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
           resolve(null)
         }, { once: true })
-        this.raiseCapabilityAsks(ask.sessionId)
+        this.raiseHostAsks(ask.sessionId)
         return
       }
       const origin = q.origin.kind === 'view' ? q.origin.app : q.app
@@ -4960,10 +5044,10 @@ export class SessionManager {
    * and then closes, ours is raised **again** — but without recording it a second time (so the
    * conversation never ends up with the same card as two separate lines).
    */
-  private raiseCapabilityAsks(sessionId: string): void {
+  private raiseHostAsks(sessionId: string): void {
     const m = this.meta.get(sessionId)
     if (!m || m.pendingApproval) return
-    const next = [...this.capabilityAsks.values()].find((a) => a.sessionId === sessionId)
+    const next = [...this.hostAsks.values()].find((a) => a.sessionId === sessionId)
     if (!next) return
     const e = { type: 'approval_request' as const, sessionId, requestId: next.requestId, detail: next.detail }
     if (!next.shown) {
@@ -6014,8 +6098,8 @@ export class SessionManager {
     this.watchers.close()
     this.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is shutting down'))
-    for (const ask of [...this.capabilityAsks.values()]) ask.resolve(null)
-    this.capabilityAsks.clear()
+    for (const ask of [...this.hostAsks.values()]) ask.resolve(null)
+    this.hostAsks.clear()
     for (const q of [...this.appQuestions.values()]) q.resolve(null)
     this.appQuestions.clear()
     this.appsHub?.dispose()
@@ -6051,8 +6135,8 @@ export class SessionManager {
     this.watchers.close()
     this.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))
-    for (const ask of [...this.capabilityAsks.values()]) ask.resolve(null)
-    this.capabilityAsks.clear()
+    for (const ask of [...this.hostAsks.values()]) ask.resolve(null)
+    this.hostAsks.clear()
     for (const q of [...this.appQuestions.values()]) q.resolve(null)
     this.appQuestions.clear()
     this.appsHub?.dispose()
@@ -6094,4 +6178,16 @@ function externalMissingReason(label: string, cwd: string): string {
 function truncate(s: string, max = 40): string {
   const oneLine = s.replace(/\s+/g, ' ').trim()
   return oneLine.length > max ? oneLine.slice(0, max) + '…' : oneLine
+}
+
+/** The answer to a card the host raised: the three of an approval, or null when it was withdrawn unanswered */
+type HostAskAnswer = 'allow' | 'always' | 'deny' | null
+
+/** A card the host raised in a session's approval slot (M4 D-4, #371) — see `SessionManager.hostAsks` */
+type HostAsk = {
+  requestId: string
+  sessionId: string
+  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' }>
+  shown: boolean
+  resolve: (d: HostAskAnswer) => void
 }

@@ -25,6 +25,8 @@ import {
   GridPanel,
   ModelOption,
   PermissionPreset,
+  ProjectConsent,
+  ProjectConsentKind,
   Question,
   QuestionAnswer,
   SessionActivity,
@@ -1386,6 +1388,17 @@ export const RpcMethods = {
    */
   'apps.answerQuestion': {
     params: z.object({ questionId: z.string(), decision: z.enum(['allow', 'deny']) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * Every remembered cross-project consent (#371): which project may reach which, and how ('delegate' — ask_project
+   * starts a session there; 'apps' — its apps attach to the caller). Listed in Settings, newest first, with the
+   * project names as they are now. Refetched whenever `project_consents_changed` arrives.
+   */
+  'projectConsents.list': { params: z.object({}), result: z.array(ProjectConsent) },
+  /** Revokes one remembered consent (#371) — the next reach from that project to that one asks again */
+  'projectConsents.revoke': {
+    params: z.object({ fromProjectId: ProjectId, toProjectId: ProjectId, kind: ProjectConsentKind }),
     result: z.object({ ok: z.literal(true) }),
   },
   /** The remembered capability answers for one app (M4 D-4) — shown next to the run history panel (B-7) and can be forgotten there */

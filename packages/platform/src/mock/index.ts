@@ -1,5 +1,7 @@
 import { frameDragEndInPage } from '../engine.js'
 import type {
+  ProjectConsent,
+  ProjectConsentKind,
   AppPermission,
   AppUsage,
   AppQuestion,
@@ -488,6 +490,16 @@ export class MockPlatform implements Platform {
 
   readonly search = {
     messages: async (query: string) => this.searchResults.filter((r) => r.snippet.includes(query)),
+  }
+
+  /** Remembered cross-project consents (#371) — a test seeds this, and revoking emits the host's event */
+  consentsList: ProjectConsent[] = []
+  readonly consents = {
+    list: async () => structuredClone(this.consentsList),
+    revoke: async (fromProjectId: string, toProjectId: string, kind: ProjectConsentKind) => {
+      this.consentsList = this.consentsList.filter((c) => !(c.fromProjectId === fromProjectId && c.toProjectId === toProjectId && c.kind === kind))
+      this.emit({ type: 'project_consents_changed' })
+    },
   }
 
   readonly rules = {

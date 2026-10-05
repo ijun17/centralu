@@ -424,6 +424,12 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('approvals.deleteRule', { id })
       },
     },
+    consents: {
+      list: () => rpc.call('projectConsents.list', {}),
+      revoke: async (fromProjectId, toProjectId, kind) => {
+        await rpc.call('projectConsents.revoke', { fromProjectId, toProjectId, kind })
+      },
+    },
     trash: {
       list: () => rpc.call('trash.list', {}),
       read: (sessionId, limit, beforeSeq) => rpc.call('trash.read', { sessionId, limit, beforeSeq }),

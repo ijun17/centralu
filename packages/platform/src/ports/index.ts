@@ -1,4 +1,6 @@
 import type {
+  ProjectConsent,
+  ProjectConsentKind,
   AdapterCapabilities,
   AppErrorBundle,
   AppReach,
@@ -538,6 +540,17 @@ export interface ApprovalRulesPort {
 }
 
 /**
+ * Cross-project consents (#371): the person's remembered "always" for one project reaching another — 'delegate'
+ * (ask_project starts a session there) or 'apps' (its apps attach to the caller). Listed and revoked in Settings;
+ * the host raises the question itself, as an approval card in the calling session.
+ */
+export interface ProjectConsentsPort {
+  list(): Promise<ProjectConsent[]>
+  /** The next reach from that project to that one asks again */
+  revoke(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): Promise<void>
+}
+
+/**
  * The trash (#204). Deleting a session moves it here; these are the ways out, and they belong to the person
  * (Settings → Trash). Nothing here is emptied on its own, so `list` carries the total size.
  */
@@ -997,6 +1010,7 @@ export interface Platform {
   fs: FsPort
   search: SearchPort
   rules: ApprovalRulesPort
+  consents: ProjectConsentsPort
   trash: TrashPort
   workspace: WorkspacePort
   prefs: PreferencesPort

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { ApprovalDetail } from '@cc/protocol'
+import { projectAccessQuestion } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { letterOf } from '../../app/keys.js'
@@ -38,6 +39,12 @@ export function ApprovalCard({
       if (!action) return
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
       if (detail.kind === 'capability' && action.decision === 'always') return
+      // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
+      if (detail.kind === 'project_access') {
+        void respond(sessionId, requestId, action.decision)
+        e.preventDefault()
+        return
+      }
       // The "always allow" toast is shown using the matcher the store sent back (#170)
       void respond(sessionId, requestId, action.decision, action.scope)
       e.preventDefault()
@@ -45,6 +52,16 @@ export function ApprovalCard({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [sessionId, requestId, detail, respond])
+
+  if (detail.kind === 'project_access') {
+    return (
+      <ProjectAccessCard
+        detail={detail}
+        busy={busy}
+        onAnswer={(decision) => void respond(sessionId, requestId, decision)}
+      />
+    )
+  }
 
   if (detail.kind === 'capability') {
     return (
@@ -134,6 +151,49 @@ export function PermissionCard({
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k="y" label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />
         <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One project reaching another (#371) — the first time a session of one project asks another project to do
+ * something (ask_project) or to lend its apps. Three answers, unlike an app's capability question: once is this
+ * call only, always is remembered for the pair (and listed in Settings, where it is revoked), deny is not
+ * remembered. The task itself is shown whole below the question, since that is what the person is agreeing to.
+ */
+function ProjectAccessCard({
+  detail,
+  busy,
+  onAnswer,
+}: {
+  detail: Extract<ApprovalDetail, { kind: 'project_access' }>
+  busy: boolean
+  onAnswer: (decision: 'allow' | 'deny' | 'always') => void
+}) {
+  return (
+    <div
+      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      data-testid="approval-card"
+      data-kind="project_access"
+    >
+      <div className="flex items-center gap-2 px-3 pt-2.5">
+        <span className="signal text-2xs font-medium">Awaiting approval</span>
+        <span className="text-xs text-ink-faint">This session wants to reach another project, and waits</span>
+      </div>
+      <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
+        {projectAccessQuestion(detail)}
+      </p>
+      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
+        {detail.access === 'delegate'
+          ? `A session opens in ${detail.to.name} with its own folder, instructions and permissions, and its answer comes back here.`
+          : `The app's tools attach to this session while it uses them.`}{' '}
+        Always is remembered for {detail.from.name} → {detail.to.name}; revoke it in Settings.
+      </p>
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
+        <ActionKey k="y" label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k="a" label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />
+        <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
       </div>
     </div>
   )
@@ -237,6 +297,7 @@ export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'command') return `${d.command}\n${d.cwd}`
   if (d.kind === 'file_edit') return `${d.path}\n\n${d.diffPreview}`
   if (d.kind === 'capability') return `${d.app.name} wants to ${d.text}`
+  if (d.kind === 'project_access') return projectAccessQuestion(d)
   return d.raw
 }
 
