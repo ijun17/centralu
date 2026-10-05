@@ -15,7 +15,8 @@ const MAX_H = 96
  * to this app's builder session.
  *
  * **The person never leaves the app.** After sending, the view stays exactly as it was, and only a
- * one-line "sent" note and a way to open that conversation beside it ("Show") remain. Which app and
+ * one-line "sent" note and a way to open that conversation beside it ("Show") remain — from a view on
+ * the grid or the project screen, "Show" goes to the app view first (PinnedApps' `showBuilder`). Which app and
  * which view it came from is attached by the host as a header (`apps.askBuilder`) — this row does
  * not write that itself and send it. If the app is stopped or its last run failed, the host attaches
  * that fact too: "this button does not work" has to travel together with that failure.

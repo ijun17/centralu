@@ -548,6 +548,11 @@ and "Send to builder".
   writes the same text). The person wrote the rest, so it goes through as an instruction, not
   quoted. The person stays on the app: the builder's conversation opens beside the view
   ("Builder"), not in place of it. An app without a builder offers "Start builder" instead.
+  A view on the grid or the project screen has the same bar, but its panel is too narrow for the
+  conversation beside it, so its "Show the conversation" (and the error tail's "Show") goes to the
+  app view with "Builder" open, through the same `openApp` the panel's Open uses. On the project
+  screen that is the same view and × goes back to the panel; the grid's view stays on the grid.
+  With no builder left, the error tail shows no "Show".
 - **Template** (`packages/agent-host/app-template/`): starts with `node server.mjs` alone, with no
   install and no `package.json`. One runtime file, `runtime/centralu-app-runtime.mjs` (626.5 KiB,
   built reproducibly from pinned MIT packages by `scripts/build-app-runtime.mjs` and marked generated

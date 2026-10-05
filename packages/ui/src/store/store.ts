@@ -1413,8 +1413,21 @@ export type AppState = {
    * @returns whether it was sent — a failure is reported as a toast
    */
   sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<boolean>
-  /** Opens an app as a pinned view — creates its slot the first time, or goes to it if already open */
-  openApp(projectId: string | null, appId: string): void
+  /**
+   * Opens an app as a pinned view — creates its slot the first time, or goes to it if already open.
+   *
+   * `builder: true` opens its builder's conversation beside it too (`builderPaneFor`). That is how a view laid over a
+   * panel — on the grid or the project screen — shows the builder: the panel has no room for the pane, so "Show the
+   * conversation" goes to the app view through this same door the panel's Open uses.
+   */
+  openApp(projectId: string | null, appId: string, opts?: { builder?: boolean }): void
+  /**
+   * The pinned view key whose builder pane should open the next time that view is the one on screen (`openApp` with
+   * `builder`) — the view opens it and clears this. Only this screen session's: not saved with the workspace.
+   */
+  builderPaneFor: string | null
+  /** Clears `builderPaneFor` once the view it names has opened its builder pane */
+  takeBuilderPaneFor(key: string): void
   /**
    * Gives the app a pinned view without going to it (#203). The project screen shows its apps' pinned views in its
    * panels, and this is the same entry `openApp` makes — so an app on the project screen and the same app opened from
@@ -2435,6 +2448,7 @@ export const useStore = create<AppState>((set, get) => ({
   inlineFramesVersion: 0,
   gridPanels: [] as GridPanel[],
   builderPaneSessionId: null,
+  builderPaneFor: null as string | null,
   orchestratorId: null as string | null,
   orchestratorWaking: false,
   introSeen: false,
@@ -5108,11 +5122,12 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  openApp(projectId, appId) {
+  openApp(projectId, appId, opts) {
     const key = externalAppKey(projectId, appId)
     set((s) => ({
       view: 'app',
       focusedApp: { projectId, appId },
+      ...(opts?.builder ? { builderPaneFor: key } : {}),
       // What is picked must be shown (the same rule as `focusSession`) — any covering wide surface is dismissed
       overlay: null,
       // Picking a screen = having passed the intro (the same reason as `setView`, #63)
@@ -5126,6 +5141,10 @@ export const useStore = create<AppState>((set, get) => ({
           ],
     }))
     get().saveWorkspace()
+  },
+
+  takeBuilderPaneFor(key) {
+    if (get().builderPaneFor === key) set({ builderPaneFor: null })
   },
 
   ensurePinnedView(projectId, appId) {

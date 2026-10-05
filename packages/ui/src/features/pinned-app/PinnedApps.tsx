@@ -136,6 +136,25 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     }
   }, [paneSession, setBuilderPane])
   /*
+   * "Show the conversation" (FixBar, ErrorTail). In the app view the pane opens beside the view. A view laid over a
+   * panel — the grid's or the project screen's — draws no pane (`visible` is false there: a panel is too narrow for a
+   * 380px conversation beside the app), so the link goes to the app view with the pane open, through `openApp`, the
+   * door the panel's Open uses. On the project screen that is this same view; on the grid it is the app's own view,
+   * apart from the grid's (#288). Setting only this view's flag in a slot did nothing a person could see.
+   */
+  const openApp = useStore((s) => s.openApp)
+  const showBuilder = () => {
+    if (visible) setBuilderOpen(true)
+    else openApp(pv.projectId, pv.appId, { builder: true })
+  }
+  const paneAsked = useStore((s) => s.builderPaneFor === pv.key)
+  const takePaneAsk = useStore((s) => s.takeBuilderPaneFor)
+  useEffect(() => {
+    if (!paneAsked || !visible) return
+    setBuilderOpen(true)
+    takePaneAsk(pv.key)
+  }, [paneAsked, visible, pv.key, takePaneAsk])
+  /*
    * A capability question from a chain started by this app's view (M4 D-4) — one at a time, oldest
    * first. The whole list is selected and filtered here: if the selector itself returned a new
    * array every time, it would read as a new value on every store change.
@@ -383,8 +402,8 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
           <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} onMessage={onMessage} />
-          <ErrorTail app={app} builder={builder} onShowBuilder={() => setBuilderOpen(true)} onShowRuns={() => setRunsOpen(true)} />
-          <FixBar app={app} pv={pv} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
+          <ErrorTail app={app} builder={builder} onShowBuilder={showBuilder} onShowRuns={() => setRunsOpen(true)} />
+          <FixBar app={app} pv={pv} builder={builder} onShowBuilder={showBuilder} />
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
           {asking && <CapabilityAsk question={asking} visible={mode !== 'hidden'} />}
         </div>

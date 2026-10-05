@@ -155,9 +155,17 @@ export function ErrorTail({
           {bundle.sentAt !== null ? (
             <span className="flex items-center gap-2 text-xs text-ink-faint" data-testid="error-tail-sent">
               Sent to the builder.
-              <button type="button" className="text-ink-muted underline-offset-2 hover:text-ink hover:underline" onClick={onShowBuilder}>
-                Show
-              </button>
+              {/* No builder any more (its session was deleted): nothing to show, and the no-builder bar below offers to start one */}
+              {builder.id && (
+                <button
+                  type="button"
+                  className="text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+                  onClick={onShowBuilder}
+                  data-testid="error-tail-show-builder"
+                >
+                  Show
+                </button>
+              )}
             </span>
           ) : builder.id ? (
             <button
