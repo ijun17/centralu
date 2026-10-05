@@ -1,3 +1,4 @@
+import { frameDragEndInPage } from '../engine.js'
 import type {
   Attachment,
   ApprovalDecision,
@@ -580,6 +581,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       // Same reason as the keyboard above: the page does not guess. The desktop build
       // passes the shell's answer in; the browser gets the phrase that is true anywhere.
       fileManagerName: opts.fileManagerName ?? 'file manager',
+      // Unlike the keyboard, the engine is the page's own: the dev browser is whichever one runs it
+      frameDragEndInPage: frameDragEndInPage(),
     },
     async dispose() {
       unsubscribeEndpoint?.()

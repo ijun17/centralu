@@ -415,6 +415,10 @@ describe.each([
     it('answers what this desktop calls the file manager', () => {
       expect(h.platform.capabilities.fileManagerName).toMatch(/\S/)
     })
+
+    it('answers how its engine reports a frame\'s dragend (#308) — Node has no Chromium client hints', () => {
+      expect(h.platform.capabilities.frameDragEndInPage).toBe(false)
+    })
   })
 
   it('exposes capabilities and detect', async () => {

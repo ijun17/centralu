@@ -1,3 +1,4 @@
+import { frameDragEndInPage } from '../engine.js'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
@@ -429,6 +430,8 @@ export async function createTauriPlatform(): Promise<Platform> {
       windowControlsInset,
       shortcutKeys,
       fileManagerName,
+      // WKWebView or WebKitGTK answers false, WebView2 true: the webview answers for itself
+      frameDragEndInPage: frameDragEndInPage(),
     },
   }
 }

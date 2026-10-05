@@ -1,9 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppBridge, McpUiHostContext, McpUiStyles, McpUiTheme } from '@modelcontextprotocol/ext-apps/app-bridge'
-import { APP_VERSION, type AppId } from '@cc/protocol'
+import { APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { externalAppKey, useStore } from '../../store/store.js'
+import { DragRelay } from './dragRelay.js'
 import { activeTheme, readHostStyles } from './hostStyles.js'
 
 /**
@@ -365,6 +366,15 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       }
       // Until a transcript viewer (B-7) exists, the view's logs are only received, never shown
       bridge.onloggingmessage = () => {}
+      /*
+       * An item dragged out of the view (#308): the host's relay in the view posts the drag's link
+       * and where it ended, since the page never hears a drag from another origin (dragRelay.ts).
+       * Every other notification outside the standard is ignored, as before.
+       */
+      const relay = new DragRelay(() => iframe, () => ({ appId, projectId }), platform.capabilities.frameDragEndInPage)
+      bridge.fallbackNotificationHandler = async (n) => {
+        if (n.method === APP_DRAG_NOTIFICATION) relay.take(n.params)
+      }
       bridge.oninitialized = () => {
         if (cancelled || !bridge) return
         // If the text size changed between connect and initialize, this catches it up here (only the changed field goes out)

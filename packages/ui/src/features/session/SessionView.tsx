@@ -35,6 +35,10 @@ import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
 import { composingKey, isComposerSendKey } from './composerKeys.js'
 import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dragPath.js'
+import { APP_LINK_DROP_EVENT, type AppLinkDrop } from '../app-frame/dragRelay.js'
+import { droppedPiece, droppedText, insertAtCaret, isOutsideLink, isTextDrag, type DroppedText } from './dragLink.js'
+import { appReachNotice } from './appReachNotice.js'
+import { usePlatform } from '../../app/PlatformProvider.js'
 import {
   anchorAt,
   decideFollow,
@@ -64,7 +68,11 @@ const COMPOSER_REACH = 54
  * nothing goes in. Expanding a collapsed composer before that check would bring up an empty
  * field that looks as if something had happened.
  */
-type ComposerDrop = { accept: (dt: DataTransfer) => Promise<boolean> }
+type ComposerDrop = {
+  accept: (dt: DataTransfer) => Promise<boolean>
+  /** An item dragged out of an app view and dropped on the pane (#308, app-frame/dragRelay.ts) */
+  acceptAppLink: (drop: AppLinkDrop) => boolean
+}
 
 /**
  * A selector that creates a new array every time destabilizes the zustand snapshot and causes
@@ -221,6 +229,26 @@ export function SessionPane({
    */
   const [dragOver, setDragOver] = useState(false)
   const composerDrop = useRef<ComposerDrop>(null)
+  /*
+   * An item dragged out of an app view lands here as an event, not a drop (#308): the page never
+   * hears a drag from another origin, so the view's relay reports where it ended and the frame
+   * hands the link to the element under that point (app-frame/dragRelay.ts). Anywhere on the pane
+   * counts, as for a file (#116): the composer is usually folded away.
+   */
+  const paneRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const pane = paneRef.current
+    if (!pane) return
+    const onAppDrop = (e: Event) => {
+      const drop = (e as CustomEvent<AppLinkDrop>).detail
+      e.stopPropagation()
+      if (!composerDrop.current?.acceptAppLink(drop)) return
+      drop.landed = true
+      setDroppedIn(true)
+    }
+    pane.addEventListener(APP_LINK_DROP_EVENT, onAppDrop)
+    return () => pane.removeEventListener(APP_LINK_DROP_EVENT, onAppDrop)
+  }, [])
   const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu || droppedIn
 
   /*
@@ -413,6 +441,7 @@ export function SessionPane({
        * click vanished entirely). `clip` never creates a scroll container, so there is nowhere
        * for it to scroll up to in the first place.
        */
+      ref={paneRef}
       className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-floor ${fold ? 'overflow-clip' : ''}`}
       data-testid="session-view"
       /*
@@ -452,8 +481,8 @@ export function SessionPane({
        */
       onDragOver={(e) => {
         // Reordering (sessions, projects) has its own owner for that spot — this passes it
-        // through untouched
-        if (!isFileDrag(e.dataTransfer.types)) return
+        // through untouched. A link from outside the window is taken like a file (#308)
+        if (!isFileDrag(e.dataTransfer.types) && !isOutsideLink(e.dataTransfer.types)) return
         /*
          * If it is over the composer, the highlight belongs to it (the composer lights up its
          * border in ink-muted). If both light up at once, it says how many places would accept the
@@ -479,7 +508,7 @@ export function SessionPane({
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
       }}
       onDrop={(e) => {
-        if (!isFileDrag(e.dataTransfer.types)) return
+        if (!isFileDrag(e.dataTransfer.types) && !isOutsideLink(e.dataTransfer.types)) return
         setDragOver(false)
         // Something dropped exactly on the composer was already accepted by it — accepting it
         // again here would attach it twice
@@ -873,6 +902,21 @@ const Composer = memo(function Composer({
    */
   useLayoutEffect(() => setRecall(null), [sessionId])
 
+  /*
+   * The quiet line under a link dropped from an app this session cannot reach (#308): the link went
+   * in, but the agent will not have the app's tools, and the line says what would give them. It is
+   * about this session, so another session in the same composer (the focus view reuses it) clears
+   * it, as does sending, dismissing it, or the next drop. `asked` drops a late answer to an earlier
+   * drop.
+   */
+  const platform = usePlatform()
+  const [appNotice, setAppNotice] = useState<{ text: string; reason: string } | null>(null)
+  const asked = useRef(0)
+  useLayoutEffect(() => {
+    asked.current++
+    setAppNotice(null)
+  }, [sessionId])
+
   // Autocomplete: `/` for skills, `@` for files
   const ac = useAutocomplete({
     sessionId,
@@ -1020,12 +1064,69 @@ const Composer = memo(function Composer({
      * and attaching the screenshot it happened to show is the bug. Checked here, in the one place
      * both the pane and the composer hand their drop to, so neither can miss it.
      */
-    if (!isOsFileDrag([...dt.types])) return false
-    return takeFiles(dt.files)
+    const types = [...dt.types]
+    if (isOsFileDrag(types)) return takeFiles(dt.files)
+    /*
+     * A link or text goes into the sentence at the caret (#308) — after the file check, since a
+     * file dragged in from the OS can carry its `file:` address as `text/uri-list` too. A drag
+     * with a session, panel or project type is still the grid's, as above (`isTextDrag`).
+     */
+    if (!isTextDrag(types)) return false
+    const dropped = droppedText(dt.getData('text/uri-list'), dt.getData('text/plain'))
+    if (!dropped) return false
+    insertDropped(dropped)
+    return true
+  }
+
+  /**
+   * Puts a dropped link or text at the caret: in place of the selection, or at the end when the
+   * composer's text is not what the field shows yet. The caret goes right after it, and the field
+   * takes focus, so typing goes on from there.
+   */
+  const insertDropped = (dropped: DroppedText) => {
+    const piece = droppedPiece(dropped)
+    setText((prev) => {
+      const el = inputRef.current
+      const sel = el && el.value === prev ? [el.selectionStart, el.selectionEnd] : [prev.length, prev.length]
+      const { text: next, caret } = insertAtCaret(prev, sel[0] ?? prev.length, sel[1] ?? prev.length, piece)
+      requestAnimationFrame(() => {
+        const later = inputRef.current
+        if (!later) return
+        later.focus()
+        later.setSelectionRange(caret, caret)
+        setCaret(caret)
+      })
+      return next
+    })
+  }
+
+  /**
+   * An item dragged out of an app view (#308). The link goes in whatever the answer, and the host
+   * says whether this session can use that app's tools (`apps.reach`); if not, the quiet line says
+   * why. An older host that has no answer leaves the line off rather than guess.
+   */
+  const acceptAppLink = (drop: AppLinkDrop): boolean => {
+    const dropped = droppedText(drop.uri, drop.text)
+    if (!dropped) return false
+    insertDropped(dropped)
+    const ask = ++asked.current
+    setAppNotice(null)
+    const { appId, projectId: appProject } = drop.from
+    platform.apps.reach(sessionId, appId, appProject).then(
+      (r) => {
+        if (ask !== asked.current || r.reachable) return
+        const s = useStore.getState()
+        const app = s.externalApps.find((a) => a.appId === appId && a.projectId === appProject)
+        const project = appProject === null ? null : (s.projects[appProject]?.name ?? 'another project')
+        setAppNotice({ text: appReachNotice(r, app?.name ?? appId, project), reason: r.reason })
+      },
+      () => {},
+    )
+    return true
   }
   // No deps here — the closure above needs to see each render's draft and state, so the handle
   // must be recreated every render too
-  useImperativeHandle(dropRef, () => ({ accept: acceptDrop }))
+  useImperativeHandle(dropRef, () => ({ accept: acceptDrop, acceptAppLink }))
 
   /*
    * The pane rendering a conversation is what fetches it.
@@ -1071,11 +1172,27 @@ const Composer = memo(function Composer({
           */
         setRecall(null)
         setDraft(sessionId, EMPTY_DRAFT)
+        asked.current++
+        setAppNotice(null)
         void send(sessionId, t, attachments)
       }}
     >
       {(attachments.length > 0 || uploading > 0) && (
         <AttachmentStrip attachments={attachments} uploading={uploading} onRemove={removeAttachment} />
+      )}
+      {appNotice && (
+        <div className="mb-2 flex items-start gap-2 text-sm text-ink-muted" role="status" data-testid="composer-app-notice" data-reason={appNotice.reason}>
+          <span className="min-w-0 flex-1">{appNotice.text}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-sm p-0.5 text-ink-faint hover:text-ink"
+            aria-label="Dismiss"
+            data-testid="composer-app-notice-dismiss"
+            onClick={() => setAppNotice(null)}
+          >
+            <CloseIcon />
+          </button>
+        </div>
       )}
       <div
         /*
@@ -1097,7 +1214,7 @@ const Composer = memo(function Composer({
         onDragEnter={(e) => {
           e.preventDefault()
           // Lit only for what it would take — a session dragged over it is the grid's (#286)
-          if (isFileDrag(e.dataTransfer.types)) setDragging(true)
+          if (isFileDrag(e.dataTransfer.types) || isTextDrag(e.dataTransfer.types)) setDragging(true)
         }}
         onDragOver={(e) => e.preventDefault()}
         onDragLeave={(e) => {

@@ -410,6 +410,15 @@ export type PlatformCapabilities = {
    * Thunar…), so the generic phrase is the honest one there rather than a guess.
    */
   fileManagerName: string
+  /**
+   * Whether a frame's `dragend` reports where the drag ended in the top page's coordinates rather
+   * than the frame's own (#308). The UI places an item dragged out of an app view by that point
+   * (app-frame/dragRelay.ts), and the engines disagree: WebKit reports the frame's coordinates, as
+   * the spec has it, Chromium (WebView2 on Windows) the page's. An engine fact, asked for here for
+   * the same reason as the keyboard above: ui does not look at what it runs on (`engine.ts` has the
+   * measurement).
+   */
+  frameDragEndInPage: boolean
 }
 
 /**

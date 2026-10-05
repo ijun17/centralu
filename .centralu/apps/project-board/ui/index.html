@@ -336,7 +336,7 @@
         select.addEventListener('change', () => move(item, select.value))
         const node = el(
           'article',
-          { class: `card${saving.has(item.itemId) ? ' saving' : ''}`, draggable: movable ? 'true' : 'false', 'data-number': item.number ?? '' },
+          { class: `card${saving.has(item.itemId) ? ' saving' : ''}`, draggable: movable || item.url ? 'true' : 'false', 'data-number': item.number ?? '' },
           item.url
             ? el('a', { class: 'title', href: item.url, onclick: (e) => (e.preventDefault(), open(item.url)) }, item.title)
             : el('span', { class: 'title' }, item.title),
@@ -350,9 +350,16 @@
             saving.has(item.itemId) ? el('span', {}, 'Saving…') : select,
           ),
         )
+        // A card carries its link too, so it drops into a session's composer as one (Centralu's
+        // drag contract, docs/apps.md): `text/uri-list` and `text/plain`. Only a movable card
+        // carries the item, which a column takes as a move.
         node.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/x-item', item.itemId)
-          e.dataTransfer.effectAllowed = 'move'
+          if (movable) e.dataTransfer.setData('text/x-item', item.itemId)
+          if (item.url) {
+            e.dataTransfer.setData('text/uri-list', item.url)
+            e.dataTransfer.setData('text/plain', item.number == null ? item.title : `#${item.number} ${item.title}`)
+          }
+          e.dataTransfer.effectAllowed = 'copyMove'
         })
         return node
       }
