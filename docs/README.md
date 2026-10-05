@@ -18,7 +18,7 @@ Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-
 | Document | What is in it | Read first |
 |---|---|---|
 | [product-spec.md](product-spec.md) | The spec: requirements (FR-1–22), screens (focus view, grid, project screen), roadmap, risks | — |
-| [architecture.md](architecture.md) | Axes of change, layers, dependency rules, design patterns, process topology | product-spec §6 |
+| [architecture.md](architecture.md) | Axes of change, layers, dependency rules, design patterns, process topology; the keeper, switching builds and applying an update (§4.1–4.5, including a keeper that cannot move: §4.4) | product-spec §6 |
 | [folder-structure.md](folder-structure.md) | How the monorepo is split, and where code for a given change goes | architecture |
 | [tech-stack.md](tech-stack.md) | Library choices with the reasoning, and the list of things not to reach for | architecture |
 | [platform-abstraction.md](platform-abstraction.md) | The Platform port — how web development turns into a Tauri app. Implementation matrix and the lint rules that enforce it | architecture |

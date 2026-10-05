@@ -576,8 +576,9 @@ function record(kind: string, err: unknown): void {
  * How this host leaves (#280 step 2).
  *
  *   stop    today's ending: agents, terminals and commands are stopped with it. Always the answer
- *           without a keeper, and under one when the keeper itself is stopping ("Quit and stop
- *           agents", the last window closing with background mode off, idle exit) — it says so with
+ *           without a keeper, and under one when the keeper itself is stopping ("Quit
+ *           completely", "Restart completely", the last window closing with background mode off,
+ *           idle exit) — it says so with
  *           `stop` on the child service.
  *   detach  under a keeper that keeps the children: a restart, a build switch, a crash, the keeper's
  *           pipe closing. Nothing is stopped; the next host re-attaches to all of it.

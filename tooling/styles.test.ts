@@ -380,10 +380,15 @@ describe('Tauri permissions', () => {
    */
   it('the desktop shell hands its build bar to App instead of laying it over the top bar', () => {
     const main = readFileSync(join(ROOT, 'apps/desktop/src/main.tsx'), 'utf8')
-    expect(main, 'the build bar is not handed to App').toMatch(/<App platform=\{platform\} banner=\{buildBar\} \/>/)
-    expect(main, 'the build bar is not a ShellBanner').toMatch(/<ShellBanner testId="host-other-build"/)
+    // The bar is drawn by build-bar.tsx since #387, so the browser harness can draw the same one
+    const bar = readFileSync(join(ROOT, 'apps/desktop/src/build-bar.tsx'), 'utf8')
+    expect(main, 'the build bar is not handed to App').toMatch(/<App platform=\{platform\} banner=\{buildBarNode\} \/>/)
+    expect(main, 'the build bar is not the BuildBarView').toMatch(/<BuildBarView\b/)
+    expect(bar, 'the build bar is not a ShellBanner').toMatch(/<ShellBanner testId="host-other-build"/)
     // Anything fixed to the top edge lands on the traffic lights and the header
-    expect(main, 'something in the desktop shell is fixed to the top edge').not.toMatch(/\bfixed\b[^"]*\btop-0\b/)
+    for (const [name, text] of [['main.tsx', main], ['build-bar.tsx', bar]] as const) {
+      expect(text, `something in ${name} is fixed to the top edge`).not.toMatch(/\bfixed\b[^"]*\btop-0\b/)
+    }
   })
 
   it('the webview does not intercept an OS drop (kills file attachments)', () => {

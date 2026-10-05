@@ -502,7 +502,7 @@ async function scenario() {
   check((await viewFrame(h2, opened).catch((e) => ({ url: String(e) }))).url === frame.url, 'and the new host gives the same address for it')
 
   // ---- stop
-  log('\nquit and stop agents')
+  log('\nquit completely')
   const held = await heldChildren(data)
   for (const c of held) if (c.alive) heldPids.add(c.pid)
   const keeperC = view.keeper.pid

@@ -8,8 +8,9 @@ import { expect, test, type Page } from '@playwright/test'
  * macOS traffic lights and its "Switch to this build" button sat on the top bar's own controls.
  * Now App draws it in the flow, directly below the top bar, and the lanes give up its height.
  *
- * Driven through apps/web/shell-banner.html, which mounts the real App on the mock with a
- * ShellBanner in the slot and reports the macOS 86px window-controls inset. The traffic lights
+ * Driven through apps/web/shell-banner.html, which mounts the real App on the mock with the
+ * desktop's own build bar in the slot (apps/desktop/src/build-bar.tsx, fed a made-up keeper report
+ * and decided by the same `buildBar`) and reports the macOS 86px window-controls inset. The traffic lights
  * are not in a browser, so their box comes from tauri.conf.json — the same numbers the window is
  * built with.
  *
@@ -129,6 +130,54 @@ export function shellBannerTests(): void {
         await expectBelow(page, banner, ['sidebar', 'session-view'])
       })
     }
+
+    /*
+     * #387: beta.10's keeper cannot hand itself over on macOS ("Message too long"), and the fix is
+     * in the sending keeper, which an update does not replace. The host swap still goes ahead
+     * under it, so the window runs its own build; the bar must say that calmly and offer the full
+     * restart, instead of "Switch to this build" forever and "Could not switch builds" on the second try.
+     */
+    for (const state of ['keeper-later', 'keeper-later-first'] as const) {
+      test(`a keeper that could not move while the host runs this build (${state}): a note and a full restart, no switch`, async ({
+        page,
+      }) => {
+        await open(page, `demo=focus&state=${state}`)
+        await expectBelowTopBar(page)
+        const bar = page.getByTestId('host-other-build')
+        await expect(bar).toHaveAttribute('role', 'status')
+        await expect(page.getByTestId('host-switch-progress')).toHaveText(
+          'Running this build. The background keeper moves to it the next time it restarts.',
+        )
+        await expect(bar).not.toContainText('Could not switch builds')
+        await expect(page.getByTestId('host-switch-build')).toHaveCount(0)
+        const restart = page.getByTestId('host-restart-keeper')
+        await expect(restart).toHaveText('Restart completely')
+        expect(await hitsItself(page, 'host-restart-keeper'), 'something is drawn over the restart button').toBe(true)
+
+        // It says plainly what stops before anything does
+        await restart.click()
+        await expect(page.getByTestId('confirm-restart-keeper-loses')).toContainText(
+          'Also stops agents, terminals and running commands.',
+        )
+        const calls = () => page.evaluate(() => (window as unknown as { __shellCalls: string[] }).__shellCalls)
+        expect(await calls()).toEqual([])
+        await page.getByTestId('confirm-restart-keeper-yes').click()
+        expect(await calls()).toEqual(['restart_keeper'])
+        await expect(page.getByTestId('host-switch-progress')).toHaveText('Restarting the background keeper on this build…')
+        await expect(page.getByTestId('host-restart-keeper')).toHaveCount(0)
+      })
+    }
+
+    test('a real failure still reads as one: the reason, "Try again", and no restart offered', async ({ page }) => {
+      await open(page, 'demo=focus&state=failed')
+      const bar = page.getByTestId('host-other-build')
+      await expect(bar).toHaveAttribute('role', 'alert')
+      await expect(page.getByTestId('host-switch-progress')).toHaveText(
+        'Could not switch builds: the new build did not pass its start check: no answer within 60s. The running build was not touched and is still serving.',
+      )
+      await expect(page.getByTestId('host-switch-build')).toHaveText('Try again')
+      await expect(page.getByTestId('host-restart-keeper')).toHaveCount(0)
+    })
 
     test('in the grid, every panel starts below the banner', async ({ page }) => {
       await open(page, 'demo=grid&state=other')

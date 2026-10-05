@@ -43,6 +43,7 @@ fn main() {
             "background_mode",
             "set_background_mode",
             "quit_and_stop_agents",
+            "restart_keeper",
             "relaunch_info",
             "apply_update_relaunch",
         ]),

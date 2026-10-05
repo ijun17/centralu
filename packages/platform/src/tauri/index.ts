@@ -8,7 +8,17 @@ import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, Sy
 import { createWebPlatform } from '../web/index.js'
 import type { SwapView } from './switch-plan.js'
 
-export { autoSwitch, swapProgressText, swapRunning, switchPlan, type SwapView, type SwitchPlan } from './switch-plan.js'
+export {
+  autoSwitch,
+  buildBar,
+  keeperStaysBehind,
+  swapProgressText,
+  swapRunning,
+  switchPlan,
+  type BuildBar,
+  type SwapView,
+  type SwitchPlan,
+} from './switch-plan.js'
 
 /**
  * The Tauri implementation (docs/platform-abstraction.md §5, migration playbook steps 2-3).
@@ -185,9 +195,22 @@ export async function switchHostBuild(): Promise<void> {
   await invoke('switch_host_build').catch(rethrowAsError)
 }
 
-/** "Quit and stop agents" (#280): stops the host whatever background mode says, then quits */
+/**
+ * "Quit completely" (#280): stops the keeper, the host and everything they hold (agents,
+ * terminals, running commands, app processes) whatever background mode says, then quits
+ */
 export async function quitAndStopAgents(): Promise<void> {
   await invoke('quit_and_stop_agents').catch(rethrowAsError)
+}
+
+/**
+ * "Restart completely" (#387): stops the keeper and everything it holds, as "Quit completely" does,
+ * but keeps this window open; the window then starts a keeper of its own build and reattaches.
+ * For a keeper that could not move to this build by itself. Returns once the keeper has taken the
+ * request; the reconnect arrives as `host-status` and `host-build`.
+ */
+export async function restartKeeper(): Promise<void> {
+  await invoke('restart_keeper').catch(rethrowAsError)
 }
 
 /** Exported for testing — checks the seam with the Rust commands without a webview */

@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { autoSwitch, swapProgressText, swapRunning, switchPlan, type AutoSwitchInput, type SwapView } from './switch-plan.js'
+import {
+  COMPLETELY_STOPS,
+  KEEPER_LATER_TEXT,
+  RESTART_COMPLETELY_LOSES,
+  autoSwitch,
+  buildBar,
+  keeperStaysBehind,
+  swapProgressText,
+  swapRunning,
+  switchPlan,
+  type AutoSwitchInput,
+  type BuildBarInput,
+  type SwapView,
+} from './switch-plan.js'
 
 describe('what switching builds costs (#280 step 3)', () => {
   it('switches without asking when nothing is running', () => {
@@ -103,5 +116,107 @@ describe('switching by itself after an update (#352)', () => {
     const swap: SwapView = { phase: 'draining', target: { commit: 'b' }, startedAt: 1 }
     expect(autoSwitch({ ...quiet, build: { ...quiet.build, swap } })).toBe('none')
     expect(autoSwitch({ ...quiet, build: { ...quiet.build, sameBuild: true, keeperSameBuild: true } })).toBe('none')
+  })
+})
+
+/**
+ * A keeper of an older build that cannot hand itself over (#387): beta.10's keeper fails with
+ * "Message too long" on macOS, and the fix lives in the sending keeper, which an update does not
+ * replace. The host swap goes ahead under it; the window must not keep offering a switch that can
+ * only fail again, nor call the second try a failure.
+ */
+describe('a keeper that stays on its build while the host runs this one (#387)', () => {
+  const app = { commit: '9e77999e', builtAt: '2026-10-05T10:00:00Z' }
+  const tooLong = 'could not pass the state on: Message too long (os error 40)'
+  /** What beta.10's keeper reports when the host already runs this build (the second click) */
+  const secondTry: SwapView = {
+    phase: 'failed',
+    target: app,
+    from: app,
+    message: `could not hand over to the new build's keeper: ${tooLong}`,
+    keeperMessage: tooLong,
+    startedAt: 2,
+  }
+  /** ...and on the first click, when the host swap went ahead under it */
+  const firstTry: SwapView = { phase: 'done', target: app, from: { commit: 'daf4ecf5' }, keeperMessage: tooLong, startedAt: 1 }
+  const behindKeeper = { mode: 'keeper' as const, app, sameBuild: true, keeperSameBuild: false }
+  const input = (swap: SwapView | undefined, over: Partial<BuildBarInput> = {}): BuildBarInput => ({
+    build: { ...behindKeeper, ...(swap ? { swap } : {}) },
+    dismissed: false,
+    dismissedSwap: null,
+    ...over,
+  })
+
+  it('reads the host on this build with the keeper left behind as running the new version, not as a failure', () => {
+    for (const swap of [secondTry, firstTry]) {
+      expect(keeperStaysBehind({ ...behindKeeper, swap })).toBe(true)
+      const bar = buildBar(input(swap))
+      expect(bar).toEqual({ kind: 'keeper_later', text: KEEPER_LATER_TEXT, detail: tooLong })
+      expect(JSON.stringify(bar)).not.toContain('Could not switch builds')
+    }
+  })
+
+  it('a restart is what moves the keeper, and it says plainly what stops', () => {
+    expect(KEEPER_LATER_TEXT).toContain('next time it restarts')
+    expect(RESTART_COMPLETELY_LOSES).toContain(COMPLETELY_STOPS)
+    expect(COMPLETELY_STOPS).toBe('Also stops agents, terminals and running commands.')
+  })
+
+  it('does not switch by itself again either', () => {
+    const build = { ...behindKeeper, keepsAgents: true, busy: false, relaunched: true, swap: secondTry }
+    expect(autoSwitch({ build, autoApply: true, tried: false, dismissed: false })).toBe('none')
+  })
+
+  it('only for this build, only once the host is on it, and only when the keeper said why it stayed', () => {
+    // The swap was to another window's build
+    expect(keeperStaysBehind({ ...behindKeeper, swap: { ...secondTry, target: { commit: 'other' } } })).toBe(false)
+    expect(keeperStaysBehind({ ...behindKeeper, swap: { ...secondTry, target: { ...app, builtAt: 'later' } } })).toBe(false)
+    // The host did not reach this build: that is a real failure
+    expect(keeperStaysBehind({ ...behindKeeper, sameBuild: false, swap: secondTry })).toBe(false)
+    // Nothing went wrong with the keeper, or it is on this build already
+    const { keeperMessage: _, ...noReason } = secondTry
+    expect(keeperStaysBehind({ ...behindKeeper, swap: noReason })).toBe(false)
+    expect(keeperStaysBehind({ ...behindKeeper, keeperSameBuild: true, swap: secondTry })).toBe(false)
+    // Still running
+    expect(keeperStaysBehind({ ...behindKeeper, swap: { ...secondTry, phase: 'handing_over' } })).toBe(false)
+  })
+
+  it('a keeper behind that has not tried yet is still offered the switch, which stops nothing', () => {
+    expect(buildBar(input(undefined))).toEqual({ kind: 'other', who: 'keeper' })
+  })
+
+  it('"Dismiss" hides the note until the window is no longer behind', () => {
+    expect(buildBar(input(secondTry, { dismissed: true }))).toEqual({ kind: 'none' })
+  })
+})
+
+describe('the build bar otherwise (#280)', () => {
+  const app = { commit: 'new' }
+  const host = { mode: 'keeper' as const, app, sameBuild: false, keeperSameBuild: false }
+  const input = (build: BuildBarInput['build'], over: Partial<BuildBarInput> = {}): BuildBarInput => ({
+    build,
+    dismissed: false,
+    dismissedSwap: null,
+    ...over,
+  })
+
+  it('a real failure says "Could not switch builds" with its reason and offers to try again, as before', () => {
+    const swap: SwapView = { phase: 'failed', target: app, message: 'the new build did not pass its start check: it exited', startedAt: 3 }
+    expect(buildBar(input({ ...host, swap }))).toEqual({
+      kind: 'failed',
+      text: 'Could not switch builds: the new build did not pass its start check: it exited. The running build was not touched and is still serving.',
+      retry: true,
+    })
+    // The keeper stayed too, but the host did not reach this build either: still a failure
+    expect(buildBar(input({ ...host, swap: { ...swap, keeperMessage: 'x' } })).kind).toBe('failed')
+    // Dismissed: the switch is offered again, without the error
+    expect(buildBar(input({ ...host, swap }, { dismissedSwap: 3 }))).toEqual({ kind: 'other', who: 'host' })
+  })
+
+  it('shows a running swap, nothing in direct mode, and nothing once everything is on this build', () => {
+    expect(buildBar(input({ ...host, swap: { phase: 'draining', target: app, startedAt: 1 } })).kind).toBe('switching')
+    expect(buildBar(input({ ...host, mode: 'direct' }))).toEqual({ kind: 'none' })
+    expect(buildBar(input({ mode: 'keeper', app, sameBuild: true, keeperSameBuild: true }))).toEqual({ kind: 'none' })
+    expect(buildBar(input(host, { dismissed: true }))).toEqual({ kind: 'none' })
   })
 })

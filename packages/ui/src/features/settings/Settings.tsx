@@ -978,14 +978,14 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
           <span className="mt-1 block text-xs leading-body text-ink-faint">
             Closing the window leaves the agent host and its running sessions going. Opening
             Centralu again picks them up where they are, waiting approvals included. Off, quitting
-            stops them, as before.
+            is always Quit completely and stops them.
           </span>
         </span>
       </label>
       <p className="mt-3 text-xs leading-body text-ink-faint">
-        To stop everything anyway, choose <span className="text-ink-muted">Quit and stop agents</span>{' '}
-        when you quit. With no window open and nothing running for 30 minutes, the background host
-        stops by itself.
+        To stop everything anyway, choose <span className="text-ink-muted">Quit completely</span>{' '}
+        when you quit: it also stops agents, terminals and running commands. With no window open and
+        nothing running for 30 minutes, the background host stops by itself.
       </p>
       {error && (
         <p className="mt-2 text-xs text-danger" data-testid="settings-background-error">

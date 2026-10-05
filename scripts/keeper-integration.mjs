@@ -349,7 +349,7 @@ async function scenarioBackgroundOn() {
 }
 
 async function scenarioStop() {
-  log('\nquit and stop agents')
+  log('\nquit completely')
   const data = newData()
   const sock = join(data, 'keeper.sock')
   const k = startKeeper(data)

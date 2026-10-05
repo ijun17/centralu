@@ -13,7 +13,7 @@
 | 문서 | 담긴 내용 | 먼저 읽을 것 |
 |---|---|---|
 | [product-spec.ko.md](product-spec.ko.md) | 스펙: 요구사항(FR-1–22), 화면(포커스 뷰, 그리드, 프로젝트 화면), 로드맵, 리스크 | — |
-| [architecture.ko.md](architecture.ko.md) | 변화 축, 레이어, 의존성 규칙, 디자인 패턴, 프로세스 토폴로지 | product-spec §6 |
+| [architecture.ko.md](architecture.ko.md) | 변화 축, 레이어, 의존성 규칙, 디자인 패턴, 프로세스 토폴로지; 키퍼, 빌드 바꾸기, 업데이트 적용(§4.1–4.5, 옮겨 가지 못하는 키퍼는 §4.4) | product-spec §6 |
 | [folder-structure.ko.md](folder-structure.ko.md) | 모노레포를 나누는 방법, 그리고 어떤 변경의 코드가 갈 곳 | architecture |
 | [tech-stack.ko.md](tech-stack.ko.md) | 라이브러리 선택과 그 이유, 그리고 손대지 말 것들의 목록 | architecture |
 | [platform-abstraction.ko.md](platform-abstraction.ko.md) | Platform 포트 — 웹으로 개발한 것이 Tauri 앱이 되는 방법. 구현 매트릭스와 이를 강제하는 lint 규칙 | architecture |

@@ -3,9 +3,10 @@ import { test, expect } from '@playwright/test'
 /**
  * Background mode (#280), on the mock platform, which stands in for the desktop app with a keeper.
  *
- * The keeper side (what closing the window does with it on or off, the idle exit, "Quit and stop
- * agents") is driven end to end by `scripts/keeper-integration.mjs`; this holds the setting's own
+ * The keeper side (what closing the window does with it on or off, the idle exit, "Quit
+ * completely") is driven end to end by `scripts/keeper-integration.mjs`; this holds the setting's own
  * screen: it is off by default, it says what it costs, and what it saves is what the platform holds.
+ * The quit question's buttons in each mode are e2e/quit-dialog.spec.ts.
  */
 test('background mode is off by default, says what it keeps running, and saves through the platform', async ({ page }) => {
   await page.goto('/?mock=1')
@@ -19,7 +20,10 @@ test('background mode is off by default, says what it keeps running, and saves t
   await expect(toggle).not.toBeChecked()
   // What someone needs before turning it on: what keeps running, how to stop it, when it stops itself
   await expect(section).toContainText('Keep agents running after Centralu quits')
-  await expect(section).toContainText('Quit and stop agents')
+  // The same words as the quit question, and what they stop
+  await expect(section).toContainText('Quit completely')
+  await expect(section).toContainText('also stops agents, terminals and running commands')
+  await expect(section).not.toContainText('Quit and stop agents')
   await expect(section).toContainText('30 minutes')
 
   await toggle.check()

@@ -681,7 +681,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
         "stop" => {
             reply(&mut stream, &json!({ "ok": true }));
             drop(stream);
-            k.shutdown("asked to stop (Quit and stop agents)");
+            k.shutdown("asked to stop (Quit completely, or Restart completely)");
         }
         "relaunching" => relaunching(&k, &mut stream, &req),
         "switch" => switch(k, &mut stream, &req),

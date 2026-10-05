@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App, ShellBanner, applyCachedTheme, applyCachedTypography, confirmKeyAction, useStore } from '@cc/ui'
+import { App, applyCachedTheme, applyCachedTypography, confirmKeyAction, useStore } from '@cc/ui'
 import {
   autoSwitch,
+  buildBar,
   createTauriPlatform,
   focusWindow,
   hostBuild,
@@ -10,8 +11,7 @@ import {
   onHostBuild,
   quitAndStopAgents,
   restartHost,
-  swapProgressText,
-  swapRunning,
+  restartKeeper,
   switchHostBuild,
   switchPlan,
   type HostBuild,
@@ -19,6 +19,8 @@ import {
 } from '@cc/platform/tauri'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { BuildBarView, RestartKeeperDialog } from './build-bar.js'
+import { QuitDialog } from './quit-dialog.js'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
@@ -170,9 +172,16 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
    *
    * The keeper itself moves to the window's build first (#280 step 4), handing everything over
    * without stopping anything. A keeper that is behind while the host is not gets the same bar.
+   *
+   * A keeper that cannot move (a handoff that fails in an older keeper, #387) stays on its build
+   * while the host swap goes ahead under it. Then the bar says this window runs its build and the
+   * keeper moves when it next starts, and offers "Restart completely" rather than a switch that
+   * would only fail again (`buildBar`, `keeperStaysBehind`).
    */
   const [build, setBuild] = useState<HostBuild | null>(null)
   const [askSwitch, setAskSwitch] = useState(false)
+  const [askRestart, setAskRestart] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const [switchError, setSwitchError] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState(false)
   // A failed swap stays on the bar until dismissed; this remembers which one was
@@ -183,16 +192,14 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       .catch(() => {})
     return onHostBuild((b) => {
       setBuild(b)
-      if (b.sameBuild && b.keeperSameBuild !== false) setDismissed(false)
+      if (b.sameBuild && b.keeperSameBuild !== false) {
+        setDismissed(false)
+        // The keeper of this build answered: a full restart, if one ran, is over
+        setRestarting(false)
+      }
     })
   }, [])
-  const keeper = build?.mode === 'keeper'
-  const swap = keeper ? build?.swap : undefined
-  const switching = swapRunning(swap)
-  const swapFailed = swap?.phase === 'failed' && dismissedSwap !== swap.startedAt
-  // Switched, but the keeper stayed on the previous build: worth a line, not an alarm
-  const swapNotice = swap?.phase === 'done' && !!swap.keeperMessage && dismissedSwap !== swap.startedAt
-  const otherBuild = keeper && (build?.sameBuild === false || build?.keeperSameBuild === false) && !dismissed
+  const bar = build ? buildBar({ build, dismissed, dismissedSwap }) : ({ kind: 'none' } as const)
   const plan = build ? switchPlan(build) : null
   const startSwitch = () => {
     setSwitchError(null)
@@ -267,62 +274,33 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
    * Handed to App, which draws it between its top bar and the lanes (#326). Laid over the window
    * here (fixed, top 0) it covered the macOS traffic lights and the header's controls.
    */
-  const buildBar =
-    keeper && build && (switching || swapFailed || swapNotice || otherBuild) ? (
-      <ShellBanner testId="host-other-build" role={swapFailed ? 'alert' : 'status'}>
-        {switching || swapFailed || swapNotice ? (
-          <span
-            className={`min-w-0 flex-1 truncate ${swapFailed ? 'text-danger' : ''}`}
-            title={swap?.message}
-            data-testid="host-switch-progress"
-          >
-            {swapProgressText(swap)}
-          </span>
-        ) : (
-          <span className="min-w-0 flex-1 truncate">
-            {build.sameBuild === false
-              ? `The agent host is running ${describeBuild(build.host)}.`
-              : `The background keeper is running ${describeBuild(build.keeper)}.`}{' '}
-            This window is {describeBuild(build.app)}.
-          </span>
-        )}
-        {/* Truncates too: a long error must not push the buttons out of the window */}
-        {switchError && (
-          <span className="min-w-0 max-w-[40%] truncate text-danger" title={switchError}>
-            {switchError}
-          </span>
-        )}
-        {!switching && otherBuild && (
-          <button
-            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-ink hover:border-line-strong"
-            onClick={() => {
-              setSwitchError(null)
-              if (swap) setDismissedSwap(swap.startedAt)
-              // Ask only when something can be lost; otherwise just switch
-              if (plan?.confirm) setAskSwitch(true)
-              else startSwitch()
-            }}
-            data-testid="host-switch-build"
-          >
-            {swapFailed ? 'Try again' : 'Switch to this build'}
-          </button>
-        )}
-        {!switching && (
-          <button
-            className="shrink-0 text-ink-faint hover:text-ink"
-            onClick={() => {
-              if (swap) setDismissedSwap(swap.startedAt)
-              setDismissed(true)
-            }}
-          >
-            {swapFailed || swapNotice ? 'Dismiss' : 'Not now'}
-          </button>
-        )}
-      </ShellBanner>
+  const buildBarNode =
+    build && bar.kind !== 'none' ? (
+      <BuildBarView
+        build={build}
+        bar={bar}
+        error={switchError}
+        restarting={restarting}
+        onSwitch={() => {
+          setSwitchError(null)
+          if (build.swap) setDismissedSwap(build.swap.startedAt)
+          // Ask only when something can be lost; otherwise just switch
+          if (plan?.confirm) setAskSwitch(true)
+          else startSwitch()
+        }}
+        onDismiss={() => {
+          if (build.swap) setDismissedSwap(build.swap.startedAt)
+          setDismissed(true)
+        }}
+        onRestart={() => {
+          setSwitchError(null)
+          setAskRestart(true)
+        }}
+      />
     ) : null
   return (
     <>
-      <App platform={platform} banner={buildBar} />
+      <App platform={platform} banner={buildBarNode} />
       {hostFailure !== null && (
         <div className="fixed inset-0 z-40 bg-surface-floor/95" data-testid="host-failed">
           <StartupFailure
@@ -377,100 +355,33 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           </div>
         </div>
       )}
+      {askRestart && (
+        <RestartKeeperDialog
+          onCancel={() => setAskRestart(false)}
+          onConfirm={() => {
+            setAskRestart(false)
+            setRestarting(true)
+            void restartKeeper().catch((e: Error) => {
+              setRestarting(false)
+              setSwitchError(e.message)
+            })
+          }}
+        />
+      )}
       {askQuit && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin"
-          data-testid="confirm-quit"
-          onClick={() => setAskQuit(false)}
-        >
-          <div
-            ref={dialogRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Quit Centralu?"
-            className="w-[360px] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal) focus:outline-none"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-md text-ink">Quit Centralu?</p>
-            {background ? (
-              <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="confirm-quit-background">
-                Agents keep running in the background. Open Centralu again to come back to them,
-                waiting approvals included.
-              </p>
-            ) : (
-              <p className="mt-2 text-xs leading-body text-ink-muted">
-                Running agent processes stop with the app. Conversations are saved and resume when
-                you come back.
-              </p>
-            )}
-            {quitError && <p className="mt-2 text-xs text-danger">{quitError}</p>}
-            {strays.length > 0 && (
-              <div className="mt-3 rounded-md border border-line bg-surface-floor p-2" data-testid="quit-strays">
-                <p className="text-xs text-ink-muted">
-                  {strays.length} process{strays.length > 1 ? 'es' : ''} started in your project
-                  folders will keep running:
-                </p>
-                <ul className="mt-1 max-h-24 overflow-y-auto">
-                  {strays.slice(0, 6).map((s) => (
-                    <li key={s.pid} className="readout truncate text-2xs text-ink-faint" title={s.cwd}>
-                      {s.pid} · {s.command}
-                    </li>
-                  ))}
-                  {strays.length > 6 && (
-                    <li className="text-2xs text-ink-faint">…and {strays.length - 6} more</li>
-                  )}
-                </ul>
-                <label className="mt-2 flex items-center gap-1.5 text-xs text-ink-muted">
-                  <input
-                    type="checkbox"
-                    className="accent-line-strong"
-                    checked={alsoStop}
-                    onChange={(e) => setAlsoStop(e.target.checked)}
-                    data-testid="quit-stop-strays"
-                  />
-                  Stop them too
-                </label>
-              </div>
-            )}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink"
-                onClick={() => setAskQuit(false)}
-                data-testid="confirm-quit-no"
-              >
-                Cancel <span className="text-2xs text-ink-faint">esc</span>
-              </button>
-              {background && (
-                <button
-                  className="rounded-md border border-line px-2 py-1 text-sm text-ink-muted hover:border-line-strong hover:text-ink"
-                  onClick={() => void quit(true)}
-                  data-testid="confirm-quit-stop"
-                >
-                  Quit and stop agents
-                </button>
-              )}
-              <button
-                className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger/70"
-                onClick={() => void quit()}
-                data-testid="confirm-quit-yes"
-              >
-                Quit <span className="text-2xs">⏎</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <QuitDialog
+          background={background}
+          strays={strays}
+          alsoStop={alsoStop}
+          error={quitError}
+          dialogRef={dialogRef}
+          onAlsoStop={setAlsoStop}
+          onCancel={() => setAskQuit(false)}
+          onQuit={(completely) => void quit(completely)}
+        />
       )}
     </>
   )
-}
-
-/** "build abc1234 (0.1.0-beta.6) from /Applications/Centralu.app" — what a person can check against what they installed */
-function describeBuild(b: HostBuild['host']): string {
-  if (!b) return 'an unknown build'
-  const version = b.version ? ` (${b.version})` : ''
-  const from = b.bundlePath ? ` from ${b.bundlePath}` : ''
-  return `build ${b.commit}${version}${from}`
 }
 
 function Starting() {

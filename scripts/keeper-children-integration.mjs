@@ -17,7 +17,7 @@
  *   - a dev server (a project command) keeps running under the same run id, its log still growing;
  *   - a codex turn in progress survives a build switch (the blue-green swap of step 3: the old host
  *     drains and detaches, the new one re-attaches);
- *   - stop ("Quit and stop agents") ends every child the keeper held.
+ *   - stop ("Quit completely") ends every child the keeper held.
  *
  * `--no-claude --no-codex` leaves the parts that need no model and no network: the terminal and the
  * dev server across a host crash, and stop. CI runs exactly that (the `keeper` job in
@@ -348,7 +348,7 @@ async function scenario() {
   }
 
   // Stop: everything the keeper held ends
-  log('\nquit and stop agents')
+  log('\nquit completely')
   held = await heldChildren(data)
   for (const c of held) if (c.alive) heldPids.add(c.pid)
   const pids = [...heldPids]

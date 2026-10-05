@@ -290,13 +290,26 @@ impl Supervisor {
         }
     }
 
-    /// "Quit and stop agents": tells the keeper to stop the host and itself, whatever background
-    /// mode says. In direct mode quitting already does that.
+    /// "Quit completely": tells the keeper to stop the host, everything it holds (agents,
+    /// terminals, running commands) and itself, whatever background mode says. In direct mode
+    /// quitting already does that.
     pub fn stop_agents(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]
             Choice::Keeper => self.link().ok_or("not attached to a keeper")?.stop(),
             _ => Ok(()),
+        }
+    }
+
+    /// "Restart completely" (#387): stops the keeper as "Quit completely" does, but this window
+    /// stays and starts a keeper of its own build. For a keeper of an older build that could not
+    /// hand itself over: the fix for a failing handoff is in the sending keeper, which an update
+    /// does not replace while it runs.
+    pub fn restart_keeper(&self) -> Result<(), String> {
+        match self.choice() {
+            #[cfg(unix)]
+            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.restart_keeper(),
+            _ => Err("the host is not held by a keeper in this build".into()),
         }
     }
 
@@ -692,6 +705,14 @@ mod link {
             if let Ok(mut st) = self.state.lock() {
                 st.shutting_down = true;
             }
+            client::request(&self.sock, &json!({ "op": "stop" }), Duration::from_secs(5)).map(|_| ())
+        }
+
+        /// Stops the keeper and everything it holds, like `stop`, but stays: the attach loop (`run`)
+        /// sees the connection end when the keeper has exited, and starts a keeper from this
+        /// window's own executable, with this window's host. The keeper removes its socket before it
+        /// stops anything, so nothing reaches it on its way out, and the next one waits for its lock.
+        pub fn restart_keeper(&self) -> Result<(), String> {
             client::request(&self.sock, &json!({ "op": "stop" }), Duration::from_secs(5)).map(|_| ())
         }
 

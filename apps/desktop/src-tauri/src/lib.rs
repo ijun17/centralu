@@ -122,13 +122,21 @@ fn set_background_mode(sup: State<'_, Supervisor>, on: bool) -> Result<bool, Str
     sup.set_background(on)
 }
 
-/// "Quit and stop agents" (#280): stops the host whatever background mode says, then quits.
+/// "Quit completely" (#280): stops the keeper, the host and everything they hold (agents,
+/// terminals, running commands) whatever background mode says, then quits.
 #[tauri::command]
 fn quit_and_stop_agents(app: AppHandle, sup: State<'_, Supervisor>, approved: State<QuitApproved>) -> Result<(), String> {
     sup.stop_agents()?;
     approved.0.store(true, std::sync::atomic::Ordering::SeqCst);
     app.exit(0);
     Ok(())
+}
+
+/// "Restart completely" (#387): stops the keeper and everything it holds, and this window starts a
+/// keeper of its own build. For a keeper that could not hand itself over to this build.
+#[tauri::command]
+fn restart_keeper(sup: State<'_, Supervisor>) -> Result<(), String> {
+    sup.restart_keeper()
 }
 
 /// Whether "Apply now" can relaunch this window into the update just installed (#352).
@@ -681,6 +689,7 @@ pub fn run() {
             background_mode,
             set_background_mode,
             quit_and_stop_agents,
+            restart_keeper,
             relaunch_info,
             apply_update_relaunch
         ])

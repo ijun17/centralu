@@ -229,8 +229,9 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - Crash safety: the snapshot is saved on every state change, not at exit.
 - **Background mode** (#280, decision 1 — a setting, off by default). Off: quitting the app stops the host and its
   agents, as before. On: closing or quitting the app leaves the host and its running turns going, and reopening the
-  app re-attaches to them with nothing to restore — a waiting approval is still waiting. **Quit and stop agents** in
-  the quit dialog stops them either way. An unwatched host stops by itself after 30 minutes with no window open and
+  app re-attaches to them with nothing to restore — a waiting approval is still waiting. The quit dialog follows
+  the setting: off, its one button is **Quit completely**; on, **Quit** closes the window and leaves everything
+  running, and **Quit completely** stops the keeper, the host and every agent, terminal and running command anyway. An unwatched host stops by itself after 30 minutes with no window open and
   nothing running. A reopened app of a different build says so and offers to switch the host to its own build.
   Switching is a blue-green swap (#280 step 3): the new build starts next to the running host, which gets up to
   10 seconds to finish the calls it serves itself, and the window reconnects in a moment. The bar shows each step
@@ -241,8 +242,11 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   that holds the host and the agents) to the new build (#280 step 4): it hands everything to the new build's
   keeper and exits, which stops nothing and does not even make the window reconnect; an open app view keeps
   working across the whole switch. A keeper that is behind while the host is not gets the same bar, and switching
-  then asks nothing. If the keeper cannot move, the host switch still happens and the bar says the keeper stayed
-  on the previous build, and why. Desktop only; it needs the keeper ([architecture.md](architecture.md) §4.1–4.4).
+  then asks nothing. If the keeper cannot move, the host switch still happens. Once the host runs the window's
+  build, the bar does not offer the switch again (an older keeper fails the same way every time, #387): it says
+  this window runs its build and the keeper moves the next time it restarts, and offers **Restart completely**,
+  which says it stops agents, terminals and running commands, restarts the keeper on this build and reconnects
+  the window. "Could not switch builds" is kept for a switch whose host did not reach the build. Desktop only; it needs the keeper ([architecture.md](architecture.md) §4.1–4.4).
 - **Applying an update** (#352). Once an update is installed, the update line offers **Apply now**: the app
   relaunches itself into the new version, the keeper holds the host and every agent through the relaunch whatever
   background mode says, and the new window switches the keeper and the host to its build by itself when nothing can

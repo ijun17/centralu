@@ -39,6 +39,7 @@
     "allow-background-mode",
     "allow-set-background-mode",
     "allow-quit-and-stop-agents",
+    "allow-restart-keeper",
     "allow-relaunch-info",
     "allow-apply-update-relaunch"
   ]
