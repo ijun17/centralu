@@ -700,6 +700,11 @@ tests. What differs from macOS and Linux, and what holds it:
 - **Paths.** `path-guard.ts` refuses a path whose `relative()` from the root is absolute (another
   drive, a UNC share), instead of walking its segments inside the root (`path-guard.test.ts`, with
   `path.win32`). Windows paths ignore case; containment uses `relative()`, which does too.
+- **File identity.** A read's opened-file check is the only guard against a swap there, since
+  Windows has no `O_NOFOLLOW`. An NTFS file id is 64 bits with the record's reuse count on top, so
+  it is above 2^53, and as a Number two files can compare equal: on windows-2022, 1754 of 2000
+  pairs of files made one after the other did. `dev` and `ino` are compared as bigints
+  (`path-guard.ts` `assertExistingPath`, `fs.ts`; `fs-read-identity.test.ts`, #368).
 
 Limits:
 
