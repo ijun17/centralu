@@ -526,9 +526,11 @@ class CodexSession implements SessionHandle {
    * (so nothing is missing on resume).
    *
    * There are two:
-   *   1. The bridge for orchestrator tools (FR-11)
+   *   1. The bridge for Centralu's own tools (FR-11). Since #320 every ordinary session gets it
+   *      too (the reader set), so a Codex session starts one small node process for it (about
+   *      40 MB resident, measured idle) unless the person turned the set off in Settings.
    *   2. The bridge for an external app (M4 A-5) — one per app. This is only produced **for a
-   *      session that has an app attached**: most sessions start zero bridge processes. An MCP
+   *      session that has an app attached**: a session with neither starts no bridge. An MCP
    *      server the person approved (propose_mcp_server) also becomes a user-folder app and
    *      arrives here (A-7). It used to be loaded raw, but Codex's elicitation asking whether to
    *      use that server's tools was likely being rejected by us (we only accept `ours`), so it
@@ -548,6 +550,14 @@ class CodexSession implements SessionHandle {
         command: process.execPath,
         args: [bridgePath()],
         env: { CC_HOST_URL: bridge!.url, CC_HOST_TOKEN: bridge!.token, CC_SESSION_ID: this.opts.sessionId },
+        /*
+         * Our own tools are never asked about, under any preset — the same as Claude, where they
+         * skip canUseTool (isOrchestratorTool). Without this, auto (`approvalPolicy: never`) made
+         * Codex refuse every one of them on its own: "MCP tool call requires approval, but approval
+         * policy is never" (measured, codex-cli 0.160.0, #320). Under safe and normal the
+         * elicitation it raised was answered `accept` by us anyway (onServerRequest, `ours`).
+         */
+        default_tools_approval_mode: 'approve',
       }
     }
     const apps = this.opts.apps

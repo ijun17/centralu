@@ -167,6 +167,18 @@ describe('thread/resume — servers are loaded again on resume too', () => {
       env: { CC_HOST_URL: BRIDGE.url, CC_HOST_TOKEN: BRIDGE.token, CC_SESSION_ID: 'codex-o1' },
     })
   })
+
+  /*
+   * Measured with codex-cli 0.160.0 (#320): under auto, which runs `approvalPolicy: never`, Codex
+   * refused every centralu call by itself — "MCP tool call requires approval, but approval policy
+   * is never" — so an ordinary Codex session in auto had its reader set and could use none of it.
+   */
+  for (const preset of ['auto', 'normal', 'safe'] as const) {
+    it(`Centralu's own tools are approved up front under ${preset}, for every profile that gets them`, async () => {
+      const c = await start(WORKER, { permissionPreset: preset, orchestratorTools: {} as OrchestratorTools, toolProfile: 'reader' })
+      expect(mcpServers(c)!['centralu']).toMatchObject({ default_tools_approval_mode: 'approve' })
+    })
+  }
 })
 
 describe('elicitation — app tool approval goes to our card, everything else stays as before', () => {
