@@ -2033,6 +2033,26 @@ test('Send key: once enabled, Enter inserts a newline and the modifier+Enter sen
 })
 
 /*
+ * The sessions' read-only tools (#320) are on for someone who never opened Settings, and turning
+ * them off is remembered — the host reads the same record when a session starts.
+ */
+test("Settings: the sessions' read-only tools start on, and turning them off is remembered", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const open = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-orchestrator').click()
+  }
+  await open()
+  await expect(page.getByTestId('settings-session-tools')).toBeChecked()
+  await page.getByTestId('settings-session-tools').uncheck()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.sessionTools)).toBe(false)
+
+  await page.reload()
+  await open()
+  await expect(page.getByTestId('settings-session-tools')).not.toBeChecked()
+})
+
+/*
  * The relationship between text size (zoom) and vh (dogfooding finding: "when I bump up the text
  * size, the session's composer disappears"). vh is not affected by zoom, so zooming in made the
  * 100vh shell taller than the window and pushed the bottom (the composer) outside it. After

@@ -728,6 +728,8 @@ function OrchestratorSettings() {
 
       <OrchestratorSkills />
 
+      <SessionToolsSwitch />
+
       {asking && (
         <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
           <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4">
@@ -773,6 +775,38 @@ function OrchestratorSettings() {
         </Modal>
       )}
     </section>
+  )
+}
+
+/**
+ * Whether ordinary sessions get Centralu's light, read-only tools (#320). On by default.
+ *
+ * It sits with the orchestrator because it is the other half of the same question — which
+ * sessions get Centralu's own tools — and the answer here is the part that does not direct
+ * anything: a session looks at its own project, it never sends or creates.
+ */
+function SessionToolsSwitch() {
+  const on = useStore((s) => s.prefs.sessionTools)
+  const setPrefs = useStore((s) => s.setPrefs)
+  return (
+    <div className="mt-6 border-t border-line pt-4">
+      <label className="flex items-center gap-2 text-sm text-ink-muted">
+        <input
+          type="checkbox"
+          className="accent-line-strong"
+          data-testid="settings-session-tools"
+          checked={on}
+          onChange={(e) => void setPrefs({ sessionTools: e.target.checked })}
+        />
+        Let sessions look at their own project
+      </label>
+      <p className="mt-1 text-xs leading-body text-ink-faint">
+        Every session can read the other sessions in its project, search that project&apos;s past
+        conversations, and read Centralu&apos;s guide. It cannot send to or create sessions — that
+        stays with the orchestrator. Turning this off stops those tools at once; turning it on
+        reaches a session the next time it starts.
+      </p>
+    </div>
   )
 }
 
