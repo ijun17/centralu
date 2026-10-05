@@ -2568,6 +2568,8 @@ describe('worktree sessions', () => {
     // Simulates a host restart — calling resume on an already-live session does nothing.
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
     const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    // Not the real gh, like every other manager here (#368; why: 'remembers the worktree even after the host restarts')
+    restarted.prLookup = async () => null
     const restartedRpc = createRpcHandler(restarted, adapters)
     adapter.lastCwd = null
 
@@ -2610,6 +2612,14 @@ describe('worktree sessions', () => {
     const path = s.worktree!.path
 
     const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
+    /*
+     * Not the real gh (#368). A manager that comes up with a worktree session checks for its merge at once and does
+     * not wait for it (#69), and that check ends in `gh pr view` in the repository. On windows-2022 that gh took 10 s,
+     * holding the repository as its working directory the whole time, so the cleanup's rm met EBUSY until it exited
+     * and the hook ran out of time; 'returns to the same worktree…' above failed the same way. Set before anything
+     * awaits, which is before the check reaches gh.
+     */
+    restarted.prLookup = async () => null
     const found = restarted.listSessions().find((x) => x.id === s.id)
 
     // base (the merge-detection baseline from #69) also survives a restart — losing it drops that session out
