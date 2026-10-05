@@ -7,19 +7,28 @@ import { basename, dirname, join } from 'node:path'
  * run at all.
  *
  * Since #307 the host reads npm's `claude.cmd` and starts the program it names directly: npm's
- * `node_modules\@anthropic-ai\claude-code\bin\claude.exe`. Windows will not delete or overwrite an
- * executable while it runs, so every Claude session Centralu kept open held exactly the file a
- * Claude Code update has to replace. Claude Code's `install.cjs` replaces it by unlinking it and
- * linking (or copying) the platform binary in its place; when that fails it leaves npm's 500-byte
- * placeholder there and only sets an exit code. That is the broken `claude` the owner found after
- * an update (#353), which Windows reports as a 16-bit program.
+ * `node_modules\@anthropic-ai\claude-code\bin\claude.exe`, which `install.cjs` made a second name
+ * (a hard link) of the platform package's `claude.exe`. Windows lets a running program's names be
+ * renamed, and deleted as long as another name remains, but never deletes the last name and never
+ * writes over it. An npm update removes both of npm's names; with a Centralu session running from
+ * one of them, the second removal is the last name and fails, and so does putting a new file there.
+ * Claude Code's `install.cjs` then leaves npm's 500-byte placeholder and only sets an exit code:
+ * the broken `claude` the owner found after an update (#353), which Windows reports as a 16-bit
+ * program.
  *
- * So on Windows the host starts Claude from its own hard link, `<data>\tools\claude\<key>\claude.exe`.
- * Measured on Windows 11 / NTFS (#353): while a hard link of a program runs, the original name can be
- * deleted, replaced and renamed; while the original name itself runs, delete and replace fail. A
- * link costs no disk; when the data folder is on another volume (`EXDEV`) or the file system has no
- * links (`EPERM`) the program is copied instead. macOS and Linux replace a running executable
- * without complaint, so nothing here runs there.
+ * So on Windows the host starts Claude from its own hard link, `<data>\tools\claude\<key>\claude.exe`,
+ * a third name npm never touches. Measured on Windows 11 / NTFS with Node 24 (#353, a copy of
+ * PING.EXE standing in):
+ *
+ *   running from                 delete the platform name   delete bin\claude.exe   new file at bin\claude.exe
+ *   npm's bin\claude.exe         OK                         EPERM                   EBUSY
+ *   Centralu's hard link         OK                         OK                      OK
+ *
+ * Writing over one of npm's names in place still fails while the link runs (EBUSY: it is the same
+ * file), but nothing in an update does that: npm and `install.cjs` delete, then create. A link costs
+ * no disk; when the data folder is on another volume (`EXDEV`) or the file system has no links
+ * (`EPERM`) the program is copied instead. macOS and Linux replace a running executable without
+ * complaint, so nothing here runs there.
  */
 
 /** Smaller than any real Claude Code binary (about 250 MB) and larger than any placeholder (500 bytes in 2.1.x) */
@@ -146,8 +155,9 @@ type Options = {
  * The hard links one host made, and which of them a running session started from.
  *
  * A link is removed once no session of this host uses it and it is not the one new sessions start
- * from. Windows refuses to delete a program while it runs, so a link some process still runs (a
- * session that is winding down, another Centralu) survives the attempt and goes on a later sweep.
+ * from. A process still running from a removed link (a session winding down) is not disturbed:
+ * while npm's names remain, Windows only drops the link's name; once they are gone it refuses to
+ * delete the last name, and the link goes on a later sweep.
  */
 export class ClaudeLinks {
   private readonly fs: ExeFs
@@ -271,7 +281,7 @@ export class ClaudeLinks {
       try {
         this.fs.removeDir(join(this.base(), name))
       } catch {
-        // A process still runs from it (Windows refuses); a later sweep gets it
+        // A process still runs from it and npm's names are gone (Windows refuses the last name); a later sweep gets it
       }
     }
   }

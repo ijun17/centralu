@@ -56,18 +56,20 @@ worktree setup command runs under `cmd.exe`, so it reads `%CENTRALU_WORKTREE%`, 
 
 **How a Claude process is started on Windows (#353).** Claude Code installed with npm is one
 program, `node_modules\@anthropic-ai\claude-code\bin\claude.exe`, which npm's `claude.cmd` starts
-and which the host starts directly since #307. Windows will not delete or overwrite a program while
-it runs, and Claude Code's own setup step (`install.cjs`) updates it by deleting that file and
-linking the new build in its place. A Centralu session holding the file made that step fail, and
-the step then leaves npm's 500-byte placeholder behind: a text file named `.exe` that Windows calls
-a 16-bit program. So, on Windows only (`adapters/claude/exe-link.ts`, `start-gate.ts`):
+and which the host starts directly since #307. That file is a second name (a hard link) of the
+platform package's `claude.exe`. Windows lets a running program's names be renamed, and deleted
+while another name remains, but never deletes the last name or writes over it. An npm update
+deletes both names and creates new files; with a Centralu session running from `bin\claude.exe`
+the second deletion is the last name and fails, and Claude Code's setup step (`install.cjs`) then
+leaves npm's 500-byte placeholder behind: a text file named `.exe` that Windows calls a 16-bit
+program. So, on Windows only (`adapters/claude/exe-link.ts`, `start-gate.ts`):
 
 | Step | What happens | Why |
 |---|---|---|
 | Placeholder check | an `.exe` under 1 MB that does not start with `MZ` fails the session start, and `detect`, with the file, the cause and the fix (`node "<pkg>\install.cjs"`, or reinstall with no Claude Code running) | a spawn error would only say "16-bit program" |
-| Hard link | the program is hard-linked into `<data>\tools\claude\<version>-<size>\claude.exe` (data = `CC_DATA_DIR`) and started from there; a copy when linking fails (`EXDEV`, `EPERM`); npm's path itself if both fail, with a log line | while a link runs, npm's name can be deleted, replaced and renamed (measured on NTFS); a link costs no disk |
+| Hard link | the program is hard-linked into `<data>\tools\claude\<version>-<size>\claude.exe` (data = `CC_DATA_DIR`) and started from there; a copy when linking fails (`EXDEV`, `EPERM`); npm's path itself if both fail, with a log line | an npm update deletes both of npm's names for the program and creates new files there; Windows refuses to delete the last name of a running program, so with a session running from npm's name the update fails, and with one running from the link it succeeds (measured on NTFS); a link costs no disk |
 | Link key | the version from npm's `package.json` next to the program plus its size; outside npm, size and modification time | free to read; `--version` would run npm's file, a content hash reads 250 MB per start; npm stamps every file with one time |
-| Cleanup | a link folder goes when no session of this host runs from it and it is not the one new sessions use: at host start, when the installed version changes, when a session's process ends | Windows refuses to delete a running program, so a folder still in use survives the attempt |
+| Cleanup | a link folder goes when no session of this host runs from it and it is not the one new sessions use: at host start, when the installed version changes, when a session's process ends | removing a link never disturbs a process running from it; Windows refuses only the last name of a running program, and that folder goes on a later sweep |
 | Spaced starts | Claude processes start one at a time, 1.5 s apart | the sign-in is a file with one refresher at a time; processes started together all refresh an expired token at once |
 | Refresh race | a turn that ends with "another Claude Code process is refreshing it" is sent again once after 3 to 6 s, with a notice in the conversation; a second loss is reported | the CLI calls it transient; the other process has written the new token by then |
 | Leaving | on quit the host waits up to 1.5 s for the Claude processes it closed to exit on their stdin EOF | a Node process takes its children with it when it exits, which could cut a refresh mid-write |

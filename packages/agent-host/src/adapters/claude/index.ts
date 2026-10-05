@@ -1300,7 +1300,7 @@ export class ClaudeAdapter implements AgentAdapter {
     /*
      * Host start (Windows): links an earlier run left behind go, except the one the installed Claude
      * Code would start from. Nothing runs from them any more — the processes of the previous host
-     * ended with it, and Windows refuses to delete one that still runs.
+     * ended with it, and removing a name never disturbs a process still running from it.
      */
     if (platform === 'win32') {
       this.launch.links.keep(executable())
@@ -1436,8 +1436,10 @@ export class ClaudeAdapter implements AgentAdapter {
    * exits (libuv puts them in a job object that kills on close), so a Claude process that just got
    * EOF from `dispose` would be ended at once, possibly in the middle of writing a refreshed sign-in
    * — which leaves the next Claude process with a lock it waits out or fails on. This gives the
-   * closed processes up to `exitGraceMs` to leave by themselves. Elsewhere nothing waits: the SDK
-   * sends them SIGTERM on the host's exit, which they handle.
+   * closed processes up to `exitGraceMs` to leave by themselves. Measured on Windows 11 (#353, CLI
+   * 2.1.289, Node 24): a child PING.EXE was gone the moment its Node parent exited, and an idle
+   * `claude -p --input-format stream-json` left 0.6 to 0.9 s after its stdin closed. Elsewhere
+   * nothing waits: the SDK sends them SIGTERM on the host's exit, which they handle.
    */
   async settle(): Promise<void> {
     if (this.launch.platform !== 'win32' || this.launch.closing.size === 0) return
