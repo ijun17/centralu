@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22, v23 and v24 broke the same six assertions one after another: if the version is written
  * six times, every migration bills six small chores.
  */
-const LATEST_SCHEMA = 42
+const LATEST_SCHEMA = 43
 
 function seeded() {
   const s = new Store()
@@ -662,6 +662,92 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     s.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
     s.deleteProject('p2')
     expect(s.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    s.close()
+  })
+})
+
+/**
+ * v43: an app panel's span on the grid (#306) — two nullable columns on `grid_layout`, written with the placement and
+ * read back with it. Absent is "not chosen", which the UI resolves; it is never stored as 1 × 1.
+ */
+describe('migration v43 — an app panel keeps its span', () => {
+  const ap = (projectId: string | null, appId: string, span?: { cols: number; rows: number }): GridPanel => ({
+    kind: 'app',
+    projectId,
+    appId,
+    ...(span ? { span } : {}),
+  })
+
+  it('a span round-trips with its placement, and a panel without one reads without one', () => {
+    const s = seeded()
+    s.setGridView([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    expect(s.listGridView()).toEqual([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    // Rewritten without it: the choice is gone, not kept from the last write
+    s.setGridView([sp('s1'), ap('p1', 'board')])
+    expect(s.listGridView()).toEqual([sp('s1'), ap('p1', 'board')])
+    s.close()
+  })
+
+  it('a v42 store keeps its grid, and a v42 host still rewrites the table, its rows reading as no span chosen', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v43-'))
+    const file = join(dir, 'store.db')
+    try {
+      const fresh = new Store(file)
+      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      gridSession(fresh, 's1', 'p1')
+      fresh.close()
+      // Take the table back to v42's shape, with an app and a session on it
+      const raw = new Database(file)
+      raw.exec(`
+        DROP TABLE grid_layout;
+        CREATE TABLE grid_layout (
+          panel_key  TEXT PRIMARY KEY,
+          kind       TEXT NOT NULL CHECK (kind IN ('session', 'app')),
+          session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+          project_id TEXT,
+          app_id     TEXT,
+          position   INTEGER NOT NULL
+        );
+        INSERT INTO grid_layout (panel_key, kind, project_id, app_id, position) VALUES ('app:p1/board', 'app', 'p1', 'board', 0);
+        INSERT INTO grid_layout (panel_key, kind, session_id, position) VALUES ('session:s1', 'session', 's1', 1);
+      `)
+      raw.pragma('user_version = 42')
+      raw.close()
+
+      const s = new Store(file)
+      expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+      expect(s.listGridView()).toEqual([ap('p1', 'board'), sp('s1')])
+      s.setGridView([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      expect(s.listGridView()).toEqual([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      s.close()
+
+      // A v42 host's setGridView, copied from that build: it names neither column, and must still succeed
+      const older = new Database(file)
+      older.transaction(() => {
+        older.prepare(`DELETE FROM grid_layout`).run()
+        older
+          .prepare(
+            `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, position) VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run('app:p1/board', 'app', null, 'p1', 'board', 0)
+      })()
+      older.close()
+      const again = new Store(file)
+      expect(again.listGridView()).toEqual([ap('p1', 'board')])
+      again.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('half a span, or one outside the bounds, reads as none chosen', () => {
+    const s = seeded()
+    s.setGridView([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c')])
+    const db = (s as unknown as { db: Database.Database }).db
+    db.exec(`UPDATE grid_layout SET span_cols = 2 WHERE app_id = 'a'`)
+    db.exec(`UPDATE grid_layout SET span_cols = 9, span_rows = 1 WHERE app_id = 'b'`)
+    db.exec(`UPDATE grid_layout SET span_cols = 2, span_rows = 2 WHERE app_id = 'c'`)
+    expect(s.listGridView()).toEqual([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c', { cols: 2, rows: 2 })])
     s.close()
   })
 })

@@ -706,6 +706,22 @@ describe('the grid RPC, in both shapes (#288)', () => {
   it('refuses a save that names neither panels nor session ids', async () => {
     await expect(rpc('grid.set', {})).rejects.toThrow()
   })
+
+  // #306: the span the person chose for an app panel goes through the RPC and comes back with it
+  it('an app panel’s span is saved and read back with its placement, and one out of bounds is refused', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
+    const panels = [
+      { kind: 'session', sessionId: a.id },
+      { kind: 'app', projectId: p.id, appId: 'board', span: { cols: 2, rows: 1 } },
+      { kind: 'app', projectId: null, appId: 'notes' },
+    ]
+    expect(await rpc('grid.set', { panels, sessionIds: [a.id] })).toEqual(panels)
+    expect(await rpc('grid.get', { tagged: true })).toEqual(panels)
+    await expect(
+      rpc('grid.set', { panels: [{ kind: 'app', projectId: null, appId: 'notes', span: { cols: 9, rows: 1 } }] }),
+    ).rejects.toThrow()
+  })
 })
 
 describe('deleting a session', () => {

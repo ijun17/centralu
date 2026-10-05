@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
+import { GridSpan, sessionLiveDefaults } from '@cc/protocol'
 
 /**
  * Where the schema lives depends on how the process is running.
@@ -1476,6 +1476,31 @@ export class Store {
           })()
         },
       },
+      {
+        to: 43,
+        breaksOlderReaders: false,
+        /**
+         * An app panel's span on the grid, in cells (#306): `span_cols` × `span_rows`, both NULL when the person has not
+         * chosen one for this placement — the panel then takes their setting for the app, else the app's recommendation,
+         * else 1 × 1 (the UI decides; the host only keeps the choice).
+         *
+         * On the placement's row rather than per app, because the top bar's choice is about this panel: removing the
+         * panel forgets it, and placing the app again starts from the defaults. The per-app default is the person's
+         * setting, kept with the rest of the UI's way of looking (the workspace snapshot), and the app's own
+         * recommendation comes from its manifest.
+         *
+         * **Expand only (#292's rule).** Two nullable columns. A v42 host reads the table as it did; its `setGridView`
+         * rewrites the rows without naming them, so the spans it writes are NULL — a layout falling back to the
+         * defaults, not a broken one.
+         */
+        run: () => {
+          const cols = new Set(
+            (this.db.prepare(`PRAGMA table_info(grid_layout)`).all() as { name: string }[]).map((c) => c.name),
+          )
+          if (!cols.has('span_cols')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN span_cols INTEGER`)
+          if (!cols.has('span_rows')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN span_rows INTEGER`)
+        },
+      },
     ]
   }
 
@@ -2009,19 +2034,32 @@ export class Store {
   listGridView(): GridPanel[] {
     const rows = this.db
       .prepare(
-        `SELECT g.kind, g.session_id, g.project_id, g.app_id FROM grid_layout g
+        `SELECT g.kind, g.session_id, g.project_id, g.app_id, g.span_cols, g.span_rows FROM grid_layout g
            LEFT JOIN sessions s ON g.kind = 'session' AND s.id = g.session_id
            LEFT JOIN projects p ON g.kind = 'app' AND p.id = g.project_id
           WHERE (g.kind = 'session' AND s.id IS NOT NULL AND s.deleted_at IS NULL)
              OR (g.kind = 'app' AND g.app_id IS NOT NULL AND (g.project_id IS NULL OR p.id IS NOT NULL))
           ORDER BY g.position`,
       )
-      .all() as { kind: string; session_id: string | null; project_id: string | null; app_id: string | null }[]
-    return rows.map((r) =>
-      r.kind === 'session'
-        ? { kind: 'session' as const, sessionId: r.session_id! }
-        : { kind: 'app' as const, projectId: r.project_id, appId: r.app_id! },
-    )
+      .all() as {
+      kind: string
+      session_id: string | null
+      project_id: string | null
+      app_id: string | null
+      span_cols: number | null
+      span_rows: number | null
+    }[]
+    return rows.map((r) => {
+      if (r.kind === 'session') return { kind: 'session' as const, sessionId: r.session_id! }
+      // A span is kept only whole: a row with one half, or a value outside the protocol's bounds, reads as none chosen
+      const span = GridSpan.safeParse({ cols: r.span_cols, rows: r.span_rows })
+      return {
+        kind: 'app' as const,
+        projectId: r.project_id,
+        appId: r.app_id!,
+        ...(span.success ? { span: span.data } : {}),
+      }
+    })
   }
 
   /**
@@ -2035,13 +2073,17 @@ export class Store {
   setGridView(panels: readonly GridPanel[]): void {
     const del = this.db.prepare(`DELETE FROM grid_layout`)
     const ins = this.db.prepare(
-      `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, position) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, position, span_cols, span_rows)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     this.db.transaction(() => {
       del.run()
       panels.forEach((p, i) => {
-        if (p.kind === 'session') ins.run(`session:${p.sessionId}`, 'session', p.sessionId, null, null, i)
-        else ins.run(`app:${p.projectId ?? '_user'}/${p.appId}`, 'app', null, p.projectId, p.appId, i)
+        if (p.kind === 'session') ins.run(`session:${p.sessionId}`, 'session', p.sessionId, null, null, i, null, null)
+        else {
+          const key = `app:${p.projectId ?? '_user'}/${p.appId}`
+          ins.run(key, 'app', null, p.projectId, p.appId, i, p.span?.cols ?? null, p.span?.rows ?? null)
+        }
       })
     })()
   }
