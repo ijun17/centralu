@@ -16,11 +16,20 @@
 //! them with exact-length reads: a plain `read` that swallowed the `F` byte would silently discard
 //! the descriptors riding on it. The kernel caps descriptors per message (`SCM_MAX_FD`, 253 on
 //! Linux), hence the batches.
+//!
+//! A batch's `sendmsg` can fail for want of room rather than block. On macOS a `sendmsg` carrying
+//! ancillary data on a stream socket returns `EMSGSIZE` at once when the send buffer
+//! (`net.local.stream.sendspace`, 8 KiB) has less free space than the byte plus its control data,
+//! which happens whenever the bytes before it nearly fill the buffer and the receiver has not
+//! drained it yet; Linux blocks instead. So `EMSGSIZE`, `ENOBUFS` and `EAGAIN` on a batch mean
+//! "wait for the receiver and try again", up to `FDS_ROOM_LIMIT`. A plain `write` never fails this
+//! way, so the header and blobs need nothing of the kind. The failure depends on the exact number
+//! of bytes before each batch, which is why the tests sweep sizes around the buffer's.
 
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -32,6 +41,14 @@ pub const MAX_BLOB: u64 = 128 * 1024 * 1024;
 const MAX_BLOBS: usize = 64 * 1024;
 const MAX_FDS: usize = 16 * 1024;
 const FDS_PER_BATCH: usize = 64;
+/// How long one descriptor batch may wait for room on the channel. The receiver is the incoming
+/// keeper reading the state in a loop, so room appears within microseconds while it is alive, and
+/// a receiver that died closes the channel, which fails the send at once (`EPIPE`). This bound only
+/// ends the wait for a receiver that is alive but stuck: everything is frozen meanwhile, so rolling
+/// back beats waiting forever. Generous so a loaded machine never rolls back a healthy handoff; the
+/// same as the wait for `ready` (`READY_LIMIT`).
+const FDS_ROOM_LIMIT: Duration = Duration::from_secs(30);
+const MAX_ROOM_PAUSE: Duration = Duration::from_millis(20);
 
 pub struct Message {
     pub header: Value,
@@ -73,7 +90,14 @@ pub fn send_op(s: &mut UnixStream, header: &Value) -> io::Result<()> {
 
 /// Receives one message, waiting at most `timeout` for each read.
 pub fn recv(s: &mut UnixStream, timeout: Duration) -> io::Result<Message> {
-    s.set_read_timeout(Some(timeout))?;
+    if let Err(e) = s.set_read_timeout(Some(timeout)) {
+        // macOS refuses socket options (`EINVAL`) once the peer has closed, but what it sent
+        // before closing is still there to read, and with the peer gone no read can block. The
+        // outgoing keeper sends `commit` and exits at once, so this is the normal last message.
+        if e.raw_os_error() != Some(libc::EINVAL) {
+            return Err(e);
+        }
+    }
     let mut len = [0u8; 4];
     s.read_exact(&mut len)?;
     let len = u32::from_be_bytes(len);
@@ -136,18 +160,43 @@ fn send_fds(s: &UnixStream, fds: &[RawFd]) -> io::Result<()> {
         (*cmsg).cmsg_len = libc::CMSG_LEN((fds.len() * std::mem::size_of::<RawFd>()) as libc::c_uint) as _;
         std::ptr::copy_nonoverlapping(fds.as_ptr(), libc::CMSG_DATA(cmsg) as *mut RawFd, fds.len());
     }
+    // The payload is one byte, so a sendmsg that fails sent nothing, descriptors included: a retry
+    // can neither send the `F` byte twice nor split a batch.
+    let deadline = Instant::now() + FDS_ROOM_LIMIT;
+    let mut pause = Duration::from_millis(1);
     loop {
-        // SAFETY: msg is fully initialised above.
+        // SAFETY: msg is fully initialised above, and sendmsg does not modify it.
         let n = unsafe { libc::sendmsg(s.as_raw_fd(), &msg, 0) };
         if n == 1 {
             return Ok(());
         }
-        let e = io::Error::last_os_error();
-        if n < 0 && e.kind() == io::ErrorKind::Interrupted {
-            continue;
+        if n >= 0 {
+            return Err(io::Error::new(io::ErrorKind::WriteZero, "sendmsg sent nothing"));
         }
-        return Err(if n < 0 { e } else { io::Error::new(io::ErrorKind::WriteZero, "sendmsg sent nothing") });
+        let e = io::Error::last_os_error();
+        match e.raw_os_error() {
+            Some(libc::EINTR) => continue,
+            Some(libc::EMSGSIZE | libc::ENOBUFS | libc::EAGAIN) => {
+                if Instant::now() >= deadline {
+                    let secs = FDS_ROOM_LIMIT.as_secs();
+                    return Err(io::Error::new(e.kind(), format!("no room for descriptors on the channel in {secs} s: {e}")));
+                }
+                wait_for_room(s, pause);
+                pause = (pause * 2).min(MAX_ROOM_PAUSE);
+            }
+            _ => return Err(e),
+        }
     }
+}
+
+/// Waits up to `pause` for the channel to report room, then `pause` more. `POLLOUT` only means
+/// there is some room, not room for a batch's control data, so the sleep keeps a retry from
+/// spinning while the receiver drains.
+fn wait_for_room(s: &UnixStream, pause: Duration) {
+    let mut p = libc::pollfd { fd: s.as_raw_fd(), events: libc::POLLOUT, revents: 0 };
+    // SAFETY: one pollfd on a descriptor we hold. An error or a timeout just means retry.
+    unsafe { libc::poll(&mut p, 1, pause.as_millis() as libc::c_int) };
+    std::thread::sleep(pause);
 }
 
 fn recv_fds(s: &UnixStream, max: usize) -> io::Result<Vec<OwnedFd>> {
@@ -246,10 +295,144 @@ mod tests {
         assert_eq!(&got, b"hi");
     }
 
+    fn sockopt(s: &UnixStream, name: libc::c_int) -> usize {
+        let mut v: libc::c_int = 0;
+        let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+        // SAFETY: an int-sized option read into an int.
+        let r = unsafe { libc::getsockopt(s.as_raw_fd(), libc::SOL_SOCKET, name, &mut v as *mut _ as *mut libc::c_void, &mut len) };
+        assert_eq!(r, 0, "getsockopt: {}", io::Error::last_os_error());
+        v as usize
+    }
+
+    /// Bytes waiting to be read on `s`.
+    fn unread(s: &UnixStream) -> usize {
+        let mut n: libc::c_int = 0;
+        // SAFETY: FIONREAD writes one int.
+        let r = unsafe { libc::ioctl(s.as_raw_fd(), libc::FIONREAD, &mut n) };
+        assert_eq!(r, 0, "FIONREAD: {}", io::Error::last_os_error());
+        n as usize
+    }
+
+    /// A channel whose send buffer is the size the bug lives at. macOS's default is 8 KiB
+    /// (`net.local.stream.sendspace`) and is left alone; Linux's is hundreds of KiB, which would
+    /// only make a sweep slow, so it is shrunk there (Linux doubles what it is asked for).
+    fn channel() -> (UnixStream, UnixStream, usize) {
+        let (a, b) = UnixStream::pair().unwrap();
+        if sockopt(&a, libc::SO_SNDBUF) > 64 * 1024 {
+            let v: libc::c_int = 8 * 1024;
+            let len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+            let p = &v as *const libc::c_int as *const libc::c_void;
+            // SAFETY: int-sized options written from an int.
+            unsafe {
+                libc::setsockopt(a.as_raw_fd(), libc::SOL_SOCKET, libc::SO_SNDBUF, p, len);
+                libc::setsockopt(b.as_raw_fd(), libc::SOL_SOCKET, libc::SO_RCVBUF, p, len);
+            }
+        }
+        let sndbuf = sockopt(&a, libc::SO_SNDBUF);
+        (a, b, sndbuf)
+    }
+
+    /// A header and one blob that take exactly `prefix` bytes on the stream, or a bare header
+    /// when `prefix` is shorter than that can be.
+    fn filler(prefix: usize, fds: usize) -> (Value, Vec<Vec<u8>>) {
+        let header = json!({ "op": "state" });
+        let framed = |blobs: usize| 4 + serde_json::to_vec(&json!({ "h": header, "blobs": blobs, "fds": fds })).unwrap().len();
+        let with_blob = framed(1) + 8;
+        if prefix < with_blob {
+            return (header, vec![]);
+        }
+        (header, vec![vec![b'x'; prefix - with_blob]])
+    }
+
+    /// Sends a message of `prefix` bytes before `n` descriptors over `channel()`, to a reader that
+    /// starts only once the prefix has arrived (or `gate` has passed, when it cannot all fit) and
+    /// the sender has then had `head_start` to try its first batch: the moment the buffer is
+    /// fullest. A slow sender can only make this miss the bug, never fail a correct send.
+    fn send_to_late_reader(prefix: usize, n: usize, gate: Duration, head_start: Duration) -> (io::Result<()>, io::Result<Message>) {
+        let (mut a, mut b, _) = channel();
+        let (keep, passed) = UnixStream::pair().unwrap();
+        let raw = vec![passed.as_raw_fd(); n];
+        let (header, blobs) = filler(prefix, n);
+        let reader = std::thread::spawn(move || {
+            let since = std::time::Instant::now();
+            while unread(&b) < prefix && since.elapsed() < gate {
+                std::thread::sleep(Duration::from_micros(200));
+            }
+            std::thread::sleep(head_start);
+            recv(&mut b, Duration::from_secs(10))
+        });
+        let sent = send(&mut a, &header, &blobs, &raw);
+        // A failed send closes the channel, so the reader fails rather than waits.
+        drop(a);
+        let got = reader.join().unwrap();
+        drop((keep, passed));
+        (sent, got)
+    }
+
+    fn assert_round_trip(prefix: usize, n: usize, sent: io::Result<()>, got: io::Result<Message>) {
+        if let Err(e) = sent {
+            panic!("{prefix} bytes before {n} descriptors: the send failed: {e}");
+        }
+        let m = got.unwrap_or_else(|e| panic!("{prefix} bytes before {n} descriptors: the receive failed: {e}"));
+        assert_eq!(m.op(), "state");
+        assert_eq!(m.fds.len(), n, "{prefix} bytes before the descriptors");
+        for fd in &m.fds {
+            // SAFETY: fstat into a zeroed struct, on a descriptor the message owns.
+            let open = unsafe {
+                let mut st: libc::stat = std::mem::zeroed();
+                libc::fstat(fd.as_raw_fd(), &mut st) == 0
+            };
+            assert!(open, "{prefix} bytes before the descriptors: an arrived descriptor is not open");
+        }
+    }
+
+    /// The owner's failed switch (2026-10-05): the header and blobs nearly filled the channel's
+    /// buffer before the receiver drained it, and macOS answered the descriptor batch with
+    /// `EMSGSIZE` ("Message too long") instead of blocking. The batch must wait for room.
+    #[test]
+    fn descriptors_wait_for_room_after_bytes_that_nearly_fill_the_buffer() {
+        let (_, _, sndbuf) = channel();
+        let prefix = sndbuf - 100;
+        let (sent, got) = send_to_late_reader(prefix, FDS_PER_BATCH, Duration::from_secs(5), Duration::from_millis(50));
+        assert_round_trip(prefix, FDS_PER_BATCH, sent, got);
+    }
+
+    /// The same at every size around the buffer's, so a boundary nobody has measured yet is
+    /// caught without knowing its byte count: every 256 bytes up to three buffers, and each of the
+    /// last few hundred bytes of the first. 150 descriptors are three batches, so the later
+    /// batches meet a buffer the earlier ones filled.
+    #[test]
+    fn descriptors_arrive_whatever_the_bytes_before_them() {
+        let (_, _, sndbuf) = channel();
+        let mut sizes: Vec<usize> = (0..=3 * sndbuf).step_by(256).collect();
+        sizes.extend((0..=320).step_by(8).map(|k| sndbuf - k));
+        sizes.sort_unstable();
+        sizes.dedup();
+        for prefix in sizes {
+            let (sent, got) = send_to_late_reader(prefix, 150, Duration::from_millis(10), Duration::from_millis(2));
+            assert_round_trip(prefix, 150, sent, got);
+        }
+    }
+
     #[test]
     fn a_closed_channel_is_an_error_not_a_hang() {
         let (a, mut b) = UnixStream::pair().unwrap();
         drop(a);
         assert!(recv(&mut b, Duration::from_secs(2)).is_err());
+    }
+
+    /// The outgoing keeper sends `commit` and exits at once. The incoming keeper must still read
+    /// it: macOS refuses the read timeout on a socket whose peer has closed (`EINVAL`), and a
+    /// `commit` lost that way would make it take over without the exit statuses it carries.
+    #[test]
+    fn a_message_sent_just_before_the_peer_closed_is_still_read() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let (keep, passed) = UnixStream::pair().unwrap();
+        send(&mut a, &json!({ "op": "commit" }), &[b"x".to_vec()], &[passed.as_raw_fd()]).unwrap();
+        drop(a);
+        let m = recv(&mut b, Duration::from_secs(2)).unwrap();
+        assert_eq!(m.op(), "commit");
+        assert_eq!(m.fds.len(), 1);
+        drop((keep, passed));
     }
 }
