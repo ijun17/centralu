@@ -38,6 +38,7 @@ them is what later decisions rest on.
 | Document | What is in it |
 |---|---|
 | [spikes/m0-findings.md](spikes/m0-findings.md) | M0: permission override, events, Codex, topology — all four held up |
+| [spikes/2026-10-memory-heavy-store.md](spikes/2026-10-memory-heavy-store.md) | What the window costs in memory against a store shaped like the owner's (#364): WebKit and Chromium, idle, grid, switching, streaming, before and after #393; the optimisation targets |
 | [plans/m1-plan.md](plans/m1-plan.md) · [m1-result.md](plans/m1-result.md) | M1 plan and result: gates, measured performance, decisions made mid-implementation |
 | [plans/m1.5-plan.md](plans/m1.5-plan.md) · [m1.5-result.md](plans/m1.5-result.md) | Always-on operation and a verification protocol; the 5 defects measurement caught |
 | [plans/m2-plan.md](plans/m2-plan.md) · [m2-result.md](plans/m2-result.md) | M2 plan (revised after independent review) and result: the release build passing, 5 more measured defects, how to start dogfooding |

@@ -32,6 +32,7 @@
 | 문서 | 담긴 내용 |
 |---|---|
 | [spikes/m0-findings.md](spikes/m0-findings.md) | M0: 권한 오버라이드, 이벤트, Codex, 토폴로지 — 넷 다 성립했다 |
+| [spikes/2026-10-memory-heavy-store.md](spikes/2026-10-memory-heavy-store.md) | 주인 스토어 모양의 무거운 스토어에서 창이 쓰는 메모리 (#364): WebKit과 Chromium, 대기·그리드·전환·스트리밍, #393 전후; 최적화 대상 |
 | [plans/m1-plan.md](plans/m1-plan.md) · [m1-result.md](plans/m1-result.md) | M1 계획과 결과: 게이트, 측정된 성능, 구현 중에 내린 결정 |
 | [plans/m1.5-plan.md](plans/m1.5-plan.md) · [m1.5-result.md](plans/m1.5-result.md) | 상시 구동 운영과 검증 프로토콜; 측정이 잡아낸 결함 5건 |
 | [plans/m2-plan.md](plans/m2-plan.md) · [m2-result.md](plans/m2-result.md) | M2 계획(독립 리뷰 후 수정)과 결과: 릴리스 빌드 통과, 추가로 측정된 결함 5건, 도그푸딩 시작 방법 |
