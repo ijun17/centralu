@@ -4,7 +4,7 @@
 
 **무엇을** 만들지는 `product-spec.md`가 정하고, 이 폴더의 나머지 문서는 **어떻게** 만들지를 정한다. 요구사항에 대해 둘이 어긋나면 스펙이 이기고, 만드는 방식에 대해 어긋나면 설계 문서가 이긴다.
 
-설계 문서는 영어 원본(정본)과 한국어 번역(*.ko.md)을 함께 관리한다 — [#27](https://github.com/ijun17/centralu/issues/27) 참고. plans/와 spikes/는 과거 기록이라 번역하지 않는다.
+설계 문서는 영어 원본(정본)과 한국어 번역(*.ko.md)을 함께 관리한다 — [#27](https://github.com/ijun17/centralu/issues/27) 참고. plans/와 spikes/는 과거 기록이라 번역하지 않는다. generated/도 번역하지 않는다: 스크립트가 코드에서 영어로만 써 내고, 낡으면 테스트가 실패한다.
 
 현재 상태: **M2 완료, 도그푸딩 중** — [M2가 실제로 만들어 낸 것](plans/m2-result.md), [릴리스에 아직 필요한 것](plans/beta-release-checklist.md).
 
@@ -12,6 +12,8 @@
 
 | 문서 | 담긴 내용 | 먼저 읽을 것 |
 |---|---|---|
+| [domain-model.ko.md](domain-model.ko.md) | 용어집: 처음 온 사람이 마주치는 개념 전부(프로젝트, 세션과 그 역할, 승인, 앱, 화면, 키퍼, 호스트, 스왑 등), 서로의 관계, 세션 상태 기계, 프로세스 트리, 주요 흐름, 각 개념이 저장되고 정의된 곳 | — |
+| [generated/schema.md](generated/schema.md) | 스토어의 테이블과 컬럼. `pnpm docs:schema`가 실제 스토어에서 생성한다(영어만) | domain-model |
 | [product-spec.ko.md](product-spec.ko.md) | 스펙: 요구사항(FR-1–22), 화면(포커스 뷰, 그리드, 프로젝트 화면), 로드맵, 리스크 | — |
 | [architecture.ko.md](architecture.ko.md) | 변화 축, 레이어, 의존성 규칙, 디자인 패턴, 프로세스 토폴로지; 키퍼, 빌드 바꾸기, 업데이트 적용(§4.1–4.5, 옮겨 가지 못하는 키퍼는 §4.4) | product-spec §6 |
 | [folder-structure.ko.md](folder-structure.ko.md) | 모노레포를 나누는 방법, 그리고 어떤 변경의 코드가 갈 곳 | architecture |

@@ -793,6 +793,10 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 21, 26, 29, 35 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움) | 읽는다, 되돌릴 수 없다 |
 | **13, 28, 32** | **테이블이나 열 삭제** | **깨진다: `min_reader_version`을 올린다** |
 
+스키마를 바꾸는 단계는 같은 PR에서 [generated/schema.md](generated/schema.md)를 다시 만든다(`pnpm docs:schema`). 새
+테이블은 [domain-model.ko.md](domain-model.ko.md)와 그 원본의 "저장되는 곳" 목록에 한 줄을 얻는다. 둘 다 하기
+전까지 `schema-doc.test.ts`가 실패한다.
+
 ## 6. 사용량과 한도 (FR-9)
 
 **도구에게 묻는다. 도구의 파일을 읽지 않는다.** `agents.usage` → `SessionManager.usageFor(tool)`

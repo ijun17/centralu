@@ -42,6 +42,7 @@
     "perf:idle": "node packages/agent-host/scripts/idle-perf.mjs",
     "release:npm": "tsx scripts/release-npm.mts",
     "icon": "tsx scripts/render-icon.mts",
+    "docs:schema": "tsx packages/agent-host/scripts/schema-doc.mts",
     "smoke:goal": "tsx packages/agent-host/scripts/smoke-goal.mts",
     "smoke:interrupt": "tsx packages/agent-host/scripts/smoke-interrupt.mts"
   },

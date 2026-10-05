@@ -39,6 +39,7 @@ restart; `packages/ui` and `packages/platform` reload live under `pnpm app:dev`.
 - `apps/desktop`: the Tauri shell (Rust) and the keeper that supervises the host.
 - `apps/web`: the browser entry used by `pnpm dev` and e2e.
 
+Vocabulary (session roles, apps, keeper, host, swap) and how the concepts relate: `docs/domain-model.md`.
 The layer rules are enforced by lint (`docs/architecture.md` §2). Where things go:
 `docs/folder-structure.md`. All design documents: `docs/README.md`.
 

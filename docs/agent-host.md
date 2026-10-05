@@ -875,6 +875,10 @@ step against:
 | 21, 26, 29, 35 | rewrite data one way (21 rewrites every message: heavy) | reads it, cannot be undone |
 | **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |
 
+A step that changes the schema regenerates [generated/schema.md](generated/schema.md) (`pnpm docs:schema`) in the
+same PR, and a new table gets a line in a "Where it is stored" list of [domain-model.md](domain-model.md) and its
+mirror. `schema-doc.test.ts` fails until both are done.
+
 ## 6. Usage and limits (FR-9)
 
 **We ask the tool, we do not read its files.** `agents.usage` → `SessionManager.usageFor(tool)`

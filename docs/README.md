@@ -8,7 +8,8 @@ Design documents are kept in two languages: English is the canonical text (`*.md
 Korean is a maintained mirror (`*.ko.md`) — same convention as the repository root
 README. When a design changes, both files change **in the same PR as the code**.
 `plans/` and `spikes/` are records of what happened and are not mirrored
-([#27](https://github.com/ijun17/centralu/issues/27)).
+([#27](https://github.com/ijun17/centralu/issues/27)). Nor is `generated/`: it is written by a script
+from the code, in English only, and a test fails when it is out of date.
 
 Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-result.md),
 [what release still needs](plans/beta-release-checklist.md).
@@ -17,6 +18,8 @@ Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-
 
 | Document | What is in it | Read first |
 |---|---|---|
+| [domain-model.md](domain-model.md) | The vocabulary: every concept a newcomer meets (project, session and its roles, approval, app, view, keeper, host, swap, …), how they relate, the session state machine, the process tree, the main flows, and where each is stored and defined | — |
+| [generated/schema.md](generated/schema.md) | The store's tables and columns, generated from a real store by `pnpm docs:schema` (English only) | domain-model |
 | [product-spec.md](product-spec.md) | The spec: requirements (FR-1–22), screens (focus view, grid, project screen), roadmap, risks | — |
 | [architecture.md](architecture.md) | Axes of change, layers, dependency rules, design patterns, process topology; the keeper, switching builds and applying an update (§4.1–4.5, including a keeper that cannot move: §4.4) | product-spec §6 |
 | [folder-structure.md](folder-structure.md) | How the monorepo is split, and where code for a given change goes | architecture |
