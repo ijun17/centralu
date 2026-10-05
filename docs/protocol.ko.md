@@ -78,10 +78,12 @@ type NormalizedEvent =
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 충돌 감지, FR-5 하이라이트
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // 배지; codex는 알려 주고, claude는 CLI의 /goal 답과 Stop 훅 피드백에서 읽는다
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: 살아 있는 집합(REPLACE)과 방금 끝난 것
+  | { type: 'agent_version';    sessionId, version }            // #297: 이 프로세스가 돌리는 CLI 버전, 프로세스마다 한 번. SessionInfo.agentVersion으로 남는다
   | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
   | { type: 'session_deleted';  sessionId }
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352)는 기본값 false
+  | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (기본값 true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: <data>/themes의 파일이 바뀌었다 — themes.list를 다시 읽는다
   | { type: 'error';            sessionId?, error: ProtocolError }
@@ -190,6 +192,7 @@ type ApprovalDetail =
 |---|---|---|
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession`은 세션을 휴지통으로 보낸다 (FR-22) |
 | 백그라운드 작업 | `agents.stopBackgroundTask, agents.clearBackgroundTasks` | #290: 어댑터가 `stoppable`로 표시한 작업 하나를 멈춘다(그 끝은 `background_tasks`로 온다). 끝난 것을 목록에서 걷는다 |
+| 에이전트 CLI 버전 | `agents.versions, agents.setAutoApplyVersions, agents.applyVersions` | #297: 설치된 CLI(`force: false`는 30초 안의 읽기로 답한다 — 창이 포커스를 얻을 때), "새로 설치된 에이전트 CLI로 idle 세션 옮기기"(기본 켜짐), 오래된 CLI를 돌리는 idle 세션을 모두 다시 띄우고 `{ restarted, busy }`로 답한다. 세션이 돌리는 버전은 `SessionInfo.agentVersion`이며 프로세스가 없으면 null이다. 모두 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 아무것도 보이지 않는다([agent-host.ko.md](agent-host.ko.md) §4.6) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색 |
 | grid | `grid.get, grid.set` | 그리드의 패널들, 순서대로, 통째로 쓴다 (product spec §5.4). 하나하나가 `GridPanel`이다: `{ kind: 'session', sessionId }` 또는 `{ kind: 'app', projectId: string \| null, appId, span? }` (`null`은 사용자 폴더의 앱) — #288. `span`(#306)은 사람이 그 앱 패널의 머리글에서 고른 `{ cols, rows }`이고, 각 1에서 4, 고르지 않았으면 없다; 그 이전의 host는 이것을 걷어 내고 패널은 기본값으로 돌아간다. 바꾸지 않고 넓혔으므로 (§4) `PROTOCOL_VERSION`은 1 그대로다: `grid.get { tagged: true }`와 `grid.set { panels }`는 패널로 말하고, 그것이 없으면 둘 다 #288 이전의 모양, 세션 id만의 목록으로 말한다 (이전 UI의 `grid.set { sessionIds }`는 목록을 그 세션들로 바꾼다). UI는 `panels` 옆에 `sessionIds`도 보내고 id만의 목록을 세션 패널로 읽으므로, 한 빌드 차이의 UI와 host는 어느 쪽으로든 계속 함께 돈다; 이전 필드는 한 릴리스 뒤에 빠진다. `grid.set`은 최대 256개를 받고 저장한 것을 돌려준다: 중복, 모르는 세션, 등록되지 않은 프로젝트의 앱은 빠진다. 앱이 있는지는 확인하지 않는다 — 앱 목록은 폴더보다 늦을 수 있고, 찾지 못한 앱은 화면이 빼고 그린다. 모양은 패널의 정체성뿐이라 그대로 클라이언트로 옮겨 갈 수 있다 (#82) |

@@ -251,6 +251,14 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   an approval or a question, no terminal or command is running, and nobody is typing. Desktop only, with the keeper;
   elsewhere, and from a build the update did not replace (`pnpm app:open`), the line says to restart as before
   ([architecture.md](architecture.md) §4.5).
+- **Agent CLI updates** (#297). Each session runs its own Claude Code or Codex process, which keeps the CLI version it
+  started with, and with the keeper a process can outlive every app restart. When the installed CLI is newer, the
+  session header says so quietly ("Claude Code 2.1.290 installed — this session runs 2.1.282") next to one app-wide
+  action, **Update idle sessions**, which restarts every idle session on the installed version and leaves busy ones.
+  **Move idle sessions to a newly installed agent CLI** (Settings → Updates, **on by default**) does the same by itself
+  once a session is fully idle — no turn, no approval or question waiting, no background task running — and has been
+  quiet for a minute. The conversation continues through resume, and a line in it says the session moved. The
+  installed versions are read every ten minutes and when the window gains focus ([agent-host.md](agent-host.md) §4.6).
 
 #### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
@@ -558,7 +566,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 
 - **Usage dashboard**: weekly bar chart (daily), breakdown by tool/model/project, estimated cost, limit window status.
 - **Session creation dialog**: tool → model → permission preset → starting prompt. Includes the concurrent-session warning (FR-2).
-- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, **theme** — Dark, Light or follow the system, a theme per side (presets: Dark, Light, High contrast dark, High contrast light), an optional accent that never colours the signal, and custom themes as files in the data folder that can be edited in Settings, by hand or by an agent and update live, with a warning when a theme breaks the urgency order (#312, [themes.md](themes.md)), **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **a body font and a code font** (a short list or any installed font by name, always in front of the app's own fonts so Korean keeps its fallback; the terminal follows the code font) **and a line height** (Compact, Normal, Relaxed; fixed-row views keep their rows), kept with the theme in the screen preferences and handed to app views (#312, [themes.md](themes.md)), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22), **background** — whether quitting leaves agents running (FR-10, desktop only), **updates** — the running and newest version, Check now, checking automatically, installing, Apply now, and applying automatically when idle (off by default; FR-10, desktop only).
+- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, **theme** — Dark, Light or follow the system, a theme per side (presets: Dark, Light, High contrast dark, High contrast light), an optional accent that never colours the signal, and custom themes as files in the data folder that can be edited in Settings, by hand or by an agent and update live, with a warning when a theme breaks the urgency order (#312, [themes.md](themes.md)), **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **a body font and a code font** (a short list or any installed font by name, always in front of the app's own fonts so Korean keeps its fallback; the terminal follows the code font) **and a line height** (Compact, Normal, Relaxed; fixed-row views keep their rows), kept with the theme in the screen preferences and handed to app views (#312, [themes.md](themes.md)), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22), **background** — whether quitting leaves agents running (FR-10, desktop only), **updates** — the running and newest version, Check now, checking automatically, installing, Apply now, and applying automatically when idle (off by default; FR-10, desktop only); the agent CLIs installed, and moving idle sessions to a newly installed one (on by default; FR-10, #297).
 
 ### 5.4 Grid view (**experimental**)
 

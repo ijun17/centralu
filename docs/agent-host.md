@@ -142,6 +142,7 @@ interface AgentAdapter {
   readonly tool: ToolName                  // a closed enum in @cc/protocol — see #74
   readonly capabilities: AdapterCapabilities
   detect(): Promise<DetectResult>          // installed / logged in (FR-19)
+  installedVersion?(): Promise<string | null>  // #297: the CLI installed now, read without a session (§4.6)
   createSession(opts: CreateSessionOpts): Promise<SessionHandle>
   resume(externalId: string, opts): Promise<SessionHandle | null>  // null = resume not possible
 }
@@ -208,7 +209,13 @@ Implementation rules:
     event with `applyBackgroundTasks` — the same function the UI's reducer and the mock run. `sessionIdle()` says
     whether a session's process can be swapped without losing work (#297): no turn, no pending approval or question,
     no running task that is not ambient, and never idle while a tool that cannot report background work holds a
-    process.
+    process. The rule itself is `sessionIdle` in `idle.ts`, next to `hostBusy` (§4.5).
+- **The CLI version a process runs is reported once per process, as `agent_version`** (#297). Claude: the init
+  message's `claude_code_version` (init comes again with every query; only a change is sent). Codex: the `initialize`
+  answer's `userAgent`, `<client name>/<server version> (<os>) …` (measured, codex-cli 0.160.0:
+  `centralu/0.160.0 (Mac OS 27.0.1; arm64) unknown (centralu; 0.1.0-beta.10)`); `protocol-contract.json` lists the
+  field so a rename fails the drift check. An adopted process says nothing again, so its version comes from the
+  keeper tag (§4.6).
 - **What the tool tells its own user goes out, in its own words** (#304): a fresh conversation as
   `conversation_reset`, text meant to be read as `notice`, a setting the tool switched by itself as `settings_changed`
   with `by: 'tool'` (its snapshot is what the process was launched with plus the switched field; the host applies only
@@ -483,7 +490,7 @@ a 256 KiB tail, never blocking. Bytes from a host go to an agent's stdin in whol
 mid-write never leaves a torn request; up to 8 MiB are queued before the keeper stops reading the host.
 
 **What the host spawns there.** Every child carries a tag only hosts read (`keeper/tags.ts`): `{kind:"agent",
-tool, sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. A newer host
+tool, sessionId, version?}` (the CLI version it was started from, #297, §4.6), `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. A newer host
 must keep reading an older host's tags: the children outlive the build that spawned them.
 
 - **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract.ts`): `spawn` in the keeper,
@@ -567,13 +574,61 @@ again, six hours later.
 **The rule** (`idle.ts`). `hostBusy(snapshot)` is the one answer to "would someone lose something if this stopped
 now": a live session working, waiting for an approval or on a question; an open terminal; a running project command.
 The snapshot is `activity()` in `main.ts`. The keeper reads it through the activity report (§4.1) for its idle exit;
-the window gets it from the keeper's view for the switch's question and for applying an update when idle; an agent CLI
-update (#297) calls `hostBusy(activity())` directly. An open terminal counts even at a prompt: the host cannot tell an
-idle shell from one running a command, so the automatic mode waits for terminals to close.
+the window gets it from the keeper's view for the switch's question and for applying an update when idle. An open
+terminal counts even at a prompt: the host cannot tell an idle shell from one running a command, so the automatic mode
+waits for terminals to close. Moving one session to a newly installed agent CLI (#297) uses the same file's narrower
+rule, `sessionIdle` (§4.6).
 
 **What the host sees.** Nothing new: the relaunched window reconnects through the same front door, then the switch
 drains this host and starts the new build's (§4.2), after the keeper has handed itself over (§4.4). The new host's
 update status starts fresh at its own version.
+
+### 4.6 Moving sessions to a newly installed agent CLI (#297)
+
+Every session runs its own agent process, started from the CLI installed at the time, and an update to `claude` or
+`codex` reaches a session only when its process starts again. Under the keeper (§4.3) a process outlives every app
+restart, so a person who uses Centralu daily could run an old CLI indefinitely. `agent-versions.ts` knows both sides and
+restarts a session on the installed CLI when nothing in it would be lost.
+
+**The installed version** (`AgentAdapter.installedVersion`, `cli-version.ts`), read at host start, every ten minutes,
+and when a window gains focus (`agents.versions { force: false }`, answered from a reading under 30 s old):
+
+1. npm's `package.json` beside the file the command runs (`whichTool`, then `launchFor` for a Windows shim, then the
+   symlink's target), with the package name checked: `@anthropic-ai/claude-code`, `@openai/codex`. No process runs.
+   On Windows this is the only way it is read: Claude starts from the host's own link under
+   `<data>\tools\claude\…` (§1, "How a Claude process is started on Windows"), and running npm's `claude.exe` to
+   ask would hold the file an npm update has to replace.
+2. The file's own name when it is a version: Claude Code's native installer links `claude` to
+   `~/.local/share/claude/versions/<version>`.
+3. `<cli> --version`, off Windows only (a Homebrew cask, a manual install).
+
+**The running version** is `SessionInfo.agentVersion`: what the process reported (`agent_version`, §2), and until it
+does, the installed version when it was started. Each keeper spawn writes that version on the child's tag
+(`{ kind: 'agent', tool, sessionId, version }`), and `adoptKept` gives it back to the session, because an adopted
+process does not report again. A tag from a host before #297 has no version: that session's version stays unknown and
+it is never moved by itself (unknown is never "older", `runsOlderCli`), until its next restart. If an update lands
+between the last reading and a spawn, the tag names the older version; the next host then moves that session once
+more, which costs a resume and nothing else.
+
+**When a session is moved** (`restartDecision`): it is live, it runs an older version than the installed one, it is
+idle by `sessionIdle` (no turn, no approval or question, no live background task, and a tool that cannot report
+background work is never idle), and, when it moves by itself, nothing has come from it for 60 s (counted from host start
+for a session the host has not heard from). The quiet period is for the person: a turn that just ended is when they read
+the answer and type the next message. `sessionIdle` is narrower than `hostBusy` on purpose: `hostBusy` counts
+`waiting_input`, which every finished turn leaves until the next message, and terminals, which a session restart does
+not touch.
+
+| Decision | Why |
+|---|---|
+| Moving by itself is on by default ("Move idle sessions to a newly installed agent CLI", `agents.setAutoApplyVersions`, saved as `agents.autoApplyVersions`) | The owner's decision (2026-10-05). The restart waits until nothing would be lost, and the conversation continues through resume |
+| The header's action (`agents.applyVersions`) restarts every idle outdated session at once, without the quiet period | The update is app-wide; a person who just updated wants every session on it. A busy one is listed and keeps the line |
+| The restart is the manager's `restartSession` | The same path as "Restart agent": the handle is disposed (under the keeper: stdin closed, then a signal, through the keeper), and the session resumes in a newly spawned process. Nothing is re-attached, so the new process is the new CLI (`sessions/agent-versions-restart.test.ts`) |
+| The conversation gets one line from Centralu, "Claude Code restarted on 2.1.290 (was 2.1.282). The conversation continues." | A process restarted by itself is never silent |
+| The installed versions last seen are kept (`agents.versionsSeen`) | An update made while the app was closed still counts as a change |
+
+**The capability check seam** (#270). On every change of an installed CLI's version the service calls
+`capabilityCheck({ tool, from, to })`. #270 proposes re-running the probes for what a tool could not do when its version
+moves; nothing implements that yet, so the default writes one line to host.log saying so. The probes plug in there.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

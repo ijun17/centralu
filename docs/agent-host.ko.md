@@ -123,6 +123,7 @@ interface AgentAdapter {
   readonly tool: ToolName                  // a closed enum in @cc/protocol — see #74
   readonly capabilities: AdapterCapabilities
   detect(): Promise<DetectResult>          // installed / logged in (FR-19)
+  installedVersion?(): Promise<string | null>  // #297: 지금 설치된 CLI, 세션 없이 읽는다 (§4.6)
   createSession(opts: CreateSessionOpts): Promise<SessionHandle>
   resume(externalId: string, opts): Promise<SessionHandle | null>  // null = resume not possible
 }
@@ -185,7 +186,14 @@ interface AdapterCapabilities {
   - 매니저는 세션마다 목록을 쥔다(`SessionInfo.backgroundTasks`, `goal`처럼 살아 있는 동안만). 이벤트마다
     `applyBackgroundTasks`로 반영하며, UI의 리듀서와 mock도 같은 함수를 돌린다. `sessionIdle()`은 세션의 프로세스를
     잃는 것 없이 바꿀 수 있는지 말한다(#297): 턴이 없고, 기다리는 승인이나 질문이 없고, ambient가 아닌 실행 중 작업이
-    없어야 한다. 백그라운드 작업을 알리지 못하는 도구가 프로세스를 쥐고 있는 동안에는 결코 idle이 아니다.
+    없어야 한다. 백그라운드 작업을 알리지 못하는 도구가 프로세스를 쥐고 있는 동안에는 결코 idle이 아니다. 규칙 자체는
+    `idle.ts`의 `sessionIdle`이며 `hostBusy` 옆에 있다(§4.5).
+- **프로세스가 돌리는 CLI 버전은 프로세스마다 한 번 `agent_version`으로 알린다** (#297). Claude: init 메시지의
+  `claude_code_version`(init은 질의마다 다시 오므로 바뀐 것만 보낸다). Codex: `initialize` 응답의 `userAgent`,
+  `<클라이언트 이름>/<서버 버전> (<os>) …`(측정, codex-cli 0.160.0:
+  `centralu/0.160.0 (Mac OS 27.0.1; arm64) unknown (centralu; 0.1.0-beta.10)`). `protocol-contract.json`이 이 필드를
+  적어 두므로 이름이 바뀌면 drift 검사가 실패한다. 넘겨받은 프로세스는 다시 말하지 않으므로 그 버전은 키퍼 태그에서
+  온다(§4.6).
 - **도구가 자기 사용자에게 하는 말은 도구 자신의 말로 나간다** (#304): 새 대화는 `conversation_reset`, 읽히길 바라는
   글은 `notice`, 도구가 스스로 바꾼 설정은 `by: 'tool'`인 `settings_changed`(스냅숏은 프로세스를 띄운 값에 바뀐 필드를
   얹은 것이고, 호스트는 다른 것만 적용한다), 재시도는 출력이 다시 흐를 때까지 `retrying` 활동. 따로 적지 않은 것은 측정한
@@ -438,7 +446,7 @@ id로 다시 연다: 각 인스턴스는 `open()`처럼 자기 앱을 다시 붙
 남기지 않는다. 키퍼는 8 MiB까지 쌓은 뒤 호스트를 읽지 않는다.
 
 **호스트가 거기서 띄우는 것.** 자식마다 호스트만 읽는 태그가 붙는다(`keeper/tags.ts`): `{kind:"agent", tool,
-sessionId}`, `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. 새 호스트는 옛 호스트의
+sessionId, version?}`(띄운 CLI 버전, #297, §4.6), `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. 새 호스트는 옛 호스트의
 태그를 계속 읽을 수 있어야 한다: 자식은 자기를 띄운 빌드보다 오래 산다.
 
 - **에이전트.** 매니저는 어댑터에 `ProcessSource`(`adapters/contract.ts`)를 넘긴다: 키퍼에서 `spawn`하거나, 쥐어 둔
@@ -513,11 +521,56 @@ automatically when idle", `updates.setAutoApply`, 저장소의 앱 설정에 `up
 **규칙** (`idle.ts`). `hostBusy(snapshot)`이 "지금 멈추면 누가 무엇을 잃는가"에 대한 유일한 답이다: 일하거나 승인 또는
 질문을 기다리는 살아 있는 세션, 열린 터미널, 돌고 있는 프로젝트 명령. 스냅숏은 `main.ts`의 `activity()`다. 키퍼는
 활동 보고(§4.1)로 이것을 읽어 유휴 종료에 쓰고, 창은 키퍼의 view에서 받아 바꾸기의 질문과 한가할 때의 업데이트 적용에
-쓰며, 에이전트 CLI 업데이트(#297)는 `hostBusy(activity())`를 바로 부른다. 열린 터미널은 프롬프트에 있어도 친다: 호스트는
-한가한 셸과 명령을 돌리는 셸을 구별하지 못하므로, 자동 모드는 터미널이 닫히기를 기다린다.
+쓴다. 열린 터미널은 프롬프트에 있어도 친다: 호스트는 한가한 셸과 명령을 돌리는 셸을 구별하지 못하므로, 자동 모드는
+터미널이 닫히기를 기다린다. 세션 하나를 새로 설치된 에이전트 CLI로 옮기는 일(#297)은 같은 파일의 더 좁은 규칙
+`sessionIdle`을 쓴다(§4.6).
 
 **호스트가 보는 것.** 새로운 것은 없다: 다시 띄운 창은 같은 정문으로 다시 붙고, 키퍼가 스스로를 넘긴 뒤(§4.4)
 바꾸기가 이 호스트를 비우고 새 빌드의 호스트를 띄운다(§4.2). 새 호스트의 업데이트 상태는 자기 버전에서 새로 시작한다.
+
+### 4.6 새로 설치된 에이전트 CLI로 세션 옮기기 (#297)
+
+세션마다 자기 에이전트 프로세스를 돌리고, 그 프로세스는 띄울 때 설치돼 있던 CLI로 뜬다. `claude`나 `codex`를
+업데이트해도 세션에 닿는 것은 그 프로세스가 다시 뜰 때뿐이다. 키퍼 아래에서는(§4.3) 프로세스가 앱을 몇 번 다시
+열어도 살아남으므로, Centralu를 매일 쓰는 사람은 오래된 CLI를 끝없이 돌릴 수 있다. `agent-versions.ts`는 양쪽을 다
+알고, 세션 안에서 잃을 것이 없을 때 세션을 설치된 CLI로 다시 띄운다.
+
+**설치된 버전** (`AgentAdapter.installedVersion`, `cli-version.ts`). 호스트가 뜰 때, 10분마다, 창이 포커스를 얻을 때
+읽는다(`agents.versions { force: false }`, 30초 안의 읽기면 그것으로 답한다):
+
+1. 명령이 실제로 돌리는 파일(`whichTool`, Windows 심이면 `launchFor`, 다음으로 심볼릭 링크의 대상) 옆의 npm
+   `package.json`. 패키지 이름을 확인한다: `@anthropic-ai/claude-code`, `@openai/codex`. 프로세스는 뜨지 않는다.
+   Windows에서는 이것만으로 읽는다: Claude는 `<data>\tools\claude\…` 아래 호스트 자신의 링크로 뜨고(§1, "Windows에서
+   Claude 프로세스를 띄우는 방법"), 묻느라 npm의 `claude.exe`를 돌리면 npm 업데이트가 바꿔야 할 그 파일을 쥐게 된다.
+2. 파일 이름 자체가 버전일 때 그 이름: Claude Code의 네이티브 설치기는 `claude`를
+   `~/.local/share/claude/versions/<버전>`에 링크한다.
+3. `<cli> --version`, Windows가 아닐 때만(Homebrew cask, 손으로 설치한 것).
+
+**돌고 있는 버전**은 `SessionInfo.agentVersion`이다: 프로세스가 알린 것(`agent_version`, §2), 그리고 알리기 전까지는
+띄울 때 설치돼 있던 버전. 키퍼에 띄울 때마다 그 버전을 자식의 태그에 적고(`{ kind: 'agent', tool, sessionId, version }`),
+`adoptKept`가 그것을 세션에 돌려준다. 넘겨받은 프로세스는 다시 알리지 않기 때문이다. #297 이전 호스트가 쓴 태그에는
+버전이 없다: 그 세션의 버전은 다음에 다시 뜰 때까지 모르는 채로 남고, 스스로 옮겨지지 않는다(모르는 것은 결코
+"더 오래된 것"이 아니다, `runsOlderCli`). 마지막 읽기와 띄우기 사이에 업데이트가 끼면 태그는 더 오래된 버전을 적는다.
+그러면 다음 호스트가 그 세션을 한 번 더 옮기며, 드는 것은 resume 한 번뿐이다.
+
+**세션을 옮기는 때** (`restartDecision`): 살아 있고, 설치된 것보다 오래된 버전을 돌리고, `sessionIdle`로 idle이며(턴이
+없고, 승인이나 질문이 없고, 살아 있는 백그라운드 작업이 없고, 백그라운드 작업을 알리지 못하는 도구는 결코 idle이
+아니다), 스스로 옮길 때는 60초 동안 그 세션에서 아무것도 오지 않았을 때(호스트가 아직 들은 적 없는 세션은 호스트가
+뜬 때부터 센다). 조용한 시간은 사람을 위한 것이다: 막 끝난 턴은 사람이 답을 읽고 다음 메시지를 쓰는 때다.
+`sessionIdle`은 일부러 `hostBusy`보다 좁다: `hostBusy`는 끝난 턴마다 다음 메시지까지 남는 `waiting_input`과, 세션을
+다시 띄워도 건드리지 않는 터미널을 친다.
+
+| 결정 | 이유 |
+|---|---|
+| 스스로 옮기기는 기본으로 켜져 있다("Move idle sessions to a newly installed agent CLI", `agents.setAutoApplyVersions`, `agents.autoApplyVersions`로 저장) | 소유자의 결정(2026-10-05). 다시 띄우기는 잃을 것이 없을 때까지 기다리고, 대화는 resume으로 이어진다 |
+| 헤더의 동작(`agents.applyVersions`)은 오래된 idle 세션을 조용한 시간 없이 한꺼번에 다시 띄운다 | 업데이트는 앱 전체의 일이다. 방금 업데이트한 사람은 모든 세션이 그것으로 가길 바란다. 바쁜 세션은 목록에 남고 그 줄을 계속 보인다 |
+| 다시 띄우기는 매니저의 `restartSession`이다 | "Restart agent"와 같은 길: 핸들을 닫고(키퍼 아래에서는 키퍼를 통해 stdin을 닫은 뒤 신호를 보낸다), 세션은 새로 띄운 프로세스에서 resume한다. 다시 붙는 것은 없으므로 새 프로세스가 곧 새 CLI다(`sessions/agent-versions-restart.test.ts`) |
+| 대화에 Centralu의 줄 하나가 들어간다: "Claude Code restarted on 2.1.290 (was 2.1.282). The conversation continues." | 스스로 다시 띄운 프로세스는 결코 조용하지 않다 |
+| 마지막으로 본 설치 버전을 적어 둔다(`agents.versionsSeen`) | 앱이 닫혀 있는 동안 한 업데이트도 바뀐 것으로 친다 |
+
+**능력 검사 자리** (#270). 설치된 CLI의 버전이 바뀔 때마다 서비스는 `capabilityCheck({ tool, from, to })`를 부른다.
+#270은 버전이 바뀌면 도구가 못 하던 것에 대한 탐침을 다시 돌리자고 제안한다. 아직 구현한 것이 없으므로 기본값은
+host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 

@@ -77,10 +77,12 @@ type NormalizedEvent =
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // the badge; codex announces it, claude's is read from the CLI's /goal replies and Stop hook feedback
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: the live set (REPLACE) and what just ended
+  | { type: 'agent_version';    sessionId, version }            // #297: the CLI version this process runs, once per process; kept as SessionInfo.agentVersion
   | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
   | { type: 'session_deleted';  sessionId }
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352) defaults to false
+  | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (defaults to true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: a file in <data>/themes changed — re-read themes.list
   | { type: 'error';            sessionId?, error: ProtocolError }
@@ -191,6 +193,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 |---|---|---|
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession` moves the session to the trash (FR-22) |
 | background tasks | `agents.stopBackgroundTask, agents.clearBackgroundTasks` | #290: stop one task the adapter marked `stoppable` (its ending arrives as `background_tasks`); take the ended ones off the list |
+| agent CLI versions | `agents.versions, agents.setAutoApplyVersions, agents.applyVersions` | #297: the installed CLIs (`force: false` answers from a reading under 30 s old — a window gaining focus); "move idle sessions to a newly installed agent CLI" (on by default); restart every idle session that runs an older CLI, answering `{ restarted, busy }`. A session's running version is `SessionInfo.agentVersion`, null without a process. All additive: a window on an older host gets no answer and shows nothing ([agent-host.md](agent-host.md) §4.6) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | the way out of the trash (FR-22). The person's alone: no agent tool or app capability reaches it |
 | messages | `messages.load, messages.subagent, messages.search` | a history page; one launch card's subagent steps, read when the person opens them (#222); search over what was said |
 | grid | `grid.get, grid.set` | the grid's panels in order, written whole (product spec §5.4). Each is a `GridPanel`: `{ kind: 'session', sessionId }` or `{ kind: 'app', projectId: string \| null, appId, span? }` (`null` is a user-folder app) — #288. `span` (#306) is the `{ cols, rows }` the person chose for that app panel from its top bar, each 1 to 4, absent when none was chosen; a host from before it strips it and the panel falls back to its defaults. Expanded, not replaced (§4), so `PROTOCOL_VERSION` stays 1: `grid.get { tagged: true }` and `grid.set { panels }` speak panels; without them both speak the pre-#288 shape, bare session ids (an older UI's `grid.set { sessionIds }` replaces the list with its sessions). The UI sends `sessionIds` next to `panels` and reads a bare id list as session panels, so a UI and a host one build apart keep working both ways; the old fields go one release later. `grid.set` takes at most 256 and answers what it stored: duplicates, unknown sessions and an app of an unregistered project left out. Whether an app exists is not checked — the app list can lag behind its folder, and the screen leaves out an app it cannot find. The shape is the panel's identity alone, so it can move to the client unchanged (#82) |
