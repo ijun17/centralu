@@ -56,7 +56,8 @@ const forget = () => {
 // --- One write at a time ---------------------------------------------------------------------------
 // An agent may send several calls at once (a live Claude session sent both halves of a round trip
 // in parallel). Each write reads the item fresh, so running them in arrival order keeps every
-// "from → to" true and the last call the one that wins.
+// "from → to" true and the last call the one that wins. A batch is one call: its items run in the
+// order given, and no other write runs in between.
 let writes = Promise.resolve()
 function oneAtATime(fn) {
   const run = writes.then(fn, fn)
@@ -65,13 +66,20 @@ function oneAtATime(fn) {
 }
 
 // --- Presenting ------------------------------------------------------------------------------------
+// What the model reads is short: one line per item, and the same words in the text and in
+// structuredContent (docs/apps.md §9.2: Claude Code hands the model the structured part, not the
+// text). URLs and ids only when `detail: "full"` asks for them.
+const FIELDS = ['status', 'priority', 'area']
 const TYPE = { issue: 'issue', pull: 'pull request', draft: 'draft issue', hidden: 'hidden item' }
-const ref = (item) => (item.number == null ? TYPE[item.type] : sameRepo(item.repository, config.repository) ? `#${item.number}` : `${item.repository}#${item.number}`)
+const refOf = (repo, number) => (sameRepo(repo, config.repository) ? `#${number}` : `${repo}#${number}`)
+const ref = (item) => (item.number == null ? TYPE[item.type] : refOf(item.repository, item.number))
 const label = (item) => `${ref(item)} ${item.title}`
-const facts = (item) =>
-  [`Status ${item.status ?? '(none)'}`, `Priority ${item.priority ?? '(none)'}`, `Area ${item.area ?? '(none)'}`].join(' · ')
+const none = (v) => v ?? '(none)'
+/** `#113 Narrow-window reading — Needs decision · Medium · UI`; a pull request says so. */
 const line = (item) =>
-  `- ${label(item)} — Priority ${item.priority ?? '(none)'} · Area ${item.area ?? '(none)'} · ${item.draft ? 'draft ' : ''}${TYPE[item.type]}${item.url ? ` · ${item.url}` : ''}`
+  `${label(item)}${item.type === 'pull' ? (item.draft ? ' (draft PR)' : ' (PR)') : ''} — ${none(item.status)} · ${none(item.priority)} · ${none(item.area)}`
+const fullLine = (item) =>
+  `${line(item)} · ${TYPE[item.type]}${item.state ? ` ${item.state.toLowerCase()}` : ''}${item.url ? ` · ${item.url}` : ''} · item ${item.itemId}`
 
 /** Status columns in the project's own order, with the decision column first. */
 function columns(b) {
@@ -90,41 +98,151 @@ const byPriority = (a, b) => (RANK[a.priority] ?? 3) - (RANK[b.priority] ?? 3) |
  */
 const answer = (t, structured, summary = t) => ({ content: [{ type: 'text', text: t }], structuredContent: { summary, ...structured } })
 
+/**
+ * An answer made of a summary and lists of lines. The text is the summary, then each list's lines
+ * (under its heading, if it has one; an `inline` list is one line after its heading), so it says
+ * exactly what the structured part says.
+ */
+function linesAnswer(summary, lists, extra = {}) {
+  const structured = {}
+  const text = [summary]
+  for (const [key, heading, lines, inline] of lists) {
+    if (!lines.length) continue
+    structured[key] = lines
+    if (inline) text.push(`${heading} ${lines.join(', ')}.`)
+    else text.push(...(heading ? [heading] : []), ...lines)
+  }
+  return answer(text.join('\n'), { ...structured, ...extra }, summary)
+}
+
 /** A failure as an answer: the message says what happened and what to do, and nothing changed. */
 function failure(e, prefix = '') {
-  const known = e instanceof GitHubError
-  const message = `${prefix}${known ? e.message : `Unexpected error: ${e?.message ?? e}`}`
-  if (!known) console.error(e)
-  return { isError: true, ...answer(message, { error: { kind: known ? e.kind : 'internal', message } }) }
+  const message = `${prefix}${reason(e)}`
+  return { isError: true, ...answer(message, { error: { kind: e instanceof GitHubError ? e.kind : 'internal', message } }) }
+}
+function reason(e) {
+  if (e instanceof GitHubError) return e.message
+  console.error(e)
+  return `Unexpected error: ${e?.message ?? e}`
 }
 
-function findItem(b, input) {
-  const want = parseItemRef(input, config.repository)
-  const item = b.items.find((i) => i.number === want.number && sameRepo(i.repository, want.repo))
-  return { want, item }
-}
+// --- Reading items by number ------------------------------------------------------------------------
+const itemRef = z.union([z.string(), z.number()])
+const REF_HELP = '8, "#8", "owner/repo#8" or its URL'
+const detailInput = z.enum(['compact', 'full']).optional().describe('"full" adds type, state, URL and ids; default "compact"')
+
+const matches = (want) => (i) => i.number === want.number && sameRepo(i.repository, want.repo)
 
 /**
- * Applies status/priority/area to one item, one field at a time, skipping a field that already has
- * the value. All names are checked before the first write. A failed write carries what was done.
+ * Finds the items asked for, in the order asked, once each. A reference that is not an issue or pull
+ * request fails the whole read (the model sent something wrong); one that is not in the project is
+ * named in `missing`.
  */
-async function applyFields(b, item, changes) {
-  const plan = []
-  for (const key of ['status', 'priority', 'area']) {
-    if (changes[key] === undefined) continue
-    const field = b.fields[key]
-    const option = resolveOption(field, changes[key])
-    plan.push({ key, field, option, from: item[key] })
+function pick(b, inputs) {
+  const found = []
+  const missing = []
+  const seen = new Set()
+  for (const input of inputs) {
+    const want = parseItemRef(input, config.repository)
+    const key = `${want.repo.toLowerCase()}#${want.number}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const item = b.items.find(matches(want))
+    if (item) found.push(item)
+    else missing.push(refOf(want.repo, want.number))
   }
+  return { found, missing }
+}
+
+/** The read tools' answer: compact lines, or with `full` the whole items and where they came from. */
+function itemsAnswer(b, summary, items, detail, extra = []) {
+  const full = detail === 'full'
+  const lists = [['items', '', items.map(full ? fullLine : line)], ...extra]
+  if (!full) return linesAnswer(summary, lists)
+  const a = linesAnswer(`${summary} ${where(b)}.`, lists, { project: b.project, fetchedAt: b.fetchedAt })
+  a.structuredContent.items = items
+  return a
+}
+
+// --- Writing: one item or a batch -------------------------------------------------------------------
+const fieldInputs = {
+  status: z.string().optional().describe('Status, for example "Ready" or "In review"'),
+  priority: z.string().optional().describe('Priority: High, Medium or Low'),
+  area: z.string().optional().describe('Area, for example "UI" or "Apps"'),
+}
+const batchInputs = (verb) => ({
+  item: itemRef.optional().describe(`One issue or pull request: ${REF_HELP}`),
+  items: z
+    .array(z.union([itemRef, z.object({ item: itemRef, ...fieldInputs })]))
+    .min(1)
+    .max(50)
+    .optional()
+    .describe(`Several, ${verb} in this order: each ${REF_HELP}, or { item, status?, priority?, area? }`),
+  ...fieldInputs,
+})
+
+// Failures after which the next items would fail the same way: stop there instead of repeating it.
+const STOPS = new Set(['network', 'auth', 'scope', 'gh-missing', 'setup', 'forbidden', 'internal'])
+const stops = (e) => STOPS.has(e instanceof GitHubError ? e.kind : 'internal')
+
+/**
+ * Turns `item` or `items` (plus the top-level fields, which apply to every entry that does not set
+ * its own) into a list of entries, and checks every reference and option name before anything is
+ * written: one wrong name changes nothing, and the answer says each problem once.
+ */
+function plan(b, { item, items, status, priority, area }, { needFields }) {
+  if (item !== undefined && items !== undefined) throw new GitHubError('input', 'Give item (one) or items (a list), not both. Nothing changed.')
+  if (item === undefined && items === undefined) throw new GitHubError('input', 'Give item (one) or items (a list). Nothing changed.')
+  const shared = { status, priority, area }
+  const problems = []
+  const entries = (items ?? [item]).map((raw) => {
+    const e = raw !== null && typeof raw === 'object' ? raw : { item: raw }
+    const entry = { input: e.item, options: {} }
+    try {
+      entry.want = parseItemRef(e.item, config.repository)
+      entry.ref = refOf(entry.want.repo, entry.want.number)
+    } catch (err) {
+      problems.push(err.message)
+      return entry
+    }
+    let any = false
+    for (const key of FIELDS) {
+      const value = e[key] ?? shared[key]
+      if (value === undefined) continue
+      any = true
+      try {
+        entry.options[key] = resolveOption(b.fields[key], value)
+      } catch (err) {
+        problems.push(err.message)
+      }
+    }
+    if (needFields && !any) problems.push(`Nothing to change for ${entry.ref}: give status, priority or area.`)
+    return entry
+  })
+  if (problems.length) throw new GitHubError('input', `${[...new Set(problems)].join(' ')} Nothing changed.`)
+  return entries
+}
+
+const change = (d) => `${d.field} ${none(d.from)} → ${d.to}`
+
+/**
+ * Applies the planned options to one item, one field at a time, skipping a field that already has
+ * the value. `item` is this batch's own copy, updated after each write so a later entry for the
+ * same item starts from the truth. A failed write carries what was done.
+ */
+async function writeFields(b, item, options) {
   const done = []
-  const unchanged = []
-  for (const p of plan) {
-    if (p.from === p.option.name) {
-      unchanged.push(`${p.field.name} was already ${p.option.name}`)
+  const same = []
+  for (const key of FIELDS) {
+    const option = options[key]
+    if (!option) continue
+    const field = b.fields[key].name
+    if (item[key] === option.name) {
+      same.push(`${field} already ${option.name}`)
       continue
     }
     try {
-      await setOption(b.project.id, item.itemId, p.field.id, p.option.id)
+      await setOption(b.project.id, item.itemId, b.fields[key].id, option.id)
     } catch (e) {
       e.done = done
       throw e
@@ -132,122 +250,203 @@ async function applyFields(b, item, changes) {
       // Whether or not this write landed, the cached board can no longer be trusted.
       forget()
     }
-    done.push({ field: p.field.name, from: p.from, to: p.option.name })
+    done.push({ field, from: item[key], to: option.name })
+    item[key] = option.name
   }
-  return { done, unchanged, plan }
+  return { done, same }
 }
-
-const describeDone = (done) => done.map((d) => `- ${d.field}: ${d.from ?? '(none)'} → ${d.to}`).join('\n')
 
 /**
  * GitHub can take a moment to list an item that was just added: on 2026-10-04 the read right after
  * `addProjectV2ItemById` came back without it four times in a row, and a second read a few seconds
- * later had it. So a read that looks for one item tries a few times, with short waits.
+ * later had it. So a read that looks for items tries a few times, with short waits.
  */
 const LIST_WAITS_MS = [0, 500, 1000, 1500, 2000]
-async function findFresh(itemId) {
+async function findFresh(itemIds) {
   let last
   for (const ms of LIST_WAITS_MS) {
     if (ms) await new Promise((r) => setTimeout(r, ms))
     last = await board({ fresh: true })
-    const item = last.items.find((i) => i.itemId === itemId)
-    if (item) return { board: last, item }
+    if (itemIds.every((id) => last.items.some((i) => i.itemId === id))) break
   }
-  return { board: last, item: null }
+  return { board: last, byId: new Map(last.items.map((i) => [i.itemId, i])) }
 }
 
 /**
- * Reads the item again, fresh, and says what GitHub now shows (and whether it matches). It never
- * throws: by now something may have been written, and a failed read must not hide that.
+ * Reads the touched items again, fresh, once for the whole batch, and adds to each line what
+ * GitHub shows when it is not what was set. It never throws: by now something may have been
+ * written, and a failed read must not hide that. Returns the summary's last words.
  */
-async function readBack(itemId, plan) {
-  let item
+async function readBack(rows) {
+  // Only items that answer with a line: a failed one's line already says how far it got.
+  const touched = rows.filter((r) => r.line && r.touched)
+  if (!touched.length) return ''
+  let byId
   try {
-    ;({ item } = await findFresh(itemId))
+    ;({ byId } = await findFresh(touched.map((r) => r.itemId)))
   } catch (e) {
-    return { item: null, text: `Reading it back from GitHub failed: ${e?.message ?? e}` }
+    return ` Reading it back from GitHub failed: ${e?.message ?? e}`
   }
-  if (!item) return { item: null, text: 'Reading it back, GitHub did not list the item in the project.' }
-  const off = plan.filter((p) => item[p.key] !== p.option.name).map((p) => `${p.field.name} is ${item[p.key] ?? '(none)'}, not ${p.option.name}`)
-  return {
-    item,
-    text: `GitHub now shows ${ref(item)}: ${facts(item)}.${off.length ? ` Warning: ${off.join('; ')}.` : ''}`,
+  // A batch may name the same item twice: each field is checked on the last line that set it.
+  const last = new Map()
+  for (const r of touched) for (const k of FIELDS) if (r.options[k]) last.set(`${r.itemId} ${k}`, r)
+  let off = 0
+  for (const r of touched) {
+    const now = byId.get(r.itemId)
+    if (!now) {
+      off += 1
+      r.line += ' (GitHub did not list it when read back; look again in a moment)'
+      continue
+    }
+    const wrong = FIELDS.filter((k) => last.get(`${r.itemId} ${k}`) === r && now[k] !== r.options[k].name).map((k) => `${r.fieldNames[k]} ${none(now[k])}`)
+    if (wrong.length) {
+      off += 1
+      r.line += ` (but GitHub now shows ${wrong.join(', ')})`
+    }
   }
+  return off ? ` Read back from GitHub: ${off} differ${off === 1 ? 's' : ''}, see the line${off === 1 ? '' : 's'}.` : ' Read back from GitHub: as set.'
 }
 
-const fieldInputs = {
-  status: z.string().optional().describe('New Status, for example "Ready" or "In review"'),
-  priority: z.string().optional().describe('New Priority: High, Medium or Low'),
-  area: z.string().optional().describe('New Area, for example "UI" or "Apps"'),
+const count = (n, word) => (n ? [`${n} ${word}`] : [])
+
+/** The answer of a write: one line per item, the failures, and `isError` only when nothing worked. */
+function writeAnswer(b, ok, counts, failed, tail) {
+  const summary = `Project ${b.project.title} on GitHub: ${[...counts, ...count(failed.length, 'failed')].join(', ')}.${tail}`
+  const a = linesAnswer(summary, [
+    ['results', '', ok.map((r) => r.line)],
+    ['failed', 'Failed:', failed],
+  ])
+  return ok.length === 0 && failed.length ? { isError: true, ...a } : a
 }
+
+/** Records a failed entry, and when it means the rest would fail too, the entries not tried. */
+function fail(failed, entries, i, text, e) {
+  failed.push(text)
+  if (!stops(e)) return false
+  const rest = entries.slice(i + 1).map((x) => x.ref)
+  if (rest.length) failed.push(`Not tried after that: ${rest.join(', ')}.`)
+  return true
+}
+
+const fieldNamesOf = (b) => Object.fromEntries(FIELDS.map((k) => [k, b.fields[k].name]))
 
 // The two writes. Registered below; each runs inside oneAtATime.
-async function setItemFields({ item: input, status, priority, area }) {
-  if (status === undefined && priority === undefined && area === undefined)
-    return failure(new GitHubError('input', 'Nothing to change: give at least one of status, priority or area.'))
-  let target = null
+async function setItemFields(args) {
+  let b, entries
   try {
-    const b = await board({ fresh: true })
-    const { want, item } = findItem(b, input)
-    if (!item)
-      throw new GitHubError('input', `${want.repo}#${want.number} is not in the project ${b.project.title}. Nothing changed. Add it first with add_item.`)
-    target = item
-    const { done, unchanged, plan } = await applyFields(b, item, { status, priority, area })
-    const back = await readBack(item.itemId, plan)
-    const parts = [
-      done.length ? `Changed on GitHub, project ${b.project.title}: ${label(item)}\n${describeDone(done)}` : `Nothing changed on GitHub for ${label(item)}.`,
-      ...(unchanged.length ? [`Unchanged: ${unchanged.join('; ')}.`] : []),
-      back.text,
-    ]
-    return answer(parts.join('\n'), { changed: done, item: back.item ?? item })
+    b = await board({ fresh: true })
+    entries = plan(b, args, { needFields: true })
   } catch (e) {
-    const done = e?.done ?? []
-    const prefix = target
-      ? done.length
-        ? `Partly changed on GitHub for ${label(target)}:\n${describeDone(done)}\nThen it failed: `
-        : `Nothing changed for ${label(target)}. `
-      : ''
-    return failure(e, prefix)
+    return failure(e)
   }
+  const items = b.items.map((i) => ({ ...i }))
+  const rows = []
+  const failed = []
+  for (const [i, e] of entries.entries()) {
+    const item = items.find(matches(e.want))
+    if (!item) {
+      failed.push(`${e.ref} is not in the project ${b.project.title}; add it with add_item.`)
+      continue
+    }
+    const row = { itemId: item.itemId, options: e.options, fieldNames: fieldNamesOf(b) }
+    try {
+      const { done, same } = await writeFields(b, item, e.options)
+      row.touched = done.length > 0
+      row.line = done.length ? [`${e.ref} ${done.map(change).join(', ')}`, ...same].join('; ') : `${e.ref} unchanged: ${same.join(', ')}`
+      rows.push(row)
+    } catch (err) {
+      const done = err.done ?? []
+      if (fail(failed, entries, i, `${e.ref}: ${done.length ? `${done.map(change).join(', ')} done, then ` : ''}${reason(err)}`, err)) break
+    }
+  }
+  const tail = await readBack(rows)
+  const ok = rows.filter((r) => r.line)
+  return writeAnswer(b, ok, [...count(ok.filter((r) => r.touched).length, 'changed'), ...count(ok.filter((r) => !r.touched).length, 'unchanged')], failed, tail)
 }
 
-async function addItem({ item: input, status, priority, area }) {
-  const parts = []
+async function addItem(args) {
+  let b, entries
   try {
-    const want = parseItemRef(input, config.repository)
-    const b = await board({ fresh: true })
-    // Option names are checked before anything is written.
-    for (const key of ['status', 'priority', 'area']) if ({ status, priority, area }[key] !== undefined) resolveOption(b.fields[key], { status, priority, area }[key])
-    let item = b.items.find((i) => i.number === want.number && sameRepo(i.repository, want.repo))
-    let current = b
-    if (item) {
-      parts.push(`Already in the project ${b.project.title}: ${label(item)}. Nothing added.`)
-    } else {
-      const content = await findContent(want.repo, want.number)
-      if (!content) throw new GitHubError('input', `${want.repo}#${want.number} is not an issue or pull request this GitHub login can see. Nothing added.`)
-      const itemId = await addContent(b.project.id, content.id)
-      forget()
-      parts.push(`Added to the project ${b.project.title} on GitHub: ${TYPE[content.type]} ${ref({ ...content, repository: want.repo })} ${content.title} (${content.url}).`)
-      ;({ board: current, item } = await findFresh(itemId))
-      if (!item) throw new GitHubError('github', 'GitHub accepted the item but did not list it when read back. Refresh in a moment.')
-    }
-    let plan = []
-    if (status !== undefined || priority !== undefined || area !== undefined) {
-      const r = await applyFields(current, item, { status, priority, area })
-      plan = r.plan
-      if (r.done.length) parts.push(`Then set:\n${describeDone(r.done)}`)
-      if (r.unchanged.length) parts.push(`Unchanged: ${r.unchanged.join('; ')}.`)
-    }
-    const back = await readBack(item.itemId, plan)
-    parts.push(back.text)
-    return answer(parts.join('\n'), { item: back.item ?? item })
+    b = await board({ fresh: true })
+    entries = plan(b, args, { needFields: false })
   } catch (e) {
-    return failure(e, parts.length ? `${parts.join('\n')}\nThen it failed: ` : '')
+    return failure(e)
   }
+  const rows = []
+  const failed = []
+  // One holder per project item, shared by every entry that names it: an item is added once, and a
+  // later entry's "from" is what an earlier one set.
+  const holders = new Map()
+  let stopped = null
+  // First every add, in order.
+  for (const [i, e] of entries.entries()) {
+    const key = `${e.want.repo.toLowerCase()}#${e.want.number}`
+    const row = { options: e.options, fieldNames: fieldNamesOf(b), head: `${e.ref} already in the project` }
+    let holder = holders.get(key)
+    if (!holder) {
+      const existing = b.items.find(matches(e.want))
+      if (existing) holder = { itemId: existing.itemId, item: { ...existing } }
+      else {
+        try {
+          const content = await findContent(e.want.repo, e.want.number)
+          if (!content) {
+            failed.push(`${e.ref} is not an issue or pull request this GitHub login can see. Nothing added.`)
+            continue
+          }
+          holder = { itemId: await addContent(b.project.id, content.id), added: true }
+          forget()
+          Object.assign(row, { added: true, touched: true, head: `${e.ref} added: ${content.title}${content.type === 'pull' ? ' (PR)' : ''}` })
+        } catch (err) {
+          if (fail(failed, entries, i, `${e.ref}: ${reason(err)} Nothing added.`, err)) {
+            stopped = 'its fields were not set after the failure above'
+            break
+          }
+          continue
+        }
+      }
+      holders.set(key, holder)
+    }
+    Object.assign(row, { holder, itemId: holder.itemId })
+    rows.push(row)
+  }
+  // Then the fields, in the same order. A new item's current values come from GitHub, which may
+  // list it only a moment later (findFresh), so every "from" is what GitHub had.
+  const toSet = rows.filter((r) => Object.keys(r.options).length)
+  const unlisted = [...new Set(toSet.map((r) => r.holder))].filter((h) => !h.item)
+  if (!stopped && unlisted.length) {
+    try {
+      const { byId } = await findFresh(unlisted.map((h) => h.itemId))
+      for (const h of unlisted) if (byId.has(h.itemId)) h.item = { ...byId.get(h.itemId) }
+    } catch (err) {
+      stopped = `reading the project back failed, so its fields were not set: ${reason(err)}`
+    }
+  }
+  for (const r of toSet) {
+    const why = stopped ?? (r.holder.item ? null : 'GitHub did not list it yet, so its fields were not set; set them with set_item_fields in a moment')
+    if (why) {
+      r.failed = true
+      failed.push(`${r.head}; ${why}.`)
+      continue
+    }
+    try {
+      const { done, same } = await writeFields(b, r.holder.item, r.options)
+      if (done.length) r.touched = true
+      r.line = [r.head, ...(done.length ? [done.map(change).join(', ')] : []), ...same].join('; ')
+    } catch (err) {
+      const done = err.done ?? []
+      r.failed = true
+      failed.push(`${r.head}; ${done.length ? `${done.map(change).join(', ')} done, then ` : ''}${reason(err)}`)
+      if (stops(err)) stopped = 'its fields were not set after the failure above'
+    }
+  }
+  for (const r of rows) if (!r.line && !r.failed) r.line = r.added ? r.head : `${r.head}, nothing added`
+  const tail = await readBack(rows)
+  const ok = rows.filter((r) => r.line)
+  return writeAnswer(b, ok, [...count(ok.filter((r) => r.added).length, 'added'), ...count(ok.filter((r) => !r.added).length, 'already in the project')], failed, tail)
 }
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'project-board', version: '0.1.0' }, { capabilities: { tools: {}, resources: {} } })
+  const server = new McpServer({ name: 'project-board', version: '0.2.0' }, { capabilities: { tools: {}, resources: {} } })
 
   centralu.uiResource(server, 'board', UI, new URL('./ui/index.html', import.meta.url))
 
@@ -289,16 +488,18 @@ serveStdio(() => {
     {
       title: 'List project items',
       description:
-        'List the items of the Centralu GitHub Project, grouped by Status in board order, read from GitHub. Optionally filter by status, area and priority.',
+        'List the Centralu GitHub Project, one line per item: "#number title — Status · Priority · Area", in board order (decision column first, then by priority). The summary counts every Status. Filter by status, area, priority, or numbers (then in the order given).',
       inputSchema: z.object({
         status: z.string().optional().describe('Only this Status, for example "Ready"'),
         area: z.string().optional().describe('Only this Area, for example "UI"'),
         priority: z.string().optional().describe('Only this Priority: High, Medium or Low'),
+        numbers: z.array(itemRef).max(100).optional().describe(`Only these items: each ${REF_HELP}`),
+        detail: detailInput,
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async ({ status, area, priority }) => {
+    async ({ status, area, priority, numbers, detail }) => {
       try {
         const b = await board()
         const want = {
@@ -306,17 +507,45 @@ serveStdio(() => {
           area: area === undefined ? null : resolveOption(b.fields.area, area).name,
           priority: priority === undefined ? null : resolveOption(b.fields.priority, priority).name,
         }
-        const items = b.items.filter((i) => (!want.status || i.status === want.status) && (!want.area || i.area === want.area) && (!want.priority || i.priority === want.priority))
+        const fits = (i) => (!want.status || i.status === want.status) && (!want.area || i.area === want.area) && (!want.priority || i.priority === want.priority)
         const filters = Object.entries(want).filter(([, v]) => v).map(([k, v]) => `${b.fields[k].name} ${v}`)
-        const cols = want.status ? [want.status] : [...columns(b), ...(items.some((i) => !i.status) ? [null] : [])]
-        const ordered = []
-        const blocks = cols.map((c) => {
-          const inCol = items.filter((i) => i.status === c).sort(byPriority)
-          ordered.push(...inCol)
-          return `${c ?? 'No status'} (${inCol.length})\n${inCol.length ? inCol.map(line).join('\n') : '- none'}`
-        })
-        const head = `${where(b)}. ${items.length} of ${b.items.length} items${filters.length ? `, filtered by ${filters.join(', ')}` : ''}.`
-        return answer(`${head}\n\n${blocks.join('\n\n')}`, { project: b.project, columns: cols, filters: want, items: ordered, fetchedAt: b.fetchedAt }, head)
+        const cols = want.status ? [want.status] : [...columns(b), ...(b.items.some((i) => !i.status) ? [null] : [])]
+        let items
+        let missing = []
+        if (numbers !== undefined) {
+          const picked = pick(b, numbers)
+          items = picked.found.filter(fits)
+          missing = picked.missing
+          filters.push(`numbers ${numbers.join(', ')}`)
+        } else {
+          items = cols.flatMap((c) => b.items.filter((i) => i.status === c && fits(i)).sort(byPriority))
+        }
+        const counts = cols.map((c) => `${c ?? 'No status'} ${items.filter((i) => i.status === c).length}`)
+        const summary = `${b.project.title}: ${items.length} of ${b.items.length} items${filters.length ? `, filtered by ${filters.join(', ')}` : ''}. ${counts.join(' · ')}.`
+        return itemsAnswer(b, summary, items, detail, [['missing', 'Not in the project:', missing, true]])
+      } catch (e) {
+        return failure(e)
+      }
+    },
+  )
+
+  centralu.tool(
+    server,
+    'get_items',
+    {
+      title: 'Read specific items',
+      description:
+        'Read a few items by number, one line each in the order asked: "#number title — Status · Priority · Area". Says which are not in the project.',
+      inputSchema: z.object({ items: z.array(itemRef).min(1).max(100).describe(`Each ${REF_HELP}`), detail: detailInput }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    async ({ items: inputs, detail }) => {
+      try {
+        const b = await board()
+        const { found, missing } = pick(b, inputs)
+        const summary = `${b.project.title}: ${found.length} of ${found.length + missing.length} in the project.`
+        return itemsAnswer(b, summary, found, detail, [['missing', 'Not in the project:', missing, true]])
       } catch (e) {
         return failure(e)
       }
@@ -328,19 +557,19 @@ serveStdio(() => {
     'list_needs_decision',
     {
       title: 'List items that need a decision',
-      description: `List the items whose Status is "${config.decisionStatus}": the decisions waiting on the owner, highest priority first. Optionally only one Area.`,
-      inputSchema: z.object({ area: z.string().optional().describe('Only this Area, for example "UI"') }),
+      description: `List the items whose Status is "${config.decisionStatus}" (the owner's pending decisions), highest priority first, one line each. Optionally one Area.`,
+      inputSchema: z.object({ area: z.string().optional().describe('Only this Area, for example "UI"'), detail: detailInput }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async ({ area }) => {
+    async ({ area, detail }) => {
       try {
         const b = await board()
         const decision = resolveOption(b.fields.status, config.decisionStatus).name
         const wantArea = area === undefined ? null : resolveOption(b.fields.area, area).name
         const items = b.items.filter((i) => i.status === decision && (!wantArea || i.area === wantArea)).sort(byPriority)
-        const head = `${where(b)}. ${items.length} item${items.length === 1 ? '' : 's'} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}.`
-        return answer(items.length ? `${head}\n\n${items.map(line).join('\n')}` : head, { project: b.project, status: decision, area: wantArea, items, fetchedAt: b.fetchedAt }, head)
+        const summary = `${b.project.title}: ${items.length} item${items.length === 1 ? '' : 's'} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}.`
+        return itemsAnswer(b, summary, items, detail)
       } catch (e) {
         return failure(e)
       }
@@ -348,15 +577,15 @@ serveStdio(() => {
   )
 
   // Writes. Visible to agents and to the screen (the board's status menu and drag call this one), so
-  // both go through the same code. Every answer names what changed on GitHub, then what GitHub shows.
+  // both go through the same code. Every answer names what changed on GitHub, then checks it.
   centralu.tool(
     server,
     'set_item_fields',
     {
       title: 'Set Status, Priority or Area',
       description:
-        'Set the Status, Priority and/or Area of one item of the Centralu GitHub Project, on GitHub. The item is an issue or pull request already in the project: a number such as 8 or #8 (this repository), owner/repo#8, or its URL. Says what changed and what GitHub shows afterwards.',
-      inputSchema: z.object({ item: z.union([z.string(), z.number()]).describe('Issue or pull request: 8, "#8", "owner/repo#8" or its URL'), ...fieldInputs }),
+        'Set Status, Priority and/or Area on GitHub for one project item (item) or several (items, in order). Top-level status/priority/area apply to every entry without its own. Answers one line per item, e.g. "#297 Status Needs decision → Ready", then failures. A wrong option name changes nothing and lists the valid names.',
+      inputSchema: z.object(batchInputs('set')),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     (args) => oneAtATime(() => setItemFields(args)),
@@ -366,10 +595,10 @@ serveStdio(() => {
     server,
     'add_item',
     {
-      title: 'Add an issue or pull request to the project',
+      title: 'Add issues or pull requests to the project',
       description:
-        'Add an issue or pull request to the Centralu GitHub Project, on GitHub, by number (8 or #8 for this repository, owner/repo#8) or URL, and optionally set its Status, Priority and Area. Says what was added and what GitHub shows afterwards. An item already in the project is not added twice.',
-      inputSchema: z.object({ item: z.union([z.string(), z.number()]).describe('Issue or pull request: 8, "#8", "owner/repo#8" or its URL'), ...fieldInputs }),
+        'Add one issue or pull request (item) or several (items, in order) to the Centralu GitHub Project, optionally setting Status, Priority and Area (top-level values apply to every entry without its own). One already in the project is not added twice. Answers one line per item, then failures.',
+      inputSchema: z.object(batchInputs('added')),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },

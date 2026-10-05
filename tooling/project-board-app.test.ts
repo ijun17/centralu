@@ -40,10 +40,16 @@ for (let i = 2; i < args.length; i += 2) {
 }
 const out = (data) => process.stdout.write(JSON.stringify({ data }))
 const fieldNode = (f) => ({ id: f.id, name: f.name, options: f.options.map((o) => ({ id: o.id, name: o.name })) })
+const graphqlError = (type, message) => fail('gh: ' + message + '\n', 1, JSON.stringify({ data: null, errors: [{ type, message }] }))
+if (query.startsWith('mutation') && st.mode === 'read-only') graphqlError('FORBIDDEN', 'Resource not accessible by personal access token')
+// delayMs: a slow write, so writes that were not one at a time would overlap
+if (query.startsWith('mutation') && st.delayMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, st.delayMs)
 if (query.includes('updateProjectV2ItemFieldValue')) {
+  if ((st.failItems ?? []).includes(v.item)) graphqlError('UNPROCESSABLE', 'Could not update the item ' + v.item)
   const item = st.items.find((i) => i.id === v.item)
   const field = st.fields.find((f) => f.id === v.field)
-  item.values[field.name] = field.options.find((o) => o.id === v.option).name
+  // ignoreWrites: GitHub says yes but keeps the old value, which only the read-back can see
+  if (!(st.ignoreWrites ?? []).includes(v.item)) item.values[field.name] = field.options.find((o) => o.id === v.option).name
   save()
   out({ updateProjectV2ItemFieldValue: { projectV2Item: { id: item.id } } })
 } else if (query.includes('addProjectV2ItemById')) {
@@ -158,7 +164,10 @@ async function call(name: string, args: Record<string, unknown> = {}, caller: Ap
 const ghCalls = () => readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[])
 const queries = () => ghCalls().map((a) => a.find((x) => x.startsWith('query='))!)
 const mutations = () => queries().filter((q) => q.startsWith('query=mutation'))
-const setMode = (mode: string) => writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), mode }))
+const patchState = (patch: Record<string, unknown>) => writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), ...patch }))
+const setMode = (mode: string) => patchState({ mode })
+/** The project item each field write went to, in the order "GitHub" received them */
+const writtenItems = () => ghCalls().filter((a) => a.some((x) => x.includes('updateProjectV2ItemFieldValue'))).map((a) => a.find((x) => x.startsWith('item='))!.slice(5))
 const stored = (id: string) => (JSON.parse(readFileSync(statePath, 'utf8')) as ReturnType<typeof project>).items.find((i) => i.id === id)
 
 // The fake `gh` is a sh script, node is reached through a symlink and PATH is joined with `:`; the
@@ -170,6 +179,7 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
     expect(r.ok).toBe(true)
     expect(r.text).toContain('show — reads, app, screen ui://project-board/index.html')
     expect(r.text).toContain('list_items — reads, model')
+    expect(r.text).toContain('get_items — reads, model')
     expect(r.text).toContain('list_needs_decision — reads, model')
     expect(r.text).toContain('set_item_fields — changes, model+app')
     expect(r.text).toContain('add_item — changes, model')
@@ -178,56 +188,110 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
     expect(html.text).toContain('centralu/notifications/changed')
   })
 
-  it('lists every page grouped by Status in board order, without archived items, and filters by status, area and priority', async () => {
+  it('lists every page in board order, one line per item, without archived items, and filters by status, area and priority', async () => {
     runtime()
     const all = await call('list_items')
     expect(all.isError).toBe(false)
-    expect(all.text).toContain('4 of 4 items')
-    expect(all.text).not.toContain('Archived long ago')
-    const order = ['Needs decision (2)', 'Ready (0)', 'In progress (1)', 'In review (0)', 'On hold (1)', 'Done (0)'].map((h) => all.text.indexOf(h))
-    expect(order.every((i) => i >= 0)).toBe(true)
-    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(all.text).toBe(
+      [
+        'Centralu: 4 of 4 items. Needs decision 2 · Ready 0 · In progress 1 · In review 0 · On hold 1 · Done 0.',
+        '#113 Narrow-window reading — Needs decision · Medium · UI',
+        '#101 Worktree management — Needs decision · Low · Host',
+        '#280 Agents survive restarts — In progress · High · Host',
+        '#8 Polish the overall design — On hold · Low · Design',
+      ].join('\n'),
+    )
     // Two items per page in the fake: three board pages were read, once, and the second call came from the short cache
     await call('list_items', { area: 'host' })
     expect(queries().filter((q) => q.includes('projectV2(number'))).toHaveLength(3)
 
     const host = await call('list_items', { area: 'host', priority: 'low' })
-    expect(host.text).toContain('1 of 4 items, filtered by Area Host, Priority Low')
-    expect(host.text).toContain('#101 Worktree management')
+    expect(host.text).toContain('1 of 4 items, filtered by Area Host, Priority Low.')
+    expect(host.data!.items).toEqual(['#101 Worktree management — Needs decision · Low · Host'])
     const unknown = await call('list_items', { status: 'Blocked' })
     expect(unknown.isError).toBe(true)
-    expect(unknown.text).toBe('"Blocked" is not a Status in this project. Choose one of: Ready, Needs decision, In progress, In review, On hold, Done.')
+    expect(unknown.text).toBe('Status "Blocked" does not exist in this project. Choose one of: Ready, Needs decision, In progress, In review, On hold, Done.')
+  })
+
+  it('answers reads compactly, with the text saying exactly what the structured part says, and the rest only on request', async () => {
+    // Claude Code hands the model structuredContent, not the text (docs/apps.md §9.2)
+    runtime()
+    for (const [name, args] of [
+      ['list_items', {}],
+      ['list_needs_decision', {}],
+      ['get_items', { items: [8, 113] }],
+    ] as const) {
+      const r = await call(name, args)
+      expect(Object.keys(r.data!).sort()).toEqual(['items', 'summary'])
+      expect(r.text).toBe([r.data!.summary, ...(r.data!.items as string[])].join('\n'))
+      expect(JSON.stringify(r.data)).not.toMatch(/https?:|item-|PVT_|ijun17\/centralu/)
+    }
+    const full = await call('get_items', { items: [8], detail: 'full' })
+    expect(full.text).toContain('#8 Polish the overall design — On hold · Low · Design · issue open · https://github.com/ijun17/centralu/issues/8 · item item-8')
+    expect(full.data).toMatchObject({ project: { id: 'PVT_test' }, items: [{ itemId: 'item-8', url: 'https://github.com/ijun17/centralu/issues/8', status: 'On hold' }] })
+  })
+
+  it('reads specific items by number, in the order asked, and names the ones not in the project', async () => {
+    runtime()
+    const got = await call('get_items', { items: ['ijun17/centralu#101', 8, '#8', 'https://github.com/ijun17/centralu/issues/42', 'other/repo#3'] })
+    expect(got.isError).toBe(false)
+    expect(got.text).toBe(
+      [
+        'Centralu: 2 of 4 in the project.',
+        '#101 Worktree management — Needs decision · Low · Host',
+        '#8 Polish the overall design — On hold · Low · Design',
+        'Not in the project: #42, other/repo#3.',
+      ].join('\n'),
+    )
+    expect(got.data).toEqual({
+      summary: 'Centralu: 2 of 4 in the project.',
+      items: [expect.stringMatching(/^#101 /), expect.stringMatching(/^#8 /)],
+      missing: ['#42', 'other/repo#3'],
+    })
+
+    // The same filter on list_items, combined with the others
+    const listed = await call('list_items', { numbers: [8, '#113', 42] })
+    expect(listed.data!.items).toEqual(['#8 Polish the overall design — On hold · Low · Design', '#113 Narrow-window reading — Needs decision · Medium · UI'])
+    expect(listed.data!.missing).toEqual(['#42'])
+    expect((await call('list_items', { numbers: [8, 113], status: 'On hold' })).data!.items).toEqual(['#8 Polish the overall design — On hold · Low · Design'])
+
+    const bad = await call('get_items', { items: [8, 'eight'] })
+    expect(bad.isError).toBe(true)
+    expect(bad.text).toContain('"eight" is not an issue or pull request.')
   })
 
   it('lists what needs a decision, highest priority first', async () => {
     runtime()
     const r = await call('list_needs_decision')
-    expect(r.text).toContain('2 items with Status Needs decision.')
-    expect(r.text.indexOf('#113')).toBeLessThan(r.text.indexOf('#101'))
-    expect((r.data!.items as { number: number }[]).map((i) => i.number)).toEqual([113, 101])
-    expect((await call('list_needs_decision', { area: 'UI' })).text).toContain('1 item with Status Needs decision in Area UI.')
+    expect(r.text).toBe(
+      [
+        'Centralu: 2 items with Status Needs decision.',
+        '#113 Narrow-window reading — Needs decision · Medium · UI',
+        '#101 Worktree management — Needs decision · Low · Host',
+      ].join('\n'),
+    )
+    expect((await call('list_needs_decision', { area: 'UI' })).data!.summary).toBe('Centralu: 1 item with Status Needs decision in Area UI.')
   })
 
-  it('sets a status on GitHub and back, saying what changed and what GitHub shows afterwards', async () => {
+  it('sets a status on GitHub and back, saying in one line what changed, checked against GitHub', async () => {
     runtime()
     await call('list_items') // fills the cache with "On hold"
     const there = await call('set_item_fields', { item: '#8', status: 'ready' })
     expect(there.isError).toBe(false)
-    expect(there.text).toContain('Changed on GitHub, project Centralu: #8 Polish the overall design\n- Status: On hold → Ready')
-    expect(there.text).toContain('GitHub now shows #8: Status Ready · Priority Low · Area Design.')
-    // The same words lead the structured part, which is what Claude Code hands the model
-    expect(there.data).toMatchObject({ summary: there.text, changed: [{ field: 'Status', from: 'On hold', to: 'Ready' }] })
+    expect(there.text).toBe('Project Centralu on GitHub: 1 changed. Read back from GitHub: as set.\n#8 Status On hold → Ready')
+    // The same words are the structured part, which is what Claude Code hands the model
+    expect(there.data).toEqual({ summary: 'Project Centralu on GitHub: 1 changed. Read back from GitHub: as set.', results: ['#8 Status On hold → Ready'] })
     expect(stored('item-8')!.values.Status).toBe('Ready')
     // The next read is not the board cached before the write
     expect((await call('list_items', { status: 'Ready' })).text).toContain('#8 Polish the overall design')
 
     const back = await call('set_item_fields', { item: 'https://github.com/ijun17/centralu/issues/8', status: 'On hold' })
-    expect(back.text).toContain('- Status: Ready → On hold')
+    expect(back.data!.results).toEqual(['#8 Status Ready → On hold'])
     expect(stored('item-8')!.values.Status).toBe('On hold')
     expect(mutations()).toHaveLength(2)
 
     const same = await call('set_item_fields', { item: 8, status: 'On hold' })
-    expect(same.text).toContain('Nothing changed on GitHub for #8 Polish the overall design.\nUnchanged: Status was already On hold.')
+    expect(same.text).toBe('Project Centralu on GitHub: 1 unchanged.\n#8 unchanged: Status already On hold')
     expect(mutations()).toHaveLength(2)
   })
 
@@ -235,56 +299,168 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
     // A live Claude session sent both halves of a round trip in parallel
     runtime()
     const [there, back] = await Promise.all([call('set_item_fields', { item: '8', status: 'Ready' }), call('set_item_fields', { item: '8', status: 'On hold' })])
-    expect(there.text).toContain('- Status: On hold → Ready')
-    expect(back.text).toContain('- Status: Ready → On hold')
+    expect(there.data!.results).toEqual(['#8 Status On hold → Ready'])
+    expect(back.data!.results).toEqual(['#8 Status Ready → On hold'])
     expect(stored('item-8')!.values.Status).toBe('On hold')
   })
 
-  it('writes nothing when the value or the item is wrong, and says so', async () => {
+  it('sets a batch in the order given, one line per item, with shared and per-item fields', async () => {
+    runtime()
+    const r = await call('set_item_fields', {
+      items: [113, { item: '#8', priority: 'High' }, 101, { item: 8, status: 'In review' }],
+      status: 'Ready',
+    })
+    expect(r.isError).toBe(false)
+    expect(r.text).toBe(
+      [
+        'Project Centralu on GitHub: 4 changed. Read back from GitHub: as set.',
+        '#113 Status Needs decision → Ready',
+        '#8 Status On hold → Ready, Priority Low → High',
+        '#101 Status Needs decision → Ready',
+        // The second entry for #8 starts from what the first one set
+        '#8 Status Ready → In review',
+      ].join('\n'),
+    )
+    expect(writtenItems()).toEqual(['item-113', 'item-8', 'item-8', 'item-101', 'item-8'])
+    expect([stored('item-113')!.values.Status, stored('item-8')!.values.Status, stored('item-8')!.values.Priority, stored('item-101')!.values.Status]).toEqual([
+      'Ready',
+      'In review',
+      'High',
+      'Ready',
+    ])
+    // One fresh read before the batch and one to check it (three pages each), not two per item
+    expect(queries().filter((q) => q.includes('projectV2(number'))).toHaveLength(6)
+  })
+
+  it('carries on past an item that fails, and lists the failures after the lines', async () => {
+    runtime()
+    patchState({ failItems: ['item-113'] })
+    const r = await call('set_item_fields', { items: [8, 42, 113, 101], status: 'Ready' })
+    expect(r.isError).toBe(false)
+    expect(r.text).toBe(
+      [
+        'Project Centralu on GitHub: 2 changed, 2 failed. Read back from GitHub: as set.',
+        '#8 Status On hold → Ready',
+        '#101 Status Needs decision → Ready',
+        'Failed:',
+        '#42 is not in the project Centralu; add it with add_item.',
+        '#113: GitHub answered with an error: UNPROCESSABLE Could not update the item item-113',
+      ].join('\n'),
+    )
+    expect(r.data!.failed).toHaveLength(2)
+    expect(stored('item-101')!.values.Status).toBe('Ready')
+
+    // When every item failed, the answer is an error
+    const none = await call('set_item_fields', { items: [42, 113], status: 'Done' })
+    expect(none.isError).toBe(true)
+    expect(none.data!.summary).toBe('Project Centralu on GitHub: 2 failed.')
+  })
+
+  it('reads a batch back once and says on the line when GitHub shows something else', async () => {
+    runtime()
+    patchState({ ignoreWrites: ['item-101'] })
+    const r = await call('set_item_fields', { items: [8, 101], status: 'Ready' })
+    expect(r.data).toEqual({
+      summary: 'Project Centralu on GitHub: 2 changed. Read back from GitHub: 1 differs, see the line.',
+      results: ['#8 Status On hold → Ready', '#101 Status Needs decision → Ready (but GitHub now shows Status Needs decision)'],
+    })
+  })
+
+  it('stops a batch at a failure the rest would repeat, and says which items were not tried', async () => {
+    runtime()
+    setMode('read-only')
+    const r = await call('set_item_fields', { items: [8, 113, 101], status: 'Ready' })
+    expect(r.isError).toBe(true)
+    expect(r.data!.failed).toEqual([
+      "#8: The GitHub login gh uses may not change this project (GitHub said: FORBIDDEN Resource not accessible by personal access token). Ask the project's owner for write access, then try again.",
+      'Not tried after that: #113, #101.',
+    ])
+    expect(mutations()).toHaveLength(1)
+  })
+
+  it('runs batches sent at once one after the other, never interleaved', async () => {
+    runtime()
+    patchState({ delayMs: 150 })
+    const [first, second] = await Promise.all([
+      call('set_item_fields', { items: [8, 113], status: 'Ready' }),
+      call('set_item_fields', {
+        items: [
+          { item: 8, status: 'Done' },
+          { item: 113, status: 'Done' },
+        ],
+      }),
+    ])
+    expect(first.data!.results).toEqual(['#8 Status On hold → Ready', '#113 Status Needs decision → Ready'])
+    expect(second.data!.results).toEqual(['#8 Status Ready → Done', '#113 Status Ready → Done'])
+    expect(writtenItems()).toEqual(['item-8', 'item-113', 'item-8', 'item-113'])
+    expect([stored('item-8')!.values.Status, stored('item-113')!.values.Status]).toEqual(['Done', 'Done'])
+  })
+
+  it('writes nothing when a value or a reference is wrong, and names each problem once with the valid names', async () => {
     runtime()
     const badValue = await call('set_item_fields', { item: '8', priority: 'Urgent' })
     expect(badValue.isError).toBe(true)
-    expect(badValue.text).toBe('Nothing changed for #8 Polish the overall design. "Urgent" is not a Priority in this project. Choose one of: High, Medium, Low.')
-    const notThere = await call('set_item_fields', { item: '42', status: 'Ready' })
-    expect(notThere.text).toBe('ijun17/centralu#42 is not in the project Centralu. Nothing changed. Add it first with add_item.')
-    const nothing = await call('set_item_fields', { item: '8' })
-    expect(nothing.text).toBe('Nothing to change: give at least one of status, priority or area.')
-    const garbage = await call('set_item_fields', { item: 'issue eight', status: 'Ready' })
-    expect(garbage.text).toContain('"issue eight" is not an issue or pull request.')
+    expect(badValue.text).toBe('Priority "Urgent" does not exist in this project. Choose one of: High, Medium, Low. Nothing changed.')
+    const batch = await call('set_item_fields', { items: [8, 113, 'issue eight', { item: 101, area: 'Mars' }], status: 'Readyy' })
+    expect(batch.text).toBe(
+      'Status "Readyy" does not exist in this project. Choose one of: Ready, Needs decision, In progress, In review, On hold, Done. "issue eight" is not an issue or pull request. Give a number such as 8 or #8, owner/repo#8, or a github.com issue or pull request URL. Area "Mars" does not exist in this project. Choose one of: UI, Host, Apps, Design. Nothing changed.',
+    )
+    const nothing = await call('set_item_fields', { items: [8, { item: 113, status: 'Ready' }] })
+    expect(nothing.text).toBe('Nothing to change for #8: give status, priority or area. Nothing changed.')
+    expect((await call('set_item_fields', { status: 'Ready' })).text).toBe('Give item (one) or items (a list). Nothing changed.')
+    expect((await call('set_item_fields', { item: 8, items: [113], status: 'Ready' })).text).toBe('Give item (one) or items (a list), not both. Nothing changed.')
     expect(mutations()).toEqual([])
   })
 
-  it('adds an issue or pull request by number or URL, sets its fields, and never adds one twice', async () => {
+  it('adds issues or pull requests by number or URL, sets their fields, and never adds one twice', async () => {
     runtime()
     const added = await call('add_item', { item: '#42', status: 'Ready', area: 'Apps' })
     expect(added.isError).toBe(false)
-    expect(added.text).toContain('Added to the project Centralu on GitHub: issue #42 A new issue (https://github.com/ijun17/centralu/issues/42).')
-    expect(added.text).toContain('Then set:\n- Status: (none) → Ready\n- Area: (none) → Apps')
-    expect(added.text).toContain('GitHub now shows #42: Status Ready · Priority (none) · Area Apps.')
+    expect(added.text).toBe('Project Centralu on GitHub: 1 added. Read back from GitHub: as set.\n#42 added: A new issue; Status (none) → Ready, Area (none) → Apps')
+    expect(stored('item-42')!.values).toEqual({ Status: 'Ready', Area: 'Apps' })
 
     const pr = await call('add_item', { item: 'https://github.com/ijun17/centralu/pull/43' })
-    expect(pr.text).toContain('Added to the project Centralu on GitHub: pull request #43 A pull request')
+    expect(pr.data!.results).toEqual(['#43 added: A pull request (PR)'])
 
     const again = await call('add_item', { item: 42 })
-    expect(again.text).toContain('Already in the project Centralu: #42 A new issue. Nothing added.')
+    expect(again.data!.results).toEqual(['#42 already in the project, nothing added'])
     expect(mutations().filter((q) => q.includes('addProjectV2ItemById'))).toHaveLength(2)
 
     const missing = await call('add_item', { item: '999' })
     expect(missing.isError).toBe(true)
-    expect(missing.text).toBe('ijun17/centralu#999 is not an issue or pull request this GitHub login can see. Nothing added.')
+    expect(missing.data!.failed).toEqual(['#999 is not an issue or pull request this GitHub login can see. Nothing added.'])
     const badStatus = await call('add_item', { item: '43', status: 'Someday' })
-    expect(badStatus.text).toContain('"Someday" is not a Status in this project.')
+    expect(badStatus.text).toContain('Status "Someday" does not exist in this project.')
     expect(mutations().filter((q) => q.includes('addProjectV2ItemById'))).toHaveLength(2)
+  })
+
+  it('adds a batch in order, sets each one, and lists what failed', async () => {
+    runtime()
+    const r = await call('add_item', { items: [43, 999, { item: 42, area: 'UI' }, 8, { item: '#42', status: 'Done' }], status: 'In review' })
+    expect(r.isError).toBe(false)
+    expect(r.text).toBe(
+      [
+        'Project Centralu on GitHub: 2 added, 2 already in the project, 1 failed. Read back from GitHub: as set.',
+        '#43 added: A pull request (PR); Status (none) → In review',
+        '#42 added: A new issue; Status (none) → In review, Area (none) → UI',
+        '#8 already in the project; Status On hold → In review',
+        // Named twice: added once, and the second entry starts from what the first one set
+        '#42 already in the project; Status In review → Done',
+        'Failed:',
+        '#999 is not an issue or pull request this GitHub login can see. Nothing added.',
+      ].join('\n'),
+    )
+    expect(mutations().filter((q) => q.includes('addProjectV2ItemById'))).toHaveLength(2)
+    expect(writtenItems()).toEqual(['item-43', 'item-42', 'item-42', 'item-8', 'item-42'])
   })
 
   it('finds an item GitHub lists only a moment after adding it, and still sets its fields', async () => {
     runtime()
-    writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), lag: 2 }))
+    patchState({ lag: 2 })
     const r = await call('add_item', { item: '#42', status: 'Ready', priority: 'Medium', area: 'UI' })
     expect(r.isError).toBe(false)
-    expect(r.text).toContain('Added to the project')
-    expect(r.text).toContain('- Status: (none) → Ready')
-    expect(r.text).toMatch(/GitHub now shows #42: Status Ready/)
+    expect(r.data!.results).toEqual(['#42 added: A new issue; Status (none) → Ready, Priority (none) → Medium, Area (none) → UI'])
+    expect(r.data!.summary).toContain('Read back from GitHub: as set.')
   })
 
   it('the screen gets the board in column order with the decision column first', async () => {

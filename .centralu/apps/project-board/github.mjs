@@ -16,6 +16,9 @@ export class GitHubError extends Error {
 }
 
 const SCOPE = /INSUFFICIENT_SCOPES|required scopes|has not been granted the required scope|needs the "(read:)?project" scope/i
+// A login that can read the project but not change it (GitHub's GraphQL error type FORBIDDEN, or
+// the REST-style wording gh passes on). Not seen live: the owner's own login can always write.
+const FORBIDDEN = /\bFORBIDDEN\b|Resource not accessible by|does not have permission to|must have (?:write|admin) access/i
 const AUTH = /gh auth login|not logged in|authentication required|HTTP 401|Bad credentials|no oauth token/i
 const NETWORK =
   /error connecting to|could not resolve host|no such host|dial tcp|i\/o timeout|connection refused|network is unreachable|TLS handshake|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND/i
@@ -28,6 +31,11 @@ export function classify(text) {
     return new GitHubError(
       'scope',
       'The GitHub login gh uses lacks the "project" scope this app needs. Run `gh auth refresh -s project` in a terminal, then refresh.',
+    )
+  if (FORBIDDEN.test(t))
+    return new GitHubError(
+      'forbidden',
+      `The GitHub login gh uses may not change this project (GitHub said: ${first.replace(/^gh:\s*/, '')}). Ask the project's owner for write access, then try again.`,
     )
   if (AUTH.test(t)) return new GitHubError('auth', 'gh is not logged in to github.com. Run `gh auth login` in a terminal, then refresh.')
   if (NETWORK.test(t)) return new GitHubError('network', `GitHub could not be reached (${first.replace(/^gh:\s*/, '')}). Check the network, then refresh.`)
@@ -259,7 +267,7 @@ const norm = (s) =>
 /** Finds a field's option by name, ignoring case, spaces, dashes and underscores. */
 export function resolveOption(field, value) {
   const o = field.options.find((x) => norm(x.name) === norm(value))
-  if (!o) throw new GitHubError('input', `"${value}" is not a ${field.name} in this project. Choose one of: ${field.options.map((x) => x.name).join(', ')}.`)
+  if (!o) throw new GitHubError('input', `${field.name} "${value}" does not exist in this project. Choose one of: ${field.options.map((x) => x.name).join(', ')}.`)
   return o
 }
 

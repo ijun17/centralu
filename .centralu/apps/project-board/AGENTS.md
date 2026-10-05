@@ -20,8 +20,21 @@ length). Those are plain, non-secret values; change them there, not in code.
   `project` scope, GitHub unreachable, or the project not found each become one plain sentence
   with the fix (`classify` in `github.mjs`). Agent tools answer them with `isError`; `show`
   answers them as data (`ok: false`) so the screen can say why there is no board.
-- **Writes say what changed.** `set_item_fields` and `add_item` report each field as
-  `from → to`, then read the item back from GitHub and say what it shows now.
+- **Agents read short answers.** Claude Code hands the model a result's `structuredContent`, not
+  its text (docs/apps.md §9.2), so the agent tools answer `{ summary, items }` (or `results` and
+  `failed` for writes) as one line per item, `#113 Title — Status · Priority · Area`, and the text
+  is the same lines. URLs, ids and whole item objects only with `detail: "full"`. `get_items` (or
+  `list_items` with `numbers`) reads a few items in the order asked and names the ones not in the
+  project.
+- **Writes say what changed.** `set_item_fields` and `add_item` take one `item` or a list of
+  `items` (each a reference or `{ item, status?, priority?, area? }`; top-level fields apply to
+  entries without their own). Every reference and option name is checked before the first write,
+  so one wrong name changes nothing. Items run in order inside one `oneAtATime` call, one line each
+  (`#297 Status Needs decision → Ready`); an item that fails is listed under `failed` and the
+  batch carries on, unless the failure would repeat for every item (network, login, scope, write
+  access), where it stops and names the items not tried. The batch is read back from GitHub once
+  at the end, and a line says so when GitHub shows something else. `isError` only when nothing
+  worked.
 - Tests: `tooling/project-board-app.test.ts` runs this server with a fake `gh` on PATH.
 
 ## Files
