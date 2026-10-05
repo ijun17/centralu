@@ -1,6 +1,7 @@
 import type {
   AdapterCapabilities,
   AppErrorBundle,
+  AppReach,
   AppId,
   AppPermission,
   AppUsage,
@@ -845,6 +846,12 @@ export interface AppsPort {
    * builder session carries `sentAt`.
    */
   errors(appId: AppId, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }>
+  /**
+   * Whether a session can use one app's tools right now, and if not, why (#308). Asked when an item
+   * dragged out of that app's view lands in the session's composer: the link goes in either way, and
+   * the composer says what would fix a session that cannot reach the app.
+   */
+  reach(sessionId: string, appId: AppId, projectId: string | null): Promise<AppReach>
   /**
    * Sends one error bundle (`at`) to that app's builder session (M4 C-6) — **only when the
    * person clicks it.** Each bundle goes only once (the host rejects a second attempt).

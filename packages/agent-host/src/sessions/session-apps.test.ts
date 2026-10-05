@@ -91,6 +91,49 @@ describe('decision 4 — which apps attach', () => {
   })
 })
 
+describe('whether a session can reach an app, and why not (#308, apps.reach)', () => {
+  const notes = { projectId: 'p1', appId: 'notes' }
+
+  it('a session reaches the apps decision 4 gives it, and is told an app it is never given belongs elsewhere', () => {
+    expect(hub.reach(worker('p1'), notes)).toEqual({ reachable: true })
+    expect(hub.reach(ORCH, { projectId: null, appId: 'helper' })).toEqual({ reachable: true })
+    // A building session reaches its own user-folder app, which decision 4 alone would not give it
+    expect(hub.reach({ ...worker(null), builderOf: { projectId: null, appId: 'helper' } }, { projectId: null, appId: 'helper' })).toEqual({ reachable: true })
+
+    const elsewhere = { reachable: false, reason: 'other-project' }
+    expect(hub.reach(worker('p1'), { projectId: 'p2', appId: 'other' })).toEqual(elsewhere)
+    expect(hub.reach(ORCH, notes)).toEqual(elsewhere)
+    expect(hub.reach(worker(null), { projectId: null, appId: 'helper' })).toEqual(elsewhere)
+    // A session that gets no apps at all (one an app stood up)
+    expect(hub.reach(null, notes)).toEqual(elsewhere)
+    expect(hub.reach(worker('p1'), { projectId: 'p1', appId: 'gone' })).toEqual({ reachable: false, reason: 'unavailable' })
+  })
+
+  it('an app the session would be given says what stops it: the project\'s trust, then the app\'s own state', () => {
+    // p2 is untrusted: its own session is told so, not that the app belongs elsewhere
+    expect(hub.reach(worker('p2'), { projectId: 'p2', appId: 'other' })).toEqual({ reachable: false, reason: 'untrusted' })
+    writeFileSync(join(w.roots.p1, '.centralu', 'apps', 'tasks', MANIFEST_FILE), '{ not json')
+    w.rt.refresh()
+    expect(hub.reach(worker('p1'), { projectId: 'p1', appId: 'tasks' })).toEqual({ reachable: false, reason: 'app-unusable', status: 'invalid' })
+  })
+
+  it('what the live agent has decides last: a thread started without the app, or a bridge that failed', () => {
+    const asked: string[] = []
+    const live = (answer: 'attached' | 'restart' | 'failed') => ({
+      appAttachment: (server: string) => (asked.push(server), answer),
+    })
+    expect(hub.reach(worker('p1'), notes, live('restart'))).toEqual({ reachable: false, reason: 'restart' })
+    expect(hub.reach(worker('p1'), notes, live('failed'))).toEqual({ reachable: false, reason: 'bridge-failed' })
+    expect(hub.reach(worker('p1'), notes, live('attached'))).toEqual({ reachable: true })
+    expect(asked).toEqual(['app-notes', 'app-notes', 'app-notes'])
+    // An agent that follows the set live (Claude) has no say, and one asleep has none either
+    expect(hub.reach(worker('p1'), notes, {})).toEqual({ reachable: true })
+    // The agent is not asked about an app the rule does not give the session
+    expect(hub.reach(worker('p1'), { projectId: 'p2', appId: 'other' }, live('attached'))).toEqual({ reachable: false, reason: 'other-project' })
+    expect(asked).toHaveLength(3)
+  })
+})
+
 describe('hearing about it when the set of attached apps changes', () => {
   it('a notification arrives when an app folder appears or disappears, and current() follows along', async () => {
     const a = hub.attach(worker('p1'))

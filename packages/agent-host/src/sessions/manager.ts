@@ -16,6 +16,7 @@ import { existsSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
   AppQuestion,
+  AppReach,
   ApprovalDetail,
   ModelOption,
   ApprovalDecision,
@@ -5605,6 +5606,19 @@ export class SessionManager {
    * attached to **the session's currently living handle** — decision 4, the caller (that session), and
    * the record all pass through the exact same place as Claude's in-process path.
    */
+  /**
+   * Whether a session can use one app's tools right now (#308, `apps.reach`) — asked when an item from
+   * that app's view is dropped on the session's composer. Decision 4 with the session as `appsFor`
+   * sees it (a session stood up by an app gets none), and what its live agent actually has.
+   */
+  appReach(sessionId: string, ref: AppRef): AppReach {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!this.appsHub) return { reachable: false, reason: 'unavailable' }
+    const key = this.isAppAgentSession(m) ? null : { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.builderRefOf(m) }
+    return this.appsHub.reach(key, ref, this.handles.get(sessionId))
+  }
+
   async appSessionTools(sessionId: string, server: string): Promise<Record<string, unknown>[]> {
     return (await this.requireAppsHub().forSession(sessionId).tools(server)) as Record<string, unknown>[]
   }

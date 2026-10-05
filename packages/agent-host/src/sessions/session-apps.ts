@@ -1,5 +1,5 @@
-import type { SessionKind } from '@cc/protocol'
-import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps } from '../adapters/contract.js'
+import type { AppReach, ExternalAppInfo, SessionKind } from '@cc/protocol'
+import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
 
@@ -117,6 +117,18 @@ export type SessionAppCall = {
 const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
 type Hit = { ref: AppRef; server: string }
+
+/**
+ * Decision 4's scope, apart from the app's state: whether this session is ever given this app. The
+ * orchestrator gets the user-folder apps, a project's sessions that project's apps, and a building
+ * session its own app as well (see `refsFor`).
+ */
+function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId'>): boolean {
+  return (
+    (session.kind === 'orchestrator' ? app.projectId === null : session.projectId !== null && app.projectId === session.projectId) ||
+    (session.builderOf?.appId === app.appId && session.builderOf.projectId === app.projectId)
+  )
+}
 
 export class SessionAppsHub {
   /** session id → the attachment of the handle currently alive for it. Swapping the handle out lets a new one take its place */
@@ -246,13 +258,30 @@ export class SessionAppsHub {
     return this.rt
       .list()
       .filter((a) => !UNUSABLE.has(a.status))
-      .filter(
-        (a) =>
-          (session.kind === 'orchestrator' ? a.projectId === null : session.projectId !== null && a.projectId === session.projectId) ||
-          (session.builderOf?.appId === a.appId && session.builderOf.projectId === a.projectId),
-      )
+      .filter((a) => givesApp(session, a))
       .map((a) => ({ ref: { projectId: a.projectId, appId: a.appId }, server: appMcpServerName(a.appId) }))
       .sort((x, y) => x.server.localeCompare(y.server))
+  }
+
+  /**
+   * Whether a session can use one app's tools right now, and if not, why (#308, `apps.reach`). The same
+   * rule as `refsFor`, asked the other way round so the answer can name what fails first: an app this
+   * session is never given (`other-project`) before one it would be given but cannot be attached
+   * (trust, then the app's own state), and then what the live agent has (`live.appAttachment`: a Codex
+   * thread keeps the servers it started with). `session` is null for a session that gets no apps at
+   * all (one stood up by an app, manager `appsFor`). With no live agent the session attaches what the
+   * rule gives it when it wakes, so the rule's answer stands.
+   */
+  reach(session: AppSessionKey | null, ref: AppRef, live?: Pick<SessionHandle, 'appAttachment'>): AppReach {
+    const app = this.rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
+    if (!app) return { reachable: false, reason: 'unavailable' }
+    if (!session || !givesApp(session, app)) return { reachable: false, reason: 'other-project' }
+    if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
+    if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
+    const attached = live?.appAttachment?.(appMcpServerName(app.appId)) ?? 'attached'
+    if (attached === 'restart') return { reachable: false, reason: 'restart' }
+    if (attached === 'failed') return { reachable: false, reason: 'bridge-failed' }
+    return { reachable: true }
   }
 
   /** @internal Records an early-returned call — sweeps out old ones every time it does */

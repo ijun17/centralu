@@ -388,6 +388,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       createBuilder: (appId, projectId, tool) => rpc.call('apps.createBuilder', { appId, projectId, ...(tool ? { tool } : {}) }),
       askBuilder: (req) => rpc.call('apps.askBuilder', req),
       errors: (appId, projectId) => rpc.call('apps.errors', { appId, projectId }),
+      reach: (sessionId, appId, projectId) => rpc.call('apps.reach', { sessionId, appId, projectId }),
       sendError: (appId, projectId, at) => rpc.call('apps.sendError', { appId, projectId, at }),
       questions: () => rpc.call('apps.questions', {}),
       answerQuestion: async (questionId, decision) => {

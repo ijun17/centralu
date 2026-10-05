@@ -169,6 +169,23 @@ describe('thread/resume — servers are loaded again on resume too', () => {
   })
 })
 
+describe('which attached apps this thread can call (#308, appAttachment)', () => {
+  it('an app loaded at thread start is attached; one attached after it needs a restart; a bridge Codex reports failed is failed until it is ready', async () => {
+    const c = await start(WORKER)
+    expect(handle!.appAttachment!('app-notes')).toBe('attached')
+    // An app that appears while the thread runs: Codex does not take it in (apps.md §9.2)
+    w.plant('p1', 'fresh')
+    w.rt.refresh()
+    await kit.until(() => hub.refsFor(WORKER).map((r) => r.server), (s) => s.includes('app-fresh'))
+    expect(handle!.appAttachment!('app-fresh')).toBe('restart')
+
+    c.note({ method: 'mcpServer/startupStatus/updated', params: { name: 'app-tasks', status: 'failed', error: 'bridge exited' } })
+    expect(handle!.appAttachment!('app-tasks')).toBe('failed')
+    c.note({ method: 'mcpServer/startupStatus/updated', params: { name: 'app-tasks', status: 'ready', error: null } })
+    expect(handle!.appAttachment!('app-tasks')).toBe('attached')
+  })
+})
+
 describe('elicitation — app tool approval goes to our card, everything else stays as before', () => {
   const approval = (id: number, serverName: string, meta: Record<string, unknown> = { codex_approval_kind: 'mcp_tool_call' }) => ({
     id,

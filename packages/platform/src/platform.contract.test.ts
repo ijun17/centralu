@@ -934,6 +934,9 @@ describe('Platform contract: new app (web + real host)', () => {
       expect((await platform.apps.createBuilder('notes', project.id)).id).toBe(made.builder!.id)
       await expect(platform.apps.create({ projectId: project.id, id: 'notes', name: 'Again' })).rejects.toThrow(/An app "notes" already exists/)
       expect(await platform.apps.builder('ghost', project.id)).toBeNull()
+      // Whether a session reaches the app's tools (#308) — its builder does; a user-folder app is not this project's
+      expect(await platform.apps.reach(made.builder!.id, 'notes', project.id)).toEqual({ reachable: true })
+      expect(await platform.apps.reach(made.builder!.id, 'ghost', null)).toEqual({ reachable: false, reason: 'unavailable' })
 
       // "Fix this" (C-5) — the builder session's agent receives the message with the host's header attached (the echo adapter sends it back)
       const heard: string[] = []

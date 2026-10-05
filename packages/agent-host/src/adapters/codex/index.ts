@@ -692,6 +692,18 @@ class CodexSession implements SessionHandle {
     }
   }
 
+  /**
+   * Whether this thread can call an attached app's bridge (#308). The servers are fixed when the thread
+   * starts or resumes (`mcpConfig`), and Codex ignores later changes, so an app attached after that is
+   * not in this thread until it restarts. Before the thread exists, the coming start takes the current
+   * set, so the app is counted in. A bridge Codex reported failed stays failed until it reports ready.
+   */
+  appAttachment(server: string): 'attached' | 'restart' | 'failed' {
+    if (this.threadId === null) return 'attached'
+    if (!this.appServers.has(server)) return 'restart'
+    return this.mcpFailed.has(server) ? 'failed' : 'attached'
+  }
+
   /** Whether this MCP status is one to say: a failure not yet said since the server last started (see `mcpFailed`). */
   private firstMcpFailure(params: unknown): boolean {
     const p = (params ?? {}) as { name?: unknown; status?: unknown }

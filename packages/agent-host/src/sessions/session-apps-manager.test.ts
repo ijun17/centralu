@@ -20,7 +20,12 @@ import { FIXTURE_APP } from './session-apps.test-helpers.js'
 
 class Handle implements SessionHandle {
   externalId = 'ext-1'
+  /** What the live agent says about an attached app (#308) — a Codex thread can lack one or have it fail */
+  static attachment: 'attached' | 'restart' | 'failed' = 'attached'
   constructor(readonly sessionId: string) {}
+  appAttachment() {
+    return Handle.attachment
+  }
   send() {}
   respondApproval() {
     return false
@@ -131,5 +136,29 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     await mgr.restartSession(s.id)
     expect(adapter.seen).toHaveLength(1)
     expect(servers(adapter.last())).toEqual(['app-notes'])
+  })
+})
+
+describe('apps.reach — whether a session can use an app\'s tools (#308)', () => {
+  const reach = (sessionId: string, appId: string, pid: string | null) => rpc('apps.reach', { sessionId, appId, projectId: pid })
+
+  afterEach(() => {
+    Handle.attachment = 'attached'
+  })
+
+  it('answers from decision 4 and the live agent, and refuses a session that does not exist', async () => {
+    const s = await create()
+    expect(await reach(s.id, 'notes', projectId)).toEqual({ reachable: true })
+    // A user-folder app goes only to the orchestrator
+    expect(await reach(s.id, 'helper', null)).toEqual({ reachable: false, reason: 'other-project' })
+
+    Handle.attachment = 'restart'
+    expect(await reach(s.id, 'notes', projectId)).toEqual({ reachable: false, reason: 'restart' })
+    Handle.attachment = 'attached'
+
+    await rpc('projects.setTrusted', { projectId, trusted: false })
+    expect(await reach(s.id, 'notes', projectId)).toEqual({ reachable: false, reason: 'untrusted' })
+
+    await expect(reach('00000000-0000-4000-8000-000000000000', 'notes', projectId)).rejects.toThrow(/Session not found/)
   })
 })

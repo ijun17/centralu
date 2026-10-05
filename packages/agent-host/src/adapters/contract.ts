@@ -563,6 +563,20 @@ export interface SessionHandle {
    * tasks it held as ended (`stopped`) — the work went with the process (measured for both tools).
    */
   stopBackgroundTask?(taskId: string): Promise<void>
+  /**
+   * Whether this live agent can call one attached app server (`app-<id>`), as far as the agent's own
+   * configuration goes (#308). The manager asks only about a server decision 4 gives the session, so
+   * this answers what the rule cannot know:
+   *
+   *   attached       the agent has it (or will, when its thread starts)
+   *   restart        the agent started without it and cannot take it in now (a Codex thread keeps the
+   *                  servers it started with)
+   *   failed         the agent tried and the server did not start
+   *
+   * An adapter that follows the attached set live (Claude, through in-process proxies) leaves it
+   * unimplemented, which reads as `attached`.
+   */
+  appAttachment?(server: string): 'attached' | 'restart' | 'failed'
   dispose(): Promise<void>
   /**
    * Lets go of the session **without stopping its process** (#280 step 2): a host leaving for a

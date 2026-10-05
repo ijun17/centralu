@@ -7,6 +7,7 @@ import type {
   AdapterCapabilities,
   BackgroundTask,
   AppErrorBundle,
+  AppReach,
   AppRun,
   Attachment,
   BuilderRequestFacts,
@@ -1230,6 +1231,31 @@ export class MockPlatform implements Platform {
       return { latest: recent[0] ?? null, recent }
     },
     /**
+     * Whether a session can use an app's tools (#308) — decision 4 as the host decides it (session-apps.ts
+     * `reach`): the app's scope first, then trust and the app's state. What a live Codex thread has is the
+     * host's to know; a test stands for it with `appAttachments` (`<sessionId> <projectId|_user>/<appId>`).
+     */
+    reach: async (sessionId: string, appId: string, projectId: string | null): Promise<AppReach> => {
+      this.reachAsks.push({ sessionId, appId, projectId })
+      const s = this.sessions.get(sessionId)
+      if (!s) throw new Error(`Session not found: ${sessionId}`)
+      const app = this.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
+      if (!app) return { reachable: false, reason: 'unavailable' }
+      const key = `${projectId ?? '_user'}/${appId}`
+      const given =
+        (s.kind === 'orchestrator' ? projectId === null : s.projectId !== null && s.projectId === projectId) ||
+        this.appBuilders.get(key) === sessionId
+      if (!given) return { reachable: false, reason: 'other-project' }
+      if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
+      if (app.status === 'invalid' || app.status === 'unconfirmed' || app.status === 'failed') {
+        return { reachable: false, reason: 'app-unusable', status: app.status }
+      }
+      const live = this.appAttachments.get(`${sessionId} ${key}`)
+      if (live === 'restart') return { reachable: false, reason: 'restart' }
+      if (live === 'failed') return { reachable: false, reason: 'bridge-failed' }
+      return { reachable: true }
+    },
+    /**
      * Sends an error bundle to the builder session (M4 C-6). Like the real thing
      * (builder-requests.ts): rejects with the same wording, sends each bundle only once
      * (recording comes first), and builds the shape sent to the agent with **the same
@@ -1408,6 +1434,10 @@ export class MockPlatform implements Platform {
   readonly restoredVersions: { appId: string; id: string }[] = []
   /** An app's error bundles (M4 C-6) — the key is `(project ?? _user)/app`, most recent first. A test fills this in: making a bundle is the runtime's job */
   readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
+  /** What a live agent says about an attached app (#308, `apps.reach`), keyed `<sessionId> <projectId|_user>/<appId>` */
+  readonly appAttachments = new Map<string, 'restart' | 'failed'>()
+  /** Every `apps.reach` asked, in order */
+  readonly reachAsks: { sessionId: string; appId: string; projectId: string | null }[] = []
   /**
    * As if the host just picked up a new error bundle — puts it in front and broadcasts the
    * list (the list's `lastErrorAt` changes). The same thing the real runtime does when it
