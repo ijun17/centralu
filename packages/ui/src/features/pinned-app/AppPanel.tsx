@@ -1,5 +1,8 @@
 import { useLayoutEffect, useRef, type DragEvent } from 'react'
+import type { GridSpan } from '@cc/protocol'
+import type { GridSpanSource } from '@cc/core'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
+import { SpanButton } from '../../components/SpanPicker.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { registerSlot } from './slots.js'
@@ -20,7 +23,33 @@ import { DragShield } from './dragShield.jsx'
  *
  * While anything is dragged the panel lays a transparent cover over its view (dragShield.tsx), so a drag over the view
  * is the panel's to hear, not the frame's. The view stays in sight; the dragged panel's own view is dimmed with it.
+ *
+ * On the grid the header also carries the panel's span in cells (#306): a small "2×1" that opens a picker, so the
+ * person sizes the panel where they are looking at it. The project screen passes none — its panels are all one size.
  */
+
+/** Where a grid panel's span comes from, in the words the picker's "default" line uses */
+const FROM_WORDS: Record<Exclude<GridSpanSource, 'placement'>, string> = {
+  setting: 'from Settings',
+  app: 'as the app recommends',
+  default: 'one cell',
+}
+
+export type PanelSpan = {
+  /** The span this panel asks for, and who decided it */
+  asked: GridSpan
+  from: GridSpanSource
+  /** The cells it stands on now */
+  shown: GridSpan
+  /** It stands smaller than it asks, because the window has no room */
+  clamped: boolean
+  /** The largest span the grid has room for now */
+  room: GridSpan
+  /** What it falls back to without a choice of its own: the person's setting for the app, the app's, or 1 × 1 */
+  fallback: { span: GridSpan; from: GridSpanSource }
+  onPick: (span: GridSpan | null) => void
+  testId: string
+}
 export function AppPanel({
   app,
   appId,
@@ -31,6 +60,7 @@ export function AppPanel({
   remove,
   slotTestId,
   openTestId,
+  span,
 }: {
   /** The app as the list has it — undefined for a moment while the list is read again */
   app: ExternalCatalogApp | undefined
@@ -44,6 +74,8 @@ export function AppPanel({
   remove: { label: string; testId: string; onClick: () => void }
   slotTestId: string
   openTestId: string
+  /** The grid panel's span and its picker (#306); absent on the project screen */
+  span?: PanelSpan
 }) {
   const slot = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -74,9 +106,27 @@ export function AppPanel({
             {app.status.label}
           </span>
         )}
+        {span && (
+          <span className="ml-auto flex shrink-0 items-center">
+            <SpanButton
+              value={span.asked}
+              chosen={span.from === 'placement'}
+              fallback={{
+                span: span.fallback.span,
+                label: FROM_WORDS[span.fallback.from === 'placement' ? 'default' : span.fallback.from],
+              }}
+              room={span.room}
+              clamped={span.clamped}
+              shown={span.shown}
+              onPick={span.onPick}
+              testId={span.testId}
+              title="Panel size in grid cells"
+            />
+          </span>
+        )}
         <button
           type="button"
-          className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
+          className={`${span ? '' : 'ml-auto '}shrink-0 rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink`}
           onClick={onOpen}
           title="Open this app on its own, with its runs, secrets and versions"
           data-testid={openTestId}

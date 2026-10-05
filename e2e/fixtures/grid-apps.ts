@@ -16,7 +16,7 @@ import { expectCoveredInSight, expectFrameTakesPointer, expectOutOfSight, hidden
  * Grid panels are keyed by session id, or `app:<project | _user>/<appId>` for an app (core's `gridPanelKey`).
  */
 
-const slider = (projectId: string | null, overrides: Record<string, unknown> = {}) => ({
+export const slider = (projectId: string | null, overrides: Record<string, unknown> = {}) => ({
   appId: 'slider',
   projectId,
   dir: projectId ? '/tmp/alpha/.centralu/apps/slider' : '/tmp/user/apps/slider',
@@ -31,11 +31,11 @@ const slider = (projectId: string | null, overrides: Record<string, unknown> = {
   ...overrides,
 })
 
-const setApps = (page: Page, apps: unknown[]) =>
+export const setApps = (page: Page, apps: unknown[]) =>
   page.evaluate((list) => (window as any).__mock.setExternalApps(list), apps)
 
 /** The grid's panels, in the order they stand */
-const gridOrder = (page: Page) =>
+export const gridOrder = (page: Page) =>
   page.evaluate(() =>
     [...document.querySelectorAll('[data-testid="grid"] [data-testid^="grid-panel-"]')].map((el) =>
       el.getAttribute('data-testid')!.slice('grid-panel-'.length),
@@ -43,7 +43,7 @@ const gridOrder = (page: Page) =>
   )
 
 /** What the store holds for the grid — the references, as the host keeps them */
-const stored = (page: Page) => page.evaluate(() => (window as any).__store.getState().gridPanels as unknown[])
+export const stored = (page: Page) => page.evaluate(() => (window as any).__store.getState().gridPanels as unknown[])
 
 const opened = (page: Page) => page.evaluate(() => ((window as any).__mock.openedViews as unknown[]).length)
 const closed = (page: Page) => page.evaluate(() => (window as any).__mock.closedViews as string[])
@@ -72,7 +72,7 @@ const viewOf = (page: Page, key: string): FrameLocator =>
     .contentFrame()
 
 /** The view stands inside its panel's slot, to within a pixel */
-async function expectOverSlot(page: Page, viewKey: string, slot: Locator) {
+export async function expectOverSlot(page: Page, viewKey: string, slot: Locator) {
   await expect
     .poll(async () => {
       const s = await slot.boundingBox()
@@ -84,7 +84,7 @@ async function expectOverSlot(page: Page, viewKey: string, slot: Locator) {
 }
 
 /** Opens the grid with these sessions on it */
-async function openGrid(page: Page, sessionIds: string[]) {
+export async function openGrid(page: Page, sessionIds: string[]) {
   await page.evaluate(
     (l) =>
       (window as any).__store
@@ -100,7 +100,7 @@ async function openGrid(page: Page, sessionIds: string[]) {
  * Drags a sidebar row onto the grid with the mouse — before or after a panel, or onto the grid's padding (the empty
  * grid's middle). Only a drag the browser runs itself goes through a frame the way a hand does.
  */
-async function dragRowToGrid(
+export async function dragRowToGrid(
   page: Page,
   row: Locator,
   to: { panel: string; side: 'before' | 'after' } | 'padding',
@@ -125,7 +125,7 @@ async function dragRowToGrid(
 }
 
 /** Drags grid panel `from` to one side of panel `to`, one dispatched step at a time (fixtures/project-screen.ts says why) */
-async function dragGridPanel(page: Page, from: string, to: string, side: 'before' | 'after', view?: Locator) {
+export async function dragGridPanel(page: Page, from: string, to: string, side: 'before' | 'after', view?: Locator) {
   await page.evaluate((id) => {
     const w = window as any
     w.__dt = new DataTransfer()

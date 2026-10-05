@@ -1,6 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import type { GridPanel } from '@cc/protocol'
-import { appKeyOf, columnsFor, gridPanelKey, parseAppKey, rowsFor, visibleGridPanels } from '@cc/core'
+import type { GridPanel, GridSpan } from '@cc/protocol'
+import {
+  ONE_CELL,
+  appKeyOf,
+  arrangeGrid,
+  explainGridSpan,
+  gridPanelKey,
+  gridSpanRoom,
+  packGrid,
+  parseAppKey,
+  spanClamped,
+  visibleGridPanels,
+  windowSpanRoom,
+  type GridSpanSource,
+} from '@cc/core'
 import { gridAppViewKey, useStore } from '../../store/store.js'
 import { buildCatalog } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
@@ -65,6 +78,8 @@ export function GridView() {
   const foldComposer = useStore((s) => s.foldComposer)
   const focusSession = useStore((s) => s.focusSession)
   const setGridPanels = useStore((s) => s.setGridPanels)
+  const setGridPanelSpan = useStore((s) => s.setGridPanelSpan)
+  const appSpans = useStore((s) => s.appSpans)
   const ref = useRef<HTMLDivElement>(null)
   /*
    * In real pixels, measured again whenever the size changes, since the column count derives from it
@@ -138,8 +153,25 @@ export function GridView() {
   const shown = visibleGridPanels(panels, known, new Set(appsByKey.keys()))
   const byKey = new Map(shown.map((p) => [gridPanelKey(p), p] as const))
   const visible = shown.map(gridPanelKey)
-  const cols = columnsFor(width, height, visible.length)
-  const rows = rowsFor(visible.length, cols)
+  /*
+   * How many cells each panel asks for (#306): a session one, an app what its placement, the person's setting for the
+   * app or the app's recommendation says (core's `explainGridSpan`). The columns are chosen with the spans counted in
+   * (`arrangeGrid`); with every span 1 × 1 that is the grid `columnsFor` gave before spans existed.
+   */
+  const askedOf = (id: string): { span: GridSpan; from: GridSpanSource } => {
+    const p = byKey.get(id)
+    if (!p || p.kind === 'session') return { span: ONE_CELL, from: 'default' }
+    const key = appKeyOf(p.projectId, p.appId)
+    return explainGridSpan(p.span, appSpans[key], appsByKey.get(key)?.info.span)
+  }
+  const arranged = arrangeGrid(
+    visible.map((id) => askedOf(id).span),
+    width,
+    height,
+  )
+  const cols = arranged.cols
+  /** The largest span the window has room for — what the span picker calls "fits", and past which a panel says it was cut */
+  const room = windowSpanRoom(width, height)
 
   /*
     While a panel is dragged the grid rearranges live (#53). The old inset edge line said
@@ -160,6 +192,13 @@ export function GridView() {
   */
   const preview = dragging && over ? reorderIds(visible, dragging, over.id, over.before) : null
   const order = preview ?? visible
+  /*
+   * Every panel's cell. A drag's preview is the same panels in another order, packed into the same columns, so the cell
+   * the hand is aiming at keeps its width (#53). With spans the preview can need a row more or less than the committed
+   * order — the one case where cells change height mid-drag; the destination it shows is still the real one.
+   */
+  const laid = preview ? packGrid(order.map((id) => askedOf(id).span), cols, gridSpanRoom(cols, height)) : arranged
+  const rows = laid.rows
 
   /*
     The border of a spinning panel has to be at the **same angle** as the sidebar's indicator
@@ -290,9 +329,11 @@ export function GridView() {
             gridTemplateRows: wholePixelTracks(rows),
           }}
         >
-          {order.map((id) => {
+          {order.map((id, i) => {
             const panel = byKey.get(id)!
             const isWorking = panel.kind === 'session' && sessions[id]?.state === 'working'
+            const cell = laid.cells[i]!
+            const asked = askedOf(id)
             return (
               <div
                 key={id}
@@ -334,6 +375,15 @@ export function GridView() {
                 className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
                   isWorking ? 'cc-orbit-ring' : ''
                 } ${dragging === id ? 'opacity-40' : ''}`}
+                /*
+                  Placed by hand rather than by the browser's auto-flow, because a spanning panel's place has to be
+                  known to count the rows (core's `packGrid`). With every span 1 × 1 it is the same row-by-row order.
+                */
+                style={{
+                  gridColumn: `${cell.col + 1} / span ${cell.cols}`,
+                  gridRow: `${cell.row + 1} / span ${cell.rows}`,
+                }}
+                data-span={`${cell.cols}x${cell.rows}`}
                 data-focused={(panel.kind === 'session' && focusedSessionId === id) || undefined}
                 data-testid={`grid-panel-${id}`}
                 /*
@@ -422,6 +472,20 @@ export function GridView() {
                     }}
                     slotTestId={`grid-slot-${id}`}
                     openTestId={`grid-open-app-${id}`}
+                    span={{
+                      asked: asked.span,
+                      from: asked.from,
+                      shown: { cols: cell.cols, rows: cell.rows },
+                      clamped: spanClamped(asked.span, cell, { cols, rows }, room),
+                      room,
+                      fallback: explainGridSpan(
+                        undefined,
+                        appSpans[appKeyOf(panel.projectId, panel.appId)],
+                        appsByKey.get(appKeyOf(panel.projectId, panel.appId))?.info.span,
+                      ),
+                      onPick: (next) => void setGridPanelSpan(id, next),
+                      testId: `grid-span-${id}`,
+                    }}
                   />
                 ) : (
                   /*

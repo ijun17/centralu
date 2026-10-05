@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { APP_VERSION, type SessionInfo, type ToolName, type ToolStatus, type UpdateStatus } from '@cc/protocol'
-import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
+import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useTools } from '../../store/selectors.js'
@@ -10,6 +10,7 @@ import { Modal } from '../../components/Modal.jsx'
 import { APPS } from '../../apps/registry.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
+import { SpanButton } from '../../components/SpanPicker.jsx'
 import { TrashSection } from './TrashSection.jsx'
 import { ThemeSection } from './ThemeSection.jsx'
 import { TypographySection } from './TypographySection.jsx'
@@ -486,6 +487,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         </button>
       )}
       <SecretsLine app={app} />
+      <GridSpanLine app={app} />
       {app.projectId === null &&
         (confirming ? (
           <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid="external-app-remove-confirm">
@@ -531,6 +533,33 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
  * coming up because of a missing key needs to see what is missing before expanding the row. The
  * slot is the same panel as the pinned view (`AppSecrets`).
  */
+/**
+ * The app's panel size on the grid, in cells (#306) — the person's default for every placement of this app that has
+ * no size of its own from the panel's top bar. Without one, the app's recommendation (its manifest's `view.span`)
+ * applies, else 1 × 1; the "default" line in the picker names which. Only an app with a view: nothing else has a panel
+ * worth sizing.
+ */
+function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
+  const setting = useStore((s) => s.appSpans[appKeyOf(app.projectId, app.appId)])
+  const setAppSpan = useStore((s) => s.setAppSpan)
+  if (!app.info.home) return null
+  const current = explainGridSpan(undefined, setting, app.info.span)
+  const fallback = explainGridSpan(undefined, undefined, app.info.span)
+  return (
+    <div className="mt-1.5 flex items-center gap-2 px-1 text-xs text-ink-faint">
+      <span>Size on the grid</span>
+      <SpanButton
+        value={current.span}
+        chosen={current.from === 'setting'}
+        fallback={{ span: fallback.span, label: fallback.from === 'app' ? 'as the app recommends' : 'one cell' }}
+        onPick={(span) => setAppSpan(app.projectId, app.appId, span)}
+        testId="external-app-span"
+        title="Panel size in grid cells"
+      />
+    </div>
+  )
+}
+
 function SecretsLine({ app }: { app: ExternalCatalogApp }) {
   const [open, setOpen] = useState(false)
   const count = app.info.secrets?.length ?? 0

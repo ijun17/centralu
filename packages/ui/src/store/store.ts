@@ -8,6 +8,7 @@ import type {
   CommandRunInfo,
   ExternalAppInfo,
   GridPanel,
+  GridSpan,
   NormalizedEvent,
   SavedCommand,
   PermissionPreset,
@@ -38,6 +39,8 @@ import {
   appPanelId,
   appKeyOf,
   gridPanelKey,
+  sanitizeGridSpan,
+  withPanelSpan,
   gridSessionIds,
   sanitizeGridPanels,
   sanitizeArrangements,
@@ -933,6 +936,23 @@ export type AppState = {
   projectPanels: Record<string, ProjectArrangement>
   /** Writes one project's arrangement whole and saves the snapshot */
   arrangeProject(projectId: string, next: ProjectArrangement): void
+  /**
+   * The person's span for each app's panel on the grid (#306), keyed by `appKeyOf` — Settings → Apps. The default for
+   * every placement of that app that has no span of its own (from the panel's top bar), and ahead of the app's own
+   * recommendation (core's `resolveGridSpan`). An app with no entry takes its recommendation, else 1 × 1.
+   *
+   * Kept in the workspace snapshot, like `projectPanels`: a way of looking that only this UI reads, about an app the
+   * host's tables do not key (a user-folder app has no project). The choice for one placement is on the placement
+   * itself, in the host's grid table, because it goes when the panel goes.
+   */
+  appSpans: Record<string, GridSpan>
+  /** Sets or clears (`null`) the person's span for an app, and saves the snapshot */
+  setAppSpan(projectId: string | null, appId: string, span: GridSpan | null): void
+  /**
+   * Sets or clears (`null`) the span of one app panel on the grid, keyed by core's `gridPanelKey` — the panel's top bar
+   * (#306). Saved with the grid, like a move.
+   */
+  setGridPanelSpan(key: string, span: GridSpan | null): Promise<void>
   /**
    * Per-project command run state — a projection of the host's `commands.state` (#60, moved into
    * the terminal panel). The host's buffer holds the log body; this only holds the facts a badge
@@ -2424,6 +2444,7 @@ export const useStore = create<AppState>((set, get) => ({
   sidebarWidth: SIDEBAR_DEFAULT,
   foldedProjects: [],
   projectPanels: {} as Record<string, ProjectArrangement>,
+  appSpans: {} as Record<string, GridSpan>,
   commandRuns: {} as Record<string, Record<string, CommandRunInfo>>,
   overlay: null,
   inboxOpen: false,
@@ -2648,6 +2669,16 @@ export const useStore = create<AppState>((set, get) => ({
         }
         // The project screens' arrangements (#203), first for the same reason as the fold above
         set({ projectPanels: sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels) })
+        // The person's span per app (#306). A snapshot from before it has none; an entry that is not a span is dropped
+        const savedSpans = (snap as { appSpans?: unknown }).appSpans
+        if (savedSpans && typeof savedSpans === 'object' && !Array.isArray(savedSpans)) {
+          const spans: Record<string, GridSpan> = {}
+          for (const [key, raw] of Object.entries(savedSpans)) {
+            const span = sanitizeGridSpan(raw)
+            if (span) spans[key] = span
+          }
+          set({ appSpans: spans })
+        }
         if (snap.focusedSessionId && get().sessions[snap.focusedSessionId]) {
           /*
            * Reviving a session never unfolds it (#205). If the app was closed with the session's
@@ -2804,6 +2835,7 @@ export const useStore = create<AppState>((set, get) => ({
       sidebarWidth: s.sidebarWidth,
       foldedProjects: s.foldedProjects,
       projectPanels: s.projectPanels,
+      appSpans: s.appSpans,
       railWidth: s.railWidth,
       notifyPolicy: s.notifyPolicy,
       showIgnored: s.showIgnored,
@@ -3777,6 +3809,17 @@ export const useStore = create<AppState>((set, get) => ({
   arrangeProject(projectId, next) {
     set((s) => ({ projectPanels: { ...s.projectPanels, [projectId]: next } }))
     get().saveWorkspace()
+  },
+  setAppSpan(projectId, appId, span) {
+    const key = appKeyOf(projectId, appId)
+    set((s) => {
+      const { [key]: _old, ...rest } = s.appSpans
+      return { appSpans: span ? { ...rest, [key]: span } : rest }
+    })
+    get().saveWorkspace()
+  },
+  async setGridPanelSpan(key, span) {
+    await get().setGridPanels(withPanelSpan(get().gridPanels, key, span))
   },
   setFoldComposer(fold) {
     set({ foldComposer: fold })
