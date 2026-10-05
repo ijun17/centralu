@@ -38,7 +38,7 @@
    * brightness from the floor up.
    */
   --color-surface-floor: #141414; /* the app floor */
-  --color-surface-side: #171717; /* the sidebar */
+  --color-surface-side: #1a1a1a; /* the sidebar — six steps off the floor, see the session-view block */
   --color-surface-raised: #1d1d1d; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #292929; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #353535; /* hover and pressed; also my own message bubble */
@@ -55,9 +55,9 @@
    * panels and the edges, so it does not brighten a large area.
    */
   --color-surface-deck: #272727; /* the grid's and the project screen's floor */
-  /* The conversation's own surfaces — see the session-view block below for why they exist */
-  --color-surface-reading: #1d1d1d;
-  --color-surface-reading-raised: #2a2a2a;
+  /* The conversation's own surfaces — the floor's steps in this preset, see the session-view block below */
+  --color-surface-reading: #141414;
+  --color-surface-reading-raised: #1d1d1d;
 
   /* Lines */
   --color-line: #292929; /* hairline: borders, dividers, meter tracks */
@@ -143,7 +143,7 @@
    * out so a theme can change them: the achromatic rule belongs to our screens, it does not take
    * colour away from a program's output.
    */
-  --color-term-bg: #171717;
+  --color-term-bg: #1a1a1a;
   --color-term-log-bg: #1d1d1d;
   --color-term-fg: #e9e9e9;
   --color-term-cursor: #e9e9e9;
@@ -252,30 +252,37 @@
 }
 
 /*
- * The conversation reads as the front-most surface, not the floor.
+ * The conversation's surfaces.
  *
- * Depth in this palette is named by position — the floor is the app floor, the side surface the
- * sidebar, raised what floats. The conversation was sitting on the floor, which made the thing
- * you actually read the darkest thing on screen while its own composer and tool cards floated
- * brighter above it. Backwards, and measurable: the reader reported the conversation and the
- * sidebar as "the same colour", and they were three steps apart — invisible at this end of the
- * scale.
+ * Inside the session view `surface-floor` and `surface-raised` are redefined as the reading
+ * surfaces rather than swapped at a dozen call sites, so a theme can give the conversation
+ * surfaces of its own (`surface-reading`, `surface-reading-raised`) and every component's class
+ * stays correct. Every preset sets them to the floor's own steps (#362): the conversation is on
+ * the floor, and what rests on it (the composer, tool cards, approval and question cards) is
+ * raised and drawn with a `line` border, the arrangement the project-board app uses. An app's
+ * view is told the floor's steps (app-frame/hostStyles.ts), so an app panel and the session panel
+ * beside it on the grid stand on the same ground without a rule of their own.
  *
- * So inside the session view the two tokens are redefined rather than swapped at 11 call
- * sites: `surface-floor` becomes the reading surface and `surface-raised` the things resting on
- * it, keeping every component's existing class correct. The values live in their own tokens
- * (`surface-reading`, `surface-reading-raised`) so a theme sets them like any other. The surface
- * stays 6 steps clear of the sidebar; its cards now sit 13 steps above it, because the former
- * 8-step gap let the input and the conversation merge at a glance. That second number is the one
- * that matters: an approval card needs enough lift to be a component without becoming a signal.
- * A candidate that lifted the surface to within 2 steps of the approval card was rejected for
- * making the card disappear.
+ * History, in one sentence: from 2026-08 to 2026-10 the conversation was lifted a step off the
+ * floor (Dark #1d1d1d, its cards #2a2a2a) because the reader saw it and the sidebar as "the same
+ * colour" at three steps apart (#090909 and #0c0c0c then, ΔL* 0.9, with the sidebar's hairline
+ * between them), until the owner preferred the board's darker floor and the lift was found to
+ * leave app panels on a different ground from the sessions beside them.
  *
- * A brighter variant (#161616 / #1f1f1f) was built and looked at first. It cleared the
- * sidebar by 10 rather than 6, and read as not belonging to the rest of the app — far
- * enough up the scale that the conversation stopped looking like the same surface family
- * as everything around it. Six steps is visible without that cost; three, the value this
- * replaced, was not visible at all.
+ * So the sidebar keeps the distance now. Measured as CIELAB lightness (ΔL*), which follows what
+ * the eye sees at the dark end better than hex steps do:
+ *   Dark   sidebar #1a1a1a, conversation #141414: ΔL* 2.9, what the lifted conversation had from
+ *          the old sidebar (#1d1d1d and #171717, ΔL* 3.0). The old #171717 would be ΔL* 1.4.
+ *   Light  sidebar #ececec, conversation #f2f2f2: ΔL* 2.1, the sidebar a recess below the floor
+ *          as it was before.
+ * The hairline on the sidebar's edge stays; it was never enough on its own.
+ *
+ * The other constraint is the approval card: lifted enough to be a component without becoming a
+ * signal. Raised sits ΔL* 4.5 above the floor in Dark (#1d1d1d on #141414) and in Light
+ * (#ffffff on #f2f2f2), less than the lifted conversation gave its cards (6.3), and the card's
+ * `line` border (ΔL* 10.3 and 7.0 off the floor) and its signal edge carry the rest, as the
+ * board's borders do. The signal ink keeps the highest contrast on every surface
+ * (app/theme.ts `urgencyBreaks`, checked for every preset).
  */
 [data-testid='session-view'] {
   --color-surface-floor: var(--color-surface-reading);
@@ -293,8 +300,7 @@
  * dark, and each ink keeps its rank on every reading surface — signal > text > secondary >
  * background — which Settings checks for every theme (app/theme.ts `urgencyBreaks`) and a test
  * checks for every preset. Raised surfaces are lighter than the floor, so in light "lifting" a
- * card means moving it toward white. The reading surface is near-white with its cards on white,
- * the same front-most arrangement the conversation has in dark.
+ * card means moving it toward white.
  *
  * The high-contrast presets push every step further apart: black or white floors, borders that
  * meet a 3:1 contrast against the floor, and inks that all clear 4.5:1, with the order intact.
@@ -308,7 +314,7 @@
   /* The grid's floor is darker than the panels here: what was a brighter plate in dark is a
      deeper one in light, so the panels still read as cut out of it */
   --color-surface-deck: #dcdcdc;
-  --color-surface-reading: #f8f8f8;
+  --color-surface-reading: #f2f2f2;
   --color-surface-reading-raised: #ffffff;
 
   --color-line: #dedede;
@@ -390,7 +396,7 @@
   --color-surface-hover: #383838;
   --color-surface-deck: #1f1f1f;
   --color-surface-reading: #000000;
-  --color-surface-reading-raised: #141414;
+  --color-surface-reading-raised: #0f0f0f;
 
   --color-line: #707070;
   --color-line-strong: #a8a8a8;
@@ -431,7 +437,7 @@
   --color-surface-hover: #d2d2d2;
   --color-surface-deck: #e6e6e6;
   --color-surface-reading: #ffffff;
-  --color-surface-reading-raised: #f2f2f2;
+  --color-surface-reading-raised: #ffffff;
 
   --color-line: #767676;
   --color-line-strong: #4a4a4a;
@@ -670,9 +676,9 @@
   /*
    * The session marker chip.
    *
-   * Bright text on a dark background, but the sidebar background (surface-side #171717) and the
-   * chip background (surface-floor #141414) are only two steps apart, so a single border did not
-   * separate them well.
+   * Bright text on a dark background, but the sidebar background (surface-side, #1a1a1a) and the
+   * chip background (surface-floor, #141414) are only six steps apart (three when this was
+   * written), so a single border did not separate them well.
    *
    * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
    * highlight on top and a shadow underneath. It reads as a distinct object without spending any

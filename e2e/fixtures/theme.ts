@@ -80,8 +80,8 @@ export function presetTests() {
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('light')
     await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'light', background: 'rgb(242, 242, 242)' })
-    // The conversation keeps its own front-most surface in light too
-    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#f8f8f8')
+    // The conversation is on the floor, as in Dark (#362)
+    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#f2f2f2')
   })
 
   test('Follow system picks the light preset when the OS is light', async ({ page }) => {

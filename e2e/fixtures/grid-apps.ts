@@ -465,6 +465,89 @@ export function gridAppTests(): void {
       await expectOverSlot(page, `grid:${pid}/slider`, page.getByTestId(`grid-slot-app:${pid}/slider`))
     })
 
+    test('an app panel stands on the same surfaces as the session panel beside it, and the sidebar stays apart from the conversation', async ({
+      page,
+    }) => {
+      const { pid, s } = await alphaWithSlider(page)
+      const viewKey = `grid:${pid}/slider`
+      await page.evaluate(
+        ({ p, s }) =>
+          (window as any).__store.getState().setGridPanels([
+            { kind: 'session', sessionId: s },
+            { kind: 'app', projectId: p, appId: 'slider' },
+          ]),
+        { p: pid, s },
+      )
+      await page.getByTestId('grid-button').click()
+      const view = page.getByTestId(`pinned-app-${viewKey}`)
+      await expect(view.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+      const conversation = page.getByTestId(`grid-panel-${s}`).getByTestId('session-view')
+      const background = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor)
+      const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
+      /** The style variables the view was last told: the first context, then whatever each change carried */
+      const told = async () => {
+        const v = viewOf(page, viewKey)
+        const read = (k: string) =>
+          v.locator(`li[data-k="${k}"]`).evaluateAll((lis, key) => lis.map((li) => JSON.parse(li.textContent!.slice(key.length + 1))), k)
+        const [connected] = await read('connected')
+        const contexts = [connected.hostContext, ...(await read('host-context-changed'))]
+        return Object.assign({}, ...contexts.map((c) => c.styles?.variables ?? {})) as Record<string, string>
+      }
+
+      // Dark and Light by value; the high-contrast presets only have to agree with themselves
+      const presets = [
+        { id: 'dark', base: 'dark', floor: '#141414', raised: '#1d1d1d' },
+        { id: 'light', base: 'light', floor: '#f2f2f2', raised: '#ffffff' },
+        { id: 'hc-dark', base: 'dark' },
+        { id: 'hc-light', base: 'light' },
+      ] as const
+      for (const preset of presets) {
+        await page.evaluate(
+          ({ id, base }) =>
+            (window as any).__store
+              .getState()
+              .setPrefs(base === 'dark' ? { themeMode: 'dark', themeDark: id } : { themeMode: 'light', themeLight: id }),
+          preset,
+        )
+        await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(preset.id)
+
+        // The conversation's steps are the floor's (#362)...
+        const steps = await conversation.evaluate((el) => {
+          const cs = getComputedStyle(el)
+          const root = getComputedStyle(document.documentElement)
+          const t = (s: CSSStyleDeclaration, n: string) => s.getPropertyValue(n).trim()
+          return {
+            floor: t(cs, '--color-surface-floor'),
+            raised: t(cs, '--color-surface-raised'),
+            rootFloor: t(root, '--color-surface-floor'),
+            rootRaised: t(root, '--color-surface-raised'),
+          }
+        })
+        expect(steps.floor, preset.id).toBe(steps.rootFloor)
+        expect(steps.raised, preset.id).toBe(steps.rootRaised)
+        if ('floor' in preset) expect([steps.floor, steps.raised], preset.id).toEqual([preset.floor, preset.raised])
+
+        // ...so the two panels' grounds are one colour...
+        expect(await background(view), preset.id).toBe(await background(conversation))
+
+        // ...and the view is told the conversation's steps: its ground, and the raised step its cards rest on
+        await expect.poll(async () => (await told())['--color-background-primary'], preset.id).toBe(steps.floor)
+        expect((await told())['--color-background-secondary'], preset.id).toBe(steps.raised)
+
+        /*
+         * With the conversation on the floor, the sidebar must not read as the same colour (the 2026-08 report: three
+         * steps apart, a hairline between them): at least six steps, with the hairline still drawn. The high-contrast
+         * presets put the sidebar on the floor itself and leave the edge to a 3:1 hairline (fixtures/theme.ts).
+         */
+        const sidebar = page.getByTestId('sidebar')
+        expect(await sidebar.evaluate((el) => getComputedStyle(el).borderRightWidth)).toBe('1px')
+        if (preset.id === 'dark' || preset.id === 'light') {
+          const [side, floor] = [rgb(await background(sidebar)), rgb(await background(conversation))]
+          expect(Math.min(...side.map((v, i) => Math.abs(v - floor[i]!))), `${preset.id}: sidebar ${side} vs conversation ${floor}`).toBeGreaterThanOrEqual(6)
+        }
+      }
+    })
+
     test('Tab from an app panel’s header reaches its view, and Shift+Tab out of the view comes back to the header', async ({
       page,
     }) => {

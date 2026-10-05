@@ -1981,7 +1981,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
           the state indicator, and if the state cannot be seen, moving the mark here loses its
           point.
 
-          The sidebar background (surface-side) and the chip background (surface-floor) differ by only two steps, so
+          The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps, so
           a single border does not separate them well. Instead of raising the border brightness
           further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
           a shadow underneath. It reads as a separate object without spending more brightness, and

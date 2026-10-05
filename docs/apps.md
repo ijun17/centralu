@@ -377,8 +377,11 @@ accent; [themes.md](themes.md)), so an app can look like Centralu without knowin
   `--centralu-signal` (the signal colour again, under its own name) and the scrollbar,
   `--centralu-scrollbar-thumb`, `-thumb-hover`, `-track`, `-size`, `-inset` and `-radius`.
 - **Read where the view sits.** The values come from the tokens as they compute on the view's slot,
-  so a view in the conversation gets the conversation's raised surfaces and a pinned view the
-  floor's.
+  so a view in the conversation gets the conversation's surfaces and a pinned view the floor's.
+  Every preset puts the conversation on the floor's own steps ([themes.md](themes.md)), so an app
+  panel on the grid gets the same background roles as the session panels beside it (primary =
+  the floor, secondary = raised, tertiary = the hover step); a custom theme that sets
+  `surface-reading` apart is the one case where the two differ.
 - **Switches reach open views.** A theme switch, an edit to a custom theme and the accent send
   `host-context-changed` to every open view, without reloading it. Like every change notification
   it carries only the fields that changed, so an app reads the whole context the bridge keeps

@@ -29,9 +29,20 @@ person picked. An id that names nothing (a deleted file) falls back to that side
 | High contrast dark | `hc-dark` | dark |
 | High contrast light | `hc-light` | light |
 
+Every preset puts the conversation on the floor, with what rests on it (the composer, tool cards,
+approval and question cards) on the raised step and drawn with a hairline border, the way the
+project-board app draws its columns and cards ([#362](https://github.com/ijun17/centralu/issues/362)).
+So a session panel and an app panel beside it on the grid stand on the same ground, and an app's
+view is told the steps the conversation uses ([apps.md §6.5](apps.md#65-the-theme-in-a-view-312)).
+`surface-reading` and `surface-reading-raised` still exist, so a custom theme can give the
+conversation surfaces of its own; the presets set them to the floor and raised values.
+
+Dark is a dark floor (`#141414`) with raised boxes (`#1d1d1d`). The sidebar (`#1a1a1a`) stays
+apart from the conversation by lightness, not only by its edge line: a reader once saw the two as
+"the same colour" at three steps apart with the line between them, so the gap is kept at ΔL* 2.9.
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
-is waiting for you, raised surfaces move toward white, and the conversation is near-white with its
-cards on white. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
+is waiting for you, and raised surfaces move toward white: the floor is `#f2f2f2`, cards are white,
+and the sidebar is a recess at `#ececec`. The comments in `styles/index.css` record the measurements. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
 more against every reading surface. A test checks the urgency order (below) for every preset, and
 those two thresholds for the high-contrast ones.
 

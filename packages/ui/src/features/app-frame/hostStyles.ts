@@ -8,9 +8,11 @@ import type { McpUiStyleVariableKey, McpUiTheme } from '@modelcontextprotocol/ex
  * file, the accent) reaches the view the way it reaches our own screens. Where Centralu has no step
  * of its own (a larger heading, a bold weight), the value is written out and noted.
  *
- * The values are **read where the view sits** (`readHostStyles(el)`): the conversation lane
- * raises its surfaces one step (styles/index.css `[data-testid='session-view']`), so a view inside
- * it gets that lane's colours, a pinned view the floor's.
+ * The values are **read where the view sits** (`readHostStyles(el)`): the conversation lane has
+ * surfaces of its own (styles/index.css `[data-testid='session-view']`), so a view inside it gets
+ * that lane's colours, a pinned view the floor's. Every preset sets the lane's surfaces to the
+ * floor's steps (#362), so an app panel and the session panel beside it are told the same ground;
+ * only a custom theme that sets `surface-reading` apart makes them differ.
  *
  * Sizes are not scaled by the text size preference: the root zoom already scales the frame and
  * everything in it (see AppFrame's `hostContext`). The fonts and line heights are: Settings →
