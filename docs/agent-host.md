@@ -22,7 +22,8 @@ agent-host/src/
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
 ├─ data-dir.ts          # locating and migrating the data directory
-└─ updates.ts           # update checks
+├─ idle.ts              # the one rule for "is anything running a person would lose" (#352)
+└─ updates.ts           # update checks, installing, "apply automatically when idle"
 ```
 
 Usage parsing and the orchestrator's MCP surface do **not** have their own directories:
@@ -252,6 +253,8 @@ keeper updated  → the old keeper hands every handle to the new build's keeper 
                   agents, terminals and every connection carry on; nothing reconnects
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
+app relaunches  → "Apply now" (#352): the app announces it first, so with either mode nothing
+  to update       happens to the host; the relaunched window re-attaches and switches (§4.5)
 ```
 
 Thanks to this design, half of FR-10 (restore on restart) is the same code path as an ordinary reconnect — it is the default behaviour, not a special case. The rules for the cursor, the replay budget and the transport bounds are in [protocol.md](protocol.md) §1.
@@ -283,7 +286,8 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 | request | answer |
 |---|---|
 | `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and token (§4.2), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4) |
-| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. `relaunched`: this window is the one an announced relaunch started (§4.5) |
+| `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is about to relaunch itself to apply an update (#352): for `n` s (60 by default, at most 300) no window attached does not stop the keeper, whatever background mode says. The next attach spends it |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit and stop agents") |
 | `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its own executable) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A second `switch` during a swap is refused |
 | `{"op":"upgrade","exe":…,"source":…}` | hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4) |
@@ -298,12 +302,12 @@ the new one exists, so creating `~/.centralu` first (for `keeper.log` or the soc
 A second keeper whose predecessor answers on the socket exits with code 3 and starts no host; one whose
 predecessor holds the lock but does not answer (on its way out) waits up to 15 s for it.
 
-**When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. With background mode off,
-when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
+**When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. During an announced
+relaunch's grace (§4.5), not yet, in either mode. With background mode off, when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
 host (a working or waiting session, a terminal, a command run). A keeper no window attached to within 60 s of
 starting ends too: the app that launched it died first.
 
-`scripts/keeper-integration.mjs` drives all of this with the real binary (`cargo build` into `/tmp`) and the
+`scripts/keeper-integration.mjs` drives all of this, the announced relaunch included, with the real binary (`cargo build` into `/tmp`) and the
 real bundled host against a temporary `CC_DATA_DIR`.
 
 **In CI.** The `keeper e2e` job in `.github/workflows/build.yml` (macOS) builds the binary and the host once and runs
@@ -471,6 +475,29 @@ buffers, so a turn in progress loses and repeats nothing.
 and codex (`gpt-5.6-luna`): a handoff with a turn of each in a tool call, a terminal and a dev server counting; a
 handoff killed before its commit; a switch that moves the keeper and then swaps the host; and an app view and the
 window's connection across all of it. CI runs it with `--no-claude --no-codex` (§4.1).
+
+### 4.5 Applying an update, seen from the host (#352)
+
+The design is in [architecture.md](architecture.md) §4.5. The host's part is the install and one rule.
+
+**The install** (`updates.ts`). `updates.apply` runs `npm i -g centralu@<v>` and, when the installed app exists,
+`centralu install`, then reports `restart_required`; it never restarts anything. With `autoApply` on ("Apply updates
+automatically when idle", `updates.setAutoApply`, saved as `updates.autoApply` in the store's app settings, off by
+default) a check that finds a newer version starts the same install by itself, and turning the setting on with a newer
+version already known starts it at once. Not over an install under way or one already finished: a check after it leaves
+`restart_required` alone, so it installs once. A failed install is retried by the next check that finds the version
+again, six hours later.
+
+**The rule** (`idle.ts`). `hostBusy(snapshot)` is the one answer to "would someone lose something if this stopped
+now": a live session working, waiting for an approval or on a question; an open terminal; a running project command.
+The snapshot is `activity()` in `main.ts`. The keeper reads it through the activity report (§4.1) for its idle exit;
+the window gets it from the keeper's view for the switch's question and for applying an update when idle; an agent CLI
+update (#297) calls `hostBusy(activity())` directly. An open terminal counts even at a prompt: the host cannot tell an
+idle shell from one running a command, so the automatic mode waits for terminals to close.
+
+**What the host sees.** Nothing new: the relaunched window reconnects through the same front door, then the switch
+drains this host and starts the new build's (§4.2), after the keeper has handed itself over (§4.4). The new host's
+update status starts fresh at its own version.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

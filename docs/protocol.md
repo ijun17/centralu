@@ -80,7 +80,7 @@ type NormalizedEvent =
   | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
   | { type: 'session_deleted';  sessionId }
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
-  | { type: 'update_status';    status: UpdateStatus }          // #43
+  | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352) defaults to false
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: a file in <data>/themes changed — re-read themes.list
   | { type: 'error';            sessionId?, error: ProtocolError }

@@ -23,7 +23,8 @@ agent-host/src/
 ├─ log-file.ts          # stderr를 ~/.centralu/host.log로 흘린다 (stdout은 예약됨, 아래 참고)
 ├─ env-path.ts          # PATH 보강 — GUI 앱은 로그인 셸 PATH를 물려받지 못한다
 ├─ data-dir.ts          # 데이터 폴더 위치 판정과 이전
-└─ updates.ts           # 업데이트 확인
+├─ idle.ts              # "사람이 잃을 것이 돌고 있는가"에 대한 유일한 규칙 (#352)
+└─ updates.ts           # 업데이트 확인, 설치, "한가할 때 자동 적용"
 ```
 
 사용량 파싱과 오케스트레이터의 MCP 표면은 **자기 디렉토리를 갖지 않는다**: 계정 사용량은
@@ -215,6 +216,8 @@ keeper updated  → the old keeper hands every handle to the new build's keeper 
                   agents, terminals and every connection carry on; nothing reconnects
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
+app relaunches  → "Apply now" (#352): the app announces it first, so with either mode nothing
+  to update       happens to the host; the relaunched window re-attaches and switches (§4.5)
 ```
 
 이 설계 덕분에 FR-10의 절반(재시작 시 복원)은 평범한 재연결과 같은 코드 경로다 — 특별한 경우가 아니라 기본 동작이다. 커서·재생 예산·전송 한도의 규칙은 [protocol.ko.md](protocol.ko.md) §1에 있다.
@@ -245,7 +248,8 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 | 요청 | 답 |
 |---|---|
 | `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 정문의 포트와 토큰(§4.2), 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동, 지금 또는 마지막 교체(`swap`), 교체 때 호스트가 에이전트를 넘겨주는지(`keepsAgents`), 키퍼 자신의 빌드(`keeper.build`, 4단계부터) |
-| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다 |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다. `relaunched`: 이 창이 알린 다시 띄우기로 뜬 창이다(§4.5) |
+| `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — 앱이 업데이트를 적용하려고 곧 스스로를 다시 띄운다(#352): `n`초(기본 60, 최대 300) 동안은 붙은 창이 없어도 키퍼가 멈추지 않는다, 백그라운드 모드가 무엇이든. 다음 attach가 이것을 써 버린다 |
 | `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit and stop agents") |
 | `{"op":"switch","source":…,"keeper":{"exe":…}?}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. `keeper`가 있고(앱은 자기 실행 파일을 보낸다) 키퍼가 다른 빌드면, 키퍼가 먼저 그 빌드의 키퍼에게 스스로를 넘기고([architecture.ko.md](architecture.ko.md) §4.4) 그 키퍼가 교체를 한다. 교체 중의 두 번째 `switch`는 거절한다 |
 | `{"op":"upgrade","exe":…,"source":…}` | 호스트는 그대로 두고, 키퍼를 `exe`에 있는 `source` 빌드의 키퍼에게 넘긴다(§4.4) |
@@ -260,13 +264,13 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 소켓에서 답하면 두 번째 키퍼는 코드 3으로 끝나고 호스트를 띄우지 않는다. 앞선 키퍼가 잠금을 쥐었는데 답하지
 않으면(내려가는 중) 15초까지 기다린다.
 
-**언제 끝나는가.** `keeper/mod.rs`의 `idle_decision`: 창이 붙어 있으면 끝나지 않는다. 백그라운드 모드가 꺼져
-있으면 마지막 창이 떨어질 때. 켜져 있으면 창도 없고 호스트가 보고한 활동(일하거나 기다리는 세션, 터미널, 명령
+**언제 끝나는가.** `keeper/mod.rs`의 `idle_decision`: 창이 붙어 있으면 끝나지 않는다. 알린 다시 띄우기의
+유예(§4.5) 동안에는 어느 모드에서든 아직 끝나지 않는다. 백그라운드 모드가 꺼져 있으면 마지막 창이 떨어질 때. 켜져 있으면 창도 없고 호스트가 보고한 활동(일하거나 기다리는 세션, 터미널, 명령
 실행)도 없이 30분이 지났을 때. 시작하고 60초 안에 아무 창도 붙지 않은 키퍼도 끝난다: 그것을 띄운 앱이 먼저
 죽은 것이다.
 
 `scripts/keeper-integration.mjs`가 진짜 바이너리(`cargo build`, `/tmp`로)와 진짜 번들 호스트로 임시
-`CC_DATA_DIR`에서 이것을 전부 몰아 본다.
+`CC_DATA_DIR`에서 알린 다시 띄우기까지 이것을 전부 몰아 본다.
 
 **CI에서.** `.github/workflows/build.yml`의 `keeper e2e` 잡(macOS)이 바이너리와 호스트를 한 번 빌드하고, 세 키퍼
 스크립트 가운데 모델도 네트워크도 필요 없는 부분을 돌린다: `keeper-integration.mjs` 전부, 그리고
@@ -420,6 +424,26 @@ stdout은 같은 파이프이고, `children.sock`의 제어·붙기 연결은 �
 이것을 돌린다: 각각 도구 호출 중인 턴과 세는 터미널·개발 서버를 둔 채의 넘겨주기, 커밋 전에 죽인 넘겨주기, 키퍼를 옮기고
 이어서 호스트를 교체하는 바꾸기, 그리고 그 모든 과정을 넘는 앱 뷰와 창의 연결. CI는 `--no-claude --no-codex`로
 돌린다(§4.1).
+
+### 4.5 호스트에서 본 업데이트 적용 (#352)
+
+설계는 [architecture.ko.md](architecture.ko.md) §4.5에 있다. 호스트의 몫은 설치와 규칙 하나다.
+
+**설치** (`updates.ts`). `updates.apply`는 `npm i -g centralu@<v>`를 돌리고, 설치된 앱이 있으면 `centralu install`을
+돌린 뒤 `restart_required`를 알린다. 아무것도 다시 띄우지 않는다. `autoApply`가 켜져 있으면("Apply updates
+automatically when idle", `updates.setAutoApply`, 저장소의 앱 설정에 `updates.autoApply`로 저장, 기본 꺼짐) 새 버전을
+찾은 확인이 같은 설치를 스스로 시작하고, 새 버전을 이미 아는 상태에서 설정을 켜면 바로 시작한다. 진행 중이거나 이미
+끝난 설치 위에서는 하지 않는다: 그 뒤의 확인은 `restart_required`를 건드리지 않으므로 설치는 한 번이다. 실패한 설치는
+그 버전을 다시 찾는 다음 확인, 곧 여섯 시간 뒤에 다시 시도된다.
+
+**규칙** (`idle.ts`). `hostBusy(snapshot)`이 "지금 멈추면 누가 무엇을 잃는가"에 대한 유일한 답이다: 일하거나 승인 또는
+질문을 기다리는 살아 있는 세션, 열린 터미널, 돌고 있는 프로젝트 명령. 스냅숏은 `main.ts`의 `activity()`다. 키퍼는
+활동 보고(§4.1)로 이것을 읽어 유휴 종료에 쓰고, 창은 키퍼의 view에서 받아 바꾸기의 질문과 한가할 때의 업데이트 적용에
+쓰며, 에이전트 CLI 업데이트(#297)는 `hostBusy(activity())`를 바로 부른다. 열린 터미널은 프롬프트에 있어도 친다: 호스트는
+한가한 셸과 명령을 돌리는 셸을 구별하지 못하므로, 자동 모드는 터미널이 닫히기를 기다린다.
+
+**호스트가 보는 것.** 새로운 것은 없다: 다시 띄운 창은 같은 정문으로 다시 붙고, 키퍼가 스스로를 넘긴 뒤(§4.4)
+바꾸기가 이 호스트를 비우고 새 빌드의 호스트를 띄운다(§4.2). 새 호스트의 업데이트 상태는 자기 버전에서 새로 시작한다.
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 

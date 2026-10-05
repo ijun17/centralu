@@ -117,7 +117,7 @@ Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own sessio
 | Every host runs from a per-build copy, `<data>/hosts/<commit>/` | A rebuild or update rewrites the bundle; a host running from it read the Codex bridge, `schema.sql` and `app-template/` on demand and could mix two builds (2026-10-03). Copies no host uses are removed once a host is up. |
 | Background mode is a setting, off by default | Off: the last window detaching stops the keeper and host, as quitting always did. On: they keep running, and a relaunched app re-attaches. "Quit and stop agents" stops them either way. |
 | An unwatched keeper in background mode exits after 30 minutes with no window and no activity | Something has to end a host nobody is watching. Activity (a working or waiting session, a terminal, a command run) is the host's own report on its stdout; the keeper parses nothing else. A running turn or a waiting approval keeps it alive however long that takes. |
-| A window of another build attaches to the running host and offers to switch | The keeper knows both builds, its own included. Switching moves the keeper to the window's build (§4.4) and then runs the blue-green swap of §4.2; the window confirms first only when something can be lost. |
+| A window of another build attaches to the running host and offers to switch | The keeper knows both builds, its own included. Switching moves the keeper to the window's build (§4.4) and then runs the blue-green swap of §4.2; the window confirms first only when something can be lost. A window started by "Apply now" switches by itself when nothing can be (§4.5). |
 | Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a debug build in. Non-unix targets have no keeper yet. |
 
 The keeper also holds the host's long-lived children (§4.3), so a host restart or swap no longer ends them. The
@@ -251,6 +251,39 @@ recorded once. A handoff killed before the commit left A serving everything.
 Unverified: which identity macOS holds responsible for a keeper started by a keeper (B inherits A's responsible
 process, the app that launched A); any of this on Linux end to end (the unit tests ran in Docker); Windows, which has
 no keeper (`DuplicateHandle` would be its way to pass handles).
+
+### 4.5 Applying an update: one click, or by itself when idle (#352)
+
+§4.1–4.4 made an update cut nothing, but applying one took three steps: install, quit and reopen the window, press
+"Switch to this build". "Apply now" does all of it from the update line:
+
+```
+window (old build)                  keeper (old)                        window (new build)
+ 1 host installed the update:
+   npm i -g centralu@<v>, centralu install (the bundle is replaced on disk)
+ 2 relaunch_info: the bundle on disk holds another build → "Apply now"
+ 3 relaunching  ─────────────────▶  holds for 60 s with no window,
+                                    whatever background mode says
+ 4 request_restart: the old window detaches and exits; Tauri runs the same executable path again
+                                                                       5 attaches ◀── relaunched: true
+                                                                       6 nothing can be lost → switch
+                                    7 keeper handoff (§4.4), then the host swap (§4.2)
+```
+
+| Decision | Why |
+|---|---|
+| The relaunch is Tauri's `request_restart` of the same executable path | `centralu install` replaces the bundle (`rmSync`, then `ditto`), so the path the running process was started from now names the new build's executable; `tauri::process::restart` (2.11.5) reads the executable's name from the bundle's new `Info.plist` and runs it. `request_restart` rather than `restart`, because a command runs on the main thread, where `restart` skips the exit events and with them the detach. |
+| "Apply now" is offered only when the build on disk differs from the window's (`relaunch_info`) | Under `pnpm app:open` the window runs the build output, which the update does not touch, and a relaunch would start the same build: the line keeps saying "restart", with the reason in its tooltip. `pnpm app:dev` and the other direct-mode builds have no keeper, so a relaunch would stop every agent; they keep "restart" too. |
+| The app announces the relaunch to the keeper (`relaunching`) instead of relying on background mode | With background mode off (the default) the old window closing was "the last window left" and stopped everything, the update's whole point lost to a setting about quitting. The grace is 60 s (at most 300 s): the relaunch takes seconds, and a keeper with background mode off should not outlive a relaunch that failed by much. If no window attaches in time, the idle rule applies as if nothing had been announced. Peer-uid checked like every op. |
+| A keeper too old to know `relaunching` is acceptable only with background mode on | With it on, a window closing never stopped anything; with it off, relaunching would cut every turn, so the app refuses and says why. |
+| The keeper tells the next window it is the relaunched one (`relaunched` in the attach answer) | The window needs to know it came from "Apply now" to switch without a click; the keeper is the one party that saw both windows. The next attach spends the grace, so a window opened by hand later is not mistaken for it. |
+| The relaunched window switches by itself only when `switchPlan` says nothing can be lost; otherwise it opens the question at once | Pressing "Apply now" is consent to the relaunch, not to cutting a slow orchestrator call; the person just pressed it, so the question is asked now rather than left on the bar. |
+| "Apply updates automatically when idle" (off by default): the host installs as soon as a check finds a newer version; the window relaunches when idle | Installing is safe while agents work (the keeper and every host run from their own copies). Applying waits for the host's one idle rule (`hostBusy`, `agent-host/src/idle.ts`, reported to the keeper and from it to the window): no session working or waiting for an approval or a question, no terminal, no command. Unknown counts as busy. And no keystroke in a text field for 20 s: a relaunch under someone's fingers reads as a crash. A window with the setting on also switches by itself when idle, and waits instead of asking when something can be lost. |
+| Never from a window that already runs the installed version, and once per window | The relaunched window still sees the old host's `restart_required`; without the check it would relaunch into itself forever. A failure stays on the line or the bar, never retried in a loop. |
+
+Not exercised: a real update in the packaged app; which identity macOS holds responsible for a window relaunched by a
+window (Tauri spawns the executable directly, not through LaunchServices); an open terminal counts as busy even when its
+shell sits at a prompt, so the automatic mode waits for every terminal to close.
 
 ## 5. Data flow (summary — detail in [state-management.md](state-management.md))
 

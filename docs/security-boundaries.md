@@ -204,6 +204,8 @@ Limits:
 - `switch` runs `main.mjs` from whatever host folder the request names. Any process of this user can therefore make
   the keeper run code of its choosing — which that process could do by itself anyway. It is not a privilege
   boundary between processes of the same user, and is not meant to be one.
+- `relaunching` (#352) keeps a keeper with no window running for at most 300 s, whatever background mode says. It
+  grants nothing `set_background` does not already, and only for a bounded time.
 - The socket is local only. Windows has no keeper yet (named pipes and their ACLs are not written).
 
 ### The front door

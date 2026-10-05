@@ -131,8 +131,12 @@ Shortcuts (the shortcut list), and Updates.`,
 
   updates: `# Updates
 Check from Settings → Updates. It reports a new version based on the npm registry, and the person
-must click to install it (there is no automatic install). The check for a new version runs on
-startup and every six hours, and it can be turned off.
+clicks to install it. The check for a new version runs on startup and every six hours, and it can
+be turned off.
+Once installed, the desktop app offers "Apply now": it relaunches into the new version, and running
+agents, terminals and commands keep going. "Apply updates automatically when idle" (off by default)
+installs a new version without a click and applies it once no session is working or waiting, no
+terminal or command is running, and the person is not typing.
 From the terminal: \`centralu update\`.`,
 }
 

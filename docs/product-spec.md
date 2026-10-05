@@ -243,6 +243,14 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   working across the whole switch. A keeper that is behind while the host is not gets the same bar, and switching
   then asks nothing. If the keeper cannot move, the host switch still happens and the bar says the keeper stayed
   on the previous build, and why. Desktop only; it needs the keeper ([architecture.md](architecture.md) §4.1–4.4).
+- **Applying an update** (#352). Once an update is installed, the update line offers **Apply now**: the app
+  relaunches itself into the new version, the keeper holds the host and every agent through the relaunch whatever
+  background mode says, and the new window switches the keeper and the host to its build by itself when nothing can
+  be lost (asking at once when something can). **Apply updates automatically when idle** (Settings → Updates, off by
+  default) installs a newer version as soon as it is found and applies it once no session is working or waiting for
+  an approval or a question, no terminal or command is running, and nobody is typing. Desktop only, with the keeper;
+  elsewhere, and from a build the update did not replace (`pnpm app:open`), the line says to restart as before
+  ([architecture.md](architecture.md) §4.5).
 
 #### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
@@ -543,7 +551,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 
 - **Usage dashboard**: weekly bar chart (daily), breakdown by tool/model/project, estimated cost, limit window status.
 - **Session creation dialog**: tool → model → permission preset → starting prompt. Includes the concurrent-session warning (FR-2).
-- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, **theme** — Dark, Light or follow the system, a theme per side (presets: Dark, Light, High contrast dark, High contrast light), an optional accent that never colours the signal, and custom themes as files in the data folder that can be edited in Settings, by hand or by an agent and update live, with a warning when a theme breaks the urgency order (#312, [themes.md](themes.md)), **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22), **background** — whether quitting leaves agents running (FR-10, desktop only).
+- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, **theme** — Dark, Light or follow the system, a theme per side (presets: Dark, Light, High contrast dark, High contrast light), an optional accent that never colours the signal, and custom themes as files in the data folder that can be edited in Settings, by hand or by an agent and update live, with a warning when a theme breaks the urgency order (#312, [themes.md](themes.md)), **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22), **background** — whether quitting leaves agents running (FR-10, desktop only), **updates** — the running and newest version, Check now, checking automatically, installing, Apply now, and applying automatically when idle (off by default; FR-10, desktop only).
 
 ### 5.4 Grid view (**experimental**)
 
