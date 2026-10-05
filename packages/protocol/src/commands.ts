@@ -154,9 +154,10 @@ export type SessionKind = z.infer<typeof SessionKind>
 export const SessionInfo = z.object({
   id: z.string(),
   /**
-   * The project this session belongs to. **Only the orchestrator has null here** — it is a
-   * session that crosses projects, so it is not attached to any one of them (attaching it would
-   * mean it dies along with that project when the project is deleted).
+   * The project this session belongs to. Null for a session that belongs to none: the orchestrator
+   * (it crosses projects, and attached to one it would die along with that project when the
+   * project is deleted), a coordinator, the builder and agent sessions of a user-folder app, and a
+   * session in the trash (its project is kept in the trash record). docs/domain-model.md §2.1.
    */
   projectId: z.string().nullable(),
   /** Whether this is a worker or an orchestrator. Defaults to worker — old frames do not have this field */

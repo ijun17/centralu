@@ -5405,7 +5405,7 @@ export class SessionManager {
    *   Location  That project (cwd is the project root) for a project app; for a user-folder app, the
    *             orchestrator's own empty folder with no project, the same as a coordinator session.
    *             The session's app slot (`appId`) is set to that app.
-   *   Preset    **Always `normal`** — never inherited from the calling session even if it is `auto`
+   *   Preset    **Always `safe`** — never inherited from the calling session even if it is `auto`
    *             (the plan's "security boundary"). An app's text is someone else's words, and an agent
    *             running on that text must never act unattended without the person's knowledge.
    *   Text      Sent as the app's own text, not the person's — recorded in the conversation as a
