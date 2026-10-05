@@ -14,20 +14,52 @@ import { liveBackgroundTasks, type SessionInfo, type SessionState } from '@cc/pr
  * Kept free of any service so it is tested as data; the host builds the snapshot (main.ts).
  */
 
-/** The states in which someone would lose something if the host went away */
-const BUSY_STATES: ReadonlySet<SessionState> = new Set(['working', 'waiting_approval', 'waiting_input'])
+/**
+ * The states in which a turn is running: someone would lose it if the host went away.
+ *
+ * Not `waiting_input`. That is what `turn_complete` leaves (sessions/manager.ts, `applyStateHint`)
+ * until the next message: the turn is over and its answer is stored. Counting it made every session
+ * that had ever answered read as busy, so the keeper's idle exit and "Apply updates automatically
+ * when idle" (#352) waited for a message nobody was going to send. A question waiting for an answer
+ * is counted by itself (`pendingQuestions`), not by a state that also means "finished".
+ */
+const BUSY_STATES: ReadonlySet<SessionState> = new Set(['working', 'waiting_approval'])
+
+/**
+ * One session as the idle rule reads it. The fields past `state` and `live` are optional so a
+ * snapshot that does not carry them still reads (as nothing pending); the host's (`main.ts`,
+ * `mgr.listSessions()`) carries all of them.
+ */
+export type SessionActivity = Pick<SessionInfo, 'state' | 'live'> &
+  Partial<Pick<SessionInfo, 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>>
 
 export type ActivitySnapshot = {
-  sessions: Pick<SessionInfo, 'state' | 'live'>[]
+  sessions: SessionActivity[]
   terminals: number
   commandRuns: number
 }
 
 /**
+ * Whether one live session holds something a person would lose: a running turn, an approval or a
+ * question waiting for them, or background work that counts as activity (#290 — the tool holds it in
+ * its process). A session with no process holds nothing.
+ */
+export function sessionBusy(s: SessionActivity): boolean {
+  if (s.live !== true) return false
+  return (
+    BUSY_STATES.has(s.state) ||
+    !!s.pendingApproval ||
+    (s.pendingQuestions?.length ?? 0) > 0 ||
+    liveBackgroundTasks(s.backgroundTasks ?? []).length > 0
+  )
+}
+
+/**
  * Whether the host is doing anything a person would lose if it stopped now.
  *
- * - a live session that is working, waiting for an approval, or waiting on a question — an
- *   approval left in background mode is exactly what a person comes back for;
+ * - a live session that is working, waiting for an approval or on a question, or running
+ *   background work (`sessionBusy`) — an approval left in background mode is exactly what a person
+ *   comes back for. A session whose turn has finished (`waiting_input`) is not busy;
  * - an open terminal or a running project command (a dev server). An open terminal counts even
  *   when its shell sits at a prompt: the host cannot yet tell an idle shell from one running a
  *   command, and guessing wrong would end someone's work.
@@ -36,7 +68,7 @@ export type ActivitySnapshot = {
  * (#280, decision 2).
  */
 export function hostBusy(s: ActivitySnapshot): boolean {
-  return s.terminals > 0 || s.commandRuns > 0 || s.sessions.some((x) => x.live === true && BUSY_STATES.has(x.state))
+  return s.terminals > 0 || s.commandRuns > 0 || s.sessions.some(sessionBusy)
 }
 
 /**
@@ -51,10 +83,10 @@ export function hostBusy(s: ActivitySnapshot): boolean {
  * silence there does not mean nothing is running. A session with no process is idle: it holds
  * nothing.
  *
- * **Narrower than `hostBusy`, on purpose.** `hostBusy` counts `waiting_input`, and that is the
- * state every finished turn leaves (`turn_complete`) until the next message: the answer is stored,
- * and the process holds nothing of it. Counting it here would keep every session that ever
- * answered on its old CLI. A question waiting for an answer is `pendingQuestions`, counted below.
+ * The same facts about a session as `sessionBusy`, with two differences: terminals and commands do
+ * not count (restarting one session's process does not touch them), and a tool that cannot report
+ * its background work is not idle while its process lives. A finished turn (`waiting_input`) is
+ * idle here as there.
  */
 export type SessionIdle =
   | { idle: true }

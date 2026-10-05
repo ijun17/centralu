@@ -42,10 +42,29 @@ describe('hostBusy', () => {
     expect(hostBusy({ ...idle, sessions: [{ state: 'idle', live: true }, { state: 'error', live: true }] })).toBe(false)
   })
 
-  it('is busy while a live session works or waits on a person', () => {
-    for (const state of ['working', 'waiting_approval', 'waiting_input'] as const) {
+  it('is busy while a live session works or waits for an approval', () => {
+    for (const state of ['working', 'waiting_approval'] as const) {
       expect(hostBusy({ ...idle, sessions: [{ state, live: true }] }), state).toBe(true)
     }
+  })
+
+  it('is not busy with a session whose turn finished and waits for the next message (waiting_input)', () => {
+    expect(hostBusy({ ...idle, sessions: [{ state: 'waiting_input', live: true, pendingApproval: null, pendingQuestions: [], backgroundTasks: [] }] })).toBe(false)
+  })
+
+  it('is busy while a question waits for the person, whatever the state says', () => {
+    const question = { requestId: 'q-1', questions: [{ question: 'Which one?', header: 'Pick', options: [], multiSelect: false }] }
+    expect(hostBusy({ ...idle, sessions: [{ state: 'waiting_input', live: true, pendingQuestions: [question] }] })).toBe(true)
+  })
+
+  it('is busy while an approval waits, or background work that counts as activity runs (#290)', () => {
+    expect(
+      hostBusy({ ...idle, sessions: [{ state: 'idle', live: true, pendingApproval: { requestId: 'r', detail: { kind: 'other', raw: 'x' } } }] }),
+    ).toBe(true)
+    const shell = { id: 't1', kind: 'shell' as const, description: 'sleep 100', status: 'running' as const }
+    expect(hostBusy({ ...idle, sessions: [{ state: 'waiting_input', live: true, backgroundTasks: [shell] }] })).toBe(true)
+    // Housekeeping the tool calls ambient, and ended tasks, are not activity
+    expect(hostBusy({ ...idle, sessions: [{ state: 'waiting_input', live: true, backgroundTasks: [{ ...shell, ambient: true }, { ...shell, id: 't2', status: 'completed' }] }] })).toBe(false)
   })
 
   it('does not count a session whose process is gone', () => {

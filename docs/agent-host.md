@@ -572,8 +572,12 @@ version already known starts it at once. Not over an install under way or one al
 again, six hours later.
 
 **The rule** (`idle.ts`). `hostBusy(snapshot)` is the one answer to "would someone lose something if this stopped
-now": a live session working, waiting for an approval or on a question; an open terminal; a running project command.
-The snapshot is `activity()` in `main.ts`. The keeper reads it through the activity report (§4.1) for its idle exit;
+now": a live session working, waiting for an approval or on a question, or running background work that counts as
+activity (#290); an open terminal; a running project command. A session whose turn has finished (`waiting_input`, what
+`turn_complete` leaves until the next message) is idle: its answer is stored. Until 2026-10-05 that state counted as
+busy, so every session that had ever answered held off the keeper's idle exit and the automatic apply; a waiting
+question is now counted by `pendingQuestions`, not by the state. The snapshot is `activity()` in `main.ts`, with the
+manager's session list, which carries pending approvals and questions and background tasks. The keeper reads it through the activity report (§4.1) for its idle exit;
 the window gets it from the keeper's view for the switch's question and for applying an update when idle. An open
 terminal counts even at a prompt: the host cannot tell an idle shell from one running a command, so the automatic mode
 waits for terminals to close. Moving one session to a newly installed agent CLI (#297) uses the same file's narrower
@@ -614,9 +618,9 @@ more, which costs a resume and nothing else.
 idle by `sessionIdle` (no turn, no approval or question, no live background task, and a tool that cannot report
 background work is never idle), and, when it moves by itself, nothing has come from it for 60 s (counted from host start
 for a session the host has not heard from). The quiet period is for the person: a turn that just ended is when they read
-the answer and type the next message. `sessionIdle` is narrower than `hostBusy` on purpose: `hostBusy` counts
-`waiting_input`, which every finished turn leaves until the next message, and terminals, which a session restart does
-not touch.
+the answer and type the next message. `sessionIdle` reads the same facts about a session as `hostBusy`, but leaves
+out terminals and commands, which a session restart does not touch, and never calls a tool idle that cannot report
+its background work.
 
 | Decision | Why |
 |---|---|

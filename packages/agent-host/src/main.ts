@@ -516,7 +516,9 @@ if (held) void mgr.adoptKept(held.kept.agents)
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity
- * report; an agent CLI update (#297) can call `hostBusy(activity())` here directly.
+ * report. The session list carries what the rule reads besides the state: pending approvals and
+ * questions, and background tasks (#290). Moving one session to a new agent CLI (#297) uses the
+ * per-session rule instead (`sessionIdle`, through the manager).
  */
 const activity = (): ActivitySnapshot => ({
   sessions: mgr.listSessions(),

@@ -3,6 +3,7 @@ import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
 import type { AgentAdapter, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
+import { hostBusy } from '../idle.js'
 
 /**
  * The manager keeps each session's background work (#290): the live set the adapter reports, the ended tasks it
@@ -137,6 +138,27 @@ describe('whether a session is idle (#290, for #297)', () => {
     h.emit({ type: 'question_resolved', sessionId: session.id, requestId: 'q1' })
     h.emit({ type: 'turn_complete', sessionId: session.id })
     expect(mgr.sessionIdle(session.id)).toEqual({ idle: true })
+  })
+
+  /*
+   * The host-wide rule the keeper's idle exit and #352's automatic apply read, fed the manager's own list as main.ts
+   * feeds it: a finished turn is not busy, a waiting question or a running background task is.
+   */
+  it('the host idle rule over the manager’s list: a finished turn is idle, a waiting question or background work is not', async () => {
+    const { mgr, session, handles, tasks } = await setup()
+    const h = handles[0]!
+    const busy = () => hostBusy({ sessions: mgr.listSessions(), terminals: 0, commandRuns: 0 })
+    h.emit({ type: 'message_delta', sessionId: session.id, role: 'assistant', text: 'working' })
+    expect(busy()).toBe(true)
+    h.emit({ type: 'turn_complete', sessionId: session.id })
+    expect(mgr.listSessions()[0]!.state).toBe('waiting_input')
+    expect(busy()).toBe(false)
+    h.emit({ type: 'question_request', sessionId: session.id, requestId: 'q2', questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }] }] })
+    expect(busy()).toBe(true)
+    h.emit({ type: 'question_resolved', sessionId: session.id, requestId: 'q2' })
+    expect(busy()).toBe(false)
+    tasks([agent('a')])
+    expect(busy()).toBe(true)
   })
 
   it('a tool that cannot report its background work is never called idle while its process lives', async () => {
