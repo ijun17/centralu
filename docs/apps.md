@@ -44,6 +44,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | `uses.agent`, `uses.apps`, `uses.host` | What the app **declares** it will ask Centralu for (§10) | Optional. A declaration, not a permission. Absent means nothing |
 | `secrets` | Names of the secrets the app needs | Optional. Environment-variable names; `CENTRALU_*` and `CC_*` are reserved |
 | `view.origin` | `opaque` (default) or `app` (§6.4) | An unknown value is refused, not read as the default |
+| `view.span` | The span, in grid cells, the app **recommends** for its panel on the grid (§6.2): `{ "cols": 2, "rows": 1 }` | Optional, and only a default: the person's choice for the placement and their setting for the app come first. Each side 1 to 4; a whole number outside is clamped, anything else ignored — both with a warning, never an error, since an app without one simply stands at 1 × 1 |
 | `csp` | Four lists of domains | Validated, but **not read**: a view's CSP comes from its resource's `_meta.ui.csp` (§6.4) |
 
 Unknown fields are warnings, not errors, so an older Centralu reads what it knows from a newer
@@ -284,6 +285,13 @@ call.
   from the pinned view above, so the same app can stand on the grid and on its project screen at
   once, each keeping its document, with one app process behind both. Each grid view costs one
   instance and one frame; nothing caps their number.
+- **An app panel's span on the grid** (#306): columns × rows of grid cells (a session panel is
+  1 × 1). The person sets it — for one placement from the panel's top bar ("2×1", a cell picker;
+  kept on the placement, `GridPanel.span`), for the app in Settings → Apps — and the app may
+  recommend one in its manifest (`view.span`, the app list's `span`). The first that is set wins:
+  placement, Settings, the app, 1 × 1. The grid clamps a span the window cannot hold and says so on
+  the button; the view is laid over the larger slot like any other (product-spec §5.4). So a view
+  must work at whatever size it gets: the recommendation is a hint, not a promise.
 - **`ui/message`** from a pinned view asks the person which session to send it to. Nothing is sent
   before a choice, and cancelling tells the view it was not sent. Once picked, it goes the inline
   view's way (`apps.viewMessage`): stored as the app's message, and framed as the app's text for the
@@ -404,8 +412,10 @@ scrollbars.
 
 A view is often narrow: a grid or project-screen panel is one cell, about 360–480px wide on a laptop
 screen, and the inline view under a tool card is the conversation's width. Centralu does not enlarge
-a panel or let an app ask for a bigger one (#306 decided against both for now); **an app is built to
-work at a panel's width first and to spread out when there is room.** Recommended, never checked:
+a panel on focus (#306 left that for later). A grid panel can span more cells, but the person decides
+that; an app can only recommend a size (`view.span`, §6.2), and the window may still give it one cell.
+So **an app is built to work at a panel's width first and to spread out when there is room.**
+Recommended, never checked:
 
 - Nothing has a fixed width wider than about 320px; rows of controls wrap (`flex-wrap`) instead of
   overflowing, and long text wraps (`overflow-wrap: anywhere`).
