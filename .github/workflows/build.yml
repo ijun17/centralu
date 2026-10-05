@@ -236,14 +236,13 @@ jobs:
 
       - run: pnpm verify
 
-  # The TypeScript suite on Windows (#14, phase W1). Until this job existed `pnpm verify` ran only
-  # inside release.yml, on Linux and macOS, so nothing ever told us what breaks on Windows.
+  # The TypeScript suite on Windows (#14). Until this job existed `pnpm verify` ran only inside
+  # release.yml, on Linux and macOS, so nothing ever told us what breaks on Windows.
   #
-  # Lint, dependency rules and types pass on Windows and block like anywhere else. The unit tests
-  # do not block yet: their known failures are the W2 checklist (listed in #307). Only that step
-  # carries `continue-on-error`, so the job stays green and a warning annotation says how many
-  # tests fail; a check that is red on every PR teaches everyone to stop reading CI. Remove
-  # `continue-on-error` from the test step once the list is empty.
+  # Every step blocks, as on the other platforms. The unit tests did not at first (phase W1): their
+  # known failures were the W2 checklist in #307, and the step carried `continue-on-error` with a
+  # warning that counted them, because a check that is red on every PR teaches everyone to stop
+  # reading CI. W2 emptied that list, so a red step here is a new Windows failure.
   windows-tests:
     name: windows tests
     runs-on: windows-2022
@@ -266,34 +265,12 @@ jobs:
         run: pnpm depcruise
       - if: ${{ !cancelled() }}
         run: pnpm typecheck
-      - name: pnpm test (non-blocking on Windows for now)
-        id: tests
+      - name: pnpm test
         if: ${{ !cancelled() }}
-        continue-on-error: true
         # Never the real data folder, on any OS (AGENTS.md).
         env:
           CC_DATA_DIR: ${{ runner.temp }}\centralu-data
-        # vitest itself, not `pnpm test`: pnpm 11 takes `--reporter` as its own option
-        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$env:RUNNER_TEMP/vitest.json"
-
-      # What the step above hides, said where people look: a warning annotation on the run and
-      # the PR, and the failing files in the job summary. No comma in the title: a comma ends a
-      # workflow command's property, and the rest of the title was dropped.
-      - name: Report failing Windows tests
-        if: ${{ !cancelled() && steps.tests.outcome == 'failure' }}
-        shell: pwsh
-        run: |
-          $report = Join-Path $env:RUNNER_TEMP 'vitest.json'
-          if (-not (Test-Path $report)) {
-            Write-Output "::warning title=Windows tests (non-blocking)::pnpm test failed before writing its report; see the 'pnpm test' step log"
-            exit 0
-          }
-          $r = Get-Content $report -Raw | ConvertFrom-Json
-          $root = (Get-Location).Path
-          $files = @($r.testResults | Where-Object { $_.status -eq 'failed' } | ForEach-Object { $_.name.Replace($root, '').TrimStart('\', '/').Replace('\', '/') } | Sort-Object)
-          Write-Output "::warning title=Windows tests (non-blocking until the W2 list in PR 307 is fixed)::$($r.numFailedTests) of $($r.numTotalTests) tests fail in $($files.Count) of $(@($r.testResults).Count) files on Windows. The known list is the W2 checklist in #307; a new name in the job summary is a regression."
-          $summary = @("### Windows tests: $($r.numFailedTests) failing in $($files.Count) files (non-blocking)", '') + ($files | ForEach-Object { "- ``$_``" })
-          $summary -join "`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+        run: pnpm test
 
   # The keeper end to end, with the real binary and the real host (2026-10-05). Neither the unit
   # tests nor e2e start a keeper: when #329 put an `await` in the host's startup before the server

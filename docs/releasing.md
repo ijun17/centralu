@@ -50,10 +50,8 @@ script rehearses by default and why nothing publishes automatically.
   installer. The installer's one advantage is that it installs the WebView2 runtime on a
   machine without it. Neither is signed, so SmartScreen asks before the first start. The
   Windows job also runs the Rust unit tests, and a separate `windows tests` job runs the
-  four parts of `pnpm verify`. Lint, dependency rules and types block there as anywhere; the
-  unit-test step does not yet (`continue-on-error` on that step only), so the job stays green
-  and a warning annotation gives the failing count, with the failing files in the job summary.
-  Its known failures are listed in #307; once they are fixed the step should block. The npm
+  four parts of `pnpm verify`, each blocking as on the other platforms. (The unit-test step
+  did not block until the W2 failures listed in #307 were fixed.) The npm
   package `@centralu/win32-x64` ships the same folder, built again by `release.yml`'s own
   Windows job (see [Windows](#windows-14-w3) below).
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
