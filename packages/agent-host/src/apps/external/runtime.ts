@@ -1753,7 +1753,7 @@ export class ExternalApps {
   }
 
   /** Stops it — because it went idle, changed, lost trust, or the host is exiting */
-  private async halt(e: AppEntry, why: string, opts: { graceMs?: number; awaitKill?: boolean } = {}): Promise<void> {
+  private async halt(e: AppEntry, why: string, opts: { graceMs?: number; awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
     const L = e.life
     L.epoch += 1
     this.clearIdle(e)
@@ -1764,7 +1764,7 @@ export class ExternalApps {
     // A running app is stopping — it is not running in the list from this moment (A-8)
     this.appsChanged()
     proc.log.note(`stopping: ${why}`)
-    await proc.stop(opts.graceMs ?? this.timing.graceMs, { awaitKill: opts.awaitKill })
+    await proc.stop(opts.graceMs ?? this.timing.graceMs, { awaitKill: opts.awaitKill, awaitTree: opts.awaitTree })
   }
 
   private armIdle(e: AppEntry): void {

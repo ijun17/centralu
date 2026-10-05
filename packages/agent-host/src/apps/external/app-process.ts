@@ -4,7 +4,7 @@ import type { Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client'
 import { CLIENT_INFO } from '@cc/protocol'
-import { KILL_GRACE_MS, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, collectOrphansWindows, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
 import { rotateIfLarge } from '../../log-file.js'
 import { resolveCommand } from '../../tool-launch.js'
 import { StreamTransport } from './stream-transport.js'
@@ -64,6 +64,8 @@ export class AppStartError extends Error {
 
 export class AppProcess {
   readonly startedAt = Date.now()
+  /** When we saw it end (null while it runs) — with `spawnedAt`, how Windows tells what it left behind (`collectLeftovers`) */
+  private exitedAt: number | null = null
   readonly client: Client
   /** The tool list received on connection (the raw text, before filtering) — asked once per process */
   tools: Tool[] = []
@@ -72,6 +74,8 @@ export class AppProcess {
   onUnexpectedExit?: (reason: string) => void
 
   private stopping: Promise<void> | null = null
+  /** Windows: the collection of what it left running, once it has ended (`stop`) */
+  private leftovers: Promise<void> | null = null
   private exitWaiters: (() => void)[] = []
   private closeFd3Server: (() => void) | null = null
 
@@ -80,6 +84,8 @@ export class AppProcess {
     readonly fd3: Socket | null,
     readonly log: AppLog,
     probeTimeoutMs: number,
+    /** Taken just before the spawn, so it is no later than the process's own creation time */
+    private readonly spawnedAt: number,
   ) {
     this.client = new Client(
       { name: CLIENT_INFO.name, version: CLIENT_INFO.version },
@@ -94,6 +100,7 @@ export class AppProcess {
     const settle = (info: ExitInfo) => {
       if (this.exit) return
       this.exit = info
+      this.exitedAt = Date.now()
       /*
        * 'exit' can arrive before stderr has finished flowing out — and it is exactly the last line
        * that carries the crash reason. This waits briefly for 'close' (every pipe closed), but if a
@@ -134,6 +141,7 @@ export class AppProcess {
     log.note(`starting: ${spec.command} ${spec.args.join(' ')}`)
     // Windows: `npx` is `npx.cmd`, which cannot be spawned without a shell (tool-launch.ts)
     const launch = resolveCommand(spec.command, spec.env)
+    const spawnedAt = Date.now()
     const child = spawn(launch.command, [...launch.args, ...spec.args], {
       cwd: spec.cwd,
       env: spec.env,
@@ -158,7 +166,7 @@ export class AppProcess {
       detached: process.platform !== 'win32',
       windowsHide: true,
     })
-    const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs)
+    const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs, spawnedAt)
     if (proc.fd3 && spec.serveFd3) proc.closeFd3Server = spec.serveFd3(proc.fd3, (line) => log.note(line))
     try {
       await proc.connect(spec)
@@ -209,9 +217,15 @@ export class AppProcess {
    * via kill-tree's `stopGroup`). Previously there was only one blow, SIGTERM, and a helper that
    * ignored it was left orphaned under launchd. While anyone remains in a group, its pgid is not
    * reused, so this never reaches into someone else's group.
+   *
+   * Windows has no groups. Once the app has ended, what it left running is found by parent links
+   * and ended (`collectLeftovers`). That takes a process listing (~0.5 s), so by default it runs
+   * after this returns; `awaitTree` waits for it, for a caller about to move or delete the app's
+   * folder, which Windows refuses while a process has it as its working directory.
    */
-  stop(graceMs: number, opts: { awaitKill?: boolean } = {}): Promise<void> {
-    if (this.stopping) return this.stopping
+  stop(graceMs: number, opts: { awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
+    // A stop already under way, started by someone who did not wait for the leftovers: this caller still does
+    if (this.stopping) return opts.awaitTree ? this.stopping.then(() => this.leftovers ?? undefined) : this.stopping
     this.stopping = (async () => {
       void this.client.close().catch(() => {})
       this.closeFd3Server?.()
@@ -225,7 +239,12 @@ export class AppProcess {
         this.signalOwnGroup()
       }
       this.fd3?.destroy()
-      this.log.close()
+      const leftovers = process.platform === 'win32' && !this.alive ? this.collectLeftovers() : null
+      this.leftovers = leftovers
+      if (leftovers && opts.awaitTree) await leftovers
+      // The log stays open for the leftovers' note, if they are collected after this returns
+      if (leftovers && !opts.awaitTree) void leftovers.finally(() => this.log.close())
+      else this.log.close()
     })()
     return this.stopping
   }
@@ -260,6 +279,14 @@ export class AppProcess {
         resolve(true)
       })
     })
+  }
+
+  /** Windows: ends what the app left running once it has ended (kill-tree's `collectOrphansWindows`). Never rejects */
+  private async collectLeftovers(): Promise<void> {
+    const pid = this.child.pid
+    if (typeof pid !== 'number' || this.exitedAt === null) return
+    const ended = await collectOrphansWindows({ pid, spawnedAt: this.spawnedAt, exitedAt: this.exitedAt })
+    if (ended.length > 0) this.log.note(`ended ${ended.length} process(es) it left running: ${ended.join(', ')}`)
   }
 
   private signalOwnGroup(): void {

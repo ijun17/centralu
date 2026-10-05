@@ -245,7 +245,9 @@ describe('the shutdown rule (S-5)', () => {
     await until(() => alive(grandchild), (a) => a === false)
   })
 
-  it('a descendant that ignores SIGTERM, left by an app that ended on its own, is collected with SIGKILL after the grace period — no orphan is left behind', async () => {
+  // Windows has no SIGTERM to hold off: every shot there is the forceful one, so this test's first-blow premise does not
+  // exist. What it guards, that no orphan is left behind, is the Windows test below (#14).
+  it.skipIf(process.platform === 'win32')('a descendant that ignores SIGTERM, left by an app that ended on its own, is collected with SIGKILL after the grace period — no orphan is left behind', async () => {
     plant('parent', 'stubborn-grandchild')
     make()
     await rt.tools(ref('parent'))
@@ -264,6 +266,30 @@ describe('the shutdown rule (S-5)', () => {
       if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
     }
     // The test's own cap must exceed the wait (6s) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
+  }, 15_000)
+
+  /*
+   * Windows (#14) has no groups. A child Node spawns without `detached` dies with the app (libuv's job), so the test
+   * above passes there with or without any collecting. This one is a child outside that job, like every child of a
+   * Python app: its parent link outlives the app, and only following it ends the child. Not on macOS or Linux: a
+   * detached child calls setsid there and leaves the app's group, which nothing can follow (kill-tree.ts).
+   */
+  it.runIf(process.platform === 'win32')('on Windows, a descendant started outside the app\'s job, left by an app that ended on its own, is ended — no orphan is left behind', async () => {
+    plant('parent', 'detached-grandchild')
+    make()
+    await rt.tools(ref('parent'))
+    const pid = starts('parent')[0]!.pid
+    const grandchild = records('parent').find((r) => r.t === 'grandchild')!.grandchild!
+    try {
+      expect(alive(grandchild)).toBe(true)
+      await rt.restart(ref('parent'))
+      expect(alive(pid)).toBe(false)
+      expect(hostLog('parent')).not.toContain('did not exit within')
+      await until(() => alive(grandchild), (a) => a === false, 8_000)
+      await until(() => hostLog('parent'), (log) => log.includes('process(es) it left running'), 2_000)
+    } finally {
+      if (alive(grandchild)) process.kill(grandchild)
+    }
   }, 15_000)
 
   it('when the host exits (dispose), an old process still waiting to finish a call after its entry was replaced also stops', async () => {

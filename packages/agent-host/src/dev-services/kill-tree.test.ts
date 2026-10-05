@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { killTargets, killTree, parsePs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
+import { collectOrphansWindows, killTargets, killTree, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
 
 /**
  * Choosing targets for a tree kill (the conclusion of what was measured on 2026-09-07).
@@ -288,5 +288,59 @@ describe('ending a tree on Windows', () => {
     }
     expect(() => killTree(pty.handle, 'SIGTERM', os)).not.toThrow()
     expect(pty.calls).toEqual([undefined])
+  })
+})
+
+/**
+ * What an app that ended on its own left running, on Windows (#14). Windows keeps an orphan's parent id, so the tree
+ * is walked from the dead root; creation times keep a reused number from pulling in someone else's processes.
+ */
+describe('leftovers of an ended process on Windows', () => {
+  const root = { pid: 100, spawnedAt: 1_000, exitedAt: 5_000 }
+  const table = (s: string) => parseWinProcs(s)
+
+  it('reads only `pid ppid created` lines, with CRLF endings as PowerShell writes them', () => {
+    expect(table('100 4 1000\r\n  200 100 1500 \r\nheader\r\n300 x 1\r\n')).toEqual([
+      { pid: 100, ppid: 4, created: 1000 },
+      { pid: 200, ppid: 100, created: 1500 },
+    ])
+  })
+
+  it('follows the dead root\'s children and theirs, whose parents may be gone too', () => {
+    // 200 (a child of the root) is alive; 300 was started by 250, which has also ended; 400 is under 300
+    const rows = table('200 100 1500\n300 250 2500\n250 100 2000\n400 300 2600\n900 4 10\n')
+    expect(orphansOf(rows, root).map((r) => r.pid).sort()).toEqual([200, 250, 300, 400])
+  })
+
+  it('a child created before the root was started belonged to an earlier holder of that number', () => {
+    expect(orphansOf(table('200 100 999\n'), root)).toEqual([])
+  })
+
+  it('a child created after the root was seen to end belongs to a later holder of that number', () => {
+    expect(orphansOf(table('200 100 5001\n'), root)).toEqual([])
+  })
+
+  it('a deeper process older than the parent now holding its parent id is someone else\'s', () => {
+    // 200 is the root's child; 300 names 200 as its parent but is older than 200, so it was a child of an earlier 200
+    expect(orphansOf(table('200 100 3000\n300 200 2000\n'), root).map((r) => r.pid)).toEqual([200])
+  })
+
+  it('ends every leftover with taskkill and reports them; a table that cannot be read ends nothing', async () => {
+    const ended: number[] = []
+    const os = { listProcesses: async () => table('200 100 1500\n300 200 1600\n900 4 10\n'), taskkill: (pid: number) => void ended.push(pid) }
+    expect(await collectOrphansWindows(root, os)).toEqual([200, 300])
+    expect(ended).toEqual([200, 300])
+    const broken = { listProcesses: () => Promise.reject(new Error('powershell missing')), taskkill: () => {} }
+    expect(await collectOrphansWindows(root, broken)).toEqual([])
+  })
+
+  it('a taskkill that fails (already ended by the one before it) is not reported and does not stop the rest', async () => {
+    const os = {
+      listProcesses: async () => table('200 100 1500\n300 200 1600\n'),
+      taskkill: (pid: number) => {
+        if (pid === 300) throw new Error('ERROR: The process "300" not found.')
+      },
+    }
+    expect(await collectOrphansWindows(root, os)).toEqual([200])
   })
 })

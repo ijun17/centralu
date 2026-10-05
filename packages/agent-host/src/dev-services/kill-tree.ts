@@ -1,5 +1,6 @@
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 
 /**
  * Kills a process **tree** — shared by the command runner, terminal tabs, and app processes
@@ -296,6 +297,105 @@ export function stopGroup(pgid: number, graceMs: number): void {
     }
   }, graceMs)
   t.unref?.()
+}
+
+/** One row of the Windows process table: the parent it was started by, and when it was created (ms since the epoch) */
+export type WinProcRow = { pid: number; ppid: number; created: number }
+
+/** `pid ppid createdMs` lines (the listing below) -> rows. A line that cannot be parsed is dropped */
+export function parseWinProcs(out: string): WinProcRow[] {
+  const rows: WinProcRow[] = []
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line)
+    if (!m) continue
+    rows.push({ pid: Number(m[1]), ppid: Number(m[2]), created: Number(m[3]) })
+  }
+  return rows
+}
+
+/** A process that has already ended: its pid, when we started it (taken just before the spawn) and when we saw it end */
+export type EndedRoot = { pid: number; spawnedAt: number; exitedAt: number }
+
+/**
+ * What an ended process left running, on Windows (#14) — every process descended from it by parent links.
+ *
+ * Windows never re-parents an orphan: a process keeps the parent id it was born with after that parent is gone, so the
+ * tree can still be walked from a dead root. What it does not keep is a guarantee that the number still means the same
+ * process, so each link is also checked by creation time:
+ *   - a child of the root was created after we started the root and before we saw it end. An earlier holder of the
+ *     root's number left children created before the spawn; a later one could only start children after the root
+ *     ended. Both are outside the window.
+ *   - every deeper child was created no earlier than its parent. A process listed under a reused parent id is older
+ *     than the parent now holding that number.
+ */
+export function orphansOf(rows: readonly WinProcRow[], root: EndedRoot): WinProcRow[] {
+  const found: WinProcRow[] = []
+  const queue: WinProcRow[] = rows.filter((r) => r.ppid === root.pid && r.pid !== root.pid && r.created >= root.spawnedAt && r.created <= root.exitedAt)
+  const seen = new Set<number>([root.pid])
+  while (queue.length > 0) {
+    const r = queue.shift()!
+    if (seen.has(r.pid)) continue
+    seen.add(r.pid)
+    found.push(r)
+    for (const kid of rows) if (kid.ppid === r.pid && kid.created >= r.created && !seen.has(kid.pid)) queue.push(kid)
+  }
+  return found
+}
+
+/** What collecting an ended process's leftovers needs from Windows, as a parameter so it can be tested on any OS */
+export type LeftoverOs = {
+  listProcesses: () => Promise<WinProcRow[]>
+  /** Ends a process and every process under it, forcibly */
+  taskkill: (pid: number) => void
+}
+
+/*
+ * The process table through CIM, the one source that has both the parent id and the creation time; `tasklist` has
+ * neither and `wmic` is gone from current Windows 11. Measured on Windows 11 (2026-10-05): 400–750 ms for ~260
+ * processes, almost all of it PowerShell starting. Asynchronous, so the host keeps serving while it runs. PowerShell is
+ * named by its full path under the system folder, like taskkill: a bare name would be looked up in the working
+ * directory first.
+ */
+const runFile = promisify(execFile)
+const LIST_PROCESSES =
+  "Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } }"
+const REAL_LEFTOVER_OS: LeftoverOs = {
+  listProcesses: async () => {
+    const exe = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const { stdout } = await runFile(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: 10_000, windowsHide: true })
+    return parseWinProcs(stdout)
+  },
+  taskkill: REAL_OS.taskkill,
+}
+
+/**
+ * Ends what an ended process left running, on Windows (#14) — the Windows side of `stopGroup`, which has no group to
+ * signal. Returns the pids it ended.
+ *
+ * Most of an app's children never get here: Node (libuv) puts every child it spawns without `detached` into a job that
+ * is closed, killing them, when that Node process ends (measured: a plain child died with its parent, a `detached` one
+ * stayed). What is left is everything started outside such a job — by a Python or other non-Node app, or `detached`
+ * from Node — and with its parent gone, `taskkill /T` on the parent's number reaches none of it. One forceful shot, as
+ * everywhere on Windows. Never throws: a table that cannot be read leaves things as they were.
+ */
+export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+  let rows: WinProcRow[]
+  try {
+    rows = await os.listProcesses()
+  } catch {
+    return []
+  }
+  const ended: number[] = []
+  for (const r of orphansOf(rows, root)) {
+    if (r.pid === process.pid) continue // never ourselves
+    try {
+      os.taskkill(r.pid)
+      ended.push(r.pid)
+    } catch {
+      // already gone, or ended by the /T of one before it
+    }
+  }
+  return ended
 }
 
 /** stopTree's second shot */

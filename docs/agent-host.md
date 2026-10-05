@@ -46,7 +46,7 @@ ways, each in one place:
 |---|---|---|---|
 | Finding a tool | PATH, augmented from the login shell | PATH with PATHEXT, absolute entries only; npm/pnpm `.cmd` shims read for the `.js` or `.exe` they start | `env-path.ts`, `tool-launch.ts` |
 | `git`, `gh`, an app's command | by name | by absolute path: given a bare name, Windows looks in the working directory (the project) first | `tool-launch.ts` `programPath`, `resolveCommand` |
-| Ending a tree | process groups, TERM then KILL | `taskkill /T /F`, one shot; a pty's `kill()` gets no signal | `dev-services/kill-tree.ts` |
+| Ending a tree | process groups, TERM then KILL | `taskkill /T /F`, one shot; a pty's `kill()` gets no signal. What an app left running after it ended is found by parent links and creation times (one PowerShell CIM listing, ~0.5 s) and ended the same way | `dev-services/kill-tree.ts` |
 | Terminal / Run button | login shell `-l` / `-lc` | `pwsh` or Windows PowerShell, `-NoLogo` / `cmd.exe /d /s /c` | `dev-services/terminal.ts` |
 
 Quitting closes the host's stdin (it runs with `--watch-parent`, so EOF runs the same shutdown as

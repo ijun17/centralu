@@ -8,7 +8,7 @@
  * --log   writes what this process saw, one JSON object per line. Tests count "how many times it
  *         started", "which methods arrived", and "what environment it received" from this file —
  *         judging by what the app actually experienced, not by anything the host says.
- * --mode  normal | crash-on-start | ignore-eof | grandchild | stubborn-grandchild | hold-fd3 | flood-stderr
+ * --mode  normal | crash-on-start | ignore-eof | grandchild | stubborn-grandchild | detached-grandchild | hold-fd3 | flood-stderr
  *         | secret-to-stderr | bad-tool-name | mediation | view | attach
  *
  * `attach` is the bundle for A-5 (attaching to a session): tools with different annotations (the
@@ -89,6 +89,16 @@ if (MODE === 'stubborn-grandchild') {
     kid.stdout.destroy()
     kid.unref()
   })
+}
+if (MODE === 'detached-grandchild') {
+  /*
+   * A grandchild started outside the app's own job, the way any non-Node app (Python, a shell) starts its children on
+   * Windows. Node puts a child spawned without `detached` into a job that ends it together with this process; this one
+   * is not in it, so on Windows it outlives the app unless the host collects it (#14).
+   */
+  const kid = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true, windowsHide: true })
+  kid.unref()
+  log({ t: 'grandchild', grandchild: kid.pid })
 }
 if (MODE === 'ignore-eof' || MODE === 'grandchild') {
   // A grandchild in the same group — left orphaned unless the host ends the whole tree
