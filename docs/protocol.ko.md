@@ -7,7 +7,7 @@
 ## 1. 전송 계층
 
 - WebSocket, 텍스트 프레임 1개 = JSON 메시지 1개.
-- 연결 직후 핸드셰이크: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → 불일치 시 즉시 종료(에러 코드와 함께), 성공하면 `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch, build? }`. 토큰은 호스트가 시작될 때 생성되며, dev에서는 환경 변수로 전달된다.
+- 연결 직후 핸드셰이크: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → 토큰이 틀리면 4001로 닫는다. 프로토콜이 다르면 `id: '0'`인 `res` 프레임 하나에 `version_mismatch`를 실어 보내고 4002로 닫는다. 메시지는 두 숫자와 어느 쪽이 더 오래되었는지를 말한다("Protocol version mismatch: Centralu 0.2.0 speaks protocol 3, the app speaks protocol 2. The app is older: …"). 원격 호스트(`centralu serve`, [agent-host.ko.md](agent-host.ko.md) §4.7)에서는 둘이 따로 업데이트되기 때문이다. 성공하면 `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch, build? }`. 토큰은 호스트가 시작될 때 생성되며, dev에서는 환경 변수로 전달된다.
 - `hello_ok.build`(#280)는 호스트가 어떤 빌드이고 어디서 왔는지 말한다: `{ commit, protocolVersion, version?, bundlePath?, copyDir? }`. 키퍼 아래에서는 한 빌드의 창이 다른 빌드의 호스트에 붙을 수 있고, 클라이언트는 이것으로 안다. 커밋은 호스트 자신에 컴파일된 것이고, 나머지는 키퍼가 호스트를 복사해 온 번들의 기록이다([agent-host.ko.md](agent-host.ko.md) §4.1). 선택 필드다: 옛 호스트는 보내지 않고, 소스로 띄운 호스트는 `commit: 'dev'`를 보낸다.
 - **정문** (#280 3단계). 키퍼 아래에서 클라이언트는 호스트 자신의 포트로 붙지 않는다: 키퍼의 정문 `ws://127.0.0.1:<door>`로 붙고, 정문은 바이트를 그때의 호스트로 넘긴다. 토큰은 키퍼의 것이고 키퍼가 띄우는 모든 호스트에 넘겨진다(`CC_HOST_TOKEN`). 프레임은 아무것도 바뀌지 않는다: `hello`, 토큰 검사, `Origin` 규칙은 예전처럼 호스트가 한다. 호스트가 바뀌면 정문을 지나던 연결이 닫힌다. 같은 주소와 같은 토큰으로 다시 붙으면 새 호스트에 닿고, 그 `hello_ok`는 새 `streamEpoch`를 실어 클라이언트가 다시 맞춘다. 준비된 호스트가 없는 동안 연 연결은 실패하지 않고 정문에서 기다린다(최대 45초).
 - **교체를 위해 드레인하는 호스트** (#280 3단계)는 새 RPC를 거절하고, 한도(10초)가 지나도록 도는 RPC에는 `internal`과 `retryable: true`로 답한다: 거절된 호출은 돈 적이 없고, 끊긴 호출은 끝났을 수도 있다고 메시지에 적혀 있으니 호출한 쪽이 확인한 뒤 되풀이한다. 클라이언트는 모르는 코드의 프레임을 버리므로 코드는 `internal`로 둔다.

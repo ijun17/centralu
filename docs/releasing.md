@@ -11,11 +11,19 @@ Five packages go to npm:
 |---|---|---|
 | `centralu` | a launcher script, a few KB | every supported platform |
 | `@centralu/darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
-| `@centralu/linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
-| `@centralu/linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 |
+| `@centralu/linux-x64` | `Centralu.AppImage`, `icon.png`, `host/` | Linux, x86-64 |
+| `@centralu/linux-arm64` | `Centralu.AppImage`, `icon.png`, `host/` | Linux, arm64 |
 | `@centralu/win32-x64` | a `Centralu\` folder: `centralu.exe`, `resources\host\` | Windows, x86-64 — from 0.1.0-beta.9 |
 
 **The platform packages are scoped (`@centralu/…`) from 0.1.0-beta.10.** The first publish of an unscoped `centralu-win32-x64` (0.1.0-beta.8) was refused with `403 … Package name triggered spam detection`; the `@centralu` scope belongs to the owner's npm organization, so nobody can take or squat a name under it. Up to 0.1.0-beta.9, macOS and Linux shipped as `centralu-darwin-arm64`, `centralu-linux-x64` and `centralu-linux-arm64`; those stay on the registry, marked deprecated, so older shims that pin them keep installing. The shim itself stays the unscoped `centralu`, because it is the name people type; it is managed by the organization through its `developers` team. Users never type a platform package's name.
+
+The Linux packages carry the bundled host a second time, unpacked, as `host/` beside the AppImage. `centralu serve`
+(the remote mode's headless host, [agent-host.md](agent-host.md) §4.7) runs it with the system Node; the copy inside
+the AppImage is only reachable by mounting the AppImage (FUSE, which servers often lack) or extracting it on every
+start. It costs about 11 MB. macOS and Windows need no second copy: `Centralu.app/Contents/Resources/resources/host`
+and `Centralu\resources\host` are plain folders already. `scripts/release-npm.mts` copies it from
+`src-tauri/resources/host` and checks that `main.mjs`, `bundle-info.json` (for this machine) and both native modules
+are there.
 
 `centralu` declares the others as `optionalDependencies` and carries `os`/`cpu`
 fields on each of them, so npm installs exactly one bundle for the machine doing the

@@ -28,6 +28,7 @@ import {
   busyMessage,
   earlyExitMessage,
   executableIn,
+  hostDirIn,
   installedPaths,
   isBusyError,
   launchPlan,
@@ -40,7 +41,8 @@ import {
   webview2Status,
   windowsInstall,
 } from './platform.mjs'
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { parseServeArgs, printConnection, rotateToken, runServe, SERVE_HELP } from './serve.mjs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -102,6 +104,37 @@ function explainMissing() {
     `Could not find the app package (${TARGET.pkg}).\n` +
     'The install may have been interrupted — please reinstall with `npm i -g centralu`.'
   )
+}
+
+/**
+ * The bundled host's entry (`resources/host/main.mjs`) for `centralu serve`, or exit with why not.
+ *
+ * `CENTRALU_HOST_ENTRY` points it at another host instead: a source checkout's
+ * `packages/agent-host/src/main.ts` while developing, or a freshly bundled `resources/host/main.mjs`.
+ * The tests start `serve` that way (tooling/launcher-serve.test.ts).
+ */
+function requireHostEntry() {
+  if (process.env.CENTRALU_HOST_ENTRY) return process.env.CENTRALU_HOST_ENTRY
+  if (!TARGET) {
+    console.error(explainMissing())
+    process.exit(1)
+  }
+  let root
+  try {
+    root = dirname(require.resolve(`${TARGET.pkg}/package.json`))
+  } catch {
+    console.error(explainMissing())
+    process.exit(1)
+  }
+  const entry = join(hostDirIn(PLATFORM, join(root, TARGET.artifact)), 'main.mjs')
+  if (!existsSync(entry)) {
+    console.error(
+      `The host is missing from ${TARGET.pkg} (looked for ${entry}).\n` +
+        'Linux packages published before `centralu serve` existed do not carry it. Update with `npm i -g centralu`.',
+    )
+    process.exit(1)
+  }
+  return entry
 }
 
 function requireApp() {
@@ -484,6 +517,8 @@ const HELP = `${APP_NAME} ${pkg.version}
                         Windows: %LOCALAPPDATA%\\Programs\\Centralu and a Start menu shortcut)
   centralu uninstall    Removes that registration (conversation history is kept)
   centralu update       Upgrades if a new version is available
+  centralu serve        Runs the host alone on this machine, for the app on another computer
+                        to reach over SSH (\`centralu serve --help\`)
   centralu --version    Prints the version
 
 Requires: Node 22+, and the claude or codex CLI (the app's first screen reports the status)`
@@ -499,6 +534,33 @@ switch (cmd) {
   case 'update':
     await update()
     break
+  case 'serve': {
+    // No update notice here: `--connection`'s stdout is read by a program, and a foreground
+    // server's terminal is a log.
+    const args = parseServeArgs(rest)
+    if (args.error) {
+      console.error(args.error)
+      process.exit(2)
+    }
+    if (args.mode === 'help') {
+      console.log(SERVE_HELP)
+      break
+    }
+    try {
+      if (args.mode === 'rotate') {
+        process.exitCode = rotateToken({ env: process.env, home: HOME })
+        break
+      }
+      // realpath: npm's bin is a symlink to this file, and the launcher must not depend on the link
+      const opts = { env: process.env, home: HOME, entry: requireHostEntry(), version: pkg.version, cliPath: realpathSync(process.argv[1]) }
+      process.exitCode = args.mode === 'connection' ? await printConnection(opts) : await runServe({ ...opts, port: args.port })
+    } catch (e) {
+      // A state file that cannot be read or written: one sentence, not a stack, and nothing on stdout
+      console.error(`centralu serve: ${e?.message ?? e}`)
+      process.exitCode = 1
+    }
+    break
+  }
   case '--version':
   case '-v':
     console.log(pkg.version)

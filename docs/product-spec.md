@@ -70,7 +70,12 @@ To stop the scope leaking, what v1 explicitly **does not do**:
   is a structured GUI, not a PTY wrap — but a project terminal beside it turned out to be part of watching a
   project, not a replacement for the conversation. Recorded rather than deleted, same reasoning as the grid line below.
 - Advanced git operations (rebase, cherry-pick etc. — read-oriented; commit/staging come later)
-- Remote/cloud execution (local projects on the local machine only)
+- ~~Remote/cloud execution (local projects on the local machine only)~~ — **narrowed 2026-10-05 (#82).**
+  A project may live on another machine the person reaches over SSH. That machine runs its own, independent host
+  (own store, own agent sign-ins, own files), started there with `centralu serve`; the app talks to it through an SSH
+  local forward. It is opt-in and for one trusted person: the host listens on loopback on both ends, nothing is ever
+  exposed on a public port, and there is no shared or multi-user server. **Cloud execution stays a non-goal**: Centralu
+  does not run agents on infrastructure of its own. How it is built: [agent-host.md](agent-host.md) §4.7.
 - Tools other than Claude Code and Codex (only the adapter structure is designed to extend)
 - ~~**Concurrent split grid view**~~ — **withdrawn 2026-08-20.** It was built, and it ships marked **experimental** (§5.4).
   The line is kept rather than deleted: there was a period where this document said "we do not build this"

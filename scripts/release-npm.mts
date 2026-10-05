@@ -142,6 +142,32 @@ function head(path: string, n: number): Buffer {
   return buf
 }
 
+/**
+ * The bundled host, unpacked beside the AppImage, for `centralu serve` (#82).
+ *
+ * The app's own copy is inside the AppImage's squashfs, which a headless server can only reach by
+ * mounting it (FUSE, often missing there) or extracting it on every start. So the Linux packages
+ * carry the same folder a second time, as plain files; `hostDirIn` in the launcher's platform.mjs
+ * looks for it here. Taken from `src-tauri/resources/host`, which the build's `beforeBuildCommand`
+ * has just written, for the same reason as the Windows target below. `dereference`: npm drops
+ * symlinks from a tarball without a word.
+ */
+function installLinuxHost(pkgDir: string): void {
+  const dest = join(pkgDir, 'host')
+  rmSync(dest, { recursive: true, force: true })
+  cpSync(join(ROOT, 'apps/desktop/src-tauri/resources/host'), dest, { recursive: true, dereference: true })
+}
+
+/** The files `centralu serve` cannot start without, in the unpacked Linux host */
+function checkLinuxHost(pkgDir: string): void {
+  for (const rel of ['host/main.mjs', 'host/bundle-info.json', 'host/node_modules/better-sqlite3/package.json', 'host/node_modules/node-pty/package.json']) {
+    if (!existsSync(join(pkgDir, rel))) fail(`${rel} is missing from the package — \`centralu serve\` would not start`)
+  }
+  const info = JSON.parse(readFileSync(join(pkgDir, 'host/bundle-info.json'), 'utf8')) as { platform?: string; arch?: string }
+  if (`${info.platform}-${info.arch}` !== HOST) fail(`the unpacked host was bundled for ${info.platform}-${info.arch}, not ${HOST}`)
+  console.log('  unpacked host present (for centralu serve)')
+}
+
 type Target = {
   /** npm package suffix (`centralu-<id>`) *and* the `packaging/npm/` directory name */
   id: string
@@ -239,8 +265,10 @@ const TARGETS: Record<string, Target | undefined> = {
        * node-pty's spawn-helper, and the comment there records how long that one took to find.
        */
       chmodSync(dest, 0o755)
+      installLinuxHost(dirname(dest))
     },
     check: (dest) => {
+      checkLinuxHost(dirname(dest))
       /*
        * (a) macOS verifies the code signature here. An AppImage has none, so check what the
        *     signature was really standing in for: that this file is the artifact we think it
@@ -290,8 +318,10 @@ const TARGETS: Record<string, Target | undefined> = {
       cpSync(src, dest)
       cpSync(join(ROOT, 'apps/desktop/src-tauri/icons/icon.png'), join(dirname(dest), 'icon.png'))
       chmodSync(dest, 0o755)
+      installLinuxHost(dirname(dest))
     },
     check: (dest) => {
+      checkLinuxHost(dirname(dest))
       // (a) same AppImage-magic check as linux-x64 — arch-independent
       const magic = head(dest, 11)
       if (magic.subarray(0, 4).toString('latin1') !== '\x7fELF') fail(`not an ELF binary: ${dest}`)

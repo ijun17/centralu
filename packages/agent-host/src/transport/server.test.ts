@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
 import { PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
-import { HostServer, parseAllowedOrigins, type HostServerOptions } from './server.js'
+import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 
 const TOKEN = 'test-token'
@@ -321,6 +321,25 @@ describe('handshake', () => {
     await c.open()
     c.send({ kind: 'hello', token: TOKEN, protocolVersion: 999 })
     expect(await c.closed()).toBe(4002)
+  })
+
+  it('tells a newer app that the host is the side to update', async () => {
+    const { port } = await start()
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION + 1 })
+    expect(await c.closed()).toBe(4002)
+    const refusal = c.frames.find((f) => f.kind === 'res') as { error: { code: string; message: string } } | undefined
+    expect(refusal?.error.code).toBe('version_mismatch')
+    expect(refusal?.error.message).toContain(`host speaks protocol ${PROTOCOL_VERSION}`)
+    expect(refusal?.error.message).toContain('update Centralu where the host runs')
+  })
+
+  it('tells an older app that the app is the side to update, naming the host version', () => {
+    const message = versionMismatchMessage(3, 2, '0.2.0')
+    expect(message).toContain('Centralu 0.2.0 speaks protocol 3, the app speaks protocol 2')
+    expect(message).toContain('update the Centralu app on this computer')
+    expect(message).not.toContain('where the host runs')
   })
 
   it('closes the connection if RPC is sent without authenticating', async () => {

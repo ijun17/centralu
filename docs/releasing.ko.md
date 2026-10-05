@@ -12,11 +12,18 @@ npm에는 다섯 개의 패키지가 올라간다:
 |---|---|---|
 | `centralu` | 런처 스크립트, 몇 KB | 지원하는 모든 플랫폼 |
 | `@centralu/darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
-| `@centralu/linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
-| `@centralu/linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 |
+| `@centralu/linux-x64` | `Centralu.AppImage`, `icon.png`, `host/` | Linux, x86-64 |
+| `@centralu/linux-arm64` | `Centralu.AppImage`, `icon.png`, `host/` | Linux, arm64 |
 | `@centralu/win32-x64` | `Centralu\` 폴더: `centralu.exe`, `resources\host\` | Windows, x86-64 — 0.1.0-beta.9부터 |
 
 **플랫폼 패키지는 0.1.0-beta.10부터 스코프 이름(`@centralu/…`)이다.** 스코프 없는 `centralu-win32-x64`를 처음 올릴 때(0.1.0-beta.8) `403 … Package name triggered spam detection`으로 거부되었다. `@centralu` 스코프는 소유자의 npm 조직 것이라 그 아래 이름은 누구도 가져가거나 선점할 수 없다. 0.1.0-beta.9까지 macOS와 Linux는 `centralu-darwin-arm64`, `centralu-linux-x64`, `centralu-linux-arm64`로 나갔고, 이 패키지들은 사용 중단 표시를 단 채 레지스트리에 남아 그것을 핀한 옛 shim이 계속 설치되게 한다. shim 자체는 사람들이 치는 이름이라 스코프 없는 `centralu`로 두고, 조직의 `developers` 팀을 통해 관리한다. 사용자는 플랫폼 패키지 이름을 칠 일이 없다.
+
+Linux 패키지는 번들 호스트를 한 번 더, 풀린 채로 AppImage 옆의 `host/`로 싣는다. `centralu serve`(원격 모드의 화면 없는
+호스트, [agent-host.ko.md](agent-host.ko.md) §4.7)가 그것을 시스템 Node로 돌린다. AppImage 안의 사본은 AppImage를
+마운트하거나(서버에 흔히 없는 FUSE) 시작할 때마다 풀어야만 닿는다. 약 11 MB가 든다. macOS와 Windows에는 두 번째 사본이
+필요 없다: `Centralu.app/Contents/Resources/resources/host`와 `Centralu\resources\host`는 이미 평범한 폴더다.
+`scripts/release-npm.mts`가 `src-tauri/resources/host`에서 복사하고, `main.mjs`, (이 머신용) `bundle-info.json`, 두
+네이티브 모듈이 있는지 확인한다.
 
 `centralu`는 나머지를 `optionalDependencies`로 선언하고 각각에 `os`/`cpu` 필드를 달아 둔다. 그래서 npm은 설치를 수행하는 머신에 맞는 번들 딱 하나만 설치한다. esbuild와 swc가 쓰는 것과 같은 구성이며, 이유는 크기다: Linux 머신에 macOS 번들을 내려받을 사람은 없다.
 

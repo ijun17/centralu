@@ -17,6 +17,7 @@
   ],
   "files": [
     "Centralu.AppImage",
-    "icon.png"
+    "icon.png",
+    "host"
   ]
 }

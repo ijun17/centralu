@@ -400,7 +400,7 @@ export class HostServer {
         if (frame.data.protocolVersion !== PROTOCOL_VERSION) {
           this.sendError(ws, null, {
             code: 'version_mismatch',
-            message: `Protocol version mismatch (server ${PROTOCOL_VERSION}, client ${frame.data.protocolVersion})`,
+            message: versionMismatchMessage(PROTOCOL_VERSION, frame.data.protocolVersion, this.opts.build?.version),
             retryable: false,
           })
           ws.close(4002, 'version mismatch')
@@ -484,6 +484,25 @@ export class HostServer {
   }
 }
 
+
+/**
+ * The refusal a client of another protocol gets (#82), worded for the person who has to act on it.
+ *
+ * With the app and the host on one machine they always came from one install, so "server 1,
+ * client 2" was enough. With a host on another machine (`centralu serve`) the two are updated
+ * separately, and the message has to say which of them is behind: the older side is the one to
+ * update. The client shows it as is. `centralu serve --connection` reads the host's number back
+ * out of either wording (`mismatchServerVersion` in packaging/npm/centralu/bin/serve.mjs), so
+ * "host speaks protocol N" stays in the text.
+ */
+export function versionMismatchMessage(server: number, client: number, hostVersion?: string): string {
+  const host = hostVersion ? `Centralu ${hostVersion}` : 'This host'
+  const which =
+    server < client
+      ? 'The host is older: update Centralu where the host runs (npm i -g centralu), then restart it.'
+      : 'The app is older: update the Centralu app on this computer.'
+  return `Protocol version mismatch: ${host} speaks protocol ${server}, the app speaks protocol ${client}. ${which}`
+}
 
 /**
  * Only a code the protocol knows about ever goes out (dogfooding, 2026-09-10).

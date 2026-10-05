@@ -213,6 +213,30 @@ outbound backlog passes 64 MiB is cut, so a connection cannot make the host hold
 an endless slot (#82; `transport/server.ts`, `TRANSPORT_LIMITS`). An authenticated socket's hello is
 answered once; a repeat is ignored.
 
+## The remote host (`centralu serve`, #82)
+
+A host started with `centralu serve` on another machine is reached by the app through an SSH local forward
+([agent-host.md](agent-host.md) §4.7). The boundary is the one above, unchanged: loopback binding and the token.
+
+- **Nothing listens on a public interface.** The host binds 127.0.0.1 on the remote; the forward binds 127.0.0.1 on
+  the person's computer. Reaching the host takes an SSH login to that machine as that user, so SSH is what
+  authenticates the person and encrypts the link. Centralu adds no listener, no TLS and no login of its own.
+- **The token** is 32 random bytes in `<data folder>/serve.json`, created with mode 0600 (never written wider and
+  narrowed later) and set back to 0600 whenever `serve` finds it wider. It is printed only by
+  `centralu serve --connection`, which the client runs over SSH; the host's ready line, which also carries it, is read
+  by the launcher and passed on to nothing. It reaches the host in the environment (`CC_HOST_TOKEN`, readable only by
+  the owner), not on the command line, which every user on the machine can read with `ps`. It does not change across
+  restarts until `--rotate-token`.
+- **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
+  a desktop. A machine where another user can read your files (root, or a wrong home-folder mode) can read the token;
+  the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).
+- **Single trusted user.** One host per data folder (the ownership lock), one person's sign-ins. There is no
+  account model and no sharing between people.
+- **Headless.** The host starts without `DISPLAY` / `WAYLAND_DISPLAY`, so nothing it starts can raise a window or a
+  keyring prompt on that machine.
+- **What the client must not do:** forward with a wildcard bind address (`-L 0.0.0.0:…`) or `GatewayPorts`, which
+  would expose the host's port on the client's network with only the token in front of it.
+
 ## The keeper's control socket
 
 The keeper (`centralu --keeper`, #280) is a new trust boundary: through its socket a process can read the front

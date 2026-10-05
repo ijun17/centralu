@@ -709,6 +709,100 @@ its background work.
 `capabilityCheck({ tool, from, to })`. #270 proposes re-running the probes for what a tool could not do when its version
 moves; nothing implements that yet, so the default writes one line to host.log saying so. The probes plug in there.
 
+### 4.7 Remote mode, phase 1: `centralu serve` (#82)
+
+The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,
+independent host: its own store, its own agent CLI sign-ins, its own files and terminals (#82, decision 1). In phase 1
+the person installs and starts that host by hand; the app reaches it through an SSH local forward. Nothing listens on
+a public interface on either end: the remote host binds 127.0.0.1, and so does the forward on the person's computer.
+The app installing the host over SSH is phase 3, after its lifecycle contract is written (#82, decision 4).
+
+**On the remote machine:**
+
+1. Install Node 22 or later, then `npm i -g centralu`. On Linux the platform package carries the bundled host
+   unpacked beside the AppImage (`host/`, [releasing.md](releasing.md)), so running it needs no display, no FUSE and
+   no desktop libraries.
+2. Install Claude Code and/or Codex there and sign in (`claude`, then `/login`; `codex login`). The host uses that
+   machine's sign-ins, never the client's.
+3. Run `centralu serve`. It stays in the foreground and logs to stderr (and to `~/.centralu/host.log`, as always).
+   The line to look for is `[centralu serve] listening on 127.0.0.1:17175 …`.
+4. Keep it running with whatever you already use: tmux, `nohup`, or a `systemd --user` unit (below). Real
+   supervision, an update path and uninstall come with the installer in phase 3.
+
+```ini
+# ~/.config/systemd/user/centralu.service
+[Unit]
+Description=Centralu host (centralu serve)
+
+[Service]
+# The launcher serve keeps up to date, so the unit does not depend on npm's PATH
+ExecStart=%h/.centralu/bin/centralu serve
+# SIGTERM to the launcher only; it passes one to the host, which stops its own agents first
+KillMode=mixed
+TimeoutStopSec=30
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+Then `systemctl --user daemon-reload && systemctl --user enable --now centralu`, and once,
+`loginctl enable-linger $USER`, so the host keeps running after you log out. Run the first `centralu serve` by hand:
+that is what writes `~/.centralu/bin/centralu`.
+
+**The commands:**
+
+| Command | What it does |
+|---|---|
+| `centralu serve` | Starts the host in the foreground on `127.0.0.1:<port>`. Exit code: the host's own (0 after a clean stop) |
+| `centralu serve --port <n>` | The same, on that port. The port is recorded, and the next `serve` without a flag uses it |
+| `centralu serve --connection` | Prints one JSON line and exits (below). Creates the token if there is none yet |
+| `centralu serve --rotate-token` | Replaces the token, keeping the port. A running serve keeps the old one until it restarts |
+| `centralu serve --help` | The above |
+
+`--connection` answers the one question the client asks over `ssh -T -o BatchMode=yes <target> …`:
+
+```json
+{"v":1,"port":17175,"token":"…","version":"0.1.0-beta.11","protocolVersion":1,"dataDir":"/home/me/.centralu","hostRunning":true}
+```
+
+| Field | Meaning |
+|---|---|
+| `v` | The shape of this line. A client that does not know the number says which side to update |
+| `port` | Where the host listens on the remote's loopback: the port the last `serve` listened on, else 17175 |
+| `token` | The token for the hello. The same across restarts until `--rotate-token` |
+| `version`, `protocolVersion` | The running host's when `hostRunning`, read from its `hello_ok`; otherwise the installed package's (`host/bundle-info.json`). They differ after an `npm i -g` the host was not restarted for |
+| `dataDir` | The data folder the host owns |
+| `hostRunning` | A host holding this token answered a hello on `port` just now. A TCP connect alone does not count |
+
+stdout carries that line and nothing else; anything to explain goes to stderr. If the command is not found (exit 127),
+the SSH shell's PATH lacks npm's global folder (nvm, fnm, volta and `~/.npm-global` set it only in interactive
+shells): use `~/.centralu/bin/centralu`, which `serve` and `--connection` keep pointing at this install and this Node
+by absolute path. Those paths are versioned under nvm and Homebrew, so after a Node upgrade the launcher fails until
+`centralu serve` (or `--connection`) runs once from an interactive shell and rewrites it.
+
+| Decision | Why |
+|---|---|
+| A launcher starts the bundled host on the system Node; no keeper | The same `resources/host` the app runs, so a remote host is not a second build to keep working. The keeper exists to swap builds under a window and to hold agents across restarts; a headless host needs neither yet |
+| Bound to 127.0.0.1 only, reached through an SSH local forward | SSH already authenticates the person and encrypts the link. A public port would need TLS and a login of our own, and every scanner on the internet would find it |
+| The token lives in `<data folder>/serve.json`, mode 0600 from the first byte, narrowed back if it drifts | It is the key to every RPC on that machine. `--connection` prints it and nothing else does: the host's ready line, which carries it, is read by the launcher and never passed on |
+| The token reaches the host in `CC_HOST_TOKEN`, not `--token` | Any user on the machine can read another's command line (`ps`); only the owner can read a process's environment. The host deletes the variable after reading it |
+| Token and port are generated once and kept | The client stores them and reconnects without an SSH round trip; it runs `--connection` again only when a hello is refused |
+| Default port 17175 | Below every OS's ephemeral range and below the host's per-app view origins (20000–32767, `views/origin-ports.ts`) |
+| The host gets its own process group and `--watch-parent` | Ctrl+C reaches the launcher, which passes one SIGINT to the host alone, and the host stops its agents in order. Killing the launcher, even with SIGKILL, closes the host's stdin and takes it down: it is never left running unsupervised (`tooling/launcher-serve.test.ts`) |
+| A signal during startup is held until the host can shut down | Before the host attaches its handlers the kernel's default applies and ends it on the spot. Measured: a SIGINT passed on as soon as the ready line was read killed the host every time. Now it shuts down cleanly once started; a second signal while starting exits at once (`main.ts`, `pendingSignal`) |
+| A second `serve`, or any other host on the same data folder, is refused | The ownership lock (`instance-lock.ts`) is the authority. `serve` first asks the port it recorded, so a serve already up is named with its port; for any other owner the host's lock message is followed by a line naming the pid |
+| No `DISPLAY` / `WAYLAND_DISPLAY` in the host's environment | Nothing it starts can open a window or a keyring dialog nobody would see; a tool that would ask falls back to its file store or fails with a message in the log |
+| Windows: no own group, no forwarding | `detached` means a new console there; the host shares the launcher's console and gets Ctrl+C itself. Not exercised yet |
+
+**What phase 1 does not cover.** App views open from the host's HTTP door at `127.0.0.1:<port>`, so they work
+through a forward whose local port equals the remote port. An app whose manifest asks for its own origin gets a port of
+its own (`views/origin-ports.ts`), which one forward does not carry. The client's host list, search across machines and
+the grid layout moving to the client are the client's part of #82.
+
+A host refuses a client of another protocol with `version_mismatch` and close code 4002. The message names both numbers
+and which side is older, so the person knows whether to update the app or the remote ([protocol.md](protocol.md) §1).
+
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 
 When the Node sidecar became the deployment path in M1.5, the plan to "move it to Rust at Tauri step 4 and delete it"

@@ -632,6 +632,100 @@ automatically when idle", `updates.setAutoApply`, 저장소의 앱 설정에 `up
 #270은 버전이 바뀌면 도구가 못 하던 것에 대한 탐침을 다시 돌리자고 제안한다. 아직 구현한 것이 없으므로 기본값은
 host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 
+### 4.7 원격 모드 1단계: `centralu serve` (#82)
+
+앱은 다른 머신(SSH 서버, 나중에는 노트북)에 있는 프로젝트를 다룰 수 있다. 그 머신은 자기만의 독립된 호스트를 돌린다:
+자기 저장소, 자기 에이전트 CLI 로그인, 자기 파일과 터미널 (#82, 결정 1). 1단계에서는 사람이 그 호스트를 직접 설치하고
+띄우며, 앱은 SSH 로컬 포워드로 닿는다. 양쪽 어디에서도 공개 인터페이스에 열린 것이 없다: 원격 호스트는 127.0.0.1에
+바인드하고, 사람의 컴퓨터 쪽 포워드도 마찬가지다. 앱이 SSH로 호스트를 설치하는 것은 수명 주기 계약을 쓴 뒤의
+3단계다 (#82, 결정 4).
+
+**원격 머신에서:**
+
+1. Node 22 이상을 설치하고 `npm i -g centralu`. Linux에서는 플랫폼 패키지가 번들 호스트를 AppImage 옆에 풀린 채로
+   싣고 있으므로(`host/`, [releasing.ko.md](releasing.ko.md)) 돌리는 데 디스플레이도 FUSE도 데스크톱 라이브러리도
+   필요 없다.
+2. 그 머신에 Claude Code 및/또는 Codex를 설치하고 로그인한다 (`claude` 후 `/login`, `codex login`). 호스트는 그
+   머신의 로그인을 쓰며, 클라이언트의 것은 결코 쓰지 않는다.
+3. `centralu serve`를 실행한다. 전경에 머물며 stderr에 (그리고 늘 그렇듯 `~/.centralu/host.log`에) 로그를 쓴다.
+   찾을 줄은 `[centralu serve] listening on 127.0.0.1:17175 …`이다.
+4. 이미 쓰는 것으로 계속 돌게 둔다: tmux, `nohup`, 또는 `systemd --user` 유닛 (아래). 진짜 감독, 업데이트 경로,
+   제거는 3단계의 설치기와 함께 온다.
+
+```ini
+# ~/.config/systemd/user/centralu.service
+[Unit]
+Description=Centralu host (centralu serve)
+
+[Service]
+# The launcher serve keeps up to date, so the unit does not depend on npm's PATH
+ExecStart=%h/.centralu/bin/centralu serve
+# SIGTERM to the launcher only; it passes one to the host, which stops its own agents first
+KillMode=mixed
+TimeoutStopSec=30
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+그다음 `systemctl --user daemon-reload && systemctl --user enable --now centralu`, 그리고 한 번
+`loginctl enable-linger $USER`를 해서 로그아웃한 뒤에도 호스트가 돌게 한다. 첫 `centralu serve`는 손으로 실행한다:
+`~/.centralu/bin/centralu`를 쓰는 것이 그것이다.
+
+**명령:**
+
+| 명령 | 하는 일 |
+|---|---|
+| `centralu serve` | 호스트를 전경에서 `127.0.0.1:<port>`로 띄운다. 종료 코드는 호스트의 것 (깨끗이 멈추면 0) |
+| `centralu serve --port <n>` | 같은 것을 그 포트로. 포트는 기록되어, 플래그 없는 다음 `serve`가 그것을 쓴다 |
+| `centralu serve --connection` | JSON 한 줄을 찍고 끝난다 (아래). 토큰이 아직 없으면 만든다 |
+| `centralu serve --rotate-token` | 포트는 두고 토큰을 바꾼다. 돌고 있는 serve는 재시작할 때까지 옛 토큰을 쓴다 |
+| `centralu serve --help` | 위의 것 |
+
+`--connection`은 클라이언트가 `ssh -T -o BatchMode=yes <target> …`로 묻는 단 하나의 질문에 답한다:
+
+```json
+{"v":1,"port":17175,"token":"…","version":"0.1.0-beta.11","protocolVersion":1,"dataDir":"/home/me/.centralu","hostRunning":true}
+```
+
+| 필드 | 뜻 |
+|---|---|
+| `v` | 이 줄의 모양. 그 숫자를 모르는 클라이언트는 어느 쪽을 업데이트할지 말한다 |
+| `port` | 호스트가 원격의 루프백에서 듣는 곳: 마지막 `serve`가 들은 포트, 없으면 17175 |
+| `token` | hello에 쓸 토큰. `--rotate-token` 전까지 재시작해도 같다 |
+| `version`, `protocolVersion` | `hostRunning`이면 돌고 있는 호스트의 것(그 `hello_ok`에서 읽는다), 아니면 설치된 패키지의 것(`host/bundle-info.json`). 호스트를 재시작하지 않은 `npm i -g` 뒤에는 둘이 다르다 |
+| `dataDir` | 호스트가 소유하는 데이터 폴더 |
+| `hostRunning` | 이 토큰을 가진 호스트가 방금 `port`에서 hello에 답했다. TCP 연결만으로는 치지 않는다 |
+
+stdout에는 그 줄만 나가고, 설명할 것은 stderr로 간다. 명령을 찾지 못하면(종료 코드 127) SSH 셸의 PATH에 npm의
+전역 폴더가 없는 것이다(nvm, fnm, volta, `~/.npm-global`은 대화형 셸에서만 그것을 넣는다): `~/.centralu/bin/centralu`를
+쓴다. `serve`와 `--connection`이 이것을 절대 경로로 이 설치와 이 Node에 맞춰 둔다. nvm과 Homebrew에서는 그 경로에
+버전이 들어 있으므로, Node를 올린 뒤에는 대화형 셸에서 `centralu serve`(또는 `--connection`)를 한 번 돌려 다시 쓰기
+전까지 이 런처가 실패한다.
+
+| 결정 | 이유 |
+|---|---|
+| 런처가 번들 호스트를 시스템 Node로 띄운다; 키퍼는 없다 | 앱이 돌리는 것과 같은 `resources/host`이므로, 원격 호스트는 따로 살려 둘 두 번째 빌드가 아니다. 키퍼는 창 밑에서 빌드를 바꾸고 재시작 너머로 에이전트를 쥐려고 있다; 화면 없는 호스트에는 아직 둘 다 필요 없다 |
+| 127.0.0.1에만 바인드하고 SSH 로컬 포워드로 닿는다 | SSH가 이미 사람을 인증하고 연결을 암호화한다. 공개 포트라면 TLS와 우리만의 로그인이 필요하고, 인터넷의 모든 스캐너가 그것을 찾는다 |
+| 토큰은 `<데이터 폴더>/serve.json`에, 첫 바이트부터 0600으로, 어긋나면 다시 좁혀 둔다 | 그 머신의 모든 RPC의 열쇠다. 찍는 것은 `--connection`뿐이다: 토큰을 실은 호스트의 준비 줄은 런처가 읽고 아무 데도 넘기지 않는다 |
+| 토큰은 `--token`이 아니라 `CC_HOST_TOKEN`으로 호스트에 간다 | 머신의 아무 사용자나 남의 명령줄을 읽을 수 있다(`ps`); 프로세스의 환경은 주인만 읽는다. 호스트는 읽은 뒤 그 변수를 지운다 |
+| 토큰과 포트는 한 번 만들고 둔다 | 클라이언트는 그것을 저장해 두고 SSH 왕복 없이 다시 붙는다; hello가 거절될 때만 `--connection`을 다시 돌린다 |
+| 기본 포트 17175 | 모든 OS의 임시 포트 범위보다, 그리고 호스트의 앱별 뷰 origin(20000–32767, `views/origin-ports.ts`)보다 아래 |
+| 호스트는 자기 프로세스 그룹과 `--watch-parent`를 갖는다 | Ctrl+C는 런처에 닿고, 런처가 호스트 하나에만 SIGINT를 한 번 넘기며, 호스트가 에이전트를 순서대로 멈춘다. 런처를 죽이면(SIGKILL이라도) 호스트의 stdin이 닫혀 함께 내려간다: 감독 없이 남겨지는 일이 없다 (`tooling/launcher-serve.test.ts`) |
+| 시작하는 동안 온 시그널은 호스트가 내려갈 수 있을 때까지 쥐고 있는다 | 호스트가 핸들러를 달기 전에는 커널 기본 동작이 적용되어 그 자리에서 끝난다. 측정: 준비 줄을 읽자마자 넘긴 SIGINT가 매번 호스트를 죽였다. 이제는 시작이 끝나면 깨끗이 내려간다; 시작하는 동안 두 번째 시그널이 오면 바로 끝난다 (`main.ts`, `pendingSignal`) |
+| 두 번째 `serve`, 또는 같은 데이터 폴더의 다른 어떤 호스트도 거절된다 | 소유권 잠금(`instance-lock.ts`)이 권위다. `serve`는 먼저 기록해 둔 포트에 물어보므로 이미 떠 있는 serve는 포트와 함께 이름이 나오고, 다른 소유자라면 호스트의 잠금 메시지 뒤에 pid를 대는 줄이 붙는다 |
+| 호스트 환경에 `DISPLAY` / `WAYLAND_DISPLAY`가 없다 | 호스트가 띄우는 무엇도 아무도 보지 못할 창이나 키링 대화상자를 열 수 없다; 물어보려던 도구는 파일 저장소로 물러나거나 로그에 메시지를 남기고 실패한다 |
+| Windows: 자기 그룹 없음, 넘기기 없음 | 거기서 `detached`는 새 콘솔을 뜻한다; 호스트는 런처의 콘솔을 같이 쓰고 Ctrl+C를 직접 받는다. 아직 돌려 보지 않았다 |
+
+**1단계가 다루지 않는 것.** 앱 뷰는 호스트의 HTTP 문 `127.0.0.1:<port>`에서 열리므로, 로컬 포트가 원격 포트와 같은
+포워드를 통해서는 동작한다. 매니페스트가 자기 origin을 요구하는 앱은 따로 포트를 받으며(`views/origin-ports.ts`),
+포워드 하나로는 실리지 않는다. 클라이언트의 호스트 목록, 머신을 가로지르는 검색, 그리드 배치를 클라이언트로 옮기는
+것은 #82의 클라이언트 쪽 몫이다.
+
+호스트는 다른 프로토콜의 클라이언트를 `version_mismatch`와 종료 코드 4002로 거절한다. 메시지는 두 숫자와 어느 쪽이
+더 오래되었는지를 말하므로, 사람은 앱을 업데이트할지 원격을 업데이트할지 안다 ([protocol.ko.md](protocol.ko.md) §1).
+
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 
 M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서 Rust로 옮기고 삭제한다"는 계획은

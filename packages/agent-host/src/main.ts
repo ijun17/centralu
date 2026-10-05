@@ -215,7 +215,8 @@ if (!lock.ok) {
   process.exit(1)
 }
 /*
- * A signal handler must never be attached here.
+ * A signal handler that ends the process must never be attached here (the one below only holds
+ * the signal for later).
  *
  * This used to register lock.release() + process.exit(0) on SIGINT/SIGTERM first. Since handlers
  * run in registration order, the real shutdown() registered afterward **never ran at all** — every
@@ -224,6 +225,26 @@ if (!lock.ok) {
  * path led to exit).
  */
 process.on('exit', lock.release)
+
+/*
+ * A signal that arrives before shutdown() exists is held, not obeyed (#82). Until a process has a
+ * listener for SIGINT or SIGTERM the kernel's default applies, which ends it on the spot: no
+ * shutdown, no WAL checkpoint, and whatever it had started already left behind. The ready line
+ * goes out well before the real handlers below are attached (the services start in between), and
+ * `centralu serve` measured the gap: a Ctrl+C passed on as soon as the ready line was read killed
+ * the host by SIGINT every time, while the same signal 3 s later shut it down cleanly. These only
+ * record the signal; the real handlers replace them and act on it (see `pendingSignal` below). A second
+ * signal before then exits at once, so a start that hangs can still be stopped from the terminal.
+ */
+let pendingSignal: NodeJS.Signals | null = null
+const holdSignal = (sig: NodeJS.Signals) => {
+  // A second one while still starting is someone insisting on a start that hangs: obey it
+  if (pendingSignal) process.exit(1)
+  pendingSignal = sig
+  console.error(`[agent-host] ${sig} while starting; shutting down once started (send it again to stop now)`)
+}
+process.on('SIGINT', holdSignal)
+process.on('SIGTERM', holdSignal)
 
 /*
  * A store a newer Centralu wrote, past what this host can read (#292), is refused here, in the same way as a lock
@@ -663,6 +684,10 @@ const shutdown = async (mode: LeaveMode, handOver: boolean) => {
  */
 process.on('SIGINT', () => void shutdown(onSignalMode, onSignalMode === 'detach'))
 process.on('SIGTERM', () => void shutdown(onSignalMode, onSignalMode === 'detach'))
+process.off('SIGINT', holdSignal)
+process.off('SIGTERM', holdSignal)
+// One that came while starting: the same ending it would have had, now that there is one
+if (pendingSignal) void shutdown(onSignalMode, onSignalMode === 'detach')
 // The keeper is stopping for good and asks this host to stop its children the way it always did. No next host to hand views to
 held?.children.on('stop', () => void shutdown('stop', false))
 

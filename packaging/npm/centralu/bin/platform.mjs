@@ -54,6 +54,23 @@ export function executableIn(platform, app) {
 }
 
 /**
+ * The bundled host (`resources/host`, the folder whose `main.mjs` the app runs) inside a
+ * platform package, for `centralu serve` (#82).
+ *
+ * - macOS: inside the bundle, where Tauri puts `bundle.resources`.
+ * - Windows: beside the exe, which is already how the folder ships (W1 in #307).
+ * - Linux: a `host/` folder next to the AppImage. The host inside the AppImage sits in a
+ *   squashfs that is only reachable by mounting it (FUSE, which headless servers often lack)
+ *   or by extracting it on every start, so `scripts/release-npm.mts` ships the same folder a
+ *   second time, unpacked. It is 11 MB; the AppImage is several times that.
+ */
+export function hostDirIn(platform, app) {
+  if (platform === 'darwin') return posix.join(app, 'Contents', 'Resources', 'resources', 'host')
+  if (platform === 'win32') return win32.join(app, 'resources', 'host')
+  return posix.join(posix.dirname(app), 'host')
+}
+
+/**
  * How to start the app: the command, its arguments, the spawn options, and whether the
  * launcher stays attached until it exits.
  *

@@ -40,6 +40,10 @@ packages/agent-host/src/adapters/codex/generated/*
 packaging/npm/darwin-arm64/*.app/
 packaging/npm/linux-x64/*.AppImage
 packaging/npm/linux-x64/icon.png
+packaging/npm/linux-x64/host/
+packaging/npm/linux-arm64/*.AppImage
+packaging/npm/linux-arm64/icon.png
+packaging/npm/linux-arm64/host/
 packaging/npm/win32-x64/Centralu/
 
 # 아이콘 후보 비교용 산출물 (pnpm icon --preview)
