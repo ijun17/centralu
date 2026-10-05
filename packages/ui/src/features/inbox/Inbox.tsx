@@ -65,10 +65,15 @@ export function Inbox() {
 
   return (
     <>
-      {/* Clicking outside closes it. Covers the screen without dimming it — a dropdown does not take the screen away */}
-      <div className="fixed inset-0 z-30" onClick={() => toggle(false)} data-testid="inbox-backdrop" />
+      {/*
+        Pressing outside closes it. Covers the screen without dimming it — a dropdown does not take the screen away.
+        On the press, not the click, and marked data-no-drag: this sits inside the top bar's window drag region, and on
+        Windows a window drag swallows the mouseup, so a click never came and the inbox stayed open (#365, DragRegion.tsx).
+      */}
+      <div className="fixed inset-0 z-30" onMouseDown={() => toggle(false)} data-no-drag data-testid="inbox-backdrop" />
       <div
         ref={panelRef}
+        data-no-drag
         tabIndex={-1}
         role="dialog"
         aria-label="Waiting"

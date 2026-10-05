@@ -164,9 +164,15 @@ export function UsageDonuts() {
 
       {open && (
         <>
-          {/* Clicking outside closes it — covers the screen without dimming it (same rule as the inbox) */}
-          <div className="fixed inset-0 z-30" onClick={() => show(null)} data-testid="usage-backdrop" />
+          {/*
+            Pressing outside closes it — covers the screen without dimming it (same rule as the inbox).
+            On the press, not the click, and marked data-no-drag: this sits inside the top bar's
+            window drag region, and on Windows a window drag swallows the mouseup, so a click never
+            came and the dropdown stayed open (#365, DragRegion.tsx).
+          */}
+          <div className="fixed inset-0 z-30" onMouseDown={() => show(null)} data-no-drag data-testid="usage-backdrop" />
           <div
+            data-no-drag
             className="cc-drop absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
             data-testid="usage-drop"
           >

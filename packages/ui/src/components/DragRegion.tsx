@@ -14,6 +14,14 @@ import { useStore } from '../store/store.js'
  * So mousedown is caught across the whole region, and unless the spot pressed is something
  * interactive (a button, an input), the drag is started manually. Every visible empty spot
  * becomes grabbable.
+ *
+ * **A popover that hangs inside the region marks itself `data-no-drag`**, its outside-click
+ * backdrop included (#365). The backdrop covers the whole screen from inside the region, so
+ * without the mark every press anywhere started a window drag. On Windows that is not just a
+ * moved window: tao starts the drag with ReleaseCapture and WM_NCLBUTTONDOWN/HTCAPTION, the
+ * system's modal move loop takes the mouse until the button is released, and the page never
+ * sees the mouseup — so a backdrop waiting for `click` never closed its dropdown. Backdrops
+ * close on mousedown for the same reason: nothing after the press has to reach the page.
  */
 export function DragRegion({
   children,
@@ -41,6 +49,12 @@ export function DragRegion({
       onMouseDown={(e) => {
         if (e.button !== 0) return
         const el = e.target as HTMLElement
+        /*
+         * Only a press on the region itself. React bubbles events through portals by the
+         * component tree, so a popover portalled to body (the background task list in the
+         * session header) arrives here although it is nowhere near the header on screen (#365).
+         */
+        if (!e.currentTarget.contains(el)) return
         // Does not drag over something interactive. Without this guard, buttons stop working
         if (el.closest('button, a, input, textarea, select, label, [role="button"], [data-no-drag]')) return
         void platform.system.startWindowDrag().catch((err: Error) => {
