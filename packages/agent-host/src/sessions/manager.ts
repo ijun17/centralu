@@ -1007,15 +1007,24 @@ export class SessionManager {
   setGridView(panels: readonly GridPanel[]): GridPanel[] {
     const known = new Set(this.meta.keys())
     const projects = new Set(this.store.listProjects().map((p) => p.id))
+    // A linked machine's session (#82) is kept while the hub's mirror knows it (links/links.ts)
+    const remote = (id: string) => !known.has(id) && this.linkedSession(id)
     const seen = new Set<string>()
     const clean = panels.filter((p) => {
       const key = p.kind === 'session' ? `session:${p.sessionId}` : `app:${p.projectId ?? '_user'}/${p.appId}`
       if (seen.has(key)) return false
       seen.add(key)
-      return p.kind === 'session' ? known.has(p.sessionId) : p.projectId === null || projects.has(p.projectId)
+      return p.kind === 'session' ? known.has(p.sessionId) || remote(p.sessionId) : p.projectId === null || projects.has(p.projectId)
     })
-    this.store.setGridView(clean)
+    this.store.setGridView(clean, remote)
     return clean
+  }
+
+  /** Whether a machine-qualified id names a session of a linked machine the hub knows (#82). None without links */
+  private linkedSession: (sessionId: string) => boolean = () => false
+
+  useLinkedSessions(known: (sessionId: string) => boolean): void {
+    this.linkedSession = known
   }
 
   async listProjects(): Promise<ProjectInfo[]> {

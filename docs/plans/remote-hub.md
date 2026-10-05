@@ -164,15 +164,84 @@ wakes sessions that were live. So the hub must:
 | 4 | Where should the ssh process live? | Keeper child vs `ControlPersist` across a blue-green hub swap: does the link survive, how long to reconnect |
 | 5 | How does a version mismatch behave? | Two builds with different `protocolVersion`; what the handshake reports |
 
-## 9. Decisions (owner, 2026-10-05)
+### 8.1 Results (2026-10-05)
 
-1. **Linked hosts (C)** instead of the UI holding several hosts (B). Replaces decision 1 of
-   2026-10-03 on #82.
-2. **The remote orchestrator is hidden; remote user-folder apps are shown** (§3.4).
-3. **Consent on the connecting side; the reverse direction off by default**, turned on only by the
-   connecting side (§3.2).
-4. **Any device can be the hub.**
-5. **Versions are aligned before connecting**, asking the person, as in §4.
-6. **Phase order: 1 → 3 → 2.** Phase 1 updates only the hub side and expects a manual
-   `npm i -g centralu` on the remote; phase 3 (install and update over ssh) comes before phase 2.
-7. **Where the ssh process lives** is decided by probe 4.
+**Probe 1 holds.** Rig: two hosts as separate processes on temporary data folders
+(`e2e/fixtures/linked-host-main.ts`: the real store, session manager, RPC handler, terminals, server
+and router, with a scripted agent instead of a model), the hub linked to the other as `m1` over
+loopback, the real web UI on the hub (`e2e/linked-hosts*.spec.ts`, Chromium and WebKit, 4 of 4
+passed). Through the UI: the remote project shows in the sidebar, a session is created in it
+(`m1.<uuid>`), a message streams back, an approval card is answered, a question is answered, a
+terminal runs `echo` on the remote (`m1.term-1`), and the session goes to the trash. What broke or
+answered for the wrong machine:
+
+| Where | What happened | Fix |
+|---|---|---|
+| `messages.load` | Stored payloads are the events themselves and carry the remote's unprefixed `sessionId` | The router rewrites `payload.sessionId`, `from`, `fromSessionId`, project ids in payloads |
+| `grid.set` | A remote session panel was dropped: the hub keeps only sessions it knows, and `grid_layout.session_id` references its own `sessions` table | A column for remote panels (§6), kept while the machine is linked |
+| `agents.detect`, `agents.models`, `agents.capabilities`, `agents.usage`, `agents.versions` | The new-session dialog and the session header ask without a machine, so the hub's own CLIs answered for a remote project | The optional `machine` parameter (§5); the UI passes it (next PR) |
+| `fs.listDir`, `fs.watch`, `agents.listExternalSessions` | Routed by project and worked, so the file tree of a remote project already opens | Kept routed; only `fs.resolve` (a path for this computer's OS) is refused |
+| Session row, terminal surface, approval and question ids | Passed unchanged: test ids like `session-row-m1.<uuid>` and `terminal-surface-m1.term-1`; request ids are per session and travel with the routed session id | None |
+| The scripted agent | Trashing with "also delete the conversation" needs `deleteExternalConversation` | Test double only |
+
+Approval rule ids, the one number the UI hands back, are folded into negative numbers per machine
+(`links/machine-ids.ts`), so an older UI can never delete a local rule with a remote rule's id.
+
+**Probe 2 holds.** Same rig: the remote host is killed, the hub's link goes to `unreachable`, the page's
+socket is dropped and reconnects. The session stays listed from the hub's headers mirror with
+`live: true` and `unreachable: true`, and the page sends no `agents.resumeSession` (counted at the
+socket for 1.5 s after reconnecting). What the UI does with `machine_resync` when the machine comes
+back is the next PR.
+
+**Probe 5, measured.** A client hello with another protocol gets one `res` frame and close 4002:
+
+```
+{"kind":"res","id":"0","ok":false,"error":{"code":"version_mismatch","message":"Protocol version mismatch: Centralu 0.1.0-beta.11 speaks protocol 1, the app speaks protocol 2. The host is older: update Centralu where the host runs (npm i -g centralu), then restart it.","retryable":false}}
+```
+
+Same protocol with different versions connects, and `hello_ok.build.version` names the remote's.
+So the hub needs nothing new from the handshake: `centralu serve --connection` already reports the
+running host's `version` and `protocolVersion` (read from its `hello_ok`, or from that refusal), so
+the hub compares before it opens the socket and holds the link at `versions_differ` with both sides
+and the older one named. The refusal now also carries `data: { protocolVersion, version }`, so a
+4002 after a remote restart is read without parsing the sentence. The sentence says "the app" for
+the client, which reads oddly when the client is a hub; left as it is, since the hub shows its own.
+
+**Probe 3 holds.** The Ubuntu server did not answer on port 22 that day; the owner's Windows 11 laptop on the
+LAN stood in, with two remote hosts: `centralu serve` of main inside WSL2 (Ubuntu 24.04) and of beta.10 on Windows
+itself, each on a temporary data folder. A hub on the Mac (the e2e harness host with the real router, links and
+`SshTunnel`) linked to both over the real `ssh` at once; numbers are in [agent-host.md](../agent-host.md) §4.8. In
+short: connected in 2–4 s, an RPC through the hub 5–22 ms at the median, a keystroke echoed in 8–31 ms, terminal
+output relayed as fast as the remote produced it (6.3 MB at 7.5–15 MB/s from WSL; Windows' ConPTY is slow by itself,
+10.0 s through the hub against 9.5 s straight), a 0.5 MB diff in 240–365 ms. The 64 MiB slow-reader cut was not
+reached. The laptop went to sleep in the middle of one run: both links went to `unreachable` with ssh's own reason
+and came back by themselves once it woke. Model streaming was not measured (no live model in these probes).
+
+What a Windows remote taught, all now in `links/tunnel.ts`:
+
+| Finding | Consequence |
+|---|---|
+| Windows OpenSSH runs the remote command under PowerShell 5.1, which re-parses quotes and mangles a double quote passed to a native program | A per-machine `shell` (`posix`, `powershell`, `wsl`); anything not a plain word crosses as base64 (`-EncodedCommand`, and a base64 script piped to `bash -l` inside WSL) |
+| Exit codes do not survive: a 127 arrived as 1, a missing command inside WSL as 0 | The fallback to `~/.centralu/bin/centralu` is decided on the remote in one command, and "not found" is the word `CENTRALU-NOT-FOUND` on stdout |
+| WSL appends Windows' PATH, and `command -v centralu` in the distro named Windows' npm shim, the owner's Windows install | The WSL lookup takes `/mnt/*` off PATH. **That shim ran once during the probe** (with `serve --connection`, before the filter existed); it printed nothing and exited 0 |
+| WSL stops a distro about 15 s after its last `wsl.exe` client exits, and its services with it: `centralu serve` under systemd was stopped 19 s after it started; a `setsid nohup` one died with the ssh session that started it | The WSL forward runs `wsl.exe -d <distro> --exec sleep infinity` instead of `-N`, so the link holds the distro while it is up |
+| WSL2 forwards the distro's 127.0.0.1 to Windows' 127.0.0.1 | One forward to Windows' sshd reaches a host inside WSL, as the owner said |
+| ssh prints `** WARNING` lines about key exchange, PowerShell wraps errors in CLIXML, a Node crash ends with `Node.js v22.x` | The reason shown to the person skips all three |
+| Windows needs Python and build tools for a source install (`better-sqlite3` has no prebuild for Node 24 there) | Not ours to install on the owner's laptop; the Windows host ran the published beta.10 bundle through main's `serve` launcher (`CENTRALU_HOST_ENTRY`). Phase 3's bundled install avoids it |
+
+A machine can name the command to run in place of `centralu` (`MachineInfo.command`); the probes used it to reach
+source checkouts with temporary data folders.
+
+**Probe 4: not run.** The transport is behind an interface (`links/tunnel.ts`), tested with a fake `ssh` on PATH, so
+the probe can move it (a keeper child or `ControlPersist`) without touching the router. Until then the ssh processes are
+children of the hub host and end with it; the next host opens its own links (2–4 s).
+
+### 8.2 What phase 1 built, host side
+
+`packages/agent-host/src/links/` and `main.ts`: the registry and the headers mirror in the hub's store (v46, expand
+only, with a column for grid panels of remote sessions), `SshTunnel` with the three shells, a link per machine with
+backoff, version check (§4) and the hidden-session rule (§3.4), the `RemoteClient` (a port of the UI's client: same
+cursor and epoch rules, fails fast while away, reports refusals, never answers a request), and the router with a
+route for each of the 151 methods (146 plus the five `machines.*`). The protocol gained only additions: `machines.*`,
+`machine_status`, `machine_resync`, a `machine` field on rows and an optional `machine` parameter on ten per-machine
+calls, `unreachable` on mirrored rows, and data on the version refusal ([protocol.md](../protocol.md) §6).

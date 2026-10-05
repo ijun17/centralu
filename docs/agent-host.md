@@ -827,11 +827,110 @@ by absolute path. Those paths are versioned under nvm and Homebrew, so after a N
 
 **What phase 1 does not cover.** App views open from the host's HTTP door at `127.0.0.1:<port>`, so they work
 through a forward whose local port equals the remote port. An app whose manifest asks for its own origin gets a port of
-its own (`views/origin-ports.ts`), which one forward does not carry. The client's host list, search across machines and
-the grid layout moving to the client are the client's part of #82.
+its own (`views/origin-ports.ts`), which one forward does not carry. The other end, the host that links to this one, is
+§4.8.
 
 A host refuses a client of another protocol with `version_mismatch` and close code 4002. The message names both numbers
 and which side is older, so the person knows whether to update the app or the remote ([protocol.md](protocol.md) §1).
+
+### 4.8 Remote mode, phase 1: the hub's links (#82)
+
+The other half of §4.7: the host a window is attached to (the **hub**) links to the `centralu serve` hosts of other
+machines and shows their sessions and projects as its own ([plans/remote-hub.md](plans/remote-hub.md); the protocol
+side is [protocol.md](protocol.md) §6). Hosts talk only to hosts: the window still talks to one host, and each machine
+stays the one writer of its own store. The code is `packages/agent-host/src/links/`.
+
+**The pieces, as `main.ts` wires them.**
+
+| Piece | File | What it does |
+|---|---|---|
+| Registry | `stored.ts`, store v46 `linked_machines` | The machines the person linked: id, name, ssh target, remote shell, the `slot` for folding numbers, the version pair accepted |
+| Transport | `tunnel.ts` (`SshTunnel`) | Asks the remote for its connection line over ssh, then holds an ssh local forward |
+| Link | `links.ts` (`LinkedMachine`) | One per machine: transport, version check, client, backoff, status, the hidden-session set, the mirror's updates |
+| Client | `remote-client.ts` | The hub's WebSocket to the remote host: hello, cursor and epoch, calls, events, terminal frames |
+| Router | `router.ts`, `routes.ts` | In front of `HostServer.onRpc`: sends a call to the machine its ids name, merges lists, answers the rest locally |
+| Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
+| Mirror | `stored.ts`, store v46 `machine_headers` | Each machine's sessions and projects as last listed, for when it cannot be reached |
+
+The three choke points of §5 of the plan are where it sits: the router is the `onRpc` the server calls, a link puts
+the remote's events into `server.broadcast` (so they get the hub's own `seq` and replay) and its terminal frames into
+the same lane as local ones. A host with no linked machine routes every call to its own handler, as before.
+
+**The transport.** Two ssh commands, the person's own `ssh`, keys and `~/.ssh/config`:
+
+```
+ssh -T -o BatchMode=yes -o ConnectTimeout=15 -- <target> <connection command>
+ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    -o GatewayPorts=no -L 127.0.0.1:<port>:127.0.0.1:<port> -- <target>
+```
+
+The connection command depends on the remote's shell (`MachineInfo.shell`), because `ssh <target> <command>` hands the
+command to whatever login shell the remote account has:
+
+| Shell | The connection command | Measured on |
+|---|---|---|
+| `posix` | `sh -c 'if command -v centralu …; then exec centralu serve --connection; elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | the fake ssh of `tunnel.test.ts` |
+| `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`Get-Command centralu`, then `%USERPROFILE%\.centralu\bin\centralu.cmd`) | Windows 11, OpenSSH, PowerShell 5.1 |
+| `wsl` | The same PowerShell wrapper around `wsl.exe -d '<distro>' -- bash -lc 'echo <base64> \| base64 -d \| bash -l'`, the script being the POSIX lookup with `/mnt/*` taken off PATH | Ubuntu 24.04 in WSL2 on that laptop |
+
+A machine can name its own command in place of `centralu` (`MachineInfo.command`): a source checkout, a data folder
+other than `~/.centralu`. It runs as given, with no fallback.
+
+| Decision | Why |
+|---|---|
+| The fallback to the launcher is decided on the remote, in one command, and "not found" is a word on stdout | Exit codes do not survive Windows: OpenSSH runs the command under PowerShell, which turns any failure into 1. Measured: a 127 from WSL or from PowerShell itself arrived as 1, and a missing command inside WSL arrived as 0 |
+| Everything but plain words crosses PowerShell as base64 | PowerShell 5.1 re-parses quotes, and mangles a double quote passed to a native program; base64 is letters, digits, `+`, `/` and `=`, which no layer touches |
+| A WSL lookup takes `/mnt/*` off PATH | WSL appends Windows' PATH, and Windows' npm folder has a `centralu` shim: measured, `command -v centralu` in the distro named `/mnt/c/Users/<me>/AppData/Roaming/npm/centralu`, the Windows install |
+| The WSL forward runs `wsl.exe -d <distro> --exec sleep infinity` instead of `-N` | WSL stops a distro about 15 s after its last `wsl.exe` client exits, and its services with it. Measured: `centralu serve` under a systemd unit was stopped 19 s after it started, with no client attached; a forward to Windows' sshd alone never holds the distro |
+| Both ends of the forward bind 127.0.0.1, `GatewayPorts=no` | Nothing on either machine's network can use the link |
+| The same port number on both ends when it is free here, another one otherwise | §4.7: an app view's address carries the host's own port. Two machines on the default 17175 cannot both have it; app views of the second need the proxy of phase 2 anyway |
+| `BatchMode=yes` everywhere | A password or host-key prompt nobody can answer would hang the link. The person sets the keys up once, as for any ssh use |
+| The token is not stored; it is asked over ssh at every link start | It is the key to every RPC on that machine. One ssh round trip per start (measured 2.1 to 4.3 s to connected on a LAN) is cheap |
+| The ssh processes are children of the hub host, behind the `Tunnel` interface | Where they should live across a hub swap (a keeper child, or OpenSSH `ControlPersist`) is probe 4 of the plan; whichever wins replaces only `SshTunnel` |
+
+**The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
+(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to a minute); `not_running` (Centralu
+answers there but no `centralu serve` runs; retried); `versions_differ`; `refused` (a token refused twice in a row:
+the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
+it restarts).
+
+**Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
+and `protocolVersion`, and the hub compares them with its own before it opens the socket, and again with
+`hello_ok.build` once it does. Another protocol never connects. Another version of the same channel holds the link at
+`versions_differ`, naming the older side, until the two match or the person declines (`machines.acceptVersions`,
+remembered for that pair only, so either side moving asks again). A dev build has no older side and connects on one
+protocol. The update itself is the next step: the hub's through its own update, the remote's by hand in phase 1
+(`npm i -g centralu` there) and over ssh in phase 3.
+
+**After connecting**, the link reads the remote's `sessions.list` and `projects.list` into the mirror, notes which
+sessions it hides (the remote's orchestrator and coordinators, §3.4 of the plan), and broadcasts `machine_resync`; the
+window re-reads that machine and wakes what died. The link keeps one cursor and epoch per remote, so a dropped socket
+gets the gap replayed, and a remote that restarted is a new lifetime and a resync. Events of sessions the hub does not
+show are dropped, and session events keep the mirror's names and states current between reads.
+
+**The reverse direction is off** (plan §3.2). The link is a client connection the hub opened. The protocol has no
+frame for a host to call its client, and `RemoteClient` drops anything shaped like a request without dispatching it
+(`remote-client.test.ts`), so a compromised remote cannot reach the hub through the link.
+
+**Measured through the hub** (probe 3, 2026-10-05; a MacBook on Wi-Fi, the remote a Windows 11 laptop on the same
+LAN; `centralu serve` of main in WSL2 and of beta.10 on Windows):
+
+| | WSL2 Ubuntu | Windows (PowerShell) |
+|---|---|---|
+| Link to connected | 2.1 to 4.3 s | 2.3 to 3.7 s |
+| RPC round trip through the hub, median / p95 | 5.4–12.8 / 7.7–36 ms | 5.5–22 / 8–68 ms |
+| Keystroke to echo (one RPC per key), median / p95 | 8–16 / 12–35 ms | 16–31 / 17–46 ms |
+| Terminal output, through the hub / straight to the remote | 6.3 MB at 7.5–15 / 5.5–8.7 MB/s | 0.34 MB in 10.0 / 9.5 s |
+| `git.diff` of a 400k-line change (the host's 0.5 MB cap) | 240–290 ms | 310–365 ms |
+
+The relay adds nothing measurable against the remote's own pace: Windows' slow output is ConPTY's, the same straight
+to the remote host. The 64 MiB slow-reader cut was not reached.
+
+**What phase 1 does not cover yet.** The window's side (grouping by machine, the new-session dialog per machine, the
+version prompt, Settings → Machines) is the next change. App views of another machine are phase 2; files, diff and
+search already answer for a remote project (they route by project), but the window does not offer them there yet;
+installing and updating the remote over ssh is phase 3. `centralu serve` on WSL needs something that starts it when the
+distro starts (the systemd unit of §4.7); the link then keeps the distro running.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

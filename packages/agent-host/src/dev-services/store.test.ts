@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22, v23 and v24 broke the same six assertions one after another: if the version is written
  * six times, every migration bills six small chores.
  */
-const LATEST_SCHEMA = 45
+const LATEST_SCHEMA = 46
 
 function seeded() {
   const s = new Store()
