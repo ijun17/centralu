@@ -45,7 +45,7 @@ claude는 인프로세스, codex는 stdio 다리.
 | `manager` | 워크트리 자식이 있거나 프로젝트의 매니저 자리인 세션 (#69, #76) | 자기 워크트리 자식 | 목록, 읽기, 보내기, 워크트리 세션 제안·삭제 | 워크트리 규칙 |
 | `scoped` | 코디네이터(#80. `agents.createCoordinator`로 만든다. 예전에는 #97에서 걷어낸 관제 앱의 작업이 만들었다) | 자기 멤버 | 목록, 읽기, 보내기 | 자기 경계 |
 | `builder` | 앱을 만드는 세션 (M4 C-3) | 자기 앱 | `check` | 만들고 검사하기 |
-| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320) | 자기 프로젝트, 호출할 때 읽음 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2) | 없음 |
+| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320) | 자기 프로젝트, 호출할 때 읽음 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 없음 |
 
 `reader` 묶음은 읽기 전용이다. 그 도구 객체는 보내기·만들기·설정 변경을 이름으로만이 아니라
 그 자체로 거절한다. 앱이 세운 에이전트 세션(M4 D-1)은 답을 앱에 돌려주므로 이 묶음을 받지
@@ -73,6 +73,12 @@ claude.ai 커넥터 끔):
 한 번은 앱에 대한 추측 답이고, 오케스트레이터는 안내서를 로드해 둔다. Codex에는 미루기가 없어
 셋 다 받는다. `orchestrator-tools.test.ts`는 직렬화한 묶음과 지침이 `READER_BUDGET_CHARS`
 (1,000)를 넘으면 실패한다.
+
+앱 붙이기 도구(#371 A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4)는 같은 서버에 자기 한도
+`APP_ACCESS_BUDGET_CHARS`(900. 지금 874)로 실린다. 어느 묶음도 다른 쪽의 여유로 자라지 않게 하려는 것이다.
+Claude는 셋 다 미루며, 그 값은 요청마다 +31 토큰이다(같은 측정, 2026-10-05, `ask_project`가 들어오기 전 #320 묶음에서 잼: +192에서 +223). 올려
+두면 +263을 더한다. Codex 세션이 그만큼 낸다. 모델은 여전히 찾는다: 새 haiku 세션 5번 중 5번이 평범한 요청에서
+도구 검색으로 `find_apps`를 찾았다(apps.md §9.4).
 
 묶음을 받은 Codex 세션은 stdio 다리를 띄우므로, #320 이후 모든 Codex 세션이 node 프로세스를
 하나 더 띄운다(유휴 시 상주 메모리 약 40 MB). 다리는 `default_tools_approval_mode: 'approve'`를

@@ -295,6 +295,12 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   by" with a link back; the caller's conversation shows a compact card linking to it. Files the answer names inside
   the target project become readable to the caller, nothing broader. Stop on the caller stops the delegated turn; a
   session that was itself asked cannot ask a third project. Details in agent-host.md §1.2.
+- **Another project's apps, on demand** (#371 part A, owner decision 2026-10-05): an ordinary project session can
+  find an app another project shares, or one of the person's own user-folder apps, attach it while it needs its tools
+  and detach it afterwards (`find_apps`, `attach_app`, `detach_app`), so those tools cost no context otherwise. Sharing
+  is the person's choice per project app (Settings → Apps or the app's header, off by default); using another
+  project's app asks once per pair of projects (allow once, always, deny; "always" revocable in Settings). Claude has
+  the tools in the same turn; a Codex session gets them from its next turn. Detail in apps.md §9.4.
 - **The permission preset is deliberately inexpressible** in the orchestrator's settings tool schema — an orchestrator
   must not be able to quietly widen another session's approval back door.
 - Settings changes surface as a `settings_changed` event + toast, so the human sees

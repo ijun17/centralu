@@ -345,6 +345,16 @@ then who may call it:
   `e2e/public-apps.spec.ts`). The
   session side re-checks decision 4 at every call, so a detached app cannot be reached by a stale
   tool name.
+- A project's session reaches another project's app only by attaching it (#371 part A, apps.md
+  §9.4), and only when three things hold, each read again at every count of the session's apps and
+  so at every call: the person shares that app (off by default, per app), the person allowed this
+  pair of projects (a consent card in the calling session; "always" kept per pair and revocable in
+  Settings, "once" for that attachment, a denial not kept), and both projects are trusted. A session
+  in an untrusted project attaches nothing, so a planted AGENTS.md cannot pull another project's
+  tools into it. User-folder apps attach without a card, as they are the person's own; that does not
+  widen what the session could already run, since the calls follow the session's preset. The app
+  still runs in its own folder with its own data, and its calls are recorded with the calling
+  session (`app-access.test.ts`, `app-access-manager.test.ts`).
 - The broker pipe (fd 3) is handed only to that process, so there is no token to steal. A broker
   call must carry the run id of a call the same app is handling on the same pipe; no id, an
   invented id, a finished run's id and another app's live id are all refused, logged and recorded
@@ -390,6 +400,10 @@ Limits:
 - Redaction is literal string replacement. Values shorter than 4 characters, and values the app
   transforms (encodes, splits), are not caught.
 - Visibility decides who may call a tool, not what the tool does.
+- Sharing an app and allowing a pair of projects are about which sessions may call it, not what it
+  does with what they send: an attached app receives whatever the calling session's agent passes it,
+  which can include that project's files or conversation. "Always for this pair" covers every app
+  the other project shares, including ones shared later.
 - A permission is per capability, not per request: once an app may run an agent, the app decides
   what to ask it. The agent's writes and commands still stop at an approval card (`safe`), but
   what it may read is whatever its session can read.

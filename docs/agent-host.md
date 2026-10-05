@@ -44,7 +44,7 @@ the Codex bridge.
 | `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
 | `scoped` | a coordinator (#80; made through `agents.createCoordinator`, once by the control app's tasks, removed in #97) | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2) | none |
+| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
 
 The `reader` set is read-only: its tools object refuses sending, creating and settings outright,
 not only by name. It is never given to an agent session an app stood up (M4 D-1), whose answer goes
@@ -73,6 +73,14 @@ had measured the same for `send_to_session`, which is why its tools are `alwaysL
 from a guess about the app, and the orchestrator has the guide loaded. Codex has no deferral and
 gets all three. `orchestrator-tools.test.ts` fails if the serialized set and its instructions pass
 `READER_BUDGET_CHARS` (1,000).
+
+The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) ride on
+the same server with their own ceiling, `APP_ACCESS_BUDGET_CHARS` (900; the set is 874), so neither
+set grows into the other's headroom. Claude defers all three, which adds +31 tokens per request (the
+same probe, 2026-10-05, measured on the #320 set before `ask_project` joined it: +192 to +223), and
+loaded they would add +263, which is what a
+Codex session pays. The model still finds them: 5 of 5 fresh haiku sessions found `find_apps` through
+tool search from a plain request (apps.md §9.4).
 
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts
 one more node process (about 40 MB resident, idle). The bridge sets

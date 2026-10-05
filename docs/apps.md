@@ -59,8 +59,8 @@ visibility is not read as the default: the side that is wrong stays closed.
 
 | | Folder | Whose tools | Removing it |
 |---|---|---|---|
-| Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9) | Through git. Centralu has no button for it |
-| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
+| Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9); another project's session that attaches it, if the person shares it (§9.4) | Through git. Centralu has no button for it |
+| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator; a project's session that attaches it (§9.4) | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
 
 - Only the **registered project root** is scanned, never a worktree. A worktree carries its own copy
   of the folder, but the app runs once per project and worktree sessions use the root's app.
@@ -621,9 +621,11 @@ and "Send to builder".
 | A builder | The above, and its own app (a user-folder app's builder has no project) |
 | Any other | None |
 
-Apps that are `invalid`, `untrusted` or `failed` are not attached. The rule is checked again **at
-every call**, not only when attaching: Codex cannot change a running thread's servers, so the
-per-call check is what actually stops an app that was detached.
+Beyond this table, a project's session can attach an app **itself** for as long as it needs it: an
+app another project shares, or a user-folder app (§9.4). Apps that are `invalid`, `untrusted` or
+`failed` are not attached. The rule is checked again **at every call**, not only when attaching:
+Codex cannot change a running thread's servers, so the per-call check is what actually stops an app
+that was detached.
 
 Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`.
 The tool list is the last one read, so starting a session does not start every app. If none has
@@ -694,6 +696,75 @@ so with `approval_policy = "never"` there, Codex refuses an app's write tools.
   early. The app receives `notifications/cancelled`, and, through the run id, whatever the app had
   asked the broker for is cancelled too, down the chain: another app's call it made, and an agent
   session it started, which is interrupted.
+
+### 9.4 Another project's apps, on demand (#371 part A)
+
+Decision 4 keeps a session to its own project's apps. The owner's decision for #371 (2026-10-05)
+lets a session reach further only while it needs to: it **finds** an app it could attach,
+**attaches** it (the app's tools join this session) and **detaches** it (they leave), so another
+project's tools cost no context when they are not in use. Code: `sessions/app-access.ts`, the hub's
+`OnDemandApps` port in `session-apps.ts`, the tools in `orchestrator-tools.ts`.
+
+**What can be attached**, decided when the session asks and again every time the hub counts the
+session's apps (and so at every call):
+
+| App | When | Asks the person |
+|---|---|---|
+| Another project's app | The person shares it (off by default), its project is trusted, and it is not `invalid`, `untrusted` or `failed` | Once per pair of projects, in the calling session: the consent card (Allow once, Always for this pair, Deny). "Always" is kept per (from project, to project, `apps`) in `project_consents` (store v44, shared with part B's `ask_project`) and listed in Settings, where revoking it detaches what it allowed. "Once" lasts for that attachment; a denial is not remembered |
+| User-folder app | Not `invalid`, `unconfirmed` or `failed` | Never: the person put it in their own folder to use across projects |
+| This project's own app | Already attached by decision 4 | — |
+
+A session in an **untrusted** project attaches nothing: its repository's text could be the one
+asking, and an untrusted project runs none of its own apps either. Only a project's ordinary
+session has the tools (they ride with the reader set, below); the orchestrator, a worktree manager,
+a coordinator, a builder and an agent an app stood up do not.
+
+**Sharing** is the person's choice, per project app: "Share with other projects" in Settings → Apps,
+or the Share button in the app's header (`apps.setShared`). It is kept in the store's settings table
+(`app_shared:<project>/<app>`, absent means off) and reported in the app list (`shared: true`).
+Turning it off detaches the app from every session that attached it.
+
+**The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1):
+
+| Tool | Does | Result names |
+|---|---|---|
+| `find_apps({ query? })` | Lists what this session could attach: `<project>/<app>` for another project's app, `<app>` for a user-folder app, with the project, the manifest's name and first description line (JSON-quoted: the author's words), and the tool names if the app has listed them since the host started (finding starts no app) | `attach_app` |
+| `attach_app({ app })` | Asks for consent if needed, attaches, starts the app to list its tools (within the 15 s cap) | the tools as `mcp__<server>__<tool>`, when they are there, and `detach_app` |
+| `detach_app({ app })` | Detaches an app this tool attached (a name from `find_apps`, or the server name). An app decision 4 gives stays | — |
+
+They are counted against their own ceiling (`APP_ACCESS_BUDGET_CHARS`, 900; the set is 874, of
+which about 210 per tool is the name and schema envelope), not the reader set's. Claude defers all
+three behind tool search, which costs +31 input tokens per request against +263 loaded
+(`scripts/probe-reader-tools.mts`; Codex has no deferral and loads them). Measured with haiku (Claude Code
+2.1.289, `scripts/smoke-app-access.mts`: a fresh pair of scratch projects per trial with a shared app,
+the consent card answered "always", and a prompt naming neither the tools nor the project): in 5 of
+5 sessions the model found `find_apps` through tool search, attached the app, called its tool in the
+same turn and detached it, and on the next turn no call reached the app (one model tried the old name
+anyway; the CLI answered "No such tool available").
+
+**Attaching and detaching, per agent:**
+
+| | Claude | Codex |
+|---|---|---|
+| Attach | The hub recounts the live handle; the adapter's `setMcpServers` adds the app's proxy server. The tools are there **in the same turn** (measured above: the model loaded `mcp__app-counter__poke` through tool search right after `attach_app` and called it) | A thread keeps the servers it started with (§9.2), so the manager restarts the session through resume **when the turn ends** (`appsRestartAfterTurn`, beside #164's settings restart), and `mcpConfig` then includes the app. The result says the tools arrive next turn and tells the model to finish the turn. Run for real (codex-cli 0.160.0, `TOOL=codex` in the same script): the model attached the app and said it would finish next turn; after "Go on." it called `poke`, detached the app, and on the following turn no longer had the tool. That is also the first logged-in run showing the MCP configuration sent with `thread/resume` takes effect (§9.2, S-7) |
+| Detach | The proxy server is removed at once | Every call is checked against the current set, so a call by the old name is refused at once; the name leaves the thread with the same end-of-turn restart |
+
+**Names.** The app attaches as `app-<id>`, or `app-<id>-2` (and so on) when that name is taken in
+the session, for instance by its own project's app of the same id. The name is chosen when it is
+attached and kept for the session; an app that later appears in the session's own project under the
+same name keeps the name, and the attached one steps back.
+
+**Where it runs and what is recorded.** Nothing about the app changes: it runs where it lives, with
+its own folder as working directory and its own data folder, one instance per (project, app) shared
+with its own project's sessions (§4). Calls go through `ExternalApps.call` with caller `session`
+and the calling session's id (§5), so the owner's Runs panel lists them under the calling session's
+name, and approval follows the calling session's preset (decision 5).
+
+**How long.** Until `detach_app`, or until the session is deleted. The list is kept per session in
+the store's settings table (`session_apps:<session>`), so it survives the host restarting and the
+session resuming. It is checked again on every count: sharing turned off, the "always" revoked,
+either project untrusted, or the app becoming unusable takes it away (Claude at once; a Codex thread
+refuses the call, and the name leaves at its next thread).
 
 ## 10. The broker: agents, other apps, host data
 
@@ -791,6 +862,7 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop (§8) |
 | `apps.setSecret` | Set, replace or clear one declared secret (§2); the value is never returned |
+| `apps.setShared` | Share a project app with the person's other projects, or stop (§9.4) |
 | `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | Stage an import and return the review; bring it in, turned off or enabled with the review's key; drop the staging (§12) |
 | `apps.review`, `apps.enable` | The review of an imported app waiting for the person; enable it with that review's key (§12) |
 | `apps.versions`, `apps.restoreVersion` | Kept versions of a user-folder app, or the git commits that touched a project app; restore a kept version (§12) |
@@ -919,6 +991,9 @@ from there it is an ordinary import, turned off unless the person enables it.
   any app in the packaged Windows app, have not been tried.
 - The broker answers only while the app handles a call: an app cannot ask by itself (a timer, a
   watcher). The host data list has two names.
+- Attaching another project's app (§9.4) is a project session's: the orchestrator, a worktree
+  manager and a coordinator cannot. Codex gets an attached app only from its next turn, so the
+  person has to send another message for the model to use it.
 - Export (plan E-2) and sharing through a team server are not built: an app is shared by sending
   its folder or a zip of it, or by committing a project app.
 - App links arrive on macOS only, and have been exercised by hand, not in CI (§12.3). An https
