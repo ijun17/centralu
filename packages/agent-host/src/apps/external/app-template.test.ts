@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -173,7 +174,8 @@ describe('a broken app states the reason', () => {
     await expect(r.tools(ref('mapped'))).rejects.toThrow()
     const error = r.list().find((a) => a.appId === 'mapped')!.error!
     expect(error).toContain('is not valid JSON')
-    expect(error).toMatch(/vendored\/centralu\/centralu\.mjs:\d+/)
+    // The original file is named by its path on disk, so with the OS separator (vendored\centralu\… on Windows)
+    expect(error).toMatch(/vendored[\\/]centralu[\\/]centralu\.mjs:\d+/)
     // The line that threw is also printed as its original line — a bundled single line (hundreds of characters) never eats a whole slot of the stderr tail
     expect(error).toContain('throw new Error(`centralu.readJson:')
     expect(error).not.toContain('centralu-app-runtime.mjs')
@@ -328,7 +330,10 @@ describe('centralu.agent (D-1)', () => {
     } finally {
       closeBroker()
       fd3.destroy()
+      // Waited for: the app's working directory is its folder, which Windows will not delete while the process runs (#14)
+      const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, 'exit')
       child.kill('SIGKILL')
+      await exited
     }
   }
 

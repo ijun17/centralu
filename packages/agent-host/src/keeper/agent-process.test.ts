@@ -12,6 +12,12 @@ import { FakeKeeper } from './fake-keeper.test-helpers.js'
 let keeper: FakeKeeper
 let children: KeeperChildren
 
+/*
+ * The keeper is macOS and Linux only: on Windows the host runs on the direct path and nothing connects to a keeper
+ * (docs/agent-host.md). Its service is a unix-domain socket, which this fake cannot listen on there (EACCES) (#14).
+ */
+const keeperless = process.platform === 'win32'
+
 beforeEach(async () => {
   keeper = await FakeKeeper.start()
   children = await KeeperChildren.connect(keeper.sock)
@@ -44,7 +50,7 @@ async function until(ok: () => boolean): Promise<void> {
   expect(ok()).toBe(true)
 }
 
-describe('an agent process the keeper holds', () => {
+describe.skipIf(keeperless)('an agent process the keeper holds', () => {
   it('carries stdin and stdout like a child of this host', async () => {
     const p = KeeperAgentProcess.spawn(children, echo, tag)
     p.stdin.write('{"hello":1}\n')
@@ -118,7 +124,7 @@ describe('an agent process the keeper holds', () => {
   })
 })
 
-describe('a pty the keeper holds', () => {
+describe.skipIf(keeperless)('a pty the keeper holds', () => {
   it('delivers output and exit like node-pty, then releases the record', async () => {
     const pty = KeeperPty.spawn(children, process.execPath, ['-e', 'console.log("from the shell"); process.exit(2)'], {
       cwd: process.cwd(),
@@ -152,7 +158,7 @@ describe('a pty the keeper holds', () => {
   })
 })
 
-describe('the keeper asking this host to stop', () => {
+describe.skipIf(keeperless)('the keeper asking this host to stop', () => {
   it('arrives as a stop event on the control connection', async () => {
     const stopped = new Promise<void>((r) => children.once('stop', r))
     keeper.askStop()

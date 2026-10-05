@@ -17,6 +17,8 @@ const dbIn = () => {
   dirs.push(d)
   return join(d, 'store.db')
 }
+// Every lock a test takes is released before this runs: the ownership lock is an open SQLite file, and Windows cannot
+// delete a file that is still open (#14)
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
@@ -62,6 +64,7 @@ describe('single-instance lock for the host', () => {
       pid: process.pid,
       started: processStartTime(process.pid),
     })
+    if (r.ok) r.release()
   })
 
   /*
@@ -76,6 +79,7 @@ describe('single-instance lock for the host', () => {
     const r = acquireInstanceLock(db, () => 'Sun Sep 27 00:21:23 2026')
     expect(r.ok).toBe(true)
     expect(JSON.parse(readFileSync(join(db, '..', 'host.lock'), 'utf8')).pid).toBe(process.pid)
+    if (r.ok) r.release()
   })
 
   // `ps` reads the start time; Windows has neither, and skips the file check (above)
@@ -99,7 +103,9 @@ describe('single-instance lock for the host', () => {
     const first = acquireInstanceLock(db)
     if (first.ok) first.release()
     expect(existsSync(join(db, '..', 'host.lock'))).toBe(false)
-    expect(acquireInstanceLock(db).ok).toBe(true)
+    const next = acquireInstanceLock(db)
+    expect(next.ok).toBe(true)
+    if (next.ok) next.release()
   })
 
   it('never releases someone else\'s lock (that would defeat the point of the block)', () => {

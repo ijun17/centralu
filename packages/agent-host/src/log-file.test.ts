@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MAX_LOG_BYTES, hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
@@ -92,18 +92,20 @@ describe('the host log file', () => {
   it('does not hold onto a dead fd when the rollover fails, and keeps writing to the same file', () => {
     const dir = tmp()
     const path = hostLogPath(dir)
+    // Makes the rename fail on every OS: a folder (not empty) already sits where the rollover goes. A read-only directory
+    // (chmod 0555) did this on macOS and Linux only; Windows ignores those mode bits (#14)
+    mkdirSync(`${path}.1`)
+    writeFileSync(join(`${path}.1`, 'in-the-way'), '')
     const stop = teeStderrToFile(path, 64)
     try {
-      // Makes the rename fail — EACCES when the directory has no write permission
-      chmodSync(dir, 0o555)
       for (let i = 0; i < 12; i++) process.stderr.write(`line ${i} ${'y'.repeat(20)}\n`)
       process.stderr.write('after-failed-roll\n')
     } finally {
-      chmodSync(dir, 0o755)
       stop()
     }
     // The rollover failed (stayed in one file), but the log kept flowing into this file
-    expect(existsSync(`${path}.1`)).toBe(false)
+    expect(statSync(`${path}.1`).isDirectory()).toBe(true)
+    expect(readFileSync(path, 'utf8')).toContain('line 0')
     expect(readFileSync(path, 'utf8')).toContain('after-failed-roll')
   })
 

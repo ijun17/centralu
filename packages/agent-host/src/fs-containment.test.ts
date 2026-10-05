@@ -44,7 +44,9 @@ const ESCAPING_DIRS = ['leak', 'nest/leak', 'link/../evil'] as const
 const ESCAPING_FILES = ['leakfile', 'leak/secret.txt', 'nest/leak/secret.txt', 'link/../evil/secret.txt'] as const
 
 beforeEach(async () => {
-  fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contain-')))
+  // native: on Windows the temp folder can be an 8.3 short name (C:\Users\RUNNER~1), which only the native call expands,
+  // and the host answers with the expanded path (#14)
+  fixture = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-contain-')))
   root = join(fixture, 'project')
   outside = join(fixture, 'outside')
   mkdirSync(root)

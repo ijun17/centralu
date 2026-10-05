@@ -139,6 +139,15 @@ const viewerPid = () => {
   return (JSON.parse(lines.findLast((l) => l.includes('"t":"start"'))!) as { pid: number }).pid
 }
 
+/**
+ * The viewer app's folder goes away. An app runs with its own folder as its working directory, and Windows will not
+ * delete a folder a process is in, so there the app is stopped first, as a person would have to (#14).
+ */
+const deleteViewer = async () => {
+  if (process.platform === 'win32') await rt.restart({ projectId, appId: 'viewer' })
+  rmSync(join(repo, ...PROJECT_APPS, 'viewer'), { recursive: true, force: true })
+}
+
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-inline-views-')))
   repo = join(root, 'repo')
@@ -282,7 +291,7 @@ describe('paths that close a view', () => {
     await apps.call('app-viewer', 'show', { q: 'x' }, { callId: 'toolu_G' })
     await until(appViews, (v) => v.some((e) => e.phase === 'result'))
     const id = appViews()[0]!.instanceId!
-    rmSync(join(repo, ...PROJECT_APPS, 'viewer'), { recursive: true, force: true })
+    await deleteViewer()
     rt.refresh()
     await until(appViews, (v) => v.some((e) => e.phase === 'closed'))
     expect(appViews().at(-1)).toMatchObject({ callId: 'toolu_G', phase: 'closed', reason: 'This app was removed' })
@@ -492,7 +501,7 @@ describe('cap and reopening', () => {
     const { sessionId, apps } = await start()
     await show(apps, 'x1')
     await rpc('apps.closeView', { instanceId: opened('x1') })
-    rmSync(join(repo, ...PROJECT_APPS, 'viewer'), { recursive: true, force: true })
+    await deleteViewer()
     rt.refresh()
     await expect(rpc('apps.inlineReopen', { sessionId, callId: 'x1' })).rejects.toThrow('This app was removed')
   })

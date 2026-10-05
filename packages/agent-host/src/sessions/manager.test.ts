@@ -3,10 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
+  closeSync,
+  constants as fsConstants,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -14,6 +17,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
@@ -2376,7 +2380,13 @@ describe('worktree sessions', () => {
     project = (await wtRpc('projects.add', { path: repo })) as { id: string; path: string }
   })
 
-  afterEach(() => rmSync(root, { recursive: true, force: true }))
+  /*
+   * Retried, and asynchronously: a manager starts git in the repository on its own when it comes up (merge detection,
+   * #69) and does not wait for it, and the tests that start a second manager end before that work does. Windows will
+   * not delete a folder a process is working in, so the first try can meet EBUSY there (#14). rmSync's own retries
+   * block the event loop that work needs to finish, and failed the same way every time.
+   */
+  afterEach(() => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }))
 
   const create = (worktree: boolean) =>
     wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree }) as Promise<SessionInfo>
@@ -2516,7 +2526,14 @@ describe('worktree sessions', () => {
     symlinkSync('pkg', join(nm, 'alias'))
     mkdirSync(join(nm, 'zzz'))
     writeFileSync(join(nm, 'zzz', 'secret'), 'x')
-    chmodSync(join(nm, 'zzz', 'secret'), 0o000)
+    /*
+     * Unreadable. Windows ignores chmod's mode bits, so there the file is held open with an exclusive lock instead,
+     * which every other open refuses (#14).
+     */
+    // 0x10000000 is libuv's UV_FS_O_EXLOCK (sharing mode 0), which Node's fs.constants does not export. Measured on
+    // Windows 11 (2026-10-05): with it held, copyFileSync fails with EBUSY and cpSync with EPIPE
+    const locked = process.platform === 'win32' ? openSync(join(nm, 'zzz', 'secret'), fsConstants.O_RDONLY | 0x10000000) : null
+    if (locked === null) chmodSync(join(nm, 'zzz', 'secret'), 0o000)
     writeFileSync(join(repo, '.gitignore'), 'node_modules\n')
     store.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -2531,7 +2548,8 @@ describe('worktree sessions', () => {
       expect(logged.mock.calls.some(([line]) => String(line).startsWith('[worktree] copy failed: node_modules'))).toBe(true)
     } finally {
       logged.mockRestore()
-      chmodSync(join(nm, 'zzz', 'secret'), 0o644)
+      if (locked !== null) closeSync(locked)
+      else chmodSync(join(nm, 'zzz', 'secret'), 0o644)
     }
   })
 
@@ -2614,7 +2632,11 @@ describe('worktree sessions', () => {
     // A gitignored file — the kind that git worktree add never brings along.
     writeFileSync(join(repo, '.env.local'), 'SECRET=1\n')
     store.setWorktreeSetup(project.id, {
-      command: 'echo "$CENTRALU_WORKTREE:$CENTRALU_WORKTREE_INDEX" > setup-ran.txt',
+      // The setup command runs in the platform's shell: cmd.exe on Windows, where a variable is %NAME% (agent-host.md)
+      command:
+        process.platform === 'win32'
+          ? 'echo %CENTRALU_WORKTREE%:%CENTRALU_WORKTREE_INDEX%> setup-ran.txt'
+          : 'echo "$CENTRALU_WORKTREE:$CENTRALU_WORKTREE_INDEX" > setup-ran.txt',
       copyFiles: ['.env.local'],
     })
 
@@ -3106,9 +3128,13 @@ describe('worktree sessions', () => {
     expect(back.session.worktree).toEqual(s.worktree)
     // The folder, the uncommitted work in it and git's record of it are all where they were
     expect(readFileSync(join(path, 'wip.txt'), 'utf8')).toBe('work in progress\n')
-    expect(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' })).toContain(
-      `worktree ${realpathSync(path)}\n`,
-    )
+    // git names a worktree its own way (C:/Users/… on Windows, the long name where the temp folder is an 8.3 short
+    // one), so both sides are compared as the native canonical path (#14)
+    const registered = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' })
+      .split('\n')
+      .filter((l) => l.startsWith('worktree '))
+      .map((l) => realpathSync.native(l.slice('worktree '.length)))
+    expect(registered).toContain(realpathSync.native(path))
     expect(await wtRpc('agents.worktreeStatus', { sessionId: s.id })).toMatchObject({ path, dirty: true, changedFiles: 1 })
     // Restored, it is a live session again — its worktree is not marked for anything
     expect(((await wtRpc('trash.list', {})) as { sessions: unknown[] }).sessions).toEqual([])

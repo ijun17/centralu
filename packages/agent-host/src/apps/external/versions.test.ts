@@ -120,7 +120,8 @@ describe('a version is captured when the code changes and starts', () => {
     await running()
     const [snap] = rt.snapshots(ref)
     const files = join(dataRoot, VERSIONS_REL, '_user', 'ver', snap!.id, 'files')
-    expect(readdirSync(files, { recursive: true }).sort()).toEqual([MANIFEST_FILE, 'ui', 'ui/index.html', 'version.txt'])
+    // readdirSync names nested entries with the OS separator (ui\index.html on Windows)
+    expect(readdirSync(files, { recursive: true, encoding: 'utf8' }).map((f) => f.replaceAll('\\', '/')).sort()).toEqual([MANIFEST_FILE, 'ui', 'ui/index.html', 'version.txt'])
     expect(readdirSync(appDir())).not.toContain(VERSIONS_REL)
   })
 })
@@ -155,6 +156,10 @@ describe('restore', () => {
     // A restore can also be undone — back to the v3 that came right before it
     rt.restoreVersion(ref, after.find((s) => s.reason === 'before restore')!.id)
     expect(readFileSync(join(appDir(), 'version.txt'), 'utf8')).toBe('v3')
+    // That restore starts the app again too. Waited for so the test does not end with a start in flight: a process that
+    // comes up after dispose() is stopped without being waited for, and on Windows its working directory (the app
+    // folder) cannot be deleted while it runs (#14)
+    expect(await running()).toBe('v3')
   })
 
   it('an app stopped after failing repeatedly also starts again once restored — it is the code the person chose', async () => {

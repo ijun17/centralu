@@ -410,7 +410,9 @@ describe('importFile — a file dragged in from outside', () => {
 describe('resolveExisting — the absolute path handed to the shell', () => {
   it('gives the absolute path of a file that exists', async () => {
     writeFileSync(join(root, 'a.ts'), 'x')
-    expect(await resolveExisting(root, 'a.ts')).toBe(realpathSync(join(root, 'a.ts')))
+    // native: the answer is the canonical path, which on Windows expands an 8.3 short temp folder (C:\Users\RUNNER~1); the
+    // JS realpath leaves that name as it is (#14)
+    expect(await resolveExisting(root, 'a.ts')).toBe(realpathSync.native(join(root, 'a.ts')))
   })
 
   /** Handing the shell a path that does not exist does nothing at all — this blocks that silence */

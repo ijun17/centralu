@@ -103,6 +103,8 @@ describe('v10 migration — allows a session with no project', () => {
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
     expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
+    // Closed before the folder goes: Windows cannot delete a file that is still open
+    store.close()
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -776,6 +778,7 @@ describe('v13 migration — the old-named table becomes grid_panels', () => { //
 
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
     expect(store.listGridView()).toEqual([sp('s1')])
+    store.close()
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -833,6 +836,7 @@ describe('v14 migration — remembers the directory a session was created in', (
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
+    store.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -851,6 +855,7 @@ describe('v14 migration — remembers the directory a session was created in', (
     const store = new Store(file)
 
     expect(store.sessionCwd('orc')).toBeNull()
+    store.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -870,6 +875,7 @@ describe('v14 migration — remembers the directory a session was created in', (
 
     const second = new Store(file)
     expect(second.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
+    second.close()
     rmSync(dir, { recursive: true, force: true })
   })
 })

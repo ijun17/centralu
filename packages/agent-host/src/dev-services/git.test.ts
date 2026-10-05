@@ -102,7 +102,7 @@ describe('git path containment', () => {
     git('add', '.')
     git('commit', '-q', '-m', 'init')
     const sub = join(d, 'pkg')
-    execFileSync('mkdir', ['-p', sub])
+    mkdirSync(sub, { recursive: true })
     writeFileSync(join(d, 'outside.txt'), 'outside\n')
 
     await expect(gitDiff(sub, '../outside.txt')).rejects.toThrow(/outside the project/i)
@@ -213,8 +213,8 @@ describe('a .. past a symlink cannot reveal an outside file\'s content (#119)', 
     const outside = mkdtempSync(join(tmpdir(), 'cc-git-outside-'))
     dirs.push(outside)
     writeFileSync(join(outside, 'secret.txt'), 'OUTSIDE SECRET')
-    execFileSync('mkdir', ['-p', join(d, 'sub', 'deep')])
-    execFileSync('mkdir', ['-p', join(d, 'sub', 'evil')])
+    mkdirSync(join(d, 'sub', 'deep'), { recursive: true })
+    mkdirSync(join(d, 'sub', 'evil'), { recursive: true })
     symlinkSync(join(d, 'sub', 'deep'), join(d, 'link'))
     symlinkSync(outside, join(d, 'evil'))
 

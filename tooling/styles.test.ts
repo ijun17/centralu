@@ -170,13 +170,12 @@ describe('the built CSS actually contains styles', () => {
  */
 describe('our own classes are actually used', () => {
   const OURS = ['cc-chip', 'cc-orbit']
-  const src = execFileSync('grep', ['-rl', '--include=*.tsx', '--include=*.ts', '-e', 'cc-', 'packages/ui/src'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  })
-    .split('\n')
-    .filter(Boolean)
-    .map((f) => readFileSync(join(ROOT, f), 'utf8'))
+  // Read in Node, not with `grep`, which a Windows machine without Git's usr/bin on PATH does not have (#14)
+  const uiSrc = join(ROOT, 'packages/ui/src')
+  const src = readdirSync(uiSrc, { recursive: true, encoding: 'utf8' })
+    .filter((f) => /\.tsx?$/.test(f))
+    .map((f) => readFileSync(join(uiSrc, f), 'utf8'))
+    .filter((text) => text.includes('cc-'))
     .join('\n')
 
   it.each(OURS)('%s — is attached to a component', (name) => {
