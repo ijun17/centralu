@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
@@ -127,10 +127,64 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
     child,
     async kill(signal: NodeJS.Signals = 'SIGTERM') {
       if (child.exitCode !== null || child.signalCode !== null) return
+      const tree = descendants(child.pid!)
       const exited = once(child, 'exit')
       child.kill(signal)
       await exited
+      await gone(tree)
     },
+  }
+}
+
+/*
+ * What the host started is waited for too, not only the host (#368). Its probes (`claude --version`,
+ * `claude auth status`, which the window asks for through `agents.detect` on load) are not ended
+ * with it, and with HOME in the workspace they write `home/.claude.json` and `home/.claude/backups/`
+ * a moment after the host has exited. Removing the workspace then failed with ENOTEMPTY when a write
+ * landed during the removal, and when it landed after, it made the folder again: a Mac that had run
+ * the e2e suite for two days held 97 `centralu-e2e-recovery-*` folders with exactly those files.
+ * The probes are left to finish rather than killed: the host leaves them alone in the real app as
+ * well. Taken before the signal, while they are still under the host; afterwards they have been
+ * handed to init. Unix only: these specs do not run on Windows.
+ */
+function descendants(root: number): number[] {
+  if (process.platform === 'win32') return []
+  let out = ''
+  try {
+    out = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8', timeout: 5_000 })
+  } catch {
+    return []
+  }
+  const kids = new Map<number, number[]>()
+  for (const line of out.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line)
+    if (m) kids.set(Number(m[2]), [...(kids.get(Number(m[2])) ?? []), Number(m[1])])
+  }
+  const found: number[] = []
+  const queue = [root]
+  while (queue.length > 0) {
+    for (const kid of kids.get(queue.shift()!) ?? []) {
+      found.push(kid)
+      queue.push(kid)
+    }
+  }
+  return found
+}
+
+/** Waits until none of `pids` is running; the probes give up on their own after 5 s, so 15 s is generous */
+async function gone(pids: number[], timeoutMs = 15_000): Promise<void> {
+  const running = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code === 'EPERM'
+    }
+  }
+  const deadline = Date.now() + timeoutMs
+  while (pids.some(running)) {
+    if (Date.now() > deadline) throw new Error(`the host's children ${pids.filter(running).join(', ')} were still running ${timeoutMs}ms after it exited`)
+    await new Promise((r) => setTimeout(r, 50))
   }
 }
 
