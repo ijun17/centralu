@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
 import { createHttpHandler, type HttpRoute } from '../transport/http.js'
+import { withDragRelay } from './drag-relay.js'
 import { allowAttribute, approvedPermissions, buildProxyCsp, buildViewCsp, type ViewCspDomains, type ViewPermissions } from './csp.js'
 import type { OriginPorts } from './origin-ports.js'
 import { PROXY_SCRIPT_HASH, proxyPageHtml } from './proxy-page.js'
@@ -314,7 +315,8 @@ export class ViewHost {
       status: 200,
       // The srcdoc document inherits this response's policy — this is where the view's CSP is applied
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': buildViewCsp(doc.csp).policy },
-      body: proxyPageHtml({ mode: 'opaque', hostOrigin, sandbox: SANDBOX_OPAQUE, allow, html: doc.html }),
+      // The drag relay goes into every view (drag-relay.ts): a drag out of a view reaches the page no other way
+      body: proxyPageHtml({ mode: 'opaque', hostOrigin, sandbox: SANDBOX_OPAQUE, allow, html: withDragRelay(doc.html) }),
     }
   }
 
@@ -362,7 +364,7 @@ export class ViewHost {
     return {
       status: 200,
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': buildViewCsp(doc.csp).policy },
-      body: doc.html,
+      body: withDragRelay(doc.html),
     }
   }
 }

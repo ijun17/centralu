@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { request } from 'node:http'
 import { HostServer } from '../transport/server.js'
 import { OriginPorts, type PortBook } from './origin-ports.js'
+import { DRAG_RELAY_SCRIPT, withDragRelay } from './drag-relay.js'
 import { PROXY_SCRIPT, PROXY_SCRIPT_HASH } from './proxy-page.js'
 import { MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, type ViewSource } from './view-host.js'
 import { VIEW_MIME_TYPE } from './view-document.js'
@@ -116,8 +117,10 @@ describe('ViewHost — opaque origin (default)', () => {
     expect(page.csp).toContain("frame-src 'none'")
     const cfg = pageConfig(page.body)
     expect(cfg).toMatchObject({ mode: 'opaque', hostOrigin: HOST_ORIGIN, sandbox: 'allow-scripts allow-forms' })
-    // The app's HTML is embedded escaped inside the JSON — it cannot escape the block with `</script>`
-    expect(cfg.html).toBe('<p>board</p></script><script>alert(1)</script>')
+    // The app's HTML is embedded escaped inside the JSON — it cannot escape the block with `</script>`.
+    // The host's drag relay rides along at its end (#308)
+    expect(cfg.html).toBe(withDragRelay('<p>board</p></script><script>alert(1)</script>'))
+    expect(cfg.html).toContain(DRAG_RELAY_SCRIPT)
     expect(page.body.match(/<\/script>/g)).toHaveLength(2)
     // The document is read once in frame(), and the proxy page uses that
     expect(reads).toEqual(['p1/notes ui://notes/board'])
@@ -222,7 +225,9 @@ describe('ViewHost — per-app origin', () => {
     expect(src.pathname).not.toContain(SECRET)
     const doc = await get(cfg.src!)
     expect(doc.status).toBe(200)
-    expect(doc.body).toBe('<p>notes</p>')
+    // The per-app origin's document carries the drag relay too (#308)
+    expect(doc.body).toBe(withDragRelay('<p>notes</p>'))
+    expect(doc.body).toContain(DRAG_RELAY_SCRIPT)
     expect(doc.csp).toContain('script-src \'unsafe-inline\' https://cdn.example.com')
     expect(doc.csp).toContain("connect-src 'none'")
 
@@ -356,7 +361,7 @@ describe('ViewHost — a planned hand-over (#280 step 4)', () => {
       // The address the UI already holds is served by the new host, and asking again gives the same one
       const page = await get(before.url)
       expect(page.status).toBe(200)
-      expect(pageConfig(page.body).html).toBe('<p>board</p>')
+      expect(pageConfig(page.body).html).toBe(withDragRelay('<p>board</p>'))
       expect((await second.views.frame({ app: NOTES, instanceId, hostOrigin: HOST_ORIGIN })).url).toBe(before.url)
       expect(second.views.describe(instanceId)).toEqual({ app: NOTES, uri: 'ui://notes/board' })
     } finally {

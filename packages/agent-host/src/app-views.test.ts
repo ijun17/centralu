@@ -16,6 +16,7 @@ import { SessionManager } from './sessions/manager.js'
 import { HostServer } from './transport/server.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
+import { withDragRelay } from './views/drag-relay.js'
 
 /**
  * The seam between app views and the external app runtime (M4 B-3 ↔ A) — the exact
@@ -132,8 +133,8 @@ describe('the view document is what the runtime read from the app', () => {
     expect(page.status).toBe(200)
     const pid = await servingPid('slider')
     // The document's pid matches the tool answer's pid — this is the document that app process
-    // actually served, not a stand-in
-    expect(pageConfig(page.body).html).toBe(`<!doctype html><p id="served">view from app process ${pid}</p>`)
+    // actually served, not a stand-in — with the host's drag relay added at its end (#308)
+    expect(pageConfig(page.body).html).toBe(withDragRelay(`<!doctype html><p id="served">view from app process ${pid}</p>`))
     expect(page.csp).toContain('connect-src https://api.fixture.test')
 
     // The view's onreadresource takes the same path
