@@ -54,6 +54,31 @@ TERM) and ends its tree with `taskkill` only if it is still running after the gr
 worktree setup command runs under `cmd.exe`, so it reads `%CENTRALU_WORKTREE%`, not
 `$CENTRALU_WORKTREE`.
 
+**How a Claude process is started on Windows (#353).** Claude Code installed with npm is one
+program, `node_modules\@anthropic-ai\claude-code\bin\claude.exe`, which npm's `claude.cmd` starts
+and which the host starts directly since #307. Windows will not delete or overwrite a program while
+it runs, and Claude Code's own setup step (`install.cjs`) updates it by deleting that file and
+linking the new build in its place. A Centralu session holding the file made that step fail, and
+the step then leaves npm's 500-byte placeholder behind: a text file named `.exe` that Windows calls
+a 16-bit program. So, on Windows only (`adapters/claude/exe-link.ts`, `start-gate.ts`):
+
+| Step | What happens | Why |
+|---|---|---|
+| Placeholder check | an `.exe` under 1 MB that does not start with `MZ` fails the session start, and `detect`, with the file, the cause and the fix (`node "<pkg>\install.cjs"`, or reinstall with no Claude Code running) | a spawn error would only say "16-bit program" |
+| Hard link | the program is hard-linked into `<data>\tools\claude\<version>-<size>\claude.exe` (data = `CC_DATA_DIR`) and started from there; a copy when linking fails (`EXDEV`, `EPERM`); npm's path itself if both fail, with a log line | while a link runs, npm's name can be deleted, replaced and renamed (measured on NTFS); a link costs no disk |
+| Link key | the version from npm's `package.json` next to the program plus its size; outside npm, size and modification time | free to read; `--version` would run npm's file, a content hash reads 250 MB per start; npm stamps every file with one time |
+| Cleanup | a link folder goes when no session of this host runs from it and it is not the one new sessions use: at host start, when the installed version changes, when a session's process ends | Windows refuses to delete a running program, so a folder still in use survives the attempt |
+| Spaced starts | Claude processes start one at a time, 1.5 s apart | the sign-in is a file with one refresher at a time; processes started together all refresh an expired token at once |
+| Refresh race | a turn that ends with "another Claude Code process is refreshing it" is sent again once after 3 to 6 s, with a notice in the conversation; a second loss is reported | the CLI calls it transient; the other process has written the new token by then |
+| Leaving | on quit the host waits up to 1.5 s for the Claude processes it closed to exit on their stdin EOF | a Node process takes its children with it when it exits, which could cut a refresh mid-write |
+
+The retry runs on every platform (it costs nothing where the race never happens); the rest is
+Windows only, because macOS and Linux replace a running program without complaint and macOS keeps
+the sign-in in the keychain. Ending one session needs nothing extra: on Windows the SDK closes the
+CLI's stdin and kills it only after 7 seconds. A process that is mid-turn when the host quits is
+still ended with the host, as before. A Claude Code update installed while sessions run is picked
+up by each session's next start; the old version's link goes once its last session ends.
+
 The one addition (#280): under the keeper (`CC_KEEPER=1`), the host also writes
 `{"activity":{"busy":true|false}}` to stdout, once at start and whenever it changes
 (`keeper-link.ts`). That is what the keeper's idle rule reads. Started any other way, the host
