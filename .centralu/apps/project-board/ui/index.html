@@ -7,20 +7,49 @@
     <title>Project board</title>
     <style>
       /*
-       * Centralu's palette, whichever theme shows: the host sends its colours under the MCP Apps
-       * variable names (applied below), so the board follows light and dark. The fallbacks are the
-       * dark theme's values. Contrast is urgency: the signal colour (the standard's warning text,
-       * pure white in dark and pure black in light) marks only what waits on the owner.
+       * Everything the board looks like comes from Centralu's theme: the host sends the MCP Apps
+       * style variables and Centralu's own (applied on <html> by applyTheme below), so a theme
+       * switch, or a different font, line height or text size in Settings → Appearance, reshapes
+       * the board the way it reshapes Centralu.
+       *
+       * This block is the only place with fallbacks. They are Centralu's dark defaults, for the
+       * moment before the host context arrives; every rule below reads these names and nothing
+       * else. Contrast is urgency: the signal colour (the standard's warning text, pure white in
+       * dark and pure black in light) marks only what waits on the owner.
        */
       :root {
+        /* Colour roles */
         --bg: var(--color-background-primary, #141414);
         --surface: var(--color-background-secondary, #1d1d1d);
-        --raised: var(--color-background-tertiary, #353535);
         --ink: var(--color-text-primary, #e9e9e9);
         --ink-2: var(--color-text-secondary, #909090);
         --ink-3: var(--color-text-tertiary, #5c5c5c);
         --edge: var(--color-border-primary, #292929);
-        --beacon: var(--color-text-warning, #ffffff);
+        --edge-strong: var(--color-border-secondary, #353535);
+        --ring: var(--color-ring-primary, #909090);
+        --beacon: var(--centralu-signal, var(--color-text-warning, #ffffff));
+        /* Type: what a person reads, the controls around it, and the board's one heading */
+        --sans: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif);
+        --mono: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+        --text: var(--font-text-md-size, 13px);
+        --text-sm: var(--font-text-sm-size, 12px);
+        --leading: var(--font-text-md-line-height, 1.65);
+        --heading: var(--font-heading-xs-size, 13px);
+        --leading-tight: var(--font-heading-xs-line-height, 1.3);
+        --regular: var(--font-weight-normal, 400);
+        --semibold: var(--font-weight-semibold, 600);
+        /* Shape: small marks, controls and cards, panels */
+        --radius-sm: var(--border-radius-sm, 3px);
+        --radius-md: var(--border-radius-md, 4px);
+        --radius-lg: var(--border-radius-lg, 8px);
+        --border: var(--border-width-regular, 1px);
+        /* Centralu's scrollbar (the block at the end) */
+        --sb-size: var(--centralu-scrollbar-size, 10px);
+        --sb-inset: var(--centralu-scrollbar-inset, 3px);
+        --sb-radius: var(--centralu-scrollbar-radius, 999px);
+        --sb-track: var(--centralu-scrollbar-track, transparent);
+        --sb-thumb: var(--centralu-scrollbar-thumb, #292929);
+        --sb-thumb-hover: var(--centralu-scrollbar-thumb-hover, #353535);
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
@@ -28,48 +57,53 @@
         margin: 0;
         display: flex;
         flex-direction: column;
-        font: 13px/1.45 var(--font-sans, -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
+        font-family: var(--sans);
+        font-size: var(--text);
+        line-height: var(--leading);
+        font-weight: var(--regular);
         color: var(--ink);
         background: transparent;
       }
       header {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 8px 12px;
         flex-wrap: wrap;
         padding: 12px 16px 10px;
-        border-bottom: 1px solid var(--edge);
+        border-bottom: var(--border) solid var(--edge);
       }
-      h1 { font-size: 14px; font-weight: 600; margin: 0; }
+      h1 { font-size: var(--heading); line-height: var(--leading-tight); font-weight: var(--semibold); margin: 0; }
       h1 a { color: inherit; text-decoration: none; }
       h1 a:hover { text-decoration: underline; text-decoration-color: var(--ink-3); }
       .sub { color: var(--ink-3); }
       .spacer { flex: 1; }
       select, button {
         font: inherit;
+        line-height: var(--leading-tight);
         color: var(--ink);
         background: var(--surface);
-        border: 1px solid var(--edge);
-        border-radius: 6px;
+        border: var(--border) solid var(--edge);
+        border-radius: var(--radius-md);
         padding: 3px 8px;
+        max-width: 100%;
       }
       button { cursor: pointer; }
-      select:hover, button:hover { border-color: var(--raised); }
+      select:hover, button:hover { border-color: var(--edge-strong); }
       button:disabled { color: var(--ink-3); cursor: default; }
-      :focus-visible { outline: 1px solid var(--ink-2); outline-offset: 1px; }
+      :focus-visible { outline: var(--border) solid var(--ring); outline-offset: 1px; }
       .stamp { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
       .notice {
         margin: 12px 16px 0;
         padding: 10px 12px;
-        border: 1px solid var(--raised);
-        border-radius: 8px;
+        border: var(--border) solid var(--edge-strong);
+        border-radius: var(--radius-lg);
         background: var(--surface);
         white-space: pre-wrap;
       }
-      .notice strong { color: var(--beacon); font-weight: 600; }
+      .notice strong { color: var(--beacon); font-weight: var(--semibold); }
       .notice button { margin-left: 8px; }
-      .notice code { font-family: var(--font-mono, ui-monospace, monospace); }
+      .notice code { font-family: var(--mono); }
 
       .board {
         flex: 1;
@@ -85,12 +119,12 @@
         display: flex;
         flex-direction: column;
         min-height: 0;
-        border: 1px solid transparent;
-        border-radius: 10px;
+        border: var(--border) solid transparent;
+        border-radius: var(--radius-lg);
       }
       .column.drop { border-color: var(--ink-3); }
-      /* The decision column is what waits on the owner: first, framed, and in the one pure white. */
-      .column.decision { border-color: var(--raised); background: var(--surface); }
+      /* The decision column is what waits on the owner: first, framed, and in the signal colour. */
+      .column.decision { border-color: var(--edge-strong); background: var(--surface); }
       .column.decision .col-head { color: var(--beacon); }
       .col-head {
         display: flex;
@@ -98,49 +132,64 @@
         gap: 6px;
         padding: 8px 10px 6px;
         color: var(--ink-2);
-        font-weight: 600;
+        font-weight: var(--semibold);
       }
       .col-head .mark { width: 1em; text-align: center; }
-      .col-head .count { color: var(--ink-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+      .col-head .count { color: var(--ink-3); font-weight: var(--regular); font-variant-numeric: tabular-nums; }
       .cards { flex: 1; overflow-y: auto; padding: 0 6px 8px; display: flex; flex-direction: column; gap: 6px; }
       .empty { color: var(--ink-3); padding: 4px 4px 8px; }
 
       .card {
         background: var(--bg);
-        border: 1px solid var(--edge);
-        border-radius: 8px;
+        border: var(--border) solid var(--edge);
+        border-radius: var(--radius-md);
         padding: 8px 10px;
         cursor: grab;
       }
       .column:not(.decision) .card { background: var(--surface); }
-      .card:hover { border-color: var(--raised); }
+      .card:hover { border-color: var(--edge-strong); }
       .card.saving { opacity: 0.5; }
       .card .title { color: var(--ink); text-decoration: none; display: block; overflow-wrap: anywhere; }
       .card .title:hover { text-decoration: underline; text-decoration-color: var(--ink-3); }
-      .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; color: var(--ink-2); }
-      .num { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: var(--ink-2); }
-      .tag { border: 1px solid var(--edge); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+      .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; color: var(--ink-2); font-size: var(--text-sm); }
+      .num { font-family: var(--mono); color: var(--ink-2); }
+      .tag { border: var(--border) solid var(--edge); border-radius: var(--radius-sm); padding: 0 5px; }
       .p-High { color: var(--ink); border-color: var(--ink-3); }
       .p-Medium { color: var(--ink-2); }
       .p-Low { color: var(--ink-3); }
-      .move { margin-left: auto; font-size: 12px; padding: 1px 4px; color: var(--ink-2); max-width: 118px; }
+      .move { margin-left: auto; padding: 1px 4px; color: var(--ink-2); max-width: 118px; }
+
+      /*
+       * A narrow view: a grid or project-screen panel (about 360–480px), or the inline view under a
+       * tool card (#306). Side by side, six columns would leave a sliver each; stacked, every column
+       * gets the full width and the board scrolls as one page. The decision column is first either
+       * way, so what waits on the owner is still the first thing seen. Dropping a card on another
+       * column works the same, since each column is still its own drop target.
+       */
+      @media (max-width: 520px) {
+        header { padding: 10px 12px 8px; }
+        .stamp { order: 1; flex-basis: 100%; }
+        .board { flex-direction: column; overflow-x: hidden; overflow-y: auto; padding: 10px 12px 12px; gap: 10px; }
+        .column { flex: none; max-width: none; }
+        .cards { flex: none; overflow: visible; }
+      }
 
       /*
        * Centralu's scrollbar (the app template's block): drawn the way Centralu draws its own, from
-       * the theme's scrollbar variables, with its dark values as fallbacks.
+       * the theme's scrollbar variables.
        */
-      ::-webkit-scrollbar { width: var(--centralu-scrollbar-size, 10px); height: var(--centralu-scrollbar-size, 10px); }
-      ::-webkit-scrollbar-track { background: var(--centralu-scrollbar-track, transparent); }
+      ::-webkit-scrollbar { width: var(--sb-size); height: var(--sb-size); }
+      ::-webkit-scrollbar-track { background: var(--sb-track); }
       ::-webkit-scrollbar-thumb {
-        background: var(--centralu-scrollbar-thumb, #292929);
-        border: var(--centralu-scrollbar-inset, 3px) solid transparent;
+        background: var(--sb-thumb);
+        border: var(--sb-inset) solid transparent;
         background-clip: content-box;
-        border-radius: var(--centralu-scrollbar-radius, 999px);
+        border-radius: var(--sb-radius);
       }
-      ::-webkit-scrollbar-thumb:hover { background: var(--centralu-scrollbar-thumb-hover, #353535); background-clip: content-box; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); background-clip: content-box; }
       /* Only where ::-webkit-scrollbar does not exist: elsewhere scrollbar-color would switch it off */
       @supports not selector(::-webkit-scrollbar) {
-        * { scrollbar-color: var(--centralu-scrollbar-thumb, #292929) var(--centralu-scrollbar-track, transparent); scrollbar-width: thin; }
+        * { scrollbar-color: var(--sb-thumb) var(--sb-track); scrollbar-width: thin; }
       }
     </style>
   </head>

@@ -93,6 +93,66 @@ async function insideAndOutside(page: Page) {
   return { inside: await pixel(page, Math.round(box.x + box.width - 12), y), outside: await pixel(page, Math.round(box.x - 4), y) }
 }
 
+/** A board with items in every column, each title long enough to wrap in a narrow view */
+const BOARD_SPREAD = {
+  ...BOARD_STATE,
+  columns: ['Needs decision', 'In progress', 'In review', 'On hold', 'Done'],
+  items: ['Needs decision', 'In progress', 'In review', 'On hold', 'Done'].flatMap((status, c) =>
+    [0, 1].map((n) => ({
+      ...BOARD_STATE.items[0]!,
+      itemId: `spread-${c}-${n}`,
+      status,
+      number: 100 + c * 10 + n,
+      title: `A longer item title in ${status} that has to wrap inside a narrow panel ${n}`,
+    })),
+  ),
+}
+
+async function showPreset(page: Page, preset: string, side: 'dark' | 'light') {
+  await page.evaluate(
+    ([p, s]) => {
+      const root = document.documentElement
+      root.dataset.theme = p
+      root.dataset.themeBase = s
+      window.dispatchEvent(new CustomEvent('cc-themechange'))
+    },
+    [preset, side],
+  )
+}
+
+async function showBoard(page: Page, state: unknown = BOARD_STATE) {
+  await page.evaluate((st) => {
+    ;(window as any).__mock.appToolHandler = async () => ({ content: [{ type: 'text', text: 'board' }], structuredContent: st })
+  }, state)
+  await mount(page, 'project-board', 'ui://project-board/index.html')
+}
+
+/** Centralu's own tokens as the host page computes them, in the form the view's computed style reports */
+async function hostValues(page: Page) {
+  return page.evaluate(() => {
+    const probe = document.createElement('div')
+    document.body.appendChild(probe)
+    const color = (token: string) => ((probe.style.color = `var(${token})`), getComputedStyle(probe).color)
+    const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    const out = {
+      ink: color('--color-ink'),
+      muted: color('--color-ink-muted'),
+      signal: color('--color-ink-signal'),
+      line: color('--color-line'),
+      radiusSm: token('--radius-sm'),
+      radiusMd: token('--radius-md'),
+      radiusLg: token('--radius-lg'),
+      textMd: token('--text-md'),
+      textSm: token('--text-sm'),
+    }
+    probe.remove()
+    return out
+  })
+}
+
+const styleOf = (v: FrameLocator, selector: string, prop: 'fontFamily' | 'fontSize' | 'lineHeight' | 'borderTopColor' | 'borderTopLeftRadius') =>
+  v.locator(selector).first().evaluate((el, p) => getComputedStyle(el)[p], prop)
+
 export function appThemeTests() {
   test.beforeAll(async () => {
     fx = await startFixtureHost({
@@ -187,6 +247,99 @@ export function appThemeTests() {
     expect(await colorOf(v, '.card .title')).toBe(LIGHT.ink)
     expect(await thumb(v, '.cards')).toBe(LIGHT.thumb)
     expect(await thumb(v, '.board')).toBe(LIGHT.thumb)
+  })
+
+  test('the template takes its type and shape from the theme: its display size, and a changed font, line height and radius', async ({ page }) => {
+    await mount(page, 'counter', 'ui://counter/main')
+    const v = view(page)
+    await expect(v.locator('#count')).toBeVisible()
+    await expect.poll(() => styleOf(v, 'button', 'borderTopLeftRadius')).toBe('4px')
+    // The count is the standard's 2xl heading (hostStyles.ts writes 28px), not a size of its own
+    expect(await styleOf(v, '#count', 'fontSize')).toBe('28px')
+    await page.evaluate(() => {
+      const root = document.documentElement.style
+      root.setProperty('--font-sans', '"Inter", -apple-system, sans-serif')
+      root.setProperty('--leading-body', '1.452')
+      root.setProperty('--radius-md', '6px')
+      window.dispatchEvent(new CustomEvent('cc-themechange'))
+    })
+    await expect.poll(() => styleOf(v, 'body', 'fontFamily')).toMatch(/^"?Inter"?,/)
+    // 13px x 1.452
+    expect(parseFloat(await styleOf(v, 'body', 'lineHeight'))).toBeCloseTo(18.876, 2)
+    expect(await styleOf(v, 'button', 'borderTopLeftRadius')).toBe('6px')
+  })
+
+  for (const [preset, side] of [['dark', 'dark'], ['light', 'light'], ['hc-dark', 'dark'], ['hc-light', 'light']] as const) {
+    test(`the project board takes its colours, type and shape from the theme: ${preset}`, async ({ page }) => {
+      await showBoard(page)
+      const v = view(page)
+      await showPreset(page, preset, side)
+      await expect.poll(() => schemeOf(v)).toBe(side)
+      const want = await hostValues(page)
+      await expect.poll(() => colorOf(v, '.card .title')).toBe(want.ink)
+      expect(await colorOf(v, '.column.decision .col-head')).toBe(want.signal)
+      expect(await colorOf(v, '.column:not(.decision) .col-head')).toBe(want.muted)
+      expect(await styleOf(v, '.card', 'borderTopColor')).toBe(want.line)
+      expect(await styleOf(v, '.card', 'borderTopLeftRadius')).toBe(want.radiusMd)
+      expect(await styleOf(v, '.column', 'borderTopLeftRadius')).toBe(want.radiusLg)
+      expect(await styleOf(v, '.tag', 'borderTopLeftRadius')).toBe(want.radiusSm)
+      expect(await styleOf(v, 'body', 'fontSize')).toBe(want.textMd)
+      expect(await styleOf(v, '.meta', 'fontSize')).toBe(want.textSm)
+    })
+  }
+
+  test('the project board follows a changed font, line height and shape without a reload', async ({ page }) => {
+    await showBoard(page)
+    const v = view(page)
+    await expect(v.locator('.card').first()).toBeVisible()
+    // What Settings → Appearance writes on the root (app/typography.ts), and a custom theme's radius
+    await page.evaluate(() => {
+      const root = document.documentElement.style
+      root.setProperty('--font-sans', '"Inter", -apple-system, sans-serif')
+      root.setProperty('--font-mono', '"Iosevka Term", ui-monospace, monospace')
+      root.setProperty('--leading-body', '1.848')
+      root.setProperty('--radius-md', '6px')
+      window.dispatchEvent(new CustomEvent('cc-themechange'))
+    })
+    await expect.poll(() => styleOf(v, 'body', 'fontFamily')).toMatch(/^"?Inter"?,/)
+    expect(await styleOf(v, '.num', 'fontFamily')).toMatch(/^"?Iosevka Term"?,/)
+    // 13px x 1.848
+    expect(parseFloat(await styleOf(v, 'body', 'lineHeight'))).toBeCloseTo(24.024, 2)
+    expect(await styleOf(v, '.card', 'borderTopLeftRadius')).toBe('6px')
+    expect(await styleOf(v, '#refresh', 'borderTopLeftRadius')).toBe('6px')
+  })
+
+  test('in a panel-narrow view the board stacks its columns: nothing overflows sideways and every card reads in full', async ({ page }) => {
+    // A grid panel is about 360-480px wide; the harness frame is the page width less 32px of padding
+    await page.setViewportSize({ width: 412, height: 900 })
+    await showBoard(page, BOARD_SPREAD)
+    const v = view(page)
+    await expect(v.locator('.column')).toHaveCount(BOARD_SPREAD.columns.length)
+    const layout = await v.locator('body').evaluate(() => {
+      const board = document.querySelector('.board')!
+      const header = document.querySelector('header')!
+      const cols = [...document.querySelectorAll('.column')].map((c) => c.getBoundingClientRect())
+      const titles = [...document.querySelectorAll('.card .title')].map((t) => ({ sw: t.scrollWidth, cw: t.clientWidth, right: t.getBoundingClientRect().right }))
+      return {
+        width: document.documentElement.clientWidth,
+        boardOverflow: board.scrollWidth - board.clientWidth,
+        headerOverflow: header.scrollWidth - header.clientWidth,
+        lefts: [...new Set(cols.map((c) => Math.round(c.left)))],
+        widths: cols.map((c) => Math.round(c.width)),
+        tops: cols.map((c) => Math.round(c.top)),
+        titles,
+      }
+    })
+    expect(layout.width).toBeLessThan(400)
+    expect(layout.boardOverflow).toBeLessThanOrEqual(0)
+    expect(layout.headerOverflow).toBeLessThanOrEqual(0)
+    // One column under another, each as wide as the board allows
+    expect(layout.lefts).toHaveLength(1)
+    for (const w of layout.widths) expect(w).toBeGreaterThan(layout.width - 40)
+    expect(layout.tops).toEqual([...layout.tops].sort((a, b) => a - b))
+    for (const t of layout.titles) expect(t.right).toBeLessThanOrEqual(layout.width)
+    // The decision column is still first
+    expect(await v.locator('.column').first().getAttribute('class')).toContain('decision')
   })
 
   test('on a light theme a view stays transparent on Centralu\'s background', async ({ page }) => {

@@ -7,52 +7,92 @@
     <title>{{APP_NAME}}</title>
     <style>
       /*
-       * Colours, type and corners come from Centralu's theme: it sends MCP Apps style variables
-       * (applied by the script below), so the screen follows the person's theme, light or dark.
-       * The fallbacks are Centralu's dark theme, for a moment before the theme arrives.
+       * Colours, type and shape come from Centralu's theme: it sends MCP Apps style variables
+       * (applied by the script below), so the screen follows the person's theme, light or dark,
+       * and their font, line height and text size.
+       *
+       * Keep the fallbacks in this one block: they are Centralu's dark defaults, for the moment
+       * before the theme arrives. Every rule below reads these names, never a colour or size of
+       * its own. Spacing (margins, padding, gaps) has no theme variable and stays literal.
        */
+      :root {
+        --bg: var(--color-background-secondary, #1d1d1d);
+        --bg-hover: var(--color-background-tertiary, #353535);
+        --ink: var(--color-text-primary, #e9e9e9);
+        --danger: var(--color-text-danger, #ffa198);
+        --edge: var(--color-border-secondary, #353535);
+        --ring: var(--color-ring-primary, #909090);
+        --sans: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif);
+        --text: var(--font-text-md-size, 13px);
+        --leading: var(--font-text-md-line-height, 1.65);
+        --display: var(--font-heading-2xl-size, 28px);
+        --leading-tight: var(--font-heading-2xl-line-height, 1.3);
+        --radius: var(--border-radius-md, 4px);
+        --border: var(--border-width-regular, 1px);
+        /* Centralu's scrollbar (the block at the end) */
+        --sb-size: var(--centralu-scrollbar-size, 10px);
+        --sb-inset: var(--centralu-scrollbar-inset, 3px);
+        --sb-radius: var(--centralu-scrollbar-radius, 999px);
+        --sb-track: var(--centralu-scrollbar-track, transparent);
+        --sb-thumb: var(--centralu-scrollbar-thumb, #292929);
+        --sb-thumb-hover: var(--centralu-scrollbar-thumb-hover, #353535);
+      }
       body {
         margin: 16px;
-        font: var(--font-text-md-size, 13px) / var(--font-text-md-line-height, 1.65) var(--font-sans, system-ui, sans-serif);
-        color: var(--color-text-primary, #e9e9e9);
+        font-family: var(--sans);
+        font-size: var(--text);
+        line-height: var(--leading);
+        color: var(--ink);
         background: transparent;
       }
-      .count { font-size: 32px; font-variant-numeric: tabular-nums; margin-bottom: 12px; }
+      .count { font-size: var(--display); line-height: var(--leading-tight); font-variant-numeric: tabular-nums; margin-bottom: 12px; }
+      /*
+       * Narrow first (docs/apps.md 6.6): a view may be a grid panel 360px wide or the inline view
+       * under a tool card. Rows wrap instead of overflowing, nothing has a fixed width, and the
+       * layout only spreads out when there is room.
+       */
+      .actions { display: flex; flex-wrap: wrap; gap: 8px; }
       button {
         font: inherit;
         color: inherit;
-        background: var(--color-background-secondary, #1d1d1d);
-        border: var(--border-width-regular, 1px) solid var(--color-border-secondary, #353535);
-        border-radius: var(--border-radius-md, 4px);
+        background: var(--bg);
+        border: var(--border) solid var(--edge);
+        border-radius: var(--radius);
         padding: 4px 12px;
         cursor: pointer;
       }
-      button:hover { background: var(--color-background-tertiary, #353535); }
-      .error { color: var(--color-text-danger, #ffa198); margin-top: 8px; white-space: pre-wrap; }
+      button:hover { background: var(--bg-hover); }
+      :focus-visible { outline: var(--border) solid var(--ring); outline-offset: 1px; }
+      .error { color: var(--danger); margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      @media (max-width: 420px) {
+        body { margin: 12px; }
+      }
 
       /*
        * Centralu's scrollbar. Keep this block: it draws scrollbars the way Centralu does, from the
-       * theme's scrollbar variables, with its dark values as fallbacks.
+       * theme's scrollbar variables.
        */
-      ::-webkit-scrollbar { width: var(--centralu-scrollbar-size, 10px); height: var(--centralu-scrollbar-size, 10px); }
-      ::-webkit-scrollbar-track { background: var(--centralu-scrollbar-track, transparent); }
+      ::-webkit-scrollbar { width: var(--sb-size); height: var(--sb-size); }
+      ::-webkit-scrollbar-track { background: var(--sb-track); }
       ::-webkit-scrollbar-thumb {
-        background: var(--centralu-scrollbar-thumb, #292929);
-        border: var(--centralu-scrollbar-inset, 3px) solid transparent;
+        background: var(--sb-thumb);
+        border: var(--sb-inset) solid transparent;
         background-clip: content-box;
-        border-radius: var(--centralu-scrollbar-radius, 999px);
+        border-radius: var(--sb-radius);
       }
-      ::-webkit-scrollbar-thumb:hover { background: var(--centralu-scrollbar-thumb-hover, #353535); background-clip: content-box; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); background-clip: content-box; }
       /* Only where ::-webkit-scrollbar does not exist: elsewhere scrollbar-color would switch it off */
       @supports not selector(::-webkit-scrollbar) {
-        * { scrollbar-color: var(--centralu-scrollbar-thumb, #292929) var(--centralu-scrollbar-track, transparent); scrollbar-width: thin; }
+        * { scrollbar-color: var(--sb-thumb) var(--sb-track); scrollbar-width: thin; }
       }
     </style>
   </head>
   <body>
     <div class="count" id="count">…</div>
-    <button id="increment">+1</button>
-    <button id="reset">Reset</button>
+    <div class="actions">
+      <button id="increment">+1</button>
+      <button id="reset">Reset</button>
+    </div>
     <div class="error" id="error"></div>
 
     <!-- Centralu replaces this tag with the MCP App bridge (runtime/mcp-app.js). Keep it. -->

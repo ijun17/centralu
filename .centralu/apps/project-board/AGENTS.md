@@ -110,6 +110,15 @@ when an agent's call started it, on this app's screen when the screen did — an
 until the manifest's `uses` changes. The call waits while the person decides (up to 5 minutes). A
 refusal comes back as that error: show it plainly instead of retrying.
 
+## The screen's look
+
+- **Everything comes from Centralu's theme** (docs/apps.md §6.5): colours, sizes, line heights,
+  fonts, weights, radii and the border width are MCP Apps variables, applied on `<html>` by
+  `applyTheme`. Their fallbacks (Centralu's dark values) are in the `:root` block at the top of the
+  stylesheet and nowhere else; every rule reads those names. Spacing stays literal.
+- **Narrow first** (docs/apps.md §6.6): under 520px the columns stack, the decision column first,
+  and the board scrolls as one page. Keep that working when you change the layout.
+
 ## Checking your work
 
 - Call Centralu's **`check`** tool after changes. It validates the manifest, starts the app, lists
