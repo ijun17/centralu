@@ -798,6 +798,11 @@ export type AppState = {
    * @returns whether it was removed — a failure is reported as a toast
    */
   removeUserApp(appId: string): Promise<boolean>
+  /**
+   * Shares a project app with the person's other projects, or stops (#371 part A). The list follows
+   * from the host's broadcast; a failure is reported as a toast.
+   */
+  setAppShared(projectId: string, appId: string, shared: boolean): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
   /** The orchestrator's skill suggestion (#71) — the same suggest-then-one-click-approve rail */
   skillProposals: { name: string; content: string; why?: string }[]
@@ -4628,6 +4633,16 @@ export const useStore = create<AppState>((set, get) => ({
       return null
     } catch (e) {
       return (e as Error).message
+    }
+  },
+
+  async setAppShared(projectId, appId, shared) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      await platform.apps.setShared(appId, projectId, shared)
+    } catch (e) {
+      set({ toast: `Could not change sharing: ${(e as Error).message}` })
     }
   },
 

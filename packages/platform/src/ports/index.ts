@@ -912,6 +912,12 @@ export interface AppsPort {
    */
   setSecret(appId: AppId, projectId: string | null, name: string, value: string | null): Promise<void>
   /**
+   * Shares a project app with the person's other projects, or stops (#371 part A). Off by default;
+   * a session in another project can then find and attach it, once the person allows that pair of
+   * projects. Turning it off detaches it from every session that attached it.
+   */
+  setShared(appId: AppId, projectId: string, shared: boolean): Promise<void>
+  /**
    * Prepares to import an app (M4 E-3) — the host copies the source (a folder on this
    * machine, a local .zip, or a .zip over https) into a staging area and returns what the
    * person should review. **It has not been admitted yet.** Rejections (a link pointing

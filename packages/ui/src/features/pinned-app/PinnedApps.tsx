@@ -224,6 +224,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     return registerPinnedFrame(pv.key, { teardown: () => frame.current?.teardown() ?? Promise.resolve('not-connected') })
   }, [pv.phase, pv.instanceId, pv.key])
   const reload = useStore((s) => s.reloadPinnedView)
+  const setAppShared = useStore((s) => s.setAppShared)
 
   const canOpen = !!app && !!app.info.home && app.status.runnable
   useEffect(() => {
@@ -367,6 +368,25 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               title="The secrets this app declares — which are set, and a place to set them"
             >
               {missing ? `Secrets · ${missing} missing` : 'Secrets'}
+            </button>
+          )}
+          {/* Sharing with the person's other projects (#371 part A) — the same switch as Settings → Apps, here where the app is */}
+          {app?.projectId && (
+            <button
+              type="button"
+              className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
+                app.info.shared ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
+              }`}
+              aria-pressed={app.info.shared === true}
+              onClick={() => void setAppShared(app.projectId!, app.appId, !app.info.shared)}
+              data-testid="pinned-share-toggle"
+              title={
+                app.info.shared
+                  ? 'Shared with your other projects: their sessions can attach it while they need it. Press to stop sharing'
+                  : 'Share with your other projects: their sessions could attach it while they need it, after you allow each project once'
+              }
+            >
+              {app.info.shared ? 'Shared' : 'Share'}
             </button>
           )}
           {app && (

@@ -469,6 +469,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         </button>
       )}
       <SecretsLine app={app} />
+      <ShareLine app={app} />
       <GridSpanLine app={app} />
       {app.projectId === null &&
         (confirming ? (
@@ -539,6 +540,33 @@ function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
         title="Panel size in grid cells"
       />
     </div>
+  )
+}
+
+/**
+ * Sharing a project app with the person's other projects (#371 part A) — off by default, because a
+ * project app is that project's own. When on, a session in another project can find it and attach it
+ * to itself for as long as it needs the tools, after the person allows that pair of projects once.
+ * A user-folder app has no switch: it is the person's own and available to every project already.
+ */
+function ShareLine({ app }: { app: ExternalCatalogApp }) {
+  const setShared = useStore((s) => s.setAppShared)
+  if (app.projectId === null) return null
+  const shared = app.info.shared === true
+  return (
+    <label
+      className="mt-1.5 flex cursor-pointer items-center gap-2 px-1 text-xs text-ink-faint"
+      title="Sessions in your other projects can attach this app while they need it. Each project asks you once."
+      data-testid="external-app-share"
+    >
+      <input
+        type="checkbox"
+        className="accent-ink-muted"
+        checked={shared}
+        onChange={(e) => void setShared(app.projectId!, app.appId, e.target.checked)}
+      />
+      <span>Share with other projects</span>
+    </label>
   )
 }
 

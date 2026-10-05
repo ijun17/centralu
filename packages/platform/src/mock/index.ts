@@ -1275,6 +1275,15 @@ export class MockPlatform implements Platform {
      * to mask the name. What was received is recorded to `secretWrites` so a test can see it —
      * whether the value stays out of the screen (the DOM) is checked separately by a test.
      */
+    /** Sharing (#371 part A) — like the host: only an app that exists, the mark in the list, then the broadcast */
+    setShared: async (appId: string, projectId: string, shared: boolean): Promise<void> => {
+      const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+      if (!a) throw new Error(`No such app: ${appId}`)
+      if (shared) a.shared = true
+      else delete a.shared
+      this.sharedWrites.push({ appId, projectId, shared })
+      this.emit({ type: 'external_apps_changed' })
+    },
     setSecret: async (appId: string, projectId: string | null, name: string, value: string | null): Promise<void> => {
       const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
       if (!a) throw new Error(`There is no such app: ${projectId ?? 'user'}/${appId}`)
@@ -1380,6 +1389,8 @@ export class MockPlatform implements Platform {
   }
   /** Setting or clearing a secret that reached the host (M4 E) — tests check what went to which app under which name */
   readonly secretWrites: { appId: string; projectId: string | null; name: string; value: string | null }[] = []
+  /** What `setShared` received (#371 part A) — a test reads it to see the switch reached the host */
+  readonly sharedWrites: { appId: string; projectId: string; shared: boolean }[] = []
   /** Import source → the review window the host would return (M4 E-3). A test plugs this in — the mock does not read folders or zips */
   readonly importSources = new Map<string, AppReview>()
   /** Source → the host's rejection wording (M4 E-3) — tests check whether the window shows that wording as-is */
