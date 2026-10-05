@@ -3,6 +3,7 @@
 The screen's colours, shadows and scrollbar come from tokens (`packages/ui/src/styles/index.css`).
 A **theme** is a set of values for those tokens. Settings → Appearance chooses which theme shows;
 a **custom theme** is a JSON file anyone — a person, an editor, an agent — can write (#312).
+The same section sets the text: its size, the body and code fonts, and the line height ([below](#text-size-fonts-and-line-height)).
 
 ## Choosing
 
@@ -130,11 +131,44 @@ after a switch.
 | The preset floors are written into the script | The stylesheet has not loaded yet, so there is nothing to read them from. The same test compares them with `index.css` |
 | The native window does not read the cache at launch | Rust would need a cached value of its own, written by the page. The document loads from the bundle's embedded assets, and the script paints with its first frame. Only the gap before that frame is left, and it is not worth a second cache |
 
+## Text: size, fonts and line height
+
+Settings → Appearance also sets the text (#312 step 5). Four more preferences in `UiPreferences`,
+applied the way a theme is — as values for tokens, written on `<html>` (`packages/ui/src/app/typography.ts`):
+
+| Preference | Values | What it does |
+|---|---|---|
+| `textSize` | `0.85` · `0.925` · `1` (default) · `1.1` · `1.25` | The root's CSS zoom: the whole screen scales, like the OS's display scaling. Any other number lands on the nearest step |
+| `bodyFont` | a family or a list, `''` (default) | Goes in front of `--font-sans`: replies, titles, controls |
+| `codeFont` | a family or a list, `''` (default) | Goes in front of `--font-mono`: code blocks and spans, paths, readouts, and every terminal |
+| `lineHeight` | `compact` · `normal` (default) · `relaxed` | Multiplies `--leading-body` (1.65) and `--leading-code` (1.5) by 0.88 · 1 · 1.12 |
+
+Settings offers a short list of common fonts and *Other…* for any installed font by name. What is
+typed is quoted name by name (`JetBrains Mono` becomes `"JetBrains Mono"`; a generic keyword such as
+`monospace` stays bare) and checked by the browser before it is kept.
+
+| Decision | Why |
+|---|---|
+| The app's stack is always appended after the picked font | A font that is not installed, or a Latin font with no Hangul, falls back glyph by glyph to what shows today. Replacing the stack would turn Korean into whatever the OS picks last |
+| A default writes nothing on the root | The stylesheet's own values show, so a person who never opens these settings sees exactly the screen from before they existed (checked with the style snapshot) |
+| The terminal follows the code font | The terminal is text a machine wrote, like a path or a log. Step 1 kept xterm on its own stack only so that the token rename moved nothing. On a font change xterm re-reads it and refits, so the shell gets its new columns |
+| Line height leaves `--leading-tight` and the fixed-row views alone | A heading or a two-line label is set to fit its box. The code viewer (18px rows), the diff (~17px) and the commit graph (38px) are virtual lists or drawn lanes that know their row height in pixels (see the comments there) |
+| The text size moved out of the workspace snapshot | It is a way of looking, like the theme, not a place things are. The host moves the snapshot's old step (`textScale`, 0..4) into the record once, on the first read that finds no `textSize` there; after that the record has its own value and the old field is ignored |
+| Markdown keeps its em sizes | A heading (1.25em) or a code span (0.92em) is sized against the reply's own text, so it keeps its proportion whichever font is picked; the text size is a zoom over everything, so there is nothing else for them to follow |
+
+Like the theme, the last choice is cached (`cc-typography` in `localStorage`) and applied in `main.tsx`
+before the first frame, so a different font or zoom does not reflow the screen once the preferences
+arrive. A font or line-height change is announced with the theme's `cc-themechange`, which is what
+xterm and app views listen to. The composer's caret maths (`features/session/caret.ts`) reads the
+textarea's computed line height in pixels and copies it to its mirror, so it needs nothing from here.
+
 ## Apps
 
 App views get the theme too ([apps.md](apps.md) §6.5): the side as the MCP Apps `theme`, all 76
 standard style variables mapped from these tokens, and in the `centralu` extension the signal colour
 and the scrollbar tokens. Every switch, custom-theme edit and accent change reaches open views
-without reloading them. The signal colour is the standard's warning colour there, so an app that
+without reloading them, and so does a change of font or line height: `--font-sans`, `--font-mono` and
+the line-height variables are read from the same tokens. The text size is not sent as sizes (the root
+zoom already scales the frame); `centralu.fontScale` reports it. The signal colour is the standard's warning colour there, so an app that
 marks "waiting for you" with it keeps the urgency order. The app template applies all of it and
 ships Centralu's scrollbar as a stylesheet; apps are encouraged to use both, never checked.

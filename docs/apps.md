@@ -360,7 +360,9 @@ accent; [themes.md](themes.md)), so an app can look like Centralu without knowin
   heights, radii, the border width and shadows. Centralu is achromatic, so the roles the standard
   gives a hue land on the inks: info is plain text, and **warning is the signal colour**, what is
   waiting for the person (pure white in dark, pure black in light). Danger is Centralu's danger red,
-  success the diff's green. Sizes are not multiplied by the text size setting, since the root zoom
+  success the diff's green. The two fonts and the text line heights follow the body font, code font
+  and line height in Settings → Appearance ([themes.md](themes.md)), and a change is sent like a theme
+  switch. Sizes are not multiplied by the text size setting, since the root zoom
   already scales the frame; where Centralu has no step of its own (a large heading, bold), the value
   is written out.
 - **`centralu.variables`** carries Centralu's own, which the standard has no name for:

@@ -28,8 +28,9 @@ scrims, shadows, keycap, `activity-1…5`, `term-*`). The old brightness names (
 `beacon`…) would read backwards in a light theme. The block is plain `@theme`, not `inline`, so
 utilities read `var(--color-…)` at run time and a theme can switch by changing variables alone; for
 the same reason shadows are used as `shadow-(--shadow-modal)`, since Tailwind copies a theme
-shadow's value into the `shadow-modal` utility. xterm takes its colours and font from the same
-variables when a terminal opens (`components/terminalTheme.ts`). A restyling that must not move a
+shadow's value into the `shadow-modal` utility. xterm takes its colours and font (the code font,
+`--font-mono`) from the same variables when a terminal opens, and again on every theme or font change
+(`components/terminalTheme.ts`). A restyling that must not move a
 pixel is checked with `e2e/style-snapshot.spec.ts`, which records every element's computed colours
 on the demo scenes before and after (`scripts/style-snapshot-diff.mjs` compares the two).
 

@@ -29,8 +29,8 @@
 이름(`void`, `chalk`, `beacon`…)은 밝은 테마에서 거꾸로 읽힌다. 블록은 `inline`이 아닌 그냥
 `@theme`이라 유틸리티가 실행 중에 `var(--color-…)`를 읽고, 테마는 변수만 바꿔 전환할 수 있다. 같은
 이유로 그림자는 `shadow-(--shadow-modal)`로 쓴다 — Tailwind는 테마 그림자의 값을 `shadow-modal`
-유틸리티 안에 복사해 넣기 때문이다. xterm은 터미널이 열릴 때 같은 변수에서 색과 글꼴을 읽는다
-(`components/terminalTheme.ts`). 픽셀 하나도 움직이면 안 되는 스타일 정리는
+유틸리티 안에 복사해 넣기 때문이다. xterm은 터미널이 열릴 때, 그리고 테마나 글꼴이 바뀔
+때마다 같은 변수에서 색과 글꼴(코드 글꼴, `--font-mono`)을 읽는다 (`components/terminalTheme.ts`). 픽셀 하나도 움직이면 안 되는 스타일 정리는
 `e2e/style-snapshot.spec.ts`로 확인한다. 데모 장면에서 모든 요소의 계산된 색을 전후로 기록하고,
 `scripts/style-snapshot-diff.mjs`가 둘을 비교한다.
 
