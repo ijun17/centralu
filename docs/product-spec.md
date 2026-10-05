@@ -541,8 +541,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
     what the tool calls ambient is not counted) and opens a list: each task's kind and description, what stopping the
     turn does to it ("stops with the turn" / "survives Stop"), and a Stop for that task alone where the tool can do it.
     A task that ended stays listed with how it ended (done, failed, stopped) until the person clears it, and an agent's
-    row opens the steps its launch card keeps (#222). The sidebar row and the control rail carry the same count; the
-    rail lists a session whose turn ended while its background work runs.
+    row opens the steps its launch card keeps (#222). The sidebar row carries the same count.
   - **Stop says what it stops.** While a turn runs, the Stop control states what interrupting it does to the
     background work, from what was measured per tool: "Also stops 1 background task · 1 background task keeps
     running". Claude stops a background subagent with the turn and leaves a shell running; Codex leaves a child agent
@@ -831,7 +830,7 @@ In:
 
 - **A. Runtime** — the manifest; apps in the project (`.centralu/apps/`, committed with the repository) or the user folder;
   started when first needed, stopped when idle; one call path with tool visibility and run records; attached to Claude and
-  Codex sessions; approved MCP servers absorbed as apps; one list with the built-in apps; project trust, shared with #92
+  Codex sessions; approved MCP servers absorbed as apps; one list of every app; project trust, shared with #92
 - **B. Views** — inline under the tool card that called it (the standard's own place, where apps built for other hosts work),
   pinned in the main area (the host calls the app's home tool), the sandbox proxy with an opaque origin, change notifications
   to open views, a skeleton while starting and the reason when it fails, a runs panel
@@ -846,7 +845,12 @@ Light: **E. Handing over, the local half** — snapshots for apps outside git, a
 
 Out: the team server (permissions, distribution, central run records — the paid boundary); an app marketplace; apps waking
 up by themselves (timers, watchers — the broker refuses a call that no run started); also a process sandbox for app servers,
-handing the builder a capture of the view, and moving the control app to the new format.
+and handing the builder a capture of the view.
+
+The built-in control app (the rail on the orchestrator screen, with its tasks and their foremen, #80/#81) was not moved to
+the new format; it was removed with the compiled app framework under it ([#97](https://github.com/ijun17/centralu/issues/97),
+owner decision 2026-10-05: the rail was rarely looked at and sessions are run from the grid; a view of the orchestrator's
+sessions, if one is wanted, is built as an external app). The inbox (FR-15) stays in the top bar.
 
 ---
 

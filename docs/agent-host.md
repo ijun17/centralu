@@ -42,7 +42,7 @@ the Codex bridge.
 |---|---|---|---|---|
 | `orchestrator` | the one orchestrator | every session | all but the manager's and builder's | role and usage |
 | `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
-| `scoped` | a lead (coordinator, #80) | its members | list, read, send | its boundary |
+| `scoped` | a coordinator (#80; made through `agents.createCoordinator`, once by the control app's tasks, removed in #97) | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
 | `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide` | none |
 

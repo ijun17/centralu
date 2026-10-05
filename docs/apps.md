@@ -12,8 +12,8 @@ app built here is a standard MCP server. What Centralu adds on top is listed in 
 Code: runtime `packages/agent-host/src/apps/external/`, view hosting `packages/agent-host/src/views/`,
 session attachment `sessions/session-apps.ts`, inline views `inline-views.ts`, template
 `packages/agent-host/app-template/`, UI `packages/ui/src/features/{app-frame,pinned-app}/` and
-`session/InlineView.tsx`. The built-in `control` app (#81) is a compiled app of a different kind
-and is not covered here. Security reasoning: [security-boundaries.md](security-boundaries.md).
+`session/InlineView.tsx`. These are the only apps: the compiled built-in app framework and its one app,
+the control rail (#81), were removed in #97. Security reasoning: [security-boundaries.md](security-boundaries.md).
 
 ## 1. What an app is
 
@@ -37,7 +37,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | Field | Meaning | Rule |
 |---|---|---|
 | `manifestVersion` | Manifest format | Must be `1`. Anything else is refused with "update Centralu": guessing at a format we do not know would run a changed field with its old meaning |
-| `id` | App id | Equal to the folder name. `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a built-in app's id (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
+| `id` | App id | Equal to the folder name. `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #97) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
 | `name`, `version`, `description` | What people and agents read | Not empty; at most 80, 64 and 2000 characters |
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
@@ -526,7 +526,7 @@ and "Send to builder".
 
 - **Making an app**: the orchestrator's `create_app` and the RPC `apps.create` (the New app button's
   call) go through one function. Everything is refused **before a folder exists**: an id failing the
-  proposed-server rule (#93 plus no `app-` prefix), a built-in id, an untrusted project, a folder
+  proposed-server rule (#93 plus no `app-` prefix), a reserved id, an untrusted project, a folder
   that already exists. Parent folders are made one level at a time through the path guard (a
   `.centralu` link pointing outside the project stops it). The template is expanded into a hidden
   folder, which discovery skips, then renamed into place. The data folder is created. Nothing is
@@ -618,8 +618,7 @@ and "Send to builder".
 
 Apps that are `invalid`, `untrusted` or `failed` are not attached. The rule is checked again **at
 every call**, not only when attaching: Codex cannot change a running thread's servers, so the
-per-call check is what actually stops an app that was detached. The built-in `control` app's tools
-are still not given to ordinary workers (#81).
+per-call check is what actually stops an app that was detached.
 
 Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`.
 The tool list is the last one read, so starting a session does not start every app. If none has
@@ -775,7 +774,7 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | RPC | What |
 |---|---|
 | `apps.list` | Every discovered app, with status and reason |
-| `apps.invoke` | A view's tool call (a built-in app's call when `projectId` is absent) |
+| `apps.invoke` | A view's tool call (`projectId` absent or null means a user-folder app) |
 | `apps.viewFrame`, `apps.readResource` | The frame address of a view instance; a resource of the frame's own app |
 | `apps.openView`, `apps.closeView` | Open a pinned view (calls `home`); close any view instance |
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver a view's message once the person agreed (an inline view's to its conversation, a pinned view's to the session picked) |
@@ -845,7 +844,7 @@ What is refused before anything lands (`imports.test.ts`):
 
 | Refused | Why |
 |---|---|
-| An id already in the user folder (even an invalid folder), a built-in id, an id failing the #93 rule or starting with `app-` | Same rule as a new app. Nothing is overwritten |
+| An id already in the user folder (even an invalid folder), a reserved id, an id failing the #93 rule or starting with `app-` | Same rule as a new app. Nothing is overwritten |
 | A link inside a folder that points outside it | Links are not followed; the refusal names the link and its target. Links pointing inside are not copied and are listed |
 | A zip entry with `..`, an absolute path, a drive letter, a backslash, an empty segment or a control character | Zip slip. Files are written only under paths built from checked segments, and each is checked again to be inside the staging folder |
 | A zip link entry pointing outside the archive; an entry that inflates past its declared size (inflation stops there) or fails its checksum; two entries that differ only in case or Unicode form; a file and a folder with the same name; encrypted, split or ZIP64 archives | The list the person saw must be the files that are written |

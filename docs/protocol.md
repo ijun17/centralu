@@ -236,34 +236,18 @@ It is the prerequisite: one named assumption instead of twenty-one anonymous one
 build fails for reasons that are about Windows. `tooling/paths.test.ts` fails the build on a
 twenty-second.
 
-## 3.2 App documents ([#81](https://github.com/ijun17/centralu/issues/81))
+## 3.2 Retired: built-in app documents ([#81](https://github.com/ijun17/centralu/issues/81), [#97](https://github.com/ijun17/centralu/issues/97))
 
-Each app has one JSON document and an on/off flag. The `apps.*` RPCs and the
-`app_state_changed` event carry that document as `unknown`, and nothing on the wire checks
-it. The protocol carries the document without knowing what it means, which is why no app needs
-an RPC of its own.
+Apps compiled into Centralu kept one JSON document and an on/off flag each, carried as `unknown`
+by `apps.state`, `apps.setState`, `apps.setEnabled` and the `app_state_changed` event. The only
+such app, the control rail, was removed in #97, and its document's type (`control-app.ts`) went
+with it. The four stay in the protocol and the host still answers them, so a window from an older
+build gets a well-formed reply; nothing in this build calls them, and the stored rows
+(`app:control:*` in `app_settings`) are left where they are. `control` stays a reserved app id
+(`RESERVED_APP_IDS` in `app-id.ts`) so no external app inherits those rows or the coordinator
+sessions stamped with it.
 
-**The document's shape is still written down in one place.** An app has two halves, the host
-half (its tools and observers) and the UI half (its rail and settings), and both read and write
-the same document. The only package both halves may import is `@cc/protocol`, so the shape
-goes there. For the control app that file is `control-app.ts`. No wire schema refers to it,
-and no other protocol file imports it.
-
-Written twice, the two copies drifted apart. The control app's host copy made `notifies`
-required, but its UI copy wrote documents without that field. After a fresh install, one inline
-reply in the rail was enough for the host to crash with `doc.notifies.push` of undefined on
-every later notice.
-
-Rules for an app document:
-
-- **Every top-level field is optional.** Either half may write the document first, so any
-  field can be missing. The side that reads a field supplies its default.
-- **Declare it as a TypeScript type, not a zod schema.** Nothing validates the document, and
-  a schema would suggest a check that never runs.
-- **Do not name a vendor in it** (`tooling/boundaries.test.ts`). A tool is a `ToolName`.
-
-This applies only to apps compiled into Centralu. M4's external apps keep their state in their
-own process ([plans/apps-plan.md](plans/apps-plan.md)).
+External apps keep their state in their own process ([apps.md](apps.md)).
 
 ## 4. Schema and version rules (the C6 defence)
 
