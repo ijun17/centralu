@@ -2115,9 +2115,9 @@ describe("an ordinary session's reader set (#320)", () => {
     expect(adapter.lastOpts?.sessionId).toBe(a1.id)
     expect(adapter.lastOpts?.toolProfile).toBe('reader')
 
-    // What the bridge (Codex) is offered: exactly the reader set
+    // What the bridge (Codex) is offered: exactly the reader set, and asking another project (#371)
     const offered = ((await rpc('orchestrator.tools', { sessionId: a1.id })) as { name: string }[]).map((t) => t.name)
-    expect(offered).toEqual(['read_session', 'recall', 'app_guide'])
+    expect(offered).toEqual(['read_session', 'recall', 'app_guide', 'ask_project'])
   })
 
   it('lists, reads and recalls only its own project — another project\'s session cannot be reached', async () => {

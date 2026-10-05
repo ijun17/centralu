@@ -140,6 +140,15 @@ function appToolOf(toolName: string): { server: string; tool: string } | null {
   return { server: parts[1]!, tool: parts[2]! }
 }
 
+/** The tools that only read — the ones a read grant (#371, `CreateSessionOpts.mayRead`) lets through without a card */
+const READ_TOOLS = new Set(['Read', 'Glob', 'Grep'])
+
+/** The path a read tool reads: Read's file, or the folder Glob and Grep search in (absent means the working folder) */
+function readTarget(toolName: string, input: Record<string, unknown>): string | null {
+  const p = toolName === 'Read' ? input.file_path : input.path
+  return typeof p === 'string' && p ? p : null
+}
+
 /**
  * Preset to SDK permission options.
  *
@@ -549,6 +558,17 @@ class ClaudeSession implements SessionHandle {
           const appTool = appToolOf(toolName)
           if (appTool && self.opts.apps?.readOnly(appTool.server, appTool.tool)) {
             return { behavior: 'allow' as const, updatedInput: toolInput }
+          }
+
+          /*
+           * **A read of a file another project handed back** (#371 part B). ask_project grants the caller the paths
+           * the delegated session named, after this process started — so not `additionalDirectories`, which is fixed
+           * at launch. A read outside the working folder lands here (measured, see `readableDirs`), and the host
+           * answers whether that path was granted. Only reads: a write to the same path still asks.
+           */
+          if (READ_TOOLS.has(toolName) && self.opts.mayRead) {
+            const target = readTarget(toolName, toolInput)
+            if (target && self.opts.mayRead(target)) return { behavior: 'allow' as const, updatedInput: toolInput }
           }
 
           /*

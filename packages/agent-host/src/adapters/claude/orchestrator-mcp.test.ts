@@ -23,8 +23,11 @@ describe('the Claude in-process server', () => {
    * The orchestrator measured that deferral made it never find send_to_session; the reader set
    * measured that it made recall go unused. Only app_guide, the rarely needed one, waits (#320).
    */
-  it('loads the reader set except app_guide, and sends it no instructions', () => {
-    expect(registered('reader')).toEqual({ tools: { read_session: 'loaded', recall: 'loaded', app_guide: 'deferred' }, instructions: undefined })
+  it('loads the reader set except app_guide, and ask_project with it, and sends it no instructions', () => {
+    expect(registered('reader')).toEqual({
+      tools: { read_session: 'loaded', recall: 'loaded', app_guide: 'deferred', ask_project: 'loaded' },
+      instructions: undefined,
+    })
   })
 
   it('still loads every tool of the directing profiles, with their instructions', () => {

@@ -160,7 +160,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     old.close()
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(5) // v40, then v41 (#222), v42 (#288), v43 (#306) and v44 (#371) after it
+    expect(s.migrationsRun).toBe(6) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371) after it
     expect(s.searchMessages('zebracorn')).toEqual([])
     expect(s.searchMessages('build the package').map((h) => [h.sessionId, h.seq])).toEqual([['s1', 1]])
     expect(indexRows(s)).toBe(3) // s1's three things said; the session in the trash has none
@@ -178,7 +178,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     raw.close()
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(5) // v40, then v41 (#222), v42 (#288), v43 (#306) and v44 (#371) after it
+    expect(s.migrationsRun).toBe(6) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371) after it
     expect(indexRows(s)).toBe(3)
     s.close()
     expect(statSync(file).size).toBe(size)
@@ -194,7 +194,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const s = new Store(file)
-    expect(s.schemaVersion).toBe(44)
+    expect(s.schemaVersion).toBe(45)
     expect(s.searchMessages('zebracorn')).toEqual([])
     expect(indexRows(s)).toBe(3)
     expect(said.mock.calls.some(([line]) => String(line).includes('could not vacuum'))).toBe(true)

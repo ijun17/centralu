@@ -55,6 +55,32 @@ export type OrchestratedSession = {
   lastActive?: string
 }
 
+/** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
+export type AskProjectResult =
+  | {
+      ok: true
+      state: 'done'
+      project: string
+      sessionId: string
+      sessionName: string
+      /** The delegated turn's final answer, cut in the middle when long */
+      answer: string
+      /** Named paths inside the target project the caller may now read (files, or output folders) */
+      readable: string[]
+      /** Named paths outside it: listed, not granted */
+      outside: string[]
+    }
+  | {
+      ok: true
+      state: 'working'
+      project: string
+      sessionId: string
+      sessionName: string
+      /** What the delegated session waits on, when it waits on the person (an approval, a question) */
+      notice?: string
+    }
+  | { ok: false; error: string }
+
 export type OrchestratorTools = {
   /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions) */
   listSessions(): Promise<OrchestratedSession[]>
@@ -135,6 +161,14 @@ export type OrchestratorTools = {
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null },
   ): Promise<{ ok: boolean; error?: string; /** takes effect once the running turn ends (#164) */ deferred?: boolean }>
+  /**
+   * Asks another project to do a task (#371 part B, ask_project) — an ordinary session's only reach outside its own
+   * project, and only with the person's consent for the pair. Starts (or reuses) a visible session in the target
+   * project with that project's folder, instructions, tool and permissions, sends the task, and waits for the turn,
+   * up to a bound (`ASK_WAIT_MS`): past it, the answer is "still working" and a call with no task waits again.
+   * `signal` is the caller's tool call: aborted, the delegated turn is stopped too.
+   */
+  askProject(opts: { project: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult>
   recall(
     query: string,
     limit?: number,
@@ -437,6 +471,13 @@ export type CreateSessionOpts = {
    *    value: touching the thread's sandbox would only end up overriding the user's own settings.
    */
   readableDirs?: string[]
+  /**
+   * Paths this session was given to read **after it started** (#371 part B): the output files another project named
+   * in its answer to this session's ask_project. Asked on every read, since grants arrive mid-turn and
+   * `readableDirs` is fixed when the process starts. Claude uses it in `canUseTool` (a read outside the folder lands
+   * there and is allowed without a card when this says yes); Codex does not restrict reads, so it has no use for it.
+   */
+  mayRead?: (path: string) => boolean
   resumeExternalId?: string
   /**
    * The goal the host last heard of for this conversation, when a new process resumes it (the badge's

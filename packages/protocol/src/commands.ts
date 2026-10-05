@@ -298,6 +298,17 @@ export const SessionInfo = z.object({
    */
   parentSessionId: z.string().nullable().default(null),
   /**
+   * The session that asked for this one through ask_project (#371 part B) — a session in another project. Null for
+   * every session a person or an app started.
+   *
+   * The delegated session is an ordinary session of its own project, so the person can watch it and step in; this
+   * line is what marks it "asked by" and links back to the caller. On the row (store v45), so the mark survives a
+   * restart, and the caller's next ask reuses the session it already asked. The caller may since have been deleted:
+   * the id then names a session that is no longer listed. Optional rather than defaulted so a frame or a fixture
+   * that predates it needs no change: absent and null read the same.
+   */
+  askedBy: z.string().nullable().optional(),
+  /**
    * **Facts valid only while the process is alive** — these come from the host's memory, not
    * the database.
    *

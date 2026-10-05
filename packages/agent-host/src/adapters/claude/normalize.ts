@@ -28,6 +28,8 @@ export function toolSummary(name: string, input: Json): ToolSummary {
   else if (name.endsWith('propose_project')) title = str(input.reason, name)
   // The only channel through which a proposal card can pre-fill a branch name (#69) — carried in the title.
   else if (name.endsWith('propose_worktree_session')) title = str(input.branch, name)
+  // The project asked (#371) — the caller's card names it, and finds the delegated session by it before the answer
+  else if (name.endsWith('__ask_project')) title = str(input.project, name)
   /*
    * An agent card's title is the work handed to it (#98). While it was just the name, every card
    * said "Agent Agent", and launching three agents side by side left no way to tell which card was

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
-import type { OrchestratorTools } from '../adapters/contract.js'
+import type { AskProjectResult, OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput, ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
@@ -293,6 +293,27 @@ export const READER_TOOLS = [
   },
 ] as const satisfies readonly { name: OrchestratorToolName; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
+/**
+ * Delegation to another project (#371 part B) — the one tool that reaches outside an ordinary session's project, so
+ * it is its own set with its own budget rather than a fourth reader. It rides with the reader set (the same profile,
+ * the same Settings switch), and it acts only after the person's consent for the pair of projects: the consent card,
+ * not this description, is what keeps the project boundary.
+ *
+ * Loaded, not deferred: like recall, it answers a request the person makes in words ("have the other project do
+ * it"), and a tool the model has to search for first is one it may answer without (#320 measured that for recall).
+ * `task` is optional only for waiting: the "still working" answer tells the model to call again without one.
+ */
+export const DELEGATE_TOOLS = [
+  {
+    name: 'ask_project',
+    description: "Has another Centralu project do a job in its own folder; returns its session's answer.",
+    schema: z.object({ project: z.string(), task: z.string().optional() }),
+  },
+] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+
+/** The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host.md */
+export const DELEGATE_BUDGET_CHARS = 400
+
 /** No server instructions for the reader set — see READER_TOOLS */
 export const READER_INSTRUCTIONS = ''
 
@@ -409,6 +430,27 @@ async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): P
 }
 
 /**
+ * What the model reads back from ask_project (#371). The delegated session's answer is someone else's words, so it
+ * is fenced the way a worker's preview is (JSON-quoted, one line): a line in it cannot pose as a line of ours. The
+ * session is named so the person can be pointed at it; the paths come last, as a list the model can act on.
+ */
+function askProjectText(r: AskProjectResult): ToolOutput {
+  if (!r.ok) return { text: r.error, isError: true }
+  const where = `the session "${r.sessionName}" [${r.sessionId}] in ${r.project}`
+  if (r.state === 'working') {
+    return {
+      text:
+        `${r.project} is still working on it in ${where}${r.notice ? ` — ${r.notice}` : ''}. ` +
+        `To keep waiting, call ask_project again with project "${r.project}" and no task; the work goes on meanwhile.`,
+    }
+  }
+  const lines = [`${r.project} answered (from ${where}), as JSON:`, trustedJsonText(r.answer || '(no final text)')]
+  if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
+  if (r.outside.length) lines.push(`Named outside ${r.project}'s folder (not opened for you): ${r.outside.join(', ')}`)
+  return { text: lines.join('\n') }
+}
+
+/**
  * Runs one tool and turns the result into **text for the model to read**.
  *
  * Why rendering happens here too: if each of the two paths composed its own sentence, the same
@@ -420,8 +462,19 @@ export async function runOrchestratorTool(
   name: string,
   args: Record<string, unknown>,
   caller: ToolCaller = { sessionId: null, profile: 'human' },
+  /** The tool call's own signal, where the path has one (Claude's in-process MCP) — ask_project stops the delegated turn on it */
+  signal?: AbortSignal,
 ): Promise<ToolOutput> {
   if (name === 'list_sessions') return listSessionsText(tools, caller)
+
+  if (name === 'ask_project') {
+    // Only the reader seat has it (profileAllows) — checked here too, since this runner is shared by every seat
+    if (caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
+    const project = typeof args.project === 'string' ? args.project.trim() : ''
+    if (!project) return { text: 'Give a project — the name of another Centralu project.', isError: true }
+    const task = typeof args.task === 'string' && args.task.trim() ? args.task : undefined
+    return askProjectText(await tools.askProject({ project, ...(task ? { task } : {}) }, signal))
+  }
 
   if (name === 'recall') {
     const query = String(args.query ?? '')
@@ -666,7 +719,9 @@ export const SCOPED_INSTRUCTIONS = [
 
 /** Whether this profile allows the tool — both exposure (schemas) and execution (run) are decided by this */
 export function profileAllows(profile: ToolProfile, name: string): boolean {
-  if (profile === 'reader') return READER_TOOLS.some((t) => t.name === name)
+  if (profile === 'reader') return READER_TOOLS.some((t) => t.name === name) || DELEGATE_TOOLS.some((t) => t.name === name)
+  // ask_project (#371) is a reader's alone: every directing seat already sends work inside its own view
+  if (DELEGATE_TOOLS.some((t) => t.name === name)) return false
   if (profile === 'orchestrator') {
     return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name) && !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   }
@@ -683,7 +738,7 @@ export function profileAllows(profile: ToolProfile, name: string): boolean {
 export function toolDefsFor(
   profile: ToolProfile,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
-  if (profile === 'reader') return READER_TOOLS
+  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS]
   return ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name))
 }
 

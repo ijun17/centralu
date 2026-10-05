@@ -1534,6 +1534,26 @@ export class Store {
           `)
         },
       },
+      {
+        to: 45,
+        breaksOlderReaders: false,
+        /**
+         * The session that asked for this one (#371 part B) — `sessions.asked_by_session_id`, set when another
+         * project's session started it through ask_project. On the row, like `parent_session_id`, because the mark
+         * must outlive the process: the person reads "asked by" on the session and follows the link back after a
+         * restart, and the next ask from the same caller reuses the session it already asked.
+         *
+         * Not a foreign key: the caller can go to the trash or be deleted for good while the delegated session stays,
+         * and the mark then names a session no longer here (the screen says so) rather than vanishing.
+         *
+         * **Expand only (#292's rule).** A nullable column; an older host's upsert does not name it and leaves it as
+         * it was.
+         */
+        run: () => {
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'asked_by_session_id')) this.db.exec(`ALTER TABLE sessions ADD COLUMN asked_by_session_id TEXT`)
+        },
+      },
     ]
   }
 
@@ -1988,8 +2008,8 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -2005,6 +2025,7 @@ export class Store {
            scope_session_ids = excluded.scope_session_ids,
            role_append = excluded.role_append,
            app_id = excluded.app_id,
+           asked_by_session_id = excluded.asked_by_session_id,
            context_used = excluded.context_used, context_window = excluded.context_window,
            context_exactness = excluded.context_exactness`,
       )
@@ -2025,6 +2046,7 @@ export class Store {
         scopeSessionIds: s.scopeSessionIds ? JSON.stringify(s.scopeSessionIds) : null,
         roleAppend: s.roleAppend ?? null,
         appId: s.appId ?? null,
+        askedBy: s.askedBy ?? null,
         /*
          * Context rides the ordinary upsert (issue #48), which the manager already runs after
          * every event — so a reading is on disk the instant it arrives, with no second write
@@ -2162,6 +2184,7 @@ export class Store {
                 s.worktree_base as worktreeBase,
                 s.parent_session_id as parentSessionId,
                 s.scope_session_ids as scopeSessionIdsJson, s.role_append as roleAppend, s.app_id as appId,
+                s.asked_by_session_id as askedBy,
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq

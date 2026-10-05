@@ -141,11 +141,17 @@ async function handle(msg) {
 
   if (method === 'tools/call') {
     try {
-      const r = await rpc('orchestrator.tool', {
-        sessionId: SESSION_ID,
-        name: params?.name,
-        args: params?.arguments ?? {},
-      })
+      /*
+       * The app call's ceiling, not the 60-second default: ask_project (#371) waits for another project's turn, and
+       * the host answers "still working" at 240 seconds — the default would cut that call first and the model would
+       * read a timeout instead. Every other tool here answers in well under a second, so the longer bound costs
+       * them nothing.
+       */
+      const r = await rpc(
+        'orchestrator.tool',
+        { sessionId: SESSION_ID, name: params?.name, args: params?.arguments ?? {} },
+        APP_CALL_TIMEOUT_MS,
+      )
       return ok(id, { content: [{ type: 'text', text: r.text }], isError: r.isError === true })
     } catch (e) {
       // Does not silently pretend it succeeded — pretending the model's request went through leaves only the person unaware

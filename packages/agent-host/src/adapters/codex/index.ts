@@ -568,6 +568,8 @@ class CodexSession implements SessionHandle {
          * elicitation it raised was answered `accept` by us anyway (onServerRequest, `ours`).
          */
         default_tools_approval_mode: 'approve',
+        // Said, not assumed (the app bridges' reason above): ask_project's "still working" at 240 s must beat it (#371)
+        tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC,
       }
     }
     const apps = this.opts.apps

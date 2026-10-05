@@ -25,7 +25,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { OrchestratorTools } from '../src/adapters/contract.js'
 import { orchestratorMcp } from '../src/adapters/claude/orchestrator-mcp.js'
-import { ORCHESTRATOR_TOOLS, READER_TOOLS, runOrchestratorTool } from '../src/sessions/orchestrator-tools.js'
+import { DELEGATE_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, runOrchestratorTool } from '../src/sessions/orchestrator-tools.js'
 
 const claude = execFileSync('which', ['claude']).toString().trim()
 const cwd = mkdtempSync(join(tmpdir(), 'cc-reader-'))
@@ -37,6 +37,17 @@ const fake = {
   ],
   readSession: async () => ({ ok: true, state: 'idle', lines: ['{"role":"user","text":"fix the checkout button"}', '{"role":"assistant","text":"Done: the button is fixed"}'] }),
   recall: async () => ({ hits: [{ sessionId: 'b7', session: 'db-migration', project: 'shop', snippet: 'we chose pg_dump for the backup', seq: 42 }] }),
+  // ask_project (#371): a canned answer, as if the other project had done the task
+  askProject: async () => ({
+    ok: true,
+    state: 'done',
+    project: 'toolkit',
+    sessionId: 'd1',
+    sessionName: 'Asked by shop',
+    answer: 'Exported 12 sprites to /tmp/toolkit/out',
+    readable: ['/tmp/toolkit/out'],
+    outside: [],
+  }),
 } as unknown as OrchestratorTools
 
 type Def = { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; load?: boolean }
@@ -77,6 +88,11 @@ const VARIANTS: Record<string, () => Record<string, unknown>> = {
   'reader set, all loaded': () => ({ centralu: server(READER_TOOLS, true) }),
   'shipped (app_guide deferred)': () => ({ centralu: orchestratorMcp(fake, 'reader', 'probe') }),
   'reader set, all deferred': () => ({ centralu: server(READER_TOOLS, false) }),
+  // #371: the set as #320 shipped it (no ask_project), and ask_project deferred rather than loaded as shipped
+  '#320 set, before ask_project': () => ({ centralu: server(READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t) })), false) }),
+  'ask_project deferred': () => ({
+    centralu: server([...READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t) })), ...DELEGATE_TOOLS.map((t) => ({ ...t, load: false }))], false),
+  }),
 }
 
 async function run(variant: string, prompt: string) {
@@ -142,12 +158,16 @@ if (!only || only === 'use') {
     'What are the other sessions in this project doing right now?',
     'In an earlier conversation we decided how to back up the database. What did we choose?',
     'How do I stop the spinning indicator in Centralu?',
+    // #371: a request for another project's work — and the three above must not reach for ask_project
+    'Have the toolkit project export the sprites again, then tell me where the files are.',
   ]
   // A model's choice varies run to run: PROBE_REPEAT=5 asks each question five times
   const repeat = Number(process.env.PROBE_REPEAT ?? 1)
   const variants = process.env.PROBE_VARIANTS?.split(';') ?? ['reader set, all loaded', 'shipped (app_guide deferred)', 'reader set, all deferred']
+  // PROBE_ASK=toolkit asks only the questions containing it
+  const picked = asks.filter((a) => !process.env.PROBE_ASK || a.includes(process.env.PROBE_ASK))
   for (const v of variants) {
-    for (const a of asks) for (let k = 0; k < repeat; k++) {
+    for (const a of picked) for (let k = 0; k < repeat; k++) {
       const r = await run(v, a)
       console.log(`  ${v.padEnd(28)} ${a.slice(0, 40).padEnd(42)} calls=[${r.calls.join(' ')}]  "${r.text}"`)
     }

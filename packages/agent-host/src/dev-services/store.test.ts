@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22, v23 and v24 broke the same six assertions one after another: if the version is written
  * six times, every migration bills six small chores.
  */
-const LATEST_SCHEMA = 44
+const LATEST_SCHEMA = 45
 
 function seeded() {
   const s = new Store()
@@ -1995,6 +1995,18 @@ describe('migration v44 — consent from one project to another', () => {
     s.setProjectConsent('p1', 'p3', 'delegate')
     s.deleteProject('p2')
     expect(s.listProjectConsents().map((c) => `${c.fromProjectId}>${c.toProjectId}`)).toEqual(['p1>p3'])
+    s.close()
+  })
+})
+
+/** v45: the session that asked for this one (#371 part B) — kept on the row, so the mark and the way back survive a restart */
+describe('migration v45 — a delegated session remembers who asked', () => {
+  it('round-trips askedBy, and a session nobody asked for reads it as null', () => {
+    const s = seeded()
+    const [plain] = s.listSessions()
+    expect(plain!.askedBy).toBeNull()
+    s.upsertSession({ ...plain!, id: 's2', askedBy: 's1' })
+    expect(s.listSessions().find((x) => x.id === 's2')!.askedBy).toBe('s1')
     s.close()
   })
 })

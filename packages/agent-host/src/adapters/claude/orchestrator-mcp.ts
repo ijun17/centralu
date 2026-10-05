@@ -55,11 +55,13 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
     instructions: instructionsFor(profile),
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
     tools: toolDefsFor(profile).map((t) =>
-      tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) =>
+      tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>, extra: unknown) =>
         // Served by the host itself, so a planned swap waits for it, within a bound (#280, drain.ts)
         hostDrain
           .track(`tool ${ORCHESTRATOR_MCP_NAME}/${t.name}`, async () => {
-            const r = await runOrchestratorTool(tools, t.name, args, { sessionId: sessionId ?? null, profile })
+            // The call's own signal (MCP's request extra): the CLI cancelling the call stops what it started (ask_project, #371)
+            const signal = (extra as { signal?: AbortSignal } | undefined)?.signal
+            const r = await runOrchestratorTool(tools, t.name, args, { sessionId: sessionId ?? null, profile }, signal)
             return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
           })
           .catch((e: unknown) => {

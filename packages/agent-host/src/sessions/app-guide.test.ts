@@ -6,6 +6,7 @@ import {
   MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
+  DELEGATE_TOOLS,
   SCOPED_INSTRUCTIONS,
   profileAllows,
   runOrchestratorTool,
@@ -42,7 +43,7 @@ async function wholeGuide(): Promise<string> {
 }
 
 /** Every tool name in the registry */
-const KNOWN = new Set<string>(ORCHESTRATOR_TOOLS.map((t) => t.name))
+const KNOWN = new Set<string>([...ORCHESTRATOR_TOOLS.map((t) => t.name), ...DELEGATE_TOOLS.map((t) => t.name)])
 
 function toolLikeWords(text: string): string[] {
   return [...new Set(text.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])]

@@ -106,6 +106,18 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
       }
       return { tool, title: reason || tool, readOnly: false, paths: [] }
     }
+    // ask_project (#371) — the project asked is the title, the same rule as toolSummary on the claude side
+    if (tool === 'ask_project' && (!server || server === 'centralu')) {
+      const rawArgs = item.arguments ?? obj(item.invocation).arguments
+      let project = ''
+      try {
+        const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
+        project = str(obj(parsed).project)
+      } catch {
+        /* If the arguments are not JSON, the card names no project — it still finds the session it asked */
+      }
+      return { tool, title: project || tool, readOnly: false, paths: [] }
+    }
     // Worktree proposal (#69) — the branch name is the title, and that title is the only channel for the UI's prefill
     if (tool.endsWith('propose_worktree_session')) {
       const rawArgs = obj(item.invocation).arguments

@@ -133,6 +133,11 @@ export type SessionSummary = {
    * All the core knows is a single id; only the app knows what it means.
    */
   appId: string | null
+  /**
+   * The session in another project that asked for this one through ask_project (#371 part B), or null. The header
+   * says "asked by" and links back; the caller's conversation finds its delegated session by this.
+   */
+  askedBy?: string | null
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
