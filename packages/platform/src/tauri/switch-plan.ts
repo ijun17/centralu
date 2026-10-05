@@ -15,7 +15,13 @@
  * A keeper that cannot hand itself over leaves the host swap to go ahead under it, and then stays
  * on its build until it next starts (#387, `keeperStaysBehind`). The bar says so calmly and offers
  * "Restart completely" instead of a switch that would only fail again.
+ *
+ * A window switches by itself only forward (`isNewerBuild`): opening an older build's window (a
+ * backed-up app, an older local build) must not quietly downgrade the keeper and the host. Going
+ * back to an older build stays a button press, and the bar says it is an older build.
  */
+
+import { isNewerVersion } from '@cc/protocol'
 
 /** Where a build came from, as the keeper records it */
 export type SwapBuild = { commit: string; builtAt?: string; version?: string; bundlePath?: string }
@@ -79,9 +85,74 @@ export function switchPlan(b: { keepsAgents?: boolean; busy?: boolean; sameBuild
   }
 }
 
+/**
+ * Whether build `a` is newer than build `b`, for switching by itself only forward (#352).
+ *
+ * Newer means a higher app version (semver, prereleases included: 0.1.0-beta.11 is newer than
+ * 0.1.0-beta.10), and on equal versions a later build time (`builtAt`: the ISO time in
+ * `bundle-info.json`, or the whole seconds the keeper falls back to when that file has none). When
+ * either side lacks what it takes to order them (no version, a version that is not semver, equal
+ * versions without both build times, a host run from source), `a` is **not** newer: a switch
+ * nobody can tell to be forward is left to the person.
+ */
+export function isNewerBuild(a: SwapBuild | undefined, b: SwapBuild | undefined): boolean {
+  if (!a || !b || isDev(a) || isDev(b)) return false
+  const va = semverOf(a.version)
+  const vb = semverOf(b.version)
+  if (!va || !vb) return false
+  if (isNewerVersion(va, vb)) return true
+  if (isNewerVersion(vb, va)) return false
+  const ta = builtAtMs(a.builtAt)
+  const tb = builtAtMs(b.builtAt)
+  return ta !== null && tb !== null && ta > tb
+}
+
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z.-]+)?$/
+
+/** The version without build metadata, or null when it is not one `isNewerVersion` can order */
+function semverOf(v: string | undefined): string | null {
+  const t = v?.trim().replace(/^v/, '')
+  if (!t || !SEMVER.test(t)) return null
+  return t.replace(/\+.*$/, '')
+}
+
+/** `BuildSource::dev()`: a host run from source, which every source run shares */
+function isDev(b: SwapBuild): boolean {
+  return b.commit.trim() === 'dev'
+}
+
+/** An ISO time, or whole seconds since the epoch (`BuildSource::from_host_dir`'s fallback) */
+function builtAtMs(t: string | undefined): number | null {
+  const s = t?.trim()
+  if (!s) return null
+  if (/^\d+$/.test(s)) return Number(s) * 1000
+  const ms = Date.parse(s)
+  return Number.isNaN(ms) ? null : ms
+}
+
+/**
+ * The window's build is newer than every build a switch would replace: the host's when that is of
+ * another build, and the keeper's when that is (#352, forward only).
+ */
+function forwardOnly(b: {
+  app?: SwapBuild
+  host?: SwapBuild
+  keeper?: SwapBuild
+  sameBuild?: boolean
+  keeperSameBuild?: boolean
+}): boolean {
+  if (b.sameBuild === false && !isNewerBuild(b.app, b.host)) return false
+  if (b.keeperSameBuild === false && !isNewerBuild(b.app, b.keeper)) return false
+  return true
+}
+
 export type AutoSwitchInput = {
   build: {
     app?: SwapBuild
+    /** The running host's build: a switch by itself only replaces an older one */
+    host?: SwapBuild
+    /** The keeper's build, likewise when it is behind */
+    keeper?: SwapBuild
     keepsAgents?: boolean
     busy?: boolean
     sameBuild?: boolean
@@ -111,7 +182,9 @@ export type AutoSwitchInput = {
  * - `none`: the bar as before.
  *
  * Never while a swap runs, never twice from one window (a failure stays on the bar with "Try
- * again"), and never after "Not now".
+ * again"), and never after "Not now". And only forward: never when the window's build is not newer
+ * than the host or keeper it would replace (`isNewerBuild`), so a window of an older build cannot
+ * downgrade them without a click.
  */
 export function autoSwitch(i: AutoSwitchInput): 'switch' | 'ask' | 'wait' | 'none' {
   const b = i.build
@@ -120,6 +193,8 @@ export function autoSwitch(i: AutoSwitchInput): 'switch' | 'ask' | 'wait' | 'non
   // The keeper already said it cannot move to this build: asking again would only fail again
   if (keeperStaysBehind(b)) return 'none'
   if (!b.relaunched && !i.autoApply) return 'none'
+  // Forward only: a window of an older build, or of one that cannot be ordered, leaves it to the bar
+  if (!forwardOnly(b)) return 'none'
   if (!switchPlan(b).confirm) return 'switch'
   if (i.autoApply) return 'wait'
   return 'ask'
@@ -191,13 +266,18 @@ export type BuildBar =
    * `retry`: the window is still behind, so the switch is offered again ("Try again").
    */
   | { kind: 'failed' | 'notice'; text: string; retry: boolean }
-  /** The host or the keeper is of another build than this window: offer to switch */
-  | { kind: 'other'; who: 'host' | 'keeper' }
+  /**
+   * The host or the keeper is of another build than this window: offer to switch. `older`: the
+   * build running there is newer than this window's, so a switch goes back, and only by hand.
+   */
+  | { kind: 'other'; who: 'host' | 'keeper'; older?: true }
 
 export type BuildBarInput = {
   build: {
     mode: 'keeper' | 'direct'
     app?: SwapBuild
+    host?: SwapBuild
+    keeper?: SwapBuild
     sameBuild?: boolean
     keeperSameBuild?: boolean
     swap?: SwapView
@@ -230,7 +310,8 @@ export const RESTART_COMPLETELY_LOSES =
  *    "Restart completely", never "Switch to this build" again and never "Could not switch builds".
  * 3. How the last swap ended, until dismissed: a failure with its reason ("Could not switch
  *    builds"), with "Try again" while the window is still behind.
- * 4. A host or keeper of another build: the builds and "Switch to this build".
+ * 4. A host or keeper of another build: the builds and "Switch to this build", or, when the build
+ *    running there is newer than this window's, that this window is an older build (#352).
  */
 export function buildBar(i: BuildBarInput): BuildBar {
   const b = i.build
@@ -245,8 +326,23 @@ export function buildBar(i: BuildBarInput): BuildBar {
   if (s && i.dismissedSwap !== s.startedAt && (s.phase === 'failed' || (s.phase === 'done' && s.keeperMessage))) {
     return { kind: s.phase === 'failed' ? 'failed' : 'notice', text: swapProgressText(s) ?? '', retry: behind }
   }
-  if (behind) return { kind: 'other', who: b.sameBuild === false ? 'host' : 'keeper' }
+  if (behind) {
+    const who = b.sameBuild === false ? 'host' : 'keeper'
+    const older = isNewerBuild(who === 'host' ? b.host : b.keeper, b.app)
+    return { kind: 'other', who, ...(older ? { older: true as const } : {}) }
+  }
   return { kind: 'none' }
+}
+
+/** A build in a few words: its version and commit (`0.1.0-beta.10, 2ffcaec5`), or just the commit */
+export function shortBuild(b: SwapBuild | undefined): string {
+  if (!b) return 'unknown'
+  return b.version ? `${b.version}, ${b.commit}` : `build ${b.commit}`
+}
+
+/** The bar's line when this window is of an older build than the one running (#352) */
+export function olderBuildText(app: SwapBuild | undefined, running: SwapBuild | undefined): string {
+  return `This window is an older build (${shortBuild(app)}) than the one running (${shortBuild(running)}).`
 }
 
 /** The keeper's notion of one build (`BuildSource::same_build`): the same commit and build time, whatever the path */

@@ -168,6 +168,35 @@ export function shellBannerTests(): void {
       })
     }
 
+    /*
+     * #352: a window of an older build than the one running (a backed-up app opened while a newer
+     * one runs) never switches by itself. The bar still offers the switch, and says it goes back.
+     */
+    test('a window of an older build says so, and the switch it offers goes back', async ({ page }) => {
+      await open(page, 'demo=focus&state=older')
+      await expectBelowTopBar(page)
+      const line = page.getByTestId('host-older-build')
+      await expect(line).toHaveText(
+        'This window is an older build (0.1.0-beta.6, 2ffcaec5) than the one running (0.1.0-beta.7, 53b9cf7).',
+      )
+      // The paths are one hover away, to tell which app is which
+      await expect(line).toHaveAttribute('title', /Running: build 53b9cf7 \(0\.1\.0-beta\.7\) from .*This window: build 2ffcaec5/)
+      const button = page.getByTestId('host-switch-build')
+      await expect(button).toHaveText('Switch back to this build')
+      expect(await hitsItself(page, 'host-switch-build'), 'something is drawn over the switch button').toBe(true)
+      await button.click()
+      expect(await page.evaluate(() => (window as unknown as { __shellCalls: string[] }).__shellCalls)).toEqual([
+        'switch_host_build',
+      ])
+    })
+
+    test('a window of a newer build keeps the plain wording', async ({ page }) => {
+      await open(page, 'demo=focus&state=other')
+      await expect(page.getByTestId('host-older-build')).toHaveCount(0)
+      await expect(page.getByTestId('host-other-build')).toContainText('This window is build 53b9cf7 (0.1.0-beta.7)')
+      await expect(page.getByTestId('host-switch-build')).toHaveText('Switch to this build')
+    })
+
     test('a real failure still reads as one: the reason, "Try again", and no restart offered', async ({ page }) => {
       await open(page, 'demo=focus&state=failed')
       const bar = page.getByTestId('host-other-build')
