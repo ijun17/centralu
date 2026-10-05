@@ -257,7 +257,9 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   background mode says, and the new window switches the keeper and the host to its build by itself when nothing can
   be lost (asking at once when something can). **Apply updates automatically when idle** (Settings → Updates, off by
   default) installs a newer version as soon as it is found and applies it once no session is working or waiting for
-  an approval or a question, no terminal or command is running, and nobody is typing. Desktop only, with the keeper;
+  an approval or a question, no terminal or command is running, and nobody is typing. Switching by itself only goes
+  forward: a window of an older build than the one running (a backed-up app opened later) never switches by itself,
+  and its bar says it is an older build and offers to switch back by hand. Desktop only, with the keeper;
   elsewhere, and from a build the update did not replace (`pnpm app:open`), the line says to restart as before
   ([architecture.md](architecture.md) §4.5).
 - **Agent CLI updates** (#297). Each session runs its own Claude Code or Codex process, which keeps the CLI version it

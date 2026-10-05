@@ -5,14 +5,76 @@ import {
   RESTART_COMPLETELY_LOSES,
   autoSwitch,
   buildBar,
+  isNewerBuild,
   keeperStaysBehind,
+  olderBuildText,
   swapProgressText,
   swapRunning,
   switchPlan,
   type AutoSwitchInput,
   type BuildBarInput,
+  type SwapBuild,
   type SwapView,
 } from './switch-plan.js'
+
+/** Release builds as the keeper records them: version from the app, `builtAt` from bundle-info.json */
+const beta10: SwapBuild = { commit: '2ffcaec5', version: '0.1.0-beta.10', builtAt: '2026-10-01T09:00:00.000Z' }
+const beta11: SwapBuild = { commit: '53b9cf7', version: '0.1.0-beta.11', builtAt: '2026-10-06T09:00:00.000Z' }
+
+describe('which of two builds is newer, for switching by itself only forward (#352)', () => {
+  it('orders by app version, prereleases included', () => {
+    expect(isNewerBuild(beta11, beta10)).toBe(true)
+    expect(isNewerBuild(beta10, beta11)).toBe(false)
+    // Numerically, not as text: beta.10 is newer than beta.9
+    expect(isNewerBuild({ commit: 'a', version: '0.1.0-beta.10' }, { commit: 'b', version: '0.1.0-beta.9' })).toBe(true)
+    // A release outranks its prereleases, and a higher core outranks any prerelease
+    expect(isNewerBuild({ commit: 'a', version: '0.1.0' }, beta11)).toBe(true)
+    expect(isNewerBuild(beta11, { commit: 'a', version: '0.1.0' })).toBe(false)
+    expect(isNewerBuild({ commit: 'a', version: '0.2.0-beta.1' }, { commit: 'b', version: '0.1.0' })).toBe(true)
+  })
+
+  it('the version decides, whatever the build times say', () => {
+    expect(isNewerBuild({ ...beta11, builtAt: '2020-01-01T00:00:00Z' }, beta10)).toBe(true)
+    expect(isNewerBuild(beta10, { ...beta11, builtAt: '2020-01-01T00:00:00Z' })).toBe(false)
+  })
+
+  it('on equal versions, the later build time is newer (a local build of the same version)', () => {
+    const later = { ...beta10, commit: 'abc1234-dirty', builtAt: '2026-10-02T09:00:00.000Z' }
+    expect(isNewerBuild(later, beta10)).toBe(true)
+    expect(isNewerBuild(beta10, later)).toBe(false)
+    // The keeper's fallback when bundle-info.json has no builtAt: whole seconds since the epoch
+    const fallback = { ...beta10, builtAt: String(Date.parse('2026-10-03T00:00:00Z') / 1000) }
+    expect(isNewerBuild(fallback, beta10)).toBe(true)
+    expect(isNewerBuild(beta10, fallback)).toBe(false)
+    // The same build is not newer than itself
+    expect(isNewerBuild(beta10, { ...beta10 })).toBe(false)
+  })
+
+  it('what cannot be ordered is never newer, either way', () => {
+    const cases: [SwapBuild | undefined, SwapBuild | undefined][] = [
+      // A side is missing
+      [beta11, undefined],
+      [undefined, beta10],
+      // No version
+      [{ commit: 'abc' }, beta10],
+      [beta11, { commit: 'abc' }],
+      // A version that is not semver
+      [{ ...beta11, version: 'nightly' }, beta10],
+      [beta11, { ...beta10, version: '' }],
+      // Equal versions without both build times, or with one that is not a time
+      [beta10, { ...beta10, builtAt: undefined }],
+      [{ ...beta10, builtAt: undefined }, beta10],
+      [{ ...beta10, builtAt: 'later' }, beta10],
+      // A host run from source (`BuildSource::dev()`), even with a version
+      [{ commit: 'dev' }, beta10],
+      [beta11, { commit: 'dev' }],
+      [{ commit: 'dev', version: '9.9.9' }, beta10],
+    ]
+    for (const [a, b] of cases) {
+      expect(isNewerBuild(a, b), `${JSON.stringify(a)} vs ${JSON.stringify(b)}`).toBe(false)
+    }
+  })
+})
 
 describe('what switching builds costs (#280 step 3)', () => {
   it('switches without asking when nothing is running', () => {
@@ -81,7 +143,16 @@ describe('a swap’s progress in the bar (#280 step 3)', () => {
 /** The window "Apply now" started, or the automatic mode, switching by itself (#352) */
 describe('switching by itself after an update (#352)', () => {
   const quiet: AutoSwitchInput = {
-    build: { keepsAgents: true, busy: false, sameBuild: false, keeperSameBuild: false, relaunched: true },
+    build: {
+      app: beta11,
+      host: beta10,
+      keeper: beta10,
+      keepsAgents: true,
+      busy: false,
+      sameBuild: false,
+      keeperSameBuild: false,
+      relaunched: true,
+    },
     autoApply: false,
     tried: false,
     dismissed: false,
@@ -116,6 +187,59 @@ describe('switching by itself after an update (#352)', () => {
     const swap: SwapView = { phase: 'draining', target: { commit: 'b' }, startedAt: 1 }
     expect(autoSwitch({ ...quiet, build: { ...quiet.build, swap } })).toBe('none')
     expect(autoSwitch({ ...quiet, build: { ...quiet.build, sameBuild: true, keeperSameBuild: true } })).toBe('none')
+  })
+
+  /*
+   * Opening an older build's window (a backed-up beta.10 app while beta.11 runs) must not quietly
+   * downgrade the keeper and the host: not with the automatic mode on, not from "Apply now", idle
+   * or busy. The bar still offers the switch by hand.
+   */
+  it('only forward: a window of an older build never switches, asks or waits by itself', () => {
+    const older = { ...quiet.build, app: beta10, host: beta11, keeper: beta11 }
+    for (const autoApply of [false, true]) {
+      for (const relaunched of [false, true]) {
+        for (const busy of [false, true]) {
+          const i = { ...quiet, autoApply, build: { ...older, relaunched, busy } }
+          expect(autoSwitch(i), JSON.stringify({ autoApply, relaunched, busy })).toBe('none')
+        }
+      }
+    }
+    // A keeper alone behind, of a newer build than this window, is not moved back either
+    const keeperNewer = { ...quiet.build, app: beta10, host: beta10, keeper: beta11, sameBuild: true }
+    expect(autoSwitch({ ...quiet, autoApply: true, build: keeperNewer })).toBe('none')
+    // Nor is a newer host when only the keeper is older than this window
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: beta10, host: beta11, keeper: { ...beta10, version: '0.1.0-beta.9' } } })).toBe('none')
+  })
+
+  it('a window whose build cannot be ordered against the running one leaves it to the bar', () => {
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, host: { commit: '2ffcaec5' }, keeper: { commit: '2ffcaec5' } } })).toBe('none')
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: { commit: 'dev' } } })).toBe('none')
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, host: undefined } })).toBe('none')
+    // The same version built twice: only the later one goes ahead by itself
+    const rebuilt = { ...beta10, commit: 'abc1234-dirty', builtAt: '2026-10-02T09:00:00.000Z' }
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: rebuilt, host: beta10, keeper: beta10 } })).toBe('switch')
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: beta10, host: rebuilt, keeper: rebuilt } })).toBe('none')
+  })
+})
+
+describe('the bar for a window of an older build (#352)', () => {
+  const input = (build: BuildBarInput['build']): BuildBarInput => ({ build, dismissed: false, dismissedSwap: null })
+
+  it('says the window is the older build, so the switch it offers goes back', () => {
+    const bar = buildBar(input({ mode: 'keeper', app: beta10, host: beta11, keeper: beta11, sameBuild: false, keeperSameBuild: false }))
+    expect(bar).toEqual({ kind: 'other', who: 'host', older: true })
+    expect(
+      buildBar(input({ mode: 'keeper', app: beta10, host: beta10, keeper: beta11, sameBuild: true, keeperSameBuild: false })),
+    ).toEqual({ kind: 'other', who: 'keeper', older: true })
+    expect(olderBuildText(beta10, beta11)).toBe(
+      'This window is an older build (0.1.0-beta.10, 2ffcaec5) than the one running (0.1.0-beta.11, 53b9cf7).',
+    )
+  })
+
+  it('a newer window, or one that cannot be ordered, gets the bar as before', () => {
+    const plain = { kind: 'other', who: 'host' }
+    expect(buildBar(input({ mode: 'keeper', app: beta11, host: beta10, sameBuild: false }))).toEqual(plain)
+    expect(buildBar(input({ mode: 'keeper', app: beta10, host: { commit: 'x' }, sameBuild: false }))).toEqual(plain)
   })
 })
 

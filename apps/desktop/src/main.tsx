@@ -212,6 +212,8 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
    * click when nothing can be lost. When something can, the window "Apply now" started asks at
    * once, and the automatic mode waits for the next activity report that says idle. Once per
    * window: a failure stays on the bar with "Try again". Progress shows in the bar as for a click.
+   * Forward only: a window whose build is not newer than the keeper's and the host's (an older
+   * app opened from a backup, a build that cannot be ordered) never switches by itself.
    */
   const autoApply = useStore((s) => s.update?.autoApply ?? false)
   const autoTried = useRef(false)
