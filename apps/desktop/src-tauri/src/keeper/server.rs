@@ -6,7 +6,8 @@
 //! | request | answer |
 //! |---|---|
 //! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and token, build source, the last swap |
-//! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open |
+//! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?,"relaunched":bool}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. `relaunched`: this window is the one an announced relaunch started |
+//! | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is relaunching itself to apply an update (#352): for up to `n` s (default 60, at most 300) no window attached does not stop the keeper, whatever background mode says |
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
 //! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap |
 //! | `{"op":"upgrade","exe":path,"source":BuildSource}` | `{"ok":true}`, then the keeper hands itself over to the keeper at `exe` (of build `source`), leaving the host alone (#280 step 4) |
@@ -46,7 +47,10 @@ use super::client::{self, read_line};
 use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
 use super::swap::{self, Phase, SwapView};
-use super::{idle_decision, idle_limit, socket_path, sys, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING, KEEPER_PROTOCOL};
+use super::{
+    idle_decision, idle_limit, relaunch_grace, relaunch_state, socket_path, stop_on_detach, sys, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
+    KEEPER_PROTOCOL,
+};
 use crate::host_proc::{self, HostInfo, HostLaunch, HostStatus, LaunchError, Launcher, StatusSink, Supervisor};
 
 /// Command-line options. The app passes all of them; a person starting a keeper by hand can
@@ -120,6 +124,16 @@ pub(super) struct State {
     pub(super) drained: Option<Value>,
     /// The current host's `{"swap":{"keepsAgents":..}}` report.
     pub(super) keeps_agents: Option<bool>,
+    /// Until when an announced relaunch (#352) holds the keeper with no window attached. Cleared by
+    /// the next attach, which is told it is the window that relaunch started.
+    pub(super) relaunch_until: Option<Instant>,
+}
+
+impl State {
+    /// An announced relaunch whose grace is still running.
+    pub(super) fn relaunching(&self, now: Instant) -> bool {
+        relaunch_state(self.relaunch_until, now).0
+    }
 }
 
 pub(super) struct Keeper {
@@ -263,6 +277,7 @@ pub fn run(args: &[String]) -> i32 {
             swapping: false,
             drained: None,
             keeps_agents: None,
+            relaunch_until: None,
         }),
         idle: idle_limit(),
         started: now,
@@ -604,6 +619,7 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
         let reason = {
             let Ok(st) = k.state.lock() else { return };
             let now = Instant::now();
+            let (relaunching, relaunch_expired) = relaunch_state(st.relaunch_until, now);
             idle_decision(
                 IdleInput {
                     background: st.settings.background,
@@ -614,6 +630,8 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
                     since_start: now.duration_since(k.started),
                     since_detach: now.duration_since(st.last_detach),
                     since_busy: now.duration_since(st.last_busy),
+                    relaunching,
+                    relaunch_expired,
                 },
                 k.idle,
             )
@@ -665,6 +683,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             drop(stream);
             k.shutdown("asked to stop (Quit and stop agents)");
         }
+        "relaunching" => relaunching(&k, &mut stream, &req),
         "switch" => switch(k, &mut stream, &req),
         "upgrade" => upgrade(k, &mut stream, &req),
         "restart" => {
@@ -718,6 +737,15 @@ fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<UnixStream>,
         st.next_id += 1;
         st.attached += 1;
         st.ever_attached = true;
+        // The window an announced relaunch started (#352): it is told so, and the grace is spent
+        let relaunched = st.relaunching(Instant::now());
+        if st.relaunch_until.take().is_some() {
+            log(if relaunched {
+                "a window attached after the announced relaunch"
+            } else {
+                "a window attached after the relaunch grace had run out"
+            });
+        }
         let same = match (&client, &st.source) {
             (Some(c), Some(s)) => Some(c.same_build(s)),
             _ => None,
@@ -730,7 +758,10 @@ fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<UnixStream>,
         };
         // The answer goes out before this window is added to the push list, under the same lock,
         // so no event can overtake it.
-        reply(&mut stream, &json!({ "ok": true, "view": k.view(&st), "sameBuild": same, "keeperSameBuild": keeper_same }));
+        reply(
+            &mut stream,
+            &json!({ "ok": true, "view": k.view(&st), "sameBuild": same, "keeperSameBuild": keeper_same, "relaunched": relaunched }),
+        );
         st.subscribers.push((id, push));
         k.broadcast(&mut st);
         id
@@ -754,14 +785,43 @@ pub(super) fn watch_window(k: Arc<Keeper>, id: u64, mut reader: BufReader<UnixSt
         let Ok(mut st) = k.state.lock() else { return };
         st.subscribers.retain(|(i, _)| *i != id);
         st.attached = st.attached.saturating_sub(1);
-        st.last_detach = Instant::now();
+        let now = Instant::now();
+        st.last_detach = now;
         k.broadcast(&mut st);
-        st.attached == 0 && !st.settings.background
+        if st.attached == 0 && st.relaunching(now) {
+            log("the last window closed for an announced relaunch; waiting for it to come back");
+        }
+        stop_on_detach(st.attached, st.settings.background, st.relaunching(now))
     };
     // Frozen: the decision waits for the thaw, when the idle rule sees no window either.
     if stop && !k.frozen.load(Ordering::SeqCst) {
         k.shutdown("the last window closed and background mode is off");
     }
+}
+
+/**
+ * `relaunching` (#352): the app is about to close its window and start again from its updated
+ * bundle ("Apply now"). Until the grace runs out, no window attached is not "the last window
+ * left", even with background mode off, so the update cuts nothing because of that setting. The
+ * next window to attach spends the grace and is told it is the relaunched one (`relaunched` in its
+ * attach answer), so it can apply the switch by itself. If none comes back in time, the idle rule
+ * applies as if nothing had been announced: with background mode off, the keeper stops.
+ *
+ * Peer-uid checked like every request (`handle`); it changes nothing a process of this user could
+ * not do with `set_background` anyway, and only for a bounded time.
+ */
+fn relaunching(k: &Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
+    let grace = relaunch_grace(req.get("graceSecs").and_then(Value::as_u64));
+    {
+        let Ok(mut st) = k.state.lock() else { return };
+        if st.stopping {
+            drop(st);
+            return reply(stream, &json!({ "ok": false, "error": "the keeper is stopping" }));
+        }
+        st.relaunch_until = Some(Instant::now() + grace);
+    }
+    log(&format!("the app announced a relaunch; holding for up to {}s with no window", grace.as_secs()));
+    reply(stream, &json!({ "ok": true, "graceSecs": grace.as_secs() }));
 }
 
 /// Registers a window connection another keeper handed over (step 4) and watches it.

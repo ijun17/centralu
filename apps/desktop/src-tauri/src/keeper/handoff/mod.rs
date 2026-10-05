@@ -589,6 +589,9 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
             swapping: snap.then_switch.is_some(),
             drained: None,
             keeps_agents: snap.keeps_agents,
+            // Not passed on: a handoff starts from an attached window's switch, which already
+            // spent any relaunch grace (#352)
+            relaunch_until: None,
         }),
         idle: super::idle_limit(),
         started: ago(snap.since_start_ms),

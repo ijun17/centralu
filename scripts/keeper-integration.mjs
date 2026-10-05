@@ -19,6 +19,10 @@
  *   - background on: killing it leaves both running, a new client re-attaches to the same host,
  *     a switch moves the host to another build and removes the old copy, and the keeper
  *     ends itself after the idle limit with nothing attached — but not while a terminal is open;
+ *   - an announced relaunch ("Apply now", #352) with background off: the window closing stops
+ *     nothing, the window that attaches within the grace is told it is the relaunched one and finds
+ *     the same host and the same keeper-held terminal; without an announcement, or once the grace
+ *     has run out with no window back, the keeper stops as before;
  *   - stop ends everything;
  *   - a keeper killed outright takes its host with it, and a new keeper takes the folder over.
  *
@@ -408,6 +412,141 @@ async function hostClient(port, token) {
       }),
     close: () => ws.close(),
   }
+}
+
+/**
+ * What the keeper's child service holds: the terminals, commands and agents it keeps for the host.
+ * The child socket answers `hello` first; `list` after it carries a request id.
+ */
+function heldChildren(data, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const c = createConnection(join(data, 'children.sock'))
+    let buf = ''
+    const timer = setTimeout(() => {
+      c.destroy()
+      reject(new Error('timeout'))
+    }, timeoutMs)
+    c.on('connect', () => c.write(`${JSON.stringify({ op: 'hello', protocol: 1 })}\n`))
+    c.on('data', (d) => {
+      buf += d
+      const lines = buf.split('\n')
+      buf = lines.pop()
+      for (const l of lines) {
+        const v = JSON.parse(l)
+        if (v.rid === undefined && v.keeperPid) {
+          c.write(`${JSON.stringify({ op: 'list', rid: 1 })}\n`)
+          continue
+        }
+        clearTimeout(timer)
+        c.end()
+        return resolve(v.children ?? [])
+      }
+    })
+    c.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+  })
+}
+
+/**
+ * "Apply now" (#352): the app announces a relaunch, its window closes, and the relaunched window
+ * attaches within the grace. With background mode off, nothing may stop in between; without the
+ * announcement, or once the grace has run out, the keeper stops as it always did.
+ */
+async function scenarioRelaunch() {
+  log('\nan announced relaunch with background mode off (#352)')
+  const GRACE = 6
+  const data = newData()
+  const sock = join(data, 'keeper.sock')
+  const k = startKeeper(data, { env: { CC_KEEPER_RELAUNCH_SECS: String(GRACE) } })
+  const view = await waitFor(async () => {
+    const v = await status(sock)
+    return ready(v) && v
+  }, 30_000)
+  if (!check(view, 'the keeper brings the host up')) return
+  check(view.background === false, 'background mode is off')
+  const info = bundleInfo()
+  const build = { commit: info.commit, builtAt: info.builtAt, hostDir: HOST_SRC }
+  const app1 = attachClient(sock, build)
+  const first1 = await app1.first()
+  check(first1?.ok === true && first1.relaunched === false, 'a window opened by hand is not told it was relaunched', JSON.stringify(first1?.relaunched))
+
+  const project = mkdtempSync('/tmp/ck-proj-')
+  tempDirs.push(project)
+  const host = await hostClient(view.status.port, view.status.token)
+  let shell
+  let term
+  try {
+    const p = await host.call('projects.add', { path: project })
+    term = await host.call('terminal.create', { projectId: p.id, cols: 80, rows: 24 })
+    const held = await waitFor(async () => (await heldChildren(data)).find((c) => c.tag?.kind === 'terminal' && c.tag.id === term.terminalId), 10_000)
+    shell = held?.pid
+    check(alive(shell), 'the keeper holds the terminal', JSON.stringify(held))
+    if (shell) started.add(shell)
+  } catch (e) {
+    check(false, 'the host takes a project and a terminal', String(e))
+  } finally {
+    host.close()
+  }
+
+  const ann = await request(sock, { op: 'relaunching' })
+  check(ann.ok === true && ann.graceSecs === GRACE, `the keeper takes the announcement (grace ${GRACE}s)`, JSON.stringify(ann))
+  app1.kill()
+  await sleep(2500)
+  const mid = await status(sock).catch(() => null)
+  check(
+    alive(k.pid) && alive(view.hostPid) && alive(shell) && mid?.attached === 0,
+    'the window closing for the relaunch stops nothing: keeper, host and terminal run on with no window',
+    `keeper ${alive(k.pid)}, host ${alive(view.hostPid)}, terminal ${alive(shell)}, attached ${mid?.attached}`,
+  )
+
+  const app2 = attachClient(sock, build)
+  const first2 = await app2.first()
+  check(first2?.ok === true && first2.relaunched === true, 'the window that comes back is told it is the relaunched one', JSON.stringify(first2?.relaunched))
+  check(first2?.view?.hostPid === view.hostPid, 'and finds the same host', `${first2?.view?.hostPid} vs ${view.hostPid}`)
+  const host2 = await hostClient(view.status.port, view.status.token)
+  try {
+    const list = await host2.call('terminal.list', { projectId: (await host2.call('projects.list', {}))[0]?.id })
+    const t = list.terminals.find((x) => x.terminalId === term?.terminalId)
+    check(t?.alive === true && alive(shell), 'and the same terminal, still alive', JSON.stringify(list))
+  } catch (e) {
+    check(false, 'the host lists the terminal after the relaunch', String(e))
+  } finally {
+    host2.close()
+  }
+
+  // The grace was spent by that attach: a window closing now is the last window leaving, as always
+  app2.kill()
+  const stopped = await waitFor(() => !alive(k.pid) && !alive(view.hostPid), 15_000)
+  check(stopped, 'without an announcement, the last window closing stops the keeper and the host as before', `keeper ${alive(k.pid)}, host ${alive(view.hostPid)}`)
+  check(await waitFor(() => !alive(shell), 10_000), 'and the terminal with them')
+
+  log('\na relaunch nobody comes back from')
+  const data2 = newData()
+  const sock2 = join(data2, 'keeper.sock')
+  const k2 = startKeeper(data2, { env: { CC_KEEPER_RELAUNCH_SECS: String(GRACE) } })
+  const view2 = await waitFor(async () => {
+    const v = await status(sock2)
+    return ready(v) && v
+  }, 30_000)
+  if (!check(view2, 'the keeper brings the host up')) return
+  const app3 = attachClient(sock2, build)
+  await app3.first()
+  await request(sock2, { op: 'relaunching' })
+  app3.kill()
+  const closedAt = Date.now()
+  const ended = await waitFor(() => !alive(k2.pid) && !alive(view2.hostPid), (GRACE + 15) * 1000, 250)
+  const after = (Date.now() - closedAt) / 1000
+  check(
+    ended && after >= GRACE - 1,
+    `once the grace (${GRACE}s) runs out with no window back, it stops as if nothing had been announced`,
+    `ended ${!!ended} after ${after.toFixed(1)}s`,
+  )
+  check(
+    readFileSync(join(data2, 'keeper.log'), 'utf8').includes('no window came back within the relaunch grace'),
+    'and says why in keeper.log',
+  )
 }
 
 async function scenarioBusyHoldsIdle() {
@@ -820,6 +959,7 @@ async function main() {
     'background-off': scenarioBackgroundOff,
     'background-on': scenarioBackgroundOn,
     stop: scenarioStop,
+    relaunch: scenarioRelaunch,
     'busy-holds-idle': scenarioBusyHoldsIdle,
     'keeper-dies': scenarioKeeperDies,
     swap: scenarioSwap,
