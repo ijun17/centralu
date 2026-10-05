@@ -111,6 +111,13 @@ Run `pnpm e2e` for anything the UI shows.
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
 with the fix removed is not testing the fix.
 
+**Code with a boundary gets a sweep, not one typical value.** Buffers, batches, caps, pages and
+limits fail at sizes nobody picks by hand: the keeper's handoff failed on macOS only when about
+8,000 bytes sat in the socket buffer before a descriptor batch, while 4,000 and 20,000 passed
+(#387). Run the code across the boundary (every step from zero to a few times the limit, plus the
+values right around it) and at the scale people actually reach (several agents, terminals and app
+views, long sessions, a large store), not only the smallest state that exercises the path.
+
 The desktop app is WKWebView. If a UI bug does not reproduce in Chromium, try
 `test.use({ browserName: 'webkit' })`.
 
