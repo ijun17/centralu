@@ -135,9 +135,15 @@ describe('spacing Claude starts on Windows (#353)', () => {
     const t0 = Date.now()
     const all = await Promise.all([session(a, 'a'), session(a, 'b'), session(a, 'c')])
     const at = sdk.started.map((s) => s.at - t0)
+    /*
+     * Each start is held to its own slot, a gap after the one before. Measured from t0, not from the start before it:
+     * the CLI is reached after work the gate does not time (the first session also makes the program's link), so on
+     * Windows 11 the first start once landed 13 ms late and the next one only 47 ms after it, still in its slot (#14).
+     * 5 ms of slack for Windows timers, which can fire a little before Date.now() says they are due.
+     */
     expect(at[0]).toBeLessThan(40)
-    expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(55)
-    expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(55)
+    expect(at[1]).toBeGreaterThanOrEqual(60 - 5)
+    expect(at[2]).toBeGreaterThanOrEqual(120 - 5)
     await Promise.all(all.map((s) => s.handle.dispose()))
   })
 
