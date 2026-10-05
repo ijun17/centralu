@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { App, applyCachedTheme, useStore } from '@cc/ui'
+import { App, applyCachedTheme, applyCachedTypography, useStore } from '@cc/ui'
 import { createWebPlatform } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
@@ -26,6 +26,7 @@ if (!rootElement) throw new Error('Root element #root not found')
 
 // The theme the last run chose, before anything is drawn — the preferences arrive a round trip later (theme.ts)
 applyCachedTheme()
+applyCachedTypography()
 
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')

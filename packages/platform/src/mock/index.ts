@@ -45,6 +45,7 @@ import {
   newAppIdProblem,
   isNewerVersion,
   parseUiPreferences,
+  textSizeFromLegacyStep,
   parseThemeFile,
   formatThemeFile,
   osPathBaseName,
@@ -2596,6 +2597,8 @@ export class MockPlatform implements Platform {
 
   /** Public so tests can look inside — and set it up without going through the port */
   uiPrefs: UiPreferences = parseUiPreferences(undefined)
+  /** Whether anything has been written since the page loaded — the in-memory twin of a stored record */
+  private uiPrefsStored = false
 
   /**
    * Screen preferences (UiPreferences).
@@ -2692,17 +2695,29 @@ export class MockPlatform implements Platform {
 
   readonly prefs: PreferencesPort = {
     load: async () => {
+      let stored: unknown = this.uiPrefsStored ? this.uiPrefs : undefined
       try {
         const raw = localStorage.getItem('cc-mock-prefs')
-        if (raw) this.uiPrefs = parseUiPreferences(JSON.parse(raw))
+        if (raw) {
+          stored = JSON.parse(raw)
+          this.uiPrefs = parseUiPreferences(stored)
+        }
       } catch {
         /* node, or storage denied — the in-memory copy still works */
+      }
+      // The same one-time move as the host's: a record with no text size takes the snapshot's step (#312 step 5)
+      const hasTextSize = typeof stored === 'object' && stored !== null && 'textSize' in stored
+      if (!hasTextSize) {
+        const legacy = textSizeFromLegacyStep(((await this.workspace.load()) as { textScale?: unknown } | null)?.textScale)
+        if (legacy !== null) await this.prefs.save({ textSize: legacy })
       }
       return { ...this.uiPrefs }
     },
     // The same rule as the real thing: leaves an unwritten field untouched, and returns the whole thing after it was recorded
     save: async (patch: UiPreferencesPatch) => {
-      this.uiPrefs = { ...this.uiPrefs, ...patch }
+      // Read through the schema as the host's `prefs.set` does, so a text size lands on a step here too
+      this.uiPrefs = parseUiPreferences({ ...this.uiPrefs, ...patch })
+      this.uiPrefsStored = true
       try {
         localStorage.setItem('cc-mock-prefs', JSON.stringify(this.uiPrefs))
       } catch {

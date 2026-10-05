@@ -52,6 +52,7 @@ import {
   isProjectId,
   isSessionId,
   parseUiPreferences,
+  textSizeFromLegacyStep,
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
@@ -4206,12 +4207,28 @@ export class SessionManager {
    */
   uiPreferences(): UiPreferences {
     const raw = this.store.appSetting(UI_PREFS_KEY)
-    if (raw === null) return parseUiPreferences(undefined)
+    let stored: unknown
     try {
-      return parseUiPreferences(JSON.parse(raw))
+      stored = raw === null ? undefined : JSON.parse(raw)
     } catch {
-      return parseUiPreferences(undefined)
+      stored = undefined
     }
+    const prefs = parseUiPreferences(stored)
+    /*
+     * The text size moved here from the workspace snapshot (#312 step 5), where the screen kept
+     * it as a step index. Moved once: the first read that finds no `textSize` in the record takes
+     * the snapshot's step and writes it into the record, and from then on the record has the
+     * field, so a snapshot an older window still writes never overrides a size chosen since.
+     */
+    const hasTextSize = typeof stored === 'object' && stored !== null && 'textSize' in stored
+    if (!hasTextSize) {
+      const legacy = textSizeFromLegacyStep(this.loadWorkspace()?.textScale)
+      if (legacy !== null) {
+        prefs.textSize = legacy
+        this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify(prefs))
+      }
+    }
+    return prefs
   }
 
   setUiPreferences(patch: UiPreferencesPatch): UiPreferences {

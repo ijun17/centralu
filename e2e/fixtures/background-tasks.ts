@@ -186,7 +186,7 @@ export function backgroundTasksTests(): void {
        * Zoomed in, at the window's right edge, it still hangs right under its badge — the screen rect already has the
        * zoom in it and a fixed length gets it again (RowMenu's lesson in Sidebar.tsx, #183)
        */
-      await page.evaluate(() => (window as any).__store.setState({ textScale: 4 }))
+      await page.evaluate(() => (window as any).__store.setState((s: any) => ({ prefs: { ...s.prefs, textSize: 1.25 } })))
       await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-zoom').trim())).toBe('1.25')
       const badge = page.getByTestId(`grid-panel-${ids[1]}`).getByTestId('background-badge')
       await badge.click()
@@ -196,7 +196,7 @@ export function backgroundTasksTests(): void {
       expect(gap).toBeGreaterThanOrEqual(0)
       expect(gap).toBeLessThanOrEqual(8)
       await page.keyboard.press('Escape')
-      await page.evaluate(() => (window as any).__store.setState({ textScale: 2 }))
+      await page.evaluate(() => (window as any).__store.setState((s: any) => ({ prefs: { ...s.prefs, textSize: 1 } })))
 
       // The focus view, in a window where the evidence panel leaves the session little room
       await page.setViewportSize({ width: 900, height: 760 })

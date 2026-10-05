@@ -236,6 +236,25 @@ describe('themes reach every token', () => {
   })
 })
 
+/**
+ * The font and line-height settings (#312 step 5) write their values on top of the stylesheet's,
+ * so app/typography.ts keeps copies: the stacks a picked font goes in front of, and the Normal line
+ * heights the factors multiply. A copy that drifted would change the default screen the moment a
+ * setting was touched.
+ */
+describe('the typography settings start from the stylesheet', () => {
+  it('the fallback stacks and the Normal line heights are the ones @theme declares', async () => {
+    const t = await import('../packages/ui/src/app/typography.js')
+    const css = readFileSync(join(ROOT, 'packages/ui/src/styles/index.css'), 'utf8')
+    const block = css.slice(css.indexOf('@theme {'), css.indexOf('\n}\n', css.indexOf('@theme {')))
+    const value = (name: string) => block.match(new RegExp(`${name}:([^;]+);`))![1]!.replace(/\s+/g, ' ').trim()
+    expect(value('--font-sans')).toBe(t.DEFAULT_SANS)
+    expect(value('--font-mono')).toBe(t.DEFAULT_MONO)
+    expect(Number(value('--leading-body'))).toBe(t.LEADING_BODY)
+    expect(Number(value('--leading-code'))).toBe(t.LEADING_CODE)
+  })
+})
+
 describe('bundle regression (decision C-3: no editor engine in the viewer)', () => {
   it('CodeMirror and Shiki are not in the bundle', () => {
     // An editor engine is overkill for a read-only viewer. Including one would require lazy

@@ -144,7 +144,7 @@ test('changing the text size leaves the panels in the columns they stand in, nev
   expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
 
   const counts = await columnsThrough(page, '[data-testid="project-grid"] > div', () =>
-    page.evaluate(() => (window as any).__store.getState().setTextScale(4)),
+    page.evaluate(() => (window as any).__store.getState().setPrefs({ textSize: 1.25 })),
   )
   expect(counts).toEqual([1])
 })

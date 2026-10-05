@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_UI_PREFERENCES, parseUiPreferences } from './entities.js'
+import { DEFAULT_UI_PREFERENCES, parseUiPreferences, textSizeFromLegacyStep } from './entities.js'
 import { THEME_TOKENS, formatThemeFile, parseThemeFile, themeFileJsonSchema } from './theme.js'
 
 describe('the theme file format (#312)', () => {
@@ -54,5 +54,26 @@ describe('screen preferences, field by field', () => {
 
   it('a blob from before themes reads with the theme defaults', () => {
     expect(parseUiPreferences({ sendWithModifierEnter: true })).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true })
+  })
+
+  it('the text fields read tolerantly: a size lands on the nearest step, anything unusable is its default', () => {
+    expect(parseUiPreferences({ textSize: 1.3, lineHeight: 'relaxed', bodyFont: 'Inter', codeFont: 'Menlo' })).toMatchObject({
+      textSize: 1.25,
+      lineHeight: 'relaxed',
+      bodyFont: 'Inter',
+      codeFont: 'Menlo',
+    })
+    expect(parseUiPreferences({ textSize: '1.1', lineHeight: 'airy', bodyFont: 3 })).toMatchObject({ textSize: 1, lineHeight: 'normal', bodyFont: '' })
+    expect(parseUiPreferences({ textSize: 0.9 }).textSize).toBe(0.925)
+  })
+
+  it('the old snapshot step maps onto the five sizes, clamped, and anything else is no size', () => {
+    expect(textSizeFromLegacyStep(0)).toBe(0.85)
+    expect(textSizeFromLegacyStep(2)).toBe(1)
+    expect(textSizeFromLegacyStep(4)).toBe(1.25)
+    expect(textSizeFromLegacyStep(99)).toBe(1.25)
+    expect(textSizeFromLegacyStep(-3)).toBe(0.85)
+    expect(textSizeFromLegacyStep('4')).toBe(null)
+    expect(textSizeFromLegacyStep(undefined)).toBe(null)
   })
 })

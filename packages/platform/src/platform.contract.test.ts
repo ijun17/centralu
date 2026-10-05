@@ -514,6 +514,36 @@ describe.each([
   })
 
   /**
+   * The text size moved from the workspace snapshot into the preferences (#312 step 5). The old
+   * step comes across once; after that the record has its own value, and a snapshot that still
+   * carries the old step (written by an older window) does not override a size chosen since.
+   */
+  describe('a fresh install with a snapshot from before #312', () => {
+    let fresh: Harness
+    beforeAll(async () => {
+      fresh = await make()
+    })
+    afterAll(async () => fresh.cleanup())
+
+    it('a text size kept in the workspace snapshot moves into the preferences once', async () => {
+      await fresh.platform.workspace.save({ textScale: 4 })
+      expect((await fresh.platform.prefs.load()).textSize).toBe(1.25)
+      expect((await fresh.platform.prefs.save({ textSize: 0.925 })).textSize).toBe(0.925)
+      await fresh.platform.workspace.save({ textScale: 4 })
+      expect((await fresh.platform.prefs.load()).textSize).toBe(0.925)
+    })
+  })
+
+  it('a text size between the steps lands on the nearest one, and the other appearance fields round-trip', async () => {
+    expect(await h.platform.prefs.save({ textSize: 1.2, bodyFont: 'Inter', codeFont: '"JetBrains Mono"', lineHeight: 'relaxed' })).toMatchObject({
+      textSize: 1.25,
+      bodyFont: 'Inter',
+      codeFont: '"JetBrains Mono"',
+      lineHeight: 'relaxed',
+    })
+  })
+
+  /**
    * Theme files (#312): a save is a file the list reads back, a second save of the same id
    * replaces it, an import copies a file in under a fresh id, and every change is announced.
    */

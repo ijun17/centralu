@@ -48,7 +48,8 @@ export function terminalStyle(el: Element, kind: 'shell' | 'log'): { theme: IThe
   const cursor = kind === 'log' ? background : read('--color-term-cursor')
   if (background) theme.background = background
   if (cursor) theme.cursor = cursor
-  const fontFamily = read('--font-term')
+  // The code font (Settings → Appearance, #312 step 5): the terminal is text a machine wrote
+  const fontFamily = read('--font-mono')
   // xterm takes a number of pixels; the token is written in px (`11px`). What a machine wrote
   // is the xs step everywhere else too (paths, the code viewer).
   const fontSize = Number.parseFloat(read('--text-xs') ?? '')
@@ -60,18 +61,26 @@ export function terminalStyle(el: Element, kind: 'shell' | 'log'): { theme: IThe
 }
 
 /**
- * Keeps an open terminal in step with the theme. xterm only reads its theme when told, so a
- * terminal opened before a switch would keep the old colours until it was closed; applyTheme
- * announces every switch with `cc-themechange`, and this re-reads the variables then.
+ * Keeps an open terminal in step with the theme and the code font. xterm only reads them when
+ * told, so a terminal opened before a switch would keep the old colours or font until it was
+ * closed; applyTheme and applyTypography announce every change with `cc-themechange`, and this
+ * re-reads the variables then. A new font changes the cell size, so `refit` is called after it
+ * to give the shell its new columns and rows.
  * @returns stops following
  */
 export function followTheme(
-  term: { options: { theme?: ITheme } },
+  term: { options: { theme?: ITheme; fontFamily?: string } },
   el: Element,
   kind: 'shell' | 'log',
+  refit?: () => void,
 ): () => void {
   const update = () => {
-    term.options.theme = terminalStyle(el, kind).theme
+    const next = terminalStyle(el, kind)
+    term.options.theme = next.theme
+    if (next.fontFamily && next.fontFamily !== term.options.fontFamily) {
+      term.options.fontFamily = next.fontFamily
+      refit?.()
+    }
   }
   window.addEventListener('cc-themechange', update)
   return () => window.removeEventListener('cc-themechange', update)

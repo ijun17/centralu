@@ -13,7 +13,9 @@ import type { McpUiStyleVariableKey, McpUiTheme } from '@modelcontextprotocol/ex
  * it gets that lane's colours, a pinned view the floor's.
  *
  * Sizes are not scaled by the text size preference: the root zoom already scales the frame and
- * everything in it (see AppFrame's `hostContext`).
+ * everything in it (see AppFrame's `hostContext`). The fonts and line heights are: Settings →
+ * Appearance writes them over `--font-sans`, `--font-mono` and `--leading-body` (app/typography.ts),
+ * and announces the change with `cc-themechange`, so a view is sent them again like a theme switch.
  */
 
 /** A token to read, a value written out, or a value made from what was read */

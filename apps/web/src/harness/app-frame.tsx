@@ -1,6 +1,6 @@
 import { createRef, useSyncExternalStore, type RefObject } from 'react'
 import { createRoot } from 'react-dom/client'
-import { AppFrame, PlatformProvider, useStore, type AppFrameHandle, type AppFrameProps } from '@cc/ui'
+import { AppFrame, PlatformProvider, applyTypography, typographyOf, useStore, type AppFrameHandle, type AppFrameProps } from '@cc/ui'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { AppViewFrame } from '@cc/platform/ports'
 import '../../../../packages/ui/src/styles/index.css'
@@ -43,6 +43,8 @@ declare global {
 const mock = createMockPlatform()
 window.__mock = mock
 window.__store = useStore
+// The fonts and line height the way App.tsx puts them on the root (#312 step 5), for the app-theme e2e
+;(window as never as { __typography: unknown }).__typography = (prefs: Parameters<typeof typographyOf>[0]) => applyTypography(typographyOf(prefs))
 mock.viewFrameProvider = (appId, instanceId, opts) => {
   if (!window.__viewFrame) throw new Error('No view host is attached to this harness')
   return window.__viewFrame(appId, instanceId, opts)

@@ -484,7 +484,10 @@ export type WorkspaceSnapshot = {
   railWidth?: number
   /** Session list width (px) */
   sidebarWidth?: number
-  /** Overall text size step (TEXT_SCALES index, 0..4) — carried here because it is part of the way of looking */
+  /**
+   * @deprecated The text size step (0..4) from before #312 step 5. The text size is a preference
+   * now (`UiPreferences.textSize`); this is only read, once, to move an old value there.
+   */
   textScale?: number
   /** @deprecated The tab structure was replaced by three lanes. Appears only when reading an old snapshot */
   tab?: string

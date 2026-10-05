@@ -1003,29 +1003,21 @@ describe('the workspace snapshot has a single writer (U7)', () => {
   })
 
   /*
-   * Text size (five steps) is also a way of viewing — carried in the snapshot, surviving a restart,
-   * and any value outside the five steps (a broken snapshot, a future version) is clamped to the
-   * nearest step.
+   * The text size is a preference now (#312 step 5), not part of the snapshot: a snapshot from
+   * before carries it as a step index, and the platform moves it into the preferences once.
    */
-  it('the text size step is saved, and a value outside the range is clamped to a step', async () => {
-    const mock = new MockPlatform()
-    await useStore.getState().attach(mock)
-
-    useStore.getState().setTextScale(4)
-    await new Promise((r) => setTimeout(r, 0))
-    expect((mock.workspaceSnapshot as { textScale?: number } | null)?.textScale).toBe(4)
-
-    useStore.getState().setTextScale(99)
-    expect(useStore.getState().textScale).toBe(4)
-    useStore.getState().setTextScale(-3)
-    expect(useStore.getState().textScale).toBe(0)
-  })
-
-  it('the stored text size is restored after a restart (reconnect)', async () => {
+  it('the text size is a preference: a stored size arrives with the preferences and is not written into the snapshot', async () => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { textScale: 3 }
     await useStore.getState().attach(mock)
-    expect(useStore.getState().textScale).toBe(3)
+    expect(useStore.getState().prefs.textSize).toBe(1.1)
+
+    await useStore.getState().setPrefs({ textSize: 1.2 })
+    // Any number lands on the nearest of the five steps
+    expect(useStore.getState().prefs.textSize).toBe(1.25)
+    useStore.getState().setShowIgnored(false)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mock.workspaceSnapshot).not.toHaveProperty('textScale')
   })
 
   /*

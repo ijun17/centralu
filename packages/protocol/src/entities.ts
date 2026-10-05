@@ -924,6 +924,35 @@ export type UpdateStatus = z.infer<typeof UpdateStatus>
 export const ThemeMode = z.enum(['dark', 'light', 'system'])
 export type ThemeMode = z.infer<typeof ThemeMode>
 
+/**
+ * The five steps of the app-wide text size (#312 step 5): the root's CSS zoom factor, with 1 as the
+ * default. Why a zoom and not a font size: every text size in the UI is pinned in px, and growing
+ * only the text in a narrow grid panel breaks its wrapping first; scaling the whole screen by one
+ * factor follows the same rule as the OS's own display scaling (the store's TEXT_SCALES comment).
+ */
+export const TEXT_SIZES = [0.85, 0.925, 1, 1.1, 1.25] as const
+
+/** The nearest of the five steps — a stored value from another build, or a hand edit, lands on one */
+export function nearestTextSize(value: number): number {
+  let best: number = TEXT_SIZES[2]
+  for (const step of TEXT_SIZES) if (Math.abs(step - value) < Math.abs(best - value)) best = step
+  return best
+}
+
+/**
+ * Where the text size used to live: an index (0..4) into the same five steps, in the workspace
+ * snapshot's `textScale`. Read once to move it into the preferences, then never again; anything
+ * that is not a number is no text size at all.
+ */
+export function textSizeFromLegacyStep(step: unknown): number | null {
+  if (typeof step !== 'number' || !Number.isFinite(step)) return null
+  return TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, Math.round(step)))]!
+}
+
+/** Line height (#312 step 5): a factor on the body and code line heights; `normal` is today's values */
+export const LineHeight = z.enum(['compact', 'normal', 'relaxed'])
+export type LineHeight = z.infer<typeof LineHeight>
+
 export const UiPreferences = z.object({
   /**
    * Enter writes a newline and ⌘/Ctrl+Enter sends, instead of the other way round.
@@ -961,6 +990,23 @@ export const UiPreferences = z.object({
    * controls — never the signal colour, which stays the one thing reserved for "waiting for you".
    */
   accent: z.string().max(80).nullable(),
+  /**
+   * The body font, as the person wrote it: one family (`Inter`) or a list (`"IBM Plex Sans", Inter`).
+   * Empty is the app's own stack. The app's stack is always appended after it (app/typography.ts),
+   * so a font that is not installed, or one without Korean, falls back to what shows today.
+   */
+  bodyFont: z.string().max(200),
+  /** The code font, the same way: terminals, code blocks, paths and readouts. Empty is the app's own stack */
+  codeFont: z.string().max(200),
+  /** Line height of prose and code blocks. Fixed-row views (the code viewer, the diff, the commit graph) stay as they are */
+  lineHeight: LineHeight,
+  /**
+   * The app-wide text size, one of `TEXT_SIZES` (a zoom factor, 1 = default). It lived in the
+   * workspace snapshot as a step index (`textScale`) before #312; it is a way of looking, not a
+   * place things are, so it moved here with the rest of Appearance. Any number is accepted and
+   * lands on the nearest step, so a value from another build never throws the record away.
+   */
+  textSize: z.number().transform(nearestTextSize),
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 
@@ -982,6 +1028,10 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   themeDark: 'dark',
   themeLight: 'light',
   accent: null,
+  bodyFont: '',
+  codeFont: '',
+  lineHeight: 'normal',
+  textSize: 1,
 }
 
 /**

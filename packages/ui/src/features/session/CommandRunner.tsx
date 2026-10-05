@@ -358,7 +358,8 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    const unfollow = followTheme(term, el, 'log')
+    // A new code font changes the cell size: refit, and tell the command its new size
+    const unfollow = followTheme(term, el, 'log', () => syncSize())
     const links = registerTerminalHttpLinks(term, (url) => {
       void platform.system
         .openUrl(url)

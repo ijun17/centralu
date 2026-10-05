@@ -3,7 +3,7 @@ import type { AppBridge, McpUiHostContext, McpUiStyles, McpUiTheme } from '@mode
 import { APP_VERSION, type AppId } from '@cc/protocol'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
-import { TEXT_SCALES, externalAppKey, useStore } from '../../store/store.js'
+import { externalAppKey, useStore } from '../../store/store.js'
 import { activeTheme, readHostStyles } from './hostStyles.js'
 
 /**
@@ -228,7 +228,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   ref,
 ) {
   const platform = usePlatform()
-  const scale = TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
+  const scale = useStore((s) => s.prefs.textSize)
   const heard = useStore((s) => s.externalAppChanges[externalAppKey(projectId, appId)])
   const heardBy = useStore((s) => s.externalAppChangedBy[externalAppKey(projectId, appId)] ?? null)
   const signal = changeSignal ?? heard

@@ -183,15 +183,15 @@
   --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 0 rgb(0 0 0 / 0.7);
   --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.06), inset 0 -1px 2px rgb(0 0 0 / 0.5), 0 1px 0 rgb(0 0 0 / 0.6);
 
-  /* Text a machine wrote (commands, paths, numbers) is mono; what a person or a model says is
-     sans. Korean breaks the mono fallback, so sans handles it. */
+  /* Text a machine wrote (commands, paths, numbers, the terminal) is mono; what a person or a
+     model says is sans. Korean breaks the mono fallback, so sans handles it.
+     These are the defaults of Settings → Appearance's body and code fonts (#312 step 5): a font
+     picked there goes in front of the stack, never in place of it (app/typography.ts keeps a copy
+     of both stacks, and a test keeps the copies equal). */
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard,
     system-ui, sans-serif;
-  /* The terminal's stack is xterm's current one, kept apart so this change moves nothing; the
-     font settings (#312 step 5) will bring it together with --font-mono. */
-  --font-term: ui-monospace, 'SF Mono', Menlo, monospace;
 
   /*
    * Type, line height and radius scales (#312 step 2). Tailwind's own scales are cleared, so
@@ -217,7 +217,9 @@
 
   /*
    * Three line heights: tight for headings and two-line labels, body for prose (the conversation,
-   * descriptions), code for code blocks. Fixed-row views do not use these — see CodeViewer (18px
+   * descriptions), code for code blocks. Settings → Appearance's line height (Compact, Normal,
+   * Relaxed) multiplies body and code by one factor, written on the root (app/typography.ts);
+   * these values are Normal. Tight stays: a heading or a two-line label is set to fit its box. Fixed-row views do not use these — see CodeViewer (18px
    * rows), GitPanel's diff (17px rows) and CommitGraph (38px rows): a virtual list or a drawn
    * lane has to know the row height in pixels, so it stays a number written next to the code that
    * depends on it.
@@ -954,6 +956,12 @@
     line-height: var(--leading-tight);
     margin-top: 1.1em;
   }
+  /*
+   * The sizes inside a reply stay relative (em) on purpose, though they are off the five-size
+   * scale (#312 step 2 left them for step 5). A heading or a code span is sized against the reply's
+   * own text, so they keep their proportion to it whichever font is picked; and the text size
+   * setting is a zoom over everything, so there is no other size for them to follow.
+   */
   .cc-md h1 { font-size: 1.25em; }
   .cc-md h2 { font-size: 1.15em; }
   .cc-md h3 { font-size: 1.05em; }

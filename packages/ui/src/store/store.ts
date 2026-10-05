@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, SessionInfo, SUBAGENT_STEPS_PAGE } from '@cc/protocol'
+import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, SessionInfo, SUBAGENT_STEPS_PAGE, TEXT_SIZES, parseUiPreferences } from '@cc/protocol'
 import type {
   AppId,
   AppQuestion,
@@ -145,7 +145,8 @@ export const SIDEBAR_MAX = 480
 export const SIDEBAR_DEFAULT = 240
 
 /**
- * The five steps of overall text size (the middle one is the default).
+ * The five steps of overall text size (the middle one is the default) — the protocol's
+ * `TEXT_SIZES`, since the size is a preference (`UiPreferences.textSize`, #312 step 5).
  *
  * The value is the root's CSS zoom factor. The alternative of scaling only the font (switching to
  * rem) would be a full rewrite, because every bit of text in this codebase is fixed in px
@@ -153,8 +154,7 @@ export const SIDEBAR_DEFAULT = 240
  * in a narrow grid panel. Scaling the whole screen by the same factor is predictable instead,
  * because it follows the same rule as the OS's own display scaling.
  */
-export const TEXT_SCALES = [0.85, 0.925, 1, 1.1, 1.25] as const
-export const TEXT_SCALE_DEFAULT = 2
+export const TEXT_SCALES = TEXT_SIZES
 
 /**
  * The minimum width the conversation lane must keep.
@@ -448,7 +448,7 @@ function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<A
 
 /** The current scale (a `TEXT_SCALES` value). Used to convert between real pixels and zoom coordinates */
 export function useTextZoom(): number {
-  return TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
+  return useStore((s) => s.prefs.textSize)
 }
 
 export type ChatItem = (
@@ -683,8 +683,6 @@ export type AppState = {
    * flipped rarely, so a write per flip costs nothing.
    */
   showIgnored: boolean
-  /** The overall text size step — an index (0..4) into `TEXT_SCALES`. Carried in the snapshot because it is a way of viewing */
-  textScale: number
   /**
    * Whether to keep the composer folded in grid panels (user request, 2026-09-10).
    *
@@ -1148,7 +1146,6 @@ export type AppState = {
   toggleDir(projectId: string, path: string): void
   /** Show or hide what .gitignore hides (#17) */
   setShowIgnored(show: boolean): void
-  setTextScale(step: number): void
   setFoldComposer(fold: boolean): void
   setSpinGrid(on: boolean): void
   setSpinSessionIcon(on: boolean): void
@@ -2274,7 +2271,7 @@ export function usageTools(s: AppState): ToolName[] {
  * True while `attach` restores the workspace snapshot. `saveWorkspace` does nothing then.
  *
  * The restore goes through the same setters a person uses (`focusSession`, `setPanelWidth`,
- * `setTextScale`, `openOrchestrator`), and each of them saves. A save in the middle of the restore writes
+ * `setSidebarWidth`, `openOrchestrator`), and each of them saves. A save in the middle of the restore writes
  * the half-restored state back over the snapshot being read, so every field restored after that save is
  * stored as its default, and the next launch reads the default. It hit the folded projects (#205) and
  * `introSeen` (#63), each fixed by restoring that one field earlier, and then the spinning-marker
@@ -2381,7 +2378,6 @@ export const useStore = create<AppState>((set, get) => ({
   workingSince: {},
   expandedDirs: {},
   showIgnored: true,
-  textScale: TEXT_SCALE_DEFAULT,
   // Defaults to folded — the reason this feature exists at all is that a two-row grid leaves little room to read
   foldComposer: true,
   spinGrid: true,
@@ -2536,7 +2532,8 @@ export const useStore = create<AppState>((set, get) => ({
         Even so, it must **never block**: if it cannot be read, use the default. An app that cannot
         come up because of one setting is far worse than whatever that setting does.
       */
-      platform.prefs.load().catch(() => DEFAULT_UI_PREFERENCES),
+      // Read through the schema, field by field: an older host answers without the fields it does not know
+      platform.prefs.load().then(parseUiPreferences, () => DEFAULT_UI_PREFERENCES),
       // The external app list (A-8) also arrives with the first screen — so the sidebar's app rows
       // do not pop in late. The app still comes up if it cannot be read: the app rows just look
       // empty, and the next broadcast re-reads them
@@ -2737,10 +2734,8 @@ export const useStore = create<AppState>((set, get) => ({
         // a stored `false` is a decision and outranks it.
         const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
         if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
-        // Text size is also a way of viewing — the same `typeof` guard, for the same reason (absent
-        // is not the same as "decided to use the default")
-        const savedScale = (snap as { textScale?: number }).textScale
-        if (typeof savedScale === 'number') get().setTextScale(savedScale)
+        // The text size used to be restored here too; it is a preference now (UiPreferences.textSize),
+        // and the host moved the snapshot's old step into it once (#312 step 5)
         // Same `typeof` guard — a stored `false` was the person's decision, and outranks the default
         const savedFold = (snap as { foldComposer?: boolean }).foldComposer
         if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
@@ -2812,7 +2807,6 @@ export const useStore = create<AppState>((set, get) => ({
       railWidth: s.railWidth,
       notifyPolicy: s.notifyPolicy,
       showIgnored: s.showIgnored,
-      textScale: s.textScale,
       foldComposer: s.foldComposer,
       spinGrid: s.spinGrid,
       spinSessionIcon: s.spinSessionIcon,
@@ -3553,7 +3547,7 @@ export const useStore = create<AppState>((set, get) => ({
   setPanelWidth(px) {
     const s = get()
     const sidebar = s.panelOpen ? s.sidebarWidth : s.sidebarWidth
-    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar, TEXT_SCALES[s.textScale] ?? 1) })
+    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar, s.prefs.textSize) })
     get().saveWorkspace()
   },
 
@@ -3569,7 +3563,7 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get()
     // If the panel is collapsed, it only occupies a 32px strip
     const panel = s.panelOpen ? s.panelWidth : 32
-    set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel, TEXT_SCALES[s.textScale] ?? 1) })
+    set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel, s.prefs.textSize) })
     get().saveWorkspace()
   },
 
@@ -3689,7 +3683,7 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     try {
-      set({ prefs: await platform.prefs.save(patch) })
+      set({ prefs: parseUiPreferences(await platform.prefs.save(patch)) })
     } catch (e) {
       // The screen is left as is — leaving a failed setting turned on means it quietly reverts the next time it is turned on
       set({ toast: `Could not save that: ${(e as Error).message}` })
@@ -3799,11 +3793,6 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
-  setTextScale(step) {
-    // A value outside the five steps (a broken snapshot, a future version) is clamped to the nearest step
-    set({ textScale: Math.min(TEXT_SCALES.length - 1, Math.max(0, Math.round(step))) })
-    get().saveWorkspace()
-  },
   setToast(toast) {
     set({ toast })
   },

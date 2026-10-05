@@ -564,9 +564,9 @@ export function appPanelTests(): void {
       expect(await opened(page)).toBe(1)
 
       // Under the text scale the slot is measured in zoomed pixels and the view placed in CSS pixels (slots.ts)
-      await page.evaluate(() => (window as any).__store.getState().setTextScale(4))
+      await page.evaluate(() => (window as any).__store.getState().setPrefs({ textSize: 1.25 }))
       await expectOverSlot(page, key)
-      await page.evaluate(() => (window as any).__store.getState().setTextScale(2))
+      await page.evaluate(() => (window as any).__store.getState().setPrefs({ textSize: 1 }))
 
       // Hiding the panel closes the view, teardown first
       const instanceId = await page.evaluate(

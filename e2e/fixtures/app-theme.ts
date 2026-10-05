@@ -147,6 +147,28 @@ export function appThemeTests() {
     expect(await entries(v, 'connected')).toHaveLength(1)
   })
 
+  test('the body and code fonts and the line height reach a view, and a change is sent to it without a reload (#312 step 5)', async ({ page }) => {
+    await mount(page, 'fixture', 'ui://fixture/main')
+    const v = view(page)
+    const [connected] = await entries(v, 'connected')
+    // The defaults are the stylesheet's own values
+    expect(connected.hostContext.styles.variables['--font-sans']).toContain('Apple SD Gothic Neo')
+    expect(connected.hostContext.styles.variables['--font-text-md-line-height']).toBe('1.65')
+
+    await page.evaluate(() => (window as any).__typography({ bodyFont: 'Inter', codeFont: 'JetBrains Mono', lineHeight: 'relaxed' }))
+    await expect.poll(async () => (await entries(v, 'host-context-changed')).length).toBe(1)
+    const [changed] = await entries(v, 'host-context-changed')
+    const vars = changed.styles.variables
+    // The picked font goes first, and the app's own stack stays behind it (the Korean fallback)
+    expect(vars['--font-sans']).toMatch(/^"Inter", -apple-system/)
+    expect(vars['--font-sans']).toContain('Apple SD Gothic Neo')
+    expect(vars['--font-mono']).toMatch(/^"JetBrains Mono", ui-monospace/)
+    expect(vars['--font-text-md-line-height']).toBe('1.848')
+    // Headings keep the tight line height
+    expect(vars['--font-heading-md-line-height']).toBe('1.3')
+    expect(await entries(v, 'connected')).toHaveLength(1)
+  })
+
   test('the template applies what it receives: its colours, the danger colour and the scrollbar follow the theme', async ({ page }) => {
     await mount(page, 'counter', 'ui://counter/main')
     const v = view(page)

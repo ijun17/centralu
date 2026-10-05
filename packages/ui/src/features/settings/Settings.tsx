@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { APP_VERSION, type SessionInfo, type ToolName, type ToolStatus, type UpdateStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
-import { TEXT_SCALES, TEXT_SCALE_DEFAULT, useStore } from '../../store/store.js'
+import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useTools } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
@@ -12,6 +12,7 @@ import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { TrashSection } from './TrashSection.jsx'
 import { ThemeSection } from './ThemeSection.jsx'
+import { TypographySection } from './TypographySection.jsx'
 import { applyOffer, useRelaunchCheck, type ApplyOffer } from './apply-update.js'
 import type { BackgroundPort } from '@cc/platform/ports'
 
@@ -747,15 +748,9 @@ function OrchestratorSettings() {
 }
 
 /**
- * Appearance, opening with the app-wide text size — five steps, with the middle one as the default.
- *
- * The preview is the label: each button's "가Aa" is actually rendered at that step's own scale,
- * so the result is known before it is clicked. That is why a number (85%…) is not written
- * separately — a ratio can be read, but size has to be seen to be understood.
+ * Appearance: the theme, then text (size, fonts, line height), then how the grid behaves.
  */
 function AppearanceSection() {
-  const scale = useStore((s) => s.textScale)
-  const setScale = useStore((s) => s.setTextScale)
   const fold = useStore((s) => s.foldComposer)
   const setFold = useStore((s) => s.setFoldComposer)
   const modEnter = useStore((s) => s.prefs.sendWithModifierEnter)
@@ -768,28 +763,7 @@ function AppearanceSection() {
   return (
     <section>
       <ThemeSection />
-      <p className="mt-6 border-t border-line pt-4 text-xs leading-body text-ink-faint">Text size for the whole app.</p>
-      <div className="mt-3 flex items-end gap-2" role="radiogroup" aria-label="Text size">
-        {TEXT_SCALES.map((factor, i) => (
-          <button
-            key={factor}
-            type="button"
-            role="radio"
-            aria-checked={i === scale}
-            data-testid={`settings-scale-${i}`}
-            onClick={() => setScale(i)}
-            className={`rounded-md border px-2.5 py-1 leading-none transition-colors ${
-              i === scale
-                ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                : 'border-line text-ink-muted hover:bg-surface-hover/25 hover:text-ink'
-            }`}
-            title={i === TEXT_SCALE_DEFAULT ? 'Default' : `${Math.round(factor * 100)}%`}
-          >
-            <span style={{ fontSize: `${Math.round(13 * factor)}px` }}>가Aa</span>
-          </button>
-        ))}
-      </div>
-      <p className="mt-2 text-xs text-ink-faint">Applies immediately and is remembered.</p>
+      <TypographySection />
 
       {/*
         Folding the composer in a grid panel (user request, 2026-09-10). The setting came from

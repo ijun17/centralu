@@ -1200,7 +1200,7 @@ test('changing the text size leaves the grid in the columns it stands in, never 
   await expect(page.getByTestId(`grid-panel-${c}`)).toBeVisible()
 
   const counts = await columnsThrough(page, '[data-testid="grid"] > div', () =>
-    page.evaluate(() => (window as never as { __store: any }).__store.getState().setTextScale(4)),
+    page.evaluate(() => (window as never as { __store: any }).__store.getState().setPrefs({ textSize: 1.25 })),
   )
   expect(counts).toEqual([2])
 })

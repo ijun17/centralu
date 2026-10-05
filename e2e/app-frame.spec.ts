@@ -221,7 +221,7 @@ test('theme and font size go out in the host context, and changing font size sen
   // Color is read from our own token for wherever the view is placed
   expect(connected.hostContext.styles.variables['--color-text-primary']).toBe('#e9e9e9')
 
-  await page.evaluate(() => (window as any).__store.setState({ textScale: 4 }))
+  await page.evaluate(() => (window as any).__store.setState((s: any) => ({ prefs: { ...s.prefs, textSize: 1.25 } })))
   // Only the extension changed; it carries Centralu's own variables along with the scale (#312)
   const changed = (await entry(v, 'host-context-changed')) as { centralu: { fontScale: number; variables: Record<string, string> } }
   expect(Object.keys(changed)).toEqual(['centralu'])

@@ -249,7 +249,7 @@ test('with text zoomed in, the right-click menu still appears where clicked and 
   await setup(page)
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)
-  await page.evaluate(() => (window as any).__store.setState({ textScale: 4 }))
+  await page.evaluate(() => (window as any).__store.getState().setPrefs({ textSize: 1.25 }))
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-zoom').trim())).toBe('1.25')
 
   const row = (await page.getByTestId('file-a.ts').boundingBox())!

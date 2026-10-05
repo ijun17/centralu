@@ -9,7 +9,8 @@ import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 import { applyTheme, cacheChoice, pickTheme, resolveChoice, systemPrefersDark } from './theme.js'
-import { TEXT_SCALES, projectScreenOf, usableThemeFiles, useStore } from '../store/store.js'
+import { applyTypography, cacheTypography, typographyOf } from './typography.js'
+import { projectScreenOf, usableThemeFiles, useStore } from '../store/store.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
@@ -78,27 +79,6 @@ export function App({
   )
 
   /*
-   * Overall text size (Settings → Appearance, 5 levels).
-   *
-   * Applied with a single CSS zoom on the root — all text is pinned in px, so there is no way to
-   * grow just the font (see the TEXT_SCALES comment in the store), and zoom works in both
-   * WKWebView (Tauri) and the browser.
-   */
-  const textScale = useStore((s) => s.textScale)
-  useEffect(() => {
-    const factor = TEXT_SCALES[textScale] ?? 1
-    const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
-    style.zoom = String(factor)
-    /*
-     * vh/vw are not affected by zoom (measured: zooming in made the 100vh shell overflow the
-     * window and cut off the composer). The shell was switched to a chain of %, and the vh/vw in
-     * modals are divided by this variable to bring them back to the real window size — zoom and
-     * this variable must always be the same value, so they are set together in one place.
-     */
-    style.setProperty('--text-zoom', String(factor))
-  }, [textScale])
-
-  /*
    * The theme (Settings → Appearance, #312), next to the zoom for the same reason: both are
    * written once on the root and everything below follows.
    *
@@ -141,6 +121,25 @@ export function App({
       .setWindowAppearance(themeMode === 'system' ? null : theme.base, getComputedStyle(document.body).backgroundColor)
       .catch(() => {})
   }, [prefsArrived, themeMode, themeDark, themeLight, themeFiles, lastGoodThemes, accent, systemDark, platform])
+
+  /*
+   * Fonts, line height and the overall text size (Settings → Appearance, #312 step 5), held back
+   * until the preferences arrive for the theme's reason: main.tsx already put the cached ones on.
+   *
+   * The text size is a single CSS zoom on the root — all text is pinned in px, so there is no way
+   * to grow just the font (see the TEXT_SCALES comment in the store), and zoom works in both
+   * WKWebView (Tauri) and the browser.
+   */
+  const bodyFont = useStore((s) => s.prefs.bodyFont)
+  const codeFont = useStore((s) => s.prefs.codeFont)
+  const lineHeight = useStore((s) => s.prefs.lineHeight)
+  const textSize = useStore((s) => s.prefs.textSize)
+  useEffect(() => {
+    if (!prefsArrived) return
+    const typography = typographyOf({ bodyFont, codeFont, lineHeight, textSize })
+    applyTypography(typography)
+    cacheTypography(typography)
+  }, [prefsArrived, bodyFont, codeFont, lineHeight, textSize])
 
   /*
    * Where the spinning indicator gets stopped (user request, 2026-09-13).

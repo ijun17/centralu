@@ -188,7 +188,8 @@ function CommandLog({ projectId, command, runId }: { projectId: string; command:
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    const unfollow = followTheme(term, el, 'log')
+    // A new code font changes the cell size: refit, and tell the command its new size
+    const unfollow = followTheme(term, el, 'log', () => syncSize())
     const links = registerTerminalHttpLinks(term, (url) => {
       void platform.system
         .openUrl(url)
@@ -308,7 +309,8 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    const unfollow = followTheme(term, el, 'shell')
+    // A new code font changes the cell size: refit, and tell the shell its new size
+    const unfollow = followTheme(term, el, 'shell', () => syncSize())
     const links = registerTerminalHttpLinks(term, (url) => {
       void platform.system
         .openUrl(url)

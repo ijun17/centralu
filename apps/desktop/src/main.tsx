@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App, ShellBanner, applyCachedTheme, confirmKeyAction, useStore } from '@cc/ui'
+import { App, ShellBanner, applyCachedTheme, applyCachedTypography, confirmKeyAction, useStore } from '@cc/ui'
 import {
   autoSwitch,
   createTauriPlatform,
@@ -29,6 +29,7 @@ import '../../../packages/ui/src/styles/index.css'
 // The theme the last run chose, before anything is drawn — even the waiting-for-host screen
 // should open in it, and the preferences only arrive once the host answers (theme.ts)
 applyCachedTheme()
+applyCachedTypography()
 
 const root = createRoot(document.getElementById('root')!)
 
