@@ -8916,18 +8916,24 @@ async function plantForeman(page: Page, memberId: string, name: string): Promise
 
 /**
  * A foreman left behind by the removed control app (#97) is still reachable. It used to be drawn as
- * its task's row in the control rail; with the rail gone, the sidebar's list of sessions with no
- * project takes it in, so it can still be found by name and opened.
+ * its task's row in the control rail, then in a "No app" list under the orchestrator row; that list
+ * went too (2026-10-05), so nothing hangs under the orchestrator any more. No app claims the
+ * foreman, so it has no sidebar row, and it is found by name in the palette.
  */
-test('A foreman left by the removed control app stands in the sidebar and opens', async ({ page }) => {
+test('A foreman left by the removed control app has no sidebar row and opens from the palette', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'session that will become a member')
   const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   const foremanId = await plantForeman(page, workerId, 'Implement the skill')
+  await expect.poll(() => page.evaluate((id) => !!(window as any).__store.getState().sessions[id], foremanId)).toBe(true)
 
-  await expect(page.getByTestId('homeless-sessions')).toContainText('Implement the skill')
-  await page.getByTestId(`homeless-row-${foremanId}`).click()
+  await expect(page.getByTestId('sidebar')).not.toContainText('Implement the skill')
+  await expect(page.getByTestId('sidebar')).not.toContainText('No app')
+
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('Implement the skill')
+  await page.getByTestId('palette-item-session').click()
   await expect(page.getByTestId('session-view')).toBeVisible()
   await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(foremanId)
 })
@@ -8953,8 +8959,9 @@ test('Opening a coordinator session shows an empty evidence panel — it does no
 
   const coordinatorId = await plantForeman(page, workerId, 'Implement the skill')
 
-  // Open the coordinator — with no project on that session, the evidence lane itself must not exist
-  await page.getByTestId(`homeless-row-${coordinatorId}`).click()
+  // Open the coordinator (no sidebar row; the palette and search open it this way) — with no
+  // project on that session, the evidence lane itself must not exist
+  await page.evaluate((id: string) => (window as any).__store.getState().focusSession(id), coordinatorId)
   await expect(page.getByTestId('session-view')).toBeVisible()
   await expect(page.getByTestId('evidence-panel')).toHaveCount(0)
   await expect(page.getByTestId('evidence-rail-shell')).toHaveCount(0)

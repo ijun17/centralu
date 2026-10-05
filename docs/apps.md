@@ -257,6 +257,14 @@ makes the host call the manifest's `home` tool, as a `view` caller, and show the
 the main area. A host calling a tool is within the standard, and the view is still born from a tool
 call.
 
+A project app's sessions (its builder, the agents its `run_agent` started) are sessions of the
+project and stand in its list. A user-folder app's have no project, so they stand indented under
+the app's row in "Your apps", the only row they have: an agent there may be waiting at an approval
+card. A session with no project that no listed app claims (a coordinator the control app left
+behind, #97; a session of a user-folder app since removed) has no sidebar row. Search, the command
+palette and the inbox still reach it. The "No app" list that used to hang under the orchestrator
+row and catch all of these is gone (#372 follow-up): nothing stands under the orchestrator.
+
 - `home` must declare a `ui://` view and be visible to `app`. Otherwise opening is refused **before
   anything is called**, so nobody sees the app's state change behind a screen that never appeared.
 - Going to a session and back keeps the same document (hidden, not unloaded). Every way a view goes

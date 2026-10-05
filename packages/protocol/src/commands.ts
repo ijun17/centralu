@@ -275,10 +275,10 @@ export const SessionInfo = z.object({
    * 2026-09-09).
    *
    * All the core knows is **a single id line naming the owner**; only the app knows what it
-   * means. This line decides which list shows the session: an app that is running shows its own
-   * sessions, and the sidebar only carries project sessions. If the app is turned off or removed,
-   * the sidebar takes it over — this is how the rule that a session must stay reachable even with
-   * its app off (the demotion principle) is kept.
+   * means. A session of a project stands in that project's sidebar list whatever this says; a
+   * session with no project stands under the row of the user-folder app this names, whether that
+   * app is running or not (docs/apps.md §6.2). One that names no listed app has no sidebar row and
+   * is reached through search, the palette and the inbox.
    *
    * An app cannot write this itself: the value comes from the registered id of the app that
    * called the tool.

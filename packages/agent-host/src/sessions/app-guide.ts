@@ -162,7 +162,8 @@ There are three seats that direct sessions.
   It only watches and directs its own worktree children.
 - A coordinating session: it only watches and directs its assigned member sessions, and it cannot
   create or delete sessions. Nothing in the app creates a new one right now; one created earlier
-  keeps working and appears in the sidebar's No app list.
+  keeps working. It has no row in the sidebar; the person finds it by name in search or the command
+  palette, and in the inbox when it waits on them.
 None of them can approve on another session's behalf — the target session's approval settings stay
 exactly as they are.
 

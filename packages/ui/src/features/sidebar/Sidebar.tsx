@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -316,45 +316,6 @@ function OrchestratorButton() {
           Evolving
         </span>
       </button>
-      <HomelessSessions />
-    </div>
-  )
-}
-
-/**
- * Homeless sessions (user request, 2026-09-09) — **the spot the sidebar catches them in**.
- *
- * Sessions that belong to a project live under that project, and the orchestrator has its own
- * row. Everything else with no project lands here, so it is always reachable: a session an app
- * created outside a project, an old row that no app ever claimed, and a coordinator session the
- * removed control app (#97) stood up as a task's foreman. That last one used to be drawn as the
- * task's row in the control rail instead; with the rail gone it is an ordinary coordinator, and
- * this list is what keeps it from vanishing off the screen.
- */
-function HomelessSessions() {
-  const sessions = useStore((s) => s.sessions)
-  const focused = useStore((s) => s.focusedSessionId)
-  const focusSession = useStore((s) => s.focusSession)
-  const homeless = Object.values(sessions).filter((s) => !s.projectId && s.kind !== 'orchestrator')
-  if (homeless.length === 0) return null
-  return (
-    <div className="mt-1 space-y-0.5" data-testid="homeless-sessions">
-      <p className="px-2.5 text-2xs uppercase text-ink-faint">No app</p>
-      {homeless.map((s) => (
-        <button
-          key={s.id}
-          className={`flex w-full items-center gap-2 rounded-md border-l-2 py-1 pl-2.5 pr-2 text-left text-sm transition-colors ${
-            focused === s.id
-              ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
-              : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
-          }`}
-          onClick={() => focusSession(s.id)}
-          data-testid={`homeless-row-${s.id}`}
-        >
-          <ToolMark tool={s.tool} state={s.state} />
-          <span className="truncate">{s.name}</span>
-        </button>
-      ))}
     </div>
   )
 }
@@ -965,10 +926,64 @@ function AppRows({ apps, testId }: { apps: ExternalCatalogApp[]; testId: string 
   return (
     <ul data-testid={testId}>
       {apps.map((a) => (
-        <AppRow key={a.key} app={a} />
+        <Fragment key={a.key}>
+          <AppRow app={a} />
+          {/* A project app's sessions stand in its project's list; a user-folder app has no project to hold them */}
+          {a.projectId === null && <UserAppSessions appId={a.appId} />}
+        </Fragment>
       ))}
     </ul>
   )
+}
+
+/**
+ * The sessions of a user-folder app, indented under its row: its builder and the agents its
+ * `run_agent` stood up (both have no project and carry the app's id).
+ *
+ * This is their one place in the sidebar. A project app's sessions belong to its project and stand
+ * in that list; a user-folder app's have no project, and the "No app" list that used to catch every
+ * session with no project is gone (2026-10-05). An agent an app started runs on `safe`, so it can
+ * stop at an approval card, and a session waiting on the person must have a row to be found by.
+ *
+ * A session with no project that no listed app claims (a coordinator the removed control app stood
+ * up, a session of an app that was removed) has no row: search, the palette and the inbox still
+ * reach it.
+ */
+function UserAppSessions({ appId }: { appId: string }) {
+  const all = useStore((s) => s.sessions)
+  const own = useMemo(() => Object.values(all).filter((s) => !s.projectId && s.appId === appId), [all, appId])
+  const selected = useSelectedSessionId()
+  const focusSession = useStore((s) => s.focusSession)
+  return own.map((s) => {
+    const focused = selected === s.id
+    const unread = s.lastSeq > s.lastReadSeq
+    return (
+      <li
+        key={s.id}
+        className="relative ml-4 border-l border-line/60"
+        // Onto the grid like any session row; it carries no project, so no project screen takes it
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(SESSION_MIME, s.id)
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => focusSession(s.id)}
+          data-testid={`app-session-row-${s.id}`}
+          aria-current={focused ? 'page' : undefined}
+          data-unread={(unread && !focused) || undefined}
+          className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-md transition-colors ${
+            focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
+          }`}
+        >
+          <ToolMark tool={s.tool} state={s.state} />
+          <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
+        </button>
+      </li>
+    )
+  })
 }
 
 function AppRow({ app }: { app: ExternalCatalogApp }) {

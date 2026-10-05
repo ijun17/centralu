@@ -168,18 +168,74 @@ export function sidebarSelectionTests(): void {
         m.emit({ type: 'session_created', sessionId: id, session })
         return id
       }, worker)
-      await page.getByTestId(`homeless-row-${coordinator}`).click()
+      // No app claims it, so it has no sidebar row: it is opened by name from the palette
+      await page.keyboard.press('Meta+k')
+      await expect(page.getByTestId('sidebar')).not.toContainText('Coordinate the work')
+      await page.getByTestId('palette-input').fill('Coordinate the work')
+      await page.getByTestId('palette-item-session').click()
       await expect(page.getByTestId('session-view')).toBeVisible()
       // The focus lane, showing a session with no project — the case under test
       expect(
         await page.evaluate(() => {
           const s = (window as any).__store.getState()
-          return { view: s.view, project: s.sessions[s.focusedSessionId].projectId }
+          return { view: s.view, id: s.focusedSessionId, project: s.sessions[s.focusedSessionId].projectId }
         }),
-      ).toEqual({ view: 'focus', project: null })
+      ).toEqual({ view: 'focus', id: coordinator, project: null })
 
       await expect(tinted(page)).toHaveCount(0)
       await expect(page.getByTestId(`session-row-${worker}`)).not.toHaveAttribute('aria-current', 'page')
+    })
+
+    /*
+     * A user-folder app's sessions have no project, so no project's list holds them. They stand under the app's row in
+     * "Your apps" (2026-10-05), which replaced the "No app" list that used to hang under the orchestrator row. An agent
+     * its `run_agent` started runs on `safe` and can stop at an approval card, so it needs a row to be found by.
+     * A session with no project that no listed app claims (a coordinator the removed control app left, a session of an
+     * app that is gone) gets no row: the palette, search and the inbox still reach it.
+     */
+    test('a user-folder app’s own sessions stand under its row; a session no app claims has none', async ({ page }) => {
+      await setup(page, ['/tmp/alpha'])
+      const builder = await page.evaluate(
+        async () => (await (window as any).__mock.apps.create({ projectId: null, id: 'timer', name: 'Timer', tool: 'claude' })).builder.id as string,
+      )
+      // As the host sends them: an agent the app's run_agent stood up, waiting on an approval; a foreman of the removed
+      // control app; an agent of a user-folder app that has since been removed
+      const [agent, foreman, stray] = await page.evaluate((base) => {
+        const m = (window as any).__mock
+        const plant = (id: string, extra: Record<string, unknown>) => {
+          const session = { ...m.sessions.get(base), id, projectId: null, autoNamed: false, roleAppend: null, ...extra }
+          m.sessions.set(id, session)
+          m.emit({ type: 'session_created', sessionId: id, session })
+          return id
+        }
+        return [
+          plant('timer-agent-1', { appId: 'timer', name: 'Timer · agent 10:00', state: 'waiting_approval', waitingSince: Date.now() }),
+          plant('control-foreman-1', { appId: 'control', kind: 'coordinator', name: 'Left by control', scopeSessionIds: [base] }),
+          plant('gone-agent-1', { appId: 'gone', name: 'Gone · agent 09:00' }),
+        ]
+      }, builder)
+
+      const list = page.getByTestId('user-apps-list')
+      await expect(list.getByTestId(`app-session-row-${builder}`)).toContainText('Timer · builder')
+      await expect(list.getByTestId(`app-session-row-${agent}`)).toContainText('Timer · agent 10:00')
+      await expect(list.getByTestId(`app-session-row-${agent}`).getByTestId('tool-mark-claude')).toHaveAttribute('data-state', 'waiting_approval')
+      // Right under the app's row, in the order they came
+      expect(await list.locator(':scope > li > button').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))).toEqual([
+        'app-row-_user/timer',
+        `app-session-row-${builder}`,
+        `app-session-row-${agent}`,
+      ])
+      for (const id of [foreman, stray]) await expect(page.getByTestId(`app-session-row-${id}`)).toHaveCount(0)
+      await expect(page.getByTestId('sidebar')).not.toContainText('Left by control')
+      await expect(page.getByTestId('sidebar')).not.toContainText('No app')
+
+      await list.getByTestId(`app-session-row-${agent}`).click()
+      await expect(page.getByTestId('session-view')).toBeVisible()
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(agent)
+      await expect(list.getByTestId(`app-session-row-${agent}`)).toHaveAttribute('aria-current', 'page')
+      // An app in the user folder belongs to no project, and neither do its sessions
+      await expect(tinted(page)).toHaveCount(0)
+      await expect(marked(page)).toHaveCount(1)
     })
 
     test('a folded project that is open still shows its tint, on its name row', async ({ page }) => {
