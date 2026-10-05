@@ -944,6 +944,39 @@ export const UpdateStatus = z.object({
 export type UpdateStatus = z.infer<typeof UpdateStatus>
 
 /**
+ * The agent CLIs installed on this machine, and whether sessions move to a newer one by
+ * themselves (#297).
+ *
+ * Every session runs its own agent process, started from the CLI that was installed at the time.
+ * An update to `claude` or `codex` reaches a session only when its process starts again, and with
+ * the keeper (#280) a process can outlive many app restarts. This is the host's half of noticing:
+ * which version is installed now. Which version each session runs is on the session
+ * (`SessionInfo.agentVersion`).
+ *
+ * Owned by the host, like `UpdateStatus`: the host reads the installed versions and the host
+ * restarts sessions.
+ */
+export const AgentVersions = z.object({
+  /**
+   * The version installed now, by tool name. Null: the tool is not installed, or its version could
+   * not be read. A tool missing from the record has not been checked yet.
+   */
+  installed: z.record(z.string(), z.string().nullable()).default({}),
+  /**
+   * "Move idle sessions to a newly installed agent CLI" (#297). **On by default** (the owner's
+   * decision, 2026-10-05): with it on, a session whose process is older than the installed CLI is
+   * restarted on the new one once it is fully idle. The conversation continues through resume.
+   *
+   * Defaults to true so a window on an older host that sends no such field reads it as the setting
+   * a host that never saw it would have (protocol.md §4).
+   */
+  autoApply: z.boolean().default(true),
+  /** When the installed versions were last read (epoch ms), or null if never */
+  checkedAt: z.number().nullable().default(null),
+})
+export type AgentVersions = z.infer<typeof AgentVersions>
+
+/**
  * Preferences about the screen itself — how this person wants the app to behave, as
  * opposed to anything an agent does.
  *

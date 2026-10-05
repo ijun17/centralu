@@ -97,9 +97,13 @@
   },
   "_responseFieldsComment": [
     "Fields the adapter reads from an answer (#342). A renamed one reads as absent without an error: the running",
-    "turn's id after a resume would be lost (keeper re-attach, #313), or history would stop after its first page."
+    "turn's id after a resume would be lost (keeper re-attach, #313), or history would stop after its first page.",
+    "`userAgent` carries the app-server's version (#297); without it no Codex session is ever moved to a newer CLI."
   ],
   "responseFields": {
+    "InitializeResponse": [
+      "userAgent"
+    ],
     "ThreadTurnsListResponse": [
       "data",
       "nextCursor"

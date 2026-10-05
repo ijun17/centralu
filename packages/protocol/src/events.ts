@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  AgentVersions,
   AppId,
   ApprovalDecision,
   BackgroundTask,
@@ -589,6 +590,18 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     ended: z.array(BackgroundTask).optional(),
     clearEnded: z.boolean().optional(),
   }),
+  /**
+   * The version of the agent CLI this session's process runs (#297): Claude's init message (`claude_code_version`), the
+   * Codex app-server's `initialize` answer (its `userAgent`). Sent once per process. Live-only and never stored, like
+   * `goal`; the host keeps the latest on `SessionInfo.agentVersion` so a reconnecting window reads it back.
+   */
+  z.object({ ...base, type: z.literal('agent_version'), version: z.string() }),
+  /**
+   * The installed agent CLIs or the "move idle sessions" setting changed (#297). App-wide, like `update_status`: the
+   * host reads the installed versions on its own schedule, and a finding that lands with no RPC to answer still has
+   * to reach the session headers.
+   */
+  z.object({ ...appScoped, type: z.literal('agent_versions'), status: AgentVersions }),
   /**
    * The update picture changed (issue #43).
    *

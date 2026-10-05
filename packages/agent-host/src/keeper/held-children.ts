@@ -48,7 +48,12 @@ export function sortKept(
         release.push(c.id)
         continue
       }
-      kept.agents.push({ sessionId: tag.sessionId, tool: tag.tool as ToolName, process: adopt.agent(c) })
+      kept.agents.push({
+        sessionId: tag.sessionId,
+        tool: tag.tool as ToolName,
+        process: adopt.agent(c),
+        ...(tag.version ? { version: tag.version } : {}),
+      })
       kept.sessionIds.add(tag.sessionId)
     } else if (tag.kind === 'terminal') {
       if (!c.alive) {
@@ -91,7 +96,8 @@ export async function connectHeldChildren(dataDir: string): Promise<HeldChildren
   return {
     children,
     processes: {
-      spawn: (sessionId, tool, spec) => KeeperAgentProcess.spawn(children, spec, { kind: 'agent', tool, sessionId }),
+      spawn: (sessionId, tool, spec, version) =>
+        KeeperAgentProcess.spawn(children, spec, { kind: 'agent', tool, sessionId, ...(version ? { version } : {}) }),
     },
     ptys: keeperPtyModule(children),
     kept,

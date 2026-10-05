@@ -18,6 +18,7 @@ import {
   AppRun,
   AppReview,
   AppVersions,
+  AgentVersions,
   UsageSnapshot,
   GitFileStatus,
   GridPanel,
@@ -243,6 +244,14 @@ export const SessionInfo = z.object({
    */
   backgroundTasks: z.array(BackgroundTask).default([]),
   /**
+   * The version of the agent CLI this session's process runs (#297), or null when it has no process or the version is
+   * not known. Claude reports it in its init message (`claude_code_version`), the Codex app-server in its `initialize`
+   * answer; until then, and for a process the keeper kept, it is the version installed when the process was started.
+   * Live-only, like `goal`: a new process reports its own. Compared with `AgentVersions.installed` to say a session runs
+   * an older CLI than the one installed.
+   */
+  agentVersion: z.string().nullable().default(null),
+  /**
    * A coordinating session's view allowlist (#80, #81 — unnamed core handle #1).
    *
    * The sessions visible to the orchestrator tool of a session with kind='coordinator'. The host
@@ -348,6 +357,7 @@ export function sessionLiveDefaults(): Pick<
   | 'worktreePr'
   | 'goal'
   | 'backgroundTasks'
+  | 'agentVersion'
 > {
   return {
     pendingApproval: null,
@@ -364,6 +374,8 @@ export function sessionLiveDefaults(): Pick<
     goal: null,
     // Background tasks (#290) live in the tool process, and a new one starts with none
     backgroundTasks: [],
+    // The CLI version (#297) belongs to the process too; a new one reports its own
+    agentVersion: null,
   }
 }
 
@@ -819,6 +831,29 @@ export const RpcMethods = {
   'agents.detect': {
     params: z.object({}),
     result: z.array(ToolStatus),
+  },
+  /**
+   * The agent CLIs installed now (#297). `force: false` (the window gaining focus) answers with what is known when it
+   * was read moments ago; `force: true` reads again. Reading costs no process where the CLI came from npm (its
+   * `package.json` says the version), so this is cheap either way.
+   */
+  'agents.versions': {
+    params: z.object({ force: z.boolean().default(false) }),
+    result: AgentVersions,
+  },
+  /** "Move idle sessions to a newly installed agent CLI" on or off (#297). On by default */
+  'agents.setAutoApplyVersions': {
+    params: z.object({ enabled: z.boolean() }),
+    result: AgentVersions,
+  },
+  /**
+   * Restarts every session that runs an older CLI than the one installed and is fully idle, on the installed one
+   * (#297) — the session header's one app-wide action. A session that is working, waiting on the person, or running
+   * background tasks is left as it is and listed in `busy`; with `autoApply` on it moves once it is idle.
+   */
+  'agents.applyVersions': {
+    params: z.object({}),
+    result: z.object({ restarted: z.array(z.string()).default([]), busy: z.array(z.string()).default([]) }),
   },
   'git.status': { params: z.object({ projectId: ProjectId }), result: z.array(GitFileStatus) },
   'git.diff': {

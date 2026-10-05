@@ -521,6 +521,10 @@ export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boole
 
 export type EventSink = (event: NormalizedEvent) => void
 
+/**
+ * A session handle. Its adapter reports the running CLI's version once per process as an
+ * `agent_version` event (#297), from what the tool itself says when it starts.
+ */
 export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
@@ -589,6 +593,15 @@ export interface AgentAdapter {
   readonly descriptor: ToolDescriptor
 
   detect(): Promise<DetectResult>
+  /**
+   * The version of this tool installed on the machine now, or null when it is not installed or
+   * cannot be told (#297). Read without starting a session, and cheaply: it runs every ten minutes
+   * and whenever a window gains focus (`cli-version.ts` reads npm's `package.json`). Compared with
+   * the version each session's process reports (the `agent_version` event), it says which sessions
+   * still run an older CLI. An adapter that cannot tell leaves it unimplemented, and its sessions
+   * are never moved.
+   */
+  installedVersion?(): Promise<string | null>
   createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle>
   /**
    * The list of previous sessions the tool keeps for this directory.

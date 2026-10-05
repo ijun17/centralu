@@ -5,7 +5,8 @@
  * host's tags, because the children outlive the build that spawned them.
  */
 
-export type AgentTag = { kind: 'agent'; tool: string; sessionId: string }
+/** `version`: the CLI version the agent was started from (#297), when known — a kept process does not say it again */
+export type AgentTag = { kind: 'agent'; tool: string; sessionId: string; version?: string }
 export type TerminalTag = { kind: 'terminal'; id: string; cwd: string }
 export type CommandTag = { kind: 'command'; cwd: string; command: string; runId: string; startedAt: number }
 export type ChildTag = AgentTag | TerminalTag | CommandTag
@@ -16,7 +17,10 @@ const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0
 export function parseTag(raw: unknown): ChildTag | null {
   if (typeof raw !== 'object' || raw === null) return null
   const t = raw as Record<string, unknown>
-  if (t.kind === 'agent' && str(t.tool) && str(t.sessionId)) return { kind: 'agent', tool: t.tool, sessionId: t.sessionId }
+  if (t.kind === 'agent' && str(t.tool) && str(t.sessionId)) {
+    // A tag from a host before #297 has no version; that agent's version is simply not known
+    return { kind: 'agent', tool: t.tool, sessionId: t.sessionId, ...(str(t.version) ? { version: t.version } : {}) }
+  }
   if (t.kind === 'terminal' && str(t.id) && str(t.cwd)) return { kind: 'terminal', id: t.id, cwd: t.cwd }
   if (t.kind === 'command' && str(t.cwd) && str(t.command) && str(t.runId)) {
     return { kind: 'command', cwd: t.cwd, command: t.command, runId: t.runId, startedAt: Number(t.startedAt) || Date.now() }

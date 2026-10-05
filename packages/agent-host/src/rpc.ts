@@ -17,6 +17,7 @@ const toInfo = (h: TerminalHandle) => ({
   alive: h.alive,
 })
 import type { UpdateService } from './updates.js'
+import type { AgentVersionService } from './agent-versions.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
 import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
@@ -52,6 +53,8 @@ export type RpcServices = {
   heldPids?: () => Promise<number[]>
   /** The themes folder (#312, themes.ts) */
   themes?: ThemeFiles
+  /** The installed agent CLIs, and moving sessions to them (#297, agent-versions.ts) */
+  agentVersions?: AgentVersionService
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -63,7 +66,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
@@ -85,6 +88,10 @@ export function createRpcHandler(
   const requireViews = (): ViewHost => {
     if (!views) throw Object.assign(new Error('App views are unavailable'), { code: 'internal' })
     return views
+  }
+  const requireAgentVersions = (): AgentVersionService => {
+    if (!agentVersions) throw Object.assign(new Error('Agent version checks are unavailable'), { code: 'internal' })
+    return agentVersions
   }
   const requireUpdates = (): UpdateService => {
     if (!updates) throw Object.assign(new Error('Update checks are unavailable'), { code: 'internal' })
@@ -195,6 +202,10 @@ export function createRpcHandler(
       if (!a) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
       return a.capabilities
     },
+    'agents.versions': async (p) => requireAgentVersions().check(RpcMethods['agents.versions'].params.parse(p).force),
+    'agents.setAutoApplyVersions': async (p) =>
+      requireAgentVersions().setAutoApply(RpcMethods['agents.setAutoApplyVersions'].params.parse(p).enabled),
+    'agents.applyVersions': async () => requireAgentVersions().applyNow(),
     'agents.detect': async () =>
       Promise.all(
         [...adapters.values()].map(async (a) => {

@@ -6,7 +6,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { CLIENT_INFO } from '@cc/protocol'
+import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
 import type {
   AdapterCapabilities,
   ApprovalDecision,
@@ -18,6 +18,7 @@ import type {
 } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import { launchFor } from '../../tool-launch.js'
+import { installedCliVersion } from '../../cli-version.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
@@ -370,11 +371,20 @@ class CodexSession implements SessionHandle {
   private async start(): Promise<void> {
     const adopted = !!this.opts.processSource?.adopt
     try {
-      await this.client.request('initialize', {
+      const init = await this.client.request<{ userAgent?: unknown }>('initialize', {
         clientInfo: CLIENT_INFO,
         capabilities: null,
       })
       this.client.notify('initialized')
+      /*
+       * The app-server's version, for moving the session to a newer install (#297). Codex reports it only here, in
+       * `userAgent`: `<our client name>/<server version> (<os>) …` (measured, codex-cli 0.160.0, 2026-10-05:
+       * "centralu/0.160.0 (Mac OS 27.0.1; arm64) unknown (centralu; 0.1.0-beta.10)"). An adopted app-server is not
+       * initialized again; its version comes from the keeper's tag instead (manager.adoptKept).
+       */
+      const ua = typeof init?.userAgent === 'string' ? init.userAgent : ''
+      const version = parseCliVersion(ua.slice(ua.indexOf('/') + 1))
+      if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
     } catch (err) {
       /*
        * An app-server adopted from a previous host (#280 step 2) is the same stdio connection, already
@@ -1410,6 +1420,11 @@ export class CodexAdapter implements AgentAdapter {
     exclusiveWriter: true,
     // Child agents, from their threads' status and turns (#290, CodexChildTracker)
     backgroundTasks: true,
+  }
+
+  /** The installed Codex CLI (#297), from npm's `package.json` where it came from npm, else `codex --version` */
+  installedVersion(): Promise<string | null> {
+    return installedCliVersion('codex', '@openai/codex')
   }
 
   async detect(): Promise<DetectResult> {

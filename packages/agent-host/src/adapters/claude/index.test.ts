@@ -327,3 +327,15 @@ describe('claude /goal — passed through when the CLI offers it, refused when i
     await handle.dispose()
   })
 })
+
+describe('the CLI version a Claude process runs (#297)', () => {
+  it('reports the init message’s claude_code_version once per process, though init comes again with every query', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 'v1', cwd: '/tmp', permissionPreset: 'normal' }, (e) => events.push(e))
+    control.push({ type: 'system', subtype: 'init', session_id: 'x', claude_code_version: '2.1.289' })
+    control.push({ type: 'system', subtype: 'init', session_id: 'x', claude_code_version: '2.1.289' })
+    await tick()
+    expect(events.filter((e) => e.type === 'agent_version')).toEqual([{ type: 'agent_version', sessionId: 'v1', version: '2.1.289' }])
+    await handle.dispose()
+  })
+})

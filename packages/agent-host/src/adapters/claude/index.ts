@@ -37,6 +37,7 @@ import type {
 import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
 import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
+import { installedCliVersion } from '../../cli-version.js'
 import { ClaudeLinks, ClaudePlaceholderError, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
@@ -280,6 +281,8 @@ type ClaudeLaunch = {
 class ClaudeSession implements SessionHandle {
   externalId: string | null = null
   private queue: string[] = []
+  /** The CLI version this process last reported (#297) */
+  private reportedVersion: string | null = null
   private notify: (() => void) | null = null
   private closed = false
   /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
@@ -635,8 +638,13 @@ class ClaudeSession implements SessionHandle {
            * own record.
            */
           if (this.closed) break
-          const m = msg as { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown }
+          const m = msg as { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
+          // The CLI's own version, for moving the session to a newer install (#297). Once per process: init repeats per query
+          if (m.type === 'system' && m.subtype === 'init' && typeof m.claude_code_version === 'string' && m.claude_code_version !== this.reportedVersion) {
+            this.reportedVersion = m.claude_code_version
+            this.emit({ type: 'agent_version', sessionId: this.sessionId, version: m.claude_code_version })
+          }
           if (m.type === 'system' && m.subtype === 'init' && Array.isArray(m.slash_commands)) {
             this.goalCommand = m.slash_commands.includes('goal')
             this.settleGoalKnown()
@@ -1391,6 +1399,15 @@ export class ClaudeAdapter implements AgentAdapter {
         detail: 'claude CLI not found (check with `which claude` in a terminal)',
       }
     }
+  }
+
+  /**
+   * The installed Claude Code (#297), from npm's `package.json` where it came from npm. On Windows
+   * this never runs npm's `claude.exe` (#353: sessions start from the host's own link, and running
+   * npm's file would hold it against the next update).
+   */
+  installedVersion(): Promise<string | null> {
+    return installedCliVersion('claude', '@anthropic-ai/claude-code')
   }
 
   listExternalSessions(cwd: string, limit: number) {

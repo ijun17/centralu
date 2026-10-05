@@ -30,6 +30,7 @@ import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
+import { AgentVersionService } from './agent-versions.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
@@ -258,10 +259,18 @@ const held = underKeeper ? await connectHeldChildren(dirname(dbPath)) : null
  * in-process connects back through this address. Since the port is only decided after listen(),
  * this is given as a function rather than a value.
  */
+/*
+ * Moving sessions to a newly installed agent CLI (#297) hears every session event: a session that just said something
+ * is not quiet yet. Declared ahead of the manager, whose events can start before the service below exists.
+ */
+const versionsRef: { current?: AgentVersionService } = {}
 const mgr = new SessionManager(
   store,
   adapters,
-  (e) => server.broadcast(e),
+  (e) => {
+    server.broadcast(e)
+    versionsRef.current?.observe(e)
+  },
   () => bridgeAddress(frontDoor, port, token),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
@@ -355,6 +364,37 @@ const updates = new UpdateService((status) => server.broadcast({ type: 'update_s
   readAutoApply: () => store.appSetting(AUTO_APPLY_UPDATES_KEY) === 'true',
   writeAutoApply: (enabled) => store.setAppSetting(AUTO_APPLY_UPDATES_KEY, String(enabled)),
 })
+/*
+ * The installed agent CLIs, and moving idle sessions onto them (#297). "Move idle sessions to a newly installed agent
+ * CLI" is on unless the person turned it off (the owner's decision, 2026-10-05): a restart only happens when nothing in
+ * the session would be lost, the conversation continues through resume, and a line in the conversation says so.
+ */
+const AUTO_APPLY_AGENT_VERSIONS_KEY = 'agents.autoApplyVersions'
+const AGENT_VERSIONS_SEEN_KEY = 'agents.versionsSeen'
+const agentVersions = new AgentVersionService({
+  tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
+  sessions: mgr,
+  publish: (status) => {
+    try {
+      server.broadcast({ type: 'agent_versions', status })
+    } catch {
+      /* not listening yet: the first window asks */
+    }
+  },
+  readAutoApply: () => store.appSetting(AUTO_APPLY_AGENT_VERSIONS_KEY) !== 'false',
+  writeAutoApply: (enabled) => store.setAppSetting(AUTO_APPLY_AGENT_VERSIONS_KEY, String(enabled)),
+  readSeen: () => {
+    try {
+      const raw = JSON.parse(store.appSetting(AGENT_VERSIONS_SEEN_KEY) ?? '{}') as unknown
+      return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, string>) : {}
+    } catch {
+      return {}
+    }
+  },
+  writeSeen: (seen) => store.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
+})
+versionsRef.current = agentVersions
+mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
 // The escape hatch for the origin allow list — the rejection log states exactly the value to put
 // here. An app view's proxy uses the same list too: only a parent able to connect over WebSocket
 // can ever render a view
@@ -412,6 +452,7 @@ const server: HostServer = new HostServer({
     themes,
     terminals,
     updates,
+    agentVersions,
     commands: commandRuns,
     externalApps,
     views,
@@ -462,6 +503,8 @@ if (swapping && store.deferredSteps.length > 0) {
  * this app open for days at a time, the recurring check afterward is still needed.
  */
 updates.start()
+// The installed agent CLIs are read now and every ten minutes (#297); a window gaining focus asks too
+agentVersions.start()
 
 // The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
 if (held) void mgr.adoptKept(held.kept.agents)
@@ -564,6 +607,7 @@ async function stopServices(mode: LeaveMode, handOver: boolean): Promise<void> {
     }
   }
   updates.stop()
+  versionsRef.current?.stop()
   stopActivity()
   if (mode === 'detach') {
     // Released, not killed: the keeper keeps draining them for the next host

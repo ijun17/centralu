@@ -45,7 +45,6 @@ import {
   APP_SLUG,
   applyBackgroundTasks,
   DATA_DIR,
-  liveBackgroundTasks,
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
   // also needs to put words into a session built with the same frame.
   frameField,
@@ -63,12 +62,17 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Eve
  * session's tool there; the manager hands it to the adapter as a `ProcessSource`.
  */
 export type AgentProcessHost = {
-  spawn(sessionId: string, tool: ToolName, spec: AgentSpawnSpec): AgentProcess
+  /** `version`: the CLI version the process is started from, written on its keeper tag so the next host knows it (#297) */
+  spawn(sessionId: string, tool: ToolName, spec: AgentSpawnSpec, version?: string): AgentProcess
 }
 
-/** A tool process a previous host left running for this session, to be re-attached at startup */
-export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess }
+/**
+ * A tool process a previous host left running for this session, to be re-attached at startup. `version` is the CLI
+ * version it was started from, when its tag says (#297): an adopted process does not announce it again.
+ */
+export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
 import { Store } from '../dev-services/store.js'
+import { sessionIdle, type SessionIdle } from '../idle.js'
 import {
   gitSummary,
   gitStatusFiles,
@@ -442,6 +446,12 @@ export class SessionManager {
    * service.
    */
   private appsHub: SessionAppsHub | null = null
+  /**
+   * The installed version of a tool as last read (#297, agent-versions.ts), or null. A process started now runs it,
+   * so a session carries it as its `agentVersion` until the process reports its own; it is also what the keeper's
+   * tag records, because a process the next host adopts does not report again.
+   */
+  private versionHint: ((tool: ToolName) => string | null) | null = null
   /**
    * Agent sessions launched at an app's request that are **still waiting for an answer** (M4 D-1) —
    * session id -> the wait. Removed once the turn ends, fails or is canceled. After it finishes the
@@ -1201,7 +1211,11 @@ export class SessionManager {
   }
 
   listSessions(): SessionInfo[] {
-    return [...this.meta.values()].map((s) => ({ ...s, live: this.handles.has(s.id) }))
+    return [...this.meta.values()].map((s) => {
+      const live = this.handles.has(s.id)
+      // The CLI version belongs to the process (#297): without one there is no version to compare
+      return { ...s, live, agentVersion: live ? (s.agentVersion ?? null) : null }
+    })
   }
 
   /** Active sessions running in the same directory (the basis for FR-2's concurrent-session warning) */
@@ -1443,6 +1457,8 @@ export class SessionManager {
       // inside a project directory.)
       parentSessionId: worktree && params.projectId ? this.managerFor(params.projectId).id : null,
       ...sessionLiveDefaults(),
+      // Started from what is installed now, until the process says (#297)
+      agentVersion: this.versionHint?.(params.tool) ?? null,
     }
     /*
      * The directory this session starts in. Remembered below, not derived again later —
@@ -1465,7 +1481,7 @@ export class SessionManager {
       handle = await adapter.createSession(
         {
           sessionId: id, cwd, model: params.model, effort: params.effort,
-          ...this.processSourceFor(id, params.tool),
+          ...this.processSourceFor(id, params.tool, undefined, info.agentVersion),
           verbosity: params.verbosity,
           serviceTier: params.serviceTier,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
@@ -1878,13 +1894,21 @@ export class SessionManager {
     return p
   }
 
-  /** The keeper as a `ProcessSource` for one session, when this host runs under one (#280 step 2) */
-  private processSourceFor(sessionId: string, tool: ToolName, adopt?: AgentProcess): { processSource?: ProcessSource } {
+  /**
+   * The keeper as a `ProcessSource` for one session, when this host runs under one (#280 step 2). `version` is the CLI
+   * version a process spawned now is started from, written on its keeper tag (#297).
+   */
+  private processSourceFor(
+    sessionId: string,
+    tool: ToolName,
+    adopt?: AgentProcess,
+    version?: string | null,
+  ): { processSource?: ProcessSource } {
     const host = this.keeperOpts.processes
     if (!host) return {}
     return {
       processSource: {
-        spawn: (spec) => host.spawn(sessionId, tool, spec),
+        spawn: (spec) => host.spawn(sessionId, tool, spec, version ?? undefined),
         ...(adopt ? { adopt: { process: adopt, openCalls: this.openToolCalls(sessionId) } } : {}),
       },
     }
@@ -1918,6 +1942,8 @@ export class SessionManager {
           k.process.kill('SIGTERM')
           return
         }
+        // An adopted process does not announce its CLI version again; its tag says what it was started from (#297)
+        m.agentVersion = k.version ?? null
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
         if (!r.resumed) {
           console.error(`[agent-host] could not re-attach ${k.sessionId.slice(0, 8)}: ${r.reason ?? 'unknown'}`)
@@ -2051,12 +2077,17 @@ export class SessionManager {
       serviceTier: m.serviceTier,
       permissionPreset: m.permissionPreset,
     }
+    /*
+     * The CLI version this process runs, until it says (#297): a new process starts from what is installed now. An
+     * adopted one keeps the version its keeper tag gave (adoptKept) — it was started long before.
+     */
+    if (!adopt) m.agentVersion = this.versionHint?.(tool) ?? null
     try {
       const creating = adapter.createSession(
         {
           sessionId,
           cwd,
-          ...this.processSourceFor(sessionId, tool, adopt),
+          ...this.processSourceFor(sessionId, tool, adopt, m.agentVersion),
           model: launched.model ?? undefined,
           effort: launched.effort ?? undefined,
           verbosity: launched.verbosity ?? undefined,
@@ -3025,6 +3056,10 @@ export class SessionManager {
       case 'background_tasks':
         // The same merge the UI's reducer and the mock run (#290), so a reconnect reads back what the screen showed
         m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
+        break
+      case 'agent_version':
+        // What the process says it runs (#297) replaces what was assumed when it started
+        m.agentVersion = e.version
         break
     }
   }
@@ -4321,22 +4356,17 @@ export class SessionManager {
   }
 
   /**
-   * Whether the session is fully idle (#290, for #297): its process can be swapped without losing work. Not idle
-   * while a turn runs, while an approval or a question waits, or while a background task that is activity runs —
-   * the tool holds that work in its process, and a restart ends it. A tool that cannot report its background work
-   * is never called idle while its process lives: silence there does not mean nothing is running. A session with no
-   * process is idle, since it holds nothing.
+   * Whether the session is fully idle (#290, #297): its process can be swapped without losing work. The rule is
+   * `sessionIdle` in idle.ts; this adds what only the manager knows, whether a process runs and whether its tool
+   * reports background work.
    */
-  sessionIdle(sessionId: string): { idle: true } | { idle: false; reason: 'turn' | 'approval' | 'question' | 'background' | 'background_unknown' } {
+  sessionIdle(sessionId: string): SessionIdle {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-    if (m.pendingApproval) return { idle: false, reason: 'approval' }
-    if (m.pendingQuestions.length > 0) return { idle: false, reason: 'question' }
-    if (inTurn(m.state)) return { idle: false, reason: 'turn' }
-    if (!this.handles.has(sessionId)) return { idle: true }
-    if (liveBackgroundTasks(m.backgroundTasks).length > 0) return { idle: false, reason: 'background' }
-    if (!this.adapters.get(m.tool)?.capabilities.backgroundTasks) return { idle: false, reason: 'background_unknown' }
-    return { idle: true }
+    return sessionIdle(m, {
+      running: this.handles.has(sessionId),
+      reportsBackground: !!this.adapters.get(m.tool)?.capabilities.backgroundTasks,
+    })
   }
 
   interrupt(sessionId: string): void {
@@ -5632,6 +5662,29 @@ export class SessionManager {
    * never know about each other; the host (main.ts) is the one that connects them. This means the
    * host's own tests can run with no manager, and the manager's own tests can run with no runtime.
    */
+  /** Where the installed CLI versions come from (#297) — wired by the host, like the app runtime */
+  useVersionHint(hint: (tool: ToolName) => string | null): void {
+    this.versionHint = hint
+  }
+
+  /**
+   * Says in the conversation that the session moved to a newer CLI (#297): restarting a process by itself is never
+   * silent. A notice from Centralu, not from the tool, so it reads as what happened rather than as something to fix.
+   */
+  noteAgentMoved(sessionId: string, from: string, to: string): void {
+    const m = this.meta.get(sessionId)
+    if (!m) return
+    const label = this.toolLabel(m.tool)
+    this.onEvent({
+      type: 'notice',
+      sessionId,
+      level: 'info',
+      from: 'Centralu',
+      label: 'agent update',
+      text: `${label} restarted on ${to} (was ${from}). The conversation continues.`,
+    })
+  }
+
   useExternalApps(rt: ExternalApps, opts?: ConstructorParameters<typeof SessionAppsHub>[1]): void {
     this.appsHub?.dispose()
     this.appsHub = new SessionAppsHub(rt, opts)

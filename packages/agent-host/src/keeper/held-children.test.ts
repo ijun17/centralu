@@ -44,6 +44,20 @@ describe('sorting what the keeper holds', () => {
     expect(release).toEqual([])
   })
 
+  it('hands on the CLI version an agent tag carries, and none for a tag written before #297', () => {
+    const { kept } = sortKept(
+      [
+        child('c1', { kind: 'agent', tool: 'claude', sessionId: 's1', version: '2.1.282' }),
+        child('c2', { kind: 'agent', tool: 'codex', sessionId: 's2' }),
+      ],
+      adopt,
+    )
+    expect(kept.agents).toEqual([
+      { sessionId: 's1', tool: 'claude', process: { adopted: 'c1' }, version: '2.1.282' },
+      { sessionId: 's2', tool: 'codex', process: { adopted: 'c2' } },
+    ])
+  })
+
   it('releases an exited agent or terminal — there is nothing to take over', () => {
     const { kept, release } = sortKept(
       [child('c1', { kind: 'agent', tool: 'codex', sessionId: 's1' }, false), child('c2', { kind: 'terminal', id: 'term-1', cwd: '/p' }, false)],

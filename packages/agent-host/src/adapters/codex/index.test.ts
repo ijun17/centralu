@@ -20,6 +20,8 @@ type MockInstance = {
 
 const state = vi.hoisted(() => ({
   failInitialize: true,
+  /** What `initialize` answers */
+  initialize: {} as Record<string, unknown>,
   instances: [] as MockInstance[],
 }))
 
@@ -38,6 +40,7 @@ vi.mock('./client.js', () => ({
       if (state.failInitialize) {
         return Promise.reject(new Error(`connection refused during ${method}`))
       }
+      if (method === 'initialize') return Promise.resolve(state.initialize)
       if (method === 'thread/start') return Promise.resolve({ thread: { id: 'thread-1' } })
       return Promise.resolve({})
     }
@@ -225,5 +228,24 @@ describe('codex approval requests', () => {
       id: 13,
       payload: { action: 'accept', content: null, _meta: null },
     })
+  })
+})
+
+describe('the CLI version a Codex app-server runs (#297)', () => {
+  it('reports the version in the initialize answer’s user agent (measured shape, codex-cli 0.160.0)', async () => {
+    state.failInitialize = false
+    state.initialize = { userAgent: 'centralu/0.160.0 (Mac OS 27.0.1; arm64) unknown (centralu; 0.1.0-beta.10)', platformOs: 'macos' }
+    const events: { type: string }[] = []
+    await new CodexAdapter().createSession({ sessionId: 's9', cwd: '/tmp', permissionPreset: 'normal' }, (e) => events.push(e))
+    expect(events.filter((e) => e.type === 'agent_version')).toEqual([{ type: 'agent_version', sessionId: 's9', version: '0.160.0' }])
+    state.initialize = {}
+  })
+
+  it('says nothing when the answer carries no version', async () => {
+    state.failInitialize = false
+    state.initialize = {}
+    const events: { type: string }[] = []
+    await new CodexAdapter().createSession({ sessionId: 's10', cwd: '/tmp', permissionPreset: 'normal' }, (e) => events.push(e))
+    expect(events.some((e) => e.type === 'agent_version')).toBe(false)
   })
 })
