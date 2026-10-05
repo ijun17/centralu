@@ -732,7 +732,7 @@ interface AgentAdapter {
 - `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?)` — 그리드에 올린 것, 순서대로 (§5.4): 세션이나 앱 하나, `session:<id>` / `app:<프로젝트 id | _user>/<앱 id>`를 키로 삼아 패널은 한 번만 오른다 (v42, #288). 세션 패널은 세션과 함께 cascade되고 휴지통으로 갈 때 떠난다; 앱 패널은 프로젝트와 함께 떠난다. `span_cols`/`span_rows`는 사람이 앱 패널의 머리글에서 고른 크기이고, 고르지 않았으면 둘 다 NULL이다 (v43, #306)
 - `grid_panels(session_id, position)` — #288 이전의 그리드, 세션 id 하나에 한 줄. v42가 그 줄들을 `grid_layout`에 한 번 옮겨 적고, 한 빌드 이전의 host를 위해 그대로 두었다 (agent-host.ko.md §5.1); 이 빌드는 휴지통으로 간 세션을 빼는 것 말고는 더 읽거나 쓰지 않는다. 지우는 것은 나중의, 깨뜨리는 단계다
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
-- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계
+- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계. 만들지 않았고, 테이블은 나중 릴리스에서 지운다([agent-host.ko.md](agent-host.ko.md) §6)
 - `workspace(id, layout_json, updated_at)` — 스냅숏
 
 ---
@@ -858,7 +858,7 @@ M3 뒤의 독립된 마일스톤이고, M3는 그대로 둔다 (2026-09-25 결�
 시작하지 않은 호출을 거절한다). 그 밖에 앱 서버 자체의 프로세스 샌드박스, 화면을 찍어 만드는 세션에 넘기기.
 
 내장 컨트롤 앱(오케스트레이터 화면의 레일과 그 작업·반장, #80/#81)은 새 형식으로 옮기지 않고, 그 밑의 컴파일된 앱 틀과 함께
-걷어냈다([#97](https://github.com/ijun17/centralu/issues/97), 2026-10-05 소유자 결정: 레일은 거의 보지 않고 세션은 그리드에서
+걷어냈다([#372](https://github.com/ijun17/centralu/pull/372), [#97](https://github.com/ijun17/centralu/issues/97)에서 정했다. 2026-10-05 소유자 결정: 레일은 거의 보지 않고 세션은 그리드에서
 돌린다. 오케스트레이터의 세션을 보여 주는 화면이 필요하면 외부 앱으로 만든다). 인박스(FR-15)는 상단 바에 남는다.
 
 ---

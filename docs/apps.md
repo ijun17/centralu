@@ -13,7 +13,7 @@ Code: runtime `packages/agent-host/src/apps/external/`, view hosting `packages/a
 session attachment `sessions/session-apps.ts`, inline views `inline-views.ts`, template
 `packages/agent-host/app-template/`, UI `packages/ui/src/features/{app-frame,pinned-app}/` and
 `session/InlineView.tsx`. These are the only apps: the compiled built-in app framework and its one app,
-the control rail (#81), were removed in #97. Security reasoning: [security-boundaries.md](security-boundaries.md).
+the control rail (#81), were removed in #372 (decided in #97). Security reasoning: [security-boundaries.md](security-boundaries.md).
 
 ## 1. What an app is
 
@@ -37,7 +37,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | Field | Meaning | Rule |
 |---|---|---|
 | `manifestVersion` | Manifest format | Must be `1`. Anything else is refused with "update Centralu": guessing at a format we do not know would run a changed field with its old meaning |
-| `id` | App id | Equal to the folder name. `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #97) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
+| `id` | App id | Equal to the folder name. `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #372) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
 | `name`, `version`, `description` | What people and agents read | Not empty; at most 80, 64 and 2000 characters |
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
@@ -261,7 +261,7 @@ A project app's sessions (its builder, the agents its `run_agent` started) are s
 project and stand in its list. A user-folder app's have no project, so they stand indented under
 the app's row in "Your apps", the only row they have: an agent there may be waiting at an approval
 card. A session with no project that no listed app claims (a coordinator the control app left
-behind, #97; a session of a user-folder app since removed) has no sidebar row. Search, the command
+behind, #372; a session of a user-folder app since removed) has no sidebar row. Search, the command
 palette and the inbox still reach it. The "No app" list that used to hang under the orchestrator
 row and catch all of these is gone (#372 follow-up): nothing stands under the orchestrator.
 

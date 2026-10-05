@@ -6,7 +6,7 @@
 
 앱은 **MCP 서버**이고, 앱의 화면은 **MCP Apps** 화면이다(`ui://` 리소스, ext-apps 2.x). Centralu는 어느 쪽에도 자체 형식을 두지 않는다. 다른 호스트용으로 만든 앱이 여기서 돌고, 여기서 만든 앱은 표준 MCP 서버다. Centralu가 그 위에 더하는 것은 §7에 모았다.
 
-코드: 런타임 `packages/agent-host/src/apps/external/`, 화면 호스팅 `packages/agent-host/src/views/`, 세션에 붙이기 `sessions/session-apps.ts`, 대화 안 화면 `inline-views.ts`, 템플릿 `packages/agent-host/app-template/`, UI `packages/ui/src/features/{app-frame,pinned-app}/`와 `session/InlineView.tsx`. 앱은 이것뿐이다. 컴파일된 내장 앱 틀과 그 유일한 앱인 관제 레일(#81)은 #97에서 걷어냈다. 보안의 근거는 [security-boundaries.md](security-boundaries.md)에 있다(영어).
+코드: 런타임 `packages/agent-host/src/apps/external/`, 화면 호스팅 `packages/agent-host/src/views/`, 세션에 붙이기 `sessions/session-apps.ts`, 대화 안 화면 `inline-views.ts`, 템플릿 `packages/agent-host/app-template/`, UI `packages/ui/src/features/{app-frame,pinned-app}/`와 `session/InlineView.tsx`. 앱은 이것뿐이다. 컴파일된 내장 앱 틀과 그 유일한 앱인 관제 레일(#81)은 #372에서 걷어냈다(#97에서 정했다). 보안의 근거는 [security-boundaries.md](security-boundaries.md)에 있다(영어).
 
 ## 1. 앱은 무엇인가
 
@@ -29,7 +29,7 @@ zod 스키마 하나(`manifest.ts`)가 판정한다. 발견, `create_app`, `chec
 | 필드 | 뜻 | 규칙 |
 |---|---|---|
 | `manifestVersion` | 매니페스트 형식 | `1`이어야 한다. 다른 값은 "Centralu를 올리라"며 거절한다. 모르는 형식을 짐작으로 읽으면 뜻이 바뀐 필드를 옛 뜻으로 실행하게 된다 |
-| `id` | 앱 id | 폴더 이름과 같다. `^[a-z0-9][a-z0-9-]{0,31}$`, `centralu`로 시작하지 않고, 예약된 id가 아니다(`RESERVED_APP_IDS`: 걷어낸 관제 앱의 `control`, #97)(#93: 밑줄이 없으므로 앱이 `mcp__app-<id>__<도구>`의 칸막이 `__`를 지어낼 수 없다) |
+| `id` | 앱 id | 폴더 이름과 같다. `^[a-z0-9][a-z0-9-]{0,31}$`, `centralu`로 시작하지 않고, 예약된 id가 아니다(`RESERVED_APP_IDS`: 걷어낸 관제 앱의 `control`, #372)(#93: 밑줄이 없으므로 앱이 `mcp__app-<id>__<도구>`의 칸막이 `__`를 지어낼 수 없다) |
 | `name`, `version`, `description` | 사람과 에이전트가 읽는 것 | 비어 있지 않고, 각각 80, 64, 2000자 이내 |
 | `server.command`, `server.args` | 서버를 띄우는 방법 | 앱 폴더를 작업 폴더로 해서 실행한다 |
 | `home` | 고정 화면을 여는 도구(§6.2) | 선택. `ui://` 화면이 달리고 화면이 부를 수 있는 도구여야 한다. 아니면 `check`가 알려 준다 |

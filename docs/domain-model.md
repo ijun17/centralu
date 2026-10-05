@@ -36,7 +36,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Ordinary session | A `worker` in a project that is not a builder, a manager or an app's agent. Gets the read-only `reader` tools (worktree and delegated sessions too), unless Settings turns them off | `readsOwnProject`, `packages/agent-host/src/sessions/manager.ts` | |
 | Worktree manager | `<<role>>` A session with worktree sessions under it, or the one a project's manager slot names. Directs only its own children | `isWorktreeManager`, `manager.ts`; `projects.worktree_manager` | lead, parent |
 | Worktree session (worker) | A session working in its own git worktree and branch, always under a manager (`parentSessionId`) | `SessionInfo.worktree`, `parentSessionId` | branch session |
-| Coordinator | A session with a fixed list of sessions it may see (`scopeSessionIds`) and a role text (`roleAppend`), made through `agents.createCoordinator`. The control app that created them was removed (#372); the kind and the RPC stay, nothing calls the RPC now, and old coordinators carry `appId: 'control'` | `kind: 'coordinator'`; `createCoordinator`, `manager.ts` | sub-orchestrator |
+| Coordinator | A session with a fixed list of sessions it may see (`scopeSessionIds`) and a role text (`roleAppend`), made only by the control app's tasks. That app was removed in #372 and the RPC that created one (`agents.createCoordinator`) after it, so nothing makes a new one; the kind stays for the ones already in people's stores, which are listed, read, woken and trashed like any session, and carry `appId: 'control'` | `kind: 'coordinator'`; `manager.ts` | sub-orchestrator |
 | Builder | `<<role>>` The session building one app. A session carrying `appId` **and** named by that app in the builder map (`apps.builders`) | `builderRefOf`, `manager.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app | `isAppAgentSession`, `runAppAgent`, `manager.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | Delegated ("asked by") session | `<<role>>` A session another project's session started or reused through `ask_project`; marked with `askedBy` | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.md](agent-host.md) §1.2 | delegate |
@@ -354,7 +354,7 @@ import confirmations (`<data>/app-imports.json`), kept versions (`<data>/app-ver
 | Grid layout | Which panels the grid shows, in order: a session or an app, with an app panel's span |
 | Workspace snapshot | The UI's state as one blob, written by the UI, read back at start |
 | Commit attribution | Which session made a commit, picked up from the agent's `git commit` output; kept only here, never in the repository (#50) |
-| Usage facts | A table for tokens and cost per day, tool, model and project that **nothing reads or writes** today; only deleting a project touches it. The usage people see is the account's limits, read live (`UsageSnapshot`, [agent-host.md](agent-host.md) §6) |
+| Usage facts | A table for tokens and cost per day, tool, model and project that **nothing reads or writes**: no build ever wrote a row, and releases up to v0.1.0-beta.10 only deleted a deleted project's rows. The usage people see is the account's limits, read live (`UsageSnapshot`, [agent-host.md](agent-host.md) §6) |
 
 Where it is stored:
 
@@ -364,7 +364,7 @@ Where it is stored:
   ([agent-host.md](agent-host.md) §5.1).
 - `workspace`: the UI's snapshot, one row.
 - `commit_sessions`: commit attribution.
-- `usage_facts`: unused (above).
+- `usage_facts`: unused (above); dropped in a later contract step ([agent-host.md](agent-host.md) §5.1).
 
 ## 3. Session state
 

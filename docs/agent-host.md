@@ -42,7 +42,7 @@ the Codex bridge.
 |---|---|---|---|---|
 | `orchestrator` | the one orchestrator | every session | all but the manager's and builder's | role and usage |
 | `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
-| `scoped` | a coordinator (#80; made through `agents.createCoordinator`, once by the control app's tasks, removed in #97) | its members | list, read, send | its boundary |
+| `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
 | `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
 
@@ -149,7 +149,7 @@ measured for `recall`. A miss is an answer saying it has no such project, and th
 the tool. One of five unrelated how-to questions drew a call naming a project that does not exist
 (refused, no card). The description says "a job", not "a task": the two read the same to the model
 (7 in 10 each), and the guide, which lists every seat's tools, keeps no word of the removed
-control rail's tasks (#97). Two other wordings did no better (0 and 3 in 5).
+control rail's tasks (#372). Two other wordings did no better (0 and 3 in 5).
 
 `scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
 in one scratch project has the other write a file with a number only it knows and reads it back
@@ -894,7 +894,9 @@ This section used to describe something else entirely: a chokidar watcher parsin
 `~/.claude/projects/**` and `~/.codex/sessions/**` incrementally, writing `usage_facts` rows
 that a `usage.weekly` RPC would read, with aggregation in `core/usage`. **None of it exists** —
 chokidar is not a dependency, `core/usage` is not a directory, there is no `usage.weekly`
-method, and while `usage_facts` is still in `schema.sql` no code reads or writes it. It was
+method, and no build ever wrote a row to `usage_facts`. It stays in `schema.sql` for now: released builds up to
+v0.1.0-beta.10 still delete a project's rows from it, and this build is the first that leaves it alone, so dropping it
+is a contract step for a later release (§5.1 rule 2). It was
 also the *opposite* of the rule §8.1 states, and the two sections sat in this file
 contradicting each other. Reading a tool's private JSONL is exactly what §8.1 forbids, for
 the reason given there: an undocumented format breaks silently on upgrade, and a silent break
