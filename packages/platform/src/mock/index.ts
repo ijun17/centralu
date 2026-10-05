@@ -908,8 +908,8 @@ export class MockPlatform implements Platform {
     /**
      * A tool call from a screen — recorded, and answered with whatever a test plugged in. The
      * default answer echoes back what was called. Keeps the same contract as web. projectId
-     * always travels along (null if absent, and never leaks through a built-in app's door), and
-     * the answer is exactly the shape of MCP result the app gave (`apps.invoke`'s `result`).
+     * always travels along (null if absent), and the answer is exactly the shape of MCP result the
+     * app gave (`apps.invoke`'s `result`).
      */
     callTool: async (appId: string, tool: string, args: Record<string, unknown>, from?: AppCallOrigin) => {
       const origin: AppCallOrigin = { ...from, projectId: from?.projectId ?? null }

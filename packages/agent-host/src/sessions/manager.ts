@@ -497,7 +497,7 @@ export class SessionManager {
   private readGrants = new Map<string, Set<string>>()
   /**
    * requestId of an approval response that reached the adapter (#158) — request id -> session id. If
-   * a second response arrives for the same request (double key press, or the card and the rail both
+   * a second response arrives for the same request (double key press, or two windows both
    * firing at once), the adapter no longer knows that request and returns `false`. Reading that as
    * "the process got swapped" would broadcast `deny` for a command that just ran and record it that
    * way too — an allowed command would show up as denied. A request found here has already been
@@ -591,40 +591,6 @@ export class SessionManager {
     )) {
       void this.refreshMergedWorktrees(pid).catch(() => {})
     }
-  }
-
-  /*
-   * Built-in app state (#81), retired with the control app (#97). One JSON document plus an enabled
-   * flag per app lived in app_settings as `app:<id>:doc` / `app:<id>:enabled`. Nothing in the host
-   * reads them any more, but `apps.state` / `apps.setState` / `apps.setEnabled` still answer, so a
-   * window from an older build that asks for the rail's document gets a well-formed reply instead
-   * of an unknown-method error. The rows themselves are left where they are (expand/contract): a
-   * newer build has no reason to delete what an older one might still read.
-   */
-
-  private appKey(appId: string, key: string): string {
-    return `app:${appId}:${key}`
-  }
-
-  appState(appId: string): { doc: unknown; enabled: boolean } {
-    const raw = this.store.appSetting(this.appKey(appId, 'doc'))
-    let doc: unknown = null
-    try {
-      doc = raw ? JSON.parse(raw) : null
-    } catch {
-      doc = null // A corrupted document reads as empty
-    }
-    return { doc, enabled: this.store.appSetting(this.appKey(appId, 'enabled')) !== '0' }
-  }
-
-  setAppDoc(appId: string, doc: unknown): void {
-    this.store.setAppSetting(this.appKey(appId, 'doc'), JSON.stringify(doc ?? null))
-    this.emit({ type: 'app_state_changed', appId })
-  }
-
-  setAppEnabled(appId: string, enabled: boolean): void {
-    this.store.setAppSetting(this.appKey(appId, 'enabled'), enabled ? '1' : '0')
-    this.emit({ type: 'app_state_changed', appId })
   }
 
   /**
@@ -1230,13 +1196,15 @@ export class SessionManager {
        * (orchestrator() is the only path), and this field exists so orchestrator() has something to
        * fill when creating its own session.
        */
-      kind?: SessionInfo['kind']
-      /** A coordinator session's view and role text (#80, #81 physical layer) — filled only by
-       * createCoordinator() */
-      scopeSessionIds?: string[]
-      roleAppend?: string
-      /** The app that created this session (#81). Filled not by the app but by **the app context's binding**
+      kind?: Exclude<SessionInfo['kind'], 'coordinator'>
+      /**
+       * Role text pinned on the row and reapplied on every wake — filled only by `createAppBuilder`. A coordinator's
+       * role rode here too; nothing creates a coordinator since the control app went (#372), and one already in a
+       * store wakes through `resumeSession` with its own row.
        */
+      roleAppend?: string
+      /** The app that created this session (#81). Filled by the host's own paths for an app (builder, `run_agent`),
+       * never by the app itself */
       appId?: string | null
       /**
        * This session is that app's **builder session** (M4 C-2) — filled only by `createAppBuilder`.
@@ -1357,7 +1325,7 @@ export class SessionManager {
     const namedByBranch = worktree && params.worktreeBranch ? worktree.branch : null
     const info: SessionInfo = {
       id, projectId: params.projectId, kind: params.kind ?? 'worker', tool: params.tool, externalId: null,
-      scopeSessionIds: params.scopeSessionIds ?? null, roleAppend: params.roleAppend ?? null,
+      scopeSessionIds: null, roleAppend: params.roleAppend ?? null,
       appId: params.appId ?? null,
       ...(params.askedBy ? { askedBy: params.askedBy } : {}),
       name:
@@ -1419,7 +1387,6 @@ export class SessionManager {
           // the wake side is what actually performs that promotion).
           orchestratorTools:
             info.kind === 'orchestrator' ? this.orchestratorToolsFor(id)
-            : info.kind === 'coordinator' ? this.orchestratorToolsFor(id, undefined, info.scopeSessionIds ?? [])
             // Builder session (M4 C-3): just its own app's check — the bundle (builder) blocks the rest
             : params.builderOf ? this.orchestratorToolsFor(id)
             // Every other session: its own project, read-only (#320)
@@ -1427,19 +1394,17 @@ export class SessionManager {
             : undefined,
           toolProfile:
             info.kind === 'orchestrator' ? 'orchestrator'
-            : info.kind === 'coordinator' ? 'scoped'
             : params.builderOf ? 'builder'
             : this.readsOwnProject(info) ? 'reader'
             : undefined,
           systemPromptAppend:
             info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt()
-            // A coordinator session's (#80, #81) and a builder session's (M4 C-2) role is entirely
-            // the roleAppend fixed at creation
+            // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
             : (info.roleAppend ?? undefined),
           // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
           // (M4 A-5)
           orchestratorBridge:
-            info.kind === 'orchestrator' || info.kind === 'coordinator' || params.builderOf || apps || this.readsOwnProject(info)
+            info.kind === 'orchestrator' || params.builderOf || apps || this.readsOwnProject(info)
               ? (this.endpoint?.() ?? undefined)
               : undefined,
           // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
@@ -2072,7 +2037,7 @@ export class SessionManager {
               ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
                 // (unchanged rule)
                 ORCHESTRATOR_ROLE + this.skillsPrompt() + (resumeId ? '' : this.orchestratorMemory(m.id))
-              : // Reapplying the fixed role text — stays for a coordinator session even with the app off, and
+              : // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
                 // for a builder session (C-2) even if the app is broken
                 (m.roleAppend ?? undefined),
           orchestratorBridge:
@@ -3939,51 +3904,6 @@ export class SessionManager {
       changedFiles: 0,
     }))
     return { ...m.worktree, dirty, changedFiles }
-  }
-
-  /**
-   * Creates a coordinator session with a restricted view (#80, #81 — physical layer with no name of
-   * its own).
-   *
-   * "Task, team lead" — none of that lives here: all this function knows is the capability
-   * "an orchestrator-shaped session that only sees sessions on the allow list", and role, name and
-   * meaning are all applied by the caller (an app) through roleAppend and name. A member must be a
-   * worker — if a coordinator could have a coordinator as a member, depth would grow unbounded
-   * (depth 1 is guaranteed structurally, by never letting that happen).
-   */
-  async createCoordinator(params: {
-    name: string
-    memberSessionIds: string[]
-    roleAppend: string
-    tool: ToolName
-    model?: string
-    effort?: string
-    /** The owning app — filled by appContext. An app can never write its own id in itself */
-    appId?: string | null
-  }): Promise<SessionInfo> {
-    for (const id of params.memberSessionIds) {
-      const t = this.meta.get(id)
-      if (!t) throw Object.assign(new Error(`No such member session: ${id}`), { code: 'session_not_found' })
-      if (t.kind !== 'worker') {
-        throw Object.assign(new Error(`A member must be a worker session: ${t.name} (${t.kind})`), { code: 'internal' })
-      }
-    }
-    const info = await this.createSession({
-      projectId: null,
-      kind: 'coordinator',
-      cwd: orchestratorHome(),
-      tool: params.tool,
-      model: params.model,
-      effort: params.effort,
-      permissionPreset: 'normal',
-      scopeSessionIds: params.memberSessionIds,
-      roleAppend: params.roleAppend,
-      appId: params.appId ?? null,
-    })
-    // A name is a meaning the caller assigns — it is treated as a name the person set, so an auto-name never
-    // overwrites it (FR-18)
-    this.rename(info.id, params.name)
-    return this.meta.get(info.id)!
   }
 
   /**
@@ -6075,7 +5995,7 @@ export class SessionManager {
    * Is this an agent session stood up at an external app's request (M4 D-1) — one of the workers an
    * external app owns (`appId`) that is not that app's own builder session. No separate marker exists
    * for this: ownership (`appId`) and the builder directory already say it. A row stamped with a
-   * reserved id belongs to the removed control app (#97), never to an external app.
+   * reserved id belongs to the removed control app (#372), never to an external app.
    */
   private isAppAgentSession(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>): boolean {
     return !!m.appId && m.kind === 'worker' && !RESERVED_APP_IDS.includes(m.appId) && this.builderRefOf(m) === null

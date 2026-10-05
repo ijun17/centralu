@@ -102,12 +102,9 @@ describe('external app RPC — apps.invoke', () => {
     expect(refused.result).toBeUndefined()
   })
 
-  it("with no projectId the call goes to the user folder — the retired control app's tools are gone (#97)", async () => {
+  it("with no projectId the call goes to the user folder — the retired control app's tools are gone (#372)", async () => {
     await expect(rpc('apps.invoke', { appId: 'control', name: 'control_notify', args: { text: 'x' } })).rejects.toThrow(
       /There is no such app: user\/control/,
     )
-    // The retired state calls still answer, so a window from an older build gets a well-formed reply
-    await rpc('apps.setState', { appId: 'control', doc: { notifies: [] } })
-    expect(await rpc('apps.state', { appId: 'control' })).toEqual({ doc: { notifies: [] }, enabled: true })
   })
 })

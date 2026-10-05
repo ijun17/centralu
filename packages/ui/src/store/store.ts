@@ -2846,8 +2846,6 @@ export const useStore = create<AppState>((set, get) => ({
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
-        // `railWidth` (the control rail's width, #81) may still be in a snapshot an older build wrote.
-        // The rail is gone (#97); the field is left unread rather than treated as a broken snapshot.
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
         // Whether the tree shows ignored files is a way of looking, so it comes back with
@@ -2999,9 +2997,6 @@ export const useStore = create<AppState>((set, get) => ({
       void get().refreshThemes()
       return
     }
-
-    // A built-in app's document changed (#81). The only built-in app, the control rail, is gone (#97), so nothing reads it
-    if (e.type === 'app_state_changed') return
 
     /*
      * An external app's tool call finished (M4 A-4 → B-5). Not re-read here. An external app's state

@@ -7,7 +7,7 @@ import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNamePro
  * "what can be called, by whom" with one of its callers (the orchestrator) instead of with the
  * layer the adapters, the orchestrator tools and the app runtime all stand on. They were moved
  * here, and stayed here when the built-in app framework that also used them (HostAppModule, the
- * control app) was removed in #97.
+ * control app) was removed in #372.
  */
 
 /**

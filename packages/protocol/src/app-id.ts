@@ -35,7 +35,7 @@ export const APP_SERVER_PREFIX = 'app-'
 /**
  * App ids no external app may take (#97).
  *
- * `control` was the built-in control app (the rail, tasks and their foremen), removed in #97.
+ * `control` was the built-in control app (the rail, tasks and their foremen), removed in #372.
  * What it left behind is still there on purpose: its rows in app_settings (`app:control:*`) and
  * the coordinator sessions stamped `appId: 'control'`. An external app named `control` would
  * inherit both — those sessions would read as its own agents — so the name stays retired. The

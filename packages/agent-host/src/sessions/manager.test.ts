@@ -25,6 +25,7 @@ import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@
 import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
+import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
 
@@ -4297,12 +4298,13 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 })
 
 /**
- * The control app is gone (#97). What it left behind must stay harmless: a session that still
- * calls one of its tools is refused rather than crashing, nothing offers those tools any more, and
- * its stored document is neither read for meaning nor deleted (expand/contract — an older build
- * may still open the same store).
+ * The control app is gone (#372). What it left behind must stay harmless: a session that still
+ * calls one of its tools is refused rather than crashing, nothing offers those tools any more, a
+ * window of an older build that still calls its methods gets the host's unknown-method answer, and
+ * its stored rows are neither read nor deleted (expand/contract — an older build may still open the
+ * same store).
  */
-describe('after the control app was removed (#97)', () => {
+describe('after the control app was removed (#372)', () => {
   const RETIRED = ['control_notify', 'control_create_task', 'board_read', 'board_update', 'control_task_done']
 
   it('no profile is offered its tools, and an in-flight call to one is refused', async () => {
@@ -4315,41 +4317,67 @@ describe('after the control app was removed (#97)', () => {
     expect(r).toEqual({ text: 'Unknown tool: control_notify', isError: true })
   })
 
-  it('its stored document is left in place, still answered, and no longer reacts to tool calls', async () => {
-    const doc = { notifies: [], watches: [{ id: 'w1', pattern: 'git commit' }], tasks: [] }
-    mgr.setAppDoc('control', doc)
-    const p = await addProject()
-    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    const sink = (adapter.last as unknown as { emit: (e: NormalizedEvent) => void }).emit
-    sink({
-      type: 'tool_call', sessionId: s.id, callId: 'c1',
-      summary: { tool: 'Bash', title: 'git commit -m "done"', readOnly: false, paths: [] },
-    } as NormalizedEvent)
-    await new Promise((r) => setTimeout(r, 10))
+  /*
+   * A window from v0.1.0-beta.10 or before reads and writes the rail's document and flag through these. Every such
+   * caller catches a failed call (the rail's read is silent, a toggle shows the message), so the answer is the host's
+   * unknown-method error, not a reply shaped like the old one (docs/protocol.md §3.2).
+   */
+  it.each([
+    ['apps.state', { appId: 'control' }],
+    ['apps.setState', { appId: 'control', doc: { notifies: [] } }],
+    ['apps.setEnabled', { appId: 'control', enabled: false }],
+    ['agents.createCoordinator', { name: 'x', memberSessionIds: ['s1'], roleAppend: 'r', tool: 'claude' }],
+  ] as const)('an older window calling the retired %s gets an unknown-method error and changes nothing', async (method, params) => {
+    const doc = JSON.stringify({ notifies: [], watches: [{ id: 'w1', pattern: 'git commit' }], tasks: [] })
+    store.setAppSetting('app:control:doc', doc)
+    store.setAppSetting('app:control:enabled', '1')
+    const before = store.listSessions().length
 
-    // The watch no longer fires — the document is exactly what was written
-    expect(mgr.appState('control').doc).toEqual(doc)
-    // A restart deletes nothing
-    const again = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
-    expect(again.appState('control').doc).toEqual(doc)
+    const err = (await rpc(method, params).then(
+      () => null,
+      (e: unknown) => e,
+    )) as (Error & { code?: string }) | null
+    expect(err?.message).toBe(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
+    expect(err?.code).toBe('internal')
+
+    expect(store.appSetting('app:control:doc')).toBe(doc)
+    expect(store.appSetting('app:control:enabled')).toBe('1')
+    expect(store.listSessions().length).toBe(before)
+  })
+
+  it('its stored rows are left in place across a restart, for an older build that may still read them', async () => {
+    const doc = JSON.stringify({ notifies: [{ id: 'n1', text: 'done' }] })
+    store.setAppSetting('app:control:doc', doc)
+    new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
+    expect(store.appSetting('app:control:doc')).toBe(doc)
   })
 })
 
 /**
- * A coordinator session (#80/#81) — the core's nameless mechanics: a sight allow-list plus a
- * fixed role script. The meaning (a task's foreman, once) belongs to the caller; what is tested
- * here is the boundary of capability.
+ * A coordinator session (#80/#81) — an orchestrator-type session with clipped sight: an allow-list plus a fixed role
+ * script. Nothing creates one since the control app went (#372); the ones older builds made (a task's foreman) are
+ * still in people's stores and must keep working when opened. So each case plants one the way an older build left
+ * it, opens the store with a fresh manager, and wakes it.
  */
-describe('coordinator sessions — an orchestrator-type with clipped sight (#80/#81)', () => {
-  it('sight is entirely an allow-list, the role script rides along at spawn, and members must be workers', async () => {
+describe('coordinator sessions an older build left — an orchestrator-type with clipped sight (#80/#81, #372)', () => {
+  async function oldCoordinator(o: { name: string; memberSessionIds: string[]; roleAppend: string; appId?: string }): Promise<SessionInfo> {
+    // With the conversation id it had: the fake tool hands every new conversation the same one, so a coordinator
+    // woken without one would take its members' and they could not be woken beside it
+    const id = plantOldCoordinator(store, { ...o, tool: 'claude', externalId: 'ext-old-coordinator' })
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter], ['codex', codexAdapter]])
+    mgr = new SessionManager(store, adapters, (e) => events.push(e))
+    rpc = createRpcHandler(mgr, adapters)
+    await rpc('agents.resumeSession', { sessionId: id })
+    return mgr.listSessions().find((s) => s.id === id)!
+  }
+
+  it('sight is entirely an allow-list, the role script rides along when it wakes, and it cannot make sessions', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     const b = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     const outsider = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
 
-    const c = await mgr.createCoordinator({
-      name: 'Coordinator', memberSessionIds: [a.id, b.id], roleAppend: 'Role text: filter what comes in', tool: 'claude',
-    })
+    const c = await oldCoordinator({ name: 'Coordinator', memberSessionIds: [a.id, b.id], roleAppend: 'Role text: filter what comes in' })
     expect(c.kind).toBe('coordinator')
     expect(c.scopeSessionIds).toEqual([a.id, b.id])
     // The role script was carried through to spawn intact (fixed script -> systemPromptAppend).
@@ -4367,19 +4395,12 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
 
     // Depth-1 is structural: the scoped profile has no session-creation tool.
     await expect(mgr.runOrchestratorTool(c.id, 'create_session', {})).rejects.toThrow(/Not a tool of this session/)
-
-    // Members are workers only — a coordinator commanding a coordinator would let depth grow.
-    await expect(
-      mgr.createCoordinator({ name: 'x', memberSessionIds: [c.id], roleAppend: 'r', tool: 'claude' }),
-    ).rejects.toThrow(/must be a worker session/)
   })
 
   it('a directive and attachment the orchestrator sends to a coordinator session arrive intact in the adapter turn', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    const c = await mgr.createCoordinator({
-      name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text', tool: 'claude',
-    })
+    const c = await oldCoordinator({ name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text' })
     const orc = await mgr.orchestrator()
     expect(mgr.toolProfileOf(orc.id)).toBe('orchestrator')
     expect(mgr.toolProfileOf(c.id)).toBe('scoped')
@@ -4405,9 +4426,7 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
   it("a coordinator session's reportBack does not carry the worker's body into the adapter turn either", async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    const c = await mgr.createCoordinator({
-      name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text', tool: 'claude',
-    })
+    const c = await oldCoordinator({ name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text' })
     const tools = adapter.lastOrchestratorTools!
 
     await tools.sendToSession(a.id, 'let me know when it is done', true)
@@ -4431,9 +4450,7 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
   it("a coordinator session's report also arrives at the orchestrator's adapter turn without its body (#120)", async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    const c = await mgr.createCoordinator({
-      name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text', tool: 'claude',
-    })
+    const c = await oldCoordinator({ name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text' })
     const orc = await mgr.orchestrator()
 
     const r = await mgr.runOrchestratorTool(orc.id, 'send_to_session', {
@@ -4464,9 +4481,7 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
   it("a manager's report to a coordinator session also arrives without its body (#120)", async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    const c = await mgr.createCoordinator({
-      name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text', tool: 'claude',
-    })
+    const c = await oldCoordinator({ name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text' })
     const tools = adapter.lastOrchestratorTools!
     store.setWorktreeManager(p.id, { sessionId: a.id, baseBranch: 'main' })
     expect(mgr.toolProfileOf(a.id)).toBe('manager')
@@ -4486,15 +4501,14 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
   it('survives a restart — kind is derived from sight relationships, and the role script is reapplied on revival', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    const c = await mgr.createCoordinator({
-      name: 'Surviving coordinator', memberSessionIds: [a.id], roleAppend: 'Pinned role', tool: 'claude',
-    })
+    const c = await oldCoordinator({ name: 'Surviving coordinator', memberSessionIds: [a.id], roleAppend: 'Pinned role' })
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
     const restarted = new SessionManager(store, adapters, () => {})
     const row = restarted.listSessions().find((x) => x.id === c.id)!
     expect(row.kind).toBe('coordinator') // Derived from sight relationships, not a marker column (a lesson from #13).
     expect(row.scopeSessionIds).toEqual([a.id])
+    expect(row.name).toBe('Surviving coordinator')
 
     // Assigned via a union cast — a bare null assignment would have TS narrow later reads to null (it does
     // not know resume fills it back in).
@@ -4504,19 +4518,28 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
     expect(adapter.lastOpts?.toolProfile).toBe('scoped')
   })
 
-  it('a foreman the removed control app stood up loads after a restart as an ordinary coordinator (#97)', async () => {
+  it('a foreman the removed control app stood up loads as an ordinary coordinator (#372)', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    const c = await mgr.createCoordinator({
-      name: 'Old task', memberSessionIds: [a.id], roleAppend: 'You are the foreman of the task', tool: 'claude', appId: 'control',
+    const c = await oldCoordinator({
+      name: 'Old task', memberSessionIds: [a.id], roleAppend: 'You are the foreman of the task', appId: 'control',
     })
 
-    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
-    const row = restarted.listSessions().find((x) => x.id === c.id)!
-    expect(row).toMatchObject({ kind: 'coordinator', appId: 'control', scopeSessionIds: [a.id], projectId: null })
-    expect(restarted.toolProfileOf(c.id)).toBe('scoped')
-    const list = await restarted.runOrchestratorTool(c.id, 'list_sessions', {})
+    expect(c).toMatchObject({ kind: 'coordinator', appId: 'control', scopeSessionIds: [a.id], projectId: null })
+    expect(mgr.toolProfileOf(c.id)).toBe('scoped')
+    const list = await mgr.runOrchestratorTool(c.id, 'list_sessions', {})
     expect(list.text).toContain(a.id)
+  })
+
+  it('goes to the trash and comes back like any other session', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    const c = await oldCoordinator({ name: 'Old task', memberSessionIds: [a.id], roleAppend: 'Role text', appId: 'control' })
+
+    await rpc('agents.deleteSession', { sessionId: c.id })
+    expect(mgr.listSessions().some((s) => s.id === c.id)).toBe(false)
+    await rpc('trash.restore', { sessionId: c.id })
+    expect(mgr.listSessions().find((s) => s.id === c.id)).toMatchObject({ kind: 'coordinator', scopeSessionIds: [a.id] })
   })
 })
 
