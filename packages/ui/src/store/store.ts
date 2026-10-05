@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, SessionInfo, SUBAGENT_STEPS_PAGE, TEXT_SIZES, parseUiPreferences } from '@cc/protocol'
 import type {
-  AppId,
   AppQuestion,
   ToolStatus,
   Attachment,
@@ -129,14 +128,6 @@ export type Draft = { text: string; attachments: ChatAttachment[] }
 export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
 
 /** Limits on the evidence panel's width. Too narrow kills the path; too wide kills the conversation */
-/**
- * Width of the control rail (#81). The floor is the width at which an inline quick reply (two
- * buttons plus a composer) does not break; the ceiling is the width that does not swallow the chat.
- */
-export const RAIL_MIN = 220
-export const RAIL_MAX = 520
-export const RAIL_DEFAULT = 288
-
 export const PANEL_MIN = 260
 export const PANEL_MAX = 900
 export const PANEL_DEFAULT = 340
@@ -745,12 +736,6 @@ export type AppState = {
   mcpProposals: { name: string; command: string; args: string[]; why?: string }[]
   refreshMcpProposals(): Promise<void>
   /**
-   * App state (#81) — a `{doc, enabled}` pair per app. The store does not know the list of apps
-   * (to avoid a cycle): an entry is created either the first time an app's `useAppState` uses it
-   * (`ensure`), or by a broadcast (`app_state_changed`).
-   */
-  apps: Record<AppId, { doc: unknown; enabled: boolean }>
-  /**
    * How many times, per external app, we have heard "the state changed" (M4 B-5). Keyed by
    * `externalAppKey`. The size of the value carries no meaning — only **the fact that it changed**
    * does. An open `AppFrame` reads this as `changeSignal` and sends the view
@@ -774,9 +759,8 @@ export type AppState = {
   /**
    * Discovered external apps and their state (M4 A-8) — a copy of the host's `apps.list`. The host
    * holds the source of truth: this is never edited here, only re-read in full when
-   * `external_apps_changed` arrives. The single list merged with the built-in apps (`APPS`) is
-   * built by `app-catalog.ts`. The store still does not know the built-in app roster (to avoid a
-   * cycle).
+   * `external_apps_changed` arrives. The list every screen reads (status, scope) is built from it by
+   * `app-catalog.ts`.
    */
   externalApps: ExternalAppInfo[]
   refreshExternalApps(): Promise<void>
@@ -811,14 +795,6 @@ export type AppState = {
    * @returns whether it was removed — a failure is reported as a toast
    */
   removeUserApp(appId: string): Promise<boolean>
-  /** Width of the app rail's slot (#81) — the slot's geometry belongs to core (only its content belongs to the app), and being a way of viewing, it is carried in the workspace snapshot */
-  railWidth: number
-  setRailWidth(px: number): void
-  ensureAppState(appId: AppId): Promise<void>
-  refreshAppState(appId: AppId): Promise<void>
-  setAppDoc(appId: AppId, doc: unknown): Promise<void>
-  invokeAppTool(appId: AppId, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
-  setAppEnabled(appId: AppId, enabled: boolean): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
   /** The orchestrator's skill suggestion (#71) — the same suggest-then-one-click-approve rail */
   skillProposals: { name: string; content: string; why?: string }[]
@@ -2436,7 +2412,6 @@ export const useStore = create<AppState>((set, get) => ({
   newSessionBranch: '',
   worktreeProposals: [],
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
-  apps: {} as Record<AppId, { doc: unknown; enabled: boolean }>,
   externalAppChanges: {},
   externalAppRunChanges: {},
   externalAppChangedBy: {},
@@ -2445,7 +2420,6 @@ export const useStore = create<AppState>((set, get) => ({
   lastGoodThemes: {} as Record<string, ThemeFileEntry>,
   appQuestions: [] as AppQuestion[],
   appQuestionsVersion: 0,
-  railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
   subagentSteps: {},
@@ -2784,7 +2758,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
-        if (typeof snap.railWidth === 'number') get().setRailWidth(snap.railWidth)
+        // `railWidth` (the control rail's width, #81) may still be in a snapshot an older build wrote.
+        // The rail is gone (#97); the field is left unread rather than treated as a broken snapshot.
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
         // Whether the tree shows ignored files is a way of looking, so it comes back with
@@ -2868,7 +2843,6 @@ export const useStore = create<AppState>((set, get) => ({
       foldedProjects: s.foldedProjects,
       projectPanels: s.projectPanels,
       appSpans: s.appSpans,
-      railWidth: s.railWidth,
       notifyPolicy: s.notifyPolicy,
       showIgnored: s.showIgnored,
       foldComposer: s.foldComposer,
@@ -2938,11 +2912,8 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
-    // An app's document changed (#81) — deliberately a coarse event, so what changed is re-read rather than carried
-    if (e.type === 'app_state_changed') {
-      void get().refreshAppState(e.appId)
-      return
-    }
+    // A built-in app's document changed (#81). The only built-in app, the control rail, is gone (#97), so nothing reads it
+    if (e.type === 'app_state_changed') return
 
     /*
      * An external app's tool call finished (M4 A-4 → B-5). Not re-read here. An external app's state
@@ -4500,7 +4471,7 @@ export const useStore = create<AppState>((set, get) => ({
      * that outcome already dismissed the card, this is not sent again. A card keeps its listener alive
      * until `approval_resolved` lands and React re-renders, so a second `y` in that window became a
      * "vanished request" on the host and recorded a command that had already run as Denied. Both the
-     * card's key/buttons and the control rail go through this same path.
+     * card's key and its buttons go through this same path.
      */
     if (get().approvalsInFlight[requestId] || pending?.requestId !== requestId) return
     set((s) => ({ approvalsInFlight: { ...s.approvalsInFlight, [requestId]: true } }))
@@ -4630,13 +4601,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  setRailWidth(px) {
-    const clamped = Math.min(RAIL_MAX, Math.max(RAIL_MIN, px))
-    if (clamped === get().railWidth) return
-    set({ railWidth: clamped })
-    get().saveWorkspace()
-  },
-
   async removeUserApp(appId) {
     const platform = get().platform
     if (!platform) return false
@@ -4695,70 +4659,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
     // Whether the answer landed or not (already closed), align to the list the host knows — so an answered question does not linger on screen
     await get().refreshAppQuestions()
-  },
-
-  async ensureAppState(appId) {
-    if (get().apps[appId]) return
-    await get().refreshAppState(appId)
-  },
-
-  async refreshAppState(appId) {
-    const platform = get().platform
-    if (!platform) return
-    try {
-      const state = await platform.apps.state(appId)
-      set((s) => ({ apps: { ...s.apps, [appId]: state } }))
-    } catch {
-      // Even if one app's state fails to load, the app still stands (with an empty document) — the whole rail must not die with it
-    }
-  },
-
-  async setAppDoc(appId, doc) {
-    const platform = get().platform
-    if (!platform) return
-    /*
-     * Never writes over a document that has not been read yet (#178). Without a copy, `useAppState`
-     * hands back `null`, and the app then sends only the single field it changed on top of that — the
-     * host replaces the whole document with whatever value it receives, so pressing one row in the
-     * rail turned tasks, monitoring, foreman settings and notifications into just `{ metrics }`. If
-     * the first read failed, this state persists. The write is discarded instead, and a re-read is
-     * triggered: losing one metric is acceptable, and a setting can simply be redone once it is read.
-     * This is told apart from the document actually being empty after a successful read (a freshly
-     * created app) by whether the entry exists at all.
-     */
-    if (!get().apps[appId]) {
-      void get().refreshAppState(appId)
-      return
-    }
-    // Screen first, saving follows — the broadcast (`app_state_changed`) reconciles it against the truth either way
-    set((s) => ({ apps: { ...s.apps, [appId]: { enabled: s.apps[appId]?.enabled ?? true, doc } } }))
-    try {
-      await platform.apps.setState(appId, doc)
-    } catch (e) {
-      set({ toast: `Could not save app state: ${(e as Error).message}` })
-      void get().refreshAppState(appId)
-    }
-  },
-
-  async invokeAppTool(appId, name, args) {
-    const platform = get().platform
-    if (!platform) return { text: 'not connected', isError: true }
-    try {
-      return await platform.apps.invoke(appId, name, args)
-    } catch (e) {
-      return { text: (e as Error).message, isError: true }
-    }
-  },
-
-  async setAppEnabled(appId, enabled) {
-    const platform = get().platform
-    if (!platform) return
-    try {
-      await platform.apps.setEnabled(appId, enabled)
-      set((s) => ({ apps: { ...s.apps, [appId]: { doc: s.apps[appId]?.doc ?? null, enabled } } }))
-    } catch (e) {
-      set({ toast: `Could not toggle the app: ${(e as Error).message}` })
-    }
   },
 
   async refreshMcpProposals() {

@@ -341,27 +341,17 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
 
   return {
     agents: new WebAgentPort(rpc),
-    // App state (#81) — a thin carrier. Only the app knows what the document means
     apps: {
-      state: (appId) => rpc.call('apps.state', { appId }),
-      setState: async (appId, doc) => {
-        await rpc.call('apps.setState', { appId, doc })
-      },
-      setEnabled: async (appId, enabled) => {
-        await rpc.call('apps.setEnabled', { appId, enabled })
-      },
-      invoke: (appId, name, args) => rpc.call('apps.invoke', { appId, name, args }),
       // The app screen (M4 B-3). Both the address and the secret are made by the host — this side only reports the calling screen's origin
       viewFrame: (appId, instanceId, { projectId = null, hostOrigin }) =>
         rpc.call('apps.viewFrame', { appId, projectId, instanceId, hostOrigin }),
       /*
-        A tool call from a screen goes through the **same door** as a call from a person
-        (`apps.invoke`). Built-in and external apps go through one path, and scope and logging
-        are handled together by the host's mediation (the plan's "there is one call path").
+        A tool call from a screen goes through `apps.invoke`, and scope and logging are handled
+        together by the host's mediation (the plan's "there is one call path").
 
-        `projectId` is always carried (null for a user-folder app). Without it, the host reads
-        this as a human calling a built-in app. A screen is an external app's code, and must
-        never enter through that door. `instanceId` becomes the owner of the "changed" this
+        `projectId` is always carried (null for a user-folder app). A host from before #97 reads
+        a call without it as a person calling a built-in app, and a screen is an external app's
+        code, so it must never enter through that door. `instanceId` becomes the owner of the "changed" this
         call produces — only that screen skips that notification (B-5).
       */
       callTool: async (appId, tool, args, from) =>

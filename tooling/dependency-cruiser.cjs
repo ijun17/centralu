@@ -27,36 +27,19 @@ module.exports = {
       to: {},
     },
     /*
-     * The app layer (#81): isolation here means not "complete" but **one-directional plus
-     * ownership**, and that direction is enforced here rather than left to convention. An app
-     * only touches the core through its pass (api/contract), and the only thing the core knows
-     * about apps is a single line in the registry (and the contract types) — so that ripping an
-     * app out leaves no scar on the core.
+     * The app layer (#81): isolation here means not "complete" but **one-directional**, and that
+     * direction is enforced here rather than left to convention. The UI half of these rules went
+     * with the built-in app framework (`packages/ui/src/apps/`, removed in #97); what stays is the
+     * host's: the contract and the external app runtime do not lean on the layers that call them.
      */
     {
-      name: 'ui-app-guest-pass',
-      comment: 'The UI app runtime does not know this product\'s layers at all (#81 pass, #97 direction).',
-      severity: 'error',
-      // api.ts used to be the one exception that imported the store — that single line was
-      // "the runtime does not run if the inbox is deleted". Now the pass delegates to the
-      // surface host.ts declares, so there is no exception left.
-      from: { path: '^packages/ui/src/apps/' },
-      to: { path: '^packages/ui/src/(store|features|app)/' },
-    },
-    {
-      name: 'ui-core-blind-to-apps',
-      comment: 'All the UI core can take from apps is registry, contract and host (#81, #97).',
-      severity: 'error',
-      from: { path: '^packages/ui/src', pathNot: ['^packages/ui/src/apps/'] },
-      to: { path: '^packages/ui/src/apps/', pathNot: ['^packages/ui/src/apps/(registry|contract|host)\\.tsx?$'] },
-    },
-    {
       name: 'host-app-guest-pass',
-      comment: 'Inside a host app, nothing touches the core beyond what contract provides (#81).',
+      comment: 'The host app contract does not lean on the layers that call it (#81, #97).',
       severity: 'error',
       // The exception where contract.ts borrowed types from the orchestrator disappeared in
       // #97 — those types are now defined by contract.ts, and the orchestrator takes them from
-      // there instead.
+      // there instead. The built-in apps this rule was written for (control) are gone too; the
+      // contract it still guards is the one the adapters and the runtime share.
       from: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/external/'] },
       to: { path: '^packages/agent-host/src/(sessions|dev-services|adapters)/' },
     },
@@ -72,8 +55,7 @@ module.exports = {
      * So what is allowed is **narrowed by name** — only physical modules with no product
      * meaning. Sessions and adapters are still forbidden (a session is one caller of the
      * runtime, #97). The store is forbidden too: the runtime declares what it needs as
-     * `ExternalAppsDeps` and the host fills it in. The built-in app (control) does not get this
-     * exception.
+     * `ExternalAppsDeps` and the host fills it in.
      */
     {
       name: 'host-app-runtime-physics-only',
@@ -87,15 +69,14 @@ module.exports = {
     },
     {
       name: 'host-core-blind-to-apps',
-      comment: 'All the host core can take from apps is registry, contract, and the external app runtime\'s door (#81, M4 A).',
+      comment: 'All the host core can take from apps is the contract and the external app runtime\'s door (#81, M4 A).',
       severity: 'error',
       from: { path: '^packages/agent-host/src', pathNot: ['^packages/agent-host/src/apps/'] },
       // external/runtime.ts is the **one and only door** the external app runtime opens into
-      // the core — discovery, processes and brokering behind it are unknown to the core. The
-      // same spot registry occupies as the built-in app's single line.
+      // the core — discovery, processes and brokering behind it are unknown to the core.
       to: {
         path: '^packages/agent-host/src/apps/',
-        pathNot: ['^packages/agent-host/src/apps/(registry|contract)\\.ts$', '^packages/agent-host/src/apps/external/runtime\\.ts$'],
+        pathNot: ['^packages/agent-host/src/apps/contract\\.ts$', '^packages/agent-host/src/apps/external/runtime\\.ts$'],
       },
     },
     {

@@ -86,7 +86,7 @@ describe('external app RPC — trust', () => {
   })
 })
 
-describe('external app RPC — apps.invoke is the same door for built-in and external', () => {
+describe('external app RPC — apps.invoke', () => {
   it("given a projectId, it routes through external app mediation — the caller is the view, and the app's answer is carried through as is", async () => {
     const { id } = (await rpc('projects.add', { path: projRoot })) as { id: string }
     await rpc('projects.setTrusted', { projectId: id, trusted: true })
@@ -102,13 +102,12 @@ describe('external app RPC — apps.invoke is the same door for built-in and ext
     expect(refused.result).toBeUndefined()
   })
 
-  it("a built-in app id with no projectId is the old path as is — the built-in app's tool runs", async () => {
-    const out = (await rpc('apps.invoke', { appId: 'control', name: 'control_notify', args: { text: 'something a person needs to see' } })) as {
-      text: string
-      isError?: boolean
-    }
-    expect(out.isError).toBeFalsy()
-    const state = (await rpc('apps.state', { appId: 'control' })) as { doc: { notifies?: { text: string }[] } }
-    expect(state.doc.notifies?.map((n) => n.text)).toContain('something a person needs to see')
+  it("with no projectId the call goes to the user folder — the retired control app's tools are gone (#97)", async () => {
+    await expect(rpc('apps.invoke', { appId: 'control', name: 'control_notify', args: { text: 'x' } })).rejects.toThrow(
+      /There is no such app: user\/control/,
+    )
+    // The retired state calls still answer, so a window from an older build gets a well-formed reply
+    await rpc('apps.setState', { appId: 'control', doc: { notifies: [] } })
+    expect(await rpc('apps.state', { appId: 'control' })).toEqual({ doc: { notifies: [] }, enabled: true })
   })
 })

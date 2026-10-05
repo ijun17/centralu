@@ -42,7 +42,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 const { ClaudeAdapter } = await import('./index.js')
 const { SessionManager } = await import('../../sessions/manager.js')
 const { Store } = await import('../../dev-services/store.js')
-const { ORCHESTRATOR_TOOLS, appToolEntries } = await import('../../sessions/orchestrator-tools.js')
+const { ORCHESTRATOR_TOOLS } = await import('../../sessions/orchestrator-tools.js')
 
 let store: InstanceType<typeof Store>
 let mgr: InstanceType<typeof SessionManager>
@@ -166,7 +166,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
   it('every tool in the orchestrator registry passes the exception — a `__` in a name would be caught here', async () => {
     await mgr.orchestrator()
 
-    const names = [...ORCHESTRATOR_TOOLS, ...appToolEntries('orchestrator')].map((t) => t.name)
+    const names = ORCHESTRATOR_TOOLS.map((t) => t.name)
     expect(names.length).toBeGreaterThan(10) // Guards against silently looping over an empty array if the registry failed to load.
 
     const asked = []

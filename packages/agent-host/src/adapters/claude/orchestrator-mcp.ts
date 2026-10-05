@@ -2,7 +2,6 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { OrchestratorTools } from '../contract.js'
 import {
   ORCHESTRATOR_MCP_NAME,
-  appToolEntries,
   instructionsFor,
   runOrchestratorTool,
   toolDefsFor,
@@ -55,8 +54,7 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
     // None for the reader set (#320): server instructions are where a role would creep in
     instructions: instructionsFor(profile),
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
-    // App tools (#81) join the same list: execution routes through runOrchestratorTool's registry either way.
-    tools: [...toolDefsFor(profile), ...appToolEntries(profile)].map((t) =>
+    tools: toolDefsFor(profile).map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) =>
         // Served by the host itself, so a planned swap waits for it, within a bound (#280, drain.ts)
         hostDrain

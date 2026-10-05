@@ -1,15 +1,13 @@
-import type { z } from 'zod'
-import type { AppId, NormalizedEvent, ToolName } from '@cc/protocol'
 import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNameProblem } from '@cc/protocol'
 
 /*
- * The runtime's central set of types is **born here** (#97).
+ * The host's tool contract (#97) — what a session's tools are and who called one.
  *
- * Previously, sessions/orchestrator-tools.ts defined these and this file just re-exported them. That
- * left the source of truth for "what can an app call" sitting with a passenger (the orchestrator)
- * riding on top of the layer that hosts apps, rather than with that layer itself — delete that
- * passenger, and the runtime would fail to compile. The orchestrator is one of the runtime's callers,
- * not its owner.
+ * These used to be defined in sessions/orchestrator-tools.ts, which left the source of truth for
+ * "what can be called, by whom" with one of its callers (the orchestrator) instead of with the
+ * layer the adapters, the orchestrator tools and the app runtime all stand on. They were moved
+ * here, and stayed here when the built-in app framework that also used them (HostAppModule, the
+ * control app) was removed in #97.
  */
 
 /**
@@ -20,89 +18,10 @@ import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNamePro
  */
 export type ToolProfile = 'orchestrator' | 'manager' | 'scoped' | 'builder' | 'reader'
 
-/**
- * The profiles an app's tools may name — every one but `reader`. An ordinary session's set is the
- * host's own read-only three (#320); an app tool riding on it would put an app in every session,
- * which is the "never a worker" rule below said by the type instead of by a reviewer.
- */
-export type AppToolProfile = Exclude<ToolProfile, 'reader'>
-
-/** Whoever called an app tool — sessionId=null means a person (the UI). An app uses this to judge its own permissions */
-export type AppToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
+/** Whoever called a tool — sessionId=null means a person (the UI) */
+export type ToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
 
 export type ToolOutput = { text: string; isError?: boolean }
-
-/**
- * The host-side contract for an app (#81) — **one half of the passport.**
- *
- * An app never knows the core exists (more precisely: it reaches it only through the door this file
- * gives), and gets orchestrator tools and its own state through that door alone. The other direction
- * is a single line in the registry — that is the isolation that lets the core stay ignorant of apps
- * and lets an experimental one be ripped out cleanly (not full isolation, but one-way plus
- * ownership).
- *
- * A tool name must always carry the `<id>_` prefix — this is the naming convention a person uses to
- * read where a call came from on its card, but the source of truth for validation is the
- * registration list (orchestrator-tools.ts), not the prefix.
- */
-export type HostAppContext = {
-  /** A namespaced KV — physically `app:<id>:<key>` in app_settings (precedent: the skills and MCP proposal) */
-  kv: {
-    get<T>(key: string): T | null
-    set(key: string, value: unknown): void
-  }
-  /** A minimal session lookup for validation and display — read-only, and this is the entirety of what an app knows about a session */
-  sessionSummary(id: string): { name: string; state: string; projectId: string | null } | null
-  /** The `app_state_changed` broadcast — the UI re-reads it via apps.state (deliberately a coarse-grained event) */
-  emitChanged(): void
-  /**
-   * The primitive for physically creating a session (#80, #81). **This is typed** — a general-purpose
-   * session-creation primitive would hand an app the leverage to create a session with arbitrary
-   * power (especially seen with #72's generative apps in mind). The app supplies the meaning (the
-   * name, the role text), and the core enforces the capability (forcing scope, pinning it).
-   */
-  sessions: {
-    createCoordinator(opts: {
-      name: string
-      memberSessionIds: string[]
-      roleAppend: string
-      /** An open-ended name (#74) — the receiving side (manager.createCoordinator) originally typed this as ToolName */
-      tool: ToolName
-      model?: string
-      effort?: string
-    }): Promise<{ id: string; name: string }>
-  }
-}
-
-export type HostAppModule = {
-  /** An open-ended string, the same as the UI's half (M4 P-1) — an external app must also appear on the same registry */
-  id: AppId
-  tools?: {
-    /** Which profiles see these tools — never a worker, under any circumstances (so never `reader`, #320) */
-    profiles: readonly AppToolProfile[]
-    /** If a def has its own profiles, it overrides the group default — needed by an app (control) whose tools each want a different scope */
-    defs: readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; profiles?: readonly AppToolProfile[] }[]
-    run(ctx: HostAppContext, name: string, args: Record<string, unknown>, caller: AppToolCaller): Promise<ToolOutput>
-  }
-  /**
-   * Observing events (#80's checkpoint, contract growth anticipated by #81) — **the rule is the
-   * app's opinion, observation itself is the physical mechanism.** Every event the host broadcasts
-   * flows to every enabled app. Kept lightweight since this is a synchronous call: never do heavy
-   * work here, and a failure is swallowed and logged by the host. `app_state_changed` never comes
-   * back to the app that produced it (to prevent a loop).
-   */
-  observe?(ctx: HostAppContext, event: NormalizedEvent): void
-  /**
-   * Called once at startup — returns **the ids of the sessions this app has already created**
-   * (requested by the user, 2026-09-09).
-   *
-   * Ownership (appId) is now recorded on a session's row, but a session created before that column
-   * existed has it empty. **Only the app knows** which sessions belong to it (only the app knows the
-   * shape of its own documents) — so the app states it and the core records it. The core still never
-   * learns the meaning of it.
-   */
-  claimSessions?(ctx: HostAppContext): readonly string[]
-}
 
 /**
  * The name of the orchestrator MCP server.

@@ -21,7 +21,6 @@ import type { AgentVersionService } from './agent-versions.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
 import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
-import { HOST_APPS } from './apps/registry.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
@@ -343,6 +342,8 @@ export function createRpcHandler(
       // The shape of the answer is known between the view and the app. Here, only enough is checked to keep the envelope from breaking
       return RpcMethods['apps.readResource'].result.parse(await requireViews().readResource({ appId, projectId }, uri, instanceId))
     },
+    // apps.state / apps.setState / apps.setEnabled: the retired built-in app state (#81, #97).
+    // Still answered so an older window gets a reply; nothing in this build calls them
     'apps.state': async (p) => {
       const { appId } = RpcMethods['apps.state'].params.parse(p)
       return mgr.appState(appId)
@@ -354,9 +355,6 @@ export function createRpcHandler(
     },
     'apps.invoke': async (p) => {
       const { appId, name, args, projectId, instanceId } = RpcMethods['apps.invoke'].params.parse(p)
-      // The built-in registry is checked first — an external app can never take a built-in app's id
-      // (discovery blocks it), so the two branches never overlap
-      if (projectId === undefined && HOST_APPS.some((a) => a.id === appId)) return mgr.invokeAppTool(appId, name, args)
       // The instance is used only as the cause of "changed" — so that view does not hear the change
       // it caused itself (B-5). Unrelated to permissions
       const caller = { kind: 'view' as const, ...(instanceId ? { instanceId } : {}) }

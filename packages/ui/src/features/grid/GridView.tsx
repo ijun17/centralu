@@ -62,7 +62,7 @@ export function GridView() {
   const externalApps = useStore((s) => s.externalApps)
   // The app list, keyed the way a dragged app row names its app (`externalAppKey`)
   const appsByKey = useMemo(
-    () => new Map(buildCatalog([], {}, externalApps).external.map((a) => [a.key, a] as const)),
+    () => new Map(buildCatalog(externalApps).external.map((a) => [a.key, a] as const)),
     [externalApps],
   )
   const ensureGridAppView = useStore((s) => s.ensureGridAppView)

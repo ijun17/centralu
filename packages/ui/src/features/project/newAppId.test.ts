@@ -41,6 +41,6 @@ describe('appIdHint — the wording shown in the dialog', () => {
     expect(appIdHint('my_app', 'shape')).toContain('lowercase letters, digits and hyphens')
     expect(appIdHint('centralu-x', 'reserved')).toContain('"centralu"')
     expect(appIdHint('app-x', 'server-prefix')).toContain('"app-"')
-    expect(appIdHint('control', 'builtin')).toBe('"control" is a built-in app.')
+    expect(appIdHint('control', 'builtin')).toBe('"control" is reserved. Pick another.')
   })
 })

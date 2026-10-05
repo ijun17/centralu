@@ -31,9 +31,10 @@ describe('newAppIdProblem', () => {
     expect(newAppIdProblem('my-app-notes')).toBeNull()
   })
 
-  it('the id of a built-in app passed in by the caller cannot be used', () => {
-    expect(newAppIdProblem('control', ['control'])).toBe('builtin')
-    expect(newAppIdProblem('control')).toBeNull()
+  it('a reserved id cannot be used — the retired control app by default, or the list the caller passes in', () => {
+    expect(newAppIdProblem('control')).toBe('builtin')
+    expect(newAppIdProblem('notes', ['notes'])).toBe('builtin')
+    expect(newAppIdProblem('control', [])).toBeNull()
   })
 
   it('an earlier judgment wins — order is reserved, shape, prefix, builtin', () => {

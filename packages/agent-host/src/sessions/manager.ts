@@ -1,15 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
-import { proposedMcpServerNameError, profileAllows, registerAppTools, runOrchestratorTool } from './orchestrator-tools.js'
+import { proposedMcpServerNameError, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, CapabilityQuestion, ExternalApps, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { builderRole } from './app-builder.js'
-import { HOST_APPS } from '../apps/registry.js'
-import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
@@ -52,6 +50,7 @@ import {
   isProjectId,
   isSessionId,
   parseUiPreferences,
+  RESERVED_APP_IDS,
   textSizeFromLegacyStep,
   sessionLiveDefaults,
   withoutToolRecord,
@@ -507,13 +506,6 @@ export class SessionManager {
       keptSessions?: ReadonlySet<string>
     } = {},
   ) {
-    /*
-     * App observation hook (#81) — intercepts broadcasts and forwards them to enabled apps. The
-     * rule (what to react to) is the app's call, while the observing itself is plumbing, so it is
-     * wired up here in the core. app_state_changed is never fed back in, since it is the app's own
-     * output — if an app wrote a notification and then observed that same broadcast, it would form
-     * a loop. A failing app does not block the broadcast: the error is swallowed and logged.
-     */
     const rawEmit = this.emit
     this.emit = (full) => {
       /*
@@ -521,17 +513,7 @@ export class SessionManager {
        * call's `input` and a result's `output`, and the UI and the apps get the card. One `cat` of a large file would
        * otherwise go to every window and sit in the reconnect log (transport/event-log.ts).
        */
-      const e = withoutToolRecord(full)
-      rawEmit(e)
-      if (e.type === 'app_state_changed') return
-      for (const app of HOST_APPS) {
-        if (!app.observe || !this.appEnabled(app.id)) continue
-        try {
-          app.observe(this.appContext(app.id), e)
-        } catch (err) {
-          console.error(`[apps] ${app.id} observe failed:`, err)
-        }
-      }
+      rawEmit(withoutToolRecord(full))
     }
     /*
      * On startup, state is **not simply restored as-is.**
@@ -569,7 +551,6 @@ export class SessionManager {
      * someone. A failure here is no reason to block session restore, so it is not awaited.
      */
     void this.sweepOrphanHandoffNotes().catch(() => {})
-    this.claimAppSessions()
     this.renameLegacyManagers()
     this.nameUnnamedWorktrees()
     /*
@@ -582,38 +563,19 @@ export class SessionManager {
     )) {
       void this.refreshMergedWorktrees(pid).catch(() => {})
     }
-    /*
-     * Registers app tools (#81). Binds the directory (HOST_APPS) to this manager's context (KV,
-     * session lookup, broadcast) and loads it into orchestrator-tools' registry — both the Claude
-     * MCP bridge and the Codex bridge see that one registry. `enabled` is asked fresh each time via
-     * a closure.
-     */
-    registerAppTools(
-      HOST_APPS.flatMap((app) => {
-        const t = app.tools
-        if (!t) return []
-        return t.defs.map((d) => ({
-          name: d.name,
-          description: d.description,
-          schema: d.schema,
-          profiles: d.profiles ?? t.profiles,
-          enabled: () => this.appEnabled(app.id),
-          run: (args: Record<string, unknown>, caller) => t.run(this.appContext(app.id), d.name, args, caller),
-        }))
-      }),
-    )
   }
 
-  // ── App state (#81) — one JSON document plus an enabled flag per app. Only the app knows what it means ──
+  /*
+   * Built-in app state (#81), retired with the control app (#97). One JSON document plus an enabled
+   * flag per app lived in app_settings as `app:<id>:doc` / `app:<id>:enabled`. Nothing in the host
+   * reads them any more, but `apps.state` / `apps.setState` / `apps.setEnabled` still answer, so a
+   * window from an older build that asks for the rail's document gets a well-formed reply instead
+   * of an unknown-method error. The rows themselves are left where they are (expand/contract): a
+   * newer build has no reason to delete what an older one might still read.
+   */
 
   private appKey(appId: string, key: string): string {
     return `app:${appId}:${key}`
-  }
-
-  /** Enabled by default — this is an experimental feature, but dogfooding is exactly the experiment.
-   * Turning it off is a toggle in settings. */
-  appEnabled(appId: string): boolean {
-    return this.store.appSetting(this.appKey(appId, 'enabled')) !== '0'
   }
 
   appState(appId: string): { doc: unknown; enabled: boolean } {
@@ -622,9 +584,9 @@ export class SessionManager {
     try {
       doc = raw ? JSON.parse(raw) : null
     } catch {
-      doc = null // Treat a corrupted document as empty — one app's state must not block the whole app list
+      doc = null // A corrupted document reads as empty
     }
-    return { doc, enabled: this.appEnabled(appId) }
+    return { doc, enabled: this.store.appSetting(this.appKey(appId, 'enabled')) !== '0' }
   }
 
   setAppDoc(appId: string, doc: unknown): void {
@@ -635,61 +597,6 @@ export class SessionManager {
   setAppEnabled(appId: string, enabled: boolean): void {
     this.store.setAppSetting(this.appKey(appId, 'enabled'), enabled ? '1' : '0')
     this.emit({ type: 'app_state_changed', appId })
-  }
-
-  /**
-   * The person calls an app tool directly (#81). No profile check — the person has top-level
-   * authority, and the only check is "is this a (registered) tool of that app". Execution rules
-   * (enabled, schema) are the same as the app's own call path.
-   */
-  async invokeAppTool(appId: string, name: string, args: Record<string, unknown>) {
-    if (!name.startsWith(`${appId}_`) && !HOST_APPS.some((a) => a.id === appId && a.tools?.defs.some((d) => d.name === name))) {
-      throw Object.assign(new Error(`Not a tool of that app: ${appId}/${name}`), { code: 'internal' })
-    }
-    const app = HOST_APPS.find((a) => a.id === appId)
-    const def = app?.tools?.defs.find((d) => d.name === name)
-    if (!app || !def || !app.tools) {
-      throw Object.assign(new Error(`Not a tool of that app: ${appId}/${name}`), { code: 'internal' })
-    }
-    if (!this.appEnabled(appId)) return { text: `This tool's app is turned off: ${name}`, isError: true }
-    const parsed = def.schema.safeParse(args)
-    if (!parsed.success) return { text: `Invalid arguments: ${parsed.error.message}`, isError: true }
-    return app.tools.run(this.appContext(appId), name, parsed.data as Record<string, unknown>, {
-      sessionId: null,
-      profile: 'human',
-    })
-  }
-
-  private appContext(appId: string): HostAppContext {
-    return {
-      kv: {
-        get: <T,>(key: string): T | null => {
-          const raw = this.store.appSetting(this.appKey(appId, key))
-          try {
-            return raw ? (JSON.parse(raw) as T) : null
-          } catch {
-            return null
-          }
-        },
-        set: (key: string, value: unknown) => {
-          this.store.setAppSetting(this.appKey(appId, key), JSON.stringify(value ?? null))
-        },
-      },
-      sessionSummary: (id: string) => {
-        const m = this.meta.get(id)
-        return m ? { name: m.name, state: m.state, projectId: m.projectId } : null
-      },
-      emitChanged: () => this.emit({ type: 'app_state_changed', appId }),
-      sessions: {
-        /*
-         * Delegates to the physical primitive (#81) — it is typed, so an app cannot mint a session
-         * with arbitrary authority. **Ownership is stamped right here**: the value comes from the
-         * binding, not from an argument, so an app cannot claim someone else's name. This one line
-         * is the basis for "who owns this session".
-         */
-        createCoordinator: (opts) => this.createCoordinator({ ...opts, appId }),
-      },
-    }
   }
 
   /**
@@ -797,35 +704,6 @@ export class SessionManager {
       const renamed = { ...s, name: s.worktree.branch }
       this.meta.set(s.id, renamed)
       this.store.upsertSession(renamed)
-    }
-  }
-
-  /**
-   * Records ownership on sessions an app created in the past (runs once at startup).
-   *
-   * Only fills rows whose appId column is empty — ownership already written is never overwritten.
-   * The app says which sessions are its own (claimSessions), and the core only records the id it is
-   * given.
-   */
-  private claimAppSessions(): void {
-    for (const app of HOST_APPS) {
-      if (!app.claimSessions) continue
-      let ids: readonly string[] = []
-      try {
-        ids = app.claimSessions(this.appContext(app.id))
-      } catch (e) {
-        // An app's failure does not block startup — if ownership does not get written, the sidebar just shows
-        // it unowned
-        console.error(`[apps] claimSessions failed for ${app.id}: ${(e as Error).message}`)
-        continue
-      }
-      for (const id of ids) {
-        const m = this.meta.get(id)
-        if (!m || m.appId) continue
-        const owned = { ...m, appId: app.id }
-        this.meta.set(id, owned)
-        this.store.upsertSession(owned)
-      }
     }
   }
 
@@ -4793,11 +4671,11 @@ export class SessionManager {
         if (nameError) return { ok: false, error: nameError }
         /*
          * Once approved, it becomes the user-folder app `<name>` (M4 A-7). So the name shares its slot
-         * with app ids — it can never take a built-in app's id, or an existing user app's id. Overwriting one
+         * with app ids — it can never take a reserved id, or an existing user app's id. Overwriting one
          * is exactly swapping out a command.
          */
-        if (HOST_APPS.some((a) => a.id === spec.name)) {
-          return { ok: false, error: `"${spec.name}" is the name of a built-in app — propose a different name` }
+        if (RESERVED_APP_IDS.includes(spec.name)) {
+          return { ok: false, error: `"${spec.name}" is a reserved app name — propose a different name` }
         }
         if (this.userAppExists(spec.name)) return { ok: false, error: `"${spec.name}" is already installed` }
         const proposals = this.mcpProposals().filter((p) => p.name !== spec.name)
@@ -5774,11 +5652,11 @@ export class SessionManager {
   /**
    * Is this an agent session stood up at an external app's request (M4 D-1) — one of the workers an
    * external app owns (`appId`) that is not that app's own builder session. No separate marker exists
-   * for this: ownership (`appId`) and the builder directory already say it (a built-in app's own
-   * coordinator session is not a worker).
+   * for this: ownership (`appId`) and the builder directory already say it. A row stamped with a
+   * reserved id belongs to the removed control app (#97), never to an external app.
    */
   private isAppAgentSession(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>): boolean {
-    return !!m.appId && m.kind === 'worker' && !HOST_APPS.some((a) => a.id === m.appId) && this.builderRefOf(m) === null
+    return !!m.appId && m.kind === 'worker' && !RESERVED_APP_IDS.includes(m.appId) && this.builderRefOf(m) === null
   }
 
   /**

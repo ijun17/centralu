@@ -25,10 +25,10 @@ import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
  * The external app runtime (M4 A) — **the one file that is the door the core knows external apps
  * through.**
  *
- * A built-in app (`HOST_APPS` in `registry.ts`) is a compiled module, while an external app is a
- * folder discovered at runtime and the process that folder starts. The two live differently, so
- * their registries differ too, but the same rule holds for both (#81): the core's path to knowing
- * about an app has to stay narrow — so this runtime never imports the core, and instead **receives**
+ * An external app is a folder discovered at runtime and the process that folder starts. (Compiled
+ * built-in apps lived beside them until the last one, the control app, was removed in #97.) The
+ * rule from #81 still holds: the core's path to knowing about an app has to stay narrow — so this
+ * runtime never imports the core, and instead **receives**
  * what it needs (the project list and their trust, the data folder) through `ExternalAppsDeps`. This
  * is the same inversion #97 did for the UI runtime: the runtime declares what it needs, and the host
  * fills it in.
@@ -193,7 +193,7 @@ export type ExternalAppsDeps = {
   projects(): readonly { id: string; path: string; trusted: boolean }[]
   /** The host's data folder (`dataRoot()`) — user apps and app data live under it */
   dataRoot: string
-  /** An id an external app can never take — a built-in app's id. `apps.invoke` disambiguates between them by the same name */
+  /** Ids an external app can never take (`RESERVED_APP_IDS`) — the retired control app's rows and sessions still carry `control` (#97) */
   reservedIds: readonly string[]
   /** The folder-watching flush interval (reduced by tests) */
   watchFlushMs?: number
@@ -346,7 +346,7 @@ const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
   shape: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit — no underscores: "__" separates names in a session's tool names`,
   reserved: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself`,
   'server-prefix': `ids starting with "${APP_SERVER_PREFIX}" are how apps attach to sessions — pick another`,
-  builtin: 'that is the id of a built-in app — pick another',
+  builtin: 'that id is reserved — pick another',
 }
 
 /** An app that cannot be called — the reason is exactly the message */
@@ -1020,7 +1020,7 @@ export class ExternalApps {
    * place a previously approved server used to attach).
    *
    * Validation is the same single set discovery uses: a manifest is built and passed through
-   * `parseManifest` before it is written (the id rule from #93 lives there too). A built-in app's id
+   * `parseManifest` before it is written (the id rule from #93 lives there too). A reserved id
    * cannot be taken. **If an app with the same id already exists** — if it is the same server, that
    * app is returned as-is (calling this again produces the same result: when a move was interrupted
    * partway and runs again), and if different, this refuses (a person-made app is never overwritten).
@@ -1034,7 +1034,7 @@ export class ExternalApps {
    */
   installUserApp(spec: { id: string; name: string; description: string; server: { command: string; args: string[] } }): ExternalAppInfo {
     if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
-    if (this.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}" is the name of a built-in app — use another name`)
+    if (this.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}" is a reserved app id — use another name`)
     const text = JSON.stringify(
       {
         manifestVersion: MANIFEST_VERSION,
@@ -1196,7 +1196,7 @@ export class ExternalApps {
    *   - **the name**: the same rule as a proposed MCP server (`newAppIdProblem` — #93's characters and
    *     the `centralu` reservation, plus a ban on the `app-` prefix). Discovery still reads an id with
    *     the `app-` prefix (a hand-made app), but there is no reason for a newly created app to have a
-   *     server name like `app-app-notes`. A built-in app's id is also refused.
+   *     server name like `app-app-notes`. A reserved id is also refused.
    *   - **an untrusted project**: a created app is code that runs on this machine, and an app in an
    *     untrusted project never starts (decision 3). An app that can be created but never runs would
    *     leave the building session spinning its wheels.
@@ -2024,8 +2024,8 @@ export class ExternalApps {
   private entry(scope: Scope, found: ScannedApp): AppEntry {
     let { manifest, error } = found
     if (manifest && this.deps.reservedIds.includes(manifest.id)) {
-      // The same id as a built-in app leaves `apps.invoke` to decide which one to call — whichever registered first wins
-      error = `"${manifest.id}" is the name of a built-in app — use another id`
+      // A reserved id would inherit the retired control app's rows and sessions (#97, RESERVED_APP_IDS)
+      error = `"${manifest.id}" is a reserved app id — use another id`
       manifest = null
     }
     return {

@@ -255,17 +255,5 @@ export function backgroundTasksTests(): void {
       expect(await note.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
       await expectTakesPointer(row.getByTestId('activity-interrupt'))
     })
-
-    test('the control rail lists a session whose turn ended while its background work runs, with the mark', async ({ page }) => {
-      const id = await start(page)
-      await emit(page, id, { type: 'turn_complete' })
-      await expect.poll(() => page.evaluate((sid) => (window as any).__store.getState().sessions[sid]?.state, id)).toBe('waiting_input')
-      // Nothing about the turn's Stop is left behind once the turn is over
-      await expect(page.getByTestId('interrupt-background-note')).toHaveCount(0)
-      await page.getByTestId('orchestrator-button').click()
-      await expect(page.getByTestId('control-rail')).toBeVisible()
-      await expect(page.getByTestId(`rail-background-${id}`)).toHaveText('2 bg')
-      await expect(page.getByTestId(`rail-running-${id}`)).toBeVisible()
-    })
   })
 }

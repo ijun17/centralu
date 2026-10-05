@@ -1,24 +1,19 @@
 import { useMemo } from 'react'
 import type { ExternalAppInfo } from '@cc/protocol'
-import type { AppModule } from '../apps/contract.js'
-import { APPS } from '../apps/registry.js'
-import { externalAppKey, useStore, type AppState } from './store.js'
+import { externalAppKey, useStore } from './store.js'
 
 /**
- * One app registry (M4 A-8) — built-in apps and external apps as a single list.
+ * One app registry (M4 A-8) — the external apps the host discovered, as a single list.
  *
- * The two live differently. A built-in app (`control`) is a compiled module, and the only thing
- * to do with it is turn it on or off. An external app is a folder and a process the host
- * discovered, so it has a scope (project or user folder) and a status (starting, stopped, why).
- * Even so, the screens (the app list in Settings, an app's row in the sidebar, a pinned screen)
- * all need to ask "what is this app, and how is it right now" in one place. If each screen read
- * the two sources separately and merged them, the rule for reading status (e.g. an app in an
- * untrusted project cannot be opened) would have to exist once per screen, and one of them would
- * eventually drift out of sync.
+ * An external app is a folder and a process the host discovered, so it has a scope (project or
+ * user folder) and a status (starting, stopped, why). The screens (the app list in Settings, an
+ * app's row in the sidebar, a pinned screen, a grid panel) all need to ask "what is this app, and
+ * how is it right now" in one place. If each screen read the host's list on its own, the rule for
+ * reading status (e.g. an app in an untrusted project cannot be opened) would have to exist once
+ * per screen, and one of them would eventually drift out of sync.
  *
- * Why this file lives outside the store: the store does not know about the built-in app registry
- * (registry → app → api → host must not cycle, #97). This file only reads both the registry and
- * the store.
+ * There used to be a second kind in this list, the compiled built-in app (`control`, the rail).
+ * It was removed in #97, so every entry here is an external app.
  */
 
 /** Turns status into the shape shown to a person. The judgment lives in this one place */
@@ -31,15 +26,6 @@ export type AppStatusView = {
   runnable: boolean
   /** Brightness in the list — only something blocked that the person needs to see is bright (the palette rule) */
   tone: 'quiet' | 'busy' | 'alert'
-}
-
-export type BuiltinCatalogApp = {
-  kind: 'builtin'
-  key: string
-  appId: string
-  title: string
-  module: AppModule
-  enabled: boolean
 }
 
 export type ExternalCatalogApp = {
@@ -56,7 +42,6 @@ export type ExternalCatalogApp = {
 }
 
 export type AppCatalog = {
-  builtin: BuiltinCatalogApp[]
   external: ExternalCatalogApp[]
   /** project id → that project's apps (alphabetical) */
   byProject: Record<string, ExternalCatalogApp[]>
@@ -108,11 +93,7 @@ const byTitle = (a: ExternalCatalogApp, b: ExternalCatalogApp) => a.title.locale
  * the way there is for sessions, and discovery order (the order folders were read in) differs by
  * filesystem, which could shuffle the sidebar's rows on every startup.
  */
-export function buildCatalog(
-  builtins: readonly AppModule[],
-  builtinState: AppState['apps'],
-  external: readonly ExternalAppInfo[],
-): AppCatalog {
+export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
   const ext: ExternalCatalogApp[] = external.map((info) => ({
     kind: 'external',
     key: externalAppKey(info.projectId, info.appId),
@@ -130,14 +111,6 @@ export function buildCatalog(
     else (byProject[a.projectId] ??= []).push(a)
   }
   return {
-    builtin: builtins.map((m) => ({
-      kind: 'builtin',
-      key: `builtin/${m.id}`,
-      appId: m.id,
-      title: m.title,
-      module: m,
-      enabled: builtinState[m.id]?.enabled ?? true,
-    })),
     external: ext,
     byProject,
     user,
@@ -145,9 +118,8 @@ export function buildCatalog(
 }
 
 export function useAppCatalog(): AppCatalog {
-  const builtinState = useStore((s) => s.apps)
   const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog(APPS, builtinState, external), [builtinState, external])
+  return useMemo(() => buildCatalog(external), [external])
 }
 
 const NONE: ExternalCatalogApp[] = []
@@ -155,13 +127,13 @@ const NONE: ExternalCatalogApp[] = []
 /** A single project's apps — used by the project's block in the sidebar */
 export function useProjectApps(projectId: string): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog([], {}, external).byProject[projectId] ?? NONE, [external, projectId])
+  return useMemo(() => buildCatalog(external).byProject[projectId] ?? NONE, [external, projectId])
 }
 
 /** The user folder's apps — since they do not belong to a project, they get their own group in the sidebar */
 export function useUserApps(): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog([], {}, external).user, [external])
+  return useMemo(() => buildCatalog(external).user, [external])
 }
 
 /** A single app — undefined if it is gone (the folder disappeared, the project was deleted) */
@@ -169,6 +141,6 @@ export function useExternalApp(projectId: string | null, appId: string): Externa
   const external = useStore((s) => s.externalApps)
   return useMemo(() => {
     const info = external.find((a) => a.appId === appId && a.projectId === projectId)
-    return info ? buildCatalog([], {}, [info]).external[0] : undefined
+    return info ? buildCatalog([info]).external[0] : undefined
   }, [external, projectId, appId])
 }

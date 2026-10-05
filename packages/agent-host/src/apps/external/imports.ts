@@ -445,7 +445,7 @@ function zipParts(name: string, limits: ImportLimits): string[] {
  * Reads and validates the manifest of a staged folder — the same validation set discovery uses
  * (`parseManifest`), plus the naming rule for a newly joining app: #93's character rule and the ban
  * on the `app-` prefix (`proposedMcpServerNameError`, the same as for a new app), and a ban on a
- * built-in app's id.
+ * reserved id (`RESERVED_APP_IDS`).
  */
 export function readStagedManifest(dir: string, reservedIds: readonly string[]): { manifest: AppManifest; warnings: string[] } {
   const path = join(dir, MANIFEST_FILE)
@@ -463,7 +463,7 @@ export function readStagedManifest(dir: string, reservedIds: readonly string[]):
   const id = parsed.manifest.id
   const idProblem = proposedMcpServerNameError(id)
   if (idProblem) throw new ImportRefused(`The app id "${id}" cannot be used: ${idProblem}`)
-  if (reservedIds.includes(id)) throw new ImportRefused(`"${id}" is the name of a built-in app; this app cannot be imported under it`)
+  if (reservedIds.includes(id)) throw new ImportRefused(`"${id}" is a reserved app id; this app cannot be imported under it`)
   return { manifest: parsed.manifest, warnings: parsed.warnings }
 }
 

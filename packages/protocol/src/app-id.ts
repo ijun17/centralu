@@ -12,8 +12,7 @@
  * place, and the human-facing **wording** is attached separately where it belongs (the host
  * speaks to the agent and the logs, the UI speaks to the person in front of the window).
  *
- * Judgments this file does not make: the id of a built-in app (each half compiles its own
- * roster and the caller passes it in), whether an id already exists (only the host does
+ * Judgments this file does not make: whether an id already exists (only the host does
  * discovery), and trust (the store is the source of truth). Those are rejected by the host when
  * it creates something, and the window just displays that message as given.
  */
@@ -32,6 +31,17 @@ export const RESERVED_NAME_PREFIX = 'centralu'
  * land in the same slot as the proxy server for the `notes` app.
  */
 export const APP_SERVER_PREFIX = 'app-'
+
+/**
+ * App ids no external app may take (#97).
+ *
+ * `control` was the built-in control app (the rail, tasks and their foremen), removed in #97.
+ * What it left behind is still there on purpose: its rows in app_settings (`app:control:*`) and
+ * the coordinator sessions stamped `appId: 'control'`. An external app named `control` would
+ * inherit both — those sessions would read as its own agents — so the name stays retired. The
+ * host's discovery, import and new-app paths and the UI's new-app window all read this one list.
+ */
+export const RESERVED_APP_IDS: readonly string[] = ['control']
 
 /**
  * The length limit for one id slot — the same number as the character rule below. This is where
@@ -67,17 +77,19 @@ export type NewAppIdProblem = ServerNameProblem | 'server-prefix' | 'builtin'
 
 /**
  * The judgment for a newly **proposed** name — the rule above, plus a ban on the `app-` prefix,
- * plus the built-in app ids the caller passes in. Returns null when the name is fine.
+ * plus the reserved ids (`RESERVED_APP_IDS` unless the caller passes its own list). Returns null
+ * when the name is fine. The problem is still called `'builtin'`: it is the same refusal it was
+ * when the reserved ids were the built-in roster, and the UI's wording keys off it.
  *
  * The `app-` prefix is not blocked during discovery (a hand-made `app-store` app is attached as
  * `app-app-store`, so it does not collide). What is blocked is the point where a new name comes
  * in — a new app has no reason to have the server name `app-app-notes`, and if an approved
  * server took that slot, it could skip approval under the app's read-only annotation.
  */
-export function newAppIdProblem(id: string, builtinIds: readonly string[] = []): NewAppIdProblem | null {
+export function newAppIdProblem(id: string, reservedIds: readonly string[] = RESERVED_APP_IDS): NewAppIdProblem | null {
   const base = serverNameProblem(id)
   if (base) return base
   if (id.startsWith(APP_SERVER_PREFIX)) return 'server-prefix'
-  if (builtinIds.includes(id)) return 'builtin'
+  if (reservedIds.includes(id)) return 'builtin'
   return null
 }

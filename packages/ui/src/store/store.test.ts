@@ -1772,69 +1772,13 @@ describe('warming up grid sessions', () => {
  * Destruction comes last — a failure deletes nothing.
  */
 /**
- * App state (#81): the store does not know the app list — an entry only appears through `ensure`
- * (first use) or the `app_state_changed` broadcast. Only the app knows what the document means.
- */
-describe('app state (#81)', () => {
-  it('ensure loads it, a broadcast triggers a re-read, and setAppDoc updates the screen first', async () => {
-    const mock = new MockPlatform()
-    mock.appDocs.set('control', { notifies: [{ id: 'n1', text: 'first notification', ts: 1 }] })
-    await useStore.getState().attach(mock)
-
-    // First use: ensure fills it in
-    await useStore.getState().ensureAppState('control')
-    expect((useStore.getState().apps['control']?.doc as { notifies: unknown[] }).notifies).toHaveLength(1)
-
-    // A change on the host's side arrives as a broadcast — the store re-reads it
-    mock.appDocs.set('control', { notifies: [] })
-    mock.emit({ type: 'app_state_changed', appId: 'control' } as NormalizedEvent)
-    await vi.waitFor(() => {
-      expect((useStore.getState().apps['control']?.doc as { notifies: unknown[] }).notifies).toHaveLength(0)
-    })
-
-    // A change on the UI's side updates the screen first, and saving follows
-    await useStore.getState().setAppDoc('control', { notifies: [], metrics: { replies: 1 } })
-    expect(mock.appDocs.get('control')).toMatchObject({ metrics: { replies: 1 } })
-
-    // The toggle goes through the same channel
-    await useStore.getState().setAppEnabled('control', false)
-    expect(useStore.getState().apps['control']?.enabled).toBe(false)
-    expect(mock.appDisabled.has('control')).toBe(true)
-  })
-
-  /*
-   * Never writes over a document that has not been read (#178). If the first read failed, the rail's
-   * `doc` is `null`, and pressing one row sent a document holding only `{ metrics }` to the host,
-   * overwriting tasks, monitoring and notifications entirely.
-   */
-  it('if the document has not been read yet, setAppDoc never writes and re-reads instead (#178)', async () => {
-    useStore.setState({ apps: {} })
-    const mock = new MockPlatform()
-    const full = { tasks: [{ id: 't1', title: 'T' }], watches: [{ id: 'w', pattern: 'git push' }], metrics: { inlineReplies: 7 } }
-    mock.appDocs.set('control', full)
-    await useStore.getState().attach(mock)
-    const read = vi.spyOn(mock.apps, 'state').mockRejectedValueOnce(new Error('offline'))
-    await useStore.getState().ensureAppState('control')
-    expect(useStore.getState().apps['control']).toBeUndefined()
-
-    await useStore.getState().setAppDoc('control', { metrics: { inlineReplies: 1 } })
-    expect(mock.appDocs.get('control')).toEqual(full)
-    // Discarded the write and triggered a re-read instead — the next write happens on the real document
-    await vi.waitFor(() => expect(useStore.getState().apps['control']?.doc).toEqual(full))
-    expect(read).toHaveBeenCalledTimes(2)
-  })
-})
-
-/**
  * An external app's "changed" (M4 B-5): the store only counts, per (project, app). Re-reading is the
- * open view's own job, through its state tool — so unlike a built-in app, this never calls
- * `apps.state`.
+ * open view's own job, through its state tool — the store never asks the host for it.
  */
 describe('an external app\'s change signal (M4 B-5)', () => {
-  it('a broadcast only bumps that (project, app)\'s counter, and never re-reads a built-in app\'s state', async () => {
+  it('a broadcast only bumps that (project, app)\'s counter', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
-    const reads = vi.spyOn(mock.apps, 'state')
 
     mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
     mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
@@ -1844,8 +1788,6 @@ describe('an external app\'s change signal (M4 B-5)', () => {
     expect(useStore.getState().externalAppChanges).toEqual({ 'p1/notes': 2, '_user/notes': 1 })
     // The `notes` app of two different projects are two different apps — their keys never collide
     expect(externalAppKey('p2', 'notes')).not.toBe(externalAppKey('p1', 'notes'))
-    expect(reads).not.toHaveBeenCalled()
-    expect(useStore.getState().apps['notes']).toBeUndefined()
   })
 
   it('a run signal (M4 D-6) only bumps the runs panel\'s counter — the counter the view listens to stays untouched', async () => {
@@ -3446,6 +3388,39 @@ describe('restoring the workspace saves nothing until it is done', () => {
     await useStore.getState().attach(mock)
     await tick()
     expect(useStore.getState()).toMatchObject(lateFields)
+  })
+
+  /*
+   * The control rail is gone (#97), and a snapshot written by an older build still carries its width
+   * (`railWidth`). It must load like any other snapshot: the fields around it come back, and the next
+   * save simply stops writing it — an older build that reads the new snapshot falls back to its own
+   * default width.
+   */
+  it('an old snapshot that still carries the control rail\'s width loads in full, and the next save drops it (#97)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/restore-rail')
+    mock.sessions.set('rail-r1', sessionInfo('rail-r1', { projectId: p.id }))
+    const policy: NotifyPolicy = { ...DEFAULT_NOTIFY_POLICY, sound: !DEFAULT_NOTIFY_POLICY.sound }
+    mock.workspaceSnapshot = {
+      focusedSessionId: 'rail-r1',
+      panelWidth: 333,
+      sidebarWidth: 251,
+      railWidth: 400,
+      notifyPolicy: policy,
+      ...lateFields,
+    } as never
+
+    useStore.setState({ spinGrid: true, spinSessionIcon: true, foldComposer: true })
+    await useStore.getState().attach(mock)
+    await tick()
+
+    expect(useStore.getState()).toMatchObject({ focusedSessionId: 'rail-r1', panelWidth: 333, sidebarWidth: 251, notifyPolicy: policy, ...lateFields })
+    expect(useStore.getState()).not.toHaveProperty('railWidth')
+
+    useStore.getState().setSpinGrid(true)
+    await tick()
+    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, sidebarWidth: 251, spinGrid: true })
+    expect(mock.workspaceSnapshot).not.toHaveProperty('railWidth')
   })
 
   it('a change the person makes after the restore is still saved', async () => {

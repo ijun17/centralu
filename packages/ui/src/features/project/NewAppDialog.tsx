@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { newAppIdProblem, type ToolName, type ToolStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { APPS } from '../../apps/registry.js'
 import { Modal } from '../../components/Modal.jsx'
 import { useToolMeta, useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
@@ -10,9 +9,6 @@ import { appIdHint, deriveAppId } from './newAppId.js'
 /** What one field looks like — it has to match the new session dialog's shape to read as "the same kind of dialog" */
 const inputClass =
   'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
-
-/** The ids of built-in apps — an external app cannot claim these (the same list as the host's reservedIds) */
-const BUILTIN_IDS = APPS.map((a) => a.id)
 
 /**
  * New app (M4 C-1) — asks for a name and the agent that builds it, and the host unpacks the app
@@ -60,7 +56,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const [error, setError] = useState<string | null>(null)
 
   const id = idEdit ?? deriveAppId(name)
-  const problem = newAppIdProblem(id, BUILTIN_IDS)
+  const problem = newAppIdProblem(id)
   const untrusted = !!project && !project.trusted
 
   // Detected every time it opens — the person may have just installed or logged in

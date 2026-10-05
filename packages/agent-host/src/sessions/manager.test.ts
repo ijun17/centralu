@@ -4297,62 +4297,29 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 })
 
 /**
- * The app layer (#81): an app's tools join through a registry, its state lives in the
- * app:<id>:* KV, and a disabled app's reach stops immediately. The control app's control_notify
- * is the first consumer.
+ * The control app is gone (#97). What it left behind must stay harmless: a session that still
+ * calls one of its tools is refused rather than crashing, nothing offers those tools any more, and
+ * its stored document is neither read for meaning nor deleted (expand/contract — an older build
+ * may still open the same store).
  */
-describe("the app layer (#81) — the control app's control_notify", () => {
-  it('a notification piles up in the document and a broadcast fires — a nonexistent session is refused', async () => {
-    const orc = await mgr.orchestrator()
-    const p = await addProject()
-    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+describe('after the control app was removed (#97)', () => {
+  const RETIRED = ['control_notify', 'control_create_task', 'board_read', 'board_update', 'control_task_done']
 
-    const r = await mgr.runOrchestratorTool(orc.id, 'control_notify', {
-      text: 'The session is blocked on an external approval.',
-      sessionId: s.id,
-      priority: 'high',
-    })
-    expect(r.isError).not.toBe(true)
-
-    const state = mgr.appState('control')
-    expect(state.enabled).toBe(true)
-    const doc = state.doc as { notifies: { text: string; sessionId?: string; priority?: string }[] }
-    expect(doc.notifies).toHaveLength(1)
-    expect(doc.notifies[0]).toMatchObject({ text: 'The session is blocked on an external approval.', sessionId: s.id, priority: 'high' })
-    // A signal for the UI to re-read — it does not carry what changed (a deliberately coarse event).
-    expect(events.some((e) => e.type === 'app_state_changed' && e.appId === 'control')).toBe(true)
-
-    // A notification pointing at a nonexistent session would have its jump button point at nothing — filtered
-    // out at proposal time.
-    const bad = await mgr.runOrchestratorTool(orc.id, 'control_notify', { text: 'x', sessionId: 'ghost' })
-    expect(bad.isError).toBe(true)
-  })
-
-  it('a disabled app disappears from both exposure and execution — its state remains', async () => {
-    const orc = await mgr.orchestrator()
-    await mgr.runOrchestratorTool(orc.id, 'control_notify', { text: 'should remain' })
-
-    mgr.setAppEnabled('control', false)
-
+  it('no profile is offered its tools, and an in-flight call to one is refused', async () => {
     const { orchestratorToolSchemas } = await import('./orchestrator-tools.js')
-    expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'control_notify')).toBe(false)
+    for (const profile of ['orchestrator', 'manager', 'scoped', 'builder', 'reader'] as const) {
+      expect(orchestratorToolSchemas(profile).map((t) => t.name).filter((n) => RETIRED.includes(n))).toEqual([])
+    }
+    const orc = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orc.id, 'control_notify', { text: 'x' })
-    expect(r.isError).toBe(true)
-    // Turning it off is not deleting it — the document is unchanged.
-    expect((mgr.appState('control').doc as { notifies: unknown[] }).notifies).toHaveLength(1)
-
-    mgr.setAppEnabled('control', true)
-    expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'control_notify')).toBe(true)
+    expect(r).toEqual({ text: 'Unknown tool: control_notify', isError: true })
   })
-})
 
-describe('app observation hooks (#81) — a watch reacts to broadcasts', () => {
-  it('a tool call matching a watch pattern stands as a rail notification', async () => {
+  it('its stored document is left in place, still answered, and no longer reacts to tool calls', async () => {
+    const doc = { notifies: [], watches: [{ id: 'w1', pattern: 'git commit' }], tasks: [] }
+    mgr.setAppDoc('control', doc)
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    mgr.setAppDoc('control', { notifies: [], watches: [{ id: 'w1', pattern: 'git commit' }] })
-
-    // Through the same path the adapter streams events — onEvent -> (wrapped) emit -> observation hook.
     const sink = (adapter.last as unknown as { emit: (e: NormalizedEvent) => void }).emit
     sink({
       type: 'tool_call', sessionId: s.id, callId: 'c1',
@@ -4360,26 +4327,18 @@ describe('app observation hooks (#81) — a watch reacts to broadcasts', () => {
     } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 10))
 
-    const doc = mgr.appState('control').doc as { notifies: { text: string; priority?: string }[] }
-    expect(doc.notifies).toHaveLength(1)
-    expect(doc.notifies[0]!.priority).toBe('high')
-    expect(events.some((e) => e.type === 'app_state_changed' && e.appId === 'control')).toBe(true)
-
-    // Turning off the app stops observation too.
-    mgr.setAppEnabled('control', false)
-    sink({
-      type: 'tool_call', sessionId: s.id, callId: 'c2',
-      summary: { tool: 'Bash', title: 'git commit again', readOnly: false, paths: [] },
-    } as NormalizedEvent)
-    await new Promise((r) => setTimeout(r, 10))
-    expect((mgr.appState('control').doc as { notifies: unknown[] }).notifies).toHaveLength(1)
+    // The watch no longer fires — the document is exactly what was written
+    expect(mgr.appState('control').doc).toEqual(doc)
+    // A restart deletes nothing
+    const again = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
+    expect(again.appState('control').doc).toEqual(doc)
   })
 })
 
 /**
  * A coordinator session (#80/#81) — the core's nameless mechanics: a sight allow-list plus a
- * fixed role script. The meaning of "task/foreman" belongs to the app; what is tested here is
- * the boundary of capability.
+ * fixed role script. The meaning (a task's foreman, once) belongs to the caller; what is tested
+ * here is the boundary of capability.
  */
 describe('coordinator sessions — an orchestrator-type with clipped sight (#80/#81)', () => {
   it('sight is entirely an allow-list, the role script rides along at spawn, and members must be workers', async () => {
@@ -4545,73 +4504,19 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
     expect(adapter.lastOpts?.toolProfile).toBe('scoped')
   })
 
-  it('a session an app created previously gets its ownership recorded at startup — an old row still goes under its own app', async () => {
-    const orc = await mgr.orchestrator()
+  it('a foreman the removed control app stood up loads after a restart as an ordinary coordinator (#97)', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-    await mgr.runOrchestratorTool(orc.id, 'control_create_task', {
-      title: 'Old task', goal: 'g', memberSessionIds: [a.id],
+    const c = await mgr.createCoordinator({
+      name: 'Old task', memberSessionIds: [a.id], roleAppend: 'You are the foreman of the task', tool: 'claude', appId: 'control',
     })
-    const doc = mgr.appState('control').doc as { tasks: { coordinatorId: string }[] }
-    const coordId = doc.tasks[0]!.coordinatorId
 
-    // Simulates a row created before the appId column existed — ownership is empty.
-    const before = mgr.listSessions().find((s) => s.id === coordId)!
-    store.upsertSession({ ...before, appId: null })
-
-    // On the next startup, the app claims it as its own, and the core records it.
-    const again = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
-    expect(again.listSessions().find((s) => s.id === coordId)?.appId).toBe('control')
-  })
-
-  it('creating a task in the control app — one orchestrator tool call stands up the foreman, board, and task together', async () => {
-    const orc = await mgr.orchestrator()
-    const p = await addProject()
-    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
-
-    const r = await mgr.runOrchestratorTool(orc.id, 'control_create_task', {
-      title: 'Implement the skill', goal: 'See skill X through to the end', memberSessionIds: [a.id],
-    })
-    expect(r.isError).not.toBe(true)
-
-    const doc = mgr.appState('control').doc as { tasks: { id: string; coordinatorId: string; status: string }[] }
-    expect(doc.tasks).toHaveLength(1)
-    const task = doc.tasks[0]!
-    const foreman = mgr.listSessions().find((s) => s.id === task.coordinatorId)!
-    expect(foreman.kind).toBe('coordinator')
-    expect(foreman.scopeSessionIds).toEqual([a.id])
-    expect(foreman.roleAppend).toContain('foreman')
-    expect(foreman.roleAppend).toContain(task.id) // The role script knows its own task id.
-    /*
-     * The owning app is recorded on the row (#81, user request 2026-09-09). The value comes not
-     * from an argument but from **the binding of the app that called the tool**, so an app
-     * cannot claim someone else's name. This one field is what decides "who shows this session,"
-     * and the sidebar takes it when it is empty.
-     */
-    expect(foreman.appId).toBe('control')
-
-    // The foreman writes to the board, and it is allowed since it is not an outsider (scoped, not the
-    // orchestrator).
-    const upd = await mgr.runOrchestratorTool(task.coordinatorId, 'board_update', {
-      taskId: task.id, content: '# Progress: step 1 done',
-    })
-    expect(upd.isError).not.toBe(true)
-    const read = await mgr.runOrchestratorTool(task.coordinatorId, 'board_read', { taskId: task.id })
-    expect(read.text).toContain('step 1 done')
-
-    // Closing out -> status done + a completion notice on the person's rail.
-    const done = await mgr.runOrchestratorTool(task.coordinatorId, 'control_task_done', {
-      taskId: task.id, summary: 'all passed',
-    })
-    expect(done.isError).not.toBe(true)
-    const after = mgr.appState('control').doc as { tasks: { status: string }[]; notifies: { text: string }[] }
-    expect(after.tasks[0]!.status).toBe('done')
-    expect(after.notifies.some((n) => n.text.includes('Task done') && n.text.includes('all passed'))).toBe(true)
-
-    // A foreman cannot create a task — blocked from both exposure and execution (depth-1).
-    await expect(
-      mgr.runOrchestratorTool(task.coordinatorId, 'control_create_task', { title: 'x', goal: 'y', memberSessionIds: [a.id] }),
-    ).rejects.toThrow(/Not a tool of this session/)
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
+    const row = restarted.listSessions().find((x) => x.id === c.id)!
+    expect(row).toMatchObject({ kind: 'coordinator', appId: 'control', scopeSessionIds: [a.id], projectId: null })
+    expect(restarted.toolProfileOf(c.id)).toBe('scoped')
+    const list = await restarted.runOrchestratorTool(c.id, 'list_sessions', {})
+    expect(list.text).toContain(a.id)
   })
 })
 

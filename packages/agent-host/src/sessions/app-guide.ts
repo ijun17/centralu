@@ -15,7 +15,7 @@
  *
  * **The one exception: the tool list is not written by hand** (M4 P-4). The hand-written list was
  * wrong twice: it kept advertising `archive_session` even after the archive feature was removed
- * (58d2335), and it knew nothing at all about the control-rail app's tools (#81). Which seat can
+ * (58d2335), and it knew nothing at all about the control-rail app's tools (#81, since removed). Which seat can
  * call which tool is already decided by the tool registry (orchestrator-tools.ts), so that
  * decision is taken as-is and rendered here (`GuideSeats`). The registry is also compiled code,
  * so the reason above (nothing is read from a file at runtime) still holds. Tool names left in
@@ -33,7 +33,7 @@ export type GuideTool = { name: string; description: string }
  * every other session gets (#320).
  *
  * The caller (orchestrator-tools.ts) fills this in from the registry's decisions
- * (profileAllows, appToolEntries). Why this file does not import the registry: the registry
+ * (profileAllows, toolDefsFor). Why this file does not import the registry: the registry
  * imports this file's topic list to draw the app_guide schema — wiring the import the other way
  * too would create a cycle.
  */
@@ -83,28 +83,18 @@ One session = one agent process (Claude Code or Codex).
   exception (Settings → Orchestrator).`,
 
   apps: `# Apps
-Experimental features arrive as apps. Turn each one on or off in Settings → Apps — turning one off
-retires its screen and tools while keeping its data. The only app right now is the Control rail,
-and it is on by default.
-
-## Control rail
-The right-hand rail on the orchestrator screen (drag the left edge to resize it). It has four panes.
-- Notices: alerts that call out the person by name. An agent raises one with control_notify, and
-  one also appears when a watch (below) fires or a task finishes. The person clears it with ×; an
-  agent can only raise one, not clear it.
-- My turn: sessions waiting on the person. Approving, rejecting, and a one-line reply (Reply…) can
-  all be finished right in the rail.
-- Tasks: work items. + New task sets a name, a goal, and member sessions, and a lead (coordinating
-  session) that watches only that task stands up. The lead splits work among its members, writes
-  status on the task board, and calls the person to the rail when needed. The orchestrator can also
-  create a task with control_create_task. Finished tasks move down under Done.
-- Running: the sessions working right now, and the last thing each one said.
-Settings → Apps → Control rail panel: how many times the rail has been used, the tool, model, and
-reasoning effort used to spin up a lead (Claude and high by default), and Watches. A watch is a
-literal match against one line of a tool call, and firing it raises an urgent notice in the rail.
-It does not stop the agent.
-When the Control app is off, lead sessions still show in the sidebar's No app list — turning off
-the app does not cut off access to the session.`,
+An app is a small tool built where it is used: a folder with a manifest (centralu.app.json) and an
+MCP server. A person uses it through its screen, and agents call the same tools.
+- Where they live: a project's apps are committed with that project and run only if the project is
+  trusted; your own apps (the user folder) work in every project.
+- Making one: a project row's ⋯ menu → New app…, or the + on "Your apps" in the sidebar. A builder
+  session starts and writes the app with you.
+- Using one: apps stand in the sidebar under their project (your own under "Your apps"); opening one
+  shows its screen in the main area, and it can be pinned into the grid. When an agent calls an
+  app tool that has a screen, the screen opens under that call's card in the conversation.
+- Which sessions get which apps: the orchestrator gets your own apps, a project's sessions get
+  that project's apps.
+- Settings → Apps lists every app with its status and, when something is wrong, why.`,
 
   approvals: `# Approvals and permissions
 Every session has a permission preset: Safe (ask for everything), Normal (ask when risky), Auto
@@ -127,7 +117,7 @@ Every session has a permission preset: Safe (ask for everything), Normal (ask wh
 Changing a live session's settings restarts the conversation in place — the change applies from
 the next turn on.
 App settings (the Settings button in the top bar): Orchestrator (change the orchestrator's tools
-and approved skills, and whether every session can look at its own project), Apps, Notifications, Appearance, Permissions (saved approval rules),
+and approved skills, and whether every session can look at its own project), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
 Shortcuts (the shortcut list), and Updates.`,
 
   updates: `# Updates
@@ -170,13 +160,13 @@ There are three seats that direct sessions.
 - The worktree manager: one per project. It appears automatically the first time a worktree session
   is created, or it can be started ahead of time from the project's ⋯ menu → Start worktree manager.
   It only watches and directs its own worktree children.
-- The lead (a coordinating session): created by a task in the Control app (see the apps topic). It
-  only watches and directs its assigned member sessions, and it cannot create or delete sessions.
+- A coordinating session: it only watches and directs its assigned member sessions, and it cannot
+  create or delete sessions. Nothing in the app creates a new one right now; one created earlier
+  keeps working and appears in the sidebar's No app list.
 None of them can approve on another session's behalf — the target session's approval settings stay
 exactly as they are.
 
-The list below is generated directly from the app's tool registry. A turned-off app's tools are
-left out.
+The list below is generated directly from the app's tool registry.
 
 ## Tools the orchestrator calls
 ${toolLines(seats.orchestrator)}
@@ -184,7 +174,7 @@ ${toolLines(seats.orchestrator)}
 ## Tools the worktree manager calls
 ${toolLines(seats.manager)}
 
-## Tools the lead calls
+## Tools a coordinating session calls
 ${toolLines(seats.scoped)}
 
 ## Tools every other session calls

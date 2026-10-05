@@ -8794,160 +8794,6 @@ test('The orchestrator is still the orchestrator screen when entered via the inb
   await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
 })
 
-/*
- * The control rail (#80/#81) — the person's workbench. Turns awaiting me line up as rows, a
- * one-line reply is settled right in the row, machine notifications (control_notify) plug in,
- * and the toggle turns it off without a trace.
- */
-test('Control rail: inline replies for my turn, notifications, and the toggle all work from the orchestrator screen', async ({
-  page,
-}) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'rail test')
-  const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
-  // End the turn to put the session into "my turn" — end only after confirming working (to avoid
-  // reversing event order)
-  await expect
-    .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
-    .toBe('working')
-  await page.evaluate((sid: string) => {
-    const m = (window as any).__mock
-    m.emit({ type: 'turn_complete', sessionId: sid })
-    m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
-  }, id)
-
-  await page.getByTestId('orchestrator-button').click()
-  await expect(page.getByTestId('control-rail')).toBeVisible()
-
-  // A row appears for my turn, and an inline reply in that row reaches the session — turning the
-  // gears without ever opening the session
-  await expect(page.getByTestId(`rail-turn-${id}`)).toBeVisible()
-  await page.getByTestId(`rail-input-${id}`).fill('keep going')
-  await page.getByTestId(`rail-input-${id}`).press('Enter')
-  await expect
-    .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
-    .toBe('working')
-
-  // In a running row, **the words are the source of truth, the tool is secondary** — letting a
-  // tool title bury the narrative loses the context
-  await page.evaluate((sid: string) => {
-    const m = (window as any).__mock
-    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'Fixing the sorting issue' })
-    m.emit({
-      type: 'tool_call',
-      sessionId: sid,
-      callId: 'c9',
-      summary: { tool: 'Bash', title: 'pnpm verify', readOnly: false, paths: [] },
-    })
-  }, id)
-  await expect(page.getByTestId(`rail-running-${id}`)).toContainText('Fixing the sorting issue')
-  await expect(page.getByTestId(`rail-running-${id}`)).toContainText('Bash: pnpm verify')
-
-  // An inline reply is recorded as a measured count — "is this still being used" is a number, not
-  // a feeling
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => ((window as any).__store.getState().apps['control']?.doc?.metrics ?? {}).inlineReplies ?? 0,
-      ),
-    )
-    .toBeGreaterThan(0)
-
-  // A machine notification — the person reads it and dismisses it
-  await page.evaluate(() => {
-    void (window as any).__store.getState().setAppDoc('control', {
-      notifies: [{ id: 'n1', text: 'Session 3 is blocked on an external condition', priority: 'high', ts: 1 }],
-    })
-  })
-  await expect(page.getByTestId('rail-notify-n1')).toContainText('blocked')
-  await page.getByTestId('rail-notify-dismiss-n1').click()
-  await expect(page.getByTestId('rail-notify-n1')).toHaveCount(0)
-
-  // Resizing — drag the left edge, double-click resets to the default width. Since this is a way
-  // of viewing, it persists in the workspace
-  const railBox = async () => (await page.getByTestId('app-rails').boundingBox())!
-  const before = (await railBox()).width
-  const handle = (await page.getByTestId('rail-resize').boundingBox())!
-  await page.mouse.move(handle.x + handle.width / 2, handle.y + 100)
-  await page.mouse.down()
-  await page.mouse.move(handle.x + handle.width / 2 - 120, handle.y + 100)
-  await page.mouse.up()
-  expect((await railBox()).width).toBeGreaterThan(before + 60)
-  await page.getByTestId('rail-resize').dblclick()
-  expect(Math.abs((await railBox()).width - before)).toBeLessThan(4)
-
-  // Toggling off = the rail withdraws without a trace (it is not deleted)
-  await page.keyboard.press('Meta+k')
-  await page.getByTestId('palette-input').fill('settings')
-  await page.getByTestId('palette-item-action').click()
-  await page.getByTestId('settings-tab-apps').click()
-  // The watch-declaration editor (#80 checkpoint v1) — the pattern persists in the document
-  // (judging it is the host's observation hook's job)
-  await page.getByTestId('watch-pattern').fill('git commit')
-  await page.getByTestId('watch-add').click()
-  await expect
-    .poll(() =>
-      page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length),
-    )
-    .toBe(1)
-  await page.locator('[data-testid^="watch-remove-"]').click()
-  await expect
-    .poll(() =>
-      page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length),
-    )
-    .toBe(0)
-
-  await page.getByTestId('app-toggle-control').locator('input').uncheck()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('control-rail')).toHaveCount(0)
-})
-
-/*
- * Creating a task (#80 purpose 2): picking members creates a coordinator, reachable from both
- * the sidebar and the rail. The core creation logic lives in the host's app tool (covered by
- * unit tests) — this checks the wiring of the human path.
- */
-test('Creating a task: rail dialog -> coordinator session -> appears in the sidebar and the rail', async ({
-  page,
-}) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'session that will become a member')
-  const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
-
-  await page.getByTestId('orchestrator-button').click()
-  await page.getByTestId('rail-new-task').click()
-  await page.getByTestId('task-title').fill('Implement the skill')
-  await page.getByTestId('task-goal').fill('See skill X all the way through')
-  await page.getByTestId(`task-member-${workerId}`).check()
-  await page.getByTestId('task-create').click()
-  await expect(page.getByTestId('new-task-dialog')).toBeHidden()
-
-  // It went through the same door (control_create_task) — the human path is also just one host tool
-  const invoke = await page.evaluate(() => (window as any).__mock.lastInvoke)
-  expect(invoke.name).toBe('control_create_task')
-  expect(invoke.args.memberSessionIds).toEqual([workerId])
-
-  /*
-   * The coordinator appears **only in its own app's row** (requested by the person, 2026-09-09).
-   * It used to also show up in the sidebar as the same thing under a different-looking row, so
-   * both grew longer together as tasks piled up.
-   */
-  await expect(page.getByTestId('rail-tasks')).toContainText('Implement the skill')
-  await expect(page.locator('[data-testid^="homeless-row-"]')).toHaveCount(0)
-
-  // Members appear by name (2026-09-06) — a bare count did not say which sessions the task
-  // belonged to
-  await expect(page.getByTestId('rail-tasks')).toContainText('session that will become a member')
-  // Clicking the chip navigates to that session
-  await page.locator(`[data-testid^="rail-task-member-"][data-testid$="-${workerId}"]`).click()
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId))
-    .toBe(workerId)
-  // The coordinator does not appear in the rail's "my turn"/"running" rows — the meta layer
-  // belongs to the Tasks section
-  await expect(page.locator('[data-testid^="rail-turn-coord"]')).toHaveCount(0)
-})
-
 /**
  * The model list is **a tool's own vocabulary** (dogfooding, 2026-09-09: "this is a claude
  * session, but codex models are showing").
@@ -9037,38 +8883,53 @@ test('Being connected stays quiet, and a disconnect states itself where the donu
 })
 
 /**
- * Turning off an app hands its sessions over to the sidebar (requested by the person,
- * 2026-09-09).
- *
- * There is one rule: the app that gave it meaning is its home, and with no home, the sidebar
- * takes it in. Without this, a single toggle would wipe a session off the screen entirely —
- * there would be no way left to talk to it.
+ * A coordinator the removed control app (#97) stood up as a task's foreman, the way it sits in the
+ * store after the upgrade: no project, members in its scope, `appId: 'control'`. Nothing in the app
+ * creates one any more, so it is planted in the mock the way the host would load it.
  */
-test('Turning off the control app moves the coordinator session down to the sidebar', async ({ page }) => {
+async function plantForeman(page: Page, memberId: string, name: string): Promise<string> {
+  return page.evaluate(
+    ({ memberId, name }) => {
+      const m = (window as any).__mock
+      const member = m.sessions.get(memberId)
+      const id = 'coord-foreman-1'
+      const session = {
+        ...member,
+        id,
+        projectId: null,
+        kind: 'coordinator',
+        name,
+        autoNamed: false,
+        worktree: null,
+        parentSessionId: null,
+        scopeSessionIds: [memberId],
+        roleAppend: 'You are the foreman of the task',
+        appId: 'control',
+      }
+      m.sessions.set(id, session)
+      m.emit({ type: 'session_created', sessionId: id, session })
+      return id
+    },
+    { memberId, name },
+  )
+}
+
+/**
+ * A foreman left behind by the removed control app (#97) is still reachable. It used to be drawn as
+ * its task's row in the control rail; with the rail gone, the sidebar's list of sessions with no
+ * project takes it in, so it can still be found by name and opened.
+ */
+test('A foreman left by the removed control app stands in the sidebar and opens', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'session that will become a member')
-  const workerId = await page.evaluate(
-    () => [...(window as never as { __mock: any }).__mock.sessions.keys()][0],
-  )
+  const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
-  await page.getByTestId('orchestrator-button').click()
-  await page.getByTestId('rail-new-task').click()
-  await page.getByTestId('task-title').fill('Implement the skill')
-  await page.getByTestId('task-goal').fill('See skill X all the way through')
-  await page.getByTestId(`task-member-${workerId}`).check()
-  await page.getByTestId('task-create').click()
-  await expect(page.getByTestId('new-task-dialog')).toBeHidden()
-  // While the app is on, it lives only in the app's own row
-  await expect(page.locator('[data-testid^="homeless-row-"]')).toHaveCount(0)
+  const foremanId = await plantForeman(page, workerId, 'Implement the skill')
 
-  await page.evaluate(() =>
-    (window as never as { __store: any }).__store.getState().setAppEnabled('control', false),
-  )
-
-  // With its home gone, the sidebar takes it in — it must be findable and openable by name
   await expect(page.getByTestId('homeless-sessions')).toContainText('Implement the skill')
-  await page.locator('[data-testid^="homeless-row-"]').first().click()
+  await page.getByTestId(`homeless-row-${foremanId}`).click()
   await expect(page.getByTestId('session-view')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(foremanId)
 })
 
 /*
@@ -9090,16 +8951,10 @@ test('Opening a coordinator session shows an empty evidence panel — it does no
   // Was viewing alpha — the evidence panel is drawing alpha
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 
-  await page.getByTestId('orchestrator-button').click()
-  await page.getByTestId('rail-new-task').click()
-  await page.getByTestId('task-title').fill('Implement the skill')
-  await page.getByTestId('task-goal').fill('See skill X all the way through')
-  await page.getByTestId(`task-member-${workerId}`).check()
-  await page.getByTestId('task-create').click()
+  const coordinatorId = await plantForeman(page, workerId, 'Implement the skill')
 
-  // Open the coordinator (the task row is the coordinator) — with no project on that session, the
-  // evidence lane itself must not exist
-  await page.locator('[data-testid^="rail-task-open-"]').first().click()
+  // Open the coordinator — with no project on that session, the evidence lane itself must not exist
+  await page.getByTestId(`homeless-row-${coordinatorId}`).click()
   await expect(page.getByTestId('session-view')).toBeVisible()
   await expect(page.getByTestId('evidence-panel')).toHaveCount(0)
   await expect(page.getByTestId('evidence-rail-shell')).toHaveCount(0)

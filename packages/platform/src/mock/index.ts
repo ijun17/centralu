@@ -95,13 +95,6 @@ import type {
  * (that would split the contract apart).
  */
 
-/**
- * The ids of built-in apps — the same list as the host's `reservedIds` (HOST_APPS). An
- * external app cannot take one of these names (`apps.invoke` uses it to decide which side to
- * call). The mock cannot import the host's registry, so it is written out here as one line.
- */
-const MOCK_BUILTIN_APPS: readonly string[] = ['control']
-
 export type MockOptions = {
   /** A deterministic clock — for testing elapsed waiting time */
   now?: () => number
@@ -890,56 +883,7 @@ export class MockPlatform implements Platform {
   /** The previous conversation of a session chosen to be imported (externalId → list of lines) */
   externalHistory = new Map<string, { role: 'user' | 'assistant'; text: string }[]>()
 
-  /** App state (#81) — the mock's disk is memory. The same rule as the real thing: broadcasts on write */
-  appDocs = new Map<string, unknown>()
-  appDisabled = new Set<string>()
   readonly apps = {
-    state: async (appId: string) => ({
-      doc: this.appDocs.get(appId) ?? null,
-      enabled: !this.appDisabled.has(appId),
-    }),
-    setState: async (appId: string, doc: unknown) => {
-      this.appDocs.set(appId, doc)
-      this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
-    },
-    setEnabled: async (appId: string, enabled: boolean) => {
-      if (enabled) this.appDisabled.delete(appId)
-      else this.appDisabled.add(appId)
-      this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
-    },
-    /**
-     * The person calling an app tool directly (#81). The mock's disk is memory — the real
-     * logic of the host's app is covered by the host's unit tests, and this is just the
-     * minimal fake that e2e needs.
-     */
-    invoke: async (appId: string, name: string, args: Record<string, unknown>) => {
-      this.lastInvoke = { appId, name, args }
-      if (name === 'control_create_task') {
-        const members = (args.memberSessionIds as string[]) ?? []
-        const id = `coord-${++this.idc}`
-        const title = String(args.title ?? 'Task')
-        this.sessions.set(id, {
-          id, projectId: null, kind: 'coordinator', tool: 'claude', externalId: null,
-          name: title, autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
-          createdAt: this.now(), waitingSince: null, live: true, model: null, effort: 'high',
-          verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null,
-          worktree: null, parentSessionId: null, scopeSessionIds: members, roleAppend: '(mock role)',
-          // The same rule as the real thing (#81): the owning app is the registered id of the app that called the tool — an app cannot make one up
-          appId,
-          ...sessionLiveDefaults(),
-        })
-        this.emit({ type: 'session_created', sessionId: id, session: this.sessions.get(id) } as NormalizedEvent)
-        const doc = (this.appDocs.get(appId) as { tasks?: unknown[] } | undefined) ?? {}
-        const tasks = [
-          ...((doc.tasks as unknown[]) ?? []),
-          { id: `t-${this.idc}`, title, goal: String(args.goal ?? ''), members, coordinatorId: id, status: 'active', createdAt: this.now() },
-        ]
-        this.appDocs.set(appId, { ...doc, tasks })
-        this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
-        return { text: `Created the task "${title}"` }
-      }
-      return { text: `mock: ${name}` }
-    },
     /**
      * The app screen (M4 B-3). There is no host in the mock, so no address can be constructed.
      * A test plugs in a function that starts the real host's proxy and supplies an address here
@@ -1088,7 +1032,7 @@ export class MockPlatform implements Platform {
     /**
      * A new app (M4 C-1). Like the real thing (`ExternalApps.createApp` →
      * `SessionManager.createAppBuilder`): rejects using the same checks (protocol's
-     * `newAppIdProblem`, built-in app ids, trust, an existing id) — the rejection wording is
+     * `newAppIdProblem`, reserved ids, trust, an existing id) — the rejection wording is
      * exactly the host's, and a test checks that the window shows it as-is — then adds it to
      * the list, broadcasts, and creates the builder session. The app stays even if the session
      * fails to start.
@@ -1096,8 +1040,8 @@ export class MockPlatform implements Platform {
     create: async (spec: NewAppSpec): Promise<AppCreated> => {
       this.createdApps.push(structuredClone(spec))
       const idProblem = newAppIdProblem(spec.id)
+      if (idProblem === 'builtin') throw new Error(`"${spec.id}" cannot be an app id — that id is reserved — pick another`)
       if (idProblem) throw new Error(`"${spec.id}" cannot be an app id — ${idProblem}`)
-      if (MOCK_BUILTIN_APPS.includes(spec.id)) throw new Error(`"${spec.id}" cannot be an app id — that is the id of a built-in app — pick another`)
       const name = spec.name.replace(/\s+/g, ' ').trim()
       if (!name) throw new Error('The app needs a name')
       let dir = `/mock/data/apps/${spec.id}`
@@ -1555,7 +1499,6 @@ export class MockPlatform implements Platform {
     this.externalAppList = structuredClone(list)
     this.emit({ type: 'external_apps_changed' })
   }
-  lastInvoke: { appId: string; name: string; args: Record<string, unknown> } | null = null
   /** The side that builds a screen's address (a test plugs this in) */
   viewFrameProvider:
     | ((appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) => Promise<AppViewFrame>)

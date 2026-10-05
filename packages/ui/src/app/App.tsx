@@ -31,18 +31,6 @@ import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 import { isOsFileDrag, markInternalDrags } from '../features/files/dragPath.js'
-import { attachAppHost } from '../apps/host.js'
-import { storeAppHost } from '../store/app-host.js'
-
-/*
- * Attach the host to the app runtime (#97) — module scope, so this runs before the first render.
- *
- * Every app (rail, settings, dedicated screens) is rendered somewhere below this file, so
- * attaching the host here once means it is standing before any app stands, no matter which
- * entry point (desktop, web) the person came in through. Attaching it inside an effect would
- * mean the first render meets an empty host.
- */
-attachAppHost(storeAppHost)
 
 export function App({
   platform,

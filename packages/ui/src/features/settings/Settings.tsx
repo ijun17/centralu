@@ -7,7 +7,6 @@ import { useTools } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
-import { APPS } from '../../apps/registry.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
@@ -352,53 +351,29 @@ export function Settings() {
 }
 
 /**
- * The app list (#81) — one toggle row per app in the registry, plus a settings panel the app
- * brought with it. Turning one off is not deletion: its state stays, only the view and tools
- * step back — the etiquette of an experimental feature.
+ * The app list (M4 A-8) — one row per external app, with a status and a reason per scope
+ * (project or user folder). An app from an untrusted project, and a broken app, are not hidden
+ * either. Hiding one would leave no way to ask why it is not showing up.
  *
- * External apps (M4 A-8) stand in the same list. There is one registry (`app-catalog.ts`): a
- * built-in app gets an on/off row, an external app gets a row with a status and a reason per
- * scope (project or user folder). An app from an untrusted project, and a broken app, are not
- * hidden either. Hiding one would leave no way to ask why it is not showing up.
+ * Built-in apps used to stand at the top of this list with an on/off toggle each; the only one,
+ * the control rail, was removed in #97.
  */
 function AppsSettings() {
   const catalog = useAppCatalog()
   const projects = useStore((s) => s.projects)
-  const ensure = useStore((s) => s.ensureAppState)
-  const setEnabled = useStore((s) => s.setAppEnabled)
-  useEffect(() => {
-    for (const a of APPS) void ensure(a.id)
-  }, [ensure])
   const projectIds = Object.keys(catalog.byProject)
   return (
     <section data-testid="settings-apps">
       <p className="text-xs leading-body text-ink-faint">
-        Experimental surfaces built on the app layer. Turning one off hides its UI and tools —
-        its data stays until the app itself is removed.
+        Apps found in your projects and your own apps folder, and how each one is doing.
       </p>
-      <ul className="mt-3 space-y-2">
-        {catalog.builtin.map(({ module: a, enabled }) => (
-          <li key={a.id} className="rounded-md border border-line bg-surface-raised px-3 py-2">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-ink" data-testid={`app-toggle-${a.id}`}>
-              <input
-                type="checkbox"
-                className="accent-ink-muted"
-                checked={enabled}
-                onChange={(e) => void setEnabled(a.id, e.target.checked)}
-              />
-              <span>{a.title}</span>
-              <span className="readout ml-auto text-2xs text-ink-faint">{a.id}</span>
-            </label>
-            {enabled && a.settingsPanel && (
-              <div className="mt-2 border-t border-line pt-2">
-                <a.settingsPanel />
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
+      {catalog.external.length === 0 && (
+        <p className="mt-3 text-xs leading-body text-ink-muted" data-testid="settings-apps-empty">
+          No apps yet.
+        </p>
+      )}
       {catalog.external.length > 0 && (
-        <div className="mt-5 border-t border-line pt-3" data-testid="settings-external-apps">
+        <div className="mt-3" data-testid="settings-external-apps">
           {projectIds.map((pid) => (
             <div key={pid} className="mb-4">
               {/* The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up */}

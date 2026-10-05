@@ -26,7 +26,7 @@ export function interruptNotice(all: readonly BackgroundTask[]): string | null {
   return line.charAt(0).toUpperCase() + line.slice(1)
 }
 
-/** The number the header, the sidebar and the control rail show — running tasks that are activity (ambient excluded). */
+/** The number the header and the sidebar show — running tasks that are activity (ambient excluded). */
 export function backgroundCount(all: readonly BackgroundTask[]): number {
   return liveBackgroundTasks(all).length
 }

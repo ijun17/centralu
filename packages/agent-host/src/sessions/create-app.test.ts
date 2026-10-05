@@ -113,14 +113,14 @@ describe('apps.create', () => {
     expect(existsSync(join(repo, '.centralu'))).toBe(false)
   })
 
-  it('refuses names it cannot use — a centralu or app- prefix, underscores, uppercase letters, a built-in app\'s id', async () => {
+  it('refuses names it cannot use — a centralu or app- prefix, underscores, uppercase letters, a reserved id', async () => {
     const refused: Record<string, RegExp> = {
       'centralu-tools': /ids starting with "centralu" belong to Centralu itself/,
       'app-notes': /ids starting with "app-" are how apps attach to sessions/,
       'my_app': /lowercase letters, digits and hyphens \(up to 32\)/,
       'a__b': /lowercase letters, digits and hyphens \(up to 32\)/,
       Notes: /lowercase letters, digits and hyphens \(up to 32\)/,
-      control: /that is the id of a built-in app/,
+      control: /that id is reserved/,
     }
     for (const [id, why] of Object.entries(refused)) {
       await expect(create({ projectId, id, name: 'X' }), id).rejects.toThrow(why)

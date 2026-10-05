@@ -163,7 +163,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     expect(adapter.seen.length).toBe(before)
   })
 
-  it('cannot be proposed under the name of an existing app or a built-in app — overwriting would be swapping out the command', async () => {
+  it('cannot be proposed under the name of an existing app or a reserved id — overwriting would be swapping out the command', async () => {
     connect()
     const { orc } = await proposeAndApprove('dup')
     const again = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'dup', command: 'evil', args: [] })

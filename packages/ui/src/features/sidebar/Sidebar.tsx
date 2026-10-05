@@ -6,7 +6,6 @@ import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js
 import { BackgroundMark } from '../session/BackgroundTasks.jsx'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
-import { APPS } from '../../apps/registry.js'
 import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
 import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import {
@@ -325,29 +324,18 @@ function OrchestratorButton() {
 /**
  * Homeless sessions (user request, 2026-09-09) — **the spot the sidebar catches them in**.
  *
- * This settled on one rule: **the app that gave a session its meaning is that session's home, and
- * when there is no home, the sidebar catches it.** That is why the foreman session no longer
- * stands here while the control app is enabled — the work-item row now is the foreman, so the same
- * thing no longer stands as two rows with different names the way it used to.
- *
- * The only sessions that land here are ones that lost somewhere to go: the app was disabled
- * (toggled off), the app disappeared from the registry, or an old row that no app ever claimed as
- * its own. The rule that **a session must still be reachable even after its app is disabled** is
- * kept by this list existing — otherwise a single toggle would erase a session from the screen.
- *
- * Sessions that belong to a project live under that project, so they do not come here.
+ * Sessions that belong to a project live under that project, and the orchestrator has its own
+ * row. Everything else with no project lands here, so it is always reachable: a session an app
+ * created outside a project, an old row that no app ever claimed, and a coordinator session the
+ * removed control app (#97) stood up as a task's foreman. That last one used to be drawn as the
+ * task's row in the control rail instead; with the rail gone it is an ordinary coordinator, and
+ * this list is what keeps it from vanishing off the screen.
  */
 function HomelessSessions() {
   const sessions = useStore((s) => s.sessions)
-  const apps = useStore((s) => s.apps)
   const focused = useStore((s) => s.focusedSessionId)
   const focusSession = useStore((s) => s.focusSession)
-  const homeless = Object.values(sessions).filter((s) => {
-    if (s.projectId || s.kind === 'orchestrator') return false
-    if (!s.appId) return true // no app claims ownership
-    if (!APPS.some((a) => a.id === s.appId)) return true // app has disappeared from the registry
-    return apps[s.appId]?.enabled === false // app is disabled
-  })
+  const homeless = Object.values(sessions).filter((s) => !s.projectId && s.kind !== 'orchestrator')
   if (homeless.length === 0) return null
   return (
     <div className="mt-1 space-y-0.5" data-testid="homeless-sessions">

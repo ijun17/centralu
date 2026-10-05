@@ -40,6 +40,6 @@ export function appIdHint(id: string, problem: NewAppIdProblem): string {
     case 'server-prefix':
       return `Ids starting with "${APP_SERVER_PREFIX}" are how apps attach to sessions. Pick another.`
     case 'builtin':
-      return `"${id}" is a built-in app.`
+      return `"${id}" is reserved. Pick another.`
   }
 }

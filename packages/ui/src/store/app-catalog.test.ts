@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ExternalAppInfo } from '@cc/protocol'
-import type { AppModule } from '../apps/contract.js'
 import { UNTRUSTED_REASON, appStatus, buildCatalog } from './app-catalog.js'
 
 /**
- * One app registry (M4 A-8) — built-in and external apps stand in the same list, and the rule
- * for reading status lives in one place.
+ * One app registry (M4 A-8) — every external app stands in one list, and the rule for reading
+ * status lives in one place.
  */
 
 const info = (appId: string, over: Partial<ExternalAppInfo> = {}): ExternalAppInfo => ({
@@ -13,17 +12,14 @@ const info = (appId: string, over: Partial<ExternalAppInfo> = {}): ExternalAppIn
   trusted: true, status: 'stopped', error: null, warnings: [], ...over,
 })
 
-const control: AppModule = { id: 'control', title: 'Control rail' }
-
 describe('the registry', () => {
-  it('built-in and external apps stand in one registry, and external apps are alphabetical within each scope (project or user folder)', () => {
-    const c = buildCatalog([control], { control: { doc: null, enabled: false } }, [
+  it('external apps stand in one registry, alphabetical within each scope (project or user folder)', () => {
+    const c = buildCatalog([
       info('zeta', { name: 'Zeta' }),
       info('alpha', { name: 'Alpha' }),
       info('timer', { projectId: null, name: 'Timer' }),
       info('notes', { projectId: 'p2', name: null, status: 'invalid', error: 'bad json' }),
     ])
-    expect(c.builtin).toEqual([expect.objectContaining({ kind: 'builtin', appId: 'control', title: 'Control rail', enabled: false })])
     expect(c.byProject['p1']?.map((a) => a.title)).toEqual(['Alpha', 'Zeta'])
     // A broken manifest has no name — the folder name stands in
     expect(c.byProject['p2']?.map((a) => [a.title, a.key])).toEqual([['notes', 'p2/notes']])

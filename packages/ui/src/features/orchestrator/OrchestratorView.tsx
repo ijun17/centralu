@@ -1,11 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
 import { composingKey, isComposerSendKey } from '../session/composerKeys.js'
-import { APPS } from '../../apps/registry.js'
-import { RAIL_DEFAULT, RAIL_MAX, RAIL_MIN } from '../../store/store.js'
-import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 
 /**
  * The orchestrator screen — **control by talking**.
@@ -36,12 +33,10 @@ export function OrchestratorView() {
   const skillProposals = useStore((s) => s.skillProposals)
   const resolveSkillProposal = useStore((s) => s.resolveSkillProposal)
 
-  // The rail (#81) stands even without an orchestrator session — a person's workbench is not an accessory to the chat
   if (!id)
     return (
       <div className="flex min-h-0 min-w-0 flex-1">
         <OrchestratorEmpty />
-        <AppRails />
       </div>
     )
   return (
@@ -123,11 +118,6 @@ export function OrchestratorView() {
           </button>
         </div>
       ))}
-      {/*
-        The chat (dispatch) sits in the center, the app rail (#80, #81) on the right — a control
-        surface. Just as the right side of a session screen is the evidence panel, the right
-        side of this screen is a place with a different identity: the person's workbench.
-      */}
       <div className="flex min-h-0 min-w-0 flex-1">
         <div className="relative flex min-w-0 flex-1 flex-col">
           <SessionPane sessionId={id} />
@@ -145,49 +135,7 @@ export function OrchestratorView() {
             </div>
           )}
         </div>
-        <AppRails />
       </div>
-    </div>
-  )
-}
-
-/**
- * The apps that stand in the rail (#81). All the core knows about an app is its one line in the
- * registry, and this just draws that registry — a disabled app is not drawn (not deleted).
- */
-function AppRails() {
-  const apps = useStore((s) => s.apps)
-  const ensure = useStore((s) => s.ensureAppState)
-  const railWidth = useStore((s) => s.railWidth)
-  const setRailWidth = useStore((s) => s.setRailWidth)
-  useEffect(() => {
-    for (const a of APPS) if (a.railPanel) void ensure(a.id)
-  }, [ensure])
-  const mounted = APPS.filter((a) => a.railPanel && (apps[a.id]?.enabled ?? true))
-  if (mounted.length === 0) return null
-  /*
-   * The width is the geometry of the slot (core) — the content belongs to the app, but how much
-   * room it takes up is the screen's job, so it is stored in the workspace. Same handle grammar
-   * as the evidence panel: drag the left edge, double-click resets to the default width.
-   */
-  return (
-    <div
-      className="relative flex shrink-0 border-l border-line"
-      style={{ width: `${railWidth}px` }}
-      data-testid="app-rails"
-    >
-      <ResizeHandle
-        side="left"
-        min={RAIL_MIN}
-        max={RAIL_MAX}
-        onResize={setRailWidth}
-        onReset={() => setRailWidth(RAIL_DEFAULT)}
-        testId="rail-resize"
-      />
-      {mounted.map((a) => {
-        const Rail = a.railPanel!
-        return <Rail key={a.id} />
-      })}
     </div>
   )
 }

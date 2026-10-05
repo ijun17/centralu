@@ -62,18 +62,22 @@ async function openAppsSettings(page: Page) {
   await page.getByTestId('settings-tab-apps').click()
 }
 
-test('the settings app list: built-in and external apps show in one list, and status and reason follow the broadcast', async ({ page }) => {
+test('the settings app list: every app shows in one list, and status and reason follow the broadcast', async ({ page }) => {
   await page.goto('/?mock=1')
   const pid = await addProject(page, '/tmp/alpha')
+  // With no apps yet, the list says so instead of standing empty
+  await openAppsSettings(page)
+  await expect(page.getByTestId('settings-apps-empty')).toBeVisible()
+
   await setApps(page, [
     app('notes', pid, { status: 'running' }),
     app('broken', pid, { name: null, status: 'invalid', error: 'centralu.app.json is not JSON' }),
     app('timer', null),
   ])
-  await openAppsSettings(page)
 
-  // A built-in app is a toggle row, as it is today
-  await expect(page.getByTestId('app-toggle-control')).toBeVisible()
+  // No built-in toggle row is left (the control rail went in #97)
+  await expect(page.locator('[data-testid^="app-toggle-"]')).toHaveCount(0)
+  await expect(page.getByTestId('settings-apps-empty')).toHaveCount(0)
   const list = page.getByTestId('settings-external-apps')
   // That project's apps under the project name, user-folder apps in their own group
   await expect(list).toContainText('alpha')

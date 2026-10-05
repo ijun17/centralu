@@ -148,13 +148,27 @@ export function sidebarSelectionTests(): void {
       const worker = await newSession(page, 'alpha')
       await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-selected', 'true')
 
-      await page.getByTestId('orchestrator-button').click()
-      await page.getByTestId('rail-new-task').click()
-      await page.getByTestId('task-title').fill('Coordinate the work')
-      await page.getByTestId('task-goal').fill('See it through')
-      await page.getByTestId(`task-member-${worker}`).check()
-      await page.getByTestId('task-create').click()
-      await page.locator('[data-testid^="rail-task-open-"]').first().click()
+      // Nothing in the app creates a coordinator since the control app went (#97); one loaded from an
+      // older store is planted the way the host would send it
+      const coordinator = await page.evaluate((memberId) => {
+        const m = (window as any).__mock
+        const id = 'coord-plain-1'
+        const session = {
+          ...m.sessions.get(memberId),
+          id,
+          projectId: null,
+          kind: 'coordinator',
+          name: 'Coordinate the work',
+          autoNamed: false,
+          worktree: null,
+          parentSessionId: null,
+          scopeSessionIds: [memberId],
+        }
+        m.sessions.set(id, session)
+        m.emit({ type: 'session_created', sessionId: id, session })
+        return id
+      }, worker)
+      await page.getByTestId(`homeless-row-${coordinator}`).click()
       await expect(page.getByTestId('session-view')).toBeVisible()
       // The focus lane, showing a session with no project — the case under test
       expect(

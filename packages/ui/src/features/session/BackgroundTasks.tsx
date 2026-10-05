@@ -11,7 +11,7 @@ import { useStore } from '../../store/store.js'
  *
  * On 2026-10-04 two background subagents stopped when the person interrupted the turn to rephrase a message, and
  * nothing on screen said they were gone; it took four hours for anyone to notice. So what runs behind the turn is
- * counted where the session is named (the header, the sidebar row, the control rail), and the list it opens keeps a
+ * counted where the session is named (the header, the sidebar row), and the list it opens keeps a
  * task that ended — stopped, failed or completed — with how it ended, until the person clears it.
  *
  * The count leaves out what the tool calls ambient (housekeeping, not activity), and ended tasks: it answers "is
@@ -239,7 +239,7 @@ function BackgroundTaskRow({
 }
 
 /**
- * The same count as a small mark, for a row that names the session elsewhere (the sidebar, the control rail).
+ * The same count as a small mark, for a row that names the session elsewhere (the sidebar).
  * Nothing when nothing runs: an ended task is the session's own business, read in its header.
  */
 export function BackgroundMark({ tasks, testId }: { tasks: readonly BackgroundTask[]; testId: string }) {

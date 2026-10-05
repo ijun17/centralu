@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
-import type { AppToolCaller, AppToolProfile, ToolOutput, ToolProfile } from '../apps/contract.js'
+import type { ToolCaller, ToolOutput, ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
 function trustedJsonText(value: string): string {
@@ -387,7 +387,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'the conversation you had with the person is the memory that crosses projects, and that memory is reached only by search.',
 ].join('\n')
 
-async function listSessionsText(tools: OrchestratorTools, caller: AppToolCaller): Promise<ToolOutput> {
+async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): Promise<ToolOutput> {
   const list = await tools.listSessions()
   if (list.length === 0) {
     return { text: caller.profile === 'reader' ? 'There are no other sessions in this project.' : 'There are no sessions under management.' }
@@ -419,22 +419,8 @@ export async function runOrchestratorTool(
   tools: OrchestratorTools,
   name: string,
   args: Record<string, unknown>,
-  caller: AppToolCaller = { sessionId: null, profile: 'human' },
+  caller: ToolCaller = { sessionId: null, profile: 'human' },
 ): Promise<ToolOutput> {
-  /*
-   * App tools (#81) — looked up in the registry instead of routed by prefix: the prefix rule is
-   * a naming convention for people, and the registry is the source of truth for the decision.
-   * `enabled` is asked again at execution time — exposure is fixed at spawn time, but a
-   * turned-off app's hand must stop immediately.
-   */
-  const app = appToolFor(name)
-  if (app) {
-    if (!app.enabled()) return { text: `This tool's app is turned off: ${name}`, isError: true }
-    const parsed = app.schema.safeParse(args)
-    if (!parsed.success) return { text: `Invalid arguments: ${parsed.error.message}`, isError: true }
-    return app.run(parsed.data as Record<string, unknown>, caller)
-  }
-
   if (name === 'list_sessions') return listSessionsText(tools, caller)
 
   if (name === 'recall') {
@@ -660,7 +646,7 @@ export async function runOrchestratorTool(
 /**
  * The base tools for a scoped coordinating session (#80/#81, physically). There is no notion of
  * "duty" here — this bundle is only the capability "can see and instruct the sessions in the
- * allow-list," and the role (foreman, committee, ...) is applied by the app through roleAppend.
+ * allow-list," and the role is applied by the caller through roleAppend.
  * The absence of a session-creation tool is the depth-1 structural guarantee: a coordinator
  * cannot create a coordinator.
  */
@@ -678,40 +664,8 @@ export const SCOPED_INSTRUCTIONS = [
   'You cannot create or delete a session — report to the person if that is needed.',
 ].join('\n')
 
-/**
- * Orchestrator tools that an app registers (#81).
- *
- * The reason the definition must live in one place is the same as for the core tools: Claude
- * through the in-process MCP and Codex through the bridge must see the **same list**. App tools
- * come in through a registry rather than a static array — the name must carry the `<appId>_`
- * prefix, and `run` arrives already bound to the app's HostAppContext at registration time.
- * `enabled` is asked again at call time: schema exposure is fixed at session spawn (a live
- * session's tool list does not change), but execution must reject a turned-off app immediately.
- */
-export type AppToolEntry = {
-  name: string
-  description: string
-  schema: z.ZodObject<z.ZodRawShape>
-  profiles: readonly AppToolProfile[]
-  enabled(): boolean
-  run(args: Record<string, unknown>, caller: AppToolCaller): Promise<ToolOutput>
-}
-
-let appTools: readonly AppToolEntry[] = []
-
-/** Called once at host startup — tests call it again to swap the entries out */
-export function registerAppTools(entries: readonly AppToolEntry[]): void {
-  appTools = entries
-}
-
-function appToolFor(name: string): AppToolEntry | undefined {
-  return appTools.find((t) => t.name === name)
-}
-
 /** Whether this profile allows the tool — both exposure (schemas) and execution (run) are decided by this */
 export function profileAllows(profile: ToolProfile, name: string): boolean {
-  const app = appToolFor(name)
-  if (app) return (app.profiles as readonly ToolProfile[]).includes(profile)
   if (profile === 'reader') return READER_TOOLS.some((t) => t.name === name)
   if (profile === 'orchestrator') {
     return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name) && !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
@@ -719,11 +673,6 @@ export function profileAllows(profile: ToolProfile, name: string): boolean {
   if (profile === 'scoped') return (SCOPED_TOOL_NAMES as readonly string[]).includes(name)
   if (profile === 'builder') return (BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   return (MANAGER_TOOL_NAMES as readonly string[]).includes(name)
-}
-
-/** The app tools that are currently on and allowed for this profile — the MCP, the bridge and the schema all use the same list */
-export function appToolEntries(profile: ToolProfile): AppToolEntry[] {
-  return appTools.filter((t) => t.enabled() && (t.profiles as readonly ToolProfile[]).includes(profile))
 }
 
 /**
@@ -759,7 +708,7 @@ export function instructionsFor(profile: ToolProfile): string | undefined {
  * removed.
  */
 function toolsFor(profile: ToolProfile): GuideTool[] {
-  return [...toolDefsFor(profile), ...appToolEntries(profile)].map((t) => ({ name: t.name, description: t.description }))
+  return toolDefsFor(profile).map((t) => ({ name: t.name, description: t.description }))
 }
 
 function guideSeats(): GuideSeats {
@@ -769,7 +718,7 @@ function guideSeats(): GuideSeats {
 export function orchestratorToolSchemas(
   profile: ToolProfile = 'orchestrator',
 ): { name: string; description: string; inputSchema: unknown }[] {
-  return [...toolDefsFor(profile), ...appToolEntries(profile)].map((t) => ({
+  return toolDefsFor(profile).map((t) => ({
     name: t.name,
     description: t.description,
     inputSchema: z.toJSONSchema(t.schema),

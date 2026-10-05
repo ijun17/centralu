@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
-import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
+import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, RESERVED_APP_IDS } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import type { ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -25,7 +25,6 @@ import { runtimeViewSource } from './app-view-source.js'
 import { onExternalAppListChanged } from './app-list-events.js'
 import { broadcastAppChanges, broadcastAppRuns } from './app-change-events.js'
 import { ThemeFiles } from './themes.js'
-import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
@@ -289,7 +288,7 @@ const appRunChanges = broadcastAppRuns((e) => server.broadcast(e))
 const externalApps = new ExternalApps({
   projects: () => store.projectRoots(),
   dataRoot: dataRoot(),
-  reservedIds: HOST_APPS.map((a) => a.id),
+  reservedIds: RESERVED_APP_IDS,
   // The run record (A-6) — the store fills in the shape the runtime declared. The runtime does not know Store
   runs: storeRunLedger(store),
   // The answer to a capability approval (D-4) — the same flip. An answer given once remains even after the host restarts

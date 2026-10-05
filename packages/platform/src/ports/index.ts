@@ -500,7 +500,10 @@ export type WorkspaceSnapshot = {
   panelSplit?: number
   /** Evidence panel width (px) */
   panelWidth?: number
-  /** App rail width (px) (#81) */
+  /**
+   * @deprecated The control rail's width (#81). The rail was removed in #97; an older build may still
+   * have written this, and it is left unread.
+   */
   railWidth?: number
   /** Session list width (px) */
   sidebarWidth?: number
@@ -760,16 +763,11 @@ export type BuilderAsk = {
 }
 
 /**
- * The app-state window (#81) — one JSON document per app, plus whether it is enabled. No
- * per-app port is made: only the app knows what the document means, and this window only
- * carries it.
+ * The external apps (M4) — discovery, their screens, and the calls those screens make. The
+ * built-in app state that used to open this port (#81: a document and an on/off flag per app)
+ * went with the control rail (#97).
  */
 export interface AppsPort {
-  state(appId: AppId): Promise<{ doc: unknown; enabled: boolean }>
-  setState(appId: AppId, doc: unknown): Promise<void>
-  setEnabled(appId: AppId, enabled: boolean): Promise<void>
-  /** The person calls an app tool directly (#81) — e.g. creating a task. The person is not subject to profile checks */
-  invoke(appId: AppId, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
   /**
    * The address at which to mount an app screen (M4 B-3). `hostOrigin` is the origin
    * (`location.origin`) of the calling screen. The sandbox proxy exchanges messages only with

@@ -75,12 +75,11 @@ function importsOf(code: string): string[] {
 /**
  * `apps/` is the layer other things are meant to run *on*, and it was running *beside* them.
  *
- * The UI runtime imported the inbox's store and re-exported `useInbox` from its own pass, so
- * the contract an app author reads had one particular product's word in it — and deleting
- * that product stopped the runtime from compiling. The host half had the same shape one
- * level down: `apps/contract.ts` borrowed `AppToolCaller` from the orchestrator, which is one
- * caller of the runtime, not its owner. Both directions are inverted now: the runtime
- * declares what it needs (`apps/host.ts`) and the host supplies it (`store/app-host.ts`).
+ * The host half had this shape: `apps/contract.ts` borrowed `AppToolCaller` from the
+ * orchestrator, which is one caller of the runtime, not its owner. The direction was inverted
+ * (#97): the contract defines those types and the orchestrator takes them from there. The UI
+ * half (`packages/ui/src/apps/`, which once re-exported the inbox's store) was checked here too
+ * until that framework was removed in #97.
  *
  * The cycle grew because nothing was checking. This is the checking (#97), and it is the same
  * rule as the one above, one layer over: a shelf both sides reach must stay one-directional.
@@ -89,13 +88,6 @@ function importsOf(code: string): string[] {
  */
 describe('the app runtime does not know what carries it', () => {
   const layers = [
-    {
-      name: 'packages/ui/src/apps',
-      dir: join(ROOT, 'packages/ui/src/apps/'),
-      // The two layers of the inbox product. If the runtime called into these, the inbox
-      // could never be deleted.
-      forbidden: /(^|\/)(store|features)(\/|$)/,
-    },
     {
       name: 'packages/agent-host/src/apps',
       dir: join(ROOT, 'packages/agent-host/src/apps/'),

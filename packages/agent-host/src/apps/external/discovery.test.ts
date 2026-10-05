@@ -79,14 +79,14 @@ describe('discovery', () => {
     const apps = join(projRoot, ...PROJECT_APPS)
     plantApp(apps, 'broken', {}, '{ nope')
     plantApp(apps, 'renamed', { id: 'other-id' })
-    plantApp(apps, 'control') // the name of a built-in app
+    plantApp(apps, 'control') // a reserved id (the retired control app, #97)
     mkdirSync(join(apps, 'half-made')) // a folder with no manifest yet
     writeFileSync(join(apps, 'stray-file.txt'), 'not an app')
     rt.refresh()
 
     expect(byId('broken')).toMatchObject({ status: 'invalid', error: expect.stringContaining('is not JSON') })
     expect(byId('renamed')).toMatchObject({ status: 'invalid', error: expect.stringContaining('the folder name (renamed)') })
-    expect(byId('control')).toMatchObject({ status: 'invalid', error: expect.stringContaining('the name of a built-in app') })
+    expect(byId('control')).toMatchObject({ status: 'invalid', error: expect.stringContaining('is a reserved app id') })
     expect(byId('half-made')).toMatchObject({ status: 'invalid', error: expect.stringContaining(`there is no ${MANIFEST_FILE}`) })
     expect(rt.list().map((a) => a.appId).sort()).toEqual(['broken', 'control', 'half-made', 'renamed'])
   })
