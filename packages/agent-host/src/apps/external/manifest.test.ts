@@ -99,6 +99,27 @@ describe('manifest', () => {
     expect(extra.warnings).toEqual(['unknown field, ignored: view.pinned'])
   })
 
+  // #306: a recommendation for the grid panel's size. Never an error — clamped or ignored, and said in a warning
+  it('view.span is the panel span the app recommends: kept when whole and in bounds, clamped or ignored with a warning otherwise', () => {
+    const ok = parse({ view: { span: { cols: 2, rows: 1 } } })
+    expect(ok.ok && ok.manifest.view).toEqual({ origin: 'opaque', span: { cols: 2, rows: 1 } })
+    expect(ok.warnings).toEqual([])
+    expect(parse({}).ok && (parse({}) as { manifest: { view?: unknown } }).manifest.view).toBeUndefined()
+
+    const big = parse({ view: { span: { cols: 9, rows: 0 } } })
+    expect(big.ok && big.manifest.view?.span).toEqual({ cols: 4, rows: 1 })
+    expect(big.warnings).toEqual(['view.span: each side is 1 to 4 cells — read as 4 × 1'])
+
+    for (const span of [{ cols: 2 }, { cols: 1.5, rows: 1 }, '2x1', [2, 1], null, { cols: '2', rows: 1 }]) {
+      const r = parse({ view: { span } })
+      expect(r.ok, JSON.stringify(span)).toBe(true)
+      expect(r.ok && r.manifest.view?.span, JSON.stringify(span)).toBeUndefined()
+      expect(r.warnings.some((w) => w.startsWith('view.span: not a span, ignored')), JSON.stringify(span)).toBe(true)
+    }
+    const extra = parse({ view: { span: { cols: 2, rows: 1, wide: true } } })
+    expect(extra.warnings).toEqual(['unknown field, ignored: view.span.wide'])
+  })
+
   it('uses.agent is either true or a list of tool names (D-1)', () => {
     expect(parse({ uses: { agent: true } }).ok).toBe(true)
     expect(parse({ uses: { agent: ['claude', 'codex'] } }).ok).toBe(true)

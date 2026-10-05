@@ -1915,6 +1915,8 @@ export class ExternalApps {
       // The full fingerprint is not needed — it is only ever a key for comparison, so the first 16 characters are enough
       ...(e.life.loaded ? { codeStamp: e.life.loaded.slice(0, 16) } : {}),
       ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
+      // The panel span the app recommends on the grid (#306), already clamped by the manifest's reading
+      ...(m?.view?.span ? { span: m.view.span } : {}),
       ...this.secretSlots(e),
       ...this.importMark(e),
     }

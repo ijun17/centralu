@@ -49,6 +49,18 @@ describe('discovery', () => {
     expect(byId('notes')?.dir).toBe(join(projRoot, '.centralu', 'apps', 'notes'))
   })
 
+  // #306: the manifest's recommendation reaches the list, clamped; an app without one has none
+  it('the panel span an app recommends on the grid is in the list, clamped, and absent when the manifest has none', () => {
+    plantApp(join(dataRoot, 'apps'), 'board', { view: { span: { cols: 2, rows: 1 } } })
+    plantApp(join(dataRoot, 'apps'), 'wide', { view: { span: { cols: 12, rows: 1 } } })
+    plantApp(join(dataRoot, 'apps'), 'timer')
+    rt.refresh()
+    expect(byId('board')?.span).toEqual({ cols: 2, rows: 1 })
+    expect(byId('wide')?.span).toEqual({ cols: 4, rows: 1 })
+    expect(byId('wide')?.warnings).toContain('view.span: each side is 1 to 4 cells — read as 4 × 1')
+    expect(byId('timer')).not.toHaveProperty('span')
+  })
+
   it('turning trust on and rescanning makes the app startable — turning it off blocks it again', () => {
     plantApp(join(projRoot, ...PROJECT_APPS), 'notes')
     rt.refresh()

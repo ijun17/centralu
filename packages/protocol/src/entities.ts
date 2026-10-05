@@ -315,6 +315,12 @@ export const ExternalAppInfo = z.object({
    * it was, its status is `unconfirmed`.
    */
   imported: z.object({ source: z.string(), at: z.number(), confirmedAt: z.number().nullable() }).optional(),
+  /**
+   * The span the app recommends for its panel on the grid (#306), from the manifest's `view.span`, already checked and
+   * clamped by the host — absent when the manifest has none. Only a default: the person's choice for the placement and
+   * their setting for the app both come first, and an app without one stands at 1 × 1 as before.
+   */
+  span: GridSpan.optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 

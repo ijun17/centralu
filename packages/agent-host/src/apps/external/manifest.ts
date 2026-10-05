@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { APP_ID_MAX_LENGTH, RESERVED_NAME_PREFIX, serverNameProblem } from '@cc/protocol'
+import { APP_ID_MAX_LENGTH, GRID_SPAN_MAX, RESERVED_NAME_PREFIX, serverNameProblem, type GridSpan } from '@cc/protocol'
 import { HOST_CAPABILITIES, isHostCapability } from './capabilities.js'
 
 /**
@@ -115,7 +115,29 @@ const cspField = z.object(Object.fromEntries(CSP_KEYS.map((k) => [k, z.array(z.s
  * load its map tiles). The values match ViewHost's `OriginMode`, the same two words.
  */
 export const VIEW_ORIGINS = ['opaque', 'app'] as const
-const VIEW_KEYS = ['origin'] as const
+const VIEW_KEYS = ['origin', 'span'] as const
+const SPAN_KEYS = ['cols', 'rows'] as const
+
+/**
+ * The manifest's `view.span` — the span, in grid cells, the app recommends for its panel on the grid (#306) — read
+ * into a span, or none, with what a person and the building agent should hear about it.
+ *
+ * A recommendation, so it never makes an app invalid: the person's own choices come before it, and an app without one
+ * stands at 1 × 1 as before. A whole number outside 1..`GRID_SPAN_MAX` is clamped into it, as the grid clamps a span
+ * that does not fit; anything that is not two whole numbers is ignored. Both say so in a warning (`check` reports it).
+ */
+export function readViewSpan(raw: unknown): { span?: GridSpan; warning?: string } {
+  if (raw === undefined) return {}
+  const v = raw as { cols?: unknown; rows?: unknown }
+  const whole = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n)
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw) || !whole(v.cols) || !whole(v.rows)) {
+    return { warning: `view.span: not a span, ignored — write two whole numbers of grid cells, like { "cols": 2, "rows": 1 }` }
+  }
+  const clamp = (n: number) => Math.min(GRID_SPAN_MAX, Math.max(1, n))
+  const span = { cols: clamp(v.cols), rows: clamp(v.rows) }
+  if (span.cols === v.cols && span.rows === v.rows) return { span }
+  return { span, warning: `view.span: each side is 1 to ${GRID_SPAN_MAX} cells — read as ${span.cols} × ${span.rows}` }
+}
 
 const USES_KEYS = ['agent', 'apps', 'host'] as const
 const SERVER_KEYS = ['command', 'args'] as const
@@ -183,7 +205,16 @@ const ManifestSchema = z.object({
    * default would leave the author with no way to find out why storage does not work. This follows
    * the same principle as manifestVersion: never run an app with a value whose meaning is unknown.
    */
-  view: z.object({ origin: z.enum(VIEW_ORIGINS).default('opaque') }).optional(),
+  view: z
+    .object({
+      origin: z.enum(VIEW_ORIGINS).default('opaque'),
+      /** The panel span the app recommends on the grid (#306) — checked and clamped by `readViewSpan`, never an error */
+      span: z
+        .unknown()
+        .optional()
+        .transform((v) => readViewSpan(v).span),
+    })
+    .optional(),
 })
 
 export type AppManifest = z.infer<typeof ManifestSchema>
@@ -211,6 +242,9 @@ export function parseManifest(text: string): ManifestResult {
     return { ok: false, error: `${MANIFEST_FILE} must be a JSON object`, warnings: [] }
   }
   const warnings = unknownFields(raw as Record<string, unknown>)
+  const view = (raw as { view?: unknown }).view
+  const spanWarning = view && typeof view === 'object' ? readViewSpan((view as { span?: unknown }).span).warning : undefined
+  if (spanWarning) warnings.push(spanWarning)
   const parsed = ManifestSchema.safeParse(raw, { reportInput: true })
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues.map(describeIssue).join('; '), warnings }
@@ -236,6 +270,7 @@ function unknownFields(raw: Record<string, unknown>): string[] {
   check(raw.uses, USES_KEYS, 'uses.')
   check(raw.csp, CSP_KEYS, 'csp.')
   check(raw.view, VIEW_KEYS, 'view.')
+  check((raw.view as { span?: unknown } | undefined)?.span, SPAN_KEYS, 'view.span.')
   return out
 }
 
