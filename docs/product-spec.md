@@ -286,6 +286,15 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   with it. It rides in every session on every turn, so it was measured and cut: the four candidates in the
   orchestrator's words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
   §1.1). Settings → Orchestrator → "Let sessions look at their own project" turns it off.
+- **An ordinary session can ask another project to do a task** (#371 part B, owner decision 2026-10-05):
+  `ask_project({ project, task })` starts (or reuses) a visible session in that project, with its folder,
+  instructions, tool and permissions, waits for the turn and returns its answer, the way a subagent's result comes
+  back. The person's consent is per pair of projects: the first ask from X to Y raises a card in the caller's session
+  (allow once / always for this pair / deny); "always" is remembered and revocable in Settings → Permissions. The
+  delegated session may change code in its own project within that project's own permissions, and is marked "asked
+  by" with a link back; the caller's conversation shows a compact card linking to it. Files the answer names inside
+  the target project become readable to the caller, nothing broader. Stop on the caller stops the delegated turn; a
+  session that was itself asked cannot ask a third project. Details in agent-host.md §1.2.
 - **The permission preset is deliberately inexpressible** in the orchestrator's settings tool schema — an orchestrator
   must not be able to quietly widen another session's approval back door.
 - Settings changes surface as a `settings_changed` event + toast, so the human sees

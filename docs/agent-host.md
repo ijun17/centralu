@@ -44,7 +44,7 @@ the Codex bridge.
 | `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
 | `scoped` | a coordinator (#80; made through `agents.createCoordinator`, once by the control app's tasks, removed in #97) | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide` | none |
+| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2) | none |
 
 The `reader` set is read-only: its tools object refuses sending, creating and settings outright,
 not only by name. It is never given to an agent session an app stood up (M4 D-1), whose answer goes
@@ -79,6 +79,73 @@ one more node process (about 40 MB resident, idle). The bridge sets
 `default_tools_approval_mode: 'approve'`: our tools are never asked about, as on the Claude side,
 and without it Codex in auto (`approvalPolicy: never`) refused every call on its own.
 `scripts/smoke-reader.mts` runs the set end to end with a real model (`TOOL=codex` for Codex).
+
+### 1.2 Asking another project (`ask_project`, #371 part B)
+
+The one reach an ordinary session has outside its project. `ask_project({ project, task })` gives a
+task to another registered project and returns the answer of the session that did it, the way a
+subagent's result comes back. It rides with the reader set (same profile, same Settings switch) but
+is its own set, `DELEGATE_TOOLS`, with its own budget, because it acts. The orchestrator, managers
+and leads do not get it: they already direct sessions with `send_to_session`, inside their view.
+
+What one call does (`SessionManager.askProject`):
+
+1. **The target.** Another registered project, by name or id. Its own project is refused ("do the
+   work here"); an unknown name is refused with the other projects' names. A session that was itself
+   asked (`askedBy` set) cannot ask a third project: depth one, so two projects that consented to each
+   other cannot bounce a task between them without a person.
+2. **Consent** (`ensureProjectAccess`, kind `delegate`). The first time a session of project X asks
+   project Y, a card stands in the caller's session, in the approval slot (detail `project_access`):
+   allow once, always for this pair, deny. Only "always" is stored (store v44, `project_consents`,
+   one row per from, to and kind; both ids cascade with their project). Settings → Permissions lists
+   the pairs and revokes them. Deny and a withdrawn card return a refusal the model reads as "do not
+   ask again unless told". The same gate serves part A's app tools (kind `apps`).
+3. **The delegated session.** The idle (or finished) session this caller asked in that project
+   before, so a second ask builds on the first; otherwise a new one with that project's folder, its
+   instructions (its trust, as for any session), its default tool and that tool's remembered model and
+   effort, under the `normal` preset — what a session the person opens there gets, so its approvals
+   stand as cards in that session where the person sees them. It is an ordinary visible session,
+   named `Asked by <project> · HH:MM` and marked `askedBy` (store v45) with the caller; its header
+   links back, and the caller's conversation shows a compact card linking to it.
+4. **The task** goes in a frame (`askFrame`): who asks, and that the final message is the answer and
+   should name files by absolute path. It is recorded as sent by the caller (`from`), like
+   `send_to_session`. The call waits on the turn with the same watcher an app's agent uses
+   (`AgentRunWait`).
+5. **The answer.** The turn's final text (`finalAnswer`), JSON-quoted for the model like a worker's
+   preview (someone else's words), cut in the middle past 6,000 characters. The absolute paths it
+   names that exist **inside the target project's folder** (resolved through symlinks; never the
+   project root itself) become readable to the caller (`readGrants`): a file opens that file, a folder
+   opens what is under it. Paths outside are listed but not opened. A grant lives while this host
+   serves the caller. Claude reads through `CreateSessionOpts.mayRead`, asked in `canUseTool` (a read
+   outside the working folder lands there; `additionalDirectories` is fixed at launch); Codex does not
+   restrict reads, so it needs nothing.
+
+**Long work.** A call waits up to `ASK_WAIT_MS` (240 s), under Codex's 300-s `tool_timeout_sec`
+(now set on the `centralu` server too) with the same margin as an app's long call. Past it the
+answer is "still working" with the session's name, and a call with the same project and no task
+waits on the same turn; a new task while one runs is refused. The bridge waits 280 s for
+`orchestrator.tool` (was 60 s), so "still working" reaches the model before any timeout does.
+
+**Stop.** Stop on the caller (`interrupt`) stops the delegated turn and ends the call with that
+reason; so does the call's own cancellation (the MCP request's signal, Claude). The person stopping
+the delegated session, or a failed turn, returns an error naming the session and suggesting the
+next step. Deleting the caller drops the wait and its grants; the delegated session keeps its turn,
+since it is now that project's own session.
+
+**Size.** Measured like the reader set (haiku, `scripts/probe-reader-tools.mts`): `ask_project`
+is 350 characters (`DELEGATE_BUDGET_CHARS` 400) and costs **+103 tokens** loaded (the set: +192 →
++295), +10 deferred. It is loaded: asked "Have the toolkit project export the sprites again, then
+tell me where the files are", the model called it for that project 7 times in 10 loaded and 0 in 5
+deferred — deferred, it searched past conversations and its own folder instead, the failure #320
+measured for `recall`. A miss is an answer saying it has no such project, and the person can name
+the tool. One of five unrelated how-to questions drew a call naming a project that does not exist
+(refused, no card). The description says "a job", not "a task": the two read the same to the model
+(7 in 10 each), and the guide, which lists every seat's tools, keeps no word of the removed
+control rail's tasks (#97). Two other wordings did no better (0 and 3 in 5).
+
+`scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
+in one scratch project has the other write a file with a number only it knows and reads it back
+(`CALLER`/`CALLEE` = `claude` or `codex`).
 
 **stdout is reserved.** `main.ts` prints exactly one line to it: the handshake the Tauri
 supervisor parses for the port and auth token. Everything else goes to stderr, because that

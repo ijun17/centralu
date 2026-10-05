@@ -16,6 +16,33 @@ privileged conversation memory. Read-session, preview and recall text is framed 
 untrusted data, not human authorization — that now includes what one ordinary session reads of
 another in the same project; the reader set reads no other project and cannot send.
 
+### Asking another project (#371 part B)
+
+`ask_project` is the one way an ordinary session acts outside its own project, so it is a new
+capability with its own controls ([agent-host.md](agent-host.md) §1.2):
+
+- **The person's consent per pair of projects**, asked as a card in the caller's session the first
+  time X asks Y; only "always" is remembered (store `project_consents`), and Settings revokes it.
+  Without consent nothing is started in the other project. The card is the boundary, not the tool's
+  description: a caller steered by injected text can at most raise a card.
+- **What the delegated session runs is gated by its own project's permissions.** It starts under the
+  `normal` preset with that project's trust, as a session the person opens there would; its approvals
+  stand as cards in that session. Under a person's global bypass it runs as freely as that person's
+  own sessions there — the owner's decision is that the delegated session may change code in its own
+  project. The task arrives framed as sent by another session, never as the person.
+- **Depth one.** A session that was itself asked cannot ask a third project, so two projects that
+  consented to each other cannot pass a task back and forth without a person.
+- **The answer is someone else's words**, JSON-quoted for the caller like a worker's preview.
+- **Files come back by name, and only from inside the target project.** A named path is granted
+  to the caller only if it exists inside the target project's folder after resolving symlinks, and
+  never the project root itself; a file opens that file, a folder what is under it. A path outside
+  is listed and not opened (Claude then asks the person before reading it; Codex does not restrict
+  reads at all, so for a Codex caller the grant changes nothing and the residual is the same as any
+  Codex read).
+- **Residual:** within an allowed pair, the task text comes from the calling model, so injected text
+  in the caller's context can reach the target project as a task. The target's approvals, the
+  visible session and Stop are the controls left; revoking the pair ends it.
+
 JSON framing prevents ambiguous transcript-line assembly; it does **not** make text safe
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
 remain the deterministic authorization boundaries.
