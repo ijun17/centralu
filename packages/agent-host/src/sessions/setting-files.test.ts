@@ -108,7 +108,9 @@ beforeEach(async () => {
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
   store = new Store()
   adapters = new Map<ToolName, AgentAdapter>([
-    ['claude', offline(new ClaudeAdapter())],
+    // No gap between Claude starts: on Windows the adapter spaces them 1.5 s apart (#353), and each case here starts
+    // seven sessions, which went past the test's 5 s on the Windows CI job (#14)
+    ['claude', offline(new ClaudeAdapter({ startGapMs: 0 }))],
     ['codex', offline(new CodexAdapter())],
   ])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
