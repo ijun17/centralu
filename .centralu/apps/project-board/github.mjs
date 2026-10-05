@@ -1,8 +1,10 @@
 // Everything this app knows about GitHub. It talks to GitHub only through the person's own `gh`
-// CLI (`gh api graphql`), so the app holds no token: gh keeps its login in the system keychain, and
+// CLI (`gh api graphql` for the board, `gh api repos/…` and `gh pr` for CI and merging), so the app
+// holds no token: gh keeps its login in the system keychain, and
 // nothing here reads, stores or prints it. GitHub is the only copy of the board; server.mjs keeps a
 // short in-memory cache and nothing on disk.
 import { execFile } from 'node:child_process'
+import { tmpdir } from 'node:os'
 
 const GH_TIMEOUT_MS = 30_000
 const MAX_PAGES = 20
@@ -43,13 +45,14 @@ export function classify(text) {
 }
 
 /** Runs `gh` with arguments (never a shell), and returns its stdout. */
-export function runGh(args, { timeoutMs = GH_TIMEOUT_MS } = {}) {
+export function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd } = {}) {
   return new Promise((resolve, reject) => {
     execFile(
       'gh',
       args,
       {
         timeout: timeoutMs,
+        ...(cwd ? { cwd } : {}),
         maxBuffer: 64 * 1024 * 1024,
         // No prompts, no colour, no update notice: gh runs with nobody at a terminal.
         env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '' },
@@ -64,6 +67,7 @@ export function runGh(args, { timeoutMs = GH_TIMEOUT_MS } = {}) {
         // A GraphQL error comes back as JSON on stdout with a non-zero exit; keep it for the caller.
         const err = classify(`${stderr}\n${stdout}`)
         err.stdout = stdout
+        err.stderr = stderr
         reject(err)
       },
     )
@@ -272,3 +276,187 @@ export function resolveOption(field, value) {
 }
 
 export const sameRepo = (a, b) => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase()
+
+// --- CI and merging (ci_status, merge_when_green) --------------------------------------------------
+// The same gh, through its REST side (`gh api repos/…`) and `gh pr`, always with `-R` or a full
+// path, so nothing depends on the folder gh runs in. The merge also runs from the temp folder, so gh
+// can never touch the person's checkout.
+
+const REPO = /^[\w.-]+\/[\w.-]+$/
+const REF = /^[\w./-]+$/
+const httpStatus = (e) => Number(/HTTP (\d{3})/.exec(`${e?.stderr ?? ''}\n${e?.message ?? ''}`)?.[1] ?? 0)
+const firstLine = (e) =>
+  String(e?.stderr || e?.message || e)
+    .split('\n')
+    .map((l) => l.replace(/^gh:\s*/, '').trim())
+    .find(Boolean) ?? 'no message'
+// Failures that say nothing about the thing asked for: gh cannot reach GitHub at all.
+const FATAL = new Set(['network', 'auth', 'gh-missing'])
+
+function checkRepo(repo) {
+  if (!REPO.test(String(repo))) throw new GitHubError('input', `"${repo}" is not a repository; give owner/name.`)
+}
+
+/** GET one REST path as JSON. `missing` (HTTP codes) answers null for those instead of throwing. */
+export async function restJson(path, { missing = [] } = {}) {
+  let out
+  try {
+    out = await runGh(['api', path])
+  } catch (e) {
+    if (e instanceof GitHubError && !FATAL.has(e.kind) && missing.includes(httpStatus(e))) return null
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `GitHub answered ${path.split('?')[0]} with: ${firstLine(e)}`)
+    throw e
+  }
+  const json = parseJson(out)
+  if (json === null) throw new GitHubError('github', `gh answered ${path.split('?')[0]} with something that is not JSON.`)
+  return json
+}
+
+/** The repository: the logged-in account's permissions on it, and its default branch. */
+export async function readRepo(repo) {
+  checkRepo(repo)
+  const r = await restJson(`repos/${repo}`, { missing: [404] })
+  if (!r) throw new GitHubError('not-found', `The repository ${repo} was not found, or the account gh is logged in as cannot see it.`)
+  return { permissions: r.permissions ?? {}, defaultBranch: r.default_branch ?? 'main' }
+}
+
+const PR_FIELDS = 'number,title,body,state,isDraft,mergeable,headRefOid,headRefName,baseRefName,isCrossRepository,url,mergeCommit'
+
+/** One pull request, as `gh pr view --json` gives it. */
+export async function readPr(repo, number) {
+  checkRepo(repo)
+  let out
+  try {
+    out = await runGh(['pr', 'view', String(number), '-R', repo, '--json', PR_FIELDS])
+  } catch (e) {
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('not-found', `${repo}#${number} is not a pull request this GitHub login can see (${firstLine(e)}).`)
+    throw e
+  }
+  const pr = parseJson(out)
+  if (!pr) throw new GitHubError('github', 'gh pr view answered with something that is not JSON.')
+  return pr
+}
+
+/** The commit a branch, tag or sha names. */
+export async function resolveRef(repo, ref) {
+  checkRepo(repo)
+  if (!REF.test(String(ref))) throw new GitHubError('input', `"${ref}" is not a branch, tag or commit.`)
+  const c = await restJson(`repos/${repo}/commits/${ref}`, { missing: [404, 422] })
+  if (!c?.sha) throw new GitHubError('not-found', `${repo} has no branch, tag or commit "${ref}".`)
+  return c.sha
+}
+
+/**
+ * The checks that must pass on `base`, and where that came from: branch protection and rulesets
+ * first (what GitHub itself enforces), else the jobs of the CI workflows read from `base` itself, so
+ * a pull request cannot make its own checks optional by editing them. `names` null: none found.
+ */
+export async function readRequired(repo, base, workflows, workflowCheckNames) {
+  checkRepo(repo)
+  const names = new Set()
+  // 404: not protected; 403: this login may not read protection (that needs admin). Rulesets are
+  // readable by anyone who can read the repository.
+  const protection = await restJson(`repos/${repo}/branches/${encodeURIComponent(base)}/protection/required_status_checks`, { missing: [403, 404] })
+  for (const c of protection?.contexts ?? []) names.add(c)
+  for (const c of protection?.checks ?? []) if (c?.context) names.add(c.context)
+  const rules = await restJson(`repos/${repo}/rules/branches/${encodeURIComponent(base)}`, { missing: [403, 404] })
+  for (const r of Array.isArray(rules) ? rules : [])
+    if (r?.type === 'required_status_checks') for (const c of r.parameters?.required_status_checks ?? []) if (c?.context) names.add(c.context)
+  if (names.size) return { names: [...names], unresolved: [], source: `branch protection of ${base}` }
+
+  const found = []
+  const unresolved = []
+  const read = []
+  for (const path of workflows ?? []) {
+    let text
+    try {
+      text = await runGh(['api', '-H', 'Accept: application/vnd.github.raw+json', `repos/${repo}/contents/${path}?ref=${encodeURIComponent(base)}`])
+    } catch (e) {
+      if (e instanceof GitHubError && !FATAL.has(e.kind) && httpStatus(e) === 404) continue
+      throw e
+    }
+    const w = workflowCheckNames(text)
+    const file = path.split('/').pop()
+    found.push(...w.names)
+    unresolved.push(...w.unresolved.map((j) => `${file} job ${j}`))
+    read.push(file)
+  }
+  if (!found.length && !unresolved.length) return { names: null, unresolved: [], source: 'no required set found, so every reported check counts' }
+  return { names: [...new Set(found)], unresolved, source: `${read.join(', ')} on ${base}` }
+}
+
+/** Every check reported on a commit: check runs (GitHub Actions jobs among them) and commit statuses. */
+export async function readChecks(repo, sha) {
+  checkRepo(repo)
+  const out = []
+  for (let page = 1; page <= 10; page++) {
+    const r = await restJson(`repos/${repo}/commits/${sha}/check-runs?per_page=100&page=${page}`)
+    const runs = r?.check_runs ?? []
+    for (const c of runs) {
+      const job = /\/job\/(\d+)/.exec(c.html_url ?? '')?.[1] ?? (c.app?.slug === 'github-actions' ? String(c.id) : null)
+      out.push({ kind: 'run', name: c.name, status: c.status, conclusion: c.conclusion, id: c.id, jobId: job, url: c.html_url ?? null, at: c.started_at ?? c.completed_at ?? null })
+    }
+    if (runs.length < 100) break
+  }
+  const s = await restJson(`repos/${repo}/commits/${sha}/status`)
+  for (const st of s?.statuses ?? []) out.push({ kind: 'status', name: st.context, state: st.state, id: st.id, jobId: null, url: st.target_url ?? null, at: st.updated_at ?? null })
+  return out
+}
+
+/** A GitHub Actions job's log as text (colour codes included; ci.mjs strips them). */
+export async function readJobLog(repo, jobId) {
+  checkRepo(repo)
+  const path = `repos/${repo}/actions/jobs/${jobId}/logs`
+  try {
+    // gh 2.8x and later refuse to print a response holding terminal escape sequences (a coloured
+    // test log does) without this flag; an older gh does not know the flag and prints it anyway.
+    return await runGh(['api', '--allow-escape-sequences', path], { timeoutMs: 60_000 }).catch((e) => {
+      if (/unknown flag/.test(e?.stderr ?? '')) return runGh(['api', path], { timeoutMs: 60_000 })
+      throw e
+    })
+  } catch (e) {
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `the log of job ${jobId} could not be read: ${firstLine(e)}`)
+    throw e
+  }
+}
+
+/** An issue's body and comments as one text, and its state. */
+export async function readIssueText(repo, number) {
+  checkRepo(repo)
+  const out = await runGh(['issue', 'view', String(number), '-R', repo, '--json', 'body,comments,state'])
+  const j = parseJson(out)
+  if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
+  return { text: [j.body ?? '', ...(j.comments ?? []).map((c) => c?.body ?? '')].join('\n\n'), state: j.state ?? null }
+}
+
+/**
+ * Squash-merges a pull request, only while its head is still `sha` (a push after the checks were
+ * read makes GitHub refuse). Never `--auto`: auto-merge would merge on GitHub's own reading of the
+ * checks, which is the decision this app exists to make. No author flag, so the commit is the PR
+ * author's (GitHub's squash default). Returns null, or the reason GitHub gave.
+ */
+export async function mergePr(repo, number, sha, subject, body) {
+  checkRepo(repo)
+  try {
+    await runGh(['pr', 'merge', String(number), '-R', repo, '--squash', '--match-head-commit', sha, '--subject', subject, '--body', body], {
+      cwd: tmpdir(),
+      timeoutMs: 120_000,
+    })
+    return null
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    return firstLine(e)
+  }
+}
+
+/** Deletes a branch of the repository on GitHub. Returns null, or the reason GitHub gave. */
+export async function deleteBranch(repo, branch) {
+  checkRepo(repo)
+  if (!REF.test(String(branch))) return `"${branch}" is not a branch name`
+  try {
+    await runGh(['api', '-X', 'DELETE', `repos/${repo}/git/refs/heads/${branch}`])
+    return null
+  } catch (e) {
+    return firstLine(e)
+  }
+}

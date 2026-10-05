@@ -2,8 +2,8 @@
   "manifestVersion": 1,
   "id": "project-board",
   "name": "Project board",
-  "version": "0.1.0",
-  "description": "The GitHub Project that tracks this repository's work (project.json names it), as a board grouped by Status, with tools for agents to list items, see what needs a decision, set Status, Priority or Area, and add issues and pull requests. GitHub is the only copy: reads and writes go through the person's own GitHub CLI (`gh api graphql`), so the app stores no token and asks Centralu for nothing (no uses, no secrets). It needs `gh` installed and logged in with the `project` scope (`gh auth refresh -s project`); when it is not, or GitHub cannot be reached, the board and the tools say so.",
+  "version": "0.2.0",
+  "description": "The GitHub Project that tracks this repository's work (project.json names it), as a board grouped by Status, with tools for agents to list items, see what needs a decision, set Status, Priority or Area, and add issues and pull requests. It also carries the repository's CI and merge procedure: ci_status (the required checks of a pull request or commit, the first failing test line of a failed job, and whether it is a known intermittent failure) and merge_when_green (a maintainer-only squash merge once every required check is reported and passed; never auto-merge). GitHub is the only copy: reads and writes go through the person's own GitHub CLI (`gh`), so the app stores no token and asks Centralu for nothing (no uses, no secrets). It needs `gh` installed and logged in, with the `project` scope for the board (`gh auth refresh -s project`); when it is not, or GitHub cannot be reached, the board and the tools say so.",
   "server": { "command": "node", "args": ["--enable-source-maps", "server.mjs"] },
   "home": "show",
   "view": { "span": { "cols": 2, "rows": 1 } }

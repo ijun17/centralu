@@ -4,5 +4,11 @@
   "repository": "ijun17/centralu",
   "fields": { "status": "Status", "priority": "Priority", "area": "Area" },
   "decisionStatus": "Needs decision",
-  "cacheSeconds": 30
+  "cacheSeconds": 30,
+  "ci": {
+    "workflows": [".github/workflows/build.yml"],
+    "knownFailuresIssue": 368,
+    "waitMinutes": 40,
+    "pollSeconds": 30
+  }
 }
