@@ -27,6 +27,8 @@ import { InlineViewSlot } from './InlineView.jsx'
 import { RunMenu } from './RunMenu.jsx'
 import { BackgroundTasksBadge } from './BackgroundTasks.jsx'
 import { AgentVersionNotice } from './AgentVersionNotice.jsx'
+import { SessionMachineTag } from '../machines/MachineTag.jsx'
+import { useMachineName, useSessionAway } from '../../store/selectors.js'
 import { NoticeMark } from './NoticeMark.jsx'
 import { CommandRunnerOverlay } from './CommandRunner.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
@@ -306,6 +308,9 @@ export function SessionPane({
     return () => clearTimeout(t)
   }, [session, chat.length, markRead, appFocused])
 
+  // On a linked machine that is away (#82): dimmed, and nothing here tries to wake it
+  const away = useSessionAway(sessionId)
+
   // Avoid rendering even at the moment the session disappears (deleted, archived)
   if (!session) return null
 
@@ -336,6 +341,12 @@ export function SessionPane({
       <h1 className="truncate text-md font-medium text-ink" data-testid="session-name">
         {session.name}
       </h1>
+
+      {/*
+        The machine it runs on (#82). This header is also every grid panel's, and the conversation under it is where an
+        approval or a question is answered, so all three say which machine they act on.
+      */}
+      <SessionMachineTag sessionId={session.id} testId="session-machine" />
 
       {/* Another project's session asked for this one (#371) — the way back to it */}
       {session.askedBy && <AskedByBadge callerId={session.askedBy} />}
@@ -587,7 +598,7 @@ export function SessionPane({
         can be read. This tells the person it can be continued before they say anything to it —
         better than reporting failure after they have already sent something (FR-10).
       */}
-      {!session.live && <DormantNote sessionId={session.id} />}
+      {away ? <AwayNote machine={session.machine ?? null} /> : !session.live && <DormantNote sessionId={session.id} />}
 
       {/*
         Collapsed (requested by a user on 2026-09-10): a rounded card shows only its top edge
@@ -2585,6 +2596,20 @@ function OlderSentinel({
         {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>
     </div>
+  )
+}
+
+/**
+ * A session on a linked machine that is away (#82). What shows is what the hub last heard, and nothing here wakes it:
+ * the machine's own resync does once it is back, and a message sent now would only fail at the hub. Said in the spot
+ * the dormant note takes, because it answers the same question: will this session hear me?
+ */
+function AwayNote({ machine }: { machine: string | null }) {
+  const name = useMachineName(machine) ?? 'Its machine'
+  return (
+    <p className="border-t border-line px-4 py-1.5 text-xs text-ink-faint" data-testid="away-note">
+      {name} is away — this is what was last heard from it. It picks up again when the machine reconnects.
+    </p>
   )
 }
 

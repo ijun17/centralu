@@ -1,0 +1,119 @@
+import { describe, expect, it } from 'vitest'
+import type { MachineInfo, MachineVersions } from '@cc/protocol'
+import { isAway, machineProblem, versionPrompt } from './machines.js'
+
+const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
+  id: 'box',
+  name: 'Box',
+  sshTarget: 'me@box',
+  shell: 'posix',
+  wslDistro: null,
+  command: null,
+  status: 'connected',
+  error: null,
+  versions: null,
+  lastConnectedAt: null,
+  localPort: null,
+  sameLocalPort: false,
+  ...patch,
+})
+
+const versions = (patch: Partial<MachineVersions>): MachineVersions => ({
+  hub: { version: '0.1.0-beta.12', protocolVersion: 1, dev: false },
+  remote: { version: '0.1.0-beta.11', protocolVersion: 1, dev: false },
+  older: 'remote',
+  compatible: true,
+  sameChannel: true,
+  accepted: false,
+  ...patch,
+})
+
+describe('away rows (#82)', () => {
+  it('a row of this computer is never away', () => {
+    expect(isAway({ machine: null, unreachable: true }, {})).toBe(false)
+  })
+
+  it('a row the hub listed from its mirror is away, whatever the machine row says', () => {
+    expect(isAway({ machine: 'box', unreachable: true }, { box: machine() })).toBe(true)
+  })
+
+  it('a row of a machine whose link is not up is away', () => {
+    expect(isAway({ machine: 'box' }, { box: machine({ status: 'unreachable' }) })).toBe(true)
+    expect(isAway({ machine: 'box' }, { box: machine({ status: 'versions_differ' }) })).toBe(true)
+    expect(isAway({ machine: 'box' }, { box: machine() })).toBe(false)
+  })
+
+  it('before the machine list arrives, the row is judged by its own mark', () => {
+    expect(isAway({ machine: 'box' }, {})).toBe(false)
+  })
+})
+
+describe('a link error in plain words (#82)', () => {
+  const problem = (status: MachineInfo['status'], error: string | null) => machineProblem(machine({ status, error }))
+
+  it('a key ssh did not offer: run ssh-add', () => {
+    const p = problem('unreachable', 'ssh could not reach me@box: me@box: Permission denied (publickey).')
+    expect(p?.fix).toMatch(/ssh-add/)
+  })
+
+  it('a host key never seen: ssh once in a terminal', () => {
+    const p = problem('unreachable', 'ssh could not reach me@box: Host key verification failed.')
+    expect(p?.title).toMatch(/host key/)
+    expect(p?.fix).toContain('`ssh me@box`')
+  })
+
+  it('no centralu on the remote: install it there', () => {
+    const p = problem('unreachable', 'Centralu is not installed on me@box (run `npm i -g centralu` there, then `centralu serve` once)')
+    expect(p?.title).toBe('Centralu is not installed on Box')
+    expect(p?.fix).toContain('npm i -g centralu')
+  })
+
+  it('installed but not serving', () => {
+    expect(problem('not_running', 'Centralu is installed on Box, but no `centralu serve` is running there')?.fix).toContain('centralu serve')
+  })
+
+  it('a machine that does not answer', () => {
+    expect(problem('unreachable', 'ssh could not reach me@box: connect to host box port 22: Operation timed out')?.title).toBe('Box does not answer')
+  })
+
+  it('anything else is shown as the host said it', () => {
+    expect(problem('unreachable', 'something new')).toEqual({ title: 'something new', fix: null })
+  })
+
+  it('a connected link has no problem', () => {
+    expect(problem('connected', null)).toBeNull()
+  })
+})
+
+describe('the version prompt (#82, plan §4)', () => {
+  it('an older remote: the exact command to run there, and connect anyway', () => {
+    const p = versionPrompt(machine({ status: 'versions_differ', versions: versions({}) }))
+    expect(p).toMatchObject({ compatible: true, older: 'remote', target: '0.1.0-beta.12', remoteCommand: 'npm i -g centralu@0.1.0-beta.12' })
+  })
+
+  it('an older hub: update this computer, no remote command', () => {
+    const p = versionPrompt(
+      machine({
+        status: 'versions_differ',
+        versions: versions({ hub: { version: '0.1.0-beta.10', protocolVersion: 1, dev: false }, older: 'hub' }),
+      }),
+    )
+    expect(p).toMatchObject({ older: 'hub', target: '0.1.0-beta.11', remoteCommand: null })
+    expect(p?.text).toMatch(/Update this computer/)
+  })
+
+  it('across protocols: not compatible, and says which side to update', () => {
+    const p = versionPrompt(
+      machine({
+        status: 'versions_differ',
+        versions: versions({ remote: { version: '0.2.0-beta.1', protocolVersion: 2, dev: false }, older: 'hub', compatible: false }),
+      }),
+    )
+    expect(p?.compatible).toBe(false)
+    expect(p?.text).toMatch(/cannot talk to each other until this computer is updated/)
+  })
+
+  it('no prompt while the link is not held on versions', () => {
+    expect(versionPrompt(machine({ status: 'connected', versions: versions({ accepted: true }) }))).toBeNull()
+  })
+})

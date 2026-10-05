@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ExternalAppInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { ExternalAppInfo, MachineInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, sessionGridPanel, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
@@ -3820,5 +3820,136 @@ describe('resets, notices and switches the tool made (#304)', () => {
 
     mock.emit({ type: 'settings_changed', sessionId: 'n-3', model: 'haiku', effort: null, verbosity: null, serviceTier: null })
     expect(useStore.getState().toast).toMatch(/Orchestrator changed/)
+  })
+})
+
+/*
+ * Linked machines (#82, docs/plans/remote-hub.md). The hub lists another machine's sessions with `machine` set and their
+ * ids qualified; while that machine is away it answers from its mirror with `unreachable`. When the machine comes back it
+ * sends `machine_resync`, and the UI recovers **that machine alone**: its rows, its open conversations, its wakes.
+ */
+describe('linked machines (#82)', () => {
+  const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
+    id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
+    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, ...over,
+  })
+
+  it('machine_status replaces that machine\'s row whole', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().machines['box']?.status).toBe('connected')
+    mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable', error: 'ssh could not reach me@box: timed out' }) })
+    expect(useStore.getState().machines['box']).toMatchObject({ status: 'unreachable', error: 'ssh could not reach me@box: timed out' })
+  })
+
+  it('a resync re-reads that machine\'s sessions and projects and leaves every other row as it was', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    mock.sessions.set('mr-local', sessionInfo('mr-local'))
+    mock.sessions.set('box.mr-a', sessionInfo('box.mr-a', { projectId: remote.id, machine: 'box' }))
+    mock.sessions.set('box.mr-gone', sessionInfo('box.mr-gone', { projectId: remote.id, machine: 'box' }))
+    await useStore.getState().attach(mock)
+    const localBefore = useStore.getState().sessions['mr-local']
+    useStore.setState((st) => ({ drafts: { ...st.drafts, 'box.mr-gone': { text: 'unsent', attachments: [] } } }))
+
+    // On the machine: one session renamed, one deleted, one created. Here: a local rename the list would also carry
+    mock.sessions.get('box.mr-a')!.name = 'renamed there'
+    mock.sessions.delete('box.mr-gone')
+    mock.sessions.set('box.mr-new', sessionInfo('box.mr-new', { projectId: remote.id, machine: 'box' }))
+    mock.sessions.get('mr-local')!.name = 'renamed here, not announced'
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.mr-new']).toBeDefined())
+    const s = useStore.getState().sessions
+    expect(s['box.mr-a']!.name).toBe('renamed there')
+    expect(s['box.mr-gone']).toBeUndefined()
+    // What the deleted one held goes with it, as `session_deleted` would clear it (#163)
+    expect(useStore.getState().drafts['box.mr-gone']).toBeUndefined()
+    // Scoped: this computer's row is the very same object, not merged from the fresh list
+    expect(s['mr-local']).toBe(localBefore)
+    expect(useStore.getState().projects[remote.id]?.machine).toBe('box')
+  })
+
+  it('a resync wakes only that machine\'s sessions that were live and are not now', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    mock.sessions.set('mw-local', sessionInfo('mw-local'))
+    mock.sessions.set('box.mw-1', sessionInfo('box.mw-1', { projectId: remote.id, machine: 'box' }))
+    mock.sessions.set('box.mw-idle', sessionInfo('box.mw-idle', { projectId: remote.id, machine: 'box', live: false }))
+    await useStore.getState().attach(mock)
+    const resume = vi.spyOn(mock.agents, 'resumeSession')
+
+    // The remote host restarted without a keeper: its processes are gone. This computer's session died too, unannounced
+    mock.sessions.get('box.mw-1')!.live = false
+    mock.sessions.get('mw-local')!.live = false
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+
+    await vi.waitFor(() => expect(resume).toHaveBeenCalledWith('box.mw-1'))
+    expect(resume.mock.calls.map(([id]) => id)).toEqual(['box.mw-1'])
+  })
+
+  it('a resync re-reads the open conversations of that machine only', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    mock.sessions.set('mh-local', sessionInfo('mh-local'))
+    mock.sessions.set('box.mh-1', sessionInfo('box.mh-1', { projectId: remote.id, machine: 'box' }))
+    await useStore.getState().attach(mock)
+    await useStore.getState().loadHistory('mh-local')
+    await useStore.getState().loadHistory('box.mh-1')
+    const load = vi.spyOn(mock.agents, 'loadMessages')
+
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+
+    await vi.waitFor(() => expect(load).toHaveBeenCalledWith('box.mh-1', expect.anything()))
+    expect(load.mock.calls.map(([id]) => id)).not.toContain('mh-local')
+  })
+
+  it('a session of a machine that is away is never woken, not by focus and not by the reconnect recovery', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box({ status: 'unreachable' })]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    // Listed from the hub's mirror: last heard dormant
+    mock.sessions.set('box.ma-1', sessionInfo('box.ma-1', { projectId: remote.id, machine: 'box', live: false, unreachable: true }))
+    mock.sessions.set('box.ma-2', sessionInfo('box.ma-2', { projectId: remote.id, machine: 'box', live: true }))
+    await useStore.getState().attach(mock)
+    const resume = vi.spyOn(mock.agents, 'resumeSession')
+
+    useStore.getState().focusSession('box.ma-1')
+    await useStore.getState().wake('box.ma-1')
+    // The UI's own socket drops and comes back; the mirror still says ma-2 was live, but not that it is now
+    mock.sessions.get('box.ma-2')!.live = false
+    mock.sessions.get('box.ma-2')!.unreachable = true
+    mock.setConnectionState('disconnected')
+    mock.setConnectionState('connected')
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.ma-2']!.unreachable).toBe(true))
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(resume).not.toHaveBeenCalled()
+  })
+
+  it('a machine_status that arrives before the answer to machines.add is not overwritten by that answer', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    // The hub answers `connecting`, but its version check has already broadcast `versions_differ` (measured in e2e)
+    vi.spyOn(mock.machines, 'add').mockImplementation(async () => {
+      mock.emit({ type: 'machine_status', machine: box({ status: 'versions_differ', error: 'Box runs Centralu 0.1.0' }) })
+      return box({ status: 'connecting' })
+    })
+    await useStore.getState().addMachine({ name: 'Box', sshTarget: 'me@box', shell: 'posix' })
+    expect(useStore.getState().machines['box']?.status).toBe('versions_differ')
+  })
+
+  it('a project added on a machine is asked of that machine', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    await useStore.getState().attach(mock)
+    const add = vi.spyOn(mock.projects, 'add')
+    const p = await useStore.getState().addProject('/srv/other', 'box')
+    expect(add).toHaveBeenCalledWith('/srv/other', 'box')
+    expect(useStore.getState().projects[p.id]?.machine).toBe('box')
   })
 })

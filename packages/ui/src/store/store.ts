@@ -22,6 +22,8 @@ import type {
   ThemeFileEntry,
   UpdateStatus,
   AgentVersions,
+  MachineInfo,
+  RemoteShell,
 } from '@cc/protocol'
 import {
   allDoneNotification,
@@ -46,6 +48,7 @@ import {
   sanitizeGridPanels,
   sanitizeArrangements,
   sessionPanelId,
+  isAway,
   type ProjectArrangement,
   type SessionSummary,
 } from '@cc/core'
@@ -1024,6 +1027,30 @@ export type AppState = {
    */
   agentVersions: AgentVersions | null
   /**
+   * The machines this computer's host is linked to (#82, docs/plans/remote-hub.md), by id, in the
+   * order the host lists them. Each row is replaced whole by its `machine_status`. Empty with no
+   * links, and with a host from before them.
+   */
+  machines: Record<string, MachineInfo>
+  /** The agent CLIs installed on each linked machine (#297 per machine), read when a remote session's header asks */
+  machineAgentVersions: Record<string, AgentVersions>
+  refreshMachines(): Promise<void>
+  /**
+   * The recovery `machine_resync` asks for, scoped to one machine (#82): re-read the session and
+   * project lists and replace that machine's rows only, re-read the conversations of its sessions
+   * that are open, and wake only its sessions that were live and are not now. Every other machine's
+   * rows, and this computer's, are left exactly as they are.
+   */
+  recoverMachine(machineId: string): Promise<void>
+  addMachine(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): Promise<MachineInfo>
+  removeMachine(machineId: string): Promise<void>
+  reconnectMachine(machineId: string): Promise<void>
+  acceptMachineVersions(machineId: string): Promise<void>
+  checkMachineAgentVersions(machineId: string, force?: boolean): Promise<void>
+  /** Opens Settings on one category, e.g. Machines from a machine's header in the sidebar */
+  settingsRequest: { category: string; at: number } | null
+  openSettingsAt(category: string): void
+  /**
    * What this person has chosen about the screen (protocol's `UiPreferences`).
    *
    * **Fetched once at startup and seated here.** Letting the consumer (the composer) ask on demand
@@ -1130,7 +1157,7 @@ export type AppState = {
   /** "Move idle sessions to a newly installed agent CLI" on and off (#297) */
   setAgentAutoApply(enabled: boolean): Promise<void>
   /** Restarts every idle session that runs an older CLI on the installed one (#297) — the header's action */
-  applyAgentVersions(): Promise<void>
+  applyAgentVersions(machine?: string | null): Promise<void>
   /**
    * Changes screen settings — sends **only what changed**.
    *
@@ -1172,7 +1199,8 @@ export type AppState = {
    */
   createWorktreeManager(projectId: string, baseBranch: string): Promise<void>
 
-  addProject(path: string): Promise<ProjectInfo>
+  /** `machine`: a folder on that linked machine, its path in that machine's terms (#82) */
+  addProject(path: string, machine?: string | null): Promise<ProjectInfo>
   /**
    * A project just registered whose trust is still being asked about (M4, decision 3). Asked
    * **once**, at registration — answering or dismissing it clears it. Nothing is blocked while it
@@ -1639,11 +1667,13 @@ async function usableDefaults(
   platform: Platform,
   tool: ToolName,
   saved: ToolDefaults | undefined,
+  /** The project's machine (#82): the models are the ones its own CLI offers */
+  machine?: string | null,
 ): Promise<ToolDefaults> {
   const none: ToolDefaults = { model: null, effort: null }
   if (!saved?.model) return saved ?? none
   try {
-    const { supported, models } = await platform.agents.models(tool)
+    const { supported, models } = await platform.agents.models(tool, machine)
     if (!supported || models.length === 0) return saved
     return models.some((m) => m.id === saved.model) ? saved : none
   } catch {
@@ -1757,7 +1787,10 @@ export function appliedVersionsText(restarted: number, busy: number): string {
 
 function liveFactsOf(
   s: SessionInfo,
-): Pick<SessionSummary, 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks' | 'agentVersion'> {
+): Pick<
+  SessionSummary,
+  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks' | 'agentVersion' | 'machine' | 'unreachable'
+> {
   return {
     pendingApproval: s.pendingApproval,
     pendingQuestions: s.pendingQuestions,
@@ -1769,7 +1802,81 @@ function liveFactsOf(
     backgroundTasks: s.backgroundTasks,
     // So does the CLI version the process runs (#297)
     agentVersion: s.agentVersion,
+    /*
+     * Where it runs, and whether the hub answered for its machine from the mirror (#82). Taken on every list read, so a
+     * machine coming back (its `machine_resync`) clears the mark the list read while it was away left behind.
+     */
+    machine: s.machine ?? null,
+    unreachable: s.unreachable === true,
   }
+}
+
+/**
+ * A machine row from the answer to `machines.add/reconnect/acceptVersions`, kept only when no `machine_status` got there
+ * first (#82). The link moves on its own before the answer leaves the hub: `add` answers `connecting` while the version
+ * check has already broadcast `versions_differ` (measured in e2e, the event arrived first). Writing the answer over the
+ * event would leave the row saying connecting until the next change, which for a held link never comes.
+ */
+function withAnswered(machines: Record<string, MachineInfo>, m: MachineInfo): Record<string, MachineInfo> {
+  return machines[m.id] ? machines : { ...machines, [m.id]: m }
+}
+
+/**
+ * One session's summary from a fresh `sessions.list` row, merged over what the store already holds (`cur`).
+ *
+ * Shared by the reconnect recovery and a machine's recovery (#82), which build the same summary from the same list:
+ * two places that construct one thing have to ask for one set (#37). Only the facts the host knows are overwritten;
+ * local derived state (preview, `touchedPaths`, …) belongs to the reducer and is kept.
+ */
+function mergeListed(cur: SessionSummary | undefined, f: SessionInfo): SessionSummary {
+  return cur
+    ? {
+        ...cur,
+        projectId: f.projectId,
+        kind: f.kind,
+        tool: f.tool,
+        name: f.name,
+        autoNamed: f.autoNamed,
+        state: f.state,
+        live: f.live,
+        // `lastSeq` might already be further ahead here from an event we received — winding it back would resurrect an unread mark
+        lastSeq: Math.max(cur.lastSeq, f.lastSeq),
+        lastReadSeq: f.lastReadSeq,
+        waitingSince: f.waitingSince,
+        model: f.model,
+        effort: f.effort,
+        verbosity: f.verbosity,
+        permissionPreset: f.permissionPreset,
+        worktree: f.worktree,
+        parentSessionId: f.parentSessionId,
+        merged: f.worktreeMerged,
+        pr: f.worktreePr,
+        ...liveFactsOf(f),
+      }
+    : {
+        ...initialSession({
+          id: f.id,
+          projectId: f.projectId,
+          kind: f.kind,
+          name: f.name,
+          tool: f.tool,
+          effort: f.effort,
+          verbosity: f.verbosity,
+          model: f.model,
+          permissionPreset: f.permissionPreset,
+          worktree: f.worktree,
+          parentSessionId: f.parentSessionId,
+          merged: f.worktreeMerged,
+          pr: f.worktreePr,
+        }),
+        autoNamed: f.autoNamed,
+        state: f.state,
+        live: f.live,
+        lastSeq: f.lastSeq,
+        lastReadSeq: f.lastReadSeq,
+        waitingSince: f.waitingSince,
+        ...liveFactsOf(f),
+      }
 }
 
 /**
@@ -2553,6 +2660,9 @@ export const useStore = create<AppState>((set, get) => ({
   importDialog: null as { source: string; fromLink: boolean; at: number } | null,
   update: null,
   agentVersions: null,
+  machines: {} as Record<string, MachineInfo>,
+  machineAgentVersions: {} as Record<string, AgentVersions>,
+  settingsRequest: null as { category: string; at: number } | null,
   prefs: DEFAULT_UI_PREFERENCES,
 
   async attach(platform) {
@@ -2626,7 +2736,7 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
-    const [projects, sessions, gridPanels, tools, prefs, externalApps, themeFiles] = await Promise.all([
+    const [projects, sessions, gridPanels, tools, prefs, externalApps, themeFiles, machines] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
       // The app must come up even if the layout cannot be read — the grid just looks empty
@@ -2653,6 +2763,8 @@ export const useStore = create<AppState>((set, get) => ({
       // The theme files arrive with the preferences that choose among them, so the first screen
       // already has its theme — and a folder that cannot be read just means the presets
       platform.themes.list().catch(() => [] as ThemeFileEntry[]),
+      // The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before them has none
+      platform.machines.list().catch(() => [] as MachineInfo[]),
     ])
     const known: Record<string, SessionSummary> = Object.fromEntries(
       sessions.map((s) => [
@@ -2714,6 +2826,7 @@ export const useStore = create<AppState>((set, get) => ({
       externalApps,
       themeFiles,
       lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
+      machines: Object.fromEntries(machines.map((m) => [m.id, m])),
       connection: 'connected',
     }))
 
@@ -2995,6 +3108,21 @@ export const useStore = create<AppState>((set, get) => ({
 
     if (e.type === 'themes_changed') {
       void get().refreshThemes()
+      return
+    }
+
+    /*
+     * A linked machine's link changed state (#82). The event carries the whole row, so it replaces that machine's row
+     * rather than patching it. The machine's sessions are not touched: whether one is away is derived from this row
+     * (`isAway`), and what they are is read again only when the machine says so (`machine_resync`).
+     */
+    if (e.type === 'machine_status') {
+      set((s) => ({ machines: { ...s.machines, [e.machine.id]: e.machine } }))
+      return
+    }
+    // What the UI holds about one machine has to be read again (#82): its own recovery, not the whole app's
+    if (e.type === 'machine_resync') {
+      void get().recoverMachine(e.machineId)
       return
     }
 
@@ -3391,7 +3519,9 @@ export const useStore = create<AppState>((set, get) => ({
       const after = Object.values(st.sessions)
       const before = after.map((x) => (x.id === sessionId ? cur : x))
 
-      const one = notificationFor({ id: sessionId, name: withSeq.name, state: withSeq.state }, cur.state, ctx)
+      // An OS banner has no machine tag to show, so the name carries it for a session on a linked machine (#82)
+      const named = withSeq.machine ? `${withSeq.name} on ${st.machines[withSeq.machine]?.name ?? withSeq.machine}` : withSeq.name
+      const one = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
       const all = allDoneNotification(after, before, ctx)
       // If there is a per-session notice, use only that — do not fire twice at the same instant
       // If a per-session completion already fired, "all done" does not fire on top of it — twice at the same instant is just noise
@@ -3698,6 +3828,12 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get()
     const projectId = from ?? (s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null)
     if (!projectId || !s.platform) return
+    // The file manager is this computer's; a file on a linked machine is not in it (#82)
+    const machine = s.projects[projectId]?.machine
+    if (machine) {
+      set({ toast: `${path} is on ${s.machines[machine]?.name ?? machine}, not on this computer` })
+      return
+    }
     try {
       const res = await s.platform.fs.reveal(projectId, path)
       if (!res.supported) set({ toast: res.reason ?? 'Showing files is not available here' })
@@ -3733,6 +3869,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
   toggleSettings(open) {
     set((s) => ({ settingsOpen: open ?? !s.settingsOpen }))
+  },
+  openSettingsAt(category) {
+    set({ settingsOpen: true, settingsRequest: { category, at: Date.now() } })
   },
   openImport(source = '', fromLink = false) {
     // `at` is needed so a new link arriving at an already-open window still makes the window stand up again for that link (a request to open the same window twice)
@@ -3796,6 +3935,129 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  async checkMachineAgentVersions(machineId, force = false) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const v = await platform.agents.versions(force, machineId)
+      set((s) => ({ machineAgentVersions: { ...s.machineAgentVersions, [machineId]: v } }))
+    } catch {
+      // Away, or a host that does not know the machine parameter: the header stays quiet, as for this computer
+    }
+  },
+
+  async refreshMachines() {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const list = await platform.machines.list()
+      set({ machines: Object.fromEntries(list.map((m) => [m.id, m])) })
+    } catch {
+      /* a host from before linked machines: none */
+    }
+  },
+
+  async addMachine(spec) {
+    const m = await get().platform!.machines.add(spec)
+    set((s) => ({ machines: withAnswered(s.machines, m) }))
+    return m
+  },
+
+  async removeMachine(machineId) {
+    await get().platform!.machines.remove(machineId)
+    // Its sessions and projects leave with its own resync; the row goes now
+    set((s) => ({ machines: omitKey(s.machines, machineId), machineAgentVersions: omitKey(s.machineAgentVersions, machineId) }))
+  },
+
+  async reconnectMachine(machineId) {
+    try {
+      const m = await get().platform!.machines.reconnect(machineId)
+      set((s) => ({ machines: withAnswered(s.machines, m) }))
+    } catch (e) {
+      set({ toast: `Could not reconnect: ${(e as Error).message}` })
+    }
+  },
+
+  async acceptMachineVersions(machineId) {
+    try {
+      const m = await get().platform!.machines.acceptVersions(machineId)
+      set((s) => ({ machines: withAnswered(s.machines, m) }))
+    } catch (e) {
+      set({ toast: `Could not connect: ${(e as Error).message}` })
+    }
+  },
+
+  async recoverMachine(machineId) {
+    const s = get()
+    if (!s.platform) return
+    const ofMachine = (x: { machine?: string | null }) => (x.machine ?? null) === machineId
+    // Held live before: the candidates to wake, once the fresh list says they are not
+    const wasLive = Object.values(s.sessions).filter((x) => ofMachine(x) && x.live)
+    const [fresh, projects] = await Promise.all([
+      s.platform.agents.listSessions().catch(() => null),
+      s.platform.projects.list().catch(() => null),
+    ])
+    if (!fresh) return
+    const mine = new Map(fresh.filter(ofMachine).map((f) => [f.id, f]))
+    set((st) => {
+      /*
+       * Only this machine's rows move. Every other row keeps its object, so nothing about this computer's sessions or
+       * another machine's re-renders or loses what the reducer derived. A row of this machine the fresh list no
+       * longer has (deleted there, or the machine was unlinked) leaves; a new one joins at the end.
+       */
+      const sessions: Record<string, SessionSummary> = {}
+      for (const [id, cur] of Object.entries(st.sessions)) {
+        if (!ofMachine(cur)) sessions[id] = cur
+        else if (mine.has(id)) sessions[id] = mergeListed(cur, mine.get(id)!)
+      }
+      for (const [id, f] of mine) if (!sessions[id]) sessions[id] = mergeListed(undefined, f)
+      // What a session that left kept is cleared as `session_deleted` clears it (#163)
+      const gone = new Set(Object.keys(st.sessions).filter((id) => !sessions[id]))
+      let nextProjects = st.projects
+      if (projects) {
+        const theirs = new Map(projects.filter(ofMachine).map((p) => [p.id, p]))
+        nextProjects = {}
+        for (const [id, p] of Object.entries(st.projects)) {
+          if (!ofMachine(p)) nextProjects[id] = p
+          else if (theirs.has(id)) nextProjects[id] = theirs.get(id)!
+        }
+        for (const [id, p] of theirs) if (!nextProjects[id]) nextProjects[id] = p
+      }
+      return {
+        sessions,
+        ...forgetSessions(st, gone),
+        projects: nextProjects,
+        workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
+      }
+    })
+    replayPendingEvents(get)
+    // A remote's user-folder and project apps come and go with it
+    void get().refreshExternalApps()
+    // Its agent CLIs may have moved while it was away
+    if (get().machineAgentVersions[machineId]) void get().checkMachineAgentVersions(machineId)
+
+    /*
+     * The events of the gap are not replayed through the hub (protocol.md, `machine_resync`): every conversation of
+     * this machine that is open is read again, the same way a host resync reads every one held (#173).
+     */
+    const holding = new Set(Object.keys(get().chat))
+    const focused = get().focusedSessionId
+    if (focused) holding.add(focused)
+    for (const id of holding) {
+      const cur = get().sessions[id]
+      if (cur && ofMachine(cur)) void get().loadHistory(id)
+    }
+
+    const toWake = wasLive.filter((x) => {
+      const now = get().sessions[x.id]
+      return now && !now.live && !isAway(now, get().machines)
+    })
+    if (toWake.length === 0) return
+    const name = get().machines[machineId]?.name ?? machineId
+    set({ toast: `${name} is back — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
+    for (const x of toWake) await get().wake(x.id)
+  },
+
   async setAgentAutoApply(enabled) {
     const platform = get().platform
     if (!platform) return
@@ -3806,11 +4068,11 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async applyAgentVersions() {
+  async applyAgentVersions(machine) {
     const platform = get().platform
     if (!platform) return
     try {
-      const { restarted, busy } = await platform.agents.applyVersions()
+      const { restarted, busy } = await platform.agents.applyVersions(machine)
       set({ toast: appliedVersionsText(restarted.length, busy.length) })
     } catch (e) {
       set({ toast: `Could not restart the sessions: ${(e as Error).message}` })
@@ -4007,8 +4269,8 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async addProject(path) {
-    const p = await get().platform!.projects.add(path)
+  async addProject(path, machine) {
+    const p = await get().platform!.projects.add(path, machine)
     // Went through the door that was being pointed at, so the light turns off (#63) — a lingering hint blinking after the fact would be nagging
     set((s) => ({
       projects: { ...s.projects, [p.id]: p },
@@ -4258,7 +4520,7 @@ export const useStore = create<AppState>((set, get) => ({
      * when a handoff deliberately cleared the model on a tool switch (`sameTool ? … : undefined`),
      * this line filled it right back in.
      */
-    const remembered = await usableDefaults(platform, tool, project.defaultModels?.[tool])
+    const remembered = await usableDefaults(platform, tool, project.defaultModels?.[tool], project.machine)
     const info = await platform.agents.createSession({
       projectId,
       cwd: project.path,
@@ -5543,6 +5805,8 @@ export const useStore = create<AppState>((set, get) => ({
     // Broadcasts from the gap while disconnected never come again — the app list (A-8) is also aligned to whatever the host currently knows
     void get().refreshExternalApps()
     void get().refreshAppQuestions()
+    // So are the links' states (#82): a machine that went away or came back during the gap
+    void get().refreshMachines()
 
     const wasLive = Object.values(s.sessions).filter((x) => x.live)
 
@@ -5563,57 +5827,7 @@ export const useStore = create<AppState>((set, get) => ({
      */
     set((st) => {
       const sessions: Record<string, SessionSummary> = {}
-      for (const f of fresh) {
-        const cur = st.sessions[f.id]
-        sessions[f.id] = cur
-          ? {
-              ...cur,
-              projectId: f.projectId,
-              kind: f.kind,
-              tool: f.tool,
-              name: f.name,
-              autoNamed: f.autoNamed,
-              state: f.state,
-              live: f.live,
-              // `lastSeq` might already be further ahead here from an event we received — winding it back would resurrect an unread mark
-              lastSeq: Math.max(cur.lastSeq, f.lastSeq),
-              lastReadSeq: f.lastReadSeq,
-              waitingSince: f.waitingSince,
-              model: f.model,
-              effort: f.effort,
-              verbosity: f.verbosity,
-              permissionPreset: f.permissionPreset,
-              worktree: f.worktree,
-              parentSessionId: f.parentSessionId,
-              merged: f.worktreeMerged,
-              pr: f.worktreePr,
-              ...liveFactsOf(f),
-            }
-          : {
-              ...initialSession({
-                id: f.id,
-                projectId: f.projectId,
-                kind: f.kind,
-                name: f.name,
-                tool: f.tool,
-                effort: f.effort,
-                verbosity: f.verbosity,
-                model: f.model,
-                permissionPreset: f.permissionPreset,
-                worktree: f.worktree,
-                parentSessionId: f.parentSessionId,
-                merged: f.worktreeMerged,
-                pr: f.worktreePr,
-              }),
-              autoNamed: f.autoNamed,
-              state: f.state,
-              live: f.live,
-              lastSeq: f.lastSeq,
-              lastReadSeq: f.lastReadSeq,
-              waitingSince: f.waitingSince,
-              ...liveFactsOf(f),
-            }
-      }
+      for (const f of fresh) sessions[f.id] = mergeListed(st.sessions[f.id], f)
       /*
        * The remains of a session deleted while disconnected are cleared the way `session_deleted` clears them: that
        * event fell into the gap and is never replayed, so this is the only place they can go (#163).
@@ -5649,8 +5863,12 @@ export const useStore = create<AppState>((set, get) => ({
 
     // Only revives a process that was running right before the disconnect but that the new host does not know about
     const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
+    /*
+     * Never one on a machine that is away (#82): the hub listed it from its mirror, and waking it would only fail there.
+     * That machine's own `machine_resync` wakes what has to be woken once it is back (`recoverMachine`).
+     */
     const toWake = wasLive.filter(
-      (x) => !alive.has(x.id) && get().sessions[x.id],
+      (x) => !alive.has(x.id) && get().sessions[x.id] && !isAway(get().sessions[x.id], get().machines),
     )
     if (toWake.length === 0) return
 
@@ -5663,6 +5881,8 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get()
     const session = s.sessions[sessionId]
     if (!s.platform || !session || session.live || s.resuming[sessionId]) return
+    // A session on a machine that is away is never woken (#82): only its machine's resync does that, once it is back
+    if (isAway(session, s.machines)) return
 
     set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
     try {

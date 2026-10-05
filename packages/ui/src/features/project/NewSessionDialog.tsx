@@ -5,6 +5,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
+import { MachineTag } from '../machines/MachineTag.jsx'
 
 /** What one field looks like. All three must share a shape to read as "the same kind of answer" */
 const inputClass =
@@ -198,14 +199,21 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
     listRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [resume?.externalId])
 
-  // Detected every time the dialog opens — the person may have just installed or logged in
+  /*
+   * Detected every time the dialog opens — the person may have just installed or logged in.
+   *
+   * **On the project's machine** (#82): a session in a project on a linked machine runs that machine's CLIs, so whether
+   * one is installed and logged in is that machine's answer, not this computer's (probe 1 of the plan found this
+   * dialog answering for the wrong machine).
+   */
+  const machine = project?.machine ?? null
   const detect = useCallback(async () => {
     try {
-      setTools(await platform.agents.detect())
+      setTools(await platform.agents.detect(machine))
     } catch {
       setTools([])
     }
-  }, [platform])
+  }, [platform, machine])
   useEffect(() => {
     void detect()
   }, [detect])
@@ -341,9 +349,11 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           within reach no matter how far the scroll has gone.
         */}
         <header className="shrink-0 border-b border-line px-4 py-2.5">
-          <h2 className="text-md font-medium text-ink">
-            New session <span className="text-ink-faint">·</span>{' '}
-            <span className="text-ink-muted">{project?.name}</span>
+          <h2 className="flex items-baseline gap-1.5 text-md font-medium text-ink">
+            <span className="shrink-0">New session</span> <span className="text-ink-faint">·</span>{' '}
+            <span className="truncate text-ink-muted">{project?.name}</span>
+            {/* The machine it will run on (#82): the project decides it, so it is stated, not asked */}
+            <MachineTag machine={machine} testId="new-session-machine" className="self-center font-normal" />
           </h2>
           {/* The tool — two buttons need no subheading to make their meaning clear. Model and permissions are set from the header after creation */}
           <div className="mt-2.5 flex gap-1.5">

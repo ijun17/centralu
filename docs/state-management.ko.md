@@ -80,3 +80,26 @@ selector는 `core`의 순수 함수를 메모이즈해 감싼 형태로 구현�
 
 - 단축키, 알림 정책, 카드 접기 정책, 승인 배너 정책 등은 **데이터**다(전략 패턴의 전략 테이블). `settings` slice + store 영속화로 관리한다.
 - 정책 판단 함수는 core에 있고(`shouldCollapseCard(tool, settings)`, `canApproveInBanner(detail, settings)`) UI는 결과만 소비한다. 정책을 바꾸는 것은 데이터 변경이지 컴포넌트 수정이 아니다.
+
+## 7. 연결된 기기 (#82)
+
+허브는 다른 기기의 세션과 프로젝트를 `machine`을 채워(이 컴퓨터는 null) 한정된 id(`<machine>.<id>`, 여기서는 결코
+파싱하지 않는다)로 나열한다. `machines`는 연결된 기기마다 `MachineInfo` 하나를 지니고, 그 기기의 `machine_status`가
+통째로 바꾼다.
+
+- **자리 비움은 저장하지 않고 파생한다** (`@cc/core`의 `isAway`): 허브가 미러로 답한 행(`unreachable`), 또는 링크가
+  `connected`가 아닌 기기의 행. 자리 비운 행은 흐리게 남고 `wake`는 그것을 거절한다: 깨워도 허브에서 실패할 뿐이고,
+  기기가 돌아오면 그 기기의 resync가 깨운다. 재연결 복구(`recoverAfterReconnect`)도 같은 이유로 자리 비운 세션을
+  건너뛴다.
+- **`machine_resync {machineId}`는 전역 복구가 아니라 그 기기로 좁힌 복구를 돌린다** (`recoverMachine`):
+  1. `sessions.list`와 `projects.list`를 다시 읽고 **그 기기의 행만** 바꾼다: 다른 기기나 이 컴퓨터의 행은 객체를
+     그대로 지닌다(다시 그려지는 것도, 리듀서가 파생한 것을 잃는 것도 없다). 새 목록에 없는 행은 떠나고(거기서
+     지워졌거나 기기 연결이 풀렸다. 그 행이 지니던 것은 `session_deleted`가 지우듯 지운다, #163), 새 행은 끝에
+     붙는다;
+  2. 그 기기의 열린 대화마다 기록을 다시 읽는다(허브는 원격의 공백을 재생하지 않는다. 호스트 resync가 모든 대화에
+     하듯이 대화를 다시 읽는다, #173);
+  3. 그 기기에서 전에 살아 있었고 지금은 아닌 세션을 깨운다(키퍼 없이 재시작한 원격 호스트). 다른 기기의 것은 하나도
+     깨우지 않는다.
+- **기기별 질문은 기기를 싣는다**: 새 세션 대화상자의 `agents.detect`, 세션 메뉴의 모델과 능력 목록, 원격 세션의
+  "older CLI" 줄(`machineAgentVersions[machine]`, 머리줄이 처음 필요할 때와 resync 때 읽는다), `projects.add {path,
+  machine}`.

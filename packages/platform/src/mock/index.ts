@@ -41,6 +41,7 @@ import type {
   AgentVersions,
   ThemeFileContent,
   ThemeFileEntry,
+  MachineInfo,
 } from '@cc/protocol'
 import {
   APP_VERSION,
@@ -1576,6 +1577,57 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /**
+   * Linked machines (#82). The mock reaches no machine: one added here stands as connected at once,
+   * so a screen can be built against the shape; the real link's states come from two real hosts in
+   * e2e (`e2e/fixtures/linked-hosts.ts`).
+   */
+  machinesList: MachineInfo[] = []
+  private machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
+    const at = this.machinesList.findIndex((m) => m.id === id)
+    if (at === -1) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
+    const next = { ...this.machinesList[at]!, ...patch }
+    this.machinesList[at] = next
+    this.emit({ type: 'machine_status', machine: { ...next } })
+    return { ...next }
+  }
+  readonly machines = {
+    list: async () => this.machinesList.map((m) => ({ ...m })),
+    add: async (spec: { name: string; sshTarget: string; shell: MachineInfo['shell']; wslDistro?: string | null; command?: string | null }) => {
+      const base = spec.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 24) || 'machine'
+      let id = base
+      for (let n = 2; this.machinesList.some((m) => m.id === id); n++) id = `${base}-${n}`
+      const info: MachineInfo = {
+        id,
+        name: spec.name,
+        sshTarget: spec.sshTarget,
+        shell: spec.shell,
+        wslDistro: spec.wslDistro ?? null,
+        command: spec.command ?? null,
+        status: 'connected',
+        error: null,
+        versions: null,
+        lastConnectedAt: Date.now(),
+        localPort: null,
+        sameLocalPort: false,
+      }
+      this.machinesList.push(info)
+      this.emit({ type: 'machine_status', machine: { ...info } })
+      return { ...info }
+    },
+    remove: async (machineId: string) => {
+      this.machinesList = this.machinesList.filter((m) => m.id !== machineId)
+      this.projectsList = this.projectsList.filter((p) => p.machine !== machineId)
+      this.emit({ type: 'machine_resync', machineId })
+    },
+    reconnect: async (machineId: string) => this.machineRow(machineId, {}),
+    acceptVersions: async (machineId: string) => {
+      const v = this.machinesList.find((m) => m.id === machineId)?.versions
+      if (v && !v.compatible) throw Object.assign(new Error('The two sides speak different protocols; one of them has to be updated first'), { code: 'internal' })
+      return this.machineRow(machineId, { status: 'connected', error: null, versions: v ? { ...v, accepted: true } : null })
+    },
+  }
+
   readonly processes = {
     strays: async () => [...this.strayProcesses],
     stop: async (pids: number[]) => {
@@ -2251,8 +2303,8 @@ export class MockPlatform implements Platform {
       this.projectsList.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
       return [...this.projectsList]
     },
-    add: async (path: string) => {
-      const existing = this.projectsList.find((p) => p.path === path)
+    add: async (path: string, machine?: string | null) => {
+      const existing = this.projectsList.find((p) => p.path === path && (p.machine ?? null) === (machine ?? null))
       if (existing) return existing
       /*
        * The name is the directory's last segment under **either** separator (#47).
@@ -2264,7 +2316,9 @@ export class MockPlatform implements Platform {
        * it `proj`, and e2e — which only ever runs the mock — would have stayed green about it.
        */
       const info: ProjectInfo = {
-        id: `mock-project-${++this.idc}`,
+        // A folder on a linked machine is named the way the hub names it: `<machine>.<id>`, with the machine said (#82)
+        id: machine ? `${machine}.mock-project-${++this.idc}` : `mock-project-${++this.idc}`,
+        ...(machine ? { machine } : {}),
         path,
         name: osPathBaseName(path) || path,
         defaultTool: 'claude',

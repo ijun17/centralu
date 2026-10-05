@@ -44,6 +44,8 @@ import type {
   ThemeFileEntry,
   UpdateStatus,
   AgentVersions,
+  MachineInfo,
+  RemoteShell,
 } from '@cc/protocol'
 
 /**
@@ -68,6 +70,13 @@ export type PlatformError = {
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'resync_required'
+
+/**
+ * Which linked machine a per-machine question is for (#82, docs/plans/remote-hub.md): its agent
+ * CLIs, its usage, its folders. Null or absent: this computer (the hub), which is what every call
+ * meant before linked machines existed.
+ */
+export type MachineRef = string | null | undefined
 
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>
@@ -111,7 +120,7 @@ export interface AgentPort {
   grid(): Promise<GridPanel[]>
   setGridView(panels: GridPanel[]): Promise<GridPanel[]>
   /** The models available to pick and each model's reasoning strength (what the tool reports through its official API) */
-  models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
+  models(tool: ToolName, machine?: MachineRef): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
   /** Restarts only the agent attached to the session (the conversation stays as is) */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**
@@ -189,24 +198,24 @@ export interface AgentPort {
    * when the person opens that card's steps — they are never part of `loadMessages`.
    */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit?: number): Promise<StoredMessage[]>
-  capabilities(tool: ToolName): Promise<AdapterCapabilities>
+  capabilities(tool: ToolName, machine?: MachineRef): Promise<AdapterCapabilities>
   /**
    * This session's slash commands (skills).
    * ready=false does not mean "none" — it means the tool is not ready yet.
    */
   commands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }>
   /** Account usage and limits (FR-9). Handles only subscription limits */
-  usage(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }>
-  detect(): Promise<ToolStatus[]>
+  usage(tool: ToolName, machine?: MachineRef): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }>
+  detect(machine?: MachineRef): Promise<ToolStatus[]>
   /**
    * The agent CLIs installed now, and whether idle sessions move to a newer one by themselves (#297). `force: false`
    * (the window gaining focus) takes a reading from moments ago.
    */
-  versions(force?: boolean): Promise<AgentVersions>
+  versions(force?: boolean, machine?: MachineRef): Promise<AgentVersions>
   /** "Move idle sessions to a newly installed agent CLI" on or off (#297) */
-  setAutoApplyVersions(enabled: boolean): Promise<AgentVersions>
+  setAutoApplyVersions(enabled: boolean, machine?: MachineRef): Promise<AgentVersions>
   /** Restarts every idle session that runs an older CLI on the installed one; the busy ones are listed (#297) */
-  applyVersions(): Promise<{ restarted: string[]; busy: string[] }>
+  applyVersions(machine?: MachineRef): Promise<{ restarted: string[]; busy: string[] }>
   /** Event stream — receives events from the moment of subscription onward */
   subscribe(handler: (event: NormalizedEvent) => void): Unsubscribe
   onConnectionChange(handler: (state: ConnectionState) => void): Unsubscribe
@@ -214,7 +223,8 @@ export interface AgentPort {
 
 export interface ProjectPort {
   reorder(orderedIds: string[]): Promise<ProjectInfo[]>
-  add(path: string): Promise<ProjectInfo>
+  /** `machine`: a folder on that linked machine, the path in its own terms (#82) */
+  add(path: string, machine?: MachineRef): Promise<ProjectInfo>
   list(): Promise<ProjectInfo[]>
   gitStatus(projectId: string): Promise<ProjectInfo>
   /**
@@ -1000,6 +1010,23 @@ export interface RelaunchPort {
   watchBusy(cb: (busy: boolean | null) => void): Unsubscribe
 }
 
+/**
+ * Linked machines (#82, docs/plans/remote-hub.md): the hosts on other computers this computer's
+ * host reaches over the person's own ssh. Adding one is the consent for this computer to reach that
+ * machine (plan §3.2). Their state arrives as `machine_status` events; `machine_resync` says what the
+ * UI holds about one of them has to be read again.
+ */
+export interface MachinesPort {
+  list(): Promise<MachineInfo[]>
+  add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): Promise<MachineInfo>
+  /** Unlinks it: its sessions and projects leave the lists. Nothing on the machine changes */
+  remove(machineId: string): Promise<void>
+  /** Tries the link again now instead of waiting out its backoff */
+  reconnect(machineId: string): Promise<MachineInfo>
+  /** Connects although the versions differ (one protocol only): the person declined to align them (plan §4) */
+  acceptVersions(machineId: string): Promise<MachineInfo>
+}
+
 export interface Platform {
   agents: AgentPort
   apps: AppsPort
@@ -1018,6 +1045,7 @@ export interface Platform {
   terminal: TerminalPort
   commands: CommandRunPort
   processes: ProcessPort
+  machines: MachinesPort
   /** Present only where the host outlives the window (desktop, through the keeper — #280) */
   background?: BackgroundPort
   /** Present only in the desktop app with the keeper: relaunching into an installed update (#352) */

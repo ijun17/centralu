@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { runsOlderCli } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
@@ -17,10 +18,22 @@ import { useStore } from '../../store/store.js'
  * newer — `runsOlderCli`, the comparison the host restarts by, so the line never offers what the host would refuse.
  */
 export function AgentVersionNotice({ session }: { session: SessionSummary }) {
-  const installed = useStore((s) => s.agentVersions?.installed[session.tool] ?? null)
-  const autoApply = useStore((s) => s.agentVersions?.autoApply ?? false)
+  /*
+   * Compared with the CLI installed **where the session runs** (#82): a session on a linked machine runs that machine's
+   * CLI, and comparing it with this computer's would offer a restart the remote host refuses, or miss one it would do.
+   */
+  const machine = session.machine ?? null
+  const versions = useStore((s) => (machine ? s.machineAgentVersions[machine] : s.agentVersions) ?? null)
+  const installed = versions?.installed[session.tool] ?? null
+  const autoApply = versions?.autoApply ?? false
   const label = useStore((s) => s.tools.find((t) => t.name === session.tool)?.label ?? session.tool)
   const apply = useStore((s) => s.applyAgentVersions)
+  const check = useStore((s) => s.checkMachineAgentVersions)
+  const known = versions !== null
+  // Asked once, when a live remote session's header first needs it; the machine's resync asks again
+  useEffect(() => {
+    if (machine && session.live && !known) void check(machine)
+  }, [machine, session.live, known, check])
   if (!session.live || !runsOlderCli(session.agentVersion, installed)) return null
   const text = `${label} ${installed} installed — this session runs ${session.agentVersion}`
   return (
@@ -40,7 +53,7 @@ export function AgentVersionNotice({ session }: { session: SessionSummary }) {
         className="shrink-0 rounded-md border border-line px-1.5 text-2xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
         data-testid="agent-version-apply"
         title="Restart every idle session on the installed version. Busy sessions keep running."
-        onClick={() => void apply()}
+        onClick={() => void apply(machine)}
       >
         Update idle sessions
       </button>

@@ -31,6 +31,11 @@ const { values } = parseArgs({
     link: { type: 'string' },
     /** Real ssh links, for probe 3 (docs/plans/remote-hub.md §8): a JSON array */
     'ssh-links': { type: 'string' },
+    /**
+     * The version this hub says it runs, as a release (not a dev build), for the version prompt's e2e (#82): the hub
+     * then compares versions with a machine instead of connecting whatever they are (plan §4)
+     */
+    'hub-version': { type: 'string' },
   },
 })
 
@@ -56,8 +61,20 @@ for (const r of [
 ]) {
   if (!registry.list().some((x) => x.id === r.id)) registry.add(r)
 }
+/**
+ * A machine added through the UI (Settings → Machines) with the ssh target `direct:<port>` is reached straight on
+ * loopback, the way `--link` is (#82): the manual endpoint the UI's e2e adds a machine with. `direct:<port>:protocol=<n>`
+ * makes that host's connection line claim another protocol, for the refusal across protocols. The transport is the one
+ * thing that differs from a real link; `tunnel.test.ts` covers ssh.
+ */
+function directEndpoint(target: string): { port: number; protocolVersion: number } | null {
+  const m = /^direct:(\d+)(?::protocol=(\d+))?$/.exec(target)
+  return m ? { port: Number(m[1]), protocolVersion: m[2] ? Number(m[2]) : PROTOCOL_VERSION } : null
+}
+
+const hubVersion = values['hub-version']
 const links = new Links({
-  hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true },
+  hub: hubVersion ? { version: hubVersion, protocolVersion: PROTOCOL_VERSION, dev: false } : { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true },
   broadcast: (e) => server.broadcast(e),
   terminal: (f) => server.pushTerminal(f),
   mirror: storeMirror(store),
@@ -65,6 +82,14 @@ const links = new Links({
   tunnelFor: (record) => {
     const ssh = sshLinks.find((l) => l.id === record.id)
     if (ssh) return new SshTunnel({ target: ssh.target, remote: record.remote, configFile: ssh.configFile, log: (line) => console.error(line) })
+    const direct = directEndpoint(record.sshTarget)
+    if (direct) {
+      return new DirectTunnel(() => ({ v: 1, port: direct.port, token, version: APP_VERSION, protocolVersion: direct.protocolVersion, dataDir: '', hostRunning: true }))
+    }
+    // Any other machine added through the UI goes over the real ssh, as in `main.ts`; a manual run can name its own ssh config
+    if (!link || record.id !== link.id) {
+      return new SshTunnel({ target: record.sshTarget, remote: record.remote, configFile: process.env.CC_LINKED_SSH_CONFIG, log: (line) => console.error(line) })
+    }
     return new DirectTunnel(() => ({ v: 1, port: link!.port, token: link!.token, version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dataDir: '', hostRunning: true }))
   },
   log: (line) => console.error(line),

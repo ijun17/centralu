@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { gridSessionIds } from '@cc/core'
 import { projectScreenSessions, useStore, type Notice } from '../../store/store.js'
 import { isOnScreen } from '../../app/onscreen.js'
+import { SessionMachineTag } from '../machines/MachineTag.jsx'
 
 /**
  * Things that happened off screen stack up in the top right.
@@ -119,7 +120,11 @@ function NoticeCard({
         title="Open this session"
       >
         <div className="truncate text-sm text-ink">{notice.name}</div>
-        <div className="mt-0.5 text-2xs uppercase text-ink-faint">{look.label}</div>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          <span className="text-2xs uppercase text-ink-faint">{look.label}</span>
+          {/* On a linked machine (#82): the card says where, as the inbox does */}
+          <SessionMachineTag sessionId={notice.sessionId} testId="notice-machine" className="min-w-0" />
+        </div>
       </button>
       <button
         type="button"

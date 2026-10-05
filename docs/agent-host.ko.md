@@ -842,10 +842,22 @@ Windows에서는 beta.10의 `centralu serve`):
 중계는 원격 자신의 속도에 비해 잴 만한 것을 더하지 않는다: Windows의 느린 출력은 ConPTY의 것이고, 원격 호스트에
 바로 붙어도 같다. 64 MiB 느린 독자 차단에는 닿지 않았다.
 
-**1단계가 아직 다루지 않는 것.** 창 쪽(기기별 묶음, 기기별 새 세션 대화상자, 버전 질문, 설정 → 기기)은 다음
-변경이다. 다른 기기의 앱 뷰는 2단계다. 파일, diff, 검색은 원격 프로젝트에도 이미 답하지만(프로젝트로 라우팅된다)
-창이 거기서 아직 내놓지 않는다. ssh로 원격을 설치하고 업데이트하는 것은 3단계다. WSL의 `centralu serve`에는 배포판이
-시작할 때 그것을 띄울 것(§4.7의 systemd 유닛)이 필요하고, 그 뒤로는 링크가 배포판을 살려 둔다.
+**창 쪽** (`packages/ui`; 복구는 [state-management.ko.md](state-management.ko.md) §7):
+
+| 어디 | 링크로 하는 일 |
+|---|---|
+| 사이드바 | 연결된 기기가 하나라도 있으면 `machine`으로 묶는다: 이 컴퓨터가 먼저("Your apps"와 함께), 그다음 기기마다 이름과 링크 상태(`connected`, `connecting`, `away`, `version mismatch`, …), 그 프로젝트와 사용자 폴더 앱. 연결되지 않은 기기의 프로젝트와 세션은 흐리게(`data-away`) 남고, 결코 깨우지 않는다. 기기의 +는 그 기기의 경로로 폴더를 더하고(`projects.add {path, machine}`), 기기 이름은 설정 → 기기를 연다 |
+| 설정 → 기기 | `machines.list/add/remove/reconnect`. 행마다 마지막 오류를 할 일로 말하고(`@cc/core`의 `machineProblem`: 키가 안 올라감, 호스트 키를 받은 적 없음, 거기에 Centralu가 없거나 serve가 안 돎), 버전 질문을 담는다 |
+| 버전 질문 | `MachineInfo.versions`에서: 허브가 오래되면 기존 업데이트 경로, 원격이 오래되면 거기서 칠 정확한 `npm i -g centralu@<허브 버전>`(1단계는 원격을 업데이트하지 못한다). "Connect anyway"는 `machines.acceptVersions`이고, 프로토콜이 같을 때만 내놓는다 |
+| 새 세션 대화상자, 세션 메뉴 | `agents.detect`, `agents.models`, `agents.capabilities`에 프로젝트의 `machine`을 넘긴다 |
+| 세션 머리줄 | 기기를 밝힌다(그리드 패널의 머리줄이기도 하고, 승인과 질문에 답하는 곳이기도 하다). "older CLI"는 `agents.versions {machine}`과 비교한다 |
+| 인박스, 알림 카드, OS 알림 | 원격 세션의 기기를 밝힌다 |
+| 다른 기기의 프로젝트에서 꺼지는 것 | 파일 관리자에서 보기와 파일 트리 메뉴, IDE에서 열기(`fs.resolve`가 거절된다), 삭제할 때 폴더를 이 컴퓨터의 휴지통으로 옮기기, 새 앱, 앱 뷰(`appStatus`가 나중 버전에서 열린다고 말한다) |
+
+**1단계가 아직 다루지 않는 것.** 다른 기기의 앱 뷰는 2단계다(목록에 있고, 그 도구는 거기서 돌며, 뷰는 그렇다고
+말한다). ssh로 원격을 설치하고 업데이트하는 것은 3단계다. 사용량 게이지, `processes.strays/stop`, 종료 대화상자는
+아직 이 컴퓨터에만 묻는다. WSL의 `centralu serve`에는 배포판이 시작할 때 그것을 띄울 것(§4.7의 systemd 유닛)이
+필요하고, 그 뒤로는 링크가 배포판을 살려 둔다.
 
 ## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 

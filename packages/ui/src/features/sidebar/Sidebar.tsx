@@ -20,7 +20,10 @@ import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
-import { useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { REMOTE_APP_REASON, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { isAway } from '@cc/core'
+import { MachineStatusMark } from '../machines/MachineTag.jsx'
+import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import type { ExternalAppStatus } from '@cc/protocol'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
@@ -146,6 +149,23 @@ function dropLine(edge: 'top' | 'bottom' | null): string {
 export function Sidebar() {
   const projectIds = useStore((s) => Object.keys(s.projects).join(','))
   const ids = projectIds ? projectIds.split(',') : []
+  /*
+   * Grouped by machine once there is another machine to tell apart (#82): this computer first, then each linked machine
+   * in the order the host lists them. Projects keep their own order inside their group. With no link at all the list
+   * stays as it always was, with no header to read past.
+   */
+  const placement = useStore((s) => Object.values(s.projects).map((p) => `${p.id}\u0000${p.machine ?? ''}`).join('\u0001'))
+  const machineList = useStore((s) => Object.keys(s.machines).join(','))
+  const groups = useMemo(() => {
+    const where = new Map(placement ? placement.split('\u0001').map((x) => x.split('\u0000') as [string, string]) : [])
+    const machines = machineList ? machineList.split(',') : []
+    // A project whose machine has no row (its list not read yet) still gets a group, rather than vanishing
+    for (const m of where.values()) if (m && !machines.includes(m)) machines.push(m)
+    const order = projectIds ? projectIds.split(',') : []
+    return { machines, of: (m: string) => order.filter((id) => (where.get(id) ?? '') === m) }
+  }, [placement, machineList, projectIds])
+  const grouped = groups.machines.length > 0
+  const [addingOn, setAddingOn] = useState<string | null>(null)
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   // The minimum width is fixed in real pixels — the limit on how narrow the list can get stays the
@@ -174,16 +194,35 @@ export function Sidebar() {
       />
       <OrchestratorButton />
       <GridButton />
-      {ids.length === 0 ? (
-        <p className="px-4 py-6 text-sm leading-body text-ink-faint">
-          No projects yet.
-          <br />
-          Start with <span className="text-ink-muted">Add project</span> below.
-        </p>
+      {grouped ? (
+        <>
+          <MachineHeader machine={null} />
+          {groups.of('').map((id) => (
+            <ProjectBlock key={id} projectId={id} />
+          ))}
+          <UserApps />
+          {groups.machines.map((m) => (
+            <Fragment key={m}>
+              <MachineHeader machine={m} onAddProject={() => setAddingOn(m)} />
+              <MachineProjects machine={m} projectIds={groups.of(m)} />
+            </Fragment>
+          ))}
+          {addingOn && <AddRemoteProjectDialog machine={addingOn} onClose={() => setAddingOn(null)} />}
+        </>
       ) : (
-        ids.map((id) => <ProjectBlock key={id} projectId={id} />)
+        <>
+          {ids.length === 0 ? (
+            <p className="px-4 py-6 text-sm leading-body text-ink-faint">
+              No projects yet.
+              <br />
+              Start with <span className="text-ink-muted">Add project</span> below.
+            </p>
+          ) : (
+            ids.map((id) => <ProjectBlock key={id} projectId={id} />)
+          )}
+          <UserApps />
+        </>
       )}
-      <UserApps />
       {/*
         **Where the person presses and where the result appears must be the same place** (issue
         #4). It used to live at the far right of the top bar — the person pressed one side of the
@@ -236,10 +275,11 @@ export function Sidebar() {
           disabled={adding}
           data-testid="add-project"
           data-hint={hint || undefined}
-          title="Register a directory for agents to run in"
+          title={grouped ? 'Register a directory on this computer for agents to run in' : 'Register a directory for agents to run in'}
         >
           <PlusIcon size={13} />
-          <span className="truncate">Add project</span>
+          {/* With machines listed, the picker is this computer's: a folder elsewhere is added from its machine's + */}
+          <span className="truncate">{grouped ? 'Add project on this computer' : 'Add project'}</span>
         </button>
       </div>
     </aside>
@@ -484,6 +524,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const toggleFold = useStore((s) => s.toggleProjectFold)
   const foldOthers = useStore((s) => s.foldOtherProjects)
   const manyProjects = useStore((s) => Object.keys(s.projects).length > 1)
+  /*
+   * On a linked machine that is away (#82): its rows stay, from what the hub last heard, dimmed so they read as not
+   * current. Nothing about them changes on its own until the machine is back.
+   */
+  const away = useStore((s) => isAway(s.projects[projectId], s.machines))
   // When expanded, each row's own mark already states its state — do not repeat it on the name line
   const summary = folded ? foldSummary(sessions) : []
 
@@ -516,8 +561,10 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       nothing in the list.
     */
     <section
-      className={`relative border-b border-line/70 py-2.5 transition-colors ${open ? 'bg-surface-hover/20' : ''} ${dropLine(drop.edge)}`}
+      className={`relative border-b border-line/70 py-2.5 transition-colors ${open ? 'bg-surface-hover/20' : ''} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
+      data-machine={project.machine ?? undefined}
+      data-away={away || undefined}
       data-folded={folded || undefined}
       data-selected={open || undefined}
       {...drop.handlers}
@@ -644,7 +691,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             anchorEl={menuAnchor.current}
             onClose={() => setMenuOpen(false)}
             onNewSession={() => openNewSession(projectId)}
-            onNewApp={() => setNewAppOpen(true)}
+            // An app's view on another machine opens in a later version (#82), so a new one is not offered there yet
+            onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
             onStartManager={() => setManagerDialog(true)}
             onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
             onFoldOthers={manyProjects ? () => foldOthers(projectId) : undefined}
@@ -929,7 +977,7 @@ function AppRows({ apps, testId }: { apps: ExternalCatalogApp[]; testId: string 
         <Fragment key={a.key}>
           <AppRow app={a} />
           {/* A project app's sessions stand in its project's list; a user-folder app has no project to hold them */}
-          {a.projectId === null && <UserAppSessions appId={a.appId} />}
+          {a.projectId === null && <UserAppSessions appId={a.appId} machine={a.info.machine ?? null} />}
         </Fragment>
       ))}
     </ul>
@@ -949,9 +997,10 @@ function AppRows({ apps, testId }: { apps: ExternalCatalogApp[]; testId: string 
  * up, a session of an app that was removed) has no row: search, the palette and the inbox still
  * reach it.
  */
-function UserAppSessions({ appId }: { appId: string }) {
+function UserAppSessions({ appId, machine }: { appId: string; machine: string | null }) {
   const all = useStore((s) => s.sessions)
-  const own = useMemo(() => Object.values(all).filter((s) => !s.projectId && s.appId === appId), [all, appId])
+  // The machine too (#82): two machines' user-folder apps can share an id, and neither has a project to tell them apart
+  const own = useMemo(() => Object.values(all).filter((s) => !s.projectId && s.appId === appId && (s.machine ?? null) === machine), [all, appId, machine])
   const selected = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
   return own.map((s) => {
@@ -988,6 +1037,9 @@ function UserAppSessions({ appId }: { appId: string }) {
 
 function AppRow({ app }: { app: ExternalCatalogApp }) {
   const openApp = useStore((s) => s.openApp)
+  const setToast = useStore((s) => s.setToast)
+  // An app on a linked machine (#82): listed, its tools work there, its view opens in a later version
+  const remote = !!app.info.machine
   // Same rule as a session row: lit only while **currently looking at** that screen (useSelectedSessionId in selectors)
   const active = useStore(
     (s) => s.view === 'app' && s.focusedApp?.appId === app.appId && (s.focusedApp?.projectId ?? null) === app.projectId,
@@ -998,7 +1050,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
    * standing there. Written in a bright word: that belongs to whatever is blocked (the palette rule).
    */
   const asking = useStore((s) => s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId))
-  const hint = asking ? 'asks you' : APP_HINT[app.info.status]
+  const hint = asking ? 'asks you' : remote ? 'later version' : APP_HINT[app.info.status]
   const projectId = app.projectId
   return (
     <li
@@ -1009,7 +1061,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         A user-folder app carries no project type, so every project screen refuses it while it is
         still being dragged.
       */
-      draggable
+      draggable={!remote}
       onDragStart={(e) => {
         e.dataTransfer.setData(APP_MIME, app.key)
         if (projectId) e.dataTransfer.setData(projectItemMime(projectId), projectId)
@@ -1018,7 +1070,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
     >
       <button
         type="button"
-        onClick={() => openApp(app.projectId, app.appId)}
+        onClick={() => (remote ? setToast(REMOTE_APP_REASON) : openApp(app.projectId, app.appId))}
         data-testid={`app-row-${app.key}`}
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}
@@ -1084,6 +1136,83 @@ function UserApps() {
       )}
       {newAppOpen && <NewAppDialog projectId={null} onClose={() => setNewAppOpen(false)} />}
     </section>
+  )
+}
+
+/**
+ * A machine's header in the sidebar (#82): this computer, or a linked machine with its link's state. Pressing a linked
+ * machine's name opens Settings → Machines, where its last error is said in plain words and the version prompt waits.
+ * The + adds a folder on that machine; it is offered only while the link is up, because the machine's host is the one
+ * that checks the path.
+ *
+ * Shaped like the "Your apps" header: a group heading, not a row. It sits on the sidebar's own surface with the faint
+ * ink, so it orders the list without competing with a session that is waiting.
+ */
+function MachineHeader({ machine, onAddProject }: { machine: string | null; onAddProject?: () => void }) {
+  const info = useStore((s) => (machine ? s.machines[machine] : undefined))
+  const openSettingsAt = useStore((s) => s.openSettingsAt)
+  const name = machine ? (info?.name ?? machine) : 'This computer'
+  return (
+    <header
+      className="flex items-center gap-2 border-b border-line/70 px-3 pb-1.5 pt-3"
+      data-testid={`machine-header-${machine ?? 'local'}`}
+    >
+      {machine ? (
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-2 text-left"
+          onClick={() => openSettingsAt('machines')}
+          title={info?.error ?? `${name} — ${info?.sshTarget ?? ''}`}
+          data-testid={`machine-name-${machine}`}
+        >
+          <span className="truncate text-2xs font-medium uppercase tracking-wide text-ink-faint hover:text-ink">{name}</span>
+          {info && <MachineStatusMark status={info.status} testId={`machine-status-${machine}`} />}
+        </button>
+      ) : (
+        <span className="truncate text-2xs font-medium uppercase tracking-wide text-ink-faint">{name}</span>
+      )}
+      {machine && onAddProject && (
+        <span className="-my-1 ml-auto shrink-0">
+          <IconButton
+            label={info?.status === 'connected' ? `Add a project on ${name}` : `${name} is not connected`}
+            onClick={onAddProject}
+            disabled={info?.status !== 'connected'}
+            testId={`add-remote-project-${machine}`}
+            align="right"
+          >
+            <PlusIcon size={13} />
+          </IconButton>
+        </span>
+      )}
+    </header>
+  )
+}
+
+/** A linked machine's projects and its user-folder apps (#82), under its header */
+function MachineProjects({ machine, projectIds }: { machine: string; projectIds: string[] }) {
+  const apps = useMachineApps(machine)
+  const status = useStore((s) => s.machines[machine]?.status)
+  return (
+    <div data-testid={`machine-group-${machine}`}>
+      {projectIds.map((id) => (
+        <ProjectBlock key={id} projectId={id} />
+      ))}
+      {projectIds.length === 0 && (
+        <p className="border-b border-line/70 px-3 py-2.5 text-xs text-ink-faint" data-testid={`machine-empty-${machine}`}>
+          {status === 'connected' ? 'No projects here yet. Add one with +.' : 'No projects listed.'}
+        </p>
+      )}
+      {apps.length > 0 && (
+        <section className={`border-b border-line/70 py-2.5 ${status === 'connected' ? '' : 'opacity-60'}`} data-testid={`machine-apps-${machine}`}>
+          <header className="px-3">
+            <span className="text-md font-medium tracking-tight text-ink">Apps</span>
+          </header>
+          <div className="mt-1.5">
+            <AppRows apps={apps} testId={`machine-apps-list-${machine}`} />
+          </div>
+        </section>
+      )}
+    </div>
   )
 }
 
@@ -1540,7 +1669,7 @@ function ProjectMenu({
   anchorEl: HTMLElement | null
   onClose: () => void
   onNewSession: () => void
-  onNewApp: () => void
+  onNewApp?: () => void
   onStartManager: () => void
   onToggleTrust: () => void
   /** Only when there are two or more projects — with just one, there is no "other" to fold */
@@ -1560,7 +1689,7 @@ function ProjectMenu({
         states why and lets the person trust it right there (if the row disappeared from the menu
         instead, there would be nowhere to ask why it is missing).
       */}
-      <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />
+      {onNewApp && <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />}
       {/*
         The door to **first** create the manager slot (#76). Shown only when it is a git repo and
         that slot does not exist yet — once created, that slot stands as a row in the session list,

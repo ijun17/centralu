@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import type { FsFile } from '@cc/platform/ports'
 import { useStore } from '../../store/store.js'
+import { useProjectMachine } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { TRUNCATED_NOTICE, caretAt, selectedText, wholeFileText, type Caret } from './copy.js'
@@ -20,6 +21,8 @@ import { suffixMatches } from './resolve.js'
  *   - If precise highlighting is needed, "Open in IDE" is one click away.
  */
 export function CodeViewer({ projectId }: { projectId: string }) {
+  // An IDE on this computer cannot open another machine's file (#82); Remote-SSH links are phase 2
+  const remote = useProjectMachine(projectId) !== null
   const platform = usePlatform()
   const path = useStore((s) => s.viewerPath)
   const setToast = useStore((s) => s.setToast)
@@ -357,18 +360,20 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             </button>
           </span>
         )}
-        <button
-          className="ml-auto shrink-0 text-xs text-ink-faint hover:text-ink"
-          onClick={() => {
-            void platform.fs
-              .resolve(projectId, path)
-              .then(({ path: abs }) => platform.system.openInIde(abs))
-              .catch((e) => setToast(`Could not open in IDE: ${(e as Error).message}`))
-          }}
-          data-testid="viewer-open-ide"
-        >
-          Open in IDE
-        </button>
+        {!remote && (
+          <button
+            className="ml-auto shrink-0 text-xs text-ink-faint hover:text-ink"
+            onClick={() => {
+              void platform.fs
+                .resolve(projectId, path)
+                .then(({ path: abs }) => platform.system.openInIde(abs))
+                .catch((e) => setToast(`Could not open in IDE: ${(e as Error).message}`))
+            }}
+            data-testid="viewer-open-ide"
+          >
+            Open in IDE
+          </button>
+        )}
       </header>
 
       {error !== null ? (

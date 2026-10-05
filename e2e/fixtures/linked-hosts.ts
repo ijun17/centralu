@@ -35,9 +35,10 @@ function side(name: string): Side {
 
 export type LinkedHost = { port: number; child: ChildProcess; stderr: () => string; kill(signal?: NodeJS.Signals): Promise<void> }
 
-export async function startLinkedHost(s: Side, port: number, link?: { port: number }): Promise<LinkedHost> {
+export async function startLinkedHost(s: Side, port: number, link?: { port: number }, opts: { hubVersion?: string } = {}): Promise<LinkedHost> {
   const args = ['--import', 'tsx', 'e2e/fixtures/linked-host-main.ts', '--port', String(port), '--db', s.db, '--token', LINKED_TOKEN]
   if (link) args.push('--link', JSON.stringify({ id: MACHINE, name: 'Remote box', port: link.port, token: LINKED_TOKEN }))
+  if (opts.hubVersion) args.push('--hub-version', opts.hubVersion)
   const child = spawn(process.execPath, args, {
     cwd: root,
     env: { ...process.env, CC_DATA_DIR: join(s.dir, 'data'), HOME: s.home, CC_HOST_ALLOWED_ORIGINS: LINKED_UI_ORIGIN, CI: '1' },
@@ -74,8 +75,12 @@ export async function startLinkedHost(s: Side, port: number, link?: { port: numb
 
 export type LinkedPair = { hub: LinkedHost; remote: LinkedHost; hubSide: Side; remoteSide: Side; remotePort: number; cleanup(): Promise<void> }
 
-/** Seeds both stores, then starts the remote and the hub linked to it */
-export async function startPair(): Promise<LinkedPair> {
+/**
+ * Seeds both stores, then starts the remote and the hub linked to it. `link: false` starts the hub with no link, for a
+ * test that adds the machine through the UI (`direct:<remotePort>`, linked-host-main.ts); `hubVersion` makes the hub a
+ * release of that version, so it compares versions with the machine (plan §4).
+ */
+export async function startPair(opts: { link?: boolean; hubVersion?: string } = {}): Promise<LinkedPair> {
   const hubSide = side('hub')
   const remoteSide = side('remote')
   for (const [s, id, name] of [
@@ -92,18 +97,25 @@ export async function startPair(): Promise<LinkedPair> {
   }
   const remotePort = await freePort()
   const remote = await startLinkedHost(remoteSide, remotePort)
-  const hub = await startLinkedHost(hubSide, await freePort(), { port: remotePort })
-  return {
+  const hub = await startLinkedHost(hubSide, await freePort(), opts.link === false ? undefined : { port: remotePort }, { hubVersion: opts.hubVersion })
+  const pair: LinkedPair = {
     hub,
     remote,
     hubSide,
     remoteSide,
     remotePort,
     async cleanup() {
-      await hub.kill()
-      await remote.kill()
+      await pair.hub.kill()
+      // The remote a test restarted (`restartRemote`), not the first one
+      await pair.remote.kill()
       rmSync(hubSide.dir, { recursive: true, force: true })
       rmSync(remoteSide.dir, { recursive: true, force: true })
     },
   }
+  return pair
+}
+
+/** Starts the remote host again on its own store and port, after a test stopped it (the machine comes back) */
+export async function restartRemote(pair: LinkedPair): Promise<void> {
+  pair.remote = await startLinkedHost(pair.remoteSide, pair.remotePort)
 }

@@ -78,3 +78,26 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 
 - Shortcuts, notification policy, card collapse policy, approval banner policy and so on are **data** (the strategy table of the strategy pattern). A `settings` slice + store persistence.
 - The policy judgement functions live in core (`shouldCollapseCard(tool, settings)`, `canApproveInBanner(detail, settings)`) and the UI only consumes the result. Changing a policy is a data change, not a component edit.
+
+## 7. Linked machines (#82)
+
+The hub lists another machine's sessions and projects with `machine` set (null for this computer) and their ids
+qualified (`<machine>.<id>`, never parsed here). `machines` holds one `MachineInfo` per linked machine, replaced whole
+by its `machine_status`.
+
+- **Away is derived, not stored** (`isAway` in `@cc/core`): a row the hub answered from its mirror (`unreachable`),
+  or a row of a machine whose link is not `connected`. An away row stays listed and dimmed, and `wake` refuses it:
+  waking would only fail at the hub, and the machine's own resync does the waking once it is back. The reconnect
+  recovery (`recoverAfterReconnect`) skips away sessions for the same reason.
+- **`machine_resync {machineId}` runs a recovery scoped to that machine** (`recoverMachine`), not the global one:
+  1. re-read `sessions.list` and `projects.list`, and replace **that machine's rows only**: a row of another machine or
+     of this computer keeps its object (nothing re-renders, nothing the reducer derived is lost); a row the fresh list
+     no longer has leaves (deleted there, or the machine was unlinked), with what it held cleared as
+     `session_deleted` clears it (#163); a new one joins;
+  2. re-read the history of every open conversation of that machine (the hub does not replay a remote's gap; the
+     conversations are read again, as a host resync does for every one, #173);
+  3. wake that machine's sessions that were live before and are not now (a remote host that restarted without a
+     keeper), and none of any other machine.
+- **Per-machine questions carry the machine**: the new-session dialog's `agents.detect`, the model and capability
+  lists of a session's menu, a remote session's "older CLI" line (`machineAgentVersions[machine]`, read when its header
+  first needs it and again on its resync), and `projects.add {path, machine}`.

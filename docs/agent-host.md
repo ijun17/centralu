@@ -926,11 +926,22 @@ LAN; `centralu serve` of main in WSL2 and of beta.10 on Windows):
 The relay adds nothing measurable against the remote's own pace: Windows' slow output is ConPTY's, the same straight
 to the remote host. The 64 MiB slow-reader cut was not reached.
 
-**What phase 1 does not cover yet.** The window's side (grouping by machine, the new-session dialog per machine, the
-version prompt, Settings → Machines) is the next change. App views of another machine are phase 2; files, diff and
-search already answer for a remote project (they route by project), but the window does not offer them there yet;
-installing and updating the remote over ssh is phase 3. `centralu serve` on WSL needs something that starts it when the
-distro starts (the systemd unit of §4.7); the link then keeps the distro running.
+**The window's side** (`packages/ui`; the recovery is in [state-management.md](state-management.md) §7):
+
+| Where | What it does with the links |
+|---|---|
+| Sidebar | Once there is a linked machine, groups by `machine`: this computer first (with "Your apps"), then each machine with its name and link state (`connected`, `connecting`, `away`, `version mismatch`, …), its projects and its user-folder apps. A project or session of a machine that is not connected stays listed, dimmed (`data-away`), and is never woken. A machine's + adds a folder there by its path (`projects.add {path, machine}`); its name opens Settings → Machines |
+| Settings → Machines | `machines.list/add/remove/reconnect`. Each row says the last error as what to do (`machineProblem` in `@cc/core`: a key not loaded, a host key never accepted, Centralu not installed or not serving there), and holds the version prompt |
+| Version prompt | From `MachineInfo.versions`: an older hub gets the existing update path; an older remote gets the exact `npm i -g centralu@<hub version>` to run there (phase 1 cannot update it); "Connect anyway" is `machines.acceptVersions`, offered only on one protocol |
+| New-session dialog, session menu | `agents.detect`, `agents.models`, `agents.capabilities` with the project's `machine` |
+| Session header | Names the machine (also every grid panel's header, and where approvals and questions are answered); "older CLI" compares with `agents.versions {machine}` |
+| Inbox, notice cards, OS notifications | Name the machine of a remote session |
+| Off for another machine's project | Reveal in the file manager and the file tree's menu, Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app, app views (`appStatus` says they open in a later version) |
+
+**What phase 1 does not cover yet.** App views of another machine are phase 2 (listed, their tools work there, their
+view says so); installing and updating the remote over ssh is phase 3. Usage gauges, `processes.strays/stop` and the
+quit dialog still ask this computer only. `centralu serve` on WSL needs something that starts it when the distro starts
+(the systemd unit of §4.7); the link then keeps the distro running.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

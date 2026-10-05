@@ -245,3 +245,13 @@ cursor and epoch rules, fails fast while away, reports refusals, never answers a
 route for each of the 151 methods (146 plus the five `machines.*`). The protocol gained only additions: `machines.*`,
 `machine_status`, `machine_resync`, a `machine` field on rows and an optional `machine` parameter on ten per-machine
 calls, `unreachable` on mirrored rows, and data on the version refusal ([protocol.md](../protocol.md) §6).
+
+### 8.3 What phase 1 built, window side
+
+`packages/ui`, `packages/platform` and `@cc/core`'s `machines.ts`: the sidebar grouped by machine (this computer first),
+Settings → Machines (add, remove, reconnect, the last error as what to do), the version prompt (§4: the hub through its
+own update, the remote by the exact `npm i -g centralu@<version>` in phase 1, "connect anyway" on one protocol only),
+away rows dimmed and never woken, `machine_resync` handled by a recovery scoped to that machine, the per-machine
+questions passed with `machine`, and remote sessions named by machine in the inbox, notices, notifications and the
+session header (so in the grid and where approvals are answered). Remote apps are listed per machine and say their
+views open in a later version. Details: [agent-host.md](../agent-host.md) §4.8, [state-management.md](../state-management.md) §7.

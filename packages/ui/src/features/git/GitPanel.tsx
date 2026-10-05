@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
+import { useProjectMachine } from '../../store/selectors.js'
 import { caretAt, selectedText, type Caret } from '../viewer/copy.js'
 import { diffFileLabel, diffPlaceAt, renderableDiffRows, type DiffPlace } from './diff.js'
 
@@ -80,6 +81,7 @@ function Changes({
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const openFile = useStore((s) => s.openFile)
+  const remote = useProjectMachine(projectId) !== null
   const [selected, setSelected] = useState<GitFileStatus | null>(null)
   const [diff, setDiff] = useState<{ diff: string; truncated: boolean; binary: boolean } | null>(null)
 
@@ -143,7 +145,7 @@ function Changes({
          * was clicked into, not from a `diff --git` inside the diff itself. That is why only
          * `line` is used and `file` is not.
          */
-        onOpenInIde={async ({ line }) => {
+        onOpenInIde={remote ? undefined : async ({ line }) => {
           if (selected) {
             try {
               const { path } = await platform.fs.resolve(projectId, selected.path)
@@ -186,8 +188,11 @@ function DiffView({
   data: { diff: string; truncated: boolean; binary: boolean } | null
   /** When opened with nothing selected — the list lives in the sidebar, so this has to point there */
   emptyHint?: string
-  /** Where the top of the screen currently points — which file, and which line of it, to open */
-  onOpenInIde: (target: { file: string | null; line?: number }) => Promise<void>
+  /**
+   * Where the top of the screen currently points — which file, and which line of it, to open. Absent for a project on
+   * a linked machine (#82): an IDE on this computer cannot open that machine's file
+   */
+  onOpenInIde?: (target: { file: string | null; line?: number }) => Promise<void>
   onOpenViewer?: () => void
 }) {
   const diffText = data?.diff ?? ''
@@ -334,13 +339,15 @@ function DiffView({
               Show all
             </button>
           )}
-          <button
-            className="text-xs text-ink-faint hover:text-ink"
-            onClick={() => void onOpenInIde({ file: place.file, line: place.line })}
-            data-testid="open-in-ide"
-          >
-            Open in IDE
-          </button>
+          {onOpenInIde && (
+            <button
+              className="text-xs text-ink-faint hover:text-ink"
+              onClick={() => void onOpenInIde({ file: place.file, line: place.line })}
+              data-testid="open-in-ide"
+            >
+              Open in IDE
+            </button>
+          )}
         </span>
       </header>
       {/*
@@ -488,6 +495,7 @@ function History({
 }) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
+  const remote = useProjectMachine(projectId) !== null
   const [detail, setDetail] = useState<{
     sha: string
     files: string[]
@@ -521,7 +529,7 @@ function History({
          * based on the commit's new side, so it can drift if there have been edits since, but
          * it lands closer than dropping the person on line 1.
          */
-        onOpenInIde={async ({ file, line }) => {
+        onOpenInIde={remote ? undefined : async ({ file, line }) => {
           if (!file) {
             setToast('Could not tell which file this line belongs to')
             return
