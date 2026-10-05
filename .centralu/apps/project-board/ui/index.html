@@ -160,6 +160,30 @@
       .move { margin-left: auto; padding: 1px 4px; color: var(--ink-2); max-width: 118px; }
 
       /*
+       * The status tabs: only in the narrow layout below, where the columns stack and the board is
+       * one long page. One per column with its count; a tab scrolls the board to that section, and
+       * the section in view lights its tab.
+       */
+      .tabs { display: none; }
+      .tab {
+        flex: none;
+        display: flex;
+        align-items: baseline;
+        gap: 5px;
+        padding: 3px 8px;
+        color: var(--ink-2);
+        background: transparent;
+        border-color: transparent;
+        font-size: var(--text-sm);
+        white-space: nowrap;
+      }
+      .tab:hover { color: var(--ink); border-color: var(--edge); }
+      .tab .count { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+      .tab.decision { color: var(--beacon); }
+      .tab[aria-current] { color: var(--ink); background: var(--surface); border-color: var(--edge-strong); font-weight: var(--semibold); }
+      .tab.decision[aria-current] { color: var(--beacon); }
+
+      /*
        * A narrow view: a grid or project-screen panel (about 360–480px), or the inline view under a
        * tool card (#306). Side by side, six columns would leave a sliver each; stacked, every column
        * gets the full width and the board scrolls as one page. The decision column is first either
@@ -172,6 +196,15 @@
         .board { flex-direction: column; overflow-x: hidden; overflow-y: auto; padding: 10px 12px 12px; gap: 10px; }
         .column { flex: none; max-width: none; }
         .cards { flex: none; overflow: visible; }
+        .tabs {
+          display: flex;
+          gap: 4px;
+          padding: 8px 12px;
+          overflow-x: auto;
+          border-bottom: var(--border) solid var(--edge);
+          scrollbar-width: none;
+        }
+        .tabs::-webkit-scrollbar { display: none; }
       }
 
       /*
@@ -204,6 +237,7 @@
       <button id="refresh" type="button">Refresh</button>
     </header>
     <div id="notice" hidden></div>
+    <nav class="tabs" id="tabs" aria-label="Statuses"></nav>
     <main class="board" id="board" aria-live="polite"></main>
 
     <!-- Centralu replaces this tag with the MCP App bridge (runtime/mcp-app.js). Keep it. -->
@@ -280,14 +314,99 @@
         const visible = state.items.filter((i) => (!area || i.area === area) && (!priority || i.priority === priority))
         const rank = Object.fromEntries(state.options.priority.map((p, n) => [p, n]))
         const cols = [...state.columns, ...(visible.some((i) => !i.status) ? [null] : [])]
-        board.replaceChildren(
-          ...cols.map((status) => {
-            const items = visible
-              .filter((i) => i.status === status)
-              .sort((a, b) => (rank[a.priority] ?? 99) - (rank[b.priority] ?? 99) || (b.number ?? 0) - (a.number ?? 0))
-            return column(status, items)
-          }),
+        const groups = cols.map((status) => ({
+          status,
+          items: visible
+            .filter((i) => i.status === status)
+            .sort((a, b) => (rank[a.priority] ?? 99) - (rank[b.priority] ?? 99) || (b.number ?? 0) - (a.number ?? 0)),
+        }))
+        board.replaceChildren(...groups.map((g) => column(g.status, g.items)))
+        renderTabs(groups)
+      }
+
+      /*
+       * The narrow layout's status tabs (CSS shows them only there). A tab scrolls the board so its
+       * section stands at the top, where the first one stands unscrolled; the tab of the section in
+       * view is marked `aria-current`. A tab clicked keeps the mark while the board scrolls to it, so
+       * the mark neither runs through the sections in between nor jumps to the last one when the
+       * section clicked is too short to reach the top; the person scrolling takes it back.
+       */
+      let pinned = null // the status of the tab last clicked, until the person scrolls
+      const sections = () => [...$('board').querySelectorAll('.column')]
+      const keyOf = (status) => status ?? ''
+
+      function renderTabs(groups) {
+        $('tabs').replaceChildren(
+          ...groups.map(({ status, items }) =>
+            el(
+              'button',
+              {
+                type: 'button',
+                // Explicit, so WebKit's Tab reaches it too: without it, WebKit (WKWebView) skips buttons
+                // unless the system's "keyboard navigation" is on
+                tabindex: '0',
+                class: `tab${status === state.decisionStatus ? ' decision' : ''}`,
+                'data-status': keyOf(status),
+                onclick: () => jumpTo(keyOf(status)),
+              },
+              el('span', {}, status ?? 'No status'),
+              el('span', { class: 'count' }, String(items.length)),
+            ),
+          ),
         )
+        markTab()
+      }
+
+      function jumpTo(key) {
+        const board = $('board')
+        const section = sections().find((c) => c.dataset.status === key)
+        if (!section) return
+        pinned = key
+        const pad = parseFloat(getComputedStyle(board).paddingTop) || 0
+        const top = board.scrollTop + section.getBoundingClientRect().top - board.getBoundingClientRect().top - pad
+        const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+        board.scrollTo({ top, behavior: still ? 'auto' : 'smooth' })
+        markTab()
+      }
+
+      /** The section in view: the last one whose top has reached the board's top (the first, unscrolled) */
+      function inView() {
+        const board = $('board')
+        const pad = parseFloat(getComputedStyle(board).paddingTop) || 0
+        const edge = board.getBoundingClientRect().top + pad + 2
+        let current = sections()[0]
+        for (const c of sections()) if (c.getBoundingClientRect().top <= edge) current = c
+        return current?.dataset.status ?? null
+      }
+
+      function markTab() {
+        const key = pinned ?? inView()
+        for (const t of $('tabs').children) {
+          if (t.dataset.status === key) {
+            t.setAttribute('aria-current', 'location')
+            // Keep the marked tab in sight when the row is wider than the view
+            const row = $('tabs')
+            if (t.offsetLeft < row.scrollLeft || t.offsetLeft + t.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = t.offsetLeft - 12
+          } else t.removeAttribute('aria-current')
+        }
+      }
+
+      let marking = false
+      $('board').addEventListener('scroll', () => {
+        if (marking) return
+        marking = true
+        requestAnimationFrame(() => {
+          marking = false
+          markTab()
+        })
+      })
+      // The person's own scrolling ends a tab's hold on the mark
+      for (const type of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+        $('board').addEventListener(type, () => {
+          if (pinned === null) return
+          pinned = null
+          markTab()
+        }, { passive: true })
       }
 
       function column(status, items) {

@@ -364,6 +364,60 @@ export function appThemeTests() {
     expect(await v.locator('.column').first().getAttribute('class')).toContain('decision')
   })
 
+  test('in a panel-narrow view a tab per status jumps to that section, and the tab of the section in view follows the scroll', async ({ page }) => {
+    await page.setViewportSize({ width: 412, height: 900 })
+    await page.evaluate((st) => {
+      ;(window as any).__mock.appToolHandler = async () => ({ content: [{ type: 'text', text: 'board' }], structuredContent: st })
+    }, BOARD_SPREAD)
+    // A panel's view: it fills a slot of fixed height, so the stacked board scrolls inside it
+    const instanceId = fx.open({ projectId: null, appId: 'project-board' }, 'ui://project-board/index.html')
+    await page.evaluate((p) => (window as any).__appFrame.mount('a', p), { appId: 'project-board', projectId: null, instanceId, fill: true, className: 'flex flex-col' })
+    await page.getByTestId('frame-a').getByTestId('app-frame').evaluate((el: HTMLElement) => (el.style.height = '480px'))
+    await expect(page.getByTestId('frame-a').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    const v = view(page)
+    await expect(v.locator('.column')).toHaveCount(BOARD_SPREAD.columns.length)
+
+    const tabs = v.locator('#tabs .tab')
+    await expect(tabs).toHaveText(BOARD_SPREAD.columns.map((c) => `${c}2`))
+    await expect(v.locator('#tabs')).toBeVisible()
+    const current = () => v.locator('#tabs .tab[aria-current]').getAttribute('data-status')
+    await expect.poll(current).toBe('Needs decision')
+
+    /** How far a section's top sits below where the first one stands unscrolled */
+    const offset = (status: string) =>
+      v.locator('body').evaluate((_, s) => {
+        const board = document.querySelector('.board')!
+        const pad = parseFloat(getComputedStyle(board).paddingTop)
+        const col = document.querySelector(`.column[data-status="${s}"]`)!
+        return Math.round(col.getBoundingClientRect().top - board.getBoundingClientRect().top - pad)
+      }, status)
+
+    // A tab brings its section to the top, and is the one marked
+    await v.locator('#tabs .tab[data-status="In review"]').click()
+    await expect.poll(async () => Math.abs(await offset('In review'))).toBeLessThanOrEqual(1)
+    await expect.poll(current).toBe('In review')
+
+    // Reachable from the keyboard: Tab onto the next tab, Enter
+    await v.locator('#tabs .tab[data-status="In review"]').focus()
+    await page.keyboard.press('Tab')
+    await expect(v.locator('#tabs .tab[data-status="On hold"]')).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect.poll(async () => Math.abs(await offset('On hold'))).toBeLessThanOrEqual(1)
+    await expect.poll(current).toBe('On hold')
+
+    // Scrolling by hand moves the mark with the section in view
+    await v.locator('.board').hover()
+    await page.mouse.wheel(0, -100000)
+    await expect.poll(current).toBe('Needs decision')
+    const inProgress = await offset('In progress')
+    await page.mouse.wheel(0, inProgress + 4)
+    await expect.poll(current).toBe('In progress')
+
+    // The wide layout has no tabs
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await expect(v.locator('#tabs')).toBeHidden()
+  })
+
   test('on a light theme a view stays transparent on Centralu\'s background', async ({ page }) => {
     await showTheme(page, 'light')
     await mount(page, 'counter', 'ui://counter/main')
