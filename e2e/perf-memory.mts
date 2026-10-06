@@ -4,12 +4,13 @@
  *   pnpm perf:memory [--profile small|owner|stress] [--engines webkit,chromium] [--stream-minutes 5]
  *                    [--ui-root <checkout>] [--label <name>] [--out <file.json>] [--quick]
  *                    [--steps blank,shell,long,scrolled,grid,switched,stream] [--dpr 2]
- *                    [--stream-parts working,text,reasoning,tools,subagent,images,background]
+ *                    [--stream-parts working,text,reasoning,tools,subagent,images,background] [--turn-steps 12]
  *                    [--reduced-motion] [--freeze-animations]
  *
  * `--ui-root` builds the UI of another checkout (one with its own node_modules, or links to these) against the same
  * host: how a build before a change is measured. `--stream-parts` leaves parts of the stream out, `--dpr` changes
- * the device scale, and the last two stop the app's motion, to tell what each costs.
+ * the device scale, `--turn-steps` the length of a turn (12 steps are about 50 s; the elapsed counter changes pace after
+ * the first minute), and the last two stop the app's motion, to tell what each costs.
  *
  * For each engine it seeds a fresh store (`e2e/fixtures/heavy-store.ts`) in a temporary data folder, starts a real
  * host on it (`CC_DATA_DIR`, `HOME` and `--db` all in that folder), builds the web UI for production against that
@@ -87,6 +88,7 @@ const { values } = parseArgs({
     quick: { type: 'boolean', default: false },
     steps: { type: 'string', default: 'blank,long,scrolled,grid,switched,stream' },
     'stream-parts': { type: 'string', default: STREAM_PARTS.join(',') },
+    'turn-steps': { type: 'string', default: '12' },
     dpr: { type: 'string', default: '2' },
     'reduced-motion': { type: 'boolean', default: false },
     'freeze-animations': { type: 'boolean', default: false },
@@ -101,6 +103,8 @@ const parts = new Set(values['stream-parts'].split(',') as StreamPart[])
 for (const x of steps) if (!STEPS.includes(x)) throw new Error(`unknown step ${x}`)
 for (const x of parts) if (!STREAM_PARTS.includes(x)) throw new Error(`unknown stream part ${x}`)
 const DPR = Number(values.dpr)
+/** Steps per turn: reasoning, text and a tool call each, ~4.3 s at the stream's pace */
+const TURN_STEPS = Number(values['turn-steps'])
 /** How long a step is left alone before it is sampled */
 const SETTLE_MS = quick ? 2_000 : 10_000
 const VIEWPORT = { width: 1440, height: 900 }
@@ -383,7 +387,7 @@ async function stream(
         },
       ],
     })
-    for (let step = 0; step < 12 && Date.now() - start < ms; step++) {
+    for (let step = 0; step < TURN_STEPS && Date.now() - start < ms; step++) {
       // Reasoning, then text, streamed in small pieces
       const thinkSeq = ++seq
       for (let i = 0; i < 10; i++) {
@@ -796,6 +800,7 @@ const report = {
   profile,
   streamMinutes: streamMs / 60_000,
   streamParts: [...parts],
+  turnSteps: TURN_STEPS,
   viewport: VIEWPORT,
   dpr: DPR,
   reducedMotion: values['reduced-motion'],
