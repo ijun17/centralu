@@ -167,6 +167,59 @@ fn a_thawed_child_table_carries_on_as_if_nothing_happened() {
     a.stop_all(Duration::from_millis(200));
 }
 
+/// What an exited agent left in its process group, still waiting for its KILL when the keeper hands
+/// over, is killed by the next keeper: the outgoing one stays frozen until it exits.
+#[test]
+fn a_sweep_still_waiting_at_the_handoff_is_finished_by_the_next_keeper() {
+    let d = temp_dir("sweep");
+    let a = Children::start(&d.0).unwrap();
+    let mut ctl = connect(&d.0);
+    send(&mut ctl, &json!({ "op": "hello", "protocol": 1 }));
+    assert_eq!(read_line(&mut ctl)["ok"], true);
+    // An agent whose helper ignores TERM, so only the sweep's KILL ends it.
+    send(
+        &mut ctl,
+        &json!({ "rid": 1, "op": "spawn", "kind": "pipes", "cmd": "/bin/sh",
+                 "args": ["-c", "trap '' TERM; sleep 300 & echo $!; read x"], "cwd": "/tmp",
+                 "env": { "PATH": "/usr/bin:/bin" }, "tag": { "kind": "test" } }),
+    );
+    let spawned = read_line(&mut ctl);
+    let id = spawned["child"]["id"].as_str().unwrap().to_string();
+    let mut out = connect(&d.0);
+    send(&mut out, &json!({ "op": "attach", "protocol": 1, "id": id, "stream": "out" }));
+    assert_eq!(read_line(&mut out)["ok"], true);
+    let mut got = Vec::new();
+    read_until(&mut out, &mut got, "\n");
+    let helper: i32 = String::from_utf8_lossy(&got).trim().parse().unwrap();
+    struct KillOnDrop(i32);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            // SAFETY: a plain syscall on a pid this test started.
+            unsafe { libc::kill(self.0, libc::SIGKILL) };
+        }
+    }
+    let _kill = KillOnDrop(helper);
+    let alive = || unsafe { libc::kill(helper, 0) == 0 };
+
+    send(&mut ctl, &json!({ "rid": 2, "op": "signal", "id": id, "signal": "SIGKILL" }));
+    loop {
+        let l = read_line(&mut ctl);
+        if l["event"] == "exit" {
+            break;
+        }
+    }
+    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
+    assert_eq!(state["sweeps"].as_array().map(|s| s.len()), Some(1), "{}", state["sweeps"]);
+    let mut u = Unpack::new(pack.fds, pack.blobs);
+    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[]).unwrap();
+    let end = std::time::Instant::now() + Duration::from_secs(6);
+    while alive() && std::time::Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!alive(), "the helper {helper} outlived the handoff");
+    b.stop_all(Duration::from_millis(200));
+}
+
 #[test]
 fn the_reaped_list_reads_back_as_written() {
     let v = json!([[42, 7, null], [43, null, 15]]);

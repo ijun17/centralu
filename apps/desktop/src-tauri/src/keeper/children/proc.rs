@@ -209,6 +209,37 @@ pub fn signal(pid: i32, sig: i32, group: bool) -> io::Result<()> {
     Ok(())
 }
 
+/**
+ * Signals what is left of an exited child's process group: helpers an agent CLI started (a language
+ * server, an MCP server, a shell) that it did not stop before it ended. Returns whether anything was
+ * signalled.
+ *
+ * Only ever the child's own group. `setsid` made the group number the child's pid, and a group
+ * number is not reused while anyone is still in the group (POSIX), so as long as nobody holds that
+ * number as a pid, a group by that number can only be what the child left behind. Anyone holding
+ * it means the child is not reaped yet (its own zombie, or one another parent has not reaped) or
+ * the number has been given to someone else: either way nothing is sent, and a later sweep tries
+ * again. The keeper's own group is never a target (#350).
+ */
+pub fn signal_leftovers(pgid: i32, sig: i32) -> bool {
+    // SAFETY: getpgrp takes no arguments.
+    if pgid <= 1 || exists(pgid) || pgid == unsafe { libc::getpgrp() } {
+        return false;
+    }
+    // SAFETY: a plain syscall; a negative pid is the group.
+    unsafe { libc::kill(-pgid, sig) == 0 }
+}
+
+/// Whether any process is still in the group.
+pub fn group_exists(pgid: i32) -> bool {
+    if pgid <= 1 {
+        return false;
+    }
+    // SAFETY: signal 0 only checks.
+    let rc = unsafe { libc::kill(-pgid, 0) };
+    rc == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Reap {
     Reaped(ExitStatus),

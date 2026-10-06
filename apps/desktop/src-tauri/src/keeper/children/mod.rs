@@ -79,6 +79,10 @@ pub const HOST_STOP_WAIT: Duration = Duration::from_secs(6);
 /// How long children get after stdin EOF / SIGHUP before TERM, when the keeper stops them itself.
 pub const STOP_GRACE: Duration = Duration::from_secs(2);
 
+/// How long what an agent left in its process group gets between the TERM sent as the agent exits
+/// and the KILL (`Sweep`).
+const SWEEP_GRACE: Duration = Duration::from_secs(2);
+
 /// Bytes a host may queue for a child's stdin before the keeper stops reading the host.
 const IN_CAP: usize = 8 * 1024 * 1024;
 /// A control line longer than this is not a request.
@@ -211,7 +215,8 @@ impl Children {
     }
 
     /// Ends every child still running: stdin EOF for pipes and SIGHUP for ptys, then after `grace`
-    /// TERM to each child's group, then KILL. Returns once they are gone or the steps ran out.
+    /// TERM to each child's group, then KILL. Returns once they are gone (with what exited agents
+    /// left in their groups, `Sweep`) or the steps ran out; leftovers still waiting get KILL then.
     pub fn stop_all(&self, grace: Duration) {
         let (tx, rx) = mpsc::channel();
         if self.send(Cmd::StopAll { grace, done: tx }) {
@@ -383,6 +388,22 @@ struct Stopping {
     done: Vec<mpsc::Sender<()>>,
 }
 
+/**
+ * The process group of an agent that has exited, still to be swept (#350's rule: only that group).
+ *
+ * An agent CLI starts helpers of its own (Claude Code's LSP tool runs a language server, which runs
+ * `tsserver`; MCP servers from the user's config; shells) and they share its group, which `setsid`
+ * made the agent's own. A CLI that ends without stopping them (killed after a timeout, crashed, or
+ * just not cleaning up) left them running under launchd/init. So when an agent exits, its group gets
+ * TERM at once and, `SWEEP_GRACE` later, KILL for whatever is still there (`proc::signal_leftovers`).
+ * Ptys are not swept: the kernel hangs up a terminal's foreground group as its shell exits, and the
+ * host ends a terminal's or a command's whole tree when it stops one (`kill-tree.ts`).
+ */
+struct Sweep {
+    pgid: i32,
+    due: Instant,
+}
+
 #[derive(Clone, Copy)]
 enum Tok {
     Listener,
@@ -405,6 +426,8 @@ struct Reactor {
     next_conn: u64,
     host_stop_waiters: Vec<mpsc::Sender<()>>,
     stopping: Option<Stopping>,
+    /// Groups of exited agents waiting for their KILL.
+    sweeps: Vec<Sweep>,
     /// Frozen for a handoff: no I/O at all until thawed (step 4).
     frozen: bool,
 }
@@ -418,6 +441,16 @@ struct ReactorState {
     next_conn: u64,
     children: Vec<ChildState>,
     conns: Vec<ConnState>,
+    /// Absent from an older keeper's table, and ignored by one: a sweep handed to it is lost, which
+    /// is no worse than that keeper never sweeping.
+    #[serde(default)]
+    sweeps: Vec<SweepState>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SweepState {
+    pgid: i32,
+    due_in_ms: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -478,6 +511,7 @@ impl Reactor {
             next_conn: 1,
             host_stop_waiters: Vec::new(),
             stopping: None,
+            sweeps: Vec::new(),
             frozen: false,
         })
     }
@@ -539,7 +573,12 @@ impl Reactor {
                 wbuf: pack.blob(conn.wbuf.clone()),
             });
         }
-        let st = ReactorState { listener, next_child: self.next_child, next_conn: self.next_conn, children, conns };
+        let sweeps = self
+            .sweeps
+            .iter()
+            .map(|s| SweepState { pgid: s.pgid, due_in_ms: s.due.saturating_duration_since(now).as_millis() as u64 })
+            .collect();
+        let st = ReactorState { listener, next_child: self.next_child, next_conn: self.next_conn, children, conns, sweeps };
         let v = serde_json::to_value(&st).map_err(|e| e.to_string())?;
         self.frozen = true;
         log(&format!("frozen for a handoff ({} children, {} connections)", st.children.len(), st.conns.len()));
@@ -557,6 +596,7 @@ impl Reactor {
         r.next_child = st.next_child;
         r.next_conn = st.next_conn;
         let now = Instant::now();
+        r.sweeps = st.sweeps.iter().map(|s| Sweep { pgid: s.pgid, due: now + Duration::from_millis(s.due_in_ms) }).collect();
         for c in st.children {
             let mut take = |i: Option<usize>| -> Result<Option<OwnedFd>, String> {
                 match i {
@@ -624,7 +664,10 @@ impl Reactor {
                 continue;
             }
             let (mut fds, toks) = self.poll_set();
-            let quick = self.stopping.is_some() || !self.host_stop_waiters.is_empty() || self.watch.polling();
+            let quick = self.stopping.is_some()
+                || !self.host_stop_waiters.is_empty()
+                || self.watch.polling()
+                || !self.sweeps.is_empty();
             let timeout = if quick { 100 } else { 1000 };
             // SAFETY: fds is a valid array of fds.len() pollfd entries.
             let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) };
@@ -1171,6 +1214,12 @@ impl Reactor {
             c.exit = Some(st);
             c.exited_at = Some(Instant::now());
             log(&format!("{} pid {pid} exited (code {:?}, signal {:?})", child_id(n), st.code, st.signal));
+            if c.kind == Kind::Pipes {
+                if proc::signal_leftovers(pid, libc::SIGTERM) {
+                    log(&format!("{}: TERM to what it left in its process group", child_id(n)));
+                }
+                self.sweeps.push(Sweep { pgid: pid, due: Instant::now() + SWEEP_GRACE });
+            }
             let line = event_line(&json!({ "event": "exit", "id": child_id(n), "code": st.code, "signal": st.signal }));
             for conn in self.conns.values_mut() {
                 if let Role::Control = conn.role {
@@ -1252,6 +1301,23 @@ impl Reactor {
         Flush::Keep
     }
 
+    /// KILL to the groups whose grace has run out; groups that emptied are forgotten.
+    fn sweep(&mut self) {
+        let now = Instant::now();
+        self.sweeps.retain(|s| {
+            if !proc::group_exists(s.pgid) {
+                return false;
+            }
+            if now < s.due {
+                return true;
+            }
+            if proc::signal_leftovers(s.pgid, libc::SIGKILL) {
+                log(&format!("KILL to what pid {} left in its process group", s.pgid));
+            }
+            false
+        });
+    }
+
     fn housekeeping(&mut self) {
         // A host asked to stop has finished once no control connection is left.
         if !self.host_stop_waiters.is_empty() && !self.conns.values().any(|c| matches!(c.role, Role::Control)) {
@@ -1259,12 +1325,18 @@ impl Reactor {
                 let _ = w.send(());
             }
         }
+        self.sweep();
         if let Some(s) = &mut self.stopping {
             let live: Vec<i32> = self.children.values().filter(|c| c.exit.is_none()).map(|c| c.pid).collect();
             let now = Instant::now();
-            if live.is_empty() || (s.phase >= 2 && now >= s.deadline) {
+            let given_up = s.phase >= 2 && now >= s.deadline;
+            if (live.is_empty() && self.sweeps.is_empty()) || given_up {
                 if !live.is_empty() {
                     log(&format!("{} children did not exit after KILL", live.len()));
+                }
+                // Nothing runs after this keeper to sweep later: what agents left gets its KILL now.
+                for sw in self.sweeps.drain(..) {
+                    proc::signal_leftovers(sw.pgid, libc::SIGKILL);
                 }
                 let _ = fs::remove_file(&self.shared.sock);
                 for d in s.done.drain(..) {

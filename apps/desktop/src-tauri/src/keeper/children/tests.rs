@@ -411,3 +411,102 @@ fn a_burst_of_replies_gives_the_write_queue_its_memory_back_once_read() {
     reader.join().unwrap();
     assert!(kept <= buffer::KEEP_CAPACITY, "the write queue kept {kept} bytes of capacity");
 }
+
+/// Kills, on drop, what a test started that the code under test was supposed to end: a failing
+/// test must not leave its helpers running for the rest of the machine's day.
+struct KillOnDrop(Vec<i32>);
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        for &pid in &self.0 {
+            if pid > 1 {
+                // SAFETY: a plain syscall on a pid this test started.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+    }
+}
+
+/// The first line a child prints: the pid of the helper it started in the background.
+fn helper_of(data: &Path, id: &str) -> i32 {
+    let (mut s, _) = attach(data, id, "out");
+    let line = read_until(&mut s, "\n");
+    line.trim().parse().unwrap_or_else(|_| panic!("not a pid: {line:?}"))
+}
+
+fn gone_within(pid: i32, limit: Duration) -> bool {
+    let end = Instant::now() + limit;
+    while alive(pid) && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+    }
+    !alive(pid)
+}
+
+/**
+ * An agent CLI starts helpers of its own (Claude Code's LSP tool runs `typescript-language-server`,
+ * which runs `tsserver`; MCP servers; shells), and they share the CLI's process group. A CLI that
+ * ends without stopping them, here `sh` dying of TERM while its background `sleep` never hears it,
+ * used to leave them running under launchd/init, memory and all.
+ *
+ * Stopped the way a host of the previous build stops an agent: TERM to the CLI's own pid.
+ */
+#[test]
+fn an_agents_helpers_do_not_outlive_it() {
+    let d = temp_dir("helpers");
+    let _keeper = Children::start(&d.0).unwrap();
+    let mut host = Control::open(&d.0);
+    let (id, pid) = host.spawn("pipes", "sleep 300 & echo $!; read x");
+    let helper = helper_of(&d.0, &id);
+    let _kill = KillOnDrop(vec![helper]);
+    assert!(alive(helper), "the helper runs");
+    let r = host.req(json!({ "op": "signal", "id": id, "signal": "SIGTERM" }));
+    assert_eq!(r["ok"], true, "{r}");
+    host.wait_event(|e| e["event"] == "exit" && e["id"] == id.as_str());
+    assert!(gone(pid), "the CLI is gone");
+    assert!(gone_within(helper, Duration::from_secs(5)), "its helper {helper} outlived it");
+}
+
+/**
+ * A CLI and a helper that both ignore TERM: the host's KILL ends the CLI alone, and the helper is
+ * ended by the sweep of the CLI's group, TERM and then KILL after a grace. Nothing outside that
+ * group is touched: not another child the keeper holds (a group of its own), not a process in the
+ * keeper's own group (#350).
+ */
+#[test]
+fn a_helper_that_ignores_term_is_killed_and_nothing_outside_the_group_is_touched() {
+    let d = temp_dir("stubborn");
+    let _keeper = Children::start(&d.0).unwrap();
+    let mut host = Control::open(&d.0);
+    let (id, pid) = host.spawn("pipes", "trap '' TERM; sleep 300 & echo $!; read x");
+    let helper = helper_of(&d.0, &id);
+    let (other, other_pid) = host.spawn("pipes", "read x");
+    let mut neighbour = std::process::Command::new("/bin/sleep").arg("300").spawn().unwrap();
+    let _kill = KillOnDrop(vec![helper, other_pid, neighbour.id() as i32]);
+    host.req(json!({ "op": "signal", "id": id, "signal": "SIGTERM" }));
+    thread::sleep(Duration::from_millis(300));
+    assert!(alive(pid) && alive(helper), "both ignore TERM");
+    host.req(json!({ "op": "signal", "id": id, "signal": "SIGKILL" }));
+    host.wait_event(|e| e["event"] == "exit" && e["id"] == id.as_str());
+    assert!(gone(pid), "the CLI is gone");
+    assert!(gone_within(helper, Duration::from_secs(8)), "its helper {helper} outlived it");
+    assert!(alive(other_pid), "another kept child is not in that group");
+    assert!(matches!(neighbour.try_wait(), Ok(None)), "a process in the keeper's own group is not in that group");
+    host.req(json!({ "op": "signal", "id": other, "signal": "SIGKILL" }));
+    let _ = neighbour.kill();
+    let _ = neighbour.wait();
+}
+
+/// The keeper stopping for good does not leave the helpers of an agent that ended during the stop
+/// waiting for a sweep that would never come: they are gone by the time the stop returns.
+#[test]
+fn stop_all_ends_the_helpers_of_agents_that_exited_during_the_stop() {
+    let d = temp_dir("stophelp");
+    let keeper = Children::start(&d.0).unwrap();
+    let mut host = Control::open(&d.0);
+    // EOF ends the CLI at once; its helper ignores TERM.
+    let (id, pid) = host.spawn("pipes", "trap '' TERM; sleep 300 & echo $!; read x");
+    let helper = helper_of(&d.0, &id);
+    let _kill = KillOnDrop(vec![helper]);
+    keeper.stop_all(Duration::from_millis(300));
+    assert!(gone(pid), "the CLI is gone");
+    assert!(gone_within(helper, Duration::from_millis(1000)), "its helper {helper} outlived the stop");
+}
