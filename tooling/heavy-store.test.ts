@@ -49,7 +49,9 @@ describe('heavy-store fixture', () => {
     const first = once(1)
     expect(once(1)).toBe(first)
     expect(once(2)).not.toBe(first)
-  })
+    // Three full seeds of the small profile, each a few thousand rows written and read back: about 4 s on a Mac,
+    // more than the 15 s Windows limit on a loaded windows-2022 runner (#368)
+  }, 90_000)
 
   it('has the real store’s mix: calls and results dominate, then texts, then reasoning', () => {
     const k = a.rowsByKind
