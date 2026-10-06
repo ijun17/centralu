@@ -38,7 +38,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 평범한 세션 | 빌더도, 매니저도, 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션과 위임된 세션도). 설정에서 끌 수 있다 | `readsOwnProject`, `packages/agent-host/src/sessions/manager.ts` | |
 | 워크트리 매니저 | `<<role>>` 아래에 워크트리 세션을 둔 세션, 또는 프로젝트의 매니저 자리가 가리키는 세션. 자기 자식만 지휘한다 | `isWorktreeManager`, `manager.ts`; `projects.worktree_manager` | 리드, 부모 |
 | 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 언제나 매니저 아래에 있다(`parentSessionId`) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
-| 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. `agents.createCoordinator`로 만든다. 이것을 만들던 관제 앱은 걷어냈다(#372). 종류와 RPC는 남아 있지만 지금은 아무도 RPC를 부르지 않고, 옛 코디네이터는 `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `createCoordinator`, `manager.ts` | 하위 오케스트레이터 |
+| 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 휴지통에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 오케스트레이터 |
 | 빌더 | `<<role>>` 앱 하나를 만드는 세션. `appId`를 달고 **그리고** 빌더 지도(`apps.builders`)에서 그 앱이 가리키는 세션 | `builderRefOf`, `manager.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다 | `isAppAgentSession`, `runAppAgent`, `manager.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | 위임된("부탁받은") 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 세우거나 다시 쓴 세션. `askedBy`로 표시한다 | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
@@ -353,7 +353,7 @@ classDiagram
 | 그리드 배치 | 그리드가 보여 주는 패널과 그 순서: 세션이나 앱, 그리고 앱 패널이 차지하는 칸 |
 | 워크스페이스 스냅숏 | UI의 상태를 한 덩어리로. UI가 쓰고, 시작할 때 되읽는다 |
 | 커밋 귀속 | 어느 세션이 커밋을 만들었는가. 에이전트의 `git commit` 출력에서 집어 오고, 여기에만 두며 저장소에는 절대 적지 않는다(#50) |
-| 사용량 사실 | 날짜, 도구, 모델, 프로젝트마다 토큰과 비용을 담으려던 테이블. 지금은 **아무것도 읽거나 쓰지 않는다**. 프로젝트를 지울 때만 건드린다. 사람이 보는 사용량은 계정의 한도를 그때그때 읽은 것이다(`UsageSnapshot`, [agent-host.ko.md](agent-host.ko.md) §6) |
+| 사용량 사실 | 날짜, 도구, 모델, 프로젝트마다 토큰과 비용을 담으려던 테이블. **아무것도 읽거나 쓰지 않는다**. 행을 쓴 빌드는 없고, v0.1.0-beta.10까지의 릴리스는 지운 프로젝트의 행을 지우기만 했다. 사람이 보는 사용량은 계정의 한도를 그때그때 읽은 것이다(`UsageSnapshot`, [agent-host.ko.md](agent-host.ko.md) §6) |
 
 저장되는 곳:
 
@@ -362,7 +362,7 @@ classDiagram
   휴지통에 간 세션의 줄을 지우기만 한다). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
 - `workspace`: UI의 스냅숏. 한 줄.
 - `commit_sessions`: 커밋 귀속.
-- `usage_facts`: 쓰이지 않음(위).
+- `usage_facts`: 쓰이지 않음(위). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
 
 ## 3. 세션 상태
 

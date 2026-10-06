@@ -34,7 +34,7 @@ export function Overlay() {
   const projectId = useStore((s) => {
     // If whatever opened it stated a project, that is the answer — the grid's cross-panel link (#182)
     if (s.overlay?.kind === 'viewer' && s.viewerProjectId) return s.viewerProjectId
-    // A session with no project (the foreman) does not fall back to the last project — same rule as EvidencePanel
+    // A session with no project (the orchestrator, a coordinator) does not fall back to the last project — same rule as EvidencePanel
     const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
     return sess ? sess.projectId : s.focusedProjectId
   })

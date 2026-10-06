@@ -128,7 +128,8 @@ export class FakeKeeper {
         case 'list':
           return reply({ children: [...this.children.keys()].map((id) => this.info(id)) })
         case 'signal':
-          if (c && c.exit === null) process.kill(c.proc.pid!, String(req.signal) as NodeJS.Signals)
+          // Each child leads its own group (`detached`), as `setsid` makes it in the keeper
+          if (c && c.exit === null) process.kill(req.group === true ? -c.proc.pid! : c.proc.pid!, String(req.signal) as NodeJS.Signals)
           return reply({})
         case 'close_stdin':
           c?.proc.stdin!.end()

@@ -506,7 +506,7 @@ export type CreateSessionOpts = {
   /** If given, this session receives app tools — each adapter attaches them its own way */
   orchestratorTools?: OrchestratorTools
   /**
-   * External apps attached to this session (M4 A-5). Separate from the built-in app tools
+   * External apps attached to this session (M4 A-5). Separate from Centralu's own tools
    * (`orchestratorTools`) — an ordinary worker receives these too (decision 4 changes #81's "a
    * worker has no tools" only for external apps).
    */

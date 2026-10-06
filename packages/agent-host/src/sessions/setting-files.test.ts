@@ -11,6 +11,7 @@ import { ExternalApps } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
+import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 
 /**
  * The setting files a tool receives per session (M4 decision 3, #92/#152) — kind × project trust ×
@@ -113,14 +114,19 @@ beforeEach(async () => {
     ['claude', offline(new ClaudeAdapter({ startGapMs: 0 }))],
     ['codex', offline(new CodexAdapter())],
   ])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
-  mgr.prLookup = async () => null
   rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
   rt.refresh()
-  mgr.useExternalApps(rt)
-  rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
+  openManager()
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
 })
+
+/** A host over the store as it is now — again, for a session only an older build could have made */
+function openManager(): void {
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr.prLookup = async () => null
+  mgr.useExternalApps(rt)
+  rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
+}
 
 afterEach(async () => {
   await mgr.disposeAll()
@@ -158,9 +164,14 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
     mgr.configureOrchestrator(tool)
     return (await mgr.orchestrator()).id
   },
+  // Nothing creates one since the control app went (#372): one an older build left is opened by a new host and woken
   coordinator: async (tool) => {
     const member = (await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo
-    return (await mgr.createCoordinator({ name: 'Crew', memberSessionIds: [member.id], roleAppend: 'Coordinating session', tool })).id
+    const id = plantOldCoordinator(store, { name: 'Crew', memberSessionIds: [member.id], roleAppend: 'Coordinating session', tool })
+    await mgr.disposeAll()
+    openManager()
+    await mgr.resumeSession(id)
+    return id
   },
   worker: async (tool) => ((await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo).id,
   manager: async (tool) => {

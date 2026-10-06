@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd } from './terminal.js'
@@ -137,6 +138,66 @@ describe('multiple terminals', () => {
     expect(svc.list(cwd).map((t) => t.title)).toEqual(['Terminal 1', 'Terminal 2'])
     expect(svc.list(cwd).map((t) => t.id)).not.toContain(second.id)
   })
+
+  /*
+   * A dev server started from an interactive shell is in a process group of its own (job control),
+   * and one that ignores the hang-up a closing terminal sends used to be left running with its port.
+   * The "shell" here is a real process standing in for a pty's shell: it leads its own session as
+   * node-pty's does, ignores TERM as an interactive shell does, and ends on HUP.
+   */
+  it.skipIf(process.platform === 'win32')('closing one also ends a server started from its shell that ignores the hang-up', async () => {
+    const dir = tmp()
+    const pidFile = join(dir, 'server.pid')
+    const script = [
+      "const { spawn } = require('node:child_process')",
+      "const server = spawn(process.execPath, ['-e', \"process.on('SIGHUP', () => {}); console.log('up'); setInterval(() => {}, 1000)\"], { stdio: ['ignore', 'pipe', 'ignore'], detached: true })",
+      `server.stdout.once('data', () => { require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(server.pid)); server.stdout.destroy() })`,
+      "process.on('SIGTERM', () => {})",
+      'setInterval(() => {}, 1000)',
+    ].join('\n')
+    const shells: ChildProcess[] = []
+    const mod = {
+      spawn() {
+        const shell = spawn(process.execPath, ['-e', script], { stdio: 'ignore', detached: true })
+        shells.push(shell)
+        return {
+          pid: shell.pid,
+          onData: () => {},
+          onExit: (cb: (e: { exitCode: number }) => void) => void shell.once('exit', (code) => cb({ exitCode: code ?? 0 })),
+          write: () => {},
+          resize: () => {},
+          kill: (signal = 'SIGHUP') => void process.kill(shell.pid!, signal as NodeJS.Signals),
+        }
+      },
+    }
+    const svc = new TerminalService(() => {})
+    stubPty(svc, mod)
+    const t = svc.create(dir, 80, 24)
+    for (let i = 0; i < 250 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 20))
+    const server = Number(readFileSync(pidFile, 'utf8'))
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    try {
+      svc.close(t.id)
+      for (let i = 0; i < 150 && (alive(server) || alive(shells[0]!.pid!)); i++) await new Promise((r) => setTimeout(r, 20))
+      expect(alive(shells[0]!.pid!)).toBe(false)
+      expect(alive(server)).toBe(false)
+    } finally {
+      for (const pid of [server, shells[0]!.pid!]) {
+        try {
+          process.kill(pid, 'SIGKILL')
+        } catch {
+          // already gone
+        }
+      }
+    }
+  }, 30_000)
 
   it('closing the last one leaves the list empty', () => {
     const fake = fakePty()

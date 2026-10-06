@@ -745,7 +745,7 @@ interface AgentAdapter {
 - `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?)` — what was placed on the grid, in order (§5.4): a session or an app, keyed `session:<id>` / `app:<project id | _user>/<app id>` so a panel is placed once (v42, #288). A session panel cascades with its session and leaves when it goes to the trash; an app panel leaves with its project. `span_cols`/`span_rows` are the span the person chose for an app panel from its top bar, both NULL when none was chosen (v43, #306)
 - `grid_panels(session_id, position)` — the grid before #288, one row per session id. v42 copied its rows into `grid_layout` once and left it as it was, for a host one build older (agent-host.md §5.1); this build no longer reads or writes it, except to take a trashed session off it. Dropping it is a later, breaking step
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
-- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation
+- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation; never built, and the table is dropped in a later release ([agent-host.md](agent-host.md) §6)
 - `workspace(id, layout_json, updated_at)` — snapshot
 
 ---
@@ -874,7 +874,7 @@ up by themselves (timers, watchers — the broker refuses a call that no run sta
 and handing the builder a capture of the view.
 
 The built-in control app (the rail on the orchestrator screen, with its tasks and their foremen, #80/#81) was not moved to
-the new format; it was removed with the compiled app framework under it ([#97](https://github.com/ijun17/centralu/issues/97),
+the new format; it was removed with the compiled app framework under it ([#372](https://github.com/ijun17/centralu/pull/372), decided in [#97](https://github.com/ijun17/centralu/issues/97),
 owner decision 2026-10-05: the rail was rarely looked at and sessions are run from the grid; a view of the orchestrator's
 sessions, if one is wanted, is built as an external app). The inbox (FR-15) stays in the top bar.
 

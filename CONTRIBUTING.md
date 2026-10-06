@@ -12,8 +12,9 @@ after the code is written that it went the wrong way costs us both.
 When reporting a bug, attach `~/.centralu/host.log`. The startup banner has the build
 commit in it, so which build you were on is never in question.
 
-There are templates for both kinds of issue — a bug, and a decision that needs settling
-before code exists. Most issues here turn out to be the second kind. Neither has to fit:
+There are four issue templates: a bug, a design decision that needs settling before code
+exists, an idea, and a UI/UX problem with something already on screen. Most issues here turn
+out to be design decisions. Neither has to fit:
 the blank option stays open, because a half-formed observation is still worth writing down.
 
 The pull request template has one field that is easy to skip and worth filling in anyway:
@@ -24,6 +25,38 @@ because it is the only part of a PR that says where to go looking themselves.
 When you have pushed changes that answer a review, **leave a comment on the pull request
 saying so.** Comments reach the maintainer straight away; new commits on their own do not
 announce anything, and GitHub may not let you re-request a review from a fork.
+
+## How issues and decisions are tracked
+
+So you do not have to guess how this repository works:
+
+- **Issues** live on this repository's GitHub Issues, in English, opened from one of the
+  templates or blank. Open the issue first and wait for a direction before a large pull
+  request; a small fix can go straight to a pull request.
+- **Status** is tracked by the maintainer on a private GitHub Project (Status: Needs decision,
+  Ready, In progress, In review, On hold, Done; plus Priority and Area). Contributors do not see
+  it; anything that matters for you is said on the issue.
+- **Labels** are applied by the maintainer (GitHub does not let contributors label). The ones
+  in use:
+
+  | Label | Means |
+  |---|---|
+  | `bug` | Something behaves differently than it should |
+  | `enhancement` | Something new, or a change to how something works |
+  | `ui` | About the screen and interaction |
+  | `structural` | Needs a design change, not a local fix |
+  | `needs-measurement` | Not a fact yet: has to be measured before deciding |
+  | `first-run` | Blocks someone's first run |
+  | `docs` / `documentation` | Documentation |
+  | `accessibility` | A barrier for people with disabilities |
+  | `good first issue`, `help wanted`, `question`, `duplicate`, `invalid`, `wontfix` | GitHub's usual meanings |
+
+- **Decisions** are recorded where people will look for them: on the issue, as a comment that
+  starts with **"Decision (owner, YYYY-MM-DD)"**, and, when the design moves, in the decision
+  table of the design document it belongs to (see Documentation below). Larger designs get a
+  plan in `docs/plans/` first. There is no separate decision-record folder.
+- **Release readiness** is tracked on the 1.0 checklist (#364); known intermittent CI failures
+  are collected on #368.
 
 ## Getting it running
 
@@ -191,6 +224,11 @@ means next to it.
   a decision to revisit.
 - Where a design document conflicts with the spec (`docs/product-spec.md`) on a
   requirement, the spec wins. On how something is built, the design document wins.
+- **One glossary.** The project's vocabulary and how its concepts relate live in
+  [docs/domain-model.md](docs/domain-model.md) and its Korean mirror `docs/domain-model.ko.md`.
+  Do not add a second one (a `CONTEXT.md`, a glossary file, a folder of decision records):
+  tools that expect one should be pointed at this file in your own local configuration.
+  Decisions go in the decision tables of the design documents, with their reasoning.
 
 ## Contributor Licence Agreement (CLA)
 

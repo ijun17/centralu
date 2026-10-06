@@ -3,6 +3,7 @@ import { KeeperAgentProcess } from './agent-process.js'
 import { KeeperChildren } from './children-client.js'
 import { KeeperPty } from './keeper-pty.js'
 import { FakeKeeper } from './fake-keeper.test-helpers.js'
+import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers } from '../adapters/fake-agent-cli.test-helpers.js'
 
 /**
  * The host's side of the keeper's child service (#280 step 2): a process the keeper holds behaves
@@ -133,6 +134,42 @@ describe.skipIf(keeperless)('an agent process the keeper holds', () => {
     await keeper.close()
     expect(await exited).toEqual([null, 'SIGHUP'])
   })
+})
+
+/**
+ * An agent CLI's helpers (a language server, an MCP server, a shell) share the CLI's process group,
+ * which the keeper made the CLI's own. Stopping the agent signals that group, so the helpers end
+ * with it instead of being left running under launchd/init. The keeper also sweeps the group once
+ * the CLI has exited (tested against the real keeper in `keeper/children/tests.rs`).
+ */
+describe.skipIf(keeperless)('stopping an agent the keeper holds', () => {
+  const started: number[] = []
+  afterEach(() => killLeftovers(started))
+
+  it('ends the helper a CLI leaves behind when it dies of TERM', async () => {
+    const p = KeeperAgentProcess.spawn(children, { ...fakeAgentCli(), env: process.env }, tag)
+    const helper = await helperPid(p.stdout)
+    started.push(helper)
+    const exited = new Promise((r) => p.once('exit', r))
+    p.kill('SIGTERM')
+    await exited
+    expect(await goneWithin(helper, 5000)).toBe(true)
+    expect(keeper.ops('signal')[0]).toMatchObject({ signal: 'SIGTERM', group: true })
+  }, 30_000)
+
+  it('ends a helper that ignores TERM with the KILL that follows', async () => {
+    const p = KeeperAgentProcess.spawn(children, { ...fakeAgentCli({ ignoreTerm: true }), env: process.env }, tag)
+    const helper = await helperPid(p.stdout)
+    started.push(helper)
+    const exited = new Promise((r) => p.once('exit', r))
+    // The SDK's close: TERM, and KILL once the grace is over
+    p.kill('SIGTERM')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(alive(helper)).toBe(true)
+    p.kill('SIGKILL')
+    await exited
+    expect(await goneWithin(helper, 5000)).toBe(true)
+  }, 30_000)
 })
 
 describe.skipIf(keeperless)('a pty the keeper holds', () => {

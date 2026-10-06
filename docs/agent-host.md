@@ -42,7 +42,7 @@ the Codex bridge.
 |---|---|---|---|---|
 | `orchestrator` | the one orchestrator | every session | all but the manager's and builder's | role and usage |
 | `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
-| `scoped` | a coordinator (#80; made through `agents.createCoordinator`, once by the control app's tasks, removed in #97) | its members | list, read, send | its boundary |
+| `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
 | `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
 
@@ -149,7 +149,7 @@ measured for `recall`. A miss is an answer saying it has no such project, and th
 the tool. One of five unrelated how-to questions drew a call naming a project that does not exist
 (refused, no card). The description says "a job", not "a task": the two read the same to the model
 (7 in 10 each), and the guide, which lists every seat's tools, keeps no word of the removed
-control rail's tasks (#97). Two other wordings did no better (0 and 3 in 5).
+control rail's tasks (#372). Two other wordings did no better (0 and 3 in 5).
 
 `scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
 in one scratch project has the other write a file with a number only it knows and reads it back
@@ -573,20 +573,47 @@ must keep reading an older host's tags: the children outlive the build that spaw
 
 - **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract.ts`): `spawn` in the keeper,
   or `adopt` a kept process. Claude gets it as `spawnClaudeCodeProcess`; `CodexClient` takes the process instead
-  of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request that
-  is never sent once the process is detached or the host is exiting (the SDK kills its processes on owner exit),
-  and `stdin.end()` is `close_stdin`. Codex request ids carry a per-client prefix, so an answer to the previous
+  of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request for
+  the CLI's whole process group (below) that is never sent once the process is detached or the host is exiting
+  (the SDK kills its processes on owner exit), and `stdin.end()` is `close_stdin`. Codex request ids carry a per-client prefix, so an answer to the previous
   host's request cannot resolve one of ours.
 - **Terminals and commands.** `TerminalService` and `CommandRunner` take the keeper's pty module (`KeeperPty`,
-  node-pty's surface) instead of node-pty; stopping them still walks the process tree (`kill-tree.ts`), which
-  works from anywhere.
+  node-pty's surface) instead of node-pty; stopping or closing them walks the process tree (`kill-tree.ts`), which
+  works from anywhere. Closing a terminal takes the tree before the shell gets its hang-up: a dev server started
+  from it is in a group of its own (job control), and one that ignored the hang-up used to be left running.
+
+**What stopping an agent ends.** An agent CLI starts helpers of its own: Claude Code's LSP tool runs
+`typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from the user's config; shells.
+They share the CLI's process group, which `setsid` made the CLI's own, so the group is the CLI, what it started, and
+nothing else. A stop signals that group: the host's TERM, and the KILL that follows when the CLI is still there after
+its grace (the SDK's 5 s; codex's 2 s after EOF), reach the helpers too. And whenever an agent exits, however it ended
+(a stop, a crash, a CLI that does not clean up), the keeper sweeps its group: TERM at once, KILL 2 s later to whatever
+is still in it (`Sweep`, `keeper/children/mod.rs`). Before, only the CLI's pid was signalled, and what it left was
+reparented to launchd/init and kept running with its memory. A group number is not reused while anyone is in it, and
+no sweep is sent while any process holds the CLI's pid (its zombie not yet reaped, or the number given to someone
+else), so a sweep never reaches another group; the keeper's own group is never a target (#350). A sweep still
+waiting is handed to the next keeper with the table (§4.4), and a keeper stopping for good waits for its sweeps and
+KILLs what is left at the end. Ptys are not swept: the kernel hangs up a terminal's foreground group as its shell
+exits, and the host ends a terminal's or a command's tree when it stops one. A detach (a restart, a swap) sends
+nothing, so agents and their helpers survive it.
+
+Without a keeper (Windows, `pnpm dev`, e2e, a debug app, a keeper whose child service did not answer) the host
+spawns the CLI itself, Claude's through `spawnClaudeCodeProcess` too (`adapters/local-process.ts`). On macOS and
+Linux it gets a process group of its own; a stop is `kill-tree.ts`'s TERM to every group in its tree and KILL to
+the survivors after 3 s, and once it has exited its group is swept the same way (`stopGroup`). On Windows a stop is
+`taskkill /T /F` on its tree, and once it has exited what it left running is found by parent links and creation
+times and ended (`collectOrphansWindows`). Being in a group of its own, the CLI is no longer in the host's: a host
+that is SIGKILLed takes it along only through stdin EOF, on which codex exits at once and claude after the turn it
+is in. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so the adapter
+adds it the same way.
 
 **Leaving** (`main.ts`, `stopServices(mode)`). *Detach* — SIGTERM, SIGINT, the keeper's pipe closing, an
 uncaught exception, a swap's drain — calls `detach()` on every session handle, terminal and command run: nothing
 is sent to the tool, a waiting approval stays waiting, and output still in flight is recorded before the store
 closes. App processes and the in-process tool servers stop, as they live in the host. *Stop* — the keeper's `stop`
 event, or any ending without the child service — is the old path: sessions disposed, terminals and runs killed.
-After a stop the keeper ends whatever is left (stdin EOF and SIGHUP, 2 s, TERM to each group, 1 s, KILL).
+After a stop the keeper ends whatever is left (stdin EOF and SIGHUP, 2 s, TERM to each group, 1 s, KILL), and
+what exited agents left in their groups.
 
 **Re-attach.** At startup the host lists the keeper's children. Live agents re-attach after `listen`, through
 `resumeSession`, so a screen waking the same session joins the re-attach instead of starting a second process.
@@ -894,7 +921,9 @@ This section used to describe something else entirely: a chokidar watcher parsin
 `~/.claude/projects/**` and `~/.codex/sessions/**` incrementally, writing `usage_facts` rows
 that a `usage.weekly` RPC would read, with aggregation in `core/usage`. **None of it exists** —
 chokidar is not a dependency, `core/usage` is not a directory, there is no `usage.weekly`
-method, and while `usage_facts` is still in `schema.sql` no code reads or writes it. It was
+method, and no build ever wrote a row to `usage_facts`. It stays in `schema.sql` for now: released builds up to
+v0.1.0-beta.10 still delete a project's rows from it, and this build is the first that leaves it alone, so dropping it
+is a contract step for a later release (§5.1 rule 2). It was
 also the *opposite* of the rule §8.1 states, and the two sections sat in this file
 contradicting each other. Reading a tool's private JSONL is exactly what §8.1 forbids, for
 the reason given there: an undocumented format breaks silently on upgrade, and a silent break
