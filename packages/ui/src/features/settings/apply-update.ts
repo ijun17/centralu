@@ -164,3 +164,28 @@ export function useAutoApplyUpdate(): string | null {
   }, [decision.apply, applyUpdateNow])
   return pending ? (decision.waitingFor ?? null) : null
 }
+
+/**
+ * "Where things stand right now," in one line.
+ *
+ * **The order itself is the judgment.** Whatever is in progress comes first, the outcome comes
+ * after. In particular, `error` must never come after `latest` — the moment a brief network
+ * drop gets read back as "you are up to date," the check erases its own finding (this is
+ * exactly how #42 stayed hidden for an entire release).
+ */
+export function updateStateText(u: UpdateStatus | null, offer: ApplyOffer | null): string {
+  if (!u) return 'Not checked yet'
+  if (u.phase === 'checking') return 'Checking…'
+  if (u.phase === 'updating') return `Installing ${u.latest ?? 'the new version'}…`
+  if (u.phase === 'restart_required') {
+    const v = u.latest ?? 'the new version'
+    if (offer?.kind === 'current') return `This window runs ${v}. The agent host switches to it from the bar above.`
+    if (offer?.kind === 'apply') return `Installed ${v}. Apply it to relaunch into it.`
+    return `Installed ${v}. Restart Centralu to use it.`
+  }
+  if (u.phase === 'failed') return `Update failed: ${u.error ?? 'unknown reason'}`
+  if (u.newer && u.latest) return `${u.latest} is available`
+  if (u.error) return u.error
+  if (u.latest) return 'Up to date'
+  return 'Not checked yet'
+}
