@@ -6,6 +6,7 @@
 
 - WebSocket, 1 text frame = 1 JSON message.
 - Handshake immediately after connecting: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → on a wrong token, close 4001; on a protocol mismatch, one `res` frame with `id: '0'` and `version_mismatch`, then close 4002. Its message names both numbers and which side is older ("Protocol version mismatch: Centralu 0.2.0 speaks protocol 3, the app speaks protocol 2. The app is older: …"), because with a remote host (`centralu serve`, [agent-host.md](agent-host.md) §4.7) the two are updated separately; on success `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch, build? }`. The token is generated when the host starts; in dev it is passed through an environment variable.
+- **The refusal carries the host's numbers as data** (#82): `error.data = { protocolVersion, version? }`, the host's own. A hub linking to this host (§6) shows the version prompt from them instead of parsing the sentence.
 - `hello_ok.build` (#280) says which build the host is and where it came from: `{ commit, protocolVersion, version?, bundlePath?, copyDir? }`. Under the keeper a window of one build can be attached to a host of another, and this is how a client tells. The commit is the host's own compiled-in one; the rest is the keeper's record of the bundle it copied the host from ([agent-host.md](agent-host.md) §4.1). Optional: an older host sends none, and a host run from source sends `commit: 'dev'`.
 - **The front door** (#280 step 3). Under the keeper a client never connects to a host's own port: it connects to the keeper's front door, `ws://127.0.0.1:<door>`, which relays the bytes to whichever host is current, and the token is the keeper's, handed to every host it starts (`CC_HOST_TOKEN`). Nothing in the frames changes: `hello`, the token check and the `Origin` rule are the host's as before. When the host is swapped, the connection through the door closes; reconnecting to the same address with the same token reaches the new host, whose `hello_ok` carries a new `streamEpoch`, so the client resyncs. A connection opened while no host is ready waits at the door (up to 45 s) rather than failing.
 - **A host draining for a swap** (#280 step 3) refuses new RPCs, and answers RPCs still running at its bound (10 s), with `internal` and `retryable: true`: a refused call never ran, and a cut one is stated in the message as possibly done, so the caller checks before it repeats. The code stays `internal` because a client drops a frame whose code it does not know.
@@ -86,6 +87,8 @@ type NormalizedEvent =
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (defaults to true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: a file in <data>/themes changed — re-read themes.list
+  | { type: 'machine_status';   machine: MachineInfo }          // #82: a linked machine's link changed state; the whole record (§6)
+  | { type: 'machine_resync';   machineId }                     // #82: re-read that machine's sessions and projects, wake what died (§6)
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
 
@@ -198,6 +201,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | the way out of the trash (FR-22). The person's alone: no agent tool or app capability reaches it |
 | messages | `messages.load, messages.subagent, messages.search` | a history page; one launch card's subagent steps, read when the person opens them (#222); search over what was said |
 | grid | `grid.get, grid.set` | the grid's panels in order, written whole (product spec §5.4). Each is a `GridPanel`: `{ kind: 'session', sessionId }` or `{ kind: 'app', projectId: string \| null, appId, span? }` (`null` is a user-folder app) — #288. `span` (#306) is the `{ cols, rows }` the person chose for that app panel from its top bar, each 1 to 4, absent when none was chosen; a host from before it strips it and the panel falls back to its defaults. Expanded, not replaced (§4), so `PROTOCOL_VERSION` stays 1: `grid.get { tagged: true }` and `grid.set { panels }` speak panels; without them both speak the pre-#288 shape, bare session ids (an older UI's `grid.set { sessionIds }` replaces the list with its sessions). The UI sends `sessionIds` next to `panels` and reads a bare id list as session panels, so a UI and a host one build apart keep working both ways; the old fields go one release later. `grid.set` takes at most 256 and answers what it stored: duplicates, unknown sessions and an app of an unregistered project left out. Whether an app exists is not checked — the app list can lag behind its folder, and the screen leaves out an app it cannot find. The shape is the panel's identity alone, so it can move to the client unchanged (#82) |
+| machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: the hub's links to other machines (§6). Always the hub's own, never forwarded |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
@@ -284,4 +288,65 @@ type ProtocolError = {
 ```
 
 - code is a closed set. The UI branches on code and only displays message. Branching on string matching is forbidden.
+- A call the hub could not pass to a linked machine because its link is down (§6) is `internal`, `retryable: true`, with `data: { machine, reason: 'unreachable' }`. A failure the remote host answered keeps its own code, `retryable` and `data`.
 - An adapter's raw errors (SDK exceptions, process exit codes) are converted into this shape inside the host.
+
+## 6. Linked machines ([#82](https://github.com/ijun17/centralu/issues/82), [plans/remote-hub.md](plans/remote-hub.md))
+
+Every machine runs one host. The host a UI is attached to is that UI's **hub**: it links to the
+hosts of other machines the person added (`machines.add`), each over the person's own `ssh`
+([agent-host.md](agent-host.md) §4.8), and shows their sessions and projects as if they were its
+own. The UI still talks to one host; everything here is additive, and `PROTOCOL_VERSION` stays 1.
+
+- **Qualified ids.** An id another machine handed over reads `<machine>.<id>`: sessions, projects,
+  terminals (`<machine>.term-3`), command runs, and ids inside results and events
+  (`parentSessionId`, `worktreeManager.sessionId`, a message's `from.sessionId`). A machine id is
+  lowercase letters, digits and hyphens, starting with a letter (`MachineId`), so the first dot
+  ends it, and a qualified id still matches the session and project id pattern. **The UI never
+  parses an id**: rows carry an explicit `machine` field (`SessionInfo`, `ProjectInfo`,
+  `TrashedSession`, `ExternalAppInfo`, `ProjectConsent`, approval rules), absent or null for the
+  hub's own.
+- **Routing.** The hub sends a call to the machine its `sessionId`, `projectId` or `terminalId`
+  names, and answers the rest itself. A per-machine question takes an optional `machine`
+  parameter, absent meaning the hub: `agents.detect`, `agents.capabilities`, `agents.models`,
+  `agents.usage`, `agents.versions`, `agents.setAutoApplyVersions`, `agents.applyVersions`,
+  `projects.add`, `processes.strays`, `processes.stop`. Lists the UI rebuilds from
+  (`sessions.list`, `projects.list`, `trash.list`, `messages.search`, `apps.list`,
+  `approvals.rules`, `projectConsents.list`) are merged across machines. The table, one entry per
+  method, is `packages/agent-host/src/links/routes.ts`; a method added to the protocol does not
+  compile until it is classified there.
+- **Numbers.** An approval rule id from another machine is folded into a negative number (one
+  range per machine), and `approvals.deleteRule` with it reaches that machine; no local rule id is
+  negative, so a UI that does not know about machines can never delete a local rule with it.
+  Process ids do not travel: `processes.strays` and `processes.stop` take the same `machine`.
+- **What stays on the hub in phase 1.** The orchestrator and its tools, the coordinators
+  already in its store, layout, grid, preferences, themes, updates, app imports and screen
+  questions. A remote machine's own orchestrator and coordinators are not
+  listed, and their events are not passed on. `fs.resolve` (a path for this computer's OS) and the
+  app-view calls (`apps.viewFrame`, `apps.openView`, `apps.readResource`, `apps.invoke`,
+  `apps.inlineReopen`, `apps.viewMessage`) are refused for another machine's project or session:
+  a view's address carries that host's own ports, which phase 2 proxies through the hub.
+- **When a machine is away.** `sessions.list` and `projects.list` answer for it from the hub's
+  headers mirror, each row marked `unreachable: true`, with `live` as last heard. The UI keeps
+  those rows and does not wake them. Calls to it fail at once (§5).
+- **Events.** A linked machine's session events reach the UI under the hub's own `seq`, with ids
+  qualified; one about the remote host itself (`update_status`, `themes_changed`,
+  `app_state_changed`, `agent_versions`, `external_app_questions_changed`, an `error` with no
+  session) is dropped. Terminal frames arrive with the qualified terminal id. `machine_status`
+  carries a link's whole `MachineInfo` whenever its state changes. `machine_resync` says that what
+  the UI holds about one machine has to be read again: it comes on every (re)connect of that link
+  and when the machine is removed. The UI re-reads `sessions.list` and `projects.list` and runs its
+  reconnect recovery for that machine's sessions alone: one it held as live that the fresh list
+  says is not (the remote host restarted without a keeper) is woken.
+- **`MachineInfo`.** `{ id, name, sshTarget, shell, wslDistro, command, status, error, versions,
+  lastConnectedAt, localPort, sameLocalPort }`. `shell` is `posix`, `powershell` or `wsl`.
+  `status` is `connecting`, `connected`, `unreachable`, `not_running` (Centralu answers there,
+  `centralu serve` is not running), `versions_differ` or `refused`. `versions` is
+  `{ hub, remote, older, compatible, sameChannel, accepted }`, each side
+  `{ version, protocolVersion, dev }`: the link does not connect while the two run different
+  versions, until they are aligned or the person declines (`machines.acceptVersions`, refused
+  when the protocols differ). The prompt names `older`; a dev build has no older and connects on
+  one protocol.
+- **The reverse direction is off.** The link is a client connection the hub opened; the protocol
+  has no frame for a host to call its client, and the hub drops anything shaped like one.
+

@@ -25,7 +25,7 @@ import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { InlineViews } from './inline-views.js'
-import type { GridPanel, ToolName } from '@cc/protocol'
+import type { GridPanel, MachineInfo, RemoteShell, ToolName } from '@cc/protocol'
 
 /**
  * The optional services a host has. Without one, that feature simply does not exist on this host
@@ -54,6 +54,17 @@ export type RpcServices = {
   themes?: ThemeFiles
   /** The installed agent CLIs, and moving sessions to them (#297, agent-versions.ts) */
   agentVersions?: AgentVersionService
+  /** Linked machines (#82, links/links.ts). Without it this host links to nothing */
+  machines?: MachinesPort
+}
+
+/** What the `machines.*` methods need from the hub's links (links/links.ts) */
+export type MachinesPort = {
+  list(): MachineInfo[]
+  add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): MachineInfo
+  remove(id: string): Promise<void>
+  reconnect(id: string): MachineInfo
+  acceptVersions(id: string): MachineInfo
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -65,7 +76,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, machines }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
@@ -91,6 +102,10 @@ export function createRpcHandler(
   const requireAgentVersions = (): AgentVersionService => {
     if (!agentVersions) throw Object.assign(new Error('Agent version checks are unavailable'), { code: 'internal' })
     return agentVersions
+  }
+  const requireMachines = (): MachinesPort => {
+    if (!machines) throw Object.assign(new Error('Linked machines are unavailable on this host'), { code: 'internal' })
+    return machines
   }
   const requireUpdates = (): UpdateService => {
     if (!updates) throw Object.assign(new Error('Update checks are unavailable'), { code: 'internal' })
@@ -683,6 +698,18 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'trash.empty': async () => mgr.emptyTrash(),
+    // Linked machines (#82). The hub's own: the router never forwards these (links/routes.ts)
+    'machines.list': async () => machines?.list() ?? [],
+    'machines.add': async (p) => {
+      return requireMachines().add(RpcMethods['machines.add'].params.parse(p))
+    },
+    'machines.remove': async (p) => {
+      await requireMachines().remove(RpcMethods['machines.remove'].params.parse(p).machineId)
+      return { ok: true as const }
+    },
+    'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
+    'machines.acceptVersions': async (p) =>
+      requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
     'updates.setAuto': async (p) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
     'updates.setAutoApply': async (p) =>

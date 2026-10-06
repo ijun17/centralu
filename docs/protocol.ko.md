@@ -7,7 +7,7 @@
 ## 1. 전송 계층
 
 - WebSocket, 텍스트 프레임 1개 = JSON 메시지 1개.
-- 연결 직후 핸드셰이크: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → 토큰이 틀리면 4001로 닫는다. 프로토콜이 다르면 `id: '0'`인 `res` 프레임 하나에 `version_mismatch`를 실어 보내고 4002로 닫는다. 메시지는 두 숫자와 어느 쪽이 더 오래되었는지를 말한다("Protocol version mismatch: Centralu 0.2.0 speaks protocol 3, the app speaks protocol 2. The app is older: …"). 원격 호스트(`centralu serve`, [agent-host.ko.md](agent-host.ko.md) §4.7)에서는 둘이 따로 업데이트되기 때문이다. 성공하면 `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch, build? }`. 토큰은 호스트가 시작될 때 생성되며, dev에서는 환경 변수로 전달된다.
+- 연결 직후 핸드셰이크: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → 토큰이 틀리면 4001로 닫는다. 프로토콜이 다르면 `id: '0'`인 `res` 프레임 하나에 `version_mismatch`를 실어 보내고 4002로 닫는다. 메시지는 두 숫자와 어느 쪽이 더 오래되었는지를 말한다("Protocol version mismatch: Centralu 0.2.0 speaks protocol 3, the app speaks protocol 2. The app is older: …"). 원격 호스트(`centralu serve`, [agent-host.ko.md](agent-host.ko.md) §4.7)에서는 둘이 따로 업데이트되기 때문이다. 거절에는 호스트의 숫자가 data로도 실린다 (#82): `error.data = { protocolVersion, version? }`. 이 호스트에 링크하는 허브(§6)는 문장을 해석하지 않고 이것으로 버전 질문을 띄운다. 성공하면 `{ kind: 'hello_ok', protocolVersion, resyncRequired, currentSeq, streamEpoch, build? }`. 토큰은 호스트가 시작될 때 생성되며, dev에서는 환경 변수로 전달된다.
 - `hello_ok.build`(#280)는 호스트가 어떤 빌드이고 어디서 왔는지 말한다: `{ commit, protocolVersion, version?, bundlePath?, copyDir? }`. 키퍼 아래에서는 한 빌드의 창이 다른 빌드의 호스트에 붙을 수 있고, 클라이언트는 이것으로 안다. 커밋은 호스트 자신에 컴파일된 것이고, 나머지는 키퍼가 호스트를 복사해 온 번들의 기록이다([agent-host.ko.md](agent-host.ko.md) §4.1). 선택 필드다: 옛 호스트는 보내지 않고, 소스로 띄운 호스트는 `commit: 'dev'`를 보낸다.
 - **정문** (#280 3단계). 키퍼 아래에서 클라이언트는 호스트 자신의 포트로 붙지 않는다: 키퍼의 정문 `ws://127.0.0.1:<door>`로 붙고, 정문은 바이트를 그때의 호스트로 넘긴다. 토큰은 키퍼의 것이고 키퍼가 띄우는 모든 호스트에 넘겨진다(`CC_HOST_TOKEN`). 프레임은 아무것도 바뀌지 않는다: `hello`, 토큰 검사, `Origin` 규칙은 예전처럼 호스트가 한다. 호스트가 바뀌면 정문을 지나던 연결이 닫힌다. 같은 주소와 같은 토큰으로 다시 붙으면 새 호스트에 닿고, 그 `hello_ok`는 새 `streamEpoch`를 실어 클라이언트가 다시 맞춘다. 준비된 호스트가 없는 동안 연 연결은 실패하지 않고 정문에서 기다린다(최대 45초).
 - **교체를 위해 드레인하는 호스트** (#280 3단계)는 새 RPC를 거절하고, 한도(10초)가 지나도록 도는 RPC에는 `internal`과 `retryable: true`로 답한다: 거절된 호출은 돈 적이 없고, 끊긴 호출은 끝났을 수도 있다고 메시지에 적혀 있으니 호출한 쪽이 확인한 뒤 되풀이한다. 클라이언트는 모르는 코드의 프레임을 버리므로 코드는 `internal`로 둔다.
@@ -87,6 +87,8 @@ type NormalizedEvent =
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (기본값 true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: <data>/themes의 파일이 바뀌었다 — themes.list를 다시 읽는다
+  | { type: 'machine_status';   machine: MachineInfo }          // #82: 링크된 기기의 링크 상태가 바뀌었다. 기록 전체 (§6)
+  | { type: 'machine_resync';   machineId }                     // #82: 그 기기의 세션과 프로젝트를 다시 읽고, 죽은 것을 깨운다 (§6)
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
 
@@ -196,6 +198,7 @@ type ApprovalDetail =
 | 에이전트 CLI 버전 | `agents.versions, agents.setAutoApplyVersions, agents.applyVersions` | #297: 설치된 CLI(`force: false`는 30초 안의 읽기로 답한다 — 창이 포커스를 얻을 때), "새로 설치된 에이전트 CLI로 idle 세션 옮기기"(기본 켜짐), 오래된 CLI를 돌리는 idle 세션을 모두 다시 띄우고 `{ restarted, busy }`로 답한다. 세션이 돌리는 버전은 `SessionInfo.agentVersion`이며 프로세스가 없으면 null이다. 모두 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 아무것도 보이지 않는다([agent-host.ko.md](agent-host.ko.md) §4.6) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색 |
+| machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: 허브가 다른 기기에 거는 링크 (§6). 언제나 허브 자신의 것이고 전달되지 않는다 |
 | grid | `grid.get, grid.set` | 그리드의 패널들, 순서대로, 통째로 쓴다 (product spec §5.4). 하나하나가 `GridPanel`이다: `{ kind: 'session', sessionId }` 또는 `{ kind: 'app', projectId: string \| null, appId, span? }` (`null`은 사용자 폴더의 앱) — #288. `span`(#306)은 사람이 그 앱 패널의 머리글에서 고른 `{ cols, rows }`이고, 각 1에서 4, 고르지 않았으면 없다; 그 이전의 host는 이것을 걷어 내고 패널은 기본값으로 돌아간다. 바꾸지 않고 넓혔으므로 (§4) `PROTOCOL_VERSION`은 1 그대로다: `grid.get { tagged: true }`와 `grid.set { panels }`는 패널로 말하고, 그것이 없으면 둘 다 #288 이전의 모양, 세션 id만의 목록으로 말한다 (이전 UI의 `grid.set { sessionIds }`는 목록을 그 세션들로 바꾼다). UI는 `panels` 옆에 `sessionIds`도 보내고 id만의 목록을 세션 패널로 읽으므로, 한 빌드 차이의 UI와 host는 어느 쪽으로든 계속 함께 돈다; 이전 필드는 한 릴리스 뒤에 빠진다. `grid.set`은 최대 256개를 받고 저장한 것을 돌려준다: 중복, 모르는 세션, 등록되지 않은 프로젝트의 앱은 빠진다. 앱이 있는지는 확인하지 않는다 — 앱 목록은 폴더보다 늦을 수 있고, 찾지 못한 앱은 화면이 빼고 그린다. 모양은 패널의 정체성뿐이라 그대로 클라이언트로 옮겨 갈 수 있다 (#82) |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
@@ -282,3 +285,56 @@ type ProtocolError = {
 
 - code는 닫힌 집합이다. UI는 code로 분기하고 message는 표시만 한다. 문자열 매칭 분기는 금지다.
 - 어댑터의 raw 에러(SDK 예외, 프로세스 종료 코드)는 호스트 내부에서 이 형태로 변환된다.
+
+## 6. 링크된 기기 ([#82](https://github.com/ijun17/centralu/issues/82), [plans/remote-hub.md](plans/remote-hub.md))
+
+기기마다 호스트가 하나씩 돈다. UI가 붙은 호스트가 그 UI의 **허브**다. 허브는 사람이 추가한 다른
+기기의 호스트에 링크하고(`machines.add`, 각각 사람 자신의 `ssh`로, [agent-host.ko.md](agent-host.ko.md)
+§4.8), 그 세션과 프로젝트를 제 것처럼 보여 준다. UI는 여전히 호스트 하나와만 말한다. 여기의 모든 것은
+추가이고 `PROTOCOL_VERSION`은 1 그대로다.
+
+- **기기가 붙은 id.** 다른 기기가 넘겨준 id는 `<machine>.<id>`로 읽힌다: 세션, 프로젝트, 터미널
+  (`<machine>.term-3`), 명령 실행, 그리고 결과와 이벤트 안의 id(`parentSessionId`,
+  `worktreeManager.sessionId`, 메시지의 `from.sessionId`). 기기 id는 소문자, 숫자, 하이픈이고 글자로
+  시작하므로(`MachineId`) 첫 점이 그 끝이며, 기기가 붙은 id도 세션·프로젝트 id 규칙에 맞는다. **UI는
+  id를 해석하지 않는다**: 행마다 `machine` 필드가 있다(`SessionInfo`, `ProjectInfo`, `TrashedSession`,
+  `ExternalAppInfo`, `ProjectConsent`, 승인 규칙). 허브 자신의 것은 없거나 null이다.
+- **라우팅.** 허브는 `sessionId`, `projectId`, `terminalId`가 가리키는 기기로 호출을 보내고, 나머지는
+  스스로 답한다. 기기별 질문은 선택적인 `machine` 매개변수를 받는다(없으면 허브): `agents.detect`,
+  `agents.capabilities`, `agents.models`, `agents.usage`, `agents.versions`,
+  `agents.setAutoApplyVersions`, `agents.applyVersions`, `projects.add`, `processes.strays`,
+  `processes.stop`. UI가 다시 쌓는 목록(`sessions.list`, `projects.list`, `trash.list`,
+  `messages.search`, `apps.list`, `approvals.rules`, `projectConsents.list`)은 기기를 가로질러
+  합친다. 메서드마다 한 줄인 표는 `packages/agent-host/src/links/routes.ts`이고, 프로토콜에 더한
+  메서드는 거기서 분류되기 전까지 컴파일되지 않는다.
+- **숫자.** 다른 기기의 승인 규칙 id는 음수로 접힌다(기기마다 구간 하나). 그 값으로 부른
+  `approvals.deleteRule`은 그 기기에 닿는다. 로컬 규칙 id는 음수가 아니므로, 기기를 모르는 UI가 그
+  값으로 로컬 규칙을 지울 수는 없다. 프로세스 id는 오가지 않는다: `processes.strays`와
+  `processes.stop`은 같은 `machine`을 받는다.
+- **1단계에서 허브에 남는 것.** 오케스트레이터와 그 도구, 저장소에 이미 있는
+  코디네이터, 레이아웃, 그리드, 설정, 테마, 업데이트, 앱 가져오기, 화면 질문. 원격 기기 자신의
+  오케스트레이터와 코디네이터는 목록에 없고 그 이벤트도 전달되지 않는다. `fs.resolve`(이 컴퓨터의
+  OS가 쓸 경로)와 앱 화면 호출(`apps.viewFrame`, `apps.openView`, `apps.readResource`,
+  `apps.invoke`, `apps.inlineReopen`, `apps.viewMessage`)은 다른 기기의 프로젝트나 세션이면 거절된다.
+  화면의 주소는 그 호스트의 포트를 담고 있어서, 2단계에서 허브를 거치는 프록시로 연다.
+- **기기가 닿지 않을 때.** `sessions.list`와 `projects.list`는 허브의 헤더 미러로 그 기기를 대신
+  답하고, 각 행에 `unreachable: true`를, `live`에는 마지막으로 들은 값을 싣는다. UI는 그 행을 지우지
+  않고 깨우지도 않는다. 그 기기로 가는 호출은 바로 실패한다(§5).
+- **이벤트.** 링크된 기기의 세션 이벤트는 허브 자신의 `seq`로, id에 기기를 붙여 UI에 닿는다. 원격
+  호스트 자신에 관한 것(`update_status`, `themes_changed`, `app_state_changed`, `agent_versions`,
+  `external_app_questions_changed`, 세션 없는 `error`)은 버린다. 터미널 프레임은 기기가 붙은 터미널
+  id로 온다. `machine_status`는 링크 상태가 바뀔 때마다 그 `MachineInfo` 전체를 싣는다.
+  `machine_resync`는 UI가 한 기기에 대해 쥔 것을 다시 읽으라는 뜻이다. 그 링크가 (다시) 이어질
+  때마다, 그리고 기기를 지울 때 온다. UI는 `sessions.list`와 `projects.list`를 다시 읽고 그 기기의
+  세션에 대해서만 재연결 복구를 돌린다: live로 알던 세션이 새 목록에서 아니면(원격 호스트가 keeper
+  없이 재시작했다) 깨운다.
+- **`MachineInfo`.** `{ id, name, sshTarget, shell, wslDistro, command, status, error, versions,
+  lastConnectedAt, localPort, sameLocalPort }`. `shell`은 `posix`, `powershell`, `wsl`. `status`는
+  `connecting`, `connected`, `unreachable`, `not_running`(Centralu는 답하지만 `centralu serve`가 돌지
+  않는다), `versions_differ`, `refused`. `versions`는 `{ hub, remote, older, compatible, sameChannel,
+  accepted }`이고 양쪽은 각각 `{ version, protocolVersion, dev }`다. 두 쪽 버전이 다르면 맞추거나
+  사람이 거절할 때까지(`machines.acceptVersions`, 프로토콜이 다르면 거절된다) 링크는 이어지지 않는다.
+  질문은 `older`를 가리킨다. dev 빌드에는 더 오래된 쪽이 없고, 프로토콜이 같으면 이어진다.
+- **반대 방향은 꺼져 있다.** 링크는 허브가 연 클라이언트 연결이다. 프로토콜에는 호스트가
+  클라이언트를 부르는 프레임이 없고, 허브는 그런 모양의 것을 버린다.
+
