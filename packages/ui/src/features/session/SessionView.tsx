@@ -2314,7 +2314,12 @@ function ChatStream({
 
       <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
 
-      <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+      {/*
+        No scroll anchoring on the rows. They move with `top` (below), which Chromium's scroll
+        anchoring sees, while a transform it did not; the virtualizer already keeps the view in
+        place when a row above changes size, and anchoring on top of it would move it twice.
+      */}
+      <div className="relative w-full [overflow-anchor:none]" style={{ height: `${virtualizer.getTotalSize()}px` }}>
         {virtualizer.getVirtualItems().map((v) => (
           <div
             key={v.key}
@@ -2335,10 +2340,18 @@ function ChatStream({
               visibility, so its position and size stay the same and the virtual scroller's
               measurements are undisturbed.
             */
-            className={`absolute left-0 top-0 w-full min-w-0 ${
+            className={`absolute left-0 w-full min-w-0 ${
               chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : 'pb-3'
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
-            style={{ transform: `translateY(${v.start}px)` }}
+            /*
+              Placed with `top`, not `transform` (#364). A transform makes every row a stacking
+              context, and once a code block in one row scrolls sideways (a composited scroller
+              of its own), WebKit composited nearly every later row for overlap: six idle grid
+              panels had 119 layers, 61 with `top`, and ~22 MB more backing store, kept for as long
+              as anything repaints (docs/spikes/2026-10-memory-heavy-store.md §10). Rows only move when
+              a size is measured, so `top` costs one positioned layout then, nothing on scroll.
+            */
+            style={{ top: v.start }}
           >
             <ChatRow item={chat[v.index]!} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
           </div>
