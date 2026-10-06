@@ -14,7 +14,10 @@
  * `gpt-5.6-luna` at low effort.
  *
  * Every incoming keeper waits `CC_KEEPER_HANDOFF_HOLD_MS` (1.5 s) before saying ready, so the
- * freeze is long enough to be seen and so the failure case can kill one mid-handoff.
+ * freeze is long enough to be seen and so the failure case can kill one mid-handoff. Every
+ * cleanup of unused host copies waits 2 s and every swap 4 s between copying its build and starting
+ * it, so the switch to build C always meets the cleanup its new keeper's adopted host sets off
+ * (#368).
  *
  * Checked:
  *   - keeper A (build A) with its host, a terminal printing a counter, a dev server, a claude turn
@@ -28,9 +31,11 @@
  *     at the same address through the front door after it, and again after the host swap below;
  *   - build A's executable is deleted and written anew while keeper A runs (what `tauri build` does
  *     to a bundle), and keeper A goes on serving and hands over from it;
- *   - B starting keeper C, killed before the commit: B rolls back and serves everything as before;
+ *   - B starting keeper C, killed before the commit: B rolls back, says how C ended, and serves
+ *     everything as before;
  *   - "Switch to this build" from build C (`switch` with `keeper`): the keeper moves to C and C
- *     swaps the host to build C, the terminal and dev server still the same processes;
+ *     swaps the host to build C, the terminal and dev server still the same processes, and C's host
+ *     copy survives the cleanup that lands between copying and starting it;
  *   - stop ends the keeper, the host and every child.
  *
  * `--no-claude --no-codex` leaves the parts that need no model and no network: everything above
@@ -55,6 +60,13 @@ const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
 const WITH_CLAUDE = !process.argv.includes('--no-claude')
 const WITH_CODEX = !process.argv.includes('--no-codex')
 const HOLD_MS = 1500
+// The host-copy race of #368, made to happen on every run: the keeper that takes over reports its
+// adopted host ready and sets off a cleanup of unused host copies, while the switch it was handed
+// copies build C and starts it. The cleanup waits CLEAN_HOLD_MS and the swap waits COPY_HOLD_MS
+// between copying and starting, so the cleanup always lands after the copy and before the start,
+// which is where it once deleted the copy ("Cannot find module .../hosts/handoff-C/main.mjs").
+const CLEAN_HOLD_MS = 2000
+const COPY_HOLD_MS = 4000
 
 const started = new Set()
 const tempDirs = []
@@ -173,7 +185,14 @@ function startKeeper(b, data, extraEnv = {}) {
     {
       detached: true,
       stdio: ['ignore', logFd, logFd],
-      env: { ...process.env, CC_DATA_DIR: data, CC_KEEPER_HANDOFF_HOLD_MS: String(HOLD_MS), ...extraEnv },
+      env: {
+        ...process.env,
+        CC_DATA_DIR: data,
+        CC_KEEPER_HANDOFF_HOLD_MS: String(HOLD_MS),
+        CC_KEEPER_CLEAN_HOLD_MS: String(CLEAN_HOLD_MS),
+        CC_KEEPER_SWAP_COPY_HOLD_MS: String(COPY_HOLD_MS),
+        ...extraEnv,
+      },
     },
   )
   started.add(child.pid)
@@ -469,6 +488,7 @@ async function scenario() {
   }, 15_000, 100)
   check(view?.keeper?.pid === keeperB, 'keeper B is still the keeper', JSON.stringify(view?.keeper))
   check(view?.swap?.message?.includes('hand over'), 'the window is told the handoff failed', view?.swap?.message)
+  check(view?.swap?.message?.includes('killed by signal 9'), 'and how the new keeper ended, not a read error', view?.swap?.message)
   check(view?.hostPid === hostPid && alive(hostPid), 'the host was not touched')
   const afterFail = await heldChildren(data)
   check(livePids.filter(alive).every((pid) => afterFail.some((c) => c.pid === pid)), 'keeper B still holds every child')
@@ -491,6 +511,12 @@ async function scenario() {
   if (!check(view, 'the keeper and the host both end on build C', keeperLog().slice(-2500))) return
   heldPids.add(view.hostPid)
   check(view.hostPid !== hostPid, 'the host was swapped (a new host process)')
+  const tail = keeperLog().slice(keeperLog().lastIndexOf('took over from keeper pid'))
+  check(
+    tail.includes('CC_KEEPER_SWAP_COPY_HOLD_MS') && tail.includes('CC_KEEPER_CLEAN_HOLD_MS') && !tail.includes('removed unused host copies: handoff-C'),
+    "the cleanup the new keeper's adopted host set off met the swap's copy and left it alone",
+    tail.slice(0, 1500),
+  )
   check(await waitFor(() => !alive(keeperB), 10_000), 'keeper B has exited')
   check(view.status.port === door.port && view.status.token === door.token, 'the front door still has the same port and token')
   const termPid = before.find((c) => c.tag?.kind === 'terminal')?.pid

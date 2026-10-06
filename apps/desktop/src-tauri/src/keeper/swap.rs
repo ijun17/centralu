@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::front_door::FrontDoor;
-use super::source::{self, BuildSource};
+use super::source::{BuildSource, Claim, Copies};
 use crate::host_proc::{self, parse_ready, Adopted, HostInfo, HostOut, NextLine, Supervisor};
 
 /// How long the old host gets for its running calls before they are cut. Measured: the longest
@@ -56,6 +56,12 @@ pub const DRAIN_GRACE: Duration = Duration::from_secs(15);
 /// How long the new host may take from activation to its ready line: the lock, the expand steps,
 /// the services, listening.
 pub const ACTIVATE_LIMIT: Duration = Duration::from_secs(60);
+
+/// A test hook: wait this long between copying the new build and starting its standby host, so a
+/// test can hold a swap at the moment a cleanup once deleted the copy under it (#368).
+fn test_copy_hold() -> Option<Duration> {
+    std::env::var("CC_KEEPER_SWAP_COPY_HOLD_MS").ok()?.trim().parse::<u64>().ok().map(Duration::from_millis)
+}
 
 /// The drain bound: `CC_KEEPER_DRAIN_MS` (for tests), else `DEFAULT_DRAIN`.
 pub fn drain_bound() -> Duration {
@@ -124,6 +130,8 @@ pub enum Outcome {
 /// the keeper's state.
 pub struct Plan<'a> {
     pub data: &'a Path,
+    /// The host copies: the new build's is claimed for the whole swap, so no cleanup can take it.
+    pub copies: &'a Copies,
     /// The build to swap to (its host folder in a bundle; copied here).
     pub next: BuildSource,
     /// The copy the current host runs from: never removed by a failed swap.
@@ -142,24 +150,34 @@ pub struct Plan<'a> {
 
 pub fn run(p: &Plan) -> Outcome {
     (p.progress)(Phase::Starting);
-    let copy = match source::copy_into(p.data, &p.next) {
+    // Held until this returns: by then the new host is adopted and the keeper's state names its
+    // copy, or the swap gave up and discarded it (#368)
+    let claim = match p.copies.claim(&p.next) {
         Ok(c) => c,
         Err(e) => return Outcome::NotStarted(format!("could not copy the new build: {e}")),
     };
+    let copy = claim.path().to_path_buf();
     let mut next = p.next.clone();
     next.copy_dir = Some(copy.to_string_lossy().to_string());
-    let forget_copy = |copy: &Path| {
-        if p.current_copy.as_deref() != Some(copy) {
-            let _ = std::fs::remove_dir_all(copy);
-        }
-    };
+    let forget_copy = |claim: Claim| claim.discard(p.current_copy.as_deref());
+
+    if let Some(hold) = test_copy_hold() {
+        log(&format!("swap: holding {}ms after copying (CC_KEEPER_SWAP_COPY_HOLD_MS)", hold.as_millis()));
+        thread::sleep(hold);
+    }
+
+    // A copy that is not there would only show up as the new host's own "Cannot find module"
+    if !copy.join("main.mjs").is_file() {
+        forget_copy(claim);
+        return Outcome::NotStarted(format!("the copy of the new build in {} has no main.mjs", copy.display()));
+    }
 
     // 1. Standby
     let db = p.data.join("store.db").to_string_lossy().to_string();
     let mut launch = match host_proc::bundled_launch(&copy.join("main.mjs"), &["--db".into(), db, "--standby".into()]) {
         Ok(l) => l,
         Err(host_proc::LaunchError::Fatal(m) | host_proc::LaunchError::Retry(m)) => {
-            forget_copy(&copy);
+            forget_copy(claim);
             return Outcome::NotStarted(m);
         }
     };
@@ -167,13 +185,13 @@ pub fn run(p: &Plan) -> Outcome {
     let mut child = match host_proc::spawn_host(&launch) {
         Ok(c) => c,
         Err(e) => {
-            forget_copy(&copy);
+            forget_copy(claim);
             return Outcome::NotStarted(e);
         }
     };
     let Some(stdout) = child.stdout.take() else {
         host_proc::stop_child(&mut child);
-        forget_copy(&copy);
+        forget_copy(claim);
         return Outcome::NotStarted("could not read the new host's output".into());
     };
     // A reader that can be paused, so this host can later be handed to another keeper (step 4)
@@ -183,7 +201,7 @@ pub fn run(p: &Plan) -> Outcome {
     // 2. Health
     if let Err(why) = wait_for(&lines, STANDBY_LIMIT, |v| v.get("standby").is_some()) {
         host_proc::stop_child(&mut child);
-        forget_copy(&copy);
+        forget_copy(claim);
         return Outcome::NotStarted(format!("the new build did not pass its start check: {why}"));
     }
     (p.progress)(Phase::Standby);

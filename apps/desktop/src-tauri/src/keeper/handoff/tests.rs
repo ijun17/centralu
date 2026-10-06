@@ -229,3 +229,29 @@ fn the_reaped_list_reads_back_as_written() {
     );
     assert!(parse_reaped(None).is_empty());
 }
+
+/// An incoming keeper that exits before it is ready: the rollback says how it exited, not the
+/// read error the closed channel gave ("failed to fill whole buffer", #368).
+#[test]
+fn an_incoming_keeper_that_exits_is_reported_by_how_it_exited() {
+    let eof = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "failed to fill whole buffer");
+    let mut killed = Command::new("/bin/sh").args(["-c", "kill -9 $$"]).spawn().unwrap();
+    let why = silent(&mut killed, &eof, "finish taking over", "it finished taking over");
+    assert!(why.contains("exited before it finished taking over") && why.contains("killed by signal 9 (SIGKILL)"), "{why}");
+    assert!(!why.contains("fill whole buffer"), "{why}");
+
+    let mut gave_up = Command::new("/bin/sh").args(["-c", &format!("exit {EXIT_ABORTED}")]).spawn().unwrap();
+    let why = silent(&mut gave_up, &eof, "start", "it started");
+    assert!(why.contains("exited before it started") && why.contains("gave the handoff up"), "{why}");
+}
+
+/// One that is still running but silent past the bound is reported as silent, without waiting.
+#[test]
+fn an_incoming_keeper_that_does_not_answer_is_reported_as_silent() {
+    let timeout = std::io::Error::new(std::io::ErrorKind::WouldBlock, "Resource temporarily unavailable");
+    let mut alive = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let why = silent(&mut alive, &timeout, "finish taking over", "it finished taking over");
+    let _ = alive.kill();
+    let _ = alive.wait();
+    assert!(why.starts_with("the new keeper did not finish taking over:"), "{why}");
+}

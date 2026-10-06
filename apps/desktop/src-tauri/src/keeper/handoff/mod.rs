@@ -22,7 +22,7 @@
 //! | step | who | what |
 //! |---|---|---|
 //! | 1 | B → A | `hello` {protocol, pid, version, build} |
-//! | 2 | A | **freeze**: stop accepting on `keeper.sock` (connections queue), wait for requests in progress, park every front-door relay between copies, pause the host's stdout reader between lines, freeze the child table (it reaps what exited, then stops all I/O) |
+//! | 2 | A | **freeze**: stop accepting on `keeper.sock` (connections queue), wait for requests in progress, park every front-door relay between copies, pause the host's stdout reader between lines, freeze the child table (it reaps what exited, then stops all I/O), stop copying and removing host copies (`source::Copies`) |
 //! | 3 | A → B | `state`: the snapshot (`KeeperSnap`) + every buffer as a blob + every descriptor over `SCM_RIGHTS`: `keeper.lock`, `keeper.sock`, `children.sock`, the front door's listener, the host's stdin and stdout, each child's pipes or pty master, each child-socket connection, each relayed connection (client and host side), each attached window |
 //! | 4 | B | rebuilds everything **without any I/O**: checks it really holds the lock (`flock` on the passed description), registers exit watches, builds the tables |
 //! | 5 | B → A | `ready` (or `fail` with the reason) |
@@ -150,9 +150,13 @@ struct Frozen {
     door: bool,
     host: bool,
     children: bool,
+    copies: bool,
 }
 
 fn thaw(k: &Keeper, f: &Frozen) {
+    if f.copies {
+        k.copies.thaw();
+    }
     if f.children {
         k.children.thaw();
     }
@@ -200,7 +204,10 @@ pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switc
     let hello = match wire::recv(&mut ch, HELLO_LIMIT) {
         Ok(m) if m.op() == "hello" => m.header,
         Ok(m) => return fail(&mut child, &mut ch, &frozen, format!("the new keeper said {:?} instead of hello", m.op())),
-        Err(e) => return fail(&mut child, &mut ch, &frozen, format!("the new keeper did not start: {e}")),
+        Err(e) => {
+            let why = silent(&mut child, &e, "start", "it started");
+            return fail(&mut child, &mut ch, &frozen, why);
+        }
     };
     let theirs = hello.get("protocol").and_then(Value::as_u64).unwrap_or(0);
     if theirs < HANDOFF_PROTOCOL as u64 {
@@ -228,7 +235,10 @@ pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switc
             return fail(&mut child, &mut ch, &frozen, format!("the new keeper could not take over: {why}"));
         }
         Ok(m) => return fail(&mut child, &mut ch, &frozen, format!("the new keeper said {:?} instead of ready", m.op())),
-        Err(e) => return fail(&mut child, &mut ch, &frozen, format!("the new keeper did not finish taking over: {e}")),
+        Err(e) => {
+            let why = silent(&mut child, &e, "finish taking over", "it finished taking over");
+            return fail(&mut child, &mut ch, &frozen, why);
+        }
     }
 
     // 6. commit point: from here this keeper never resumes
@@ -251,6 +261,52 @@ pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switc
     std::process::exit(0);
 }
 
+/**
+ * Why the incoming keeper went silent, for the rollback's message. When the channel ended because
+ * it exited, how it exited says more than the read error, which was only ever "failed to fill
+ * whole buffer" (#368). Its own explanation, if it gave one, is in the keeper log: it writes to
+ * the same stderr as this keeper.
+ */
+fn silent(child: &mut Child, e: &std::io::Error, not_done: &str, before: &str) -> String {
+    use std::io::ErrorKind::{BrokenPipe, ConnectionAborted, ConnectionReset, UnexpectedEof};
+    if matches!(e.kind(), UnexpectedEof | ConnectionReset | ConnectionAborted | BrokenPipe) {
+        // The channel closes as the process exits; its status follows within moments
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return format!("the new keeper exited before {before} ({}); its reason, if it gave one, is in the keeper log", exit_words(status))
+                }
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+                _ => break,
+            }
+        }
+    }
+    format!("the new keeper did not {not_done}: {e}")
+}
+
+/// How a process ended, in words.
+fn exit_words(status: std::process::ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt;
+    if let Some(sig) = status.signal() {
+        let name = match sig {
+            libc::SIGKILL => " (SIGKILL)",
+            libc::SIGTERM => " (SIGTERM)",
+            libc::SIGABRT => " (SIGABRT)",
+            libc::SIGSEGV => " (SIGSEGV)",
+            libc::SIGBUS => " (SIGBUS)",
+            _ => "",
+        };
+        return format!("killed by signal {sig}{name}");
+    }
+    match status.code() {
+        Some(EXIT_ABORTED) => format!("exit code {EXIT_ABORTED}: it gave the handoff up"),
+        Some(101) => "exit code 101: it panicked".into(),
+        Some(c) => format!("exit code {c}"),
+        None => "no exit status".into(),
+    }
+}
+
 /// Step 2: stops all I/O and describes everything. On error, whatever was frozen stays marked in
 /// `f` for the caller to thaw.
 fn freeze(k: &Arc<Keeper>, f: &mut Frozen, then_switch: Option<BuildSource>) -> Result<(Value, Pack), String> {
@@ -270,6 +326,10 @@ fn freeze(k: &Arc<Keeper>, f: &mut Frozen, then_switch: Option<BuildSource>) -> 
     f.host = true;
     let table = k.children.freeze(Duration::from_secs(5))?;
     f.children = true;
+    // No copy or cleanup of host copies from here: the incoming keeper may make and remove them as
+    // soon as it commits, while this process is still on its way out (#368)
+    k.copies.freeze(FREEZE_LIMIT)?;
+    f.copies = true;
 
     let mut pack = Pack::default();
     let e = |e: std::io::Error| e.to_string();
@@ -558,6 +618,7 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
     let now = Instant::now();
     let ago = |ms: u64| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now);
     let settings = source::Settings { background: snap.background };
+    let copies = source::Copies::new(&data);
     let keeper = Arc::new(Keeper {
         info: KeeperInfo {
             pid: std::process::id(),
@@ -572,6 +633,7 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         sup: Supervisor::new(),
         door,
         children,
+        copies,
         state: Mutex::new(State {
             status: snap.status.clone(),
             source: snap.source.clone(),
