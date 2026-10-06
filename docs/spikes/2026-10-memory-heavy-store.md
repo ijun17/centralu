@@ -260,7 +260,100 @@ pnpm perf:memory --profile owner --engines webkit,chromium --out /tmp/main.json 
 pnpm perf:memory --engines webkit --steps shell,long,stream --stream-minutes 2 --stream-parts working   # one part
 pnpm perf:memory --engines webkit --steps blank,shell,long,grid --dpr 1
 pnpm perf:memory --ui-root <checkout of another commit> --label other               # the UI of another build
+pnpm perf:memory --engines webkit --steps shell,long,stream --stream-parts working --turn-steps 70   # one long turn
 rmdir /tmp/centralu-e2e.lock
 ```
 
 `--reduced-motion` and `--freeze-animations` run the same with the app's motion reduced or every animation off.
+
+## 9. After fixes (targets 1 and 3)
+
+Measured 2026-10-06 on the same machine with the same parameters as §2 (owner store, seed 1, 1440×900, device
+scale 2, five-minute stream), before and after in the same sitting and interleaved run by run: "before" is the UI at
+da06350e (main with this spike's tools), "after" is the same with the three changes below, both built with
+`--ui-root` and driven against the same host.
+
+**What changed.**
+
+- **Target 1, the elapsed counter** (`features/session/elapsed.ts`). It moves by the second for the first ten
+  seconds, by five seconds up to a minute, by ten up to ten minutes and by the minute after that, and shows only what
+  its step can say ("35s", "4m 20s", "12m"). It re-reads the time when the shown text would change, not on an
+  interval; it stops while the window is hidden and moves only by the minute while the row is scrolled out of view.
+  The step sizes come from a sweep of the interval alone, working-only stream, one run each: GPU at the 60 s and
+  120 s samples was 191 / 191 MB at 1 s, 84 / 110 at 5 s, 193 / 109 at 10 s (the 193 caught just after a repaint),
+  79 / 106 at 30 s. WebKit lets the backing stores go within a few seconds of the last repaint, so a few seconds apart
+  is enough. Giving the counter its own compositing layer (`will-change: transform`) instead did nothing: 189 MB
+  against 191, two runs each.
+- **Target 3, Markdown** (`features/session/markdownBlocks.ts`). A streamed reply is drawn in pieces: the top-level
+  blocks that a whole line of a later block has closed are rendered once and kept, and only the text after them is
+  parsed per delta. The page is the same as one parse of the whole (a unit test compares the two at every point of
+  randomized streams).
+- **Target 3, the conversation list** (`appendChat`). A delta copies the list once instead of twice.
+- Not done: coalescing deltas per animation frame. The synthetic stream sends a text delta every 45 ms and the tools'
+  own streams arrive at a similar pace, slower than a frame, so a frame would rarely hold two deltas to merge.
+
+**WebKit, all steps, median of three runs each** (range in brackets where the runs spread by more than 15 MB);
+footprint in MB.
+
+| Step | WebContent before | after | GPU before | after | All before | after |
+|---|---:|---:|---:|---:|---:|---:|
+| blank | 13 | 13 | 31 | 31 | 71 | 71 |
+| long | 106 | 108 | 72 | 72 | 208 | 209 |
+| scrolled | 169 (129–255) | 246 (135–249) | 79 | 75 | 280 (233–366) | 351 (240–353) |
+| grid | 188 (133–268) | 240 (140–255) | 231 | 225 | 454 (390–532) | 496 (398–510) |
+| switched | 177 (136–274) | 145 (144–290) | 89 | 85 | 298 (250–398) | 261 (260–412) |
+| stream-0s | 176 (125–274) | 145 (144–290) | 77 | 73 | 285 (228–386) | 249 (248–400) |
+| stream-60s | 199 (144–290) | 177 (152–339) | 195 | 188 (84–192) | 429 (371–518) | 375 (293–560) |
+| stream-150s | 278 (219–289) | 317 (146–324) | 193 | **94** | 504 (447–515) | 446 (267–451) |
+| stream-300s | 282 (272–315) | 182 (143–312) | 189 | **91** | 504 (496–537) | 306 (265–435) |
+| stream-settled | 281 (271–314) | 175 (140–313) | 70 | 70 | 383 (374–418) | 277 (236–416) |
+
+**Chromium, one run each**; "after GC" is after `HeapProfiler.collectGarbage`.
+
+| Step | Renderer before | after | Renderer after GC before | after | GPU before | after | JS heap after GC before | after |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| long | 106 | 118 | 104 | 75 | 57 | 57 | 14 | 14 |
+| scrolled | 118 | 119 | 98 | 97 | 62 | 62 | 16.7 | 16.8 |
+| grid | 115 | 116 | 90 | 88 | 189 | 190 | 18.1 | 18.2 |
+| stream-60s | 138 | 132 | 98 | 94 | 189 | 86 | 17.7 | 17.8 |
+| stream-150s | 156 | 153 | 98 | 92 | 188 | 82 | 17.5 | 17.3 |
+| stream-300s | 169 | 165 | 97 | 94 | 188 | 188 | 18.5 | 18.6 |
+| stream-settled | 97 | 94 | 97 | 94 | 72 | 72 | 18.5 | 18.6 |
+
+**Parts of the stream, WebKit, one run each** (`--steps shell,long,stream`); GPU / WebContent in MB.
+
+| Stream | Sample | Before | After |
+|---|---|---|---|
+| working only, 2 min | 60 s | 196 / 124 | **81** / 103 |
+| | 120 s | 196 / 132 | **106** / 112 |
+| | settled | 76 / 133 | 72 / 112 |
+| working only, one five-minute turn (`--turn-steps 70`) | 60 s | 195 / 122 | **79** / 114 |
+| | 150 s | 195 / 132 | **78** / 118 |
+| | 300 s | 195 / 148 | **109** / 110 |
+| + text and reasoning, 2 min | 60 s | 183 / 187 | 174 / 189 |
+| | 120 s | 187 / 198 | **97** / 229 |
+
+**What this shows.**
+
+1. **The counter's cost is gone.** While a session works, WebKit's GPU process now sits at 78–109 MB where it sat at
+   189–196, in the full stream as in the working-only and long-turn runs: about 90–100 MB back for as long as a
+   session works, as §7 expected. The samples that stay high (188 at stream-60s, 174 with text) are the moments the
+   page was painting anyway, streamed text or a counter in its first ten seconds; Chromium's GPU process shows the
+   same, 188 → 82–86 MB, with one sample caught high. Nothing else moves: `long`, `grid` and the settled numbers are
+   the same before and after.
+2. **WebContent is not measurably lower.** The bimodal high-water mark of §3 is still there on both sides: after
+   history reading (`scrolled`, `grid`) the after runs happened to land high two times of three, after streaming the
+   before runs did three times of three and the after runs once (143, 182, 312 MB at stream-300s). Three runs per
+   side cannot tell a change from that spread, and the text-only part run (229 against 198) is one run. Chromium's
+   renderer after a collection and its JS heap are unchanged, as expected: the Markdown work was garbage before too.
+3. **Why the Markdown change does not show here: the synthetic replies are one paragraph each.** The stream's text
+   is 40 deltas of three words with no line break, so there is nothing to keep and every delta still parses the whole
+   (short) reply. On a reply shaped like a model's (5.3 KB: twelve headings, paragraphs, fenced code blocks and lists,
+   333 deltas of three words), rendering every delta took 1,400 ms and parsed 892k characters before, 165 ms and 66k
+   characters after (Node, three runs, the same within 2%). That is the garbage this removes; whether WebKit's
+   high-water mark follows needs a stream of such replies (a `--stream-parts` text that writes Markdown), which this
+   record does not have yet.
+
+So target 1 is done; target 3 has made the work per delta proportional to the block being written instead of to
+the whole reply, without a WebKit number to show for it yet. The ~130 MB WebContent high-water mark of §4.2 remains
+the largest open item after the grid.

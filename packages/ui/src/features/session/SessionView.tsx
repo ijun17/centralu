@@ -41,6 +41,7 @@ import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dra
 import { APP_LINK_DROP_EVENT, type AppLinkDrop } from '../app-frame/dragRelay.js'
 import { droppedPiece, droppedText, insertAtCaret, isOutsideLink, isTextDrag, type DroppedText } from './dragLink.js'
 import { appReachNotice } from './appReachNotice.js'
+import { formatElapsed, useElapsedNow } from './elapsed.js'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import {
   anchorAt,
@@ -2386,8 +2387,8 @@ function ChatStream({
  * Keeping the component alive would not have been the fix. What was stored was the wrong
  * thing — an elapsed count, which is derived, and derived values should not be the thing
  * that survives. The start instant lives on the store now (`workingSince`), and this
- * subtracts it from the current time. The interval below no longer carries any state; it
- * exists only to make the clock re-read once a second.
+ * subtracts it from the current time. The clock below no longer carries any state; it
+ * exists only to make the time be re-read when the shown count would change (elapsed.ts).
  */
 function ActivityRow({ sessionId, activity }: { sessionId: string; activity: SessionSummary['activity'] }) {
   const interrupt = useStore((s) => s.interrupt)
@@ -2404,19 +2405,16 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
    * shell, Codex keeps a child agent), so the line comes from what each task says about itself.
    */
   const notice = useStore((s) => interruptNotice(s.sessions[sessionId]?.backgroundTasks ?? []))
-  const [now, setNow] = useState(() => Date.now())
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
+  const rowRef = useRef<HTMLDivElement>(null)
+  // Re-read only when the shown count changes and someone can see it (elapsed.ts, #364)
+  const now = useElapsedNow(startedAt ?? null, rowRef)
 
   // No instant means we genuinely do not know when this turn began — say nothing rather
   // than start a fresh count, which is the mistake this whole row is here to stop making
   const seconds = startedAt == null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000))
 
   return (
-    <div className="py-2" data-testid="activity-row">
+    <div ref={rowRef} className="py-2" data-testid="activity-row">
       {/*
         The plan checklist (#58, Codex's turn/plan/updated). Being progress display, it lives
         here (visible only while working) — it disappears along with activity once the turn
@@ -2466,9 +2464,12 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
                 ? `Thinking · ~${thinkingTokens >= 1000 ? `${(thinkingTokens / 1000).toFixed(1)}k` : thinkingTokens} tokens`
                 : 'Waiting for response'}
         </span>
-        {/* Showing a number for a one-second wait would just be noise */}
+        {/*
+          Showing a number for a one-second wait would just be noise. The minimum width holds the widest the count gets
+          ("9m 50s", "2h 11m"), so a count that grows a digit does not move the notice next to it.
+        */}
         {seconds >= 2 && (
-          <span className="readout shrink-0 whitespace-nowrap text-xs text-ink-faint" data-testid="activity-elapsed">
+          <span className="readout min-w-[6.5ch] shrink-0 whitespace-nowrap text-xs text-ink-faint" data-testid="activity-elapsed">
             {formatElapsed(seconds)}
           </span>
         )}
@@ -2493,13 +2494,6 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
       </div>
     </div>
   )
-}
-
-export function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const min = Math.floor(seconds / 60)
-  if (min < 60) return `${min}m ${seconds % 60}s`
-  return `${Math.floor(min / 60)}h ${min % 60}m`
 }
 
 /**

@@ -1,9 +1,10 @@
-import { memo, type ReactNode } from 'react'
+import { Fragment, memo, useRef, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../../store/store.js'
 import { requestViewerJump } from '../viewer/jump.js'
 import { parseFileRef, type FileRef } from './filePath.js'
+import { advanceSplit, piecesOf, type MarkdownSplit } from './markdownBlocks.js'
 
 /**
  * Rendering the agent's response.
@@ -29,68 +30,96 @@ export const Markdown = memo(function Markdown({
   /** The project of the file the link opens — the owner of projectRoot (#182) */
   projectId?: string | null
 }) {
+  /*
+   * While a reply streams, its finished blocks are rendered once and kept, and only the block still being written is
+   * parsed again per delta (markdownBlocks.ts, #364). The split lives with this mounted reply: a row drawn again
+   * starts from the whole text, one parse, as a reply read from history always is. The blocks are joined with the
+   * line break react-markdown itself puts between top-level blocks, so the page is the same as one parse of the whole.
+   */
+  const split = useRef<MarkdownSplit | null>(null)
+  if (split.current?.text !== text) split.current = advanceSplit(split.current, text)
   return (
     <div className="cc-md max-w-[80ch] text-ink/90" data-testid="markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          /*
-           * Links branch three ways (extended in #39):
-           *  - If href is a file in this project, it is the same file link as a backticked
-           *    path — the agent also writes things like `[manager.ts](packages/.../manager.ts)`,
-           *    and that used to be a dead link.
-           *  - http(s) and mailto open in a new window (navigating inside the app would lose
-           *    the session).
-           *  - Any other href is **never put into the DOM.** The rule that a string produced
-           *    by a model must not sit in an attribute the browser would interpret (see the
-           *    `code` comment below) holds just as much for `a` — leaving only the text is the
-           *    honest rendering.
-           */
-          a: ({ node: _node, href, children, ...props }) => {
-            const ref = typeof href === 'string' ? parseFileRef(tryDecode(href), projectRoot) : null
-            if (ref) return <FileLink refInfo={ref} projectId={projectId}>{children}</FileLink>
-            if (typeof href === 'string' && /^(https?:|mailto:)/i.test(href)) {
-              return (
-                <a {...props} href={href} target="_blank" rel="noreferrer noopener">
-                  {children}
-                </a>
-              )
-            }
-            return <>{children}</>
-          },
-          /*
-           * A path the agent typed opens in the viewer (#39).
-           *
-           * The click can do exactly one thing: hand a string to `openFile`, which reads
-           * it through `fs.readFile(projectId, …)` and shows it read-only. That is the
-           * safety property, and it is why this is a `<button>` and not an `<a href>` —
-           * the text comes out of a model, so there must be no attribute anywhere on this
-           * element that a browser would try to *interpret*. No href, therefore no scheme,
-           * therefore nothing for `javascript:` to be smuggled into. (Right-click reveal
-           * goes through `fs.reveal`, which refuses anything above the project root — the
-           * same property, kept on the host side.)
-           *
-           * `<code>` stays inside so the thing still looks like the code span it was, and
-           * so the surrounding `.cc-md` rules (including the `pre code` reset) keep
-           * applying untouched.
-           *
-           * `node` is react-markdown's own handle on the AST and is dropped rather than
-           * spread: passed through, it lands in the DOM as `node="[object Object]"`.
-           */
-          code: ({ node: _node, children, ...props }) => {
-            const ref = typeof children === 'string' ? parseFileRef(children, projectRoot) : null
-            if (!ref) return <code {...props}>{children}</code>
-            return (
-              <FileLink refInfo={ref} projectId={projectId}>
-                <code>{children}</code>
-              </FileLink>
-            )
-          },
-        }}
-      >
-        {text}
-      </ReactMarkdown>
+      {piecesOf(split.current).map((piece, i) => (
+        <Fragment key={i}>
+          {i > 0 && '\n'}
+          <MarkdownBlock text={piece} projectRoot={projectRoot} projectId={projectId} />
+        </Fragment>
+      ))}
     </div>
+  )
+})
+
+/** One run of top-level blocks; memoised on its text, so a finished block is not parsed again */
+export const MarkdownBlock = memo(function MarkdownBlock({
+  text,
+  projectRoot,
+  projectId,
+}: {
+  text: string
+  projectRoot: string | null
+  projectId: string | null
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        /*
+         * Links branch three ways (extended in #39):
+         *  - If href is a file in this project, it is the same file link as a backticked
+         *    path — the agent also writes things like `[manager.ts](packages/.../manager.ts)`,
+         *    and that used to be a dead link.
+         *  - http(s) and mailto open in a new window (navigating inside the app would lose
+         *    the session).
+         *  - Any other href is **never put into the DOM.** The rule that a string produced
+         *    by a model must not sit in an attribute the browser would interpret (see the
+         *    `code` comment below) holds just as much for `a` — leaving only the text is the
+         *    honest rendering.
+         */
+        a: ({ node: _node, href, children, ...props }) => {
+          const ref = typeof href === 'string' ? parseFileRef(tryDecode(href), projectRoot) : null
+          if (ref) return <FileLink refInfo={ref} projectId={projectId}>{children}</FileLink>
+          if (typeof href === 'string' && /^(https?:|mailto:)/i.test(href)) {
+            return (
+              <a {...props} href={href} target="_blank" rel="noreferrer noopener">
+                {children}
+              </a>
+            )
+          }
+          return <>{children}</>
+        },
+        /*
+         * A path the agent typed opens in the viewer (#39).
+         *
+         * The click can do exactly one thing: hand a string to `openFile`, which reads
+         * it through `fs.readFile(projectId, …)` and shows it read-only. That is the
+         * safety property, and it is why this is a `<button>` and not an `<a href>` —
+         * the text comes out of a model, so there must be no attribute anywhere on this
+         * element that a browser would try to *interpret*. No href, therefore no scheme,
+         * therefore nothing for `javascript:` to be smuggled into. (Right-click reveal
+         * goes through `fs.reveal`, which refuses anything above the project root — the
+         * same property, kept on the host side.)
+         *
+         * `<code>` stays inside so the thing still looks like the code span it was, and
+         * so the surrounding `.cc-md` rules (including the `pre code` reset) keep
+         * applying untouched.
+         *
+         * `node` is react-markdown's own handle on the AST and is dropped rather than
+         * spread: passed through, it lands in the DOM as `node="[object Object]"`.
+         */
+        code: ({ node: _node, children, ...props }) => {
+          const ref = typeof children === 'string' ? parseFileRef(children, projectRoot) : null
+          if (!ref) return <code {...props}>{children}</code>
+          return (
+            <FileLink refInfo={ref} projectId={projectId}>
+              <code>{children}</code>
+            </FileLink>
+          )
+        },
+      }}
+    >
+      {text}
+    </ReactMarkdown>
   )
 })
 

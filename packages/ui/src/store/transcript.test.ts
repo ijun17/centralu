@@ -54,6 +54,66 @@ describe('appendChat — live events', () => {
   })
 })
 
+describe('appendChat — one copy per streamed delta (#364)', () => {
+  /** A long conversation, as the focused one is after reading back through history, ending in an open reply or call */
+  const history = (last: object): ChatItem[] =>
+    feed([
+      ...Array.from({ length: 1000 }, (_, i) => ({ type: 'message_delta', role: 'assistant', text: `row ${i}`, seq: i + 1 })),
+      last,
+    ])
+
+  /**
+   * The rows a step copies out of a conversation this long: what `slice` and `map` return, and what a spread walks.
+   * Counted on the array methods themselves, since a second copy is made from the first one, not from the list given.
+   */
+  const step = (items: ChatItem[], e: object): { next: ChatItem[]; copied: number } => {
+    const proto = Array.prototype as unknown as Record<string | symbol, (...args: unknown[]) => unknown>
+    const originals = { slice: proto.slice!, map: proto.map!, iterator: proto[Symbol.iterator]! }
+    let copied = 0
+    const long = (a: unknown[]) => a.length >= 1000
+    proto.slice = function (this: unknown[], ...args) {
+      const r = originals.slice.apply(this, args) as unknown[]
+      if (long(this)) copied += r.length
+      return r
+    }
+    proto.map = function (this: unknown[], ...args) {
+      const r = originals.map.apply(this, args) as unknown[]
+      if (long(this)) copied += r.length
+      return r
+    }
+    proto[Symbol.iterator] = function (this: unknown[]) {
+      if (long(this)) copied += this.length
+      return originals.iterator.call(this)
+    }
+    try {
+      const next = appendChat(items, { sessionId: 's', ...e } as NormalizedEvent)
+      return { next, copied }
+    } finally {
+      Object.assign(proto, { slice: originals.slice, map: originals.map, [Symbol.iterator]: originals.iterator })
+    }
+  }
+
+  const textDeltas = [
+    ['message_delta', { type: 'message_delta', role: 'assistant', text: 'Hel', seq: 2000 }, { type: 'message_delta', role: 'assistant', text: 'lo', seq: 2000 }],
+    ['reasoning_delta', { type: 'reasoning_delta', text: 'Thin', seq: 2000 }, { type: 'reasoning_delta', text: 'king', seq: 2000 }],
+  ] as const
+  const call = { type: 'tool_call', callId: 'c1', summary: { tool: 'Bash', title: 'ls', readOnly: true, paths: [] } }
+  const toolDeltas = [
+    ['tool_output_delta', call, { type: 'tool_output_delta', callId: 'c1', text: 'a.txt\n' }],
+    ['tool_result', call, { type: 'tool_result', callId: 'c1', ok: true, summary: 'a.txt' }],
+  ] as const
+
+  it.each([...textDeltas, ...toolDeltas])('a %s copies the list once, keeping every untouched row as the same object', (_, open, delta) => {
+    const items = history(open)
+    const { next, copied } = step(items, delta)
+    expect(next).not.toBe(items)
+    expect(next).toHaveLength(items.length)
+    expect(next[items.length - 1]).not.toBe(items[items.length - 1])
+    expect(next.slice(0, -1).every((it, i) => it === items[i])).toBe(true)
+    expect(copied).toBe(items.length)
+  })
+})
+
 describe('messagesToChat — restoration', () => {
   const call = (seq: number) => row(seq, 'tool_call', { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test', readOnly: true } })
   const result = (seq: number, summary: string, ok = true) => row(seq, 'tool_result', { type: 'tool_result', callId: 'c1', ok, summary })

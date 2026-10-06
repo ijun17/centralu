@@ -169,15 +169,28 @@ function continues<K extends 'assistant' | 'reasoning'>(
   return last?.kind === kind && (seq === undefined || last.storedSeq === undefined || last.storedSeq === seq)
 }
 
+/**
+ * The conversation with one row replaced: one copy of the list, every other row the same object (#364).
+ *
+ * Streaming replaces a row per delta, and the focused conversation can hold thousands of rows after reading back
+ * through history (2,200 in the spike, docs/spikes/2026-10-memory-heavy-store.md). The delta paths used to copy the
+ * list twice (`slice(0, -1)` and a spread) or build it with `map` and a closure per row; a list has to be new for the
+ * screen to see the change, but once is enough.
+ */
+function replaceAt(items: ChatItem[], index: number, item: ChatItem): ChatItem[] {
+  const next = items.slice()
+  next[index] = item
+  return next
+}
+
 /** Converts an event to a conversation item (a streaming delta is appended to the same message's item — `continues`) */
 export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   switch (e.type) {
     case 'message_delta': {
       const last = items[items.length - 1]
       if (continues(last, 'assistant', e.seq)) {
-        const copy = items.slice(0, -1)
         // A message that started with no number (its unstored empty chunk arrived first) receives the first number learned
-        return [...copy, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) }]
+        return replaceAt(items, items.length - 1, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) })
       }
       return [...items, { kind: 'assistant', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
@@ -186,8 +199,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       if (!e.text) return items
       const last = items[items.length - 1]
       if (continues(last, 'reasoning', e.seq)) {
-        const copy = items.slice(0, -1)
-        return [...copy, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) }]
+        return replaceAt(items, items.length - 1, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) })
       }
       return [...items, { kind: 'reasoning', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
@@ -221,9 +233,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
       // `live` is discarded here — the full completed output has already arrived as `result`, so the chunk's job is done
-      return items.map((it, i) =>
-        i === real ? { ...target, result: e.summary, ok: e.ok, live: undefined } : it,
-      )
+      return replaceAt(items, real, { ...target, result: e.summary, ok: e.ok, live: undefined })
     }
     /*
      * Live output while running (#58). Attaches to its own call's row (`ownerOf`) — having several
@@ -238,7 +248,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
       if (target.result !== undefined) return items
       const live = ((target.live ?? '') + e.text).slice(-4000)
-      return items.map((it, i) => (i === real ? { ...target, live } : it))
+      return replaceAt(items, real, { ...target, live })
     }
     case 'approval_request':
       /*
