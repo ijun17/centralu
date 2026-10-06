@@ -1,8 +1,11 @@
 import { useEffect } from 'react'
 import { useStore } from '../../store/store.js'
-import { CodeViewer } from '../viewer/CodeViewer.jsx'
-import { GitPanel } from '../git/GitPanel.jsx'
 import { Kbd } from '../../components/primitives.jsx'
+import { lazyComponent } from '../../components/lazy.jsx'
+
+// Both load when the overlay first opens (components/lazy.tsx)
+const CodeViewer = lazyComponent(() => import('../viewer/CodeViewer.jsx').then((m) => m.CodeViewer))
+const GitPanel = lazyComponent(() => import('../git/GitPanel.jsx').then((m) => m.GitPanel))
 
 /**
  * The wide surface — it covers the conversation, and nothing else.

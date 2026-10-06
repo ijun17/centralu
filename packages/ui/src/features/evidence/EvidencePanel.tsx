@@ -16,13 +16,16 @@ import {
   type PanelGroup,
 } from '../../store/panelLayout.js'
 import { FileTree } from '../files/FileTree.jsx'
-import { TerminalPane } from './Terminal.jsx'
 import { COMMIT_LIMIT, commitAgo, hasMultipleAuthors } from './commits.js'
 import { fitTabs } from './fitTabs.js'
 import { TabActionSlot, TabActions } from './tabActions.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
+import { lazyComponent } from '../../components/lazy.jsx'
 import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, useTextZoom } from '../../store/store.js'
+
+/** The terminal brings xterm (~300 KB), so it loads when its tab is first shown (components/lazy.tsx) */
+const TerminalPane = lazyComponent(() => import('./Terminal.jsx').then((m) => m.TerminalPane))
 
 /**
  * The evidence lane (right side).

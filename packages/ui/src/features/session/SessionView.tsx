@@ -30,8 +30,8 @@ import { AgentVersionNotice } from './AgentVersionNotice.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { useMachineName, useSessionAway } from '../../store/selectors.js'
 import { NoticeMark } from './NoticeMark.jsx'
-import { CommandRunnerOverlay } from './CommandRunner.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
+import { lazyComponent } from '../../components/lazy.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
@@ -64,6 +64,9 @@ const COMPOSER_MAX_H = 160
  * — it does not rise while the hand is in the middle of the conversation.
  */
 const COMPOSER_REACH = 54
+
+/** The run-command window brings xterm, so it loads when first opened (components/lazy.tsx) */
+const CommandRunnerOverlay = lazyComponent(() => import('./CommandRunner.jsx').then((m) => m.CommandRunnerOverlay))
 
 /**
  * A handle that lets the composer take over handling a drop received from outside it (#116).
