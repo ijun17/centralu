@@ -109,6 +109,9 @@ function randomReply(random: () => number, count: number): string {
 }
 
 describe('a streamed reply drawn in pieces', () => {
+  /** The random-cut runs render thousands of times: seconds alone, far more on a machine running other suites */
+  const MANY_RENDERS = 60_000
+
   it('draws what one parse draws at every point of the stream, over random replies and random cuts', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const random = rng(seed)
@@ -117,7 +120,7 @@ describe('a streamed reply drawn in pieces', () => {
         expect(renderPieces(split), `seed ${seed}, after ${JSON.stringify(sofar)}`).toBe(render(sofar))
       })
     }
-  })
+  }, MANY_RENDERS)
 
   it('ends identical to one parse of the whole reply, over many more random cuts', () => {
     for (let seed = 100; seed < 400; seed++) {
@@ -126,7 +129,7 @@ describe('a streamed reply drawn in pieces', () => {
       const split = stream(text, cuts(text, random, 1 + Math.floor(random() * 60)))
       expect(renderPieces(split), `seed ${seed}`).toBe(render(text))
     }
-  })
+  }, MANY_RENDERS)
 
   it('keeps a code fence whole while blank lines inside it arrive, and splits after it closes', () => {
     const text = 'Before.\n\n```ts\nconst a = 1\n\n\nconst b = 2\n```\n\nAfter.\n'
@@ -157,7 +160,7 @@ describe('a streamed reply drawn in pieces', () => {
           expect(renderPieces(split), `seed ${seed}, after ${JSON.stringify(sofar)}`).toBe(render(sofar))
         })
     }
-  })
+  }, MANY_RENDERS)
 
   it('does not split a reply with a link reference or footnote definition, which reaches back to earlier blocks', () => {
     for (const text of [
