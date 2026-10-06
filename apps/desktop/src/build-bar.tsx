@@ -2,7 +2,7 @@ import { ShellBanner } from '@cc/ui'
 import type { HostBuild } from '@cc/platform/tauri'
 // The pure half, by path rather than through `@cc/platform/tauri`: the browser harness that drives
 // this bar in e2e (apps/web/src/harness/shell-banner.tsx) has no Tauri, and the index imports it
-import { RESTART_COMPLETELY_LOSES, type BuildBar } from '../../../packages/platform/src/tauri/switch-plan.js'
+import { olderBuildText, RESTART_COMPLETELY_LOSES, type BuildBar } from '../../../packages/platform/src/tauri/switch-plan.js'
 
 /**
  * The bar a window shows when the keeper or the host is of another build (#280), drawn from
@@ -32,7 +32,19 @@ export function BuildBarView({
   const danger = bar.kind === 'failed'
   return (
     <ShellBanner testId="host-other-build" role={danger ? 'alert' : 'status'}>
-      {bar.kind === 'other' ? (
+      {bar.kind === 'other' && bar.older ? (
+        /*
+         * A window of an older build than the one running (#352): it never switches by itself, and
+         * the bar says which way a switch would go. The full builds, paths included, on hover.
+         */
+        <span
+          className="min-w-0 flex-1 truncate"
+          title={`Running: ${describeBuild(bar.who === 'host' ? build.host : build.keeper)}. This window: ${describeBuild(build.app)}.`}
+          data-testid="host-older-build"
+        >
+          {olderBuildText(build.app, bar.who === 'host' ? build.host : build.keeper)}
+        </span>
+      ) : bar.kind === 'other' ? (
         <span className="min-w-0 flex-1 truncate">
           {bar.who === 'host'
             ? `The agent host is running ${describeBuild(build.host)}.`
@@ -61,7 +73,7 @@ export function BuildBarView({
           onClick={onSwitch}
           data-testid="host-switch-build"
         >
-          {bar.kind === 'failed' ? 'Try again' : 'Switch to this build'}
+          {bar.kind === 'failed' ? 'Try again' : bar.kind === 'other' && bar.older ? 'Switch back to this build' : 'Switch to this build'}
         </button>
       )}
       {bar.kind === 'keeper_later' && !restarting && (

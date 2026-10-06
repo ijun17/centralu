@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { assertExistingPath, isMissingPathError } from './path-guard.js'
+import { runGit, type GitTrust } from './git-exec.js'
 import { programPath } from '../tool-launch.js'
 
 const exec = promisify(execFile)
@@ -26,19 +27,23 @@ export type GitSummary = { isRepo: boolean; branch: string; changedFiles: number
 export type GitFileStatus = { path: string; staged: boolean; status: 'M' | 'A' | 'D' | 'R' | 'U' | '?' }
 export type GitCommit = { sha: string; shortSha: string; subject: string; author: string; when: number; parents: string[] }
 export type GitBranch = { name: string; current: boolean; remote: boolean; upstream?: string }
+export type { GitTrust }
 
 const OK = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
 
+/** A read: the repository's programs run only for a trusted project */
+function git(cwd: string, args: string[], trust: GitTrust = {}): Promise<string> {
+  return runGit(cwd, args, { allowRepoPrograms: trust.trusted === true })
+}
+
 /**
- * Every call is given `core.quotePath=false` (#176). With the default (on), git wraps any path
- * containing a byte at or above 0x80 in quotes with octal escapes, like `"\355\225\234…"` — a
- * Korean file name came out that way in diff headers and `--name-only`, breaking the label on
- * screen and losing the path a click needed to follow it to the file. Turning it off leaves the
- * original name intact (only quotes, backslashes and control characters are still escaped).
+ * A write the person asked for (stage, commit, switch, push): it runs as plain git does, hooks and
+ * filters included, trusted or not. Turning a clean filter off here would change what gets
+ * committed (an LFS pointer, a git-crypt file), which is worse than not committing at all.
+ * docs/security-boundaries.md lists this as a limit.
  */
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec(programPath('git'), ['-c', 'core.quotePath=false', ...args], { cwd, ...OK })
-  return stdout
+function gitWrite(cwd: string, args: string[]): Promise<string> {
+  return runGit(cwd, args, { allowRepoPrograms: true })
 }
 
 /** Every read function returns an empty result when this is not a git repository — so callers do not have to guard every time */
@@ -51,9 +56,9 @@ async function isRepo(cwd: string): Promise<boolean> {
   }
 }
 
-export async function gitSummary(cwd: string): Promise<GitSummary> {
+export async function gitSummary(cwd: string, trust: GitTrust = {}): Promise<GitSummary> {
   try {
-    const stdout = await git(cwd, ['status', '--porcelain=v2', '--branch'])
+    const stdout = await git(cwd, ['status', '--porcelain=v2', '--branch'], trust)
     let branch = '(detached)'
     let changed = 0
     for (const line of stdout.split('\n')) {
@@ -70,9 +75,9 @@ export async function gitSummary(cwd: string): Promise<GitSummary> {
 }
 
 /** The list of changed files. Why porcelain v2 is used: it stays safe even when a name has spaces or non-ASCII characters */
-export async function gitStatusFiles(cwd: string): Promise<GitFileStatus[]> {
+export async function gitStatusFiles(cwd: string, trust: GitTrust = {}): Promise<GitFileStatus[]> {
   if (!(await isRepo(cwd))) return []
-  const stdout = await git(cwd, ['status', '--porcelain=v2', '-z', '--untracked-files=all'])
+  const stdout = await git(cwd, ['status', '--porcelain=v2', '-z', '--untracked-files=all'], trust)
   const out: GitFileStatus[] = []
 
   const tokens = stdout.split('\0')
@@ -165,7 +170,7 @@ export const GIT_DIFF_MAX_CHARS = 400_000
 export async function gitDiff(
   cwd: string,
   path: string,
-  opts: { staged?: boolean; maxChars?: number } = {},
+  opts: { staged?: boolean; maxChars?: number } & GitTrust = {},
 ): Promise<{ diff: string; truncated: boolean; binary: boolean }> {
   if (!(await isRepo(cwd))) return { diff: '', truncated: false, binary: false }
   const safePath = await assertCanonicalGitPath(cwd, path)
@@ -175,14 +180,14 @@ export async function gitDiff(
 
   let stdout: string
   try {
-    stdout = await git(cwd, args)
+    stdout = await git(cwd, args, opts)
   } catch {
     return { diff: '', truncated: false, binary: false }
   }
   // An untracked file has no diff — so its content is shown directly
   if (!stdout.trim() && !opts.staged) {
     try {
-      stdout = await git(cwd, ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', safePath])
+      stdout = await git(cwd, ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', safePath], opts)
     } catch (e) {
       // --no-index exits 1 when there is a difference, so stdout rides along on the error
       stdout = String((e as { stdout?: string }).stdout ?? '')
@@ -256,11 +261,15 @@ export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<
  * a combined diff, is empty for a merge that had no conflicts, so every such merge showed up as `0 files` with an
  * empty diff. The difference against the first parent is exactly "what this merge brought into this branch."
  */
-export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }> {
+export async function gitCommitDetail(
+  cwd: string,
+  sha: string,
+  trust: GitTrust = {},
+): Promise<{ files: string[]; diff: string; truncated: boolean }> {
   if (!(await isRepo(cwd))) return { files: [], diff: '', truncated: false }
   const show = ['show', '--diff-merges=first-parent', '--pretty=format:']
-  const files = (await git(cwd, [...show, '--name-only', '--end-of-options', sha])).split('\n').filter(Boolean)
-  const raw = await git(cwd, [...show, '--no-color', '--end-of-options', sha])
+  const files = (await git(cwd, [...show, '--name-only', '--end-of-options', sha], trust)).split('\n').filter(Boolean)
+  const raw = await git(cwd, [...show, '--no-color', '--end-of-options', sha], trust)
   const max = GIT_DIFF_MAX_CHARS
   return { files, diff: raw.slice(0, max), truncated: raw.length > max }
 }
@@ -306,11 +315,15 @@ export async function gitRevParse(cwd: string, ref: string): Promise<string | nu
  * reason to copy one, and they always occupy the top of the list, pushing out the .env a person
  * actually needs to see.
  */
-export async function gitIgnoredEntries(cwd: string, limit = 50): Promise<{ path: string; bytes: number | null }[]> {
+export async function gitIgnoredEntries(
+  cwd: string,
+  limit = 50,
+  trust: GitTrust = {},
+): Promise<{ path: string; bytes: number | null }[]> {
   if (!(await isRepo(cwd))) return []
   let raw: string
   try {
-    raw = await git(cwd, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])
+    raw = await git(cwd, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'], trust)
   } catch {
     return []
   }
@@ -394,17 +407,17 @@ export async function gitBranches(cwd: string): Promise<GitBranch[]> {
 export async function gitCheckout(
   cwd: string,
   branch: string,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean } & GitTrust = {},
 ): Promise<{ ok: boolean; conflicts: string[]; message?: string }> {
   if (!(await isRepo(cwd))) return { ok: false, conflicts: [], message: 'Not a git repository' }
   if (opts.dryRun) {
-    const dirty = (await gitStatusFiles(cwd)).filter((f) => f.status !== '?').map((f) => f.path)
+    const dirty = (await gitStatusFiles(cwd, opts)).filter((f) => f.status !== '?').map((f) => f.path)
     return { ok: dirty.length === 0, conflicts: [...new Set(dirty)] }
   }
   try {
     const local = await gitRevParse(cwd, `refs/heads/${branch}`)
     const remote = !local && (await gitRevParse(cwd, `refs/remotes/${branch}`))
-    await git(cwd, ['switch', ...(remote ? ['--track'] : []), '--end-of-options', branch])
+    await gitWrite(cwd, ['switch', ...(remote ? ['--track'] : []), '--end-of-options', branch])
     return { ok: true, conflicts: [] }
   } catch (e) {
     return { ok: false, conflicts: [], message: cleanGitError(e) }
@@ -415,12 +428,12 @@ export async function gitStage(cwd: string, paths: string[], unstage = false): P
   if (paths.length === 0) return
   const safePaths = await Promise.all(paths.map((path) => assertCanonicalGitPath(cwd, path)))
   const pathspecs = safePaths.map(literalPathspec)
-  await git(cwd, unstage ? ['restore', '--staged', '--', ...pathspecs] : ['add', '--', ...pathspecs])
+  await gitWrite(cwd, unstage ? ['restore', '--staged', '--', ...pathspecs] : ['add', '--', ...pathspecs])
 }
 
 export async function gitCommit(cwd: string, message: string): Promise<{ ok: boolean; message?: string }> {
   try {
-    await git(cwd, ['commit', '-m', message])
+    await gitWrite(cwd, ['commit', '-m', message])
     return { ok: true }
   } catch (e) {
     return { ok: false, message: cleanGitError(e) }
@@ -434,7 +447,7 @@ export async function gitPush(cwd: string): Promise<{ ok: boolean; message?: str
     const current = branches.find((b) => b.current)
     if (!current) return { ok: false, message: 'Current branch is unknown (detached HEAD)' }
     const args = current.upstream ? ['push'] : ['push', '--set-upstream', 'origin', current.name]
-    await git(cwd, args)
+    await gitWrite(cwd, args)
     return { ok: true }
   } catch (e) {
     return { ok: false, message: cleanGitError(e) }
@@ -493,8 +506,21 @@ export async function gitWorktreeAdd(
   path: string,
   branch: string,
   from?: string,
+  trust: GitTrust = {},
 ): Promise<Worktree> {
-  await git(repoCwd, ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
+  /*
+   * **Only in a trusted project (#407).** A checkout writes every tracked file through the
+   * repository's smudge filters and then fires `post-checkout` (and `reference-transaction` for
+   * the new branch). Turning those off is not a safe middle: the worktree would hold files the
+   * filters never converted (an LFS pointer, a git-crypt blob), which the session then edits and
+   * commits back. `--no-checkout` avoids the filters but leaves an empty folder the agent would
+   * have to fill by running git itself. Refusing leaves nothing half-made; the manager says why
+   * before it gets here.
+   */
+  if (trust.trusted !== true) {
+    throw Object.assign(new Error('A worktree can only be created in a trusted project'), { code: 'internal' })
+  }
+  await gitWrite(repoCwd, ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
   return { path, branch }
 }
 
@@ -620,14 +646,29 @@ export async function gitWorktreeRemove(repoCwd: string, path: string, force = f
  * Deleting still leaves the commit in the reflog — the caller logs the tip sha to leave a path
  * back to it.
  */
-export async function gitBranchDelete(repoCwd: string, branch: string): Promise<void> {
-  await git(repoCwd, ['branch', '-D', branch])
+export async function gitBranchDelete(repoCwd: string, branch: string, trust: GitTrust = {}): Promise<void> {
+  await git(repoCwd, ['branch', '-D', branch], trust)
 }
 
-/** Whether uncommitted changes remain — used to ask whether removal is safe */
-export async function gitWorktreeDirty(path: string): Promise<{ dirty: boolean; changedFiles: number }> {
-  const summary = await gitSummary(path)
-  return { dirty: summary.changedFiles > 0, changedFiles: summary.changedFiles }
+/**
+ * Whether uncommitted changes remain — used to ask whether removal is safe.
+ *
+ * This guards a forced removal, so work inside a submodule has to count. A trusted project's
+ * status descends into submodules as plain git does. Before trust, status does not
+ * (`--ignore-submodules=all`, `git-exec.ts`: a submodule's own config could name a filter that
+ * was not turned off), so any submodule at all counts as a change: removal then asks first
+ * rather than guessing. A worktree is only created in a trusted project, so this is the case of
+ * trust taken away afterwards.
+ */
+export async function gitWorktreeDirty(path: string, trust: GitTrust = {}): Promise<{ dirty: boolean; changedFiles: number }> {
+  const summary = await gitSummary(path, trust)
+  let changedFiles = summary.changedFiles
+  if (trust.trusted !== true && summary.isRepo) {
+    // `ls-files --stage` reads the index only; mode 160000 is a submodule (a gitlink)
+    const staged = await git(path, ['ls-files', '--stage', '-z']).catch(() => '')
+    changedFiles += staged.split('\0').filter((line) => line.startsWith('160000 ')).length
+  }
+  return { dirty: changedFiles > 0, changedFiles }
 }
 
 /**

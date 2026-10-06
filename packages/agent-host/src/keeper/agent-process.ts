@@ -13,7 +13,8 @@ import type { AgentTag } from './tags.js'
  *
  * The difference from a child of this host is what leaving means:
  *
- * - `kill()` is a request to the keeper, and it is **never sent while the host is leaving**. The
+ * - `kill()` is a request to the keeper for the CLI's whole process group (its helpers with it), and
+ *   it is **never sent while the host is leaving**. The
  *   SDK kills every process it spawned when its owner exits (`process.on('exit')`); under the
  *   keeper an exit is a restart, and the agent must outlive it. A stop kills explicitly, before the
  *   host exits.
@@ -183,11 +184,18 @@ export class KeeperAgentProcess extends EventEmitter {
     if (this.childId) void this.keeper.release(this.childId).catch(() => {})
   }
 
+  /**
+   * Signals the CLI's whole process group, not its pid alone. The keeper started the CLI in a session
+   * of its own, so the group is the CLI and the helpers it started (a language server and its
+   * `tsserver`, MCP servers, shells), and nothing else. A CLI that dies of the signal without stopping
+   * them, or is KILLed, no longer leaves them running under launchd/init. The keeper also sweeps the
+   * group once the CLI has exited (`keeper/children/mod.rs`, `Sweep`).
+   */
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
     if (this.detached || hostLeaving || this.exitCode !== null || this.signalCode !== null) return false
     this.killed = true
     void this.ready
-      .then(() => (this.childId ? this.keeper.signal(this.childId, signal) : undefined))
+      .then(() => (this.childId ? this.keeper.signal(this.childId, signal, true) : undefined))
       .catch((e: Error) => console.error(`[keeper] could not signal ${this.childId ?? 'an agent'}: ${e.message}`))
     return true
   }

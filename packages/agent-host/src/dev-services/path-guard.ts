@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync, statSync, type Stats } from 'node:fs'
+import { lstatSync, realpathSync, statSync, type BigIntStats, type Stats } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, posix, relative, sep, win32, type PlatformPath } from 'node:path'
 
@@ -27,13 +27,18 @@ export type CreatePathState = { readonly exists: boolean }
 
 type WalkMode = 'existing' | 'create-leaf'
 
-type WalkResult = { readonly stats: Stats; readonly exists: true } | { readonly exists: false }
+type WalkResult<S = Stats> = { readonly stats: S; readonly exists: true } | { readonly exists: false }
 
 export function isMissingPathError(error: unknown): error is MissingPathError {
   return error instanceof MissingPathError
 }
 
-export async function assertExistingPath(root: string, rel: string): Promise<Stats> {
+/**
+ * The stats are bigint ones so that `dev` and `ino` can be compared as they are (#368). On NTFS a
+ * file id is 64 bits and above 2^53, and as a Number two different files can come out equal: the
+ * identity checks in fs.ts then let a swapped file through.
+ */
+export async function assertExistingPath(root: string, rel: string): Promise<BigIntStats> {
   const result = await walkPath(root, rel, 'existing')
   if (!result.exists) throw new MissingPathError(rel)
   return result.stats
@@ -50,11 +55,11 @@ export function assertExistingPathSync(root: string, rel: string): Stats {
   return result.stats
 }
 
-async function walkPath(root: string, rel: string, mode: WalkMode): Promise<WalkResult> {
+async function walkPath(root: string, rel: string, mode: WalkMode): Promise<WalkResult<BigIntStats>> {
   const rootReal = await realpath(root)
   let current = rootReal
   const parts = pathParts(root, rel)
-  if (parts.length === 0) return { stats: await stat(rootReal), exists: true }
+  if (parts.length === 0) return { stats: await stat(rootReal, { bigint: true }), exists: true }
 
   for (const [index, part] of parts.entries()) {
     if (part === '..') {
@@ -64,16 +69,16 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
 
     const candidate = join(current, part)
     assertInside(rootReal, candidate)
-    let stats: Stats
+    let stats: BigIntStats
     try {
-      const linkStats = await lstat(candidate)
+      const linkStats = await lstat(candidate, { bigint: true })
       if (linkStats.isSymbolicLink()) {
         const target = await realpath(candidate).catch((error: NodeJS.ErrnoException) => {
           if (isMissingFsPath(error)) throw new MissingPathError(rel)
           throw error
         })
         assertInside(rootReal, target)
-        stats = await stat(target)
+        stats = await stat(target, { bigint: true })
         current = target
       } else {
         stats = linkStats
@@ -88,7 +93,7 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
     if (index === parts.length - 1) return { stats, exists: true }
   }
 
-  return { stats: await stat(current), exists: true }
+  return { stats: await stat(current, { bigint: true }), exists: true }
 }
 
 function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {

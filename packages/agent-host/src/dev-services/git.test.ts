@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GIT_DIFF_MAX_CHARS, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles, gitSummary } from './git.js'
 
 /**
  * porcelain v2 parsing is checked against real git output — a hand-written string could
@@ -92,6 +92,27 @@ describe('gitStatusFiles — porcelain v2', () => {
 
     const files = await gitStatusFiles(d)
     expect(files).toEqual([{ path: 'a.txt', staged: false, status: 'M' }])
+  })
+})
+
+describe('untrusted repository status', () => {
+  // core.fsmonitor is a command from the repository's local config. Merely registering an
+  // untrusted folder must not run it before the person has approved that repository.
+  it.skipIf(process.platform === 'win32')('disables fsmonitor until the project is trusted', async () => {
+    const { d, git } = repo()
+    const marker = join(d, 'fsmonitor-ran')
+    const hook = join(d, 'fsmonitor.sh')
+    writeFileSync(hook, `#!/bin/sh\nprintf ran >> "${marker}"\nprintf '2\\n'\n`)
+    chmodSync(hook, 0o755)
+    git('config', 'core.fsmonitor', hook)
+
+    const untrusted = { trusted: false }
+    expect((await gitSummary(d, untrusted)).isRepo).toBe(true)
+    expect(await gitStatusFiles(d, untrusted)).toEqual(expect.any(Array))
+    expect(existsSync(marker)).toBe(false)
+
+    expect((await gitSummary(d, { trusted: true })).isRepo).toBe(true)
+    expect(existsSync(marker)).toBe(true)
   })
 })
 

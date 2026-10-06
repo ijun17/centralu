@@ -1,11 +1,7 @@
-import { execFile } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
 import { wireJoin } from '@cc/protocol'
-import { programPath } from '../tool-launch.js'
-
-const exec = promisify(execFile)
+import { runGit, type GitTrust } from './git-exec.js'
 
 /**
  * File search for `@` autocomplete.
@@ -41,18 +37,17 @@ export function heldFileIndexes(): number {
   return cache.size
 }
 
-async function gitFiles(root: string): Promise<string[] | null> {
+async function gitFiles(root: string, trust: GitTrust): Promise<string[] | null> {
   try {
     /*
      * Tracked files plus new files that are not ignored = everything a person might want to open.
      * Read with `-z` (#176): line-based output, depending on `core.quotePath`, wrapped a Korean
      * name as `"\355\225\234…"`, so `@한글` found nothing, and whatever path it did pick turned out
      * to be a file that did not exist. `-z` splits names with NUL, with no quoting at all.
+     * Before trust it runs none of the repository's programs (`core.fsmonitor` ran here, #407).
      */
-    const { stdout } = await exec(programPath('git'), ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-      cwd: root,
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 10_000,
+    const stdout = await runGit(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+      allowRepoPrograms: trust.trusted === true,
     })
     const files = stdout.split('\0').filter(Boolean)
     return files.length > 0 ? files.slice(0, MAX_FILES) : null
@@ -99,13 +94,13 @@ async function walk(root: string): Promise<string[]> {
   return out
 }
 
-async function indexOf(root: string): Promise<string[]> {
+async function indexOf(root: string, trust: GitTrust): Promise<string[]> {
   const now = Date.now()
   const hit = cache.get(root)
   if (hit && now - hit.at < TTL_MS) return hit.files
   // A stale index is never read again, so it is swept here rather than kept until the same root is searched (#392)
   for (const [r, index] of cache) if (now - index.at >= TTL_MS) cache.delete(r)
-  const files = (await gitFiles(root)) ?? (await walk(root))
+  const files = (await gitFiles(root, trust)) ?? (await walk(root))
   cache.set(root, { files, at: Date.now() })
   return files
 }
@@ -165,8 +160,8 @@ function subsequenceScore(haystack: string, needle: string): number | null {
   return Math.min(best * 4, 150)
 }
 
-export async function searchFiles(root: string, query: string, limit = 20): Promise<FileHit[]> {
-  const files = await indexOf(root)
+export async function searchFiles(root: string, query: string, limit = 20, trust: GitTrust = {}): Promise<FileHit[]> {
+  const files = await indexOf(root, trust)
   // The list is kept normalized to NFC — the query also has to be the same shape for Korean to compare correctly (#176)
   const q = query.trim().normalize('NFC')
 

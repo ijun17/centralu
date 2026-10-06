@@ -198,6 +198,77 @@ Limits:
 - The Codex behaviour is verified from Codex source and the installed binary's strings, not
   by a logged-in run.
 
+### Git before trust (#407)
+
+A folder copied from somewhere (a zip, a shared drive) carries its own `.git/config` and
+`.git/hooks`, and plain git reads run several of the programs named there. Measured against a
+planted copy with git 2.54: `status` runs `core.fsmonitor`, the clean filter of each file whose stat
+data no longer matches the index, and the `post-index-change` hook when it rewrites the index;
+`check-ignore` and `ls-files` run `core.fsmonitor`; `diff` and `show` run textconv drivers and smudge
+and clean filters; `log` and `show` run `gpg.program` on a signed commit when `log.showSignature`
+is set; `worktree add` runs `post-checkout`, `reference-transaction` and smudge filters. The host
+reads a project as soon as it is added (`projects.list` asks for its branch and change count), so
+every one of these was reachable before the person answered the trust question.
+
+**Before a project is trusted, no git read the host makes runs a program the repository chose.**
+Every git the host starts goes through `runGit` (`dev-services/git-exec.ts`); `git-exec.test.ts`
+fails if any other source starts git. A read for an untrusted project gets:
+
+- `--no-optional-locks`, so the index is not rewritten and the folder is left as it was found;
+- `-c core.hooksPath=<null device>` (`/dev/null`, or `\\.\nul` on Windows), under which no hook
+  can exist;
+- `-c core.fsmonitor=` (empty reads as off in every git; `false` is a boolean only from 2.36);
+- `-c log.showSignature=false`, so no signature is verified and `gpg.program` never starts;
+- for every filter driver git would see in that folder (listed first with
+  `git config --get-regexp '^filter\.'` under the same flags, so `include.path` and `includeIf`
+  resolve exactly as for the read), `clean`, `smudge` and `process` set to no command and
+  `required` to false. The user's own drivers (Git LFS) are turned off too;
+- `--no-textconv --no-ext-diff` on `diff`, `show` and `log`, and `--ignore-submodules=all` on
+  `status` and `diff`: a submodule has its own config, whose drivers were not listed.
+
+Command-line configuration outranks every configuration file and is handed to the git processes
+git starts itself, so an included file or a nested call cannot undo it. The reads this covers are
+the change count and branch (`projects.list`, `projects.gitStatus`, the app broker's status),
+`git.status`, `git.diff` (tracked and untracked), `git.log`, `git.commitDetail`, `git.branches`,
+`git.ignoredEntries`, the `git.checkout` dry run, the file tree's `check-ignore`, file search's
+`ls-files`, a project app's version history, and the worktree dirty check. A worktree session
+cannot be started in an untrusted project at all: checking out runs the repository's filters and
+hooks by design, turning them off would leave files they never converted (an LFS pointer, a
+git-crypt blob) for the session to edit and commit back, and `--no-checkout` would leave an empty
+folder. The manager refuses with the reason, and `gitWorktreeAdd` refuses too unless told the
+project is trusted.
+
+What a read still does before trust: it reads the repository's files, its configuration and any
+file that configuration includes, and `core.excludesFile`. It does not start a pager (stdout is a
+pipe) or an editor, and it does not touch the network, so `core.sshCommand` and
+`credential.helper` are never read. `safe.directory` is left to git: git honours it only from the
+user's own and the system configuration, and the host never sets it, so a folder owned by another
+user is refused as it would be in a terminal.
+
+A trusted project's reads run as plain git does (fsmonitor stays on for the checkout dry run and
+the worktree dirty check, which can otherwise approach the 10-second limit on a large repository).
+`git.log` runs locked for every project; the signature check it skips only printed into output
+the parser never read. Tests: `git-untrusted.test.ts` runs each read against the planted copy and
+requires no marker, with the same read for a trusted project as the control; `manager.test.ts`
+"runs none of the repository's programs before project trust, through every door that reads it".
+
+Limits:
+
+- **Writes the person asks for run as plain git does, trusted or not.** Stage runs clean filters;
+  commit runs `pre-commit`, `commit-msg` and `post-commit` and may sign with `gpg.program`;
+  switching branches runs `post-checkout` and smudge filters; push runs `pre-push`, credential
+  helpers and `core.sshCommand`. Turning filters off would change what gets committed, so these
+  are not locked; they happen only on the person's click.
+- Before trust, status does not look inside submodules. The untrusted worktree dirty check counts
+  each submodule as a change, so a removal asks first.
+- Before trust, a file under a clean filter (Git LFS) whose stat data changed shows as modified,
+  and diffs show raw content without textconv.
+- A filter driver whose name contains `=` cannot be named in `-c`; the read is refused instead.
+- The driver list is read just before the read. Something that changes `.git/config` in between
+  is already running on the machine.
+- The Windows null-device hooks path is covered by the Windows CI job running these tests; no
+  person has run it on a Windows machine.
+
 ## Local transport
 
 The host listens on loopback and requires a token that is not blank — whitespace-only is
@@ -566,7 +637,12 @@ unless declared; `form-action 'none'`; `object-src 'none'`. `'self'` is not a so
 opaque origin it would mean the host port. A declared entry must be `scheme://host[:port][/path]`
 with http(s) or ws(s) (a `*.` subdomain or a `:*` port is allowed). A bare `*`, bare schemes,
 keywords, anything containing a space, `;` or `,`, and loopback hosts (where the host's routes and
-other apps' ports live) are dropped, and the drop is logged. The frame's `allow` attribute passes
+other apps' ports live) are dropped, and the drop is logged. A declared host is parsed the way a
+browser parses a URL (WHATWG) before it is checked, and the policy carries that canonical form, so
+`127.1`, `2130706433` and `0x7f000001` are read as `127.0.0.1` and dropped (#407). This is
+hardening, not a closed hole: CSP host matching is literal, and Chromium and WebKit (Playwright)
+blocked every fetch to `127.0.0.1` under a policy that listed only those other spellings, while a
+policy listing `127.0.0.1` let each spelling through. The frame's `allow` attribute passes
 only a declared camera, microphone, geolocation or clipboard-write (`csp.test.ts`). The manifest's
 own `csp` field is not used.
 
@@ -700,6 +776,11 @@ tests. What differs from macOS and Linux, and what holds it:
 - **Paths.** `path-guard.ts` refuses a path whose `relative()` from the root is absolute (another
   drive, a UNC share), instead of walking its segments inside the root (`path-guard.test.ts`, with
   `path.win32`). Windows paths ignore case; containment uses `relative()`, which does too.
+- **File identity.** A read's opened-file check is the only guard against a swap there, since
+  Windows has no `O_NOFOLLOW`. An NTFS file id is 64 bits with the record's reuse count on top, so
+  it is above 2^53, and as a Number two files can compare equal: on windows-2022, 1754 of 2000
+  pairs of files made one after the other did. `dev` and `ino` are compared as bigints
+  (`path-guard.ts` `assertExistingPath`, `fs.ts`; `fs-read-identity.test.ts`, #368).
 
 Limits:
 

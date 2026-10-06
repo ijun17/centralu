@@ -87,6 +87,35 @@ describe('buildViewCsp', () => {
     }
   })
 
+  it.each([
+    'http://127.1',
+    'http://127.0.1',
+    'http://127.01',
+    'http://127.0.0.01',
+    'http://127.000.000.001',
+    'http://2130706433',
+    'http://017700000001',
+    'http://0x7f000001',
+    'http://0x7f.1',
+    'http://0',
+    'http://00',
+    'http://0x0',
+    'http://0.0',
+    'http://0.0.0',
+  ])('rejects %j after browser-compatible IPv4 canonicalization', (entry) => {
+    expect(sanitizeDomains([entry])).toEqual({ kept: [], dropped: [entry] })
+  })
+
+  it('accepts documented ports and emits canonical host components', () => {
+    expect(sanitizeDomains([
+      'https://API.EXAMPLE.COM:8443/v1',
+      'wss://*.events.example:*',
+    ])).toEqual({
+      kept: ['https://api.example.com:8443/v1', 'wss://*.events.example:*'],
+      dropped: [],
+    })
+  })
+
   it('drops a non-string declaration and a non-array list', () => {
     expect(sanitizeDomains(['https://a.example', 42, null, { x: 1 }])).toEqual({
       kept: ['https://a.example'],

@@ -1,6 +1,6 @@
 {
   "name": "centralu",
-  "version": "0.1.0-beta.10",
+  "version": "0.1.0-beta.11",
   "description": "Run, watch and steer several Claude Code and Codex CLI sessions from one window",
   "license": "MIT",
   "author": "ijun17",
@@ -37,9 +37,9 @@
     "win32"
   ],
   "optionalDependencies": {
-    "@centralu/darwin-arm64": "0.1.0-beta.10",
-    "@centralu/linux-arm64": "0.1.0-beta.10",
-    "@centralu/linux-x64": "0.1.0-beta.10",
-    "@centralu/win32-x64": "0.1.0-beta.10"
+    "@centralu/darwin-arm64": "0.1.0-beta.11",
+    "@centralu/linux-arm64": "0.1.0-beta.11",
+    "@centralu/linux-x64": "0.1.0-beta.11",
+    "@centralu/win32-x64": "0.1.0-beta.11"
   }
 }

@@ -141,7 +141,24 @@ export class TerminalService {
   close(terminalId: string): void {
     const e = this.byId.get(terminalId)
     if (!e) return
-    e.pty?.kill()
+    /*
+     * The whole tree, as Stop and restart do. A hang-up to the shell alone ended the shell, but a dev
+     * server started from it is in a group of its own (job control) and one that ignores HUP was left
+     * running with its port. The tree is taken while the shell is still there (once it has gone, its
+     * children are no longer under it); then the shell gets the hang-up a closing terminal sends, which
+     * an interactive shell ends on (it ignores TERM).
+     */
+    const handle = e.pty
+    if (handle) {
+      stopTree(handle, KILL_GRACE_MS, () => e.pty === handle)
+      if (process.platform !== 'win32') {
+        try {
+          handle.kill()
+        } catch {
+          // already gone
+        }
+      }
+    }
     this.byId.delete(terminalId)
     const siblings = (this.byCwd.get(e.cwd) ?? []).filter((x) => x.id !== terminalId)
     if (siblings.length === 0) this.byCwd.delete(e.cwd)

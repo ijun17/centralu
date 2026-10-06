@@ -573,20 +573,47 @@ must keep reading an older host's tags: the children outlive the build that spaw
 
 - **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract.ts`): `spawn` in the keeper,
   or `adopt` a kept process. Claude gets it as `spawnClaudeCodeProcess`; `CodexClient` takes the process instead
-  of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request that
-  is never sent once the process is detached or the host is exiting (the SDK kills its processes on owner exit),
-  and `stdin.end()` is `close_stdin`. Codex request ids carry a per-client prefix, so an answer to the previous
+  of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request for
+  the CLI's whole process group (below) that is never sent once the process is detached or the host is exiting
+  (the SDK kills its processes on owner exit), and `stdin.end()` is `close_stdin`. Codex request ids carry a per-client prefix, so an answer to the previous
   host's request cannot resolve one of ours.
 - **Terminals and commands.** `TerminalService` and `CommandRunner` take the keeper's pty module (`KeeperPty`,
-  node-pty's surface) instead of node-pty; stopping them still walks the process tree (`kill-tree.ts`), which
-  works from anywhere.
+  node-pty's surface) instead of node-pty; stopping or closing them walks the process tree (`kill-tree.ts`), which
+  works from anywhere. Closing a terminal takes the tree before the shell gets its hang-up: a dev server started
+  from it is in a group of its own (job control), and one that ignored the hang-up used to be left running.
+
+**What stopping an agent ends.** An agent CLI starts helpers of its own: Claude Code's LSP tool runs
+`typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from the user's config; shells.
+They share the CLI's process group, which `setsid` made the CLI's own, so the group is the CLI, what it started, and
+nothing else. A stop signals that group: the host's TERM, and the KILL that follows when the CLI is still there after
+its grace (the SDK's 5 s; codex's 2 s after EOF), reach the helpers too. And whenever an agent exits, however it ended
+(a stop, a crash, a CLI that does not clean up), the keeper sweeps its group: TERM at once, KILL 2 s later to whatever
+is still in it (`Sweep`, `keeper/children/mod.rs`). Before, only the CLI's pid was signalled, and what it left was
+reparented to launchd/init and kept running with its memory. A group number is not reused while anyone is in it, and
+no sweep is sent while any process holds the CLI's pid (its zombie not yet reaped, or the number given to someone
+else), so a sweep never reaches another group; the keeper's own group is never a target (#350). A sweep still
+waiting is handed to the next keeper with the table (§4.4), and a keeper stopping for good waits for its sweeps and
+KILLs what is left at the end. Ptys are not swept: the kernel hangs up a terminal's foreground group as its shell
+exits, and the host ends a terminal's or a command's tree when it stops one. A detach (a restart, a swap) sends
+nothing, so agents and their helpers survive it.
+
+Without a keeper (Windows, `pnpm dev`, e2e, a debug app, a keeper whose child service did not answer) the host
+spawns the CLI itself, Claude's through `spawnClaudeCodeProcess` too (`adapters/local-process.ts`). On macOS and
+Linux it gets a process group of its own; a stop is `kill-tree.ts`'s TERM to every group in its tree and KILL to
+the survivors after 3 s, and once it has exited its group is swept the same way (`stopGroup`). On Windows a stop is
+`taskkill /T /F` on its tree, and once it has exited what it left running is found by parent links and creation
+times and ended (`collectOrphansWindows`). Being in a group of its own, the CLI is no longer in the host's: a host
+that is SIGKILLed takes it along only through stdin EOF, on which codex exits at once and claude after the turn it
+is in. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so the adapter
+adds it the same way.
 
 **Leaving** (`main.ts`, `stopServices(mode)`). *Detach* — SIGTERM, SIGINT, the keeper's pipe closing, an
 uncaught exception, a swap's drain — calls `detach()` on every session handle, terminal and command run: nothing
 is sent to the tool, a waiting approval stays waiting, and output still in flight is recorded before the store
 closes. App processes and the in-process tool servers stop, as they live in the host. *Stop* — the keeper's `stop`
 event, or any ending without the child service — is the old path: sessions disposed, terminals and runs killed.
-After a stop the keeper ends whatever is left (stdin EOF and SIGHUP, 2 s, TERM to each group, 1 s, KILL).
+After a stop the keeper ends whatever is left (stdin EOF and SIGHUP, 2 s, TERM to each group, 1 s, KILL), and
+what exited agents left in their groups.
 
 **Re-attach.** At startup the host lists the keeper's children. Live agents re-attach after `listen`, through
 `resumeSession`, so a screen waking the same session joins the re-attach instead of starting a second process.

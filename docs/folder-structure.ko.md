@@ -71,7 +71,8 @@ centralu/
 │        ├─ usage/              # incremental parser for ~/.claude, ~/.codex logs
 │        └─ mcp/                # MCP server for the orchestrator (M3)
 │
-├─ e2e/                         # Playwright (apps/web + platform/mock combination)
+├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts와 seed-store.mts는
+│                               #   시드한 무거운 스토어(fixtures/heavy-store.ts)로 메모리를 잰다
 ├─ .centralu/apps/              # project apps committed with this repository (apps.md §2): project-board
 └─ tooling/                     # eslint config, dependency-cruiser rules, shared tsconfig
 ```

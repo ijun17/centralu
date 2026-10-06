@@ -11,6 +11,8 @@ import { gitSummary, gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorkt
  * exactly git's own rules (rejecting a duplicate branch, rejecting a dirty tree) — every case
  * that actually stops the user in this feature is the latter.
  */
+/** A worktree is only made in a trusted project (#407) */
+const TRUSTED = { trusted: true }
 let repo = ''
 let root = ''
 
@@ -28,7 +30,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 describe('worktrees', () => {
   it('creates one outside the repository, with a branch different from the original', async () => {
     const path = join(root, 'outside', 'session-1')
-    const wt = await gitWorktreeAdd(repo, path, 'centralu/abc12345')
+    const wt = await gitWorktreeAdd(repo, path, 'centralu/abc12345', undefined, TRUSTED)
 
     expect(wt).toEqual({ path, branch: 'centralu/abc12345' })
     expect(existsSync(join(path, 'a.txt'))).toBe(true)
@@ -39,7 +41,7 @@ describe('worktrees', () => {
 
   it('editing one side never disturbs the other (the point of this feature)', async () => {
     const path = join(root, 'outside', 'session-2')
-    await gitWorktreeAdd(repo, path, 'centralu/wt2')
+    await gitWorktreeAdd(repo, path, 'centralu/wt2', undefined, TRUSTED)
     writeFileSync(join(path, 'a.txt'), 'fixed in the worktree\n')
 
     expect((await gitWorktreeDirty(path)).dirty).toBe(true)
@@ -48,7 +50,7 @@ describe('worktrees', () => {
 
   it('an uncommitted change blocks removal unless force is given', async () => {
     const path = join(root, 'outside', 'session-3')
-    await gitWorktreeAdd(repo, path, 'centralu/wt3')
+    await gitWorktreeAdd(repo, path, 'centralu/wt3', undefined, TRUSTED)
     writeFileSync(join(path, 'a.txt'), 'not committed yet\n')
 
     // Confirms git itself rejects this — this is exactly why we attach force
@@ -62,14 +64,14 @@ describe('worktrees', () => {
   it('cannot create two worktrees with the same branch name', async () => {
     const a = join(root, 'outside', 'a')
     const b = join(root, 'outside', 'b')
-    await gitWorktreeAdd(repo, a, 'centralu/dup')
+    await gitWorktreeAdd(repo, a, 'centralu/dup', undefined, TRUSTED)
     // Naming branches by a session id's prefix makes this practically unreachable, but it must not fail silently if it happens
-    await expect(gitWorktreeAdd(repo, b, 'centralu/dup')).rejects.toThrow()
+    await expect(gitWorktreeAdd(repo, b, 'centralu/dup', undefined, TRUSTED)).rejects.toThrow()
   })
 
   it('only what is registered shows up in the list (and disappears once removed)', async () => {
     const path = join(root, 'outside', 'listed')
-    await gitWorktreeAdd(repo, path, 'centralu/listed')
+    await gitWorktreeAdd(repo, path, 'centralu/listed', undefined, TRUSTED)
 
     const before = await gitWorktreeList(repo)
     expect(before.map((w) => w.branch)).toContain('centralu/listed')

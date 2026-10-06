@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -77,9 +78,17 @@ beforeEach(() => {
   trusted = true
 })
 
+/*
+ * Retried (#368). On Windows a process can stop answering kill(pid, 0) a few milliseconds before it lets go of its
+ * working directory, and the app's descendants work in the app's folder. A test that waits for a descendant to be
+ * gone and ends right there (the shutdown rule's) met EBUSY removing that folder on windows-2022, in 7 of 105 CI
+ * runs. Measured with a probe there: 35 of 403 job-ended grandchildren still held their folder when they stopped
+ * answering, and every folder was free within 13 ms.
+ * The product never moves an app's folder that soon: removal waits for the leftovers' process listing first.
+ */
 afterEach(async () => {
   await rt?.dispose()
-  rmSync(fixture, { recursive: true, force: true })
+  await rm(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
 })
 
 describe('starts only the first time it is needed', () => {

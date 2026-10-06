@@ -1,3 +1,5 @@
+import { isIP } from 'node:net'
+
 /**
  * The CSP for an app view (M4 B-3).
  *
@@ -41,11 +43,41 @@ export type ViewPermissions = {
  * reason to reach any of that. An app that needs to talk to a local service does so through the app
  * server instead (this design's principle of keeping state and outbound calls on the server).
  */
-const SOURCE = /^(https?|wss?):\/\/(\*\.)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(:(\d{1,5}|\*))?(\/[a-z0-9._~%/-]*)?$/i
+const SOURCE = /^(https?|wss?):\/\/(\*\.)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::(\d{1,5}|\*))?(\/[a-z0-9._~%/-]*)?$/i
 
-function isLoopback(source: string): boolean {
-  const host = source.replace(/^[a-z]+:\/\//i, '').replace(/[:/].*$/, '').toLowerCase()
-  return host === 'localhost' || host.endsWith('.localhost') || /^127\.\d+\.\d+\.\d+$/.test(host) || host === '0.0.0.0'
+function isLoopback(host: string): boolean {
+  if (host === 'localhost' || host.endsWith('.localhost')) return true
+  if (isIP(host) !== 4) return false
+  const first = Number(host.split('.')[0])
+  return first === 0 || first === 127
+}
+
+/**
+ * CSP and the browser consume a WHATWG URL, so the security decision must use that same canonical
+ * host. Numeric IPv4 has several legal spellings (`127.1`, an integer, octal and hexadecimal), all
+ * of which URL parsing turns into a dotted address before a request is made.
+ */
+function canonicalSource(source: string): string | null {
+  const match = SOURCE.exec(source)
+  if (!match) return null
+  const [, rawScheme, wildcard = '', rawHost, rawPort, rawPath = ''] = match
+  if (!rawScheme || !rawHost) return null
+
+  const scheme = rawScheme.toLowerCase()
+  const probePort = rawPort === '*' ? '1' : rawPort
+  let parsed: URL
+  try {
+    parsed = new URL(`${scheme}://${rawHost}${probePort ? `:${probePort}` : ''}${rawPath}`)
+  } catch {
+    return null
+  }
+
+  const host = parsed.hostname.toLowerCase()
+  if (isLoopback(host) || (wildcard && isIP(host) !== 0)) return null
+
+  const port = rawPort ? `:${rawPort === '*' ? '*' : Number(rawPort)}` : ''
+  const path = rawPath ? parsed.pathname : ''
+  return `${scheme}://${wildcard}${host}${port}${path}`
 }
 
 /** Splits a declaration list. Only what is accepted goes into the policy; what is dropped is recorded in the host log */
@@ -54,11 +86,12 @@ export function sanitizeDomains(list: unknown): { kept: string[]; dropped: strin
   const dropped: string[] = []
   if (!Array.isArray(list)) return { kept, dropped }
   for (const item of list) {
-    if (typeof item === 'string' && SOURCE.test(item) && !isLoopback(item)) {
-      if (!kept.includes(item)) kept.push(item)
-    } else {
-      dropped.push(typeof item === 'string' ? item : JSON.stringify(item))
+    const canonical = typeof item === 'string' ? canonicalSource(item) : null
+    if (canonical) {
+      if (!kept.includes(canonical)) kept.push(canonical)
+      continue
     }
+    dropped.push(typeof item === 'string' ? item : JSON.stringify(item))
   }
   return { kept, dropped }
 }

@@ -42,6 +42,7 @@ import {
   type CodexThreadSettings,
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
+import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 
 const exec = promisify(execFile)
 
@@ -239,7 +240,7 @@ class CodexSession implements SessionHandle {
   /** App servers loaded onto this thread through the bridge — only elicitations under those names go to our cards */
   private appServers = new Set<string>()
   private reqCounter = 0
-  private alwaysAllow = new Set<string>()
+  private alwaysAllow = new AlwaysAllowRules()
   /**
    * The changes of each file-change item still open, by item id (#169). The approval request for that item
    * names it and carries nothing else (measured — see approvalDetailFrom), so the card's path and diff come
@@ -891,8 +892,8 @@ class CodexSession implements SessionHandle {
     const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId))
 
     // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
-    const key = detail.kind === 'command' ? detail.command : detail.kind === 'file_edit' ? detail.path : ''
-    if (key && this.isAlwaysAllowed(key)) {
+    const key = alwaysAllowKey(detail)
+    if (key && this.alwaysAllow.allows(key)) {
       this.client.respond(r.id, { decision: 'accept' })
       return
     }
@@ -902,15 +903,8 @@ class CodexSession implements SessionHandle {
     this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail })
   }
 
-  private isAlwaysAllowed(key: string): boolean {
-    for (const m of this.alwaysAllow) {
-      if (m.endsWith('*') ? key.startsWith(m.slice(0, -1)) : key === m) return true
-    }
-    return false
-  }
-
   applyRules(matchers: readonly string[]): void {
-    for (const m of matchers) this.alwaysAllow.add(m)
+    this.alwaysAllow.addAll(matchers)
   }
 
   send(text: string): void {

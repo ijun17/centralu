@@ -26,6 +26,8 @@ import '../../../../packages/ui/src/styles/index.css'
  *
  * Query: `?demo=focus|grid` picks the scene; `?state=` the keeper's report:
  *   - `other`: the host is of another build (the switch is offered)
+ *   - `older`: this window is an older build than the host and the keeper (#352: a backed-up
+ *     app opened while a newer one runs; the switch back is offered, by hand only)
  *   - `progress`: a swap is starting
  *   - `failed`: a swap failed before the old host was touched (a real failure)
  *   - `keeper-later`: the host is on this build and the keeper could not move (beta.10's
@@ -62,6 +64,8 @@ const tooLong = 'could not pass the state on: Message too long (os error 40)'
 function reported(): HostBuild {
   const base = { mode: 'keeper' as const, app: newer, keeper: older, keeperSameBuild: false, keepsAgents: true, busy: true }
   switch (state) {
+    case 'older':
+      return { ...base, app: older, host: newer, keeper: newer, sameBuild: false, keeperSameBuild: false }
     case 'progress':
       return { ...base, host: older, sameBuild: false, swap: { phase: 'starting', target: newer, from: older, startedAt: 1 } }
     case 'failed':

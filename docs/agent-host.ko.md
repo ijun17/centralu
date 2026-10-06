@@ -509,17 +509,42 @@ sessionId, version?}`(띄운 CLI 버전, #297, §4.6), `{kind:"terminal", id, cw
 
 - **에이전트.** 매니저는 어댑터에 `ProcessSource`(`adapters/contract.ts`)를 넘긴다: 키퍼에서 `spawn`하거나, 쥐어 둔
   프로세스를 `adopt`한다. claude는 이것을 `spawnClaudeCodeProcess`로 받고, `CodexClient`는 띄우는 대신 그 프로세스를
-  받는다. `KeeperAgentProcess`는 둘이 쓰는 `ChildProcess`의 표면을 갖지만, `kill()`은 키퍼에 보내는 요청이고 프로세스를
-  놓았거나 호스트가 끝나는 중이면 결코 보내지 않는다(SDK는 주인이 끝날 때 자기 프로세스를 kill한다). `stdin.end()`는
+  받는다. `KeeperAgentProcess`는 둘이 쓰는 `ChildProcess`의 표면을 갖지만, `kill()`은 CLI의 프로세스 그룹 전체(아래)에
+  대해 키퍼에 보내는 요청이고 프로세스를 놓았거나 호스트가 끝나는 중이면 결코 보내지 않는다(SDK는 주인이 끝날 때 자기
+  프로세스를 kill한다). `stdin.end()`는
   `close_stdin`이다. codex 요청 id에는 클라이언트마다 접두사가 붙어, 이전 호스트의 요청에 대한 답이 우리 요청을 풀지 못한다.
 - **터미널과 명령.** `TerminalService`와 `CommandRunner`는 node-pty 대신 키퍼의 pty 모듈(`KeeperPty`, node-pty의 표면)을
-  받는다. 멈출 때는 여전히 프로세스 트리를 걷는다(`kill-tree.ts`). 어디서든 통한다.
+  받는다. 멈추거나 닫을 때는 프로세스 트리를 걷는다(`kill-tree.ts`). 어디서든 통한다. 터미널을 닫을 때는 셸이 끊김
+  신호를 받기 전에 트리를 잡는다: 거기서 띄운 개발 서버는 자기 그룹에 있고(작업 제어), 끊김 신호를 무시하는 서버는 예전에
+  계속 돌고 있었다.
+
+**에이전트를 멈추면 끝나는 것.** 에이전트 CLI는 자기 도우미를 띄운다: Claude Code의 LSP 도구는
+`typescript-language-server`를 띄우고 그것이 `tsserver`를 띄운다(하나가 3.4 GB까지 갔다). 사용자 설정의 MCP 서버, 셸도
+있다. 도우미는 CLI의 프로세스 그룹을 함께 쓰고, `setsid`가 그 그룹을 CLI만의 것으로 만들었으므로 그룹은 CLI와 그것이
+띄운 것뿐이다. 멈춤은 그 그룹에 신호를 보낸다: 호스트의 TERM과, 유예가 지나도 CLI가 남아 있을 때 뒤따르는 KILL(SDK는
+5초, codex는 EOF 뒤 2초)이 도우미에게도 닿는다. 그리고 에이전트가 끝나면, 어떻게 끝났든(멈춤, 크래시, 정리하지 않는 CLI)
+키퍼가 그 그룹을 쓸어 낸다: 곧바로 TERM, 2초 뒤 아직 남은 것에 KILL(`Sweep`, `keeper/children/mod.rs`). 예전에는 CLI의
+pid에만 신호를 보냈고, 남은 것은 launchd/init으로 넘어가 메모리를 쥔 채 계속 돌았다. 그룹 번호는 그룹에 누가 남아 있는
+동안 다시 쓰이지 않고, CLI의 pid를 어떤 프로세스든 쥐고 있으면(아직 거두지 않은 좀비, 또는 남에게 넘어간 번호) 쓸어 내기를
+보내지 않으므로, 쓸어 내기는 다른 그룹에 닿지 않는다. 키퍼 자신의 그룹은 결코 대상이 아니다(#350). 아직 기다리는
+쓸어 내기는 표와 함께 다음 키퍼에 넘어가고(§4.4), 아주 멈추는 키퍼는 쓸어 내기를 기다렸다가 마지막에 남은 것을 KILL한다.
+pty는 쓸어 내지 않는다: 셸이 끝나면 커널이 터미널의 전경 그룹에 끊김 신호를 보내고, 호스트는 터미널이나 명령을 멈출 때
+그 트리를 끝낸다. detach(재시작, 교체)는 아무것도 보내지 않으므로 에이전트와 도우미는 살아남는다.
+
+키퍼가 없으면(Windows, `pnpm dev`, e2e, 디버그 앱, 자식 서비스가 답하지 않은 키퍼) 호스트가 CLI를 직접 띄운다. Claude도
+`spawnClaudeCodeProcess`로 그렇게 한다(`adapters/local-process.ts`). macOS와 Linux에서는 CLI가 자기 프로세스 그룹을
+갖는다. 멈춤은 `kill-tree.ts`의 방식이다: 트리의 모든 그룹에 TERM, 3초 뒤 살아남은 것에 KILL. 끝난 뒤에는 그 그룹을 같은
+방식으로 쓸어 낸다(`stopGroup`). Windows에서 멈춤은 트리에 `taskkill /T /F`이고, 끝난 뒤에는 남긴 것을 부모 링크와 생성
+시각으로 찾아 끝낸다(`collectOrphansWindows`). 자기 그룹에 있으므로 CLI는 더 이상 호스트의 그룹에 있지 않다: SIGKILL을
+받은 호스트는 stdin EOF로만 그것을 데려간다. codex는 EOF에 바로 끝나고, claude는 하던 턴을 마치고 끝난다. SDK는 자기가
+띄운 프로세스에만 실패 메시지에 CLI의 stderr 끝을 붙이므로, 어댑터가 같은 방식으로 붙인다.
 
 **떠나기** (`main.ts`, `stopServices(mode)`). *detach* — SIGTERM, SIGINT, 키퍼 파이프가 닫힘, 잡히지 않은 예외,
 교체의 드레인 — 는 모든 세션 핸들·터미널·명령 실행에 `detach()`를 부른다: 도구에는 아무것도 보내지 않고, 기다리는
 승인은 계속 기다리며, 오는 중이던 출력은 저장소가 닫히기 전에 기록한다. 앱 프로세스와 in-process 도구 서버는 호스트에
 살므로 멈춘다. *stop* — 키퍼의 `stop` 이벤트, 또는 자식 서비스 없는 모든 끝 — 은 예전 경로다: 세션을 정리하고 터미널과
-실행을 죽인다. stop 뒤에는 남은 것을 키퍼가 끝낸다(stdin EOF와 SIGHUP, 2초, 각 그룹에 TERM, 1초, KILL).
+실행을 죽인다. stop 뒤에는 남은 것을 키퍼가 끝낸다(stdin EOF와 SIGHUP, 2초, 각 그룹에 TERM, 1초, KILL). 끝난
+에이전트가 그룹에 남긴 것도.
 
 **다시 붙기.** 시작할 때 호스트가 키퍼의 자식 목록을 읽는다. 살아 있는 에이전트는 `listen` 뒤에 `resumeSession`을 거쳐
 다시 붙는다. 그래서 같은 세션을 깨우는 화면은 두 번째 프로세스를 띄우지 않고 다시 붙기에 합류한다. 그 세션들은 시작 시

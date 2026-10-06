@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writ
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
-import { programPath } from '../tool-launch.js'
+import { runGit, type GitTrust } from './git-exec.js'
 
 /**
  * The file tree and viewer service (C-1).
@@ -184,7 +184,7 @@ export async function resolveExisting(root: string, rel: string): Promise<string
    * (#121), but a safeguard that cannot be observed is a different matter.
    */
   safeJoin(rootReal, relative(rootReal, canonical))
-  const current = await lstat(canonical)
+  const current = await lstat(canonical, { bigint: true })
   if (current.isSymbolicLink() || current.dev !== expected.dev || current.ino !== expected.ino) {
     throw new UnsafePathError('Path changed while resolving the file')
   }
@@ -197,7 +197,7 @@ export async function resolveExisting(root: string, rel: string): Promise<string
  * directory** instead. If git is missing or this is not a repository, everything is treated as
  * not ignored.
  */
-async function ignoredIn(root: string, names: string[], dir: string): Promise<Set<string>> {
+async function ignoredIn(root: string, names: string[], dir: string, trust: GitTrust): Promise<Set<string>> {
   if (names.length === 0) return new Set()
   /*
    * git speaks POSIX (#47). Its index stores `/` on every platform, and `check-ignore` reads and
@@ -213,36 +213,26 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
    * exactly the string it was given, with no quoting.
    */
   const input = names.map((n) => wireJoin(rel, n)).join('\0')
-  const stdout = await new Promise<string>((resolveOut) => {
-    const child = spawn(programPath('git'), ['check-ignore', '--stdin', '-z'], { cwd: root })
-    let out = ''
-    child.stdout.on('data', (d) => (out += String(d)))
-    child.on('error', () => resolveOut(''))
-    // check-ignore exits 1 when there is no match — that is not an error
-    child.on('close', () => resolveOut(out))
-    /*
-     * A project does not have to be a git repository — the first-run screen says so in as
-     * many words. When it isn't one, git prints `fatal: not a git repository` and exits
-     * *before reading anything*, and the list we are writing lands on a closed pipe.
-     *
-     * The answer we want is already the right one: nothing is ignored, which is what the
-     * `close` above resolves. The danger is the EPIPE itself. A stream 'error' with no
-     * listener is an uncaught exception, and this runs inside the host — the process every
-     * session in the app is living in. Opening the file tree in a plain directory would take
-     * all of them down together.
-     *
-     * `child.on('error')` does not cover this. That one is about spawning; this one is the
-     * pipe. The Codex client learned the same thing at its own stdin (client.ts).
-     *
-     * Whether it fires is a race between our write and git's exit, which is why this stood
-     * for weeks: on a small directory the whole list fits in the pipe buffer and lands before
-     * git is gone. Past the buffer — measured at 65,536 bytes here, about four thousand
-     * files, or fewer with long names — the write blocks and the EPIPE is certain. CI hit it
-     * on both Linux runners at a fraction of that size, on timing alone.
-     */
-    child.stdin.on('error', () => {})
-    child.stdin.end(input)
-  })
+  /*
+   * A project does not have to be a git repository — the first-run screen says so in as many
+   * words. When it isn't one, git prints `fatal: not a git repository` and exits *before reading
+   * anything*, and the list we are writing lands on a closed pipe. The answer we want is already
+   * the right one: nothing is ignored. The danger is the EPIPE itself: a stream 'error' with no
+   * listener is an uncaught exception inside the host, the process every session lives in.
+   * `runGit` swallows that pipe error (on a small directory the list fits in the pipe buffer and
+   * lands before git is gone; past 65,536 bytes, about four thousand names, the EPIPE is
+   * certain, and CI hit it on both Linux runners on timing alone).
+   *
+   * check-ignore exits 1 when nothing matched, which is not an error: what it printed is kept.
+   * Before trust, the call runs none of the repository's programs (`core.fsmonitor` ran here,
+   * #407).
+   */
+  let stdout: string
+  try {
+    stdout = await runGit(root, ['check-ignore', '--stdin', '-z'], { input, allowRepoPrograms: trust.trusted === true })
+  } catch (e) {
+    stdout = String((e as { stdout?: unknown }).stdout ?? '')
+  }
   const set = new Set<string>()
   for (const path of stdout.split('\0')) {
     const name = wireBaseName(path)
@@ -251,13 +241,13 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
   return set
 }
 
-export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
+export async function listDir(root: string, rel: string, trust: GitTrust = {}): Promise<FsEntry[]> {
   const dir = safeJoin(root, rel)
   const dirInfo = await assertExistingPath(root, rel)
   if (!dirInfo.isDirectory()) fail(`${rel || '.'} is not a folder`)
   const entries = await readdir(dir, { withFileTypes: true })
   const visible = entries.filter((e) => e.name !== '.git')
-  const ignored = await ignoredIn(root, visible.map((e) => e.name), dir)
+  const ignored = await ignoredIn(root, visible.map((e) => e.name), dir, trust)
 
   return visible
     .map((e) => ({
@@ -271,30 +261,32 @@ export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
 
 export async function readTextFile(root: string, rel: string): Promise<FsFile> {
   const file = await resolveExisting(root, rel)
-  const pathInfo = await stat(file)
+  // bigint: on NTFS two different files' ids can be equal as Numbers (path-guard.ts, #368)
+  const pathInfo = await stat(file, { bigint: true })
   if (!pathInfo.isFile()) fail('Path is not a regular file')
 
   const handle = await open(file, READ_TEXT_FLAGS)
   try {
-    const info = await handle.stat()
-    if (!info.isFile()) fail('Path is not a regular file')
-    if (info.dev !== pathInfo.dev || info.ino !== pathInfo.ino) {
+    const opened = await handle.stat({ bigint: true })
+    if (!opened.isFile()) fail('Path is not a regular file')
+    if (opened.dev !== pathInfo.dev || opened.ino !== pathInfo.ino) {
       throw new UnsafePathError('Path changed while opening the file')
     }
+    const size = Number(opened.size)
 
     const mime = imageMime(rel)
-    if (mime && mime !== 'image/svg+xml' && info.size > MAX_IMAGE_PREVIEW) {
+    if (mime && mime !== 'image/svg+xml' && size > MAX_IMAGE_PREVIEW) {
       return {
         text: '',
         truncated: false,
         binary: true,
-        bytes: info.size,
-        previewError: `Image is too large to preview (${(info.size / 1_000_000).toFixed(1)}MB; limit is ${MAX_IMAGE_PREVIEW / 1_000_000}MB)`,
+        bytes: size,
+        previewError: `Image is too large to preview (${(size / 1_000_000).toFixed(1)}MB; limit is ${MAX_IMAGE_PREVIEW / 1_000_000}MB)`,
       }
     }
 
     const readLimit = mime && mime !== 'image/svg+xml' ? MAX_IMAGE_PREVIEW : MAX_TEXT
-    const buf = Buffer.allocUnsafe(Math.min(info.size, readLimit) + 1)
+    const buf = Buffer.allocUnsafe(Math.min(size, readLimit) + 1)
     let total = 0
     while (total < buf.length) {
       const { bytesRead } = await handle.read(buf, total, buf.length - total, total)
@@ -316,23 +308,23 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
           text: (truncated ? bytes.subarray(0, MAX_TEXT) : bytes).toString('utf8'),
           truncated,
           binary: false,
-          bytes: info.size,
+          bytes: size,
           image: { mime, data: bytes.toString('base64') },
         }
       }
-      return { text: '', truncated: false, binary: true, bytes: info.size, image: { mime, data: bytes.toString('base64') } }
+      return { text: '', truncated: false, binary: true, bytes: size, image: { mime, data: bytes.toString('base64') } }
     }
 
     // A null byte anywhere is treated as binary (the same heuristic git uses)
     const head = bytes.subarray(0, 8000)
-    if (head.includes(0)) return { text: '', truncated: false, binary: true, bytes: info.size }
+    if (head.includes(0)) return { text: '', truncated: false, binary: true, bytes: size }
 
     const truncated = total > MAX_TEXT
     return {
       text: (truncated ? bytes.subarray(0, MAX_TEXT) : bytes).toString('utf8'),
       truncated,
       binary: false,
-      bytes: info.size,
+      bytes: size,
     }
   } finally {
     await handle.close()
