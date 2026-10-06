@@ -143,10 +143,6 @@ export function createRpcHandler(
       const { sessionId, afterSeq } = RpcMethods['agents.exportHandoffNote'].params.parse(p)
       return mgr.exportHandoffNote(sessionId, afterSeq)
     },
-    'agents.createCoordinator': async (p) => {
-      const params = RpcMethods['agents.createCoordinator'].params.parse(p)
-      return mgr.createCoordinator(params)
-    },
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(RpcMethods['agents.worktreeStatus'].params.parse(p).sessionId),
     'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
@@ -342,17 +338,6 @@ export function createRpcHandler(
       // The shape of the answer is known between the view and the app. Here, only enough is checked to keep the envelope from breaking
       return RpcMethods['apps.readResource'].result.parse(await requireViews().readResource({ appId, projectId }, uri, instanceId))
     },
-    // apps.state / apps.setState / apps.setEnabled: the retired built-in app state (#81, #97).
-    // Still answered so an older window gets a reply; nothing in this build calls them
-    'apps.state': async (p) => {
-      const { appId } = RpcMethods['apps.state'].params.parse(p)
-      return mgr.appState(appId)
-    },
-    'apps.setState': async (p) => {
-      const { appId, doc } = RpcMethods['apps.setState'].params.parse(p)
-      mgr.setAppDoc(appId, doc)
-      return { ok: true as const }
-    },
     'apps.invoke': async (p) => {
       const { appId, name, args, projectId, instanceId } = RpcMethods['apps.invoke'].params.parse(p)
       // The instance is used only as the cause of "changed" — so that view does not hear the change
@@ -366,11 +351,6 @@ export function createRpcHandler(
         runId: out.runId,
         result: out.result ?? undefined,
       }
-    },
-    'apps.setEnabled': async (p) => {
-      const { appId, enabled } = RpcMethods['apps.setEnabled'].params.parse(p)
-      mgr.setAppEnabled(appId, enabled)
-      return { ok: true as const }
     },
     'apps.list': async () => externalApps?.list() ?? [],
     'apps.runs': async (p) => {
@@ -715,7 +695,17 @@ export function createRpcHandler(
   return async (method: string, params: unknown): Promise<unknown> => {
     const name = method as RpcMethodName
     const h = handlers[name]
-    if (!h) throw Object.assign(new Error(`Unknown method: ${method}`), { code: 'internal' })
+    /*
+     * Also the answer to a method this protocol retired (docs/protocol.md §3.2): a window of an older build attached to
+     * this host may still call one, and every caller in a released build catches the failure. Not retryable (the
+     * transport says so for everything but a swap's cut): asking again gets the same answer.
+     */
+    if (!h) {
+      throw Object.assign(
+        new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`),
+        { code: 'internal' },
+      )
+    }
     const result = await h(params)
 
     /*

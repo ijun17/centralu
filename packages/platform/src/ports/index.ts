@@ -502,11 +502,6 @@ export type WorkspaceSnapshot = {
   panelSplit?: number
   /** Evidence panel width (px) */
   panelWidth?: number
-  /**
-   * @deprecated The control rail's width (#81). The rail was removed in #97; an older build may still
-   * have written this, and it is left unread.
-   */
-  railWidth?: number
   /** Session list width (px) */
   sidebarWidth?: number
   /**
@@ -776,9 +771,7 @@ export type BuilderAsk = {
 }
 
 /**
- * The external apps (M4) — discovery, their screens, and the calls those screens make. The
- * built-in app state that used to open this port (#81: a document and an on/off flag per app)
- * went with the control rail (#97).
+ * The external apps (M4) — discovery, their screens, and the calls those screens make.
  */
 export interface AppsPort {
   /**

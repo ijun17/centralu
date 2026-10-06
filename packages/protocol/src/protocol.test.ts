@@ -160,7 +160,6 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // event schema carries it as unknown (so events never depends on commands). The receiving side parses it.
   { type: 'session_created', sessionId: 's-new', session: { id: 's-new', projectId: 'p1', name: 'Worktrees' } },
   { type: 'worktree_merged', sessionId: 's1' },
-  { type: 'app_state_changed', appId: 'control' },
   // An external app's call finished (M4 A-4) — an app is unique per (project, id), so both are carried. null means a user-folder app
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' },
   { type: 'external_app_state_changed', appId: 'timer', projectId: null },
@@ -261,6 +260,17 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
 
   it('rejects an event missing a required field', () => {
     expect(parseEventLenient({ type: 'message_delta', sessionId: 's1' })).toBeNull()
+  })
+  /*
+   * Events this protocol carried once and no longer does (docs/protocol.md §3.2). A host from before their removal can
+   * still send one to a newer window, which drops it the way it drops a type it has never heard of, and goes on.
+   */
+  it.each([
+    // The compiled-in apps' "document changed" (#81), removed with them (#372)
+    { type: 'app_state_changed', appId: 'control' },
+  ])('drops a retired event an older host may still send: $type', (raw) => {
+    expect(parseEventLenient(raw)).toBeNull()
+    expect(parseServerFrame({ kind: 'event', seq: 7, event: raw }).success).toBe(false)
   })
 })
 

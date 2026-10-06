@@ -349,7 +349,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         A tool call from a screen goes through `apps.invoke`, and scope and logging are handled
         together by the host's mediation (the plan's "there is one call path").
 
-        `projectId` is always carried (null for a user-folder app). A host from before #97 reads
+        `projectId` is always carried (null for a user-folder app). A host from before #372 reads
         a call without it as a person calling a built-in app, and a screen is an external app's
         code, so it must never enter through that door. `instanceId` becomes the owner of the "changed" this
         call produces — only that screen skips that notification (B-5).

@@ -48,9 +48,9 @@ export function EvidencePanel() {
   const open = useStore((s) => s.panelOpen)
   const projectId = useStore((s) => {
     /*
-     * A session with no project (the foreman) **does not fall back to the last project** (a
-     * dogfooding finding, 2026-09-06): if the files and git history of the last-viewed project
-     * showed up next to the foreman, it would read as if the foreman started in that folder — when
+     * A session with no project (the orchestrator, a coordinator) **does not fall back to the last
+     * project** (a dogfooding finding, 2026-09-06): if the files and git history of the last-viewed
+     * project showed up next to it, it would read as if that session started in that folder — when
      * it actually runs from the orchestrator's home. The fallback exists for "not viewing any
      * session at all."
      */

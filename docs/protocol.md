@@ -201,7 +201,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
-| usage | `usage.weekly(range)` | resident in the host |
+| usage | `agents.usage` | the account's limit windows, asked of the tool itself ([agent-host.md](agent-host.md) §6) |
 
 The request and response types of the git/fs/store RPCs are **1:1 with the port interfaces**. Deliberate duplication — the port is the original contract, and RPC and Tauri invoke are just two carriers of that contract.
 
@@ -237,16 +237,25 @@ It is the prerequisite: one named assumption instead of twenty-one anonymous one
 build fails for reasons that are about Windows. `tooling/paths.test.ts` fails the build on a
 twenty-second.
 
-## 3.2 Retired: built-in app documents ([#81](https://github.com/ijun17/centralu/issues/81), [#97](https://github.com/ijun17/centralu/issues/97))
+## 3.2 Retired methods and events ([#97](https://github.com/ijun17/centralu/issues/97), [#372](https://github.com/ijun17/centralu/pull/372))
 
-Apps compiled into Centralu kept one JSON document and an on/off flag each, carried as `unknown`
-by `apps.state`, `apps.setState`, `apps.setEnabled` and the `app_state_changed` event. The only
-such app, the control rail, was removed in #97, and its document's type (`control-app.ts`) went
-with it. The four stay in the protocol and the host still answers them, so a window from an older
-build gets a well-formed reply; nothing in this build calls them, and the stored rows
-(`app:control:*` in `app_settings`) are left where they are. `control` stays a reserved app id
-(`RESERVED_APP_IDS` in `app-id.ts`) so no external app inherits those rows or the coordinator
-sessions stamped with it.
+Apps compiled into Centralu kept one JSON document and an on/off flag each, carried as `unknown` by `apps.state`,
+`apps.setState`, `apps.setEnabled` and the `app_state_changed` event. The only such app, the control rail, was removed
+in #372 (decided in #97). Those four left the protocol after it, together with `agents.createCoordinator`, which only
+the control app's tasks called, from inside the host. Removing them changes no version (§4): each side already
+survives the other not knowing a name.
+
+| Retired | What an older peer sees |
+|---|---|
+| `apps.state`, `apps.setState`, `apps.setEnabled` | A window of v0.1.0-beta.10 or before attached to a newer host gets the host's unknown-method error (`internal`, not retryable: "Unknown method: apps.state. This Centralu host does not have it; the window may be from another build."). Its rail catches a failed read without a word and stands empty, turned on even where it had been turned off (it can no longer read that); its Settings toggle for the rail shows the message. Its rail tools already failed against a host of #372 (`apps.invoke` lost the control app there). Nothing else in that window calls them |
+| `agents.createCoordinator` | No released window ever called it. A caller would get the same error |
+| `app_state_changed` | A host of v0.1.0-beta.10 or before still sends it when its control app changes its document. A newer window drops it as an event type it does not know (§4) |
+
+The stored rows (`app:control:*` in `app_settings`) are left where they are: a release that still has the rail may
+open the same store. Coordinator sessions already in a store keep working (listed, read, woken, trashed), so
+`coordinator` stays a session kind ([domain-model.md](domain-model.md) §1.1); only the way to create one is gone.
+`control` stays a reserved app id (`RESERVED_APP_IDS` in `app-id.ts`) so no external app inherits those rows or the
+coordinator sessions stamped with it.
 
 External apps keep their state in their own process ([apps.md](apps.md)).
 
@@ -259,7 +268,8 @@ External apps keep their state in their own process ([apps.md](apps.md)).
   - **A field added to a host payload must have a default, and the client applies it** (#280, #337). The two halves are one rule. Under the keeper a window can stay attached to a host of an older build until the person switches, so every field added after the first release may be missing from what the host sends. A `.default()` alone does not help: the window's types are the parser's output, so the code reads the field as always there, and that is true only if the payload went through the schema. Events always did (`parseServerFrame`); RPC results were `unknown` in the envelope and reached the screen as sent, and a beta.9 window on a beta.7 host crashed on a session list without `backgroundTasks` (#305). A new field is therefore either optional (and every reader handles its absence) or carries a default; a required field with no default can only arrive with a version increment.
   - **The client reads every RPC result through its method's result schema, once, where it arrives** (`RpcClient`, `parseRpcResult`), the way the host reads every RPC's params. The read is tolerant (`parseTolerant`): when the whole parse fails, the result is read again field by field and element by element, and a value that still fails on its own is kept as it came — so a word a newer host's enum has and this build's does not costs that one value, not the whole list. Measured on Node: a 200-session list takes 0.33 ms, a 200-row history page 0.03 ms. The test that guards the rule (`e2e/older-host.spec.ts`) runs the real UI against a real host with every defaulted field taken out of every result, event and handshake (`withoutDefaultedFields`).
   - Removing a field or changing its meaning = version increment = rejected at the handshake. **Avoid this wherever possible** — adding a new field and keeping the old one for one milestone is always cheaper.
-- Golden tests: freeze sample message JSON per version as fixtures, and when the schema changes, CI verifies that the past fixtures still parse.
+  - **A whole method or event type can be removed without a version increment**, because the rules above already make its absence survivable: a client calling a method the host does not have gets the unknown-method error (`internal`, not retryable), which every caller has to handle anyway for a method added after its host (`agents.versions` on an older host, §3); a receiver drops an event type it does not know. Before removing one, read its callers in every release tag (`git grep <name> <tag>`) and check that each handles the failure, then list it in §3.2 with what an older peer sees. A removed name is never reused for something else.
+- Golden tests: freeze sample message JSON per version as fixtures, and when the schema changes, CI verifies that the past fixtures still parse. A retired event type moves from the fixtures to the retired list next to them, which checks that it is dropped (§3.2).
 
 ## 5. Error model
 

@@ -2677,9 +2677,9 @@ export class Store {
    * **This does not rely on an FK's CASCADE.** `messages_fts` is a virtual table with no foreign key at all, so the index rows
    * of a session caught here are dropped by hand — a session in the trash must not turn up in a search.
    *
-   * The rows that belong to the project go with it as before: project-scope rules, usage (`usage_facts` is a daily
-   * total per project, with no session in it), the answers given to its apps, and the app runs and commit links that
-   * point at no session still here. Rows that point at a session in the trash stay with that session until it is
+   * The rows that belong to the project go with it as before: project-scope rules, the answers given to its apps, and
+   * the app runs and commit links that point at no session still here. (`usage_facts` is not touched: no build ever
+   * wrote a row to it, and this build is the first that leaves it alone, so a later step can drop it; schema.sql.) Rows that point at a session in the trash stay with that session until it is
    * deleted for good: its own rules, its commit links, the app runs it started or ran in. A restore that registers
    * the folder again under the same id finds them where they were.
    */
@@ -2714,7 +2714,6 @@ export class Store {
            DELETE FROM approval_rules WHERE project_id = ? AND (session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions))`,
         )
         .run(projectId)
-      this.db.prepare(`DELETE FROM usage_facts WHERE project_id = ?`).run(projectId)
       this.db
         .prepare(
           `/* includes the trash: a commit link of a session in the trash stays with it */
