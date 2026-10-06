@@ -12,8 +12,9 @@ after the code is written that it went the wrong way costs us both.
 When reporting a bug, attach `~/.centralu/host.log`. The startup banner has the build
 commit in it, so which build you were on is never in question.
 
-There are templates for both kinds of issue — a bug, and a decision that needs settling
-before code exists. Most issues here turn out to be the second kind. Neither has to fit:
+There are four issue templates: a bug, a design decision that needs settling before code
+exists, an idea, and a UI/UX problem with something already on screen. Most issues here turn
+out to be design decisions. Neither has to fit:
 the blank option stays open, because a half-formed observation is still worth writing down.
 
 The pull request template has one field that is easy to skip and worth filling in anyway:
@@ -191,6 +192,11 @@ means next to it.
   a decision to revisit.
 - Where a design document conflicts with the spec (`docs/product-spec.md`) on a
   requirement, the spec wins. On how something is built, the design document wins.
+- **One glossary.** The project's vocabulary and how its concepts relate live in
+  [docs/domain-model.md](docs/domain-model.md) and its Korean mirror `docs/domain-model.ko.md`.
+  Do not add a second one (a `CONTEXT.md`, a glossary file, a folder of decision records):
+  tools that expect one should be pointed at this file in your own local configuration.
+  Decisions go in the decision tables of the design documents, with their reasoning.
 
 ## Contributor Licence Agreement (CLA)
 
