@@ -212,9 +212,18 @@ export type SshTunnelOptions = {
  *   address carries the host's own port). When it is taken, typically by a second linked machine
  *   on the default 17175, a free port is used instead; app views of that machine then need the
  *   proxy of phase 2, which they need anyway.
+ * - **Closing ends every ssh it started**, the held forward and an asking one still in flight, also
+ *   when `close()` comes in the middle of `open()` (a machine removed while it connects): `open()`
+ *   then starts nothing more and fails.
+ * - ssh stays in the host's process group, unlike an agent CLI (`adapters/local-process.ts`, #435):
+ *   whatever supervises the host ends that group with it (`host_proc.rs`'s `kill_group`), and a
+ *   forward, which reads no stdin, would otherwise outlive a host that died without `close()`. What
+ *   ssh itself starts here (a `ProxyCommand`, `ProxyJump`'s second ssh) ssh ends on SIGTERM.
  */
 export class SshTunnel implements Tunnel {
   private child: ChildProcess | null = null
+  /** The asking ssh runs, while they run */
+  private readonly asking = new Set<ChildProcess>()
   private downListeners: ((reason: string) => void)[] = []
   private closing = false
 
@@ -225,7 +234,11 @@ export class SshTunnel implements Tunnel {
   async open(): Promise<Endpoint> {
     await this.stopChild()
     this.closing = false
-    const line = await this.connectionLine()
+    const line = await this.connectionLine().catch((err: unknown) => {
+      this.ifClosed()
+      throw err
+    })
+    this.ifClosed()
     if (!line.hostRunning) {
       return { url: '', token: line.token, line, localPort: 0 }
     }
@@ -235,8 +248,13 @@ export class SshTunnel implements Tunnel {
     } catch (err) {
       // Taken between the check and ssh's bind: once more on a port the OS picks
       if (localPort !== line.port) throw err
+      this.ifClosed()
       localPort = await freePort()
       await this.forward(localPort, line.port)
+    }
+    if (this.closing) {
+      await this.stopChild()
+      this.ifClosed()
     }
     return { url: `ws://127.0.0.1:${localPort}`, token: line.token, line, localPort }
   }
@@ -247,12 +265,19 @@ export class SshTunnel implements Tunnel {
 
   async close(): Promise<void> {
     this.closing = true
+    for (const c of this.asking) c.kill('SIGTERM')
     await this.stopChild()
+  }
+
+  private ifClosed(): void {
+    if (this.closing) throw new Error(`The link to ${this.opts.target} was closed`)
   }
 
   private run(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+      this.asking.add(child)
+      child.once('exit', () => this.asking.delete(child))
       let stdout = ''
       let stderr = ''
       child.stdout!.on('data', (d: Buffer) => (stdout += String(d)))
@@ -284,6 +309,7 @@ export class SshTunnel implements Tunnel {
   }
 
   private forward(localPort: number, remotePort: number): Promise<void> {
+    this.ifClosed()
     const keepAlive = wslKeepAlive(this.opts.remote)
     const args = [
       ...this.config(),

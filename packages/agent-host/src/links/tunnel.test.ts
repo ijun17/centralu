@@ -27,6 +27,7 @@ if (L !== -1) {
   setInterval(() => {}, 1 << 30)
   return
 }
+if (process.env.FAKE_SSH_HANG) { fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ hanging: process.pid }) + '\n'); setInterval(() => {}, 1 << 30); return }
 if (process.env.FAKE_SSH_UNREACHABLE) { process.stderr.write('ssh: connect to host x port 22: Operation timed out\n'); process.exit(255) }
 let cmd = args[args.length - 1]
 const enc = 'powershell -NoProfile -NonInteractive -EncodedCommand '
@@ -180,6 +181,31 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     // The ssh process dies under it, as on a dropped network
     ;(t as unknown as { child: { kill(s: string): void } }).child.kill('SIGKILL')
     expect(await down).toMatch(/ssh exited/)
+  })
+
+  it('closing while the remote is still being asked ends that ssh, and starts no forward after it', async () => {
+    const t = tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }), FAKE_SSH_HANG: '1' })
+    const opening = t.open()
+    opening.catch(() => {})
+    let pid = 0
+    for (let i = 0; i < 250 && !pid; i++) {
+      pid = (logged().find((l) => typeof l === 'object' && l !== null && 'hanging' in l) as { hanging: number } | undefined)?.hanging ?? 0
+      if (!pid) await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(pid).toBeGreaterThan(0)
+    await t.close()
+    await expect(opening).rejects.toThrow(/was closed/)
+    const alive = () => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    for (let i = 0; i < 250 && alive(); i++) await new Promise((r) => setTimeout(r, 20))
+    expect(alive()).toBe(false)
+    expect((logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))).toEqual([])
   })
 
   it('a forward ssh refuses fails the open with ssh’s reason', async () => {

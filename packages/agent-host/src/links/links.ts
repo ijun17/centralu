@@ -199,10 +199,15 @@ export class LinkedMachine implements RoutedMachine {
     try {
       endpoint = await this.tunnel.open()
     } catch (err) {
+      if (this.stopped) return
       this.setStatus('unreachable', (err as Error).message)
       return this.retryLater()
     }
-    if (this.stopped) return
+    if (this.stopped) {
+      // Removed (or the hub stopping) while the tunnel opened: what it opened ends now, not with the host
+      await this.tunnel.close()
+      return
+    }
     this.endpoint = endpoint
     if (!endpoint.line.hostRunning) {
       this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`centralu serve\` is running there`)

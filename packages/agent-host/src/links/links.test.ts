@@ -9,7 +9,7 @@ import { createRpcHandler } from '../rpc.js'
 import { HostServer } from '../transport/server.js'
 import { Links } from './links.js'
 import { Router } from './router.js'
-import { DirectTunnel, type ConnectionLine } from './tunnel.js'
+import { DirectTunnel, type ConnectionLine, type Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 
@@ -353,5 +353,40 @@ describe('a hub linked to another host (#82)', () => {
     expect(await u.call('sessions.list')).toEqual([])
     expect(await u.call('grid.get', { tagged: true })).toEqual([])
     expect(u.events().some((e: any) => e.type === 'machine_resync' && e.machineId === 'remote-box')).toBe(true)
+  })
+
+  it('closes what the tunnel opened when the machine is removed while it was opening', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const seen: string[] = []
+    const tunnel: Tunnel = {
+      open: async () => {
+        seen.push('open')
+        await gate
+        seen.push('opened')
+        return { url: 'ws://127.0.0.1:1', token: TOKEN, line: lineFor(1), localPort: 1 }
+      },
+      onDown() {},
+      close: async () => void seen.push('close'),
+    }
+    const store = new Store()
+    const registry = storeRegistry(store)
+    registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+    const links = new Links({
+      hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+      broadcast: () => {},
+      terminal: () => {},
+      mirror: storeMirror(store),
+      registry,
+      tunnelFor: () => tunnel,
+    })
+    cleanups.push(() => links.stop())
+    links.start()
+    await until(() => seen.includes('open'))
+    await links.remove('m1')
+    release()
+    // The forward an ssh tunnel brought up after the removal would otherwise run until the host exits
+    await until(() => seen.at(-1) === 'close' && seen.includes('opened'))
+    expect(seen).toEqual(['open', 'close', 'opened', 'close'])
   })
 })
