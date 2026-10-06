@@ -372,8 +372,12 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 
 **빌드별 사본.** 띄울 때마다 키퍼는 번들의 `resources/host` 폴더를 `<data>/hosts/<key>/`에 복사하고(임시 폴더에
 쓴 뒤 rename) 거기서 `main.mjs`를 돌린다. key는 `bundle-info.json`에 찍힌 커밋이다. `-dirty`나 `unknown`
-빌드는 빌드 시각을 덧붙여, 서로 다른 dirty 빌드가 사본을 함께 쓰지 않는다. 호스트가 준비되면 도는 호스트의
-것 말고 다른 사본은 지운다.
+빌드는 빌드 시각을 덧붙여, 서로 다른 dirty 빌드가 사본을 함께 쓰지 않는다. 호스트가 준비되면 그 호스트가 돌지
+않는 사본을 지우되, 띄우기나 교체가 붙잡은 사본은 남긴다(`source::Copies`): 띄우기는 키퍼가 그 사본을 도는 호스트의
+것으로 적을 때까지, 교체는 새 호스트를 넘겨받거나 포기할 때까지 붙잡는다. 복사와 정리는 한 잠금을 거치고, 정리는
+호스트가 어느 사본에서 도는지를 도는 그때 읽으며, 스스로를 넘겨주는 키퍼는 얼릴 때 둘 다 멈춘다. 붙잡기가 없을 때는
+키퍼가 막 넘겨받은 호스트가 부른 정리가 교체가 방금 만든 사본을 지웠다("Cannot find module
+.../hosts/<key>/main.mjs", #368).
 
 **어디서 왔는가.** 키퍼는 도는 호스트에 대해 `{ commit, builtAt, version, protocolVersion, bundlePath, hostDir,
 copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토큰 없음)에 쓰고, 호스트에 `CC_HOST_SOURCE`로

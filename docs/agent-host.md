@@ -431,7 +431,12 @@ keeper and the app's direct path). If the keeper dies, the host sees EOF on that
 **Per-build copies.** Before each launch the keeper copies the bundle's `resources/host` folder to
 `<data>/hosts/<key>/` (temporary folder, then rename) and runs `main.mjs` from there. The key is the commit
 stamped into `bundle-info.json`; a `-dirty` or `unknown` build gets its build time appended, so two different
-dirty builds never share a copy. Copies other than the running host's are removed once a host is ready.
+dirty builds never share a copy. Once a host is ready, the copies it does not run from are removed, except those a
+launch or a swap holds (`source::Copies`): a launch holds its copy until the keeper records it as the running host's,
+a swap until its new host is adopted or it gives up. Copying and cleaning take one lock, the cleanup reads which copy
+the host runs from when it runs, and a keeper handing itself over stops both at the freeze. Without the hold, the
+cleanup a keeper's newly adopted host set off deleted the copy a swap had just made ("Cannot find module
+.../hosts/<key>/main.mjs", #368).
 
 **Where it came from.** The keeper keeps, for the running host, `{ commit, builtAt, version,
 protocolVersion, bundlePath, hostDir, copyDir }`, returns it on the control socket, writes it to

@@ -145,6 +145,8 @@ pub(super) struct Keeper {
     pub(super) door: FrontDoor,
     /// Agents, terminals and commands the keeper holds for its hosts (step 2, `children/`).
     pub(super) children: Children,
+    /// The per-build host copies and which are in use (#368, `source::Copies`).
+    pub(super) copies: source::Copies,
     pub(super) state: Mutex<State>,
     pub(super) idle: Duration,
     pub(super) started: Instant,
@@ -246,6 +248,7 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     let now = Instant::now();
+    let copies = source::Copies::new(&data);
     let keeper = Arc::new(Keeper {
         info: KeeperInfo {
             pid: std::process::id(),
@@ -260,6 +263,7 @@ pub fn run(args: &[String]) -> i32 {
         sup: Supervisor::new(),
         door,
         children,
+        copies,
         state: Mutex::new(State {
             status: HostStatus::Starting,
             source: None,
@@ -405,7 +409,7 @@ impl StatusSink for KeeperSink {
                 other.clone()
             }
         };
-        let ready_copy = {
+        let ready = {
             let Ok(mut st) = k.state.lock() else { return };
             st.status = shown.clone();
             if !matches!(status, HostStatus::Ready(_)) {
@@ -413,10 +417,7 @@ impl StatusSink for KeeperSink {
                 st.keeps_agents = None;
             }
             k.broadcast(&mut st);
-            match status {
-                HostStatus::Ready(_) => Some(st.source.as_ref().and_then(|s| s.copy_dir.clone())),
-                _ => None,
-            }
+            matches!(status, HostStatus::Ready(_))
         };
         k.write_state_file();
         match status {
@@ -425,11 +426,19 @@ impl StatusSink for KeeperSink {
             HostStatus::Restarting { attempt } => log(&format!("host restarting (attempt {attempt})")),
             HostStatus::Starting => {}
         }
-        // Once a host is up, every other copy is unused: remove them.
-        if let Some(keep) = ready_copy {
-            let data = k.data.clone();
+        // Once a host is up, every copy but its own and those a launch or swap holds is unused.
+        // Which copy is the running host's is read when the cleanup runs, not now: a swap may have
+        // adopted its new host in between (#368).
+        if ready {
+            let k = k.clone();
             thread::spawn(move || {
-                let removed = source::clean_copies(&data, keep.as_deref().map(Path::new));
+                if let Some(hold) = test_clean_hold() {
+                    log(&format!("holding {}ms before removing unused host copies (CC_KEEPER_CLEAN_HOLD_MS)", hold.as_millis()));
+                    thread::sleep(hold);
+                }
+                let removed = k.copies.clean(|| {
+                    k.state.lock().ok().and_then(|st| st.source.as_ref().and_then(|s| s.copy_dir.clone())).map(PathBuf::from)
+                });
                 if !removed.is_empty() {
                     log(&format!("removed unused host copies: {}", removed.join(", ")));
                 }
@@ -472,6 +481,12 @@ impl StatusSink for KeeperSink {
     }
 }
 
+/// A test hook: wait this long after a host is ready before removing unused copies, so a test can
+/// have the cleanup land after a swap has copied its build and before it starts it (#368).
+fn test_clean_hold() -> Option<Duration> {
+    std::env::var("CC_KEEPER_CLEAN_HOLD_MS").ok()?.trim().parse::<u64>().ok().map(Duration::from_millis)
+}
+
 /// Builds each launch: copies the desired build to its per-build folder and runs it from there.
 pub(super) fn launcher(k: &Arc<Keeper>) -> Launcher {
     let k = k.clone();
@@ -480,10 +495,15 @@ pub(super) fn launcher(k: &Arc<Keeper>) -> Launcher {
         let db = k.data.join("store.db").to_string_lossy().to_string();
         let extra = vec!["--db".to_string(), db];
         let mut running = desired.clone();
+        // Held until the state below names the copy as the running host's, so no cleanup can take
+        // it in between (#368)
+        let mut claim = None;
         let mut launch: HostLaunch = if desired.host_dir.is_some() {
-            let copy = source::copy_into(&k.data, &desired).map_err(LaunchError::Retry)?;
-            running.copy_dir = Some(copy.to_string_lossy().to_string());
-            host_proc::bundled_launch(&copy.join("main.mjs"), &extra)?
+            let held = k.copies.claim(&desired).map_err(LaunchError::Retry)?;
+            running.copy_dir = Some(held.path().to_string_lossy().to_string());
+            let launch = host_proc::bundled_launch(&held.path().join("main.mjs"), &extra)?;
+            claim = Some(held);
+            launch
         } else {
             host_proc::source_launch(&extra)
         };
@@ -492,6 +512,7 @@ pub(super) fn launcher(k: &Arc<Keeper>) -> Launcher {
         if let Ok(mut st) = k.state.lock() {
             st.source = Some(running);
         }
+        drop(claim);
         k.write_state_file();
         Ok(launch)
     })
@@ -1048,6 +1069,7 @@ pub(super) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_message: Option<
     };
     let outcome = swap::run(&swap::Plan {
         data: &k.data,
+        copies: &k.copies,
         next: next.clone(),
         current_copy,
         sup: &k.sup,
