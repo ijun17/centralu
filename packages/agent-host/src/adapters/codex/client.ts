@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { launchFor } from '../../tool-launch.js'
 import type { AgentProcess } from '../contract.js'
+import { spawnLocalAgent } from '../local-process.js'
 
 /**
  * A JSON-RPC client for `codex app-server` (stdio, newline-delimited).
@@ -67,13 +67,12 @@ export class CodexClient {
     } else {
       // On Windows an npm-installed codex is a `.cmd` shim, which cannot be spawned without a shell (tool-launch.ts)
       const launch = launchFor(opts.command ?? 'codex')
-      this.proc = spawn(launch.command, [...launch.args, ...(opts.args ?? ['app-server'])], {
-        cwd: opts.cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        // Kept in its own group so it gets cleaned up together if the parent dies (avoids a zombie — M1.5 defect 1 rule)
-        detached: false,
-        windowsHide: true,
-      })
+      /*
+       * In a process group of its own (Windows: a tree), so stopping it also ends what it started
+       * and what it left running after it exited (`local-process.ts`). It no longer shares the host's
+       * group: when the host goes, its stdin closes, and codex exits on EOF (#57).
+       */
+      this.proc = spawnLocalAgent({ command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], cwd: opts.cwd, env: process.env })
     }
 
     /**

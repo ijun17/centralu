@@ -47,9 +47,21 @@ import { appProxy, type AppProxy } from './app-proxy.js'
 import { APP_MCP_PREFIX } from '../../apps/contract.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
+import { LocalAgentProcess, spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 
 const exec = promisify(execFile)
+
+/**
+ * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
+ * spawned here (`local-process.ts`) keeps that tail, and it is added the same way, so a CLI that
+ * fails to start still says why.
+ */
+function withStderrTail(message: string, proc: AgentProcess | null): string {
+  if (!(proc instanceof LocalAgentProcess) || message.includes('stderr:')) return message
+  const tail = proc.stderrTail().trim().slice(-2000)
+  return tail ? `${message}. stderr: ${tail}` : message
+}
 
 /**
  * The Claude Code adapter (reflects M0 validation — docs/spikes/m0-findings.md).
@@ -439,8 +451,14 @@ class ClaudeSession implements SessionHandle {
          * claude another host started is accepted mid-turn — its re-`initialize` re-delivers a
          * pending approval to the new `canUseTool` at once, and the rest of a running turn
          * (three more Bash calls, the result) arrives through it.
+         *
+         * Without a keeper the CLI is still spawned here rather than by the SDK, which signals only
+         * the CLI's own pid: in a process group of its own (Windows: a tree), stopping it also ends
+         * the helpers it started (a language server and its `tsserver`, MCP servers), and so does
+         * its exit (`local-process.ts`).
          */
-        ...(this.opts.processSource ? { spawnClaudeCodeProcess: (o: AgentSpawnSpec) => this.spawnProcess(o) as never } : {}),
+        spawnClaudeCodeProcess: (o: LocalSpawnSpec) =>
+          (this.opts.processSource ? this.spawnProcess(o) : (this.proc = spawnLocalAgent(o))) as never,
         /*
          * Reasoning effort. It only matters when the model supports it, so deciding support is
          * left to whatever provides the list (supportedModels) — this just passes through the
@@ -715,7 +733,7 @@ class ClaudeSession implements SessionHandle {
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
-          error: { code: 'adapter_crashed', message: (err as Error).message, retryable: true },
+          error: { code: 'adapter_crashed', message: withStderrTail((err as Error).message, this.proc), retryable: true },
         })
       } finally {
         // The process is gone (or another host holds it now): its link may go once nothing else runs from it
