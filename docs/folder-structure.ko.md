@@ -39,6 +39,7 @@ centralu/
 │  │     ├─ inbox/              # ordering and urgency rules (all pure functions)
 │  │     ├─ unread/             # read rules (FR-16)
 │  │     ├─ approval/           # always-allow rule matching, in-place approval policy
+│  │     ├─ machines/           # linked machines: away rows, link errors in words, the version prompt
 │  │     └─ usage/              # weekly aggregation (the calculation, not the parser)
 │  │
 │  ├─ platform/                 # the firewall for C1/C2
@@ -56,6 +57,7 @@ centralu/
 │  │     ├─ features/           # vertical split by feature (§2 below)
 │  │     │  ├─ inbox/  session/  approval/  sidebar/
 │  │     │  ├─ git/  file-tree/  code-viewer/
+│  │     │  ├─ machines/         # machine tags, adding a folder on a linked machine
 │  │     │  └─ usage/  settings/  onboarding/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)

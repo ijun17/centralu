@@ -26,6 +26,15 @@ const RECOVERY_URL = `http://127.0.0.1:${RECOVERY_PORT}`
 // The older-host suite (#280) runs the same way: the real web platform, a real host, the relay on 5178
 const RECOVERY_SPEC = /(recovery|older-host)\.spec\.ts/
 
+/**
+ * The linked-hosts suite (#82) runs the real web platform against two real hosts linked to each
+ * other (e2e/fixtures/linked-hosts.ts), the page reaching the hub through a relay on 5180. Its own
+ * server and one worker, for the same reasons as the recovery suite's.
+ */
+const LINKED_PORT = 5179
+const LINKED_URL = `http://127.0.0.1:${LINKED_PORT}`
+const LINKED_SPEC = /linked-hosts(-webkit)?\.spec\.ts/
+
 export default defineConfig({
   testDir: '.',
   // Keep security-diff.spec.ts in the default `pnpm e2e` suite; the separate config is only for isolated local reruns.
@@ -38,11 +47,12 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: 'http://127.0.0.1:5174', trace: 'off' },
   projects: [
-    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC] },
+    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC] },
     { name: 'startup', testMatch: STARTUP_SPEC, use: { baseURL: STARTUP_URL } },
     // One worker: the relay port (5178) is baked into this project's UI build, so two of its
     // tests at once would collide on it (`--repeat-each 5` failed 4 of 5 with EADDRINUSE).
     { name: 'recovery', testMatch: RECOVERY_SPEC, use: { baseURL: RECOVERY_URL }, workers: 1 },
+    { name: 'linked', testMatch: LINKED_SPEC, use: { baseURL: LINKED_URL }, workers: 1 },
   ],
   webServer: [
     {
@@ -67,6 +77,14 @@ export default defineConfig({
       url: RECOVERY_URL,
       // Must match RECOVERY_TOKEN and RECOVERY_RELAY_PORT in e2e/fixtures/real-host.ts
       env: { VITE_HOST_TOKEN: 'e2e-recovery-token', VITE_HOST_URL: 'ws://127.0.0.1:5178' },
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: `pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${LINKED_PORT} --strictPort`,
+      url: LINKED_URL,
+      // Must match LINKED_TOKEN and LINKED_RELAY_PORT in e2e/fixtures/linked-hosts.ts
+      env: { VITE_HOST_TOKEN: 'e2e-linked-token', VITE_HOST_URL: 'ws://127.0.0.1:5180' },
       reuseExistingServer: false,
       timeout: 60000,
     },

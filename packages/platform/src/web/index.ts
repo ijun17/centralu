@@ -16,6 +16,7 @@ import type {
   AlertKind,
   AppToolResult,
   ConnectionState,
+  MachineRef,
   Platform,
   ProjectPort,
   SystemPort,
@@ -51,6 +52,13 @@ export type WebPlatformOptions = {
   /** Answered by the shell, for the same reason as the keyboard labels — a browser has no file manager to ask */
   fileManagerName?: string
 }
+
+/**
+ * The `machine` parameter of a per-machine call (#82): absent for this computer. Never null on the
+ * wire: the host's schema takes a machine id or nothing, and a host from before linked machines
+ * strips the field it does not know.
+ */
+const on = (machine?: MachineRef) => (machine ? { machine } : {})
 
 /** A grid list from either shape `grid.get` / `grid.set` answer in: panels, or a pre-#288 host's bare session ids */
 function asPanels(list: readonly (GridPanel | string)[]): GridPanel[] {
@@ -110,10 +118,8 @@ class WebAgentPort implements AgentPort {
     return asPanels(await this.rpc.call('grid.set', { panels, sessionIds }))
   }
 
-  models(tool: ToolName) {
-    return this.rpc.call('agents.models', {
-      tool,
-    })
+  models(tool: ToolName, machine?: MachineRef) {
+    return this.rpc.call('agents.models', { tool, ...on(machine) })
   }
 
   async interrupt(sessionId: string) {
@@ -203,25 +209,23 @@ class WebAgentPort implements AgentPort {
   commands(sessionId: string) {
     return this.rpc.call('agents.commands', { sessionId })
   }
-  usage(tool: ToolName) {
-    return this.rpc.call('agents.usage', {
-      tool,
-    })
+  usage(tool: ToolName, machine?: MachineRef) {
+    return this.rpc.call('agents.usage', { tool, ...on(machine) })
   }
-  capabilities(tool: ToolName) {
-    return this.rpc.call('agents.capabilities', { tool })
+  capabilities(tool: ToolName, machine?: MachineRef) {
+    return this.rpc.call('agents.capabilities', { tool, ...on(machine) })
   }
-  detect() {
-    return this.rpc.call('agents.detect', {})
+  detect(machine?: MachineRef) {
+    return this.rpc.call('agents.detect', { ...on(machine) })
   }
-  versions(force = false) {
-    return this.rpc.call('agents.versions', { force })
+  versions(force = false, machine?: MachineRef) {
+    return this.rpc.call('agents.versions', { force, ...on(machine) })
   }
-  setAutoApplyVersions(enabled: boolean) {
-    return this.rpc.call('agents.setAutoApplyVersions', { enabled })
+  setAutoApplyVersions(enabled: boolean, machine?: MachineRef) {
+    return this.rpc.call('agents.setAutoApplyVersions', { enabled, ...on(machine) })
   }
-  applyVersions() {
-    return this.rpc.call('agents.applyVersions', {})
+  applyVersions(machine?: MachineRef) {
+    return this.rpc.call('agents.applyVersions', { ...on(machine) })
   }
   subscribe(handler: (e: NormalizedEvent) => void): Unsubscribe {
     return this.rpc.onEvent(handler)
@@ -236,8 +240,8 @@ class WebProjectPort implements ProjectPort {
   reorder(orderedIds: string[]) {
     return this.rpc.call('projects.reorder', { orderedIds })
   }
-  add(path: string) {
-    return this.rpc.call('projects.add', { path })
+  add(path: string, machine?: MachineRef) {
+    return this.rpc.call('projects.add', { path, ...on(machine) })
   }
   list() {
     return this.rpc.call('projects.list', {})
@@ -517,6 +521,15 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     processes: {
       strays: () => rpc.call('processes.strays', {}),
       stop: (pids) => rpc.call('processes.stop', { pids }),
+    },
+    machines: {
+      list: () => rpc.call('machines.list', {}),
+      add: (spec) => rpc.call('machines.add', spec),
+      remove: async (machineId) => {
+        await rpc.call('machines.remove', { machineId })
+      },
+      reconnect: (machineId) => rpc.call('machines.reconnect', { machineId }),
+      acceptVersions: (machineId) => rpc.call('machines.acceptVersions', { machineId }),
     },
     workspace: {
       async save(snapshot) {

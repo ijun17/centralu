@@ -36,7 +36,12 @@ const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
  * The model list per tool. Spawning the tool every time the selector opens would make that
  * click slow, so the host caches it, and this only asks once, when the tool changes.
  */
-export function useModels(tool: ToolName, live: boolean): { models: ModelOption[]; reason?: string } {
+export function useModels(
+  tool: ToolName,
+  live: boolean,
+  /** The session's machine (#82): the models its own CLI offers there. Null: this computer */
+  machine: string | null = null,
+): { models: ModelOption[]; reason?: string } {
   const platform = usePlatform()
   const [state, setState] = useState<{ models: ModelOption[]; reason?: string }>({ models: [] })
 
@@ -65,7 +70,7 @@ export function useModels(tool: ToolName, live: boolean): { models: ModelOption[
      */
     setState({ models: [] })
     void platform.agents
-      .models(tool)
+      .models(tool, machine)
       .then((r) => alive && setState({ models: r.models, reason: r.supported ? undefined : r.reason }))
       // The session must stay usable even if the list cannot be read — this falls back to the
       // default and only keeps the reason
@@ -73,7 +78,7 @@ export function useModels(tool: ToolName, live: boolean): { models: ModelOption[
     return () => {
       alive = false
     }
-  }, [platform, tool, live])
+  }, [platform, tool, live, machine])
 
   return state
 }
@@ -87,20 +92,20 @@ export function useModels(tool: ToolName, live: boolean): { models: ModelOption[
  * it into code that only someone who remembers this file could fix the day Claude gets the same
  * knob.
  */
-export function useVerbosities(tool: ToolName): string[] {
+export function useVerbosities(tool: ToolName, machine: string | null = null): string[] {
   const platform = usePlatform()
   const [levels, setLevels] = useState<string[]>([])
   useEffect(() => {
     let alive = true
     void platform.agents
-      .capabilities(tool)
+      .capabilities(tool, machine)
       .then((c) => alive && setLevels(c.verbosities))
       // The menu must still render even if capabilities cannot be read — it just loses one row
       .catch(() => alive && setLevels([]))
     return () => {
       alive = false
     }
-  }, [platform, tool])
+  }, [platform, tool, machine])
   return levels
 }
 
@@ -199,8 +204,10 @@ export function SessionSettings({
   onOpenChange?: (open: boolean) => void
 }) {
   const update = useStore((s) => s.updateSessionSettings)
-  const { models, reason } = useModels(tool, live)
-  const verbosities = useVerbosities(tool)
+  // A session on a linked machine runs that machine's CLI (#82): its models and knobs are asked there
+  const machine = useStore((s) => s.sessions[sessionId]?.machine ?? null)
+  const { models, reason } = useModels(tool, live, machine)
+  const verbosities = useVerbosities(tool, machine)
   const [open, setOpen] = useState(false)
   /** Mid closing-animation — unmounts only after it has fully settled (cc-hang-out) */
   const [closing, setClosing] = useState(false)

@@ -73,33 +73,40 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             className="mt-2 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="delete-project-warning"
           >
-            The folder itself goes to the Trash — <span className="readout text-ink-muted">{project.path}</span> and
-            everything inside it, <span className="text-danger">including work the agents have not committed</span>.
-            Its sessions go to Centralu’s trash; restoring one needs the folder back.
+            The folder itself goes to the Trash —{' '}
+            <span className="readout text-ink-muted">{project.path}</span> and everything inside it,{' '}
+            <span className="text-danger">including work the agents have not committed</span>. Its sessions go
+            to Centralu’s trash; restoring one needs the folder back.
           </p>
         ) : (
           <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="delete-project-note">
-            The project leaves Centralu with its always-allow rules and usage. Its sessions go to Centralu’s trash —
-            Settings → Trash restores them or deletes them for good.{' '}
+            The project leaves Centralu with its always-allow rules and usage. Its sessions go to Centralu’s
+            trash — Settings → Trash restores them or deletes them for good.{' '}
             <span className="text-ink">The folder on disk is left alone.</span>
           </p>
         )}
 
-        <label
-          className={`mt-3 flex cursor-pointer items-start gap-2 text-xs ${
-            withFiles ? 'text-danger' : 'text-ink-muted hover:text-ink'
-          }`}
-          data-testid="delete-project-files-toggle"
-        >
-          {/* The checkbox turns red the moment it is checked — the same palette as the warning, at the same moment */}
-          <input
-            type="checkbox"
-            className={`mt-0.5 ${withFiles ? 'accent-danger' : 'accent-ink-muted'}`}
-            checked={withFiles}
-            onChange={(e) => setWithFiles(e.target.checked)}
-          />
-          <span>Move the folder to the Trash too</span>
-        </label>
+        {/*
+          The folder goes to this computer's trash through the desktop shell, so a project on a linked machine has no
+          such box (#82): its folder is on the other machine, and stays there.
+        */}
+        {!project.machine && (
+          <label
+            className={`mt-3 flex cursor-pointer items-start gap-2 text-xs ${
+              withFiles ? 'text-danger' : 'text-ink-muted hover:text-ink'
+            }`}
+            data-testid="delete-project-files-toggle"
+          >
+            {/* The checkbox turns red the moment it is checked — the same palette as the warning, at the same moment */}
+            <input
+              type="checkbox"
+              className={`mt-0.5 ${withFiles ? 'accent-danger' : 'accent-ink-muted'}`}
+              checked={withFiles}
+              onChange={(e) => setWithFiles(e.target.checked)}
+            />
+            <span>Move the folder to the Trash too</span>
+          </label>
+        )}
 
         {/*
           The name field sits **at the very bottom.** The order has to be reading the description

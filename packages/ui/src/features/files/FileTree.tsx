@@ -3,6 +3,7 @@ import type { DragEvent as ReactDragEvent } from 'react'
 import type { FsEntry } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
+import { useProjectMachine } from '../../store/selectors.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { iconForFile } from './fileIcon.js'
 import { hasDragFiles, hasDragPath, readDragPath, setDragPath } from './dragPath.js'
@@ -101,7 +102,17 @@ export function FileTree({ projectId }: { projectId: string }) {
    */
   const [hover, setHover] = useState<string | null>(null)
   const ops = useFileOps(projectId, refresh)
-  const openMenu = useCallback((target: MenuTarget, x: number, y: number) => setMenu({ target, x, y }), [])
+  /*
+   * The row menu's two verbs act on this computer's files through the desktop shell (reveal in the file manager, move
+   * to the OS trash), so a project on a linked machine has no menu in phase 1 (#82): its paths are the other machine's.
+   */
+  const remote = useProjectMachine(projectId) !== null
+  const openMenu = useCallback(
+    (target: MenuTarget, x: number, y: number) => {
+      if (!remote) setMenu({ target, x, y })
+    },
+    [remote],
+  )
   const ctx = useMemo(
     () => ({ projectId, version, ops, openMenu, hover, setHover }),
     [projectId, version, ops, openMenu, hover],

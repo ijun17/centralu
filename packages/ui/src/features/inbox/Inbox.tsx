@@ -3,6 +3,7 @@ import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
 import { letterOf } from '../../app/keys.js'
 import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
+import { SessionMachineTag } from '../machines/MachineTag.jsx'
 
 /**
  * The inbox (FR-15) — the entry point for coming back to the desk.
@@ -117,6 +118,8 @@ export function Inbox() {
                   <span className="truncate text-xs text-ink-faint">
                     {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
                   </span>
+                  {/* Which machine it waits on (#82): an approval answered here acts there */}
+                  <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
                   <span className="ml-auto flex shrink-0 items-center gap-2.5">
                     <span className="text-xs text-ink-faint">
                       {it.state === 'waiting_approval'

@@ -41,6 +41,7 @@ import type {
   AgentVersions,
   ThemeFileContent,
   ThemeFileEntry,
+  MachineInfo,
 } from '@cc/protocol'
 import {
   APP_VERSION,
@@ -58,9 +59,6 @@ import {
   osPathBaseName,
   sessionLiveDefaults,
   SUBAGENT_STEPS_PAGE,
-  wireBaseName,
-  wireJoin,
-  wireSegments,
 } from '@cc/protocol'
 import type {
   AgentPort,
@@ -73,7 +71,6 @@ import type {
   AppToolResult,
   AppViewFrame,
   ConnectionState,
-  FsEntry,
   FsFile,
   InlineViewKept,
   InlineViewReopened,
@@ -90,6 +87,7 @@ import type {
   UpdatePort,
   WorkspaceSnapshot,
 } from '../ports/index.js'
+import { MemoryFs, type MemoryFsState } from './memory-fs.js'
 
 /**
  * The in-memory implementation (docs/platform-abstraction.md §6).
@@ -471,8 +469,14 @@ export class MockPlatform implements Platform {
   /** The mock's disk is memory — this is where the bytes the real thing re-reads from an attachments/ file are recovered from */
   readonly attachmentData = new Map<string, string>()
 
-  /** The fake file tree tests manipulate */
-  fsState: { entries: Record<string, FsEntry[]>; files: Record<string, string> } = { entries: {}, files: {} }
+  /** The fake file tree tests manipulate — the state lives in the MemoryFs behind the `fs` port */
+  private readonly memoryFs = new MemoryFs()
+  get fsState(): MemoryFsState {
+    return this.memoryFs.state
+  }
+  set fsState(state: MemoryFsState) {
+    this.memoryFs.state = state
+  }
   /** The set of watched paths registered via fs.watch (#34) — tests check what the screen asked to watch */
   watchedDirs = new Map<string, string[]>()
 
@@ -617,74 +621,6 @@ export class MockPlatform implements Platform {
   readonly trashed: string[] = []
   readonly revealed: string[] = []
 
-  /**
-   * A path that goes outside the root gets rejected **in the mock too**.
-   *
-   * This is a spot it would have been tempting to skip, on the theory that a mock with no real
-   * filesystem needs no check either. Then "cannot touch outside the project" would become a
-   * rule that exists only in the real thing, and the difference would be invisible to e2e (the
-   * browser's mock) forever — the contract test actually caught this having split here.
-   * Decidable from the string alone: count segments, and going outside is whatever makes the
-   * depth negative after stepping down through a `..`.
-   *
-   * The segments come from `wireSegments` rather than from a `/` written here (#47). Reading the
-   * separator out of the protocol instead of assuming it is what makes this check the *same*
-   * check the host runs: both sides now name one encoding, so a path that means two things on
-   * two machines cannot mean the right thing here and the wrong thing there.
-   */
-  private requireInside(rel: string): void {
-    const fail = () => {
-      throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
-    }
-    if (rel.startsWith('/')) fail()
-    let depth = 0
-    for (const seg of wireSegments(rel)) {
-      if (seg === '' || seg === '.') continue
-      if (seg === '..') depth -= 1
-      else depth += 1
-      if (depth < 0) fail()
-    }
-  }
-
-  /** `a/b/c.ts` → `a/b` (the root is `''`) — since the mock's entries are grouped by parent path */
-  private parentOf(path: string): string {
-    const cut = path.lastIndexOf('/')
-    return cut < 0 ? '' : path.slice(0, cut)
-  }
-
-  /**
-   * Detaches one entry from the mock. If it is a folder, everything under it — the listing and
-   * the files — comes along. In the real thing, moving a folder takes what is inside it along
-   * too, so if the mock moved only the shell, "it moved, but the inside is empty" would become
-   * a kind of difference that happens **only in the mock**.
-   */
-  private detach(path: string): FsEntry | null {
-    const parent = this.parentOf(path)
-    const siblings = this.fsState.entries[parent] ?? []
-    const entry = siblings.find((e) => e.path === path)
-    if (!entry) return null
-    this.fsState.entries[parent] = siblings.filter((e) => e.path !== path)
-    return entry
-  }
-
-  /** What comes along when moving or deleting — the sub-listing and file contents */
-  private takeSubtree(path: string): { entries: Record<string, FsEntry[]>; files: Record<string, string> } {
-    const under = (p: string) => p === path || p.startsWith(`${path}/`)
-    const entries: Record<string, FsEntry[]> = {}
-    const files: Record<string, string> = {}
-    for (const [dir, list] of Object.entries(this.fsState.entries)) {
-      if (!under(dir)) continue
-      entries[dir] = list
-      delete this.fsState.entries[dir]
-    }
-    for (const [file, text] of Object.entries(this.fsState.files)) {
-      if (!under(file)) continue
-      files[file] = text
-      delete this.fsState.files[file]
-    }
-    return { entries, files }
-  }
-
   /** The handoff note placed in the host's data folder (#142) — path → text. Not mixed with project files (fsState) */
   handoffNotes = new Map<string, string>()
 
@@ -694,44 +630,14 @@ export class MockPlatform implements Platform {
     return path
   }
 
-  /**
-   * Lays one file down in the mock and builds **the whole path up to it** (#104).
-   *
-   * In the real thing, the host creates the parent folders before writing. If the mock only
-   * planted the content, that file would be readable but `trash` would fail to find it in the
-   * listing and reject it — a spot where the mock becomes stricter than the real thing, and
-   * handoff cleanup would fail only in the mock. When a test needs to fake "the agent left a
-   * note," it should also come in through this door, so nobody has to rediscover that trap on
-   * their own.
-   */
+  /** Lays one file down in the mock and builds the whole path up to it (#104) — see `MemoryFs.place` */
   placeFile(path: string, text: string): void {
-    this.fsState.files[path] = text
-    const segs = wireSegments(path).filter(Boolean)
-    for (let i = 0; i < segs.length; i++) {
-      const here = wireJoin(...segs.slice(0, i + 1))
-      const parent = wireJoin(...segs.slice(0, i))
-      const list = this.fsState.entries[parent] ?? []
-      if (list.some((e) => e.path === here)) continue
-      this.fsState.entries[parent] = [
-        ...list,
-        { name: segs[i]!, path: here, isDir: i < segs.length - 1, ignored: false },
-      ]
-    }
+    this.memoryFs.place(path, text)
   }
 
   readonly fs = {
-    search: async (_projectId: string, query: string, limit = 20) => {
-      // The mock does not fake real fuzzy matching — what is being verified is the UI flow
-      const all = Object.values(this.fsState.entries)
-        .flat()
-        .filter((e) => !e.isDir)
-      const q = query.toLowerCase()
-      return all
-        .filter((e) => e.path.toLowerCase().includes(q))
-        .slice(0, limit)
-        .map((e) => ({ path: e.path, name: e.name }))
-    },
-    listDir: async (_projectId: string, path: string) => this.fsState.entries[path] ?? [],
+    search: async (_projectId: string, query: string, limit = 20) => this.memoryFs.search(query, limit),
+    listDir: async (_projectId: string, path: string) => this.memoryFs.listDir(path),
     // Only records the watch set — tests check the screen's reaction by emitting fs_changed directly
     watch: async (projectId: string, paths: string[]) => {
       this.watchedDirs.set(projectId, [...paths])
@@ -739,86 +645,19 @@ export class MockPlatform implements Platform {
     },
     readFile: async (projectId: string, path: string): Promise<FsFile> => {
       this.fileOps.push({ op: 'read', projectId, path })
-      return {
-        text: this.fsState.files[path] ?? '',
-        truncated: false,
-        binary: false,
-        bytes: (this.fsState.files[path] ?? '').length,
-      }
+      return this.memoryFs.readFile(path)
     },
-    resolve: async (_projectId: string, path: string) => {
-      this.requireInside(path)
-      return { path: `/mock-project/${path}` }
-    },
-    /**
-     * Follows **the same rejection rules** as the real thing (the host's `moveEntry`): if the
-     * spot is taken, it does not move and names what it collided with; a folder cannot be put
-     * inside itself; and dropping something back where it already was is `moved: false`, not a
-     * failure. If the mock were more forgiving than the real thing, e2e would stay green while
-     * the actual app behaved differently.
-     */
-    move: async (_projectId: string, from: string, toDir: string) => {
-      this.requireInside(from)
-      this.requireInside(toDir)
-      const name = wireBaseName(from)
-      const path = wireJoin(toDir, name)
-      if (path === from) return { path, moved: false }
-      if (path.startsWith(`${from}/`)) {
-        throw Object.assign(new Error(`Cannot move ${name} into itself`), { code: 'internal' })
-      }
-      if ((this.fsState.entries[toDir] ?? []).some((e) => e.path === path)) {
-        throw Object.assign(new Error(`${path} already exists — nothing was moved`), { code: 'internal' })
-      }
-      const entry = this.detach(from)
-      if (!entry) throw Object.assign(new Error(`${from} is no longer there`), { code: 'internal' })
-      const sub = this.takeSubtree(from)
-      const rekey = (p: string) => path + p.slice(from.length)
-      for (const [dir, list] of Object.entries(sub.entries)) {
-        this.fsState.entries[rekey(dir)] = list.map((e) => ({ ...e, path: rekey(e.path) }))
-      }
-      for (const [file, text] of Object.entries(sub.files)) this.fsState.files[rekey(file)] = text
-      this.fsState.entries[toDir] = [...(this.fsState.entries[toDir] ?? []), { ...entry, path }]
-      return { path, moved: true }
-    },
-    importFile: async (_projectId: string, toDir: string, name: string, dataBase64: string) => {
-      this.requireInside(toDir)
-      // Uses only the last segment of the name — the same rule as the real thing, so even if a
-      // path sneaks in mixed into the name, it cannot escape the destination
-      const leaf = wireBaseName(name)
-      const path = wireJoin(toDir, leaf)
-      if ((this.fsState.entries[toDir] ?? []).some((e) => e.path === path)) {
-        throw Object.assign(new Error(`${path} already exists — nothing was written`), { code: 'internal' })
-      }
-      this.fsState.entries[toDir] = [
-        ...(this.fsState.entries[toDir] ?? []),
-        { name: leaf, path, isDir: false, ignored: false },
-      ]
-      this.fsState.files[path] = atob(dataBase64)
-      return { path }
-    },
+    resolve: async (_projectId: string, path: string) => this.memoryFs.resolve(path),
+    move: async (_projectId: string, from: string, toDir: string) => this.memoryFs.move(from, toDir),
+    importFile: async (_projectId: string, toDir: string, name: string, dataBase64: string) =>
+      this.memoryFs.importFile(toDir, name, dataBase64),
     trash: async (_projectId: string, path: string) => {
-      this.requireInside(path)
-      /*
-       * The project root (`'.'`) is **not an entry** in the listing — entries are the things
-       * inside the root. In the real thing, the host's resolveExisting stats the root and lets
-       * it through (it is a real folder), so rejecting it here as "no such entry" would make
-       * the mock **stricter** than the real thing — the path of deleting the whole project
-       * folder would end up blocked in e2e only.
-       */
-      if (wireSegments(path).every((seg) => seg === '' || seg === '.')) {
-        this.fsState.entries = {}
-        this.fsState.files = {}
-        this.trashed.push(path)
-        return { supported: true }
-      }
-      if (!this.detach(path))
-        throw Object.assign(new Error(`${path} is no longer there`), { code: 'internal' })
-      this.takeSubtree(path)
+      this.memoryFs.trash(path)
       this.trashed.push(path)
       return { supported: true }
     },
     reveal: async (projectId: string, path: string) => {
-      this.requireInside(path)
+      this.memoryFs.requireInside(path)
       this.revealed.push(path)
       this.fileOps.push({ op: 'reveal', projectId, path })
       return { supported: true }
@@ -1576,6 +1415,57 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /**
+   * Linked machines (#82). The mock reaches no machine: one added here stands as connected at once,
+   * so a screen can be built against the shape; the real link's states come from two real hosts in
+   * e2e (`e2e/fixtures/linked-hosts.ts`).
+   */
+  machinesList: MachineInfo[] = []
+  private machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
+    const at = this.machinesList.findIndex((m) => m.id === id)
+    if (at === -1) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
+    const next = { ...this.machinesList[at]!, ...patch }
+    this.machinesList[at] = next
+    this.emit({ type: 'machine_status', machine: { ...next } })
+    return { ...next }
+  }
+  readonly machines = {
+    list: async () => this.machinesList.map((m) => ({ ...m })),
+    add: async (spec: { name: string; sshTarget: string; shell: MachineInfo['shell']; wslDistro?: string | null; command?: string | null }) => {
+      const base = spec.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 24) || 'machine'
+      let id = base
+      for (let n = 2; this.machinesList.some((m) => m.id === id); n++) id = `${base}-${n}`
+      const info: MachineInfo = {
+        id,
+        name: spec.name,
+        sshTarget: spec.sshTarget,
+        shell: spec.shell,
+        wslDistro: spec.wslDistro ?? null,
+        command: spec.command ?? null,
+        status: 'connected',
+        error: null,
+        versions: null,
+        lastConnectedAt: Date.now(),
+        localPort: null,
+        sameLocalPort: false,
+      }
+      this.machinesList.push(info)
+      this.emit({ type: 'machine_status', machine: { ...info } })
+      return { ...info }
+    },
+    remove: async (machineId: string) => {
+      this.machinesList = this.machinesList.filter((m) => m.id !== machineId)
+      this.projectsList = this.projectsList.filter((p) => p.machine !== machineId)
+      this.emit({ type: 'machine_resync', machineId })
+    },
+    reconnect: async (machineId: string) => this.machineRow(machineId, {}),
+    acceptVersions: async (machineId: string) => {
+      const v = this.machinesList.find((m) => m.id === machineId)?.versions
+      if (v && !v.compatible) throw Object.assign(new Error('The two sides speak different protocols; one of them has to be updated first'), { code: 'internal' })
+      return this.machineRow(machineId, { status: 'connected', error: null, versions: v ? { ...v, accepted: true } : null })
+    },
+  }
+
   readonly processes = {
     strays: async () => [...this.strayProcesses],
     stop: async (pids: number[]) => {
@@ -2251,8 +2141,8 @@ export class MockPlatform implements Platform {
       this.projectsList.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
       return [...this.projectsList]
     },
-    add: async (path: string) => {
-      const existing = this.projectsList.find((p) => p.path === path)
+    add: async (path: string, machine?: string | null) => {
+      const existing = this.projectsList.find((p) => p.path === path && (p.machine ?? null) === (machine ?? null))
       if (existing) return existing
       /*
        * The name is the directory's last segment under **either** separator (#47).
@@ -2264,7 +2154,9 @@ export class MockPlatform implements Platform {
        * it `proj`, and e2e — which only ever runs the mock — would have stayed green about it.
        */
       const info: ProjectInfo = {
-        id: `mock-project-${++this.idc}`,
+        // A folder on a linked machine is named the way the hub names it: `<machine>.<id>`, with the machine said (#82)
+        id: machine ? `${machine}.mock-project-${++this.idc}` : `mock-project-${++this.idc}`,
+        ...(machine ? { machine } : {}),
         path,
         name: osPathBaseName(path) || path,
         defaultTool: 'claude',

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { buildInbox, countWaiting, detectFileConflicts, isUnread, type InboxItem } from '@cc/core'
+import { buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, type InboxItem } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
@@ -114,4 +114,23 @@ export function useConflicts() {
 /** A pure computation for use outside a hook (e.g. a global shortcut handler) */
 export function computeInbox(state: AppState, now = Date.now()): InboxItem[] {
   return buildInbox(Object.values(state.sessions).map(toCandidate), now)
+}
+
+/**
+ * The linked machine a project lives on (#82), or null for this computer. What stays off for a
+ * project on another machine in phase 1 asks this: reveal in the file manager, open in the IDE,
+ * moving files to this computer's trash, app views (docs/plans/remote-hub.md §6).
+ */
+export function useProjectMachine(projectId: string | null | undefined): string | null {
+  return useStore((s) => (projectId ? (s.projects[projectId]?.machine ?? null) : null))
+}
+
+/** A machine's name as the person gave it, or its id until the machine list arrives; null for this computer */
+export function useMachineName(machine: string | null | undefined): string | null {
+  return useStore((s) => (machine ? (s.machines[machine]?.name ?? machine) : null))
+}
+
+/** Whether a session's machine is away (#82): shown dimmed, never woken (`isAway` in core) */
+export function useSessionAway(sessionId: string): boolean {
+  return useStore((s) => isAway(s.sessions[sessionId], s.machines))
 }

@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 45, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 46, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -22,6 +22,7 @@ Only foreign keys the schema declares are drawn; references kept by convention (
 erDiagram
   sessions |o--o{ grid_layout : "session_id"
   sessions ||--o{ grid_panels : "session_id"
+  linked_machines ||--o{ machine_headers : "machine_id"
   sessions ||--o{ messages : "session_id"
   projects ||--o{ project_consents : "to_project_id"
   projects ||--o{ project_consents : "from_project_id"
@@ -97,9 +98,28 @@ erDiagram
     INTEGER position
     INTEGER span_cols
     INTEGER span_rows
+    TEXT remote_session_id
   }
   grid_panels {
     TEXT session_id PK, FK
+    INTEGER position
+  }
+  linked_machines {
+    TEXT id PK
+    TEXT name
+    TEXT ssh_target
+    TEXT shell
+    TEXT wsl_distro
+    TEXT command
+    INTEGER slot
+    INTEGER added_at
+    TEXT accepted_versions
+  }
+  machine_headers {
+    TEXT machine_id PK, FK
+    TEXT kind PK
+    TEXT item_id PK
+    TEXT info
     INTEGER position
   }
   messages {
@@ -312,6 +332,7 @@ Added in v42.
 | `position` | INTEGER | no |  |  | v42 |
 | `span_cols` | INTEGER | yes |  |  | v43 |
 | `span_rows` | INTEGER | yes |  |  | v43 |
+| `remote_session_id` | TEXT | yes |  |  | v46 |
 
 ### `grid_panels`
 
@@ -321,6 +342,34 @@ Added in v9.
 |---|---|---|---|---|---|
 | `session_id` | TEXT | yes |  | PK, FK → `sessions.id` (cascade) | v9 |
 | `position` | INTEGER | no |  |  | v9 |
+
+### `linked_machines`
+
+Added in v46.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `id` | TEXT | yes |  | PK | v46 |
+| `name` | TEXT | no |  |  | v46 |
+| `ssh_target` | TEXT | no |  |  | v46 |
+| `shell` | TEXT | no | `'posix'` |  | v46 |
+| `wsl_distro` | TEXT | yes |  |  | v46 |
+| `command` | TEXT | yes |  |  | v46 |
+| `slot` | INTEGER | no |  |  | v46 |
+| `added_at` | INTEGER | no |  |  | v46 |
+| `accepted_versions` | TEXT | yes |  |  | v46 |
+
+### `machine_headers`
+
+Added in v46.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `machine_id` | TEXT | no |  | PK 1, FK → `linked_machines.id` (cascade) | v46 |
+| `kind` | TEXT | no |  | PK 2 | v46 |
+| `item_id` | TEXT | no |  | PK 3 | v46 |
+| `info` | TEXT | no |  |  | v46 |
+| `position` | INTEGER | no | `0` |  | v46 |
 
 ### `messages`
 

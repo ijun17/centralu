@@ -89,7 +89,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 앱 실행 | 기록된 호출 하나: 화면, 세션, 다른 앱이 부른 앱 도구(`kind: tool`), 또는 앱이 Centralu에 부탁한 것(`kind: broker`). `parentRunId`로 사슬을 이룬다 | `AppRun`, `entities.ts`; `packages/agent-host/src/apps/external/runs.ts` | |
 | 중개자 | 호스트가 앱에게 fd 3으로 내주는 MCP 서버: `run_agent`, `call_app`, `host_data` | `packages/agent-host/src/apps/external/broker.ts`, `desk.ts` | |
 | 능력 | 앱이 중개자에게 부탁할 수 있는 것: `agent:<tool>`, `app:<scope>/<id>`, `host:<name>`. 매니페스트의 `uses`에 선언하고, 사람이 앱마다 한 번 허락한다 | `packages/agent-host/src/apps/external/capabilities.ts`; `AppPermission`, `entities.ts` | 권한(그것은 승인이다) |
-| 앱 비밀 | 앱의 매니페스트가 이름을 댄 값. 이 기계의 `<data>/app-secrets.json`에 두고, 스토어에는 두지 않는다 | `packages/agent-host/src/apps/external/secrets.ts` | |
+| 앱 비밀 | 앱의 매니페스트가 이름을 댄 값. 이 기기의 `<data>/app-secrets.json`에 두고, 스토어에는 두지 않는다 | `packages/agent-host/src/apps/external/secrets.ts` | |
 | 앱 버전 | 사용자 폴더 앱의 보관본(5개까지), 또는 프로젝트 앱의 git 이력 | `packages/agent-host/src/apps/external/versions.ts` | |
 | 앱 안내서 | 도구로 내준 Centralu 자체의 사용 안내서(`app_guide`). 앱 하나의 안내서가 아니다 | `packages/agent-host/src/sessions/app-guide.ts` | |
 
@@ -122,7 +122,8 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | Codex 브리지 | `codex app-server`가 세션을 위해 띄우는 작은 Node MCP 서버: Centralu 도구에 하나, 붙은 앱마다 하나. 정문을 거쳐(키퍼가 없으면 호스트 자신의 포트로) 호스트를 부른다. Claude에는 필요 없다: 그 서버들은 호스트 안에서 돈다 | `packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs` | 오케스트레이터 브리지(그보다 많이 나른다) |
 | `centralu serve` | 창도 키퍼도 없이 `127.0.0.1:17175`에서 호스트를 띄우는 npm 런처. 원격 모드 1단계용 | `packaging/npm/centralu/bin/serve.mjs`; [agent-host.ko.md](agent-host.ko.md) §4.7 | |
 | 스트림 에포크 | 호스트 수명마다 하나씩인 무작위 id. 다시 연결했을 때 에포크가 다르면 클라이언트는 다시 받기 대신 다시 맞춘다 | `packages/agent-host/src/transport/event-log.ts`; [protocol.ko.md](protocol.ko.md) | |
-| 기계 *(계획)* | 자기 호스트를 돌리며 다른 호스트와 호스트끼리 이어지는 컴퓨터. 아직 코드에 없다: 열린 PR #409, #410 | [plans/remote-hub.md](plans/remote-hub.md)(영어) | |
+| 기기 | 자기 호스트를 돌리며 다른 호스트와 호스트끼리 이어지는 컴퓨터(§6). 그것이 건네는 id는 `<machine>.<id>`로 읽힌다 | `MachineInfo`, `packages/protocol/src/machines.ts`; `packages/agent-host/src/links/`; [agent-host.ko.md](agent-host.ko.md) §4.8 | 원격, 서버 |
+| 허브 | 창이 붙은 호스트를 그것이 잇는 기기 쪽에서 본 것: 창의 호출을 그 기기들로 보내고, 그들이 마지막으로 말한 것을 비춰 둔다 | `packages/agent-host/src/links/router.ts`; [plans/remote-hub.md](plans/remote-hub.md)(영어) | |
 
 ### 1.6 두 가지를 뜻하는 말
 
@@ -357,7 +358,7 @@ classDiagram
 
 저장되는 곳:
 
-- `grid_layout`: 그리드의 패널(세션과 앱, 스토어 v42. 차지하는 칸은 v43).
+- `grid_layout`: 그리드의 패널(세션과 앱, 스토어 v42. 차지하는 칸은 v43. 이어진 기기의 세션은 따로 둔 열에, v46).
 - `grid_panels`: v9가 만든 세션 패널 그리드. v42보다 오래된 호스트를 위해 남겨 둔다(이 빌드는 한 번 옮겨 온 뒤에는
   휴지통에 간 세션의 줄을 지우기만 한다). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
 - `workspace`: UI의 스냅숏. 한 줄.
@@ -633,8 +634,40 @@ sequenceDiagram
 A가 드레인한 뒤 B가 실패하면, 키퍼는 보관해 둔 사본에서 A의 빌드를 다시 띄운다. 모든 단계는 창에 알린다
 (`view.swap`). 자세한 것은 [architecture.ko.md](architecture.ko.md) §4.2, [agent-host.ko.md](agent-host.ko.md) §4.2.
 
-## 6. 계획: 기계
+## 6. 기기
 
-호스트끼리 이어지는 원격 모드([plans/remote-hub.md](plans/remote-hub.md), 영어. 열린 PR #409, #410)는 **기계**를
-더한다: 자기 스토어, 에이전트, 로그인을 가진 자기 호스트를 돌리며 다른 호스트와 호스트끼리 이어지는 컴퓨터. 아직
-`main`의 코드에는 아무것도 없다. 들어오면 여기에 자기 줄을 얻는다.
+호스트끼리 이어지는 원격 모드([plans/remote-hub.md](plans/remote-hub.md), 영어. 1단계)는 **기기**를 더한다: 자기
+스토어, 에이전트, 로그인을 가진 자기 호스트를 돌리는 컴퓨터. 창이 붙은 호스트가 그 창의 **허브**다: 사람은 다른
+기기를 허브에 잇고(각각 그 사람 자신의 ssh로), 허브는 그 기기들의 세션과 프로젝트를 자기 것 옆에 보인다. 호스트는
+호스트하고만 이야기하고, 기기마다 자기 스토어의 유일한 작성자로 남는다.
+
+```mermaid
+classDiagram
+  class Hub["허브 (호스트)"]
+  class Machine["기기"] {
+    id, 이름
+    ssh 대상, 셸
+    상태
+  }
+  class Header["비춰 둔 헤더"]
+  Hub "1" o-- "*" Machine : 잇는다
+  Machine "1" *-- "*" Header : 마지막으로 나열한 세션과 프로젝트
+  Machine "1" o-- "*" Session : 자기 호스트에서 돌린다
+```
+
+- 기기의 세션, 프로젝트, 터미널은 자기 호스트에서 자기 id를 그대로 가진다. 허브는 그것을 `<machine>.<id>`로 바꿔
+  쓰고 모든 줄에 `machine` 필드를 따로 실어서, UI는 id를 뜯어 읽지 않는다. 기기의 승인 규칙 id는 기기마다(그
+  `slot`) 음수 하나로 접힌다.
+- 허브는 기기에서 마지막으로 들은 것을 비춰 둔다. 그래서 닿지 않는 기기도 세션이 목록에 남는다(닿지 않음 표시,
+  마지막으로 안 `live`, 깨우지 않음). 원격의 오케스트레이터와 코디네이터는 보이지 않는다.
+- 링크의 상태(`connecting`, `connected`, `unreachable`, `versions_differ` 등)는 메모리에만 있고 `machine_status`로
+  보낸다. (다시) 이어질 때마다 `machine_resync`를 말한다. 자세한 것은 [agent-host.ko.md](agent-host.ko.md) §4.8,
+  [protocol.ko.md](protocol.ko.md) §6.
+
+저장되는 곳:
+
+- `linked_machines`: 사람이 이은 기기: id, 이름, ssh 대상, 원격 셸, 숫자를 접는 slot, 받아들인 버전 쌍(스토어 v46).
+- `machine_headers`: 비춰 둔 것: 기기마다 마지막으로 나열한 세션과 프로젝트(스토어 v46).
+
+메모리에만(허브): 링크마다의 상태, 그 ssh 프로세스와 포워드, 원격의 커서와 에포크. 어디에도 저장하지 않는 것: 원격
+호스트의 토큰. 링크를 시작할 때마다 ssh로 묻는다.

@@ -65,7 +65,7 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 - We do not hold every message of a session in memory. **Focused session**: everything loaded so far, read a page at a time from StorePort when scrolling up. **Unfocused sessions**: a window of the most recent 50 rows (`WINDOW_SIZE`) beside the summary (last line, seq, state); opening one reads the rest back.
 - When focus is lost, that session's messages are trimmed to the window size, and the history cursor moves to the top of what is kept.
 - A session that is not on screen and keeps receiving events (a worker the orchestrator started, a session an app asked for, an unfocused grid panel) is trimmed the same way once it reaches twice the window (#392). It was never focused and then left, so the trim above never reached it. The focused session is never cut this way, even while the orchestrator, the grid or a pinned app covers it: the person comes back to it with the pages they loaded and their reading position.
-- A streaming `message_delta` is appended to the last message — only that row re-renders, without recreating list items (including the virtual list's measure recalculation). The list itself is copied once per delta (`replaceAt`), every other row kept as the same object. Within the row, the reply's finished Markdown blocks are rendered once and kept, and only the block still being written is parsed again (`features/session/markdownBlocks.ts`, #364): a delta used to re-parse the whole reply.
+- A streaming `message_delta` is appended to the last message — only that row re-renders, without recreating list items (including the virtual list's measure recalculation). The list itself is copied once per delta (`replaceAt` in `store/transcript.ts`), every other row kept as the same object. Within the row, the reply's finished Markdown blocks are rendered once and kept, and only the block still being written is parsed again (`features/session/markdownBlocks.ts`, #364): a delta used to re-parse the whole reply.
 - **A launch card's subagent steps are outside the window** (#222). They are not in the conversation (`chat`) and are never paged with it: `subagentSteps[session][callId]` holds them once the person opens that card, read a page at a time from `messages.subagent`. A live `subagent_event` joins an opened card only once every earlier step is read, and touches nothing else — not the conversation, not the session's state, not unread. Whether the section is open lives in the store, not the card, because the virtual list detaches rows that scroll away and a card drawn again must come back as it was left.
 
 ## 5. Persistence and restore (FR-10)
@@ -78,3 +78,26 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 
 - Shortcuts, notification policy, card collapse policy, approval banner policy and so on are **data** (the strategy table of the strategy pattern). A `settings` slice + store persistence.
 - The policy judgement functions live in core (`shouldCollapseCard(tool, settings)`, `canApproveInBanner(detail, settings)`) and the UI only consumes the result. Changing a policy is a data change, not a component edit.
+
+## 7. Linked machines (#82)
+
+The hub lists another machine's sessions and projects with `machine` set (null for this computer) and their ids
+qualified (`<machine>.<id>`, never parsed here). `machines` holds one `MachineInfo` per linked machine, replaced whole
+by its `machine_status`.
+
+- **Away is derived, not stored** (`isAway` in `@cc/core`): a row the hub answered from its mirror (`unreachable`),
+  or a row of a machine whose link is not `connected`. An away row stays listed and dimmed, and `wake` refuses it:
+  waking would only fail at the hub, and the machine's own resync does the waking once it is back. The reconnect
+  recovery (`recoverAfterReconnect`) skips away sessions for the same reason.
+- **`machine_resync {machineId}` runs a recovery scoped to that machine** (`recoverMachine`), not the global one:
+  1. re-read `sessions.list` and `projects.list`, and replace **that machine's rows only**: a row of another machine or
+     of this computer keeps its object (nothing re-renders, nothing the reducer derived is lost); a row the fresh list
+     no longer has leaves (deleted there, or the machine was unlinked), with what it held cleared as
+     `session_deleted` clears it (#163); a new one joins;
+  2. re-read the history of every open conversation of that machine (the hub does not replay a remote's gap; the
+     conversations are read again, as a host resync does for every one, #173);
+  3. wake that machine's sessions that were live before and are not now (a remote host that restarted without a
+     keeper), and none of any other machine.
+- **Per-machine questions carry the machine**: the new-session dialog's `agents.detect`, the model and capability
+  lists of a session's menu, a remote session's "older CLI" line (`machineAgentVersions[machine]`, read when its header
+  first needs it and again on its resync), and `projects.add {path, machine}`.

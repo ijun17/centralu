@@ -45,13 +45,24 @@ export type AppCatalog = {
   external: ExternalCatalogApp[]
   /** project id → that project's apps (alphabetical) */
   byProject: Record<string, ExternalCatalogApp[]>
-  /** The user folder's apps (alphabetical) */
+  /** The user folder's apps (alphabetical), this computer's only */
   user: ExternalCatalogApp[]
+  /** Each linked machine's user-folder apps (#82), grouped under that machine in the sidebar */
+  byMachine: Record<string, ExternalCatalogApp[]>
 }
 
 export const UNTRUSTED_REASON = "This project isn't trusted, so its apps don't run."
 
+/**
+ * An app on a linked machine (#82): listed, and its tools work for that machine's sessions, but its view needs the
+ * proxy through the hub of phase 2 (docs/plans/remote-hub.md §3.4, §6). Said where the view would stand.
+ */
+export const REMOTE_APP_REASON =
+  'Apps on another machine open here in a later version of Centralu. Their tools already work for the sessions on that machine.'
+
 export function appStatus(info: ExternalAppInfo): AppStatusView {
+  // Before its own status: whatever state it is in there, its view cannot open here yet
+  if (info.machine) return { label: 'Later version', reason: REMOTE_APP_REASON, runnable: false, tone: 'quiet' }
   switch (info.status) {
     case 'running':
       return { label: 'Running', reason: null, runnable: true, tone: 'quiet' }
@@ -96,7 +107,12 @@ const byTitle = (a: ExternalCatalogApp, b: ExternalCatalogApp) => a.title.locale
 export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
   const ext: ExternalCatalogApp[] = external.map((info) => ({
     kind: 'external',
-    key: externalAppKey(info.projectId, info.appId),
+    /*
+     * A linked machine's user-folder app has no project to tell it from this computer's app of the same id (both read
+     * `_user/<id>`), so its key names the machine (#82). A project app's key already does: its project id is qualified.
+     */
+    key:
+      info.machine && !info.projectId ? `${info.machine}:${externalAppKey(null, info.appId)}` : externalAppKey(info.projectId, info.appId),
     appId: info.appId,
     projectId: info.projectId,
     title: info.name ?? info.appId,
@@ -106,14 +122,17 @@ export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
   ext.sort(byTitle)
   const byProject: Record<string, ExternalCatalogApp[]> = {}
   const user: ExternalCatalogApp[] = []
+  const byMachine: Record<string, ExternalCatalogApp[]> = {}
   for (const a of ext) {
-    if (a.projectId === null) user.push(a)
-    else (byProject[a.projectId] ??= []).push(a)
+    if (a.projectId !== null) (byProject[a.projectId] ??= []).push(a)
+    else if (a.info.machine) (byMachine[a.info.machine] ??= []).push(a)
+    else user.push(a)
   }
   return {
     external: ext,
     byProject,
     user,
+    byMachine,
   }
 }
 
@@ -136,11 +155,18 @@ export function useUserApps(): ExternalCatalogApp[] {
   return useMemo(() => buildCatalog(external).user, [external])
 }
 
+/** A linked machine's user-folder apps (#82) */
+export function useMachineApps(machine: string): ExternalCatalogApp[] {
+  const external = useStore((s) => s.externalApps)
+  return useMemo(() => buildCatalog(external).byMachine[machine] ?? NONE, [external, machine])
+}
+
 /** A single app — undefined if it is gone (the folder disappeared, the project was deleted) */
 export function useExternalApp(projectId: string | null, appId: string): ExternalCatalogApp | undefined {
   const external = useStore((s) => s.externalApps)
   return useMemo(() => {
-    const info = external.find((a) => a.appId === appId && a.projectId === projectId)
+    // This computer's, for a user-folder app: another machine's has no view to open here (#82)
+    const info = external.find((a) => a.appId === appId && a.projectId === projectId && (projectId !== null || !a.machine))
     return info ? buildCatalog([info]).external[0] : undefined
   }, [external, projectId, appId])
 }

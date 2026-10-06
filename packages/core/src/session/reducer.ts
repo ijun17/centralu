@@ -138,6 +138,16 @@ export type SessionSummary = {
    * says "asked by" and links back; the caller's conversation finds its delegated session by this.
    */
   askedBy?: string | null
+  /**
+   * The linked machine this session runs on (#82, docs/plans/remote-hub.md), or null/absent for this computer. Its id
+   * then reads `<machine>.<id>`; nothing parses that, everything groups and labels by this field.
+   */
+  machine?: string | null
+  /**
+   * The hub could not reach the machine and listed this session from what it last heard (#82): `live` is the last-known
+   * value, not a fact. Such a session is shown as away and never woken; that machine's `machine_resync` replaces it.
+   */
+  unreachable?: boolean
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {

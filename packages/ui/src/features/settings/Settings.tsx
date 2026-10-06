@@ -14,6 +14,7 @@ import { TrashSection } from './TrashSection.jsx'
 import { ProjectConsentsSection } from './ProjectConsentsSection.jsx'
 import { ThemeSection } from './ThemeSection.jsx'
 import { TypographySection } from './TypographySection.jsx'
+import { MachinesSection } from './MachinesSection.jsx'
 import { applyOffer, useRelaunchCheck, type ApplyOffer } from './apply-update.js'
 import type { BackgroundPort } from '@cc/platform/ports'
 
@@ -132,6 +133,11 @@ const CATEGORIES = [
    * what it costs. Shown only where the platform can do it (the desktop app's keeper).
    */
   { id: 'background', label: 'Background' },
+  /*
+   * Linked machines (#82). Its own category because the errand is its own: "link my server", "why is it away". It
+   * holds a list, a form and a prompt, which no other category could take without renaming itself.
+   */
+  { id: 'machines', label: 'Machines' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'permissions', label: 'Permissions' },
   // Deleted sessions (#204) — the only place a conversation is deleted for good, so it has a place of its own
@@ -161,6 +167,12 @@ export function Settings() {
   const sc = useShortcut()
   const [rules, setRules] = useState<Rule[] | null>(null)
   const [category, setCategory] = useState<Category>('notifications')
+  // Another screen asked for a category (a machine's header in the sidebar opens Machines, #82)
+  const request = useStore((s) => s.settingsRequest)
+  useEffect(() => {
+    const asked = CATEGORIES.find((c) => c.id === request?.category)
+    if (asked) setCategory(asked.id)
+  }, [request])
 
   const loadRules = useCallback(() => {
     void platform.rules
@@ -276,6 +288,8 @@ export function Settings() {
             )}
 
             {category === 'background' && platform.background && <BackgroundSection port={platform.background} />}
+
+            {category === 'machines' && <MachinesSection onOpenCategory={setCategory} />}
 
             {category === 'appearance' && <AppearanceSection />}
 

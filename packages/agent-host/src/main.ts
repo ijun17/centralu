@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
-import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, RESERVED_APP_IDS } from '@cc/protocol'
+import { APP_VERSION, DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, PROTOCOL_VERSION, RESERVED_APP_IDS } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import type { ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -36,6 +36,10 @@ import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './lo
 import { hostDrain } from './drain.js'
 import { stopThenClose } from './shutdown.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
+import { Links } from './links/links.js'
+import { Router } from './links/router.js'
+import { SshTunnel } from './links/tunnel.js'
+import { storeMirror, storeRegistry } from './links/stored.js'
 
 /**
  * Agent Host entry point.
@@ -468,11 +472,25 @@ if (underKeeper) {
     console.error(`[agent-host] could not restore the app views handed over: ${(err as Error).stack ?? err}`)
   }
 }
-const server: HostServer = new HostServer({
-  port: Number(values.port),
-  token,
-  allowedOrigins,
-  onRpc: createRpcHandler(mgr, adapters, {
+/*
+ * Linked machines (#82, docs/plans/remote-hub.md): this host is the hub for its own UI, and reaches
+ * the hosts of other machines the person linked, each over the person's own ssh. The router stands
+ * in front of the RPC handler and sends a call that names another machine's session, project or
+ * terminal there; every other call reaches the handler as before. With no machine linked it passes
+ * everything through. The links start after listen (below), so a slow ssh never holds up the window.
+ */
+const links = new Links({
+  hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },
+  broadcast: (e) => server.broadcast(e),
+  terminal: (f) => toScreens(f),
+  mirror: storeMirror(store),
+  registry: storeRegistry(store),
+  tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, log: (line) => console.error(line) }),
+  log: (line) => console.error(line),
+})
+mgr.useLinkedSessions((id) => links.knowsSession(id))
+const router = new Router({
+  local: createRpcHandler(mgr, adapters, {
     themes,
     terminals,
     updates,
@@ -482,7 +500,15 @@ const server: HostServer = new HostServer({
     views,
     inlineViews,
     heldPids: held?.heldPids,
+    machines: links,
   }),
+  machines: () => links.all(),
+})
+const server: HostServer = new HostServer({
+  port: Number(values.port),
+  token,
+  allowedOrigins,
+  onRpc: router.handle,
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)
@@ -528,6 +554,8 @@ if (swapping && (store.deferredSteps.length > 0 || store.vacuumOwed)) {
  * this app open for days at a time, the recurring check afterward is still needed.
  */
 updates.start()
+// The linked machines (#82): each opens its ssh link in the background and reports through `machine_status`
+links.start()
 // The installed agent CLIs are read now and every ten minutes (#297); a window gaining focus asks too
 agentVersions.start()
 
@@ -649,6 +677,8 @@ async function stopServicesBeforeStore(mode: LeaveMode, handOver: boolean): Prom
   }
   updates.stop()
   versionsRef.current?.stop()
+  // The ssh links are this host's children: they end with it, and the next host opens its own
+  await links.stop()
   stopActivity()
   if (mode === 'detach') {
     // Released, not killed: the keeper keeps draining them for the next host
