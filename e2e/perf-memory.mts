@@ -5,12 +5,16 @@
  *                    [--ui-root <checkout>] [--label <name>] [--out <file.json>] [--quick]
  *                    [--steps blank,shell,long,scrolled,grid,switched,stream] [--dpr 2]
  *                    [--stream-parts working,text,reasoning,tools,subagent,images,background] [--turn-steps 12]
- *                    [--reduced-motion] [--freeze-animations]
+ *                    [--reduced-motion] [--freeze-animations] [--css <file>] [--layers] [--blur]
  *
  * `--ui-root` builds the UI of another checkout (one with its own node_modules, or links to these) against the same
  * host: how a build before a change is measured. `--stream-parts` leaves parts of the stream out, `--dpr` changes
  * the device scale, `--turn-steps` the length of a turn (12 steps are about 50 s; the elapsed counter changes pace after
- * the first minute), and the last two stop the app's motion, to tell what each costs.
+ * the first minute), and the next two stop the app's motion, to tell what each costs. `--css` adds a stylesheet to
+ * the page once it is up, to tell what one property costs by taking it away. `--layers` lists the composited
+ * layers in the grid (WebKit's with the memory it reports for each), with element, grid panel and why it is
+ * composited. `--blur` takes focus out of the composer the grid focuses before the grid is sampled: a blinking caret
+ * repaints, and while anything repaints WebKit keeps every layer's backing store.
  *
  * For each engine it seeds a fresh store (`e2e/fixtures/heavy-store.ts`) in a temporary data folder, starts a real
  * host on it (`CC_DATA_DIR`, `HOME` and `--db` all in that folder), builds the web UI for production against that
@@ -92,6 +96,9 @@ const { values } = parseArgs({
     dpr: { type: 'string', default: '2' },
     'reduced-motion': { type: 'boolean', default: false },
     'freeze-animations': { type: 'boolean', default: false },
+    layers: { type: 'boolean', default: false },
+    blur: { type: 'boolean', default: false },
+    css: { type: 'string' },
   },
 })
 const profile = values.profile as StoreProfile
@@ -241,6 +248,143 @@ async function pageCounts(page: Page) {
       ].join(','),
     }
   })
+}
+
+/** Describes the element an inspector object stands for, and the grid panel it is in */
+const DESCRIBE = `function () {
+  const el = this.nodeType === 1 ? this : this.parentElement
+  if (!el) return { panel: '', node: this.nodeName }
+  const p = el.closest('[data-testid^="grid-panel-"]')
+  const id = el.getAttribute('data-testid')
+  const cls = (el.getAttribute('class') || '').slice(0, 70)
+  return { panel: p ? p.getAttribute('data-testid') : '', node: el.tagName.toLowerCase() + (id ? '#' + id : '') + (cls ? ' .' + cls : '') }
+}`
+
+type Layer = {
+  /** The grid panel the layer's element is in (`grid-panel-<id>`), or '' outside every panel */
+  panel: string
+  /** The element: tag, test id, the start of its class list */
+  node: string
+  width: number
+  height: number
+  /** WebKit: the layer's backing store as WebKit reports it. Chromium: its area at the page's device scale, 4 bytes a pixel */
+  mb: number
+  drawsContent: boolean
+  reasons: string[]
+}
+
+/**
+ * Chromium's composited layers, with why each one is composited and which element and grid panel it belongs to
+ * (CDP `LayerTree`). Chromium reports no memory per layer; `mb` is the layer's whole area, which tiling may not fill.
+ */
+async function compositedLayers(cdp: CDPSession, page: Page): Promise<Layer[]> {
+  type Raw = {
+    layerId: string
+    backendNodeId?: number
+    width: number
+    height: number
+    drawsContent: boolean
+    invisible?: boolean
+  }
+  const tree = new Promise<Raw[]>((ok) =>
+    cdp.once('LayerTree.layerTreeDidChange', (e: { layers?: Raw[] }) => ok(e.layers ?? [])),
+  )
+  await cdp.send('DOM.getDocument', { depth: 0 })
+  await cdp.send('LayerTree.enable')
+  // A frame has to be produced for the tree to be reported; nudge one without changing anything
+  await page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))),
+  )
+  const raw = await tree
+  const out: Layer[] = []
+  for (const l of raw) {
+    if (l.invisible) continue
+    const { compositingReasons = [] } = (await cdp
+      .send('LayerTree.compositingReasons', { layerId: l.layerId })
+      .catch(() => ({}))) as { compositingReasons?: string[] }
+    let panel = ''
+    let node = '(no element)'
+    if (l.backendNodeId) {
+      const resolved = (await cdp
+        .send('DOM.resolveNode', { backendNodeId: l.backendNodeId })
+        .catch(() => null)) as { object?: { objectId?: string } } | null
+      const objectId = resolved?.object?.objectId
+      if (objectId) {
+        const r = (await cdp.send('Runtime.callFunctionOn', {
+          objectId,
+          returnByValue: true,
+          functionDeclaration: DESCRIBE,
+        })) as { result: { value?: { panel: string; node: string } } }
+        panel = r.result.value?.panel ?? ''
+        node = r.result.value?.node ?? node
+      }
+    }
+    out.push({
+      panel,
+      node,
+      width: Math.round(l.width),
+      height: Math.round(l.height),
+      mb: l.drawsContent ? round((l.width * l.height * DPR * DPR * 4) / 1048576) : 0,
+      drawsContent: l.drawsContent,
+      reasons: compositingReasons,
+    })
+  }
+  await cdp.send('LayerTree.disable')
+  return out
+}
+
+/**
+ * WebKit's composited layers with the memory WebKit itself reports for each (Web Inspector's `LayerTree` domain, the
+ * Layers tab). Playwright has no public door to it; this reaches the page's inspector session through Playwright's
+ * in-process internals (`_connection.toImpl`), which a Playwright upgrade may move. Measuring only.
+ */
+async function webkitLayers(page: Page): Promise<Layer[]> {
+  type Session = { send: (method: string, params?: object) => Promise<any> }
+  type Raw = {
+    layerId: string
+    nodeId?: number
+    compositedBounds: { width: number; height: number }
+    memory: number
+    pseudoElement?: string
+  }
+  const s = (page as unknown as { _connection: { toImpl: (x: unknown) => { delegate: { _session: Session } } } })
+    ._connection.toImpl(page).delegate._session
+  const { root } = (await s.send('DOM.getDocument')) as { root: { nodeId: number } }
+  await s.send('LayerTree.enable')
+  const { layers } = (await s.send('LayerTree.layersForNode', { nodeId: root.nodeId })) as { layers: Raw[] }
+  const out: Layer[] = []
+  for (const l of layers) {
+    const { compositingReasons = {} } = (await s
+      .send('LayerTree.reasonsForCompositingLayer', { layerId: l.layerId })
+      .catch(() => ({}))) as { compositingReasons?: Record<string, boolean> }
+    let panel = ''
+    let node = '(no element)'
+    if (l.nodeId) {
+      const resolved = (await s.send('DOM.resolveNode', { nodeId: l.nodeId }).catch(() => null)) as {
+        object?: { objectId?: string }
+      } | null
+      if (resolved?.object?.objectId) {
+        const r = (await s.send('Runtime.callFunctionOn', {
+          objectId: resolved.object.objectId,
+          returnByValue: true,
+          functionDeclaration: DESCRIBE,
+        })) as { result: { value?: { panel: string; node: string } } }
+        panel = r.result.value?.panel ?? ''
+        node = r.result.value?.node ?? node
+      }
+    }
+    out.push({
+      panel,
+      node: node + (l.pseudoElement ? `::${l.pseudoElement}` : ''),
+      width: Math.round(l.compositedBounds.width),
+      height: Math.round(l.compositedBounds.height),
+      mb: round(l.memory / 1048576),
+      drawsContent: l.memory > 0,
+      reasons: Object.keys(compositingReasons).filter((k) => compositingReasons[k]),
+    })
+  }
+  await s.send('LayerTree.disable')
+  return out
 }
 
 async function heap(cdp: CDPSession | null) {
@@ -581,12 +725,18 @@ function serve(dir: string, port: number): Promise<Server> {
 
 async function measureEngine(
   engine: Engine,
-): Promise<{ engine: Engine; seed: Omit<SeedSummary, 'sessions' | 'projects'>; samples: Sample[] }> {
+): Promise<{
+  engine: Engine
+  seed: Omit<SeedSummary, 'sessions' | 'projects'>
+  samples: Sample[]
+  layers: Layer[] | null
+}> {
   const work = mkdtempSync(join(tmpdir(), 'centralu-perf-memory-'))
   const dataDir = join(work, 'data')
   const home = join(work, 'home')
   mkdirSync(home)
   const samples: Sample[] = []
+  let layers: Layer[] | null = null
   let host: ChildProcess | null = null
   let server: Server | null = null
   let browser: Browser | null = null
@@ -701,6 +851,8 @@ async function measureEngine(
       })
       await page.evaluate(() => document.head.lastElementChild?.setAttribute('data-perf-freeze', ''))
     }
+    // Any other CSS, to tell what one property costs by taking it away (how the grid's layers were attributed)
+    if (values.css) await page.addStyleTag({ path: resolve(values.css) })
     const row = (id: string) => page.getByTestId(`session-row-${id}`)
     await row(seed.longSessionId).waitFor({ timeout: 60_000 })
     if (steps.has('shell')) {
@@ -740,8 +892,11 @@ async function measureEngine(
     if (steps.has('grid')) {
       await page.getByTestId('grid-button').click()
       await page.getByTestId(`grid-panel-${seed.gridSessionIds.at(-1)}`).waitFor({ timeout: 60_000 })
+      // The grid puts focus in the selected panel's composer; its blinking caret is a repaint (§3 of the record)
+      if (values.blur) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
       await sleep(SETTLE_MS)
       await sample('grid')
+      if (values.layers) layers = cdp ? await compositedLayers(cdp, page) : await webkitLayers(page)
     }
 
     // switched: ten sessions, one after another, then back to the long one
@@ -781,7 +936,7 @@ async function measureEngine(
     }
 
     const { sessions: _s, projects: _p, ...rest } = seed
-    return { engine, seed: rest, samples }
+    return { engine, seed: rest, samples, layers }
   } finally {
     await browser?.close().catch(() => {})
     if (host && host.exitCode === null) {
@@ -821,5 +976,18 @@ for (const r of results) {
       `| ${s.step} | ${s.contentFootprintMB} | ${s.afterGc?.contentFootprintMB ?? '–'} | ${s.totalFootprintMB} | ${s.footprintMB.gpu ?? 0} | ${s.footprintMB.ui ?? 0} | ` +
         `${s.heapUsedMB ?? '–'} | ${s.afterGc?.heapUsedMB ?? '–'} | ${s.domNodes} | ${s.renderedRows} | ${s.rowsReceived} | ${s.hostFootprintMB} |`,
     )
+  }
+  if (r.layers) {
+    const drawn = r.layers.filter((l) => l.drawsContent)
+    console.log(
+      `\n### Composited layers in the grid (${r.layers.length}, ${drawn.length} drawing, ` +
+        `${round(drawn.reduce((a, l) => a + l.mb, 0))} MB${r.engine === 'chromium' ? ` of area at DPR ${DPR}` : ''})\n`,
+    )
+    console.log('| panel | element | size | MB | reasons |')
+    console.log('|---|---|---:|---:|---|')
+    for (const l of [...r.layers].sort((a, b) => a.panel.localeCompare(b.panel) || b.mb - a.mb))
+      console.log(
+        `| ${l.panel || '–'} | \`${l.node.replace(/\|/g, '\\|')}\` | ${l.width}×${l.height} | ${l.mb} | ${l.reasons.join(', ')} |`,
+      )
   }
 }

@@ -234,6 +234,8 @@ each change still needs its own before and after, which `pnpm perf:memory` gives
 2. **Bring the grid's GPU cost down.** +145 MB for six idle panels. First list the layers each panel creates and
    their sizes (WebKit layer borders by hand), then remove what does not need its own layer (the panel's scroll
    container is enough). **Expected: up to ~100 MB in the grid**; unknown until the layers are listed.
+   *Done in §10:* rows placed by `top` took 58 layers out, 28 MB of GPU in the grid and 11 in the focus view; most of
+   the rest is held live by the composer's blinking caret (§10.2, §10.5).
 3. **Make less garbage per streamed event and per history page.** Every `message_delta` re-parses the whole
    message's Markdown (`Markdown` is memoised on the full text, so each delta parses it from the start with
    remark-gfm), and every delta copies the whole `chat` array (`items.slice` for text, `items.map` for tool output,
@@ -245,6 +247,7 @@ each change still needs its own before and after, which `pnpm perf:memory` gives
 4. **Shrink the shell.** ~45 MB of WebContent and an 11 MB JS heap before any session opens, from one 1.3 MB
    JavaScript chunk. xterm (terminals) and the Markdown stack are loaded up front; splitting them out until first
    use is the obvious cut. **Expected: 10–20 MB**, to be measured.
+   *Done in §10:* the startup JavaScript went from 1.38 MB to 0.97 MB, and the shell's memory did not move (§10.4).
 5. **Images** (named in #364 and #392): live screenshots added 7–15 MB that came back; three screenshots on the
    long session's first page are inside its ~45 MB. Not a top target on these numbers. If revisited, hand the `<img>`
    a blob URL made once per image instead of a new `data:` string per render.
@@ -265,6 +268,8 @@ rmdir /tmp/centralu-e2e.lock
 ```
 
 `--reduced-motion` and `--freeze-animations` run the same with the app's motion reduced or every animation off.
+`--css <file>` adds a stylesheet once the app is up (what a property costs, by taking it away), `--layers` lists the
+grid's composited layers (§10.1), and `--blur` takes focus out of the composer before the grid is sampled (§10.2).
 
 ## 9. After fixes (targets 1 and 3)
 
@@ -357,3 +362,150 @@ footprint in MB.
 So target 1 is done; target 3 has made the work per delta proportional to the block being written instead of to
 the whole reply, without a WebKit number to show for it yet. The ~130 MB WebContent high-water mark of §4.2 remains
 the largest open item after the grid.
+
+## 10. After fixes: grid and bundle
+
+Targets 2 and 4 of §7, on the same owner-sized store (seed 1), 1440×900 at device scale 2. `main` below is the
+commit before these fixes (098bfbc8; #409, merged since, changes no UI); "after" is this section's pull request
+before it was rebased onto #438 (§9), whose changes act only while a session works or streams, which none of the
+steps below do.
+
+### 10.1 What each grid panel composites
+
+`pnpm perf:memory --steps blank,long,grid --layers` lists the composited layers in the grid step: Chromium's over CDP
+(`LayerTree`), WebKit's through Web Inspector's `LayerTree` domain, which also reports each layer's backing store. The
+saved grid is six session panels, none working, the first one's composer focused (the grid puts focus there).
+
+WebKit, per panel (the six differ only in how many rows and code blocks are on screen):
+
+| Layer | Why WebKit composites it | Backing store | Needed |
+|---|---|---:|---|
+| `chat-stream`, the conversation's scroller | `overflowScrollingTouch`: an async-scrolled overflow area | 3.5–6.2 MB | yes: the panel scrolls |
+| a code block's `pre` (`.cc-md pre`, `overflow-x: auto`), 0–3 per panel | `overflowScrollingTouch`: a scroller inside the scroller | 0.1–0.8 MB | yes, as designed: code scrolls sideways |
+| **conversation rows** (`[data-index]`), 6–14 per panel | **`overlap`**: each row is a stacking context (placed with `transform`), painted after a composited `pre` | 0–8.4 MB each, ~22 MB in all | **no** |
+| `composer-shell`, the folded composer | `overlap`: it lies over the conversation's scroller (`absolute`, `z-20`) | 1.1–1.3 MB | follows from the layout |
+| `sticky-user`, the pinned question | `positionSticky`: sticky inside an async scroller | 0.5 MB | yes |
+| the panel and its `section` (`overflow-hidden rounded-lg`) | `clipsCompositingDescendants`: a clip for the layers inside | 0 (no backing) | yes |
+| three header controls (`span.inline-flex`, 22×22) | `overlap` | 0 | harmless |
+
+Outside the panels: the root (19.8 MB) and the sidebar's scroller (7.2 MB). Not composited in an idle grid:
+the panel's `isolate`, its `transition-opacity` and rounded border (no layer unless a descendant is composited),
+the orbit ring (only while a session works: `cc-orbit-ring-layer` and its rotating `::before`, 3.7 MB each per working
+panel in the demo grid), `backdrop-filter` (none in a panel), `will-change` (none). In total WebKit reported **119
+layers and 87.6 MB** of backing store; 58 of the layers were rows composited for overlap.
+
+Chromium composites the same scrollers and, after each scrolling `pre`, the rest of the scroller's contents as a layer
+of its own ("Overlaps other composited content"): 50 layers.
+
+**Off-screen app views.** The fixture has no apps. A hidden view is moved to `-200vw`, never `display: none`
+(PinnedApps `OUT_OF_SIGHT`, #309). Reasoning from CSS, not measured: WebKit only keeps tiles for what is inside the
+window's coverage, so an off-screen frame's layers should hold little; a grid app panel's slot clips with
+`rounded-b-[…]` (two corners), which WebKit cannot draw as a plain corner radius, so a composited frame inside it may
+cost a mask layer the size of the panel. Worth one `--layers` run with an app on the grid.
+
+### 10.2 What keeps them in memory: a blinking caret
+
+Taking things away one at a time (`--css`, WebKit, GPU process in MB, one run each; the grid step on `main` was
+216–218 in three runs):
+
+| Taken away | Focus view | Grid |
+|---|---:|---:|
+| nothing | 72 | 216 |
+| the panels' contents (`display: none`) | 72 | 49 |
+| the conversation (`chat-stream`) | 72 | 182 |
+| the conversation's scrolling (`overflow-y: hidden`) | 44 | 188 |
+| code blocks' scrolling (`.cc-md pre { overflow-x: hidden }`) | 62 | 190 |
+| the sticky question | 70 | 213 |
+| the panel's `isolate`, radius, clip and transition | 72 | 219 |
+| the header | 72 | 216 |
+| the composer | 72 | 110 |
+| only the composer's textarea | – | 117 |
+| **focus, nothing else (`--blur`)** | 72 | **114** |
+| the focused panel (`visibility: hidden`) | 76 | 107 |
+| the caret's colour (`caret-color: transparent`) | 72 | 217 |
+
+No layer accounts for the +145 MB; focus does. The grid focuses the selected panel's composer (GridView, so a person
+arriving from a notice can type), and a focused field's caret blinks, a repaint twice a second (a transparent caret
+still blinks). It is the same effect as the activity row's one-second timer (§3): while anything repaints, WebKit
+keeps every layer's backing store live, and lets them go seconds after the page stops painting. With focus taken out,
+six idle panels cost ~40 MB over the focus view. Chromium shows the same: 189 MB with the caret, 80 without, and 66
+with code blocks not scrolling.
+
+So the grid's GPU cost is the backing store of every layer, held for as long as anything paints: a caret, a working
+session's timer, streamed text. Fewer layers is the lever that holds for all three; the caret alone is not a defect.
+Whether the grid should put focus in a composer when it is opened from the sidebar button (rather than only when a
+notice brings the person to a panel) is a product question, left open here.
+
+### 10.3 What changed
+
+**Rows are placed with `top`, not `transform`** (`ChatStream`). A row placed with a transform is a stacking context,
+and a later stacking context that WebKit cannot prove clear of a composited `pre` gets a layer of its own. With `top`
+the rows are plain positioned boxes and stay in their scroller's layer: WebKit's count in the grid went from 119
+layers and 87.6 MB to 61 layers and 66 MB, the same as taking code-block scrolling away (50 layers, 64 MB), with code
+blocks still scrolling. Rows move only when a size is measured, so `top` costs one positioned layout then and nothing
+on scroll. Scroll anchoring is turned off on the list (`overflow-anchor: none`): Chromium's would see a change of
+`top`, which it did not see of a transform, and correct the view on top of the virtualizer. Nothing else in a panel
+was composited without need (§10.1), so nothing else changed; the visual design is untouched.
+`e2e/grid-layers{,-webkit}.spec.ts` checks that no row and no panel carries a transform or `will-change`.
+
+**The startup bundle is split** (target 4). The terminal tab and the run-command window (xterm with its fit addon),
+Settings and the file and diff overlays load the first time they are shown (`components/lazy.tsx`); Settings is
+mounted on first open and kept, so it still remembers its category. Two things stay in the startup bundle: the
+Markdown stack, which a conversation needs on its first frame, and the grid, whose own code is ~6 KB and which, drawn
+a frame late, would put focus in a composer after the hand had moved on (e2e caught tests blurring before the grid was
+there). The web entry keeps the mock platform: e2e sets `window.__mock` the moment the page loads.
+
+| Startup JavaScript (minified) | main | after |
+|---|---:|---:|
+| desktop build (`apps/desktop`) | 1,380 KB in 1 chunk | 969 KB in 14 chunks |
+| web build (`apps/web`, what `perf:memory` serves) | 1,403 KB in 2 chunks | 990 KB in 12 chunks |
+| xterm (its own chunk now, shared by the terminal and the run-command window) | in the startup chunk | 335 KB |
+
+`tooling/startup-bundle.test.ts` builds both entries and fails if xterm, the terminal, the run-command window,
+Settings or either overlay is reachable from the entry by static imports; on `main` all six checks fail in both
+builds. The desktop CSP needs nothing new: chunks load from `'self'` and their CSS through `<link>`; the first-paint
+script and its hash are unchanged.
+
+### 10.4 Before and after
+
+`pnpm perf:memory --steps blank,shell,long,grid`, `main` against this branch built by `--ui-root`, the same
+host; WebKit three runs each, alternating, median (range); Chromium one run each.
+
+| WebKit, MB | main: WebContent | GPU | all processes | after: WebContent | GPU | all processes |
+|---|---:|---:|---:|---:|---:|---:|
+| blank | 13 | 31 | 71 | 14 | 33 | 74 |
+| shell (the app up, nothing open) | 56 (56–61) | 43 | 126 (126–135) | 58 (54–69) | 45 | 132 (123–143) |
+| long (focus view) | 102 (94–103) | 75 (72–76) | 207 (195–209) | 102 (89–108) | **64 (62–65)** | 197 (180–204) |
+| grid, six idle panels | 165 (112–169) | 221 (217–221) | 418 (360–423) | 129 (116–167) | **193 (192–193)** | 354 (338–393) |
+| grid with `--blur` (one run) | 124 | 116 | 271 | 117 | **90** | 237 |
+
+| Chromium, MB | main: renderer after GC | GPU | JS heap after GC | after: renderer after GC | GPU | JS heap after GC |
+|---|---:|---:|---:|---:|---:|---:|
+| shell | 62 | 46 | 10.6 | 62 | 47 | 10.3 |
+| long | 72 | 55 | 13.9 | 72 | 58 | 13.7 |
+| grid | 79 | 183 | 15.6 | 78 | 184 | 15.4 |
+
+**The grid:** WebKit's GPU process holds 28 MB less with six idle panels (221 → 193, every run inside 192–193 against
+217–221), 26 MB less with nothing repainting (116 → 90), and the focus view 11 MB less (75 → 64), since the rows
+there were composited after a code block too. That is the ~22 MB of row backing store §10.1 counted, plus its second
+buffer where it repaints. The rest of the grid's cost is the caret (§10.2) and the six scrollers. Chromium does not
+move: its extra layers come from the code blocks' own scrollers (189 → 66 MB with code-block scrolling taken away),
+not from the rows.
+
+**The shell:** no measurable change. WebKit's WebContent with nothing open is 56 against 58 MB, inside the runs'
+spread, and Chromium's JS heap after a collection 10.6 against 10.3 MB. A module that is loaded but never run costs
+its source text and little more (both engines compile a function the first time it is called), so 410 KB less source
+is a few MB at most. The ~45 MB the shell adds over a blank page is its first render (DOM, styles, fonts, the store),
+not its code; target 4's 10–20 MB was an estimate this measurement does not bear out. The split still shortens what
+has to be parsed before the first frame.
+
+### 10.5 What is left in the grid
+
+1. **The caret.** A focused composer keeps every layer's backing store live in both engines (§10.2: ~100 MB in WebKit,
+   ~110 MB in Chromium for six panels). Whether the grid should focus a composer when opened from the sidebar button,
+   not only when a notice brings the person to a panel, is a product decision. A window in the background does not
+   blink its caret, so this costs only while the window is in front.
+2. **Code blocks scroll sideways** (`.cc-md pre { overflow-x: auto }`), each a composited scroller. In WebKit they are
+   cheap now (0.1–0.8 MB each); in Chromium they still split each conversation's contents into extra layers (189 →
+   66 MB GPU with sideways scrolling off). Wrapping long lines in narrow panels instead would be a design change.
+3. **The folded composer** is composited because it lies over the conversation's scroller (1.1 MB per panel).

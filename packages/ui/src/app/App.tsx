@@ -23,7 +23,6 @@ import { ProjectView } from '../features/project/ProjectView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { Intro } from '../features/onboarding/Intro.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
-import { Settings } from '../features/settings/Settings.jsx'
 import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
@@ -31,6 +30,13 @@ import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 import { isOsFileDrag, markInternalDrags } from '../features/files/dragPath.js'
+import { lazyComponent } from '../components/lazy.jsx'
+
+/*
+ * Not on the first frame for most launches, so it loads when first opened (components/lazy.tsx). The grid stays in the
+ * startup bundle: its own code is ~6 KB, and drawn a frame late it would focus a composer after the hand had moved on.
+ */
+const Settings = lazyComponent(() => import('../features/settings/Settings.jsx').then((m) => m.Settings))
 
 export function App({
   platform,
@@ -237,6 +243,8 @@ export function App({
     }
   }, [setAppFocused])
 
+  const settingsOpen = useStore((s) => s.settingsOpen)
+
   return (
     <PlatformProvider platform={platform}>
       {/*
@@ -270,7 +278,13 @@ export function App({
           {banner}
           <Body />
           <CommandPalette />
-          <Settings />
+          {/*
+            Mounted from the first time it opens, and kept: Settings remembers the category it was
+            left on while closed, as it did when it was mounted from the start.
+          */}
+          <OnceOpened open={settingsOpen}>
+            <Settings />
+          </OnceOpened>
           <ImportAppDialog />
           <Gust />
           <Toast />
@@ -279,6 +293,13 @@ export function App({
       </ErrorBoundary>
     </PlatformProvider>
   )
+}
+
+/** Renders nothing until `open` first turns true, then its children for good (a lazy screen that keeps its state) */
+function OnceOpened({ open, children }: { open: boolean; children: ReactNode }) {
+  const [opened, setOpened] = useState(open)
+  if (open && !opened) setOpened(true)
+  return opened ? children : null
 }
 
 /**

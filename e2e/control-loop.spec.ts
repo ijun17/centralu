@@ -5124,8 +5124,8 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
   const q1End = await stream.evaluate((el) => {
     const rows = [...el.querySelectorAll('div[data-index]')] as HTMLElement[]
     const row = rows.find((r) => (r.textContent ?? '').includes('first question'))!
-    const y = new DOMMatrixReadOnly(getComputedStyle(row).transform).m42
-    return y + row.offsetHeight
+    // The row's place in the list (rows are placed with `top`, #364)
+    return row.offsetTop + row.offsetHeight
   })
   // +80: comfortably covers the banner taking up space in the flow and pushing the list down by
   // its own height
