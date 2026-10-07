@@ -242,6 +242,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DRY_RUN: ${{ needs.guard.outputs.dry_run }}
           ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
+          TARGET: ${{ matrix.target }}
+          # The content signing key (docs/plans/thin-shell.md §4), PKCS#8 PEM. An environment
+          # secret of `npm-publish`, so it exists only in a publishing run, behind the same
+          # approval as NPM_TOKEN; a rehearsal has no environment and signs with a throwaway key.
+          # Only the job that writes a manifest gets it. release-npm.mts takes it out of its own
+          # environment before it starts anything.
+          CONTENT_SIGNING_KEY: ${{ matrix.target == 'darwin-arm64' && secrets.CONTENT_SIGNING_KEY || '' }}
         # The arguments are assembled in the shell rather than with `${{ a && b || c }}`.
         # That expression is not a ternary: it falls through to `c` whenever `b` is falsy,
         # and an empty string is falsy — so the "leave the flag off" branch would have
@@ -258,8 +265,25 @@ jobs:
           # then rehearses instead of publishing.
           if [ "$DRY_RUN" = "false" ]; then args="$args --publish"; fi
           if [ "$ALSO_LATEST" = "true" ]; then args="$args --also-latest"; fi
+          # A publish that writes a content manifest must sign it with a key in
+          # packaging/shell/keys.json, and finds out before anything reaches the registry.
+          if [ "$DRY_RUN" = "false" ] && [ "$TARGET" = "darwin-arm64" ]; then args="$args --require-content-key"; fi
           echo "pnpm release:npm $args"
           pnpm release:npm $args
+
+      # The signed manifest and its signature (not the files, which are the host already in the
+      # package), so the shell's step can be tried against what a release really wrote. After the
+      # publish, so it must never fail the job: a red platform job holds back the shim.
+      - name: Keep the content manifest
+        if: matrix.target == 'darwin-arm64'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: content-manifest-${{ matrix.target }}
+          path: |
+            apps/desktop/src-tauri/target/release/content/content-manifest.json
+            apps/desktop/src-tauri/target/release/content/content-manifest.json.sig
+          if-no-files-found: warn
 
   # The shim last, and only if every platform package above went out.
   #
