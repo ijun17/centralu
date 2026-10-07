@@ -784,6 +784,12 @@ Since the file can be anywhere, the project root is not the boundary here. Three
   SVGs.
 - **At most 10 MB** (`IMAGE_PREVIEW_MAX_BYTES`, shared with the file viewer's preview), checked on the opened file
   and again on what was read, so a file that grows between the two is still refused.
+- **Only this machine.** A `file://` URL that names another host is refused, and on Windows so is any path that
+  resolves to `\\…`: a UNC share (`\\server\share`, `//server/share`, and `file://server/share`, which Node turns into
+  that UNC path on Windows rather than refusing it) or a `\\?\` / `\\.\` device path. Reading one would have the host
+  reach out to whichever machine a reply named, and Windows offers that machine the person's sign-in. This is decided
+  on the resolved path, so a relative path in a session whose folder is a share is refused too. A drive letter mapped to
+  a share is read like any other drive: the person mapped it.
 
 The path is resolved once (`~`, a path relative to the session's folder, a `file://` URL, then `realpath`), and that
 resolved string is the one opened, with `O_NOFOLLOW`, once; the type, the size and the signature are all read through

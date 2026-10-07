@@ -1,7 +1,7 @@
 import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { posix, sep, win32, type PlatformPath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { IMAGE_PREVIEW_MAX_BYTES, type MessageImage, type MessageImageRefusal } from '@cc/protocol'
 
@@ -88,19 +88,32 @@ export function mentions(text: string, written: string): boolean {
 
 /**
  * The absolute path `written` names, on this machine: a `file://` URL, `~` for the home folder, or a path relative to
- * the session's folder. Null for a URL that names another host (`file://server/share`).
+ * the session's folder. Null for a path on another machine: a URL that names another host (`file://server/share`), and
+ * on Windows any path that resolves to `\\…` (`\\server\share`, `//server/share`, `file://server/share`, which Node
+ * turns into that UNC path there instead of refusing it, and the `\\?\` and `\\.\` device paths). Reading one would make
+ * the host reach out to whichever machine a reply named, and Windows would offer that machine the person's sign-in.
+ *
+ * `p` is the path module of the system the host runs on; tests pass `win32` or `posix` to check either on any.
  */
-export function resolveWrittenPath(written: string, cwd: string, home: string = homedir()): string | null {
+export function resolveWrittenPath(
+  written: string,
+  cwd: string,
+  home: string = homedir(),
+  p: PlatformPath = sep === '\\' ? win32 : posix,
+): string | null {
+  const windows = p.sep === '\\'
+  let abs: string
   if (/^file:/i.test(written)) {
     try {
-      return fileURLToPath(written)
+      abs = fileURLToPath(written, { windows })
     } catch {
       return null
     }
-  }
-  if (written === '~') return home
-  if (written.startsWith('~/') || (process.platform === 'win32' && written.startsWith('~\\'))) return resolve(home, written.slice(2))
-  return resolve(cwd, written)
+  } else if (written === '~') abs = home
+  else if (written.startsWith('~/') || (windows && written.startsWith('~\\'))) abs = p.resolve(home, written.slice(2))
+  else abs = p.resolve(cwd, written)
+  if (windows && abs.startsWith('\\\\')) return null
+  return abs
 }
 
 const refuse = (reason: MessageImageRefusal, message: string, file?: string): MessageImage =>

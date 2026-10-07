@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IMAGE_PREVIEW_MAX_BYTES } from '@cc/protocol'
@@ -15,7 +15,8 @@ const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([4, 0, 0, 0]), Buff
 
 let dir = ''
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-msg-image-')))
+  // native: the host answers with the expanded path, and Windows' temp folder can be an 8.3 short name (RUNNER~1)
+  dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-msg-image-')))
 })
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
@@ -63,17 +64,49 @@ describe('mentions', () => {
 
 describe('resolveWrittenPath', () => {
   it('reads a relative path against the session folder, ~ as home, and a file URL as its path', () => {
-    expect(resolveWrittenPath('out/a.png', '/work/p')).toBe('/work/p/out/a.png')
-    expect(resolveWrittenPath('../a.png', '/work/p')).toBe('/work/a.png')
-    expect(resolveWrittenPath('/abs/a.png', '/work/p')).toBe('/abs/a.png')
-    expect(resolveWrittenPath('~/Desktop/a.png', '/work/p', '/home/me')).toBe('/home/me/Desktop/a.png')
-    expect(resolveWrittenPath('~', '/work/p', '/home/me')).toBe('/home/me')
-    expect(resolveWrittenPath('~/x.png', '/work/p')).toBe(join(homedir(), 'x.png'))
-    expect(resolveWrittenPath(pathToFileURL('/tmp/a b.png').href, '/work/p')).toBe('/tmp/a b.png')
+    expect(resolveWrittenPath('out/a.png', '/work/p', '/home/me', posix)).toBe('/work/p/out/a.png')
+    expect(resolveWrittenPath('../a.png', '/work/p', '/home/me', posix)).toBe('/work/a.png')
+    expect(resolveWrittenPath('/abs/a.png', '/work/p', '/home/me', posix)).toBe('/abs/a.png')
+    expect(resolveWrittenPath('~/Desktop/a.png', '/work/p', '/home/me', posix)).toBe('/home/me/Desktop/a.png')
+    expect(resolveWrittenPath('~', '/work/p', '/home/me', posix)).toBe('/home/me')
+    expect(resolveWrittenPath('file:///tmp/a%20b.png', '/work/p', '/home/me', posix)).toBe('/tmp/a b.png')
+    // On the host's own system, with its own home
+    expect(resolveWrittenPath('~/x.png', tmpdir())).toBe(join(homedir(), 'x.png'))
+    expect(resolveWrittenPath(pathToFileURL(join(tmpdir(), 'a b.png')).href, homedir())).toBe(join(tmpdir(), 'a b.png'))
   })
 
   it('refuses a file URL that names another host', () => {
-    expect(resolveWrittenPath('file://server/share/a.png', '/work/p')).toBeNull()
+    expect(resolveWrittenPath('file://server/share/a.png', '/work/p', '/home/me', posix)).toBeNull()
+  })
+
+  it('reads a Windows path with either slash, any drive, ~\\ for home, and a file URL with a drive', () => {
+    const at = (written: string) => resolveWrittenPath(written, 'C:\\work\\p', 'C:\\Users\\me', win32)
+    expect(at('out\\a.png')).toBe('C:\\work\\p\\out\\a.png')
+    expect(at('out/a.png')).toBe('C:\\work\\p\\out\\a.png')
+    expect(at('..\\a.png')).toBe('C:\\work\\a.png')
+    expect(at('D:/shots/a.png')).toBe('D:\\shots\\a.png')
+    expect(at('d:\\shots\\a.png')).toBe('d:\\shots\\a.png')
+    expect(at('~\\Desktop\\a.png')).toBe('C:\\Users\\me\\Desktop\\a.png')
+    expect(at('~/Desktop/a.png')).toBe('C:\\Users\\me\\Desktop\\a.png')
+    expect(at('file:///C:/Users/me/a%20b.png')).toBe('C:\\Users\\me\\a b.png')
+    expect(at('file:///d:/shots/a.png')).toBe('d:\\shots\\a.png')
+  })
+
+  it('refuses on Windows every path that reaches another machine or a device: UNC, in any spelling', () => {
+    const at = (written: string) => resolveWrittenPath(written, 'C:\\work\\p', 'C:\\Users\\me', win32)
+    for (const written of [
+      // Node turns this into \\server\share\a.png on Windows instead of refusing it as it does elsewhere
+      'file://server/share/a.png',
+      'file:////server/share/a.png',
+      '\\\\server\\share\\a.png',
+      '//server/share/a.png',
+      '\\\\?\\UNC\\server\\share\\a.png',
+      '\\\\.\\pipe\\a.png',
+    ]) {
+      expect(at(written), written).toBeNull()
+    }
+    // And so does a session whose folder is a share: the relative path lands on it
+    expect(resolveWrittenPath('a.png', '\\\\server\\share\\p', 'C:\\Users\\me', win32)).toBeNull()
   })
 })
 

@@ -97,6 +97,12 @@ describe('an image in a reply', () => {
     expect(render('![a](</tmp/my shots/a.png>)')).toContain('data-path="/tmp/my shots/a.png"')
   })
 
+  it('asks for a Windows path as the reply wrote it: backslashes, a drive, a file URL with a drive', () => {
+    expect(render('![a](C:\\Users\\me\\shots\\a.png)')).toContain('data-path="C:\\Users\\me\\shots\\a.png"')
+    expect(render('![a](C:/Users/me/shots/a.png)')).toContain('data-path="C:/Users/me/shots/a.png"')
+    expect(render('![a](file:///C:/Users/me/a.png)')).toContain('data-path="file:///C:/Users/me/a.png"')
+  })
+
   it('leaves a web image an ordinary img, as before', () => {
     expect(render('![logo](https://example.com/logo.png)')).toContain('<img src="https://example.com/logo.png" alt="logo"/>')
   })
