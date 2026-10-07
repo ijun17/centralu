@@ -1,0 +1,21 @@
+[package]
+name = "centralu-keeper-core"
+description = "The keeper and the host supervisor, without Tauri"
+version.workspace = true
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[lib]
+name = "centralu_keeper_core"
+
+# Keep this list short and free of anything that links a GUI framework: the keeper executable
+# (`centralu-keeper`) links this crate and nothing of the window's (#440). Every entry here was
+# already a dependency of the app.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# `flock`, `setsid`, `umask`, the peer uid of a unix socket, descriptor passing (#280).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

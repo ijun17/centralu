@@ -1,8 +1,20 @@
+# The app and the keeper's own crate (`keeper/`, #440) build as one workspace: one Cargo.lock, one
+# target folder, one version. The version lives here once; tooling/brand.test.ts checks it.
+[workspace]
+members = ["keeper"]
+# Both, so `cargo test --lib` on this manifest (CI, AGENTS.md) still runs the keeper's tests.
+default-members = [".", "keeper"]
+
+[workspace.package]
+version = "0.1.0-beta.11"
+
 [package]
 name = "centralu"
-version = "0.1.0-beta.11"
+version.workspace = true
 description = "Agent control tower"
 edition = "2021"
+# Two executables now (the window and `centralu-keeper`); `cargo run` and `tauri dev` start this one.
+default-run = "centralu"
 # Raised from 1.77 by the `trash` dependency below, which declares 1.85. CI builds on
 # `stable`, so this is a statement of what the tree actually needs, not a new constraint.
 rust-version = "1.85"
@@ -10,6 +22,29 @@ rust-version = "1.85"
 [lib]
 name = "centralu_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "centralu"
+path = "src/main.rs"
+
+# The keeper as its own executable (#440, thin-shell plan §5). It links `centralu-keeper-core`
+# and nothing of Tauri, so it carries no webview and could be started from outside the bundle.
+# Tauri bundles every binary of this package next to the main one (`Contents/MacOS/` on macOS,
+# `usr/bin/` in the AppImage and the .deb), which is where the window looks for it.
+#
+# `required-features`: Windows has no keeper (it is built on unix sockets, descriptor passing and
+# `flock`), and Tauri leaves a binary out of the bundle when its required features are not among
+# the build's `build.features`. tauri.conf.json names `keeper-exe`; tauri.windows.conf.json does
+# not. Cargo still builds it everywhere through `default`, so a plain `cargo build` (the keeper
+# scripts, CI) produces both executables.
+[[bin]]
+name = "centralu-keeper"
+path = "src/bin/centralu-keeper.rs"
+required-features = ["keeper-exe"]
+
+[features]
+default = ["keeper-exe"]
+keeper-exe = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -27,6 +62,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The keeper, the host supervisor and the keeper client (#440).
+centralu-keeper-core = { path = "keeper" }
 
 # Delete means **sending to the trash** (#18). It has to be a real OS trash, not an unlink
 # that moves the file to a temp folder, and the Node sidecar cannot do that, so it lands here.

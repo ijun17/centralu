@@ -7,7 +7,7 @@ import { createConnection, type Socket } from 'node:net'
  * Under a keeper (`CC_KEEPER=1`) the long-lived children — claude, codex app-server, terminals and
  * project commands — are spawned by the keeper over `<data>/children.sock`, so a host that crashes,
  * restarts or is switched to another build leaves them running and the next host re-attaches.
- * The wire protocol is the keeper's (`apps/desktop/src-tauri/src/keeper/children/mod.rs`):
+ * The wire protocol is the keeper's (`apps/desktop/src-tauri/keeper/src/keeper/children/mod.rs`):
  *
  *   control  one connection per host: `hello`, then `{rid, op}` requests and pushed events
  *            (`exit` — a child ended; `stop` — the keeper is stopping, stop your children)

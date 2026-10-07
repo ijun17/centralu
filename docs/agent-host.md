@@ -1,6 +1,6 @@
 # Agent Host — the Node sidecar design
 
-A standalone Node process. In dev the developer starts it directly (`pnpm host`); in the packaged app the keeper (`centralu --keeper`, §4.1) spawns and watches it, and in `pnpm app:dev` the Tauri app does. **It has to behave the same whether or not a UI is there** — the UI can be closed and reopened many times (reconnecting) and the host keeps its sessions.
+A standalone Node process. In dev the developer starts it directly (`pnpm host`); in the packaged app the keeper (`centralu-keeper`, §4.1) spawns and watches it, and in `pnpm app:dev` the Tauri app does. **It has to behave the same whether or not a UI is there** — the UI can be closed and reopened many times (reconnecting) and the host keeps its sessions.
 
 ## 1. Internal structure
 
@@ -421,12 +421,12 @@ Thanks to this design, half of FR-10 (restore on restart) is the same code path 
 
 ### 4.1 Who holds the host: the keeper (#280, option C step 1)
 
-In the packaged app the host's parent is the keeper (`centralu --keeper`, the app's own executable in a
-mode; [architecture.md](architecture.md) §4.1), not the app. The keeper launches the host with
+In the packaged app the host's parent is the keeper (`centralu-keeper`, an executable of its own next to the
+window's, #440; [architecture.md](architecture.md) §4.1), not the app. The keeper launches the host with
 `--port 0 --watch-parent --db <data>/store.db` and `CC_DATA_DIR=<data>`, keeps its stdin pipe, and restarts
 it by the rules the app used before: five consecutive failures, a 30 s stable-uptime reset, and an
-immediate stop on a lock conflict or a store only a newer build can read (`host_proc.rs`, shared by the
-keeper and the app's direct path). If the keeper dies, the host sees EOF on that pipe and shuts down.
+immediate stop on a lock conflict or a store only a newer build can read (`host_proc.rs` in the
+`apps/desktop/src-tauri/keeper` crate, shared by the keeper and the app's direct path). If the keeper dies, the host sees EOF on that pipe and shuts down.
 
 **Per-build copies.** Before each launch the keeper copies the bundle's `resources/host` folder to
 `<data>/hosts/<key>/` (temporary folder, then rename) and runs `main.mjs` from there. The key is the commit
@@ -452,7 +452,7 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. `relaunched`: this window is the one an announced relaunch started (§4.5) |
 | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is about to relaunch itself to apply an update (#352): for `n` s (60 by default, at most 300) no window attached does not stop the keeper, whatever background mode says. The next attach spends it |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit completely", and "Restart completely", after which the window starts a keeper of its own build) |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its own executable) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A second `switch` during a swap is refused |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sends its own executable, which turns into the keeper beside it) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A second `switch` during a swap is refused |
 | `{"op":"upgrade","exe":…,"source":…}` | hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4) |
 | `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
@@ -544,7 +544,7 @@ The design is in [architecture.md](architecture.md) §4.3. Under the keeper (`CC
 that would not bind), the host spawns its own children and every ending stops them, exactly as without a keeper.
 `pnpm dev`, e2e, a debug app and Windows never take this path.
 
-**The child socket** (`keeper/children/` in the desktop crate, `keeper/children-client.ts` here). The first line
+**The child socket** (`keeper/children/` in the desktop keeper crate, `keeper/children-client.ts` here). The first line
 of a connection says what it is. A *control* connection (`{"op":"hello","protocol":1}`), one per host, carries
 requests `{"rid":n,"op":…}` answered `{"rid":n,"ok":…}` and two pushed events: `{"event":"exit","id","code","signal"}`
 and `{"event":"stop"}` (the keeper is stopping for good; stop your children). An *attach* connection

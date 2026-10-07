@@ -6,7 +6,7 @@
  *
  * Builds the desktop binary with `cargo build` into a target folder under /tmp (never
  * `tauri build`, never anything under `target/release/bundle`), bundles the repository's host with
- * `pnpm bundle:host`, and runs `centralu --keeper` against a temporary `CC_DATA_DIR`. A
+ * `pnpm bundle:host`, and runs `centralu-keeper --keeper` against a temporary `CC_DATA_DIR`. A
  * stand-in for the app attaches from a child process, so "the app dies" is a real SIGKILL of a real
  * process.
  *
@@ -54,7 +54,9 @@ import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-pr
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
-const BIN = join(TARGET, 'debug', 'centralu')
+// The keeper executable (#440), started the way a window of this build starts it.
+// keeper-handoff-integration.mjs covers the window's executable turning into it.
+const BIN = join(TARGET, 'debug', 'centralu-keeper')
 const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
 const FAKE_BUNDLE = '/tmp/centralu-keeper-test/Centralu.app'
 

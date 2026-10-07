@@ -95,11 +95,11 @@ agent-host (node, run standalone)         ▼
 
 ### 4.1 키퍼: 호스트가 창보다 오래 산다 (#280, 옵션 C 1단계)
 
-패키지된 앱에서는 Tauri 앱이 더 이상 호스트의 부모가 아니다. 호스트는 **키퍼**가 쥔다: 같은 Centralu 실행 파일을
-`centralu --keeper`로 띄운 것으로, 앱에서 떨어져 자기 세션에서 돈다.
+패키지된 앱에서는 Tauri 앱이 더 이상 호스트의 부모가 아니다. 호스트는 **키퍼**가 쥔다: 창의 실행 파일 옆에 실린
+자기 실행 파일 `centralu-keeper`(#440)로, 앱에서 떨어져 자기 세션에서 돈다.
 
 ```
-Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own session)
+Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
    │                 unix socket     │ launch · watch · restart · swap
    │                 <data>/keeper.sock, 0600
    │                                 │
@@ -209,7 +209,8 @@ macOS와 Linux에서 pid와 디스크립터를 지키지만 Windows에는 그에
 
 ```
 키퍼 A (도는 빌드)                                   키퍼 B (새 빌드, 자기 번들에서)
- 1  B를 띄운다: centralu --keeper --take-over-fd 3  ──▶  hello
+ 1  B를 띄운다: centralu-keeper --keeper           ──▶  hello
+            --take-over-fd 3
  2  얼린다: 받지 않고, 모든 중계를 세우고,
     호스트 stdout을 멈추고, 자식 표를 얼리고,
     호스트 사본을 만들지도 지우지도 않는다

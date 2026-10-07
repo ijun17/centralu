@@ -3,8 +3,8 @@
 //! Two callers share this module (#280, option C step 1):
 //!   - the app's **direct** path (`pnpm app:dev`, debug builds, non-unix targets), where the app
 //!     itself is the host's parent, as it always was;
-//!   - the **keeper** (`centralu --keeper`), a detached copy of the same executable that holds
-//!     the host so that quitting or replacing the app does not end it.
+//!   - the **keeper** (`centralu-keeper`, #440), a detached executable of its own that holds the
+//!     host so that quitting or replacing the app does not end it.
 //!
 //! The restart and backoff rules used to live inside `sidecar.rs`, tied to an `AppHandle`. They
 //! moved here unchanged so the keeper restarts a crashed host by exactly the same rules the app
@@ -1115,10 +1115,10 @@ pub fn source_launch(extra: &[String]) -> HostLaunch {
 }
 
 pub fn workspace_root() -> String {
-    // Two levels up from src-tauri/ is apps/, three levels up is the workspace root.
+    // This crate is apps/desktop/src-tauri/keeper: four levels up is the workspace root.
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
-        .nth(3)
+        .nth(4)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| ".".to_string())
 }
@@ -1469,6 +1469,13 @@ fn check_node_version(path: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The dev host runs the source from the workspace root; moving this crate (#440) moved the
+    /// root one folder further up.
+    #[test]
+    fn the_workspace_root_is_the_repository_root() {
+        assert!(Path::new(&workspace_root()).join("pnpm-workspace.yaml").is_file(), "{}", workspace_root());
+    }
 
     /// A store a newer Centralu wrote is reported at once, like a lock conflict; a plain crash is
     /// still retried (#292).

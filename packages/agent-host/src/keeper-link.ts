@@ -4,7 +4,7 @@ import { hostBusy, type ActivitySnapshot } from './idle.js'
 /**
  * What the host tells the keeper, and what it says about its own build (#280, option C step 1).
  *
- * The keeper is the Centralu executable run as `centralu --keeper`. It launches this host from a
+ * The keeper is Centralu's `centralu-keeper` executable (#440). It launches this host from a
  * per-build copy under the data folder and passes the record of where that copy came from in
  * `CC_HOST_SOURCE`. The host does not parse the keeper's protocol and the keeper does not parse
  * the host's; the only things that cross are this record (in) and one activity line (out).

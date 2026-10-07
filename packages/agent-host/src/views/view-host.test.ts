@@ -315,7 +315,7 @@ describe('ViewHost — an open view holds the app open', () => {
 })
 
 /**
- * The keeper's front door as far as views care (apps/desktop/src-tauri/src/keeper/front_door.rs):
+ * The keeper's front door as far as views care (apps/desktop/src-tauri/keeper/src/keeper/front_door.rs):
  * one loopback port that relays bytes, unread, to whichever host is current.
  */
 async function frontDoor(): Promise<{ port: number; pointAt(port: number): void; close(): Promise<void> }> {

@@ -4,10 +4,12 @@
 //! the badge, shortcuts, opening the IDE) and window management. The conversation, state and
 //! screens all live on the webview side (docs/architecture.md §4).
 
-mod host_proc;
-mod ide;
+// The host supervisor and the keeper live in a crate of their own with no Tauri in it (#440), so
+// the keeper executable (`src/bin/centralu-keeper.rs`) can link them without the webview.
+use centralu_keeper_core::host_proc;
 #[cfg(unix)]
-pub mod keeper;
+pub use centralu_keeper_core::keeper;
+mod ide;
 mod path_safety;
 mod sidecar;
 
@@ -15,7 +17,9 @@ use path_safety::assert_safe_native_path;
 use sidecar::{HostBuild, HostInfo, RelaunchInfo, Supervisor};
 
 /// Whether this process was started as the keeper (`centralu --keeper`, #280). `main()` asks
-/// before anything else, so keeper mode never builds the Tauri app.
+/// before anything else, so keeper mode never builds the Tauri app. Since #440 the keeper is
+/// `centralu-keeper`; this form stays for keepers and windows of earlier builds that start the
+/// window's executable this way.
 pub fn is_keeper(args: &[String]) -> bool {
     #[cfg(unix)]
     {
@@ -28,11 +32,13 @@ pub fn is_keeper(args: &[String]) -> bool {
     }
 }
 
-/// Runs the keeper and returns its exit code.
+/// Becomes the keeper: `exec`s the `centralu-keeper` next to this executable with the same
+/// arguments and descriptors, or runs the keeper here when there is none. Returns the exit code of
+/// a keeper run here.
 pub fn run_keeper(args: &[String]) -> i32 {
     #[cfg(unix)]
     {
-        keeper::server::run(args)
+        keeper::exe::run_from_window(args)
     }
     #[cfg(not(unix))]
     {

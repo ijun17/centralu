@@ -168,6 +168,43 @@ function checkLinuxHost(pkgDir: string): void {
   console.log('  unpacked host present (for centralu serve)')
 }
 
+/** The keeper's own executable, shipped next to the window's on macOS and Linux (#440) */
+const KEEPER_EXE = 'centralu-keeper'
+
+/**
+ * The keeper executable is there, executable, the right machine, and links no GUI framework.
+ *
+ * The last part is the reason it is a separate executable: the window's links WebKit and AppKit
+ * (or webkit2gtk), and a keeper that pulled them in again would not be one that can later start
+ * from outside the bundle. It is linked from a crate with no Tauri in it, so this only fails if
+ * someone adds such a dependency there.
+ */
+function checkKeeperExe(path: string, machine: string): void {
+  if (!existsSync(path)) fail(`the keeper executable is missing: ${path}`)
+  const mode = statSync(path).mode
+  if ((mode & 0o111) === 0) fail(`the keeper executable has no exec bit (${mode.toString(8)}): ${path}`)
+  const arch = out('/usr/bin/file', ['-b', path])
+  if (!arch.includes(machine)) fail(`the keeper executable is not ${machine}: ${arch}`)
+  const libs =
+    process.platform === 'darwin' ? out('/usr/bin/otool', ['-L', path]) : out('/usr/bin/ldd', [path])
+  if (/WebKit|AppKit|webkit2gtk|gtk-3|javascriptcore/i.test(libs)) fail(`the keeper executable links a GUI framework:\n${libs}`)
+  console.log(`  ${KEEPER_EXE} present, ${machine}, no GUI framework linked`)
+}
+
+/**
+ * `checkKeeperExe` for the keeper inside an AppImage. The AppImage runtime extracts by itself
+ * (`--appimage-extract <pattern>`, into `squashfs-root/` of the working folder) without FUSE, so
+ * this runs on any runner that can build one. The folder is under `target/`, removed afterwards.
+ */
+function checkKeeperInAppImage(appImage: string, machine: string): void {
+  const dir = join(ROOT, 'apps/desktop/src-tauri/target/release/keeper-check')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  execFileSync(appImage, ['--appimage-extract', `usr/bin/${KEEPER_EXE}`], { cwd: dir, stdio: 'ignore' })
+  checkKeeperExe(join(dir, 'squashfs-root/usr/bin', KEEPER_EXE), machine)
+  rmSync(dir, { recursive: true, force: true })
+}
+
 type Target = {
   /** npm package suffix (`centralu-<id>`) *and* the `packaging/npm/` directory name */
   id: string
@@ -228,6 +265,10 @@ const TARGETS: Record<string, Target | undefined> = {
       const arch = out('/usr/bin/file', ['-b', bin])
       if (!arch.includes('arm64')) fail(`not arm64: ${arch}`)
       console.log(`  ${arch.split(',')[0]}`)
+
+      // (d) the keeper executable beside it (#440). Without it the app still runs (the window's
+      // executable runs the keeper itself), so nothing else would notice it missing.
+      checkKeeperExe(join(dest, 'Contents/MacOS', KEEPER_EXE), 'arm64')
     },
   },
 
@@ -292,6 +333,9 @@ const TARGETS: Record<string, Target | undefined> = {
       const arch = out('/usr/bin/file', ['-b', dest])
       if (!arch.includes('x86-64')) fail(`not x86-64: ${arch}`)
       console.log(`  ${arch.split(',')[0]}`)
+
+      // (d) the keeper executable inside the AppImage (#440), for `CC_USE_KEEPER=1` there
+      checkKeeperInAppImage(dest, 'x86-64')
     },
   },
 
@@ -341,6 +385,9 @@ const TARGETS: Record<string, Target | undefined> = {
       const arch = out('/usr/bin/file', ['-b', dest])
       if (!arch.includes('aarch64')) fail(`not aarch64: ${arch}`)
       console.log(`  ${arch.split(',')[0]}`)
+
+      // (d) the keeper executable inside, same as linux-x64
+      checkKeeperInAppImage(dest, 'aarch64')
     },
   },
 

@@ -310,7 +310,7 @@ A host started with `centralu serve` on another machine is reached by the app th
 
 ## The keeper's control socket
 
-The keeper (`centralu --keeper`, #280) is a new trust boundary: through its socket a process can read the front
+The keeper (`centralu-keeper`, #280, #440) is a new trust boundary: through its socket a process can read the front
 door's port and token, stop the host, and make the keeper run a host from another folder (`switch`). The rule is the same
 as for the token itself, which only this user can read: **only this user's processes get in.**
 

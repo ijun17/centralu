@@ -684,7 +684,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 └──────────────────────────────┬────────────────────────────────────────┘
                                │ unix socket (attach, host info, stop, switch)
 ┌──────────────────────────────┴────────────────────────────────────────┐
-│  keeper — the same executable as `centralu --keeper`, detached         │
+│  keeper — `centralu-keeper`, its own executable, detached              │
 │  · launches, watches, restarts and swaps the host · per-build copies  │
 │  · hands itself, and everything it holds, to a new build's keeper     │
 │  · the front door: one stable port and token, relayed to the host     │
