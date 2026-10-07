@@ -2957,6 +2957,37 @@ export class Store {
   }
 
   /**
+   * The text of this session's replies that contain `needle`: the agent's own words (`assistant` `text` rows), and
+   * those of the subagents it launched, which the window shows under their cards. The person's messages, reasoning and
+   * tool output are not replies. Asked by `messages.image`, which reads only an image a reply names.
+   *
+   * `instr` over the stored JSON narrows the rows in SQLite; the needle is JSON-escaped the way the payload was
+   * written, so a path with a quote or a backslash is still found. The caller decides on the parsed text.
+   */
+  replyTextsContaining(sessionId: string, needle: string): string[] {
+    const escaped = JSON.stringify(needle).slice(1, -1)
+    const rows = this.db
+      .prepare(
+        `SELECT payload FROM messages
+           WHERE session_id = ? AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0
+         UNION ALL
+         SELECT payload FROM subagent_messages
+           WHERE session_id = ? AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0`,
+      )
+      .all(sessionId, escaped, sessionId, escaped) as { payload: string }[]
+    const texts: string[] = []
+    for (const r of rows) {
+      try {
+        const text = (JSON.parse(r.payload) as { text?: unknown }).text
+        if (typeof text === 'string') texts.push(text)
+      } catch {
+        // A row that is not JSON names nothing
+      }
+    }
+    return texts
+  }
+
+  /**
    * The conversation **after** afterSeq — loadMessages's forward-going counterpart (#66).
    * Used to read "what was said next" from a spot recall handed back. Same rule: one row is one message (#77).
    */

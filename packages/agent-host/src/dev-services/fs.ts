@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { wireBaseName, wireJoin } from '@cc/protocol'
+import { IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
 
@@ -36,7 +36,7 @@ export type FsFile = {
 }
 
 const MAX_TEXT = 2_000_000 // past 2MB this is truncated for display (the viewer virtual-scrolls anyway)
-const MAX_IMAGE_PREVIEW = 10_000_000 // 10MB — a cap that can absorb the base64 and WebSocket copy too
+const MAX_IMAGE_PREVIEW = IMAGE_PREVIEW_MAX_BYTES
 const READ_TEXT_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW
 
 /** Raster formats the viewer can safely show with `img`. SVG is left to the text viewer. */

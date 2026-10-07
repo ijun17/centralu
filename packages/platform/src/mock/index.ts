@@ -31,6 +31,7 @@ import type {
   SavedCommand,
   SessionInfo,
   StoredMessage,
+  MessageImage,
   UsageSnapshot,
   ToolName,
   ToolStatus,
@@ -620,6 +621,13 @@ export class MockPlatform implements Platform {
   /** For tests: what was sent to the trash and what was opened in the file manager (#18/#19) */
   readonly trashed: string[] = []
   readonly revealed: string[] = []
+  /**
+   * For tests: what `messages.image` answers, by the path the reply wrote. A path not here is "not found", as on a host
+   * whose disk does not have it; whether a reply names it is the host's to check (agent-host message-image tests).
+   */
+  readonly messageImages = new Map<string, MessageImage>()
+  readonly messageImageCalls: { sessionId: string; path: string }[] = []
+  readonly revealedImages: string[] = []
 
   /** The handoff note placed in the host's data folder (#142) — path → text. Not mixed with project files (fsState) */
   handoffNotes = new Map<string, string>()
@@ -654,6 +662,10 @@ export class MockPlatform implements Platform {
     trash: async (_projectId: string, path: string) => {
       this.memoryFs.trash(path)
       this.trashed.push(path)
+      return { supported: true }
+    },
+    revealMessageImage: async (file: string) => {
+      this.revealedImages.push(file)
       return { supported: true }
     },
     reveal: async (projectId: string, path: string) => {
@@ -2036,6 +2048,10 @@ export class MockPlatform implements Platform {
       const all = this.messages.get(sessionId) ?? []
       const filtered = beforeSeq ? all.filter((m) => m.seq < beforeSeq) : all
       return filtered.slice(-limit)
+    },
+    messageImage: async (sessionId: string, path: string): Promise<MessageImage> => {
+      this.messageImageCalls.push({ sessionId, path })
+      return this.messageImages.get(path) ?? { ok: false, reason: 'not_found', message: `There is no file at ${path}` }
     },
     loadSubagentMessages: async (sessionId: string, parentCallId: string, afterSeq = 0, limit = SUBAGENT_STEPS_PAGE) => {
       this.subagentReads += 1

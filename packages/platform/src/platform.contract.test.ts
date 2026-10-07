@@ -1090,3 +1090,45 @@ describe('Platform contract: app import (web + real host)', () => {
     }
   })
 })
+
+/**
+ * A local image a reply names, across the real wire: the schema carries the answer both ways, a refusal arrives as an
+ * answer with its reason rather than an error, and a browser cannot reveal the file.
+ */
+describe('Platform contract: an image a reply names (web + real host)', () => {
+  it('reads one a reply wrote, refuses one no reply wrote, and says a browser cannot reveal it', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-reply-image-')))
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+    writeFileSync(join(dir, 'shot.png'), png)
+    writeFileSync(join(dir, 'other.png'), png)
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters) })
+    const port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+      const p = await platform.projects.add(dir)
+      const s = await platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+      // The echo agent repeats the message as its reply, so the reply names the path
+      await platform.agents.send(s.id, `![shot](${join(dir, 'shot.png')})`)
+      expect(await platform.agents.messageImage(s.id, join(dir, 'shot.png'))).toEqual({
+        ok: true,
+        mime: 'image/png',
+        data: png.toString('base64'),
+        file: join(dir, 'shot.png'),
+      })
+      expect(await platform.agents.messageImage(s.id, join(dir, 'other.png'))).toMatchObject({ ok: false, reason: 'not_mentioned' })
+      const reveal = await platform.fs.revealMessageImage(join(dir, 'shot.png'))
+      expect(reveal.supported).toBe(false)
+      expect(reveal.reason).toMatch(/\S/)
+    } finally {
+      await platform.dispose()
+      await mgr.disposeAll()
+      await server.close()
+      store.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

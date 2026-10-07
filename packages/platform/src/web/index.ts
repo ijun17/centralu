@@ -206,6 +206,9 @@ class WebAgentPort implements AgentPort {
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit = SUBAGENT_STEPS_PAGE) {
     return this.rpc.call('messages.subagent', { sessionId, parentCallId, afterSeq, limit })
   }
+  messageImage(sessionId: string, path: string) {
+    return this.rpc.call('messages.image', { sessionId, path })
+  }
   commands(sessionId: string) {
     return this.rpc.call('agents.commands', { sessionId })
   }
@@ -471,6 +474,12 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
         const { path: abs } = await rpc.call('fs.resolve', { projectId, path })
         await opts.nativeFiles.reveal(abs)
+        return { supported: true }
+      },
+      // The host already resolved this one when it read the image; the shell still refuses a relative or linked path
+      revealMessageImage: async (file) => {
+        if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
+        await opts.nativeFiles.reveal(file)
         return { supported: true }
       },
     },

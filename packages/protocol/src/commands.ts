@@ -623,6 +623,40 @@ export type TrashedSession = z.infer<typeof TrashedSession>
  */
 export const ATTACHMENT_MAX_BASE64 = Math.ceil((32 * 1048576) / 3) * 4
 
+/**
+ * Why `messages.image` did not return a picture. The reply shows this in place of the image, with the path the
+ * agent wrote, so a word the person can act on rather than the browser's broken-image mark.
+ *
+ *   not_mentioned  the path is not in any of this session's own replies: the call reads only what the agent wrote
+ *   not_found      nothing is there (or the path does not name a file on that machine)
+ *   not_an_image   the bytes are not PNG, JPEG, GIF or WebP, whatever the name says (a folder, a text file, an SVG)
+ *   too_large      past `IMAGE_PREVIEW_MAX_BYTES`
+ *   unreadable     there, but the host may not read it (permissions)
+ *
+ * A newer host may add a reason; an older window reads it through `parseTolerant` and shows the message as it came.
+ */
+export const MessageImageRefusal = z.enum(['not_mentioned', 'not_found', 'not_an_image', 'too_large', 'unreadable'])
+export type MessageImageRefusal = z.infer<typeof MessageImageRefusal>
+
+/**
+ * The largest image the host reads for the window to show: the file viewer's preview (`fs.readFile`) and a local image
+ * a reply names (`messages.image`). 10 MB leaves room for the base64 and WebSocket copies of it.
+ */
+export const IMAGE_PREVIEW_MAX_BYTES = 10_000_000
+
+/**
+ * A local image an agent's reply names, as `messages.image` answers it.
+ *
+ * `file` is the absolute path the host resolved and opened, on the host's own machine, present when there is a file
+ * there to show in a file manager. It is what "Show in Finder" hands to the shell; the window never builds one. The
+ * hub drops it from a linked machine's answer, since that path is not on this computer.
+ */
+export const MessageImage = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), mime: z.string(), data: z.string(), file: z.string().optional() }),
+  z.object({ ok: z.literal(false), reason: MessageImageRefusal, message: z.string(), file: z.string().optional() }),
+])
+export type MessageImage = z.infer<typeof MessageImage>
+
 export const RpcMethods = {
   'agents.createSession': { params: CreateSessionParams, result: SessionInfo },
   'agents.send': {
@@ -984,6 +1018,18 @@ export const RpcMethods = {
   'fs.resolve': {
     params: z.object({ projectId: ProjectId, path: z.string() }),
     result: z.object({ path: z.string() }),
+  },
+  /**
+   * A local image an agent wrote into a reply as Markdown (`![alt](/path/to/shot.png)`). The window cannot load
+   * a file path itself (its origin is the app, and its CSP takes images from `data:` and `blob:` only), so the host
+   * reads it: wherever it is on that machine, but only a path that appears in one of this session's own replies, only
+   * PNG, JPEG, GIF or WebP by their bytes, and at most `IMAGE_PREVIEW_MAX_BYTES` (docs/security-boundaries.md,
+   * "Images a reply names"). `path` is the string as the reply wrote it: `~`, a path relative to the session's folder
+   * and a `file://` URL are resolved by the host.
+   */
+  'messages.image': {
+    params: z.object({ sessionId: SessionId, path: z.string().min(1).max(4096) }),
+    result: MessageImage,
   },
   'messages.search': {
     params: z.object({ query: z.string(), limit: z.number().optional() }),

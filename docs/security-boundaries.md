@@ -757,6 +757,53 @@ Limits:
 Do not expand the scope of these claims without stronger implementation and platform-level
 validation. In particular, do not describe these checks as complete filesystem isolation.
 
+## Images a reply names
+
+An agent often answers with a screenshot it saved: `![grid](/Users/me/Desktop/run/.test/r1/grid.png)`. The window
+cannot load that path itself (its origin is the app, and the desktop CSP's `img-src` is `'self' data: blob:`), so
+WKWebView drew a broken-image mark. The owner chose (2026-10-07) to show such an image **wherever it is on disk**, so
+the window asks the session's host for it (`messages.image`, [protocol.md](protocol.md) §3) and draws the bytes as a
+`data:` URL. The CSP is unchanged: a web image in a reply stays an ordinary `<img>`, and whether it loads is the CSP's
+answer, as before.
+
+Since the file can be anywhere, the project root is not the boundary here. Three checks are, each on its own
+(`dev-services/message-image.ts`, `SessionManager.messageImage`):
+
+- **Only a path this session's replies wrote.** The host looks for the path in the session's own stored replies
+  (`assistant` `text` rows, its subagents' included) and in the reply still streaming. The person's messages, reasoning
+  and tool output do not count, and neither does another session's reply. The match must stand alone, bounded by
+  space, a bracket or a quote, so a reply that wrote `/x/a.png` does not admit `a.png` (which resolves against the
+  session's folder to a different file). This is asked before the path is resolved or anything on disk is touched: a
+  refused path learns nothing about whether it exists. Without it, whoever holds the WebSocket token could read any
+  image on the machine through this call.
+- **Only a real image, by its bytes.** PNG, JPEG, GIF or WebP by their signatures, whatever the name says. A text file
+  named `.png`, or a link named `.png` that points at one, is refused, and its contents are not sent. SVG is refused:
+  it has no signature, so accepting it would mean accepting any text file that contains `<svg`, and it is a document
+  that can carry script and external references, which the window would be taking on the strength of an agent's
+  sentence (`<img>` does not run them, but nothing here needs it to). The project file viewer still shows a project's
+  SVGs.
+- **At most 10 MB** (`IMAGE_PREVIEW_MAX_BYTES`, shared with the file viewer's preview), checked on the opened file
+  and again on what was read, so a file that grows between the two is still refused.
+
+The path is resolved once (`~`, a path relative to the session's folder, a `file://` URL, then `realpath`), and that
+resolved string is the one opened, with `O_NOFOLLOW`, once; the type, the size and the signature are all read through
+that one descriptor. A refusal comes back as an answer with its reason (not mentioned, not found, not an image, too
+large, unreadable), shown in the picture's place with the path the reply wrote. When there is a file there, the answer
+carries its resolved path, and the window offers to reveal it in the file manager through the shell's `reveal_path`,
+which still refuses a relative path or one with a link in it. For a session on a linked machine the hub drops that path
+from the answer (`links/routes.ts`) and the window offers no reveal: the file is on the other machine.
+
+Limits:
+
+- **What the agent writes decides what is shown.** Text an agent read (a web page, a repository file) can steer it into
+  naming any image on the machine. The image is then shown to the person in the window and sent nowhere else; the
+  agent's own tools could already read the same file with the person's permissions. The checks keep the call from being
+  a general file reader, not an agent from pointing at a picture.
+- **macOS asks per protected folder.** Reading a file under Desktop, Documents or Downloads is the host reading it, and
+  macOS may ask once for that folder in Centralu's name, as it does when a project is there.
+- **Same-user races** remain as in "Project files and native handoff": a directory along the path can be swapped
+  between `realpath` and `open`. What is read is still checked as an image under the cap, through one descriptor.
+
 ## Windows (#14)
 
 Nothing here has been run on a Windows machine by a person yet; the Windows CI job runs the unit
