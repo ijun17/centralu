@@ -280,16 +280,15 @@ fn open_beneath(root: &OwnedFd, rel: &str) -> Result<File> {
         let dirfd = owned.as_ref().unwrap_or(root).as_raw_fd();
         let last = i == parts.len() - 1;
         let c = cstr(part.as_bytes(), rel)?;
-        // O_NONBLOCK on the last component: opening a FIFO for reading would otherwise wait for a
-        // writer forever. It changes nothing for a regular file.
+        // O_NONBLOCK: opening a FIFO for reading would otherwise wait for a writer forever. On a
+        // folder component O_DIRECTORY already refuses a FIFO before opening it (ENOTDIR, macOS
+        // 27); O_NONBLOCK there too costs nothing on a system that checks later. It changes
+        // nothing for a regular file or a folder.
         let flags = libc::O_RDONLY
             | libc::O_NOFOLLOW
             | libc::O_CLOEXEC
-            | if last {
-                libc::O_NONBLOCK
-            } else {
-                libc::O_DIRECTORY
-            };
+            | libc::O_NONBLOCK
+            | if last { 0 } else { libc::O_DIRECTORY };
         // SAFETY: `dirfd` is an open directory descriptor and `c` a valid C string.
         let fd = unsafe { libc::openat(dirfd, c.as_ptr(), flags) };
         if fd < 0 {

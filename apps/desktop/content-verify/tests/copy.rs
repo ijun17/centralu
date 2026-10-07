@@ -345,6 +345,15 @@ fn a_listed_path_that_is_a_folder_or_a_fifo_is_refused_without_waiting() {
     // A FIFO opened for reading without O_NONBLOCK would block here until a writer appeared.
     assert!(matches!(run(&t, &key), Err(Error::NotRegularFile(_))));
     assert_nothing_left(&t);
+
+    // And a FIFO where a folder on the way should be.
+    let t = content("fifodir", &[("a/b", b"b".to_vec(), false)], &key);
+    fs::remove_dir_all(t.join("src/a")).unwrap();
+    let c = std::ffi::CString::new(t.join("src/a").to_str().unwrap()).unwrap();
+    // SAFETY: a valid C string.
+    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+    assert!(matches!(run(&t, &key), Err(Error::NotRegularFile(_))));
+    assert_nothing_left(&t);
 }
 
 #[test]
