@@ -47,7 +47,7 @@ them is what later decisions rest on.
 | [plans/m1.5-plan.md](plans/m1.5-plan.md) · [m1.5-result.md](plans/m1.5-result.md) | Always-on operation and a verification protocol; the 5 defects measurement caught |
 | [plans/m2-plan.md](plans/m2-plan.md) · [m2-result.md](plans/m2-result.md) | M2 plan (revised after independent review) and result: the release build passing, 5 more measured defects, how to start dogfooding |
 | [plans/beta-release-checklist.md](plans/beta-release-checklist.md) | What blocks a public release. §2 is the signing and quarantine measurement that made npm the distribution channel |
-| [plans/thin-shell.md](plans/thin-shell.md) | A fixed, standalone shell that holds macOS permissions and starts the keeper from signed content, so updates stop asking for permissions (#440, #220). Draft for decision |
+| [plans/thin-shell.md](plans/thin-shell.md) | A fixed, standalone shell that holds macOS permissions and starts the keeper from signed content, so updates stop asking for permissions (#440, #220). Decided 2026-10-07 |
 
 ## Writing these
 

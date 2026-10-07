@@ -1,6 +1,6 @@
 # A fixed shell that holds macOS permissions: plan
 
-> **Status: draft for the owner's decision (§9), 2026-10-07.** Replaces the shape first proposed on #440
+> **Status: decided by the owner on 2026-10-07 (§9).** Replaces the shape first proposed on #440
 > (shell = window + keeper). The measurements behind every choice here are in
 > [spikes/2026-10-thin-shell-tcc.md](../spikes/2026-10-thin-shell-tcc.md).
 
@@ -52,7 +52,11 @@ shows the grant holds after the shell exits (§9 decision 2 keeps the option).
 
 **Where it lives.** `<data>/shell/Centralu.app`, so `~/.centralu/shell/` for a release and `~/.centralu-dev/shell/`
 for development. A hidden folder keeps it out of Spotlight and Launchpad. Bundle id `app.centralu.agent`, display
-name per §9 decision 1; that name is what the permission prompt and the System Settings list show.
+name **"Centralu"**: that name is what the permission prompt and the System Settings list show.
+
+**No Dock icon, so nothing to linger.** The shell is `LSUIElement`; the Dock icon and its running dot belong to the
+window app alone, and go away when the window quits, as today (seen in the spike: one icon, one dot, the shell
+never appears).
 
 **How it gets there.** The window carries the shell's bytes in `Contents/Resources/shell/` (only as a source for
 copying; it is never run from there). On start the window compares the installed shell's version with the one it
@@ -77,7 +81,9 @@ Running code from outside a signed bundle with the app's permissions needs a rea
   (minisign format) using a key held only in the release environment's secrets, behind the same approval as the
   npm token.
 - **Keys.** The shell carries the current and the next public key, so the signing key can rotate without a
-  shell version. A key fetched at run time would not do: whoever can change the content could change that key too.
+  shell version. They are in `packaging/shell/keys.json`; the private keys exist only as the `npm-publish`
+  environment secrets `CONTENT_SIGNING_KEY` and `CONTENT_SIGNING_KEY_NEXT`, generated straight into GitHub on
+  2026-10-07 and never written to disk. Dry runs sign with a throwaway key. A key fetched at run time would not do: whoever can change the content could change that key too.
 - **Copy, then run the copy.** The shell verifies the signature, copies, hashes the copy again and only then
   spawns from it. Nothing runs from the window bundle directly.
 - **Handoff.** On an update the running keeper (already verified) verifies and copies the new content itself with
@@ -112,6 +118,27 @@ permissions for, and a dev shell would be one more thing to rebuild.
 A content whose minimum shell version is higher than the installed shell asks the window to install the newer
 shell it carries; that is the one case that asks for permissions again, and the window says so before it happens.
 
+**If the shell is missing or refuses the content** (verification failed, a shell older than the content needs that
+could not be replaced), the window starts the keeper itself, as a debug build does, and shows why. Agents keep
+working; only the permissions fall back to the window's identity. Nothing unverified is ever started *by the shell*.
+
+### 6.1 Replacing the shell
+
+The shell is pinned, not frozen. Replacing it is part of the design from the start:
+
+- The shell's `Info.plist` carries its **shell version**; the window carries the shell it ships in
+  `Contents/Resources/shell/` together with that version, and the manifest names the minimum shell version the
+  content needs.
+- The window installs a carried shell when none is installed or the carried version is higher: it copies to
+  `<data>/shell/.Centralu.app.new`, verifies the copy against `shell.lock`, renames the old one aside, renames the
+  new one in, and removes the old one once the new shell has started a keeper. A failed step leaves the old shell
+  in place.
+- The running keeper is not disturbed: the new shell only matters the next time a keeper has to be started, or at
+  once if the content requires it (then the keeper hands off through the new shell).
+- `shell.lock` keeps one entry per shell version (version, sha256, cdhash, release asset URL), so the release
+  workflow ships exactly the bytes recorded for the version it names, and a new version is a reviewed change to
+  that file.
+
 ## 7. Versions
 
 | Version | Where | Changes when |
@@ -129,18 +156,25 @@ About shows both: "Centralu 0.1.0-beta.13 (shell 1)".
 - **With a Developer ID**, macOS identifies the window by team and bundle id, and the shell is no longer needed for
   permissions. The window keeps the option to start the keeper itself (as in development), so going back is a
   switch, and the verification stays as defence in depth.
-- **Windows and Linux** keep today's layout. The keeper split (§5) applies on Linux; the manifest check can follow
-  if it proves useful there.
+- **Windows and Linux get no shell**: neither identifies apps by code hash for permissions, so there is nothing for
+  a shell to hold, and on Windows an unsigned program copying executables into AppData and running them looks like
+  a malware dropper to Defender. What they share: the keeper as its own executable (§5), the signed manifest and
+  `<data>/content/<version>/`. Only *who starts the keeper* differs (the shell on a macOS release, the window
+  everywhere else), the same switch development and a future Developer ID use. Windows has no keeper yet (it is
+  built on Unix sockets, descriptor passing, process groups and `flock`; the Windows counterparts are named pipes,
+  `DuplicateHandle`, Job Objects and `LockFileEx`), so there the window keeps starting the host until it has one.
 
-## 9. Decisions for the owner
+## 9. Decisions (owner, 2026-10-07)
 
-| # | Question | Proposal | Why |
+| # | Question | Decision | Why |
 |---|---|---|---|
 | 1 | The name people see in the permission prompt and in System Settings | **"Centralu"** (bundle id `app.centralu.agent`) | That is the app they think they are granting. The prompt in the spike read "Centralu Agent Exp.app", which is accurate and confusing |
-| 2 | Shell lifetime | **Exit once the keeper is ready** | Measured: grants hold after the shell exits. No extra process. If a later macOS ties grants to a live parent, staying resident is a small change |
+| 2 | Shell lifetime | **Exit once the keeper is ready** | Measured: grants hold after the shell exits. No extra process, and no Dock icon or dot either way (`LSUIElement`). If a later macOS ties grants to a live parent, staying resident is a small change |
 | 3 | Shell location | **`<data>/shell/`** | Hidden from Spotlight and Launchpad, removed with the data folder, separate for dev and release |
-| 4 | Build the shell once and pin it | **Yes** (`shell.lock`, CI compares the hash) | Rebuilds are not byte-identical by promise; one stray rebuild would reset every user's permissions |
+| 4 | Build the shell once and pin it | **Yes, and replaceable** (§6.1) | Rebuilds are not byte-identical by promise; one stray rebuild would reset every user's permissions. A deliberate new shell version must still be able to ship |
 | 5 | Migration | Ask once, after the first release with the shell, with a note in the update | Existing grants belong to the window's old cdhash; the shell is a new app to macOS |
+| 6 | Windows and Linux | **No shell; share the keeper split, the manifest and the content folder** (§8) | No code-hash permissions there; Windows needs a keeper first |
+| 7 | Signing keys | **Generated into the release environment's secrets** (§4) | Same approval gate as the npm token |
 
 ## 10. Work, in pull requests
 
