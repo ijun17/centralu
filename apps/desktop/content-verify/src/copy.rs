@@ -10,9 +10,11 @@
 //!    written to the copy in the same step. There is no check of one file followed by use of
 //!    another: what was hashed is exactly what was copied.
 //! 3. The copy goes into a fresh folder beside the destination (created `0700`, so no other user can
-//!    write into it), is read back and hashed again, made read-only, and only then renamed onto the
-//!    destination with a rename that refuses to replace anything. A refusal at any point removes the
-//!    partial folder; the destination either does not exist or holds all of it.
+//!    write into it), is read back and hashed again, and everything in it is made read-only. Its
+//!    top folder is then renamed onto the destination with a rename that refuses to replace
+//!    anything, and made read-only last, through a descriptor opened before the rename (macOS will
+//!    not rename a folder its owner cannot write; see `place`). A refusal at any point removes the
+//!    copy; the destination either does not exist or holds all of it.
 //!
 //! What this does not protect against: another process of the same user, which can change the copy
 //! after this returns as it can change anything else of that user's (thin-shell.md §4).
@@ -65,8 +67,9 @@ pub fn verify_and_copy(
         &signature_bytes,
         &|_| (),
     )
-    .and_then(|()| rename_no_replace(&partial, dest_dir));
+    .and_then(|()| place(&partial, dest_dir, &manifest, &|_| ()));
     if result.is_err() {
+        // Gone already if the rename happened; `place` cleans up after itself from there.
         let _ = remove_content(&partial);
     }
     result.map(|()| manifest)
@@ -160,14 +163,63 @@ fn fill(
         fs::set_permissions(&p, Permissions::from_mode(0o555))
             .map_err(|e| Error::io(format!("chmod {d}"), e))?;
     }
-    // The top folder too, before the rename: a rename within one parent does not need write
-    // permission on the folder moved, and a chmod after the rename could fail with the copy
-    // already in place.
+    // Not the top folder: it stays 0700 until `place` has renamed it (see there).
     File::open(partial)
         .and_then(|f| f.sync_all())
-        .map_err(|e| Error::io("sync the copy", e))?;
-    fs::set_permissions(partial, Permissions::from_mode(0o555))
-        .map_err(|e| Error::io("chmod the copy", e))
+        .map_err(|e| Error::io("sync the copy", e))
+}
+
+/// Rename the filled `partial` onto `dest`, then make its top folder read-only.
+///
+/// In that order because macOS refuses to rename a folder its owner cannot write: always on
+/// macOS 14 (EACCES on CI, #445), and on macOS 27 when the new name is in another parent (moving
+/// a folder rewrites its `..`). So the top folder is still `0700` when it is renamed. The
+/// descriptor opened before the rename follows the folder, so the `fchmod` after it changes the
+/// folder that was filled and not whatever is at `dest` by then. In between, only the owner could
+/// have written into it, and only at the top (every folder below is read-only already); the
+/// listing after the `fchmod` refuses the copy if anything was added there.
+///
+/// `between` runs after the rename and before the `fchmod`; only the tests give it work.
+fn place(partial: &Path, dest: &Path, manifest: &Manifest, between: &dyn Fn(&Path)) -> Result<()> {
+    let top = open_dir(partial)?;
+    rename_no_replace(partial, dest)?;
+    between(dest);
+    let finish = || -> Result<()> {
+        // SAFETY: `top` is an open descriptor this function owns.
+        if unsafe { libc::fchmod(top.as_raw_fd(), 0o555) } != 0 {
+            return Err(Error::io("chmod the copy", io::Error::last_os_error()));
+        }
+        let mut expected: BTreeSet<String> =
+            [MANIFEST_NAME, SIGNATURE_NAME].map(String::from).into();
+        for f in &manifest.files {
+            expected.insert(f.path.split('/').next().unwrap_or_default().to_string());
+        }
+        let entries = fs::read_dir(dest).map_err(|e| Error::io("list the copy", e))?;
+        for entry in entries {
+            let name = entry
+                .map_err(|e| Error::io("list the copy", e))?
+                .file_name();
+            let name = name.to_string_lossy();
+            if !expected.contains(name.as_ref()) {
+                return Err(Error::CopyMismatch(name.into_owned()));
+            }
+        }
+        Ok(())
+    };
+    finish().inspect_err(|_| {
+        // Remove what was renamed into place, but only if `dest` is still that folder.
+        let ours = top
+            .try_clone()
+            .ok()
+            .and_then(|fd| File::from(fd).metadata().ok())
+            .zip(fs::symlink_metadata(dest).ok());
+        if let Some((a, b)) = ours {
+            use std::os::unix::fs::MetadataExt;
+            if a.dev() == b.dev() && a.ino() == b.ino() {
+                let _ = remove_content(dest);
+            }
+        }
+    })
 }
 
 fn copy_one(root: &OwnedFd, entry: &FileEntry, dest: &Path) -> Result<()> {
@@ -480,6 +532,105 @@ mod tests {
         let ok = t.join("partial");
         DirBuilder::new().mode(0o700).create(&ok).unwrap();
         fill(&root, &manifest, &ok, b"{}", b"{}", &|_| ()).unwrap();
+        remove_content(&t).unwrap();
+    }
+
+    /// The rename and the read-only top folder, for every shape of copy, with the destination
+    /// beside the staging folder (as `verify_and_copy` places it) and in another folder. macOS
+    /// refuses to rename a folder its owner cannot write (always on macOS 14, across parents on
+    /// macOS 27), so a copy made read-only before the rename fails here.
+    #[test]
+    fn a_filled_copy_is_placed_and_then_made_read_only_in_any_parent() {
+        let shapes: [&[(&str, &[u8])]; 3] = [
+            &[],
+            &[("a", b"a")],
+            &[("a/b/c", b"c"), ("a/d", b""), ("e", b"e")],
+        ];
+        for (n, files) in shapes.iter().enumerate() {
+            for other_parent in [false, true] {
+                let t = temp(&format!("place-{n}-{other_parent}"));
+                fs::create_dir(t.join("src")).unwrap();
+                fs::create_dir(t.join("elsewhere")).unwrap();
+                let mut entries = Vec::new();
+                for (path, bytes) in files.iter() {
+                    let p = t.join("src").join(path);
+                    fs::create_dir_all(p.parent().unwrap()).unwrap();
+                    fs::write(&p, bytes).unwrap();
+                    entries.push(FileEntry {
+                        path: path.to_string(),
+                        size: bytes.len() as u64,
+                        sha256: Sha256::digest(bytes).into(),
+                        executable: false,
+                    });
+                }
+                let manifest = Manifest {
+                    app_version: "1.0.0".into(),
+                    platform: "p".into(),
+                    min_shell_version: 1,
+                    files: entries,
+                    key_id: String::new(),
+                };
+                let root = open_dir(&t.join("src")).unwrap();
+                let partial = t.join(".dest.partial");
+                DirBuilder::new().mode(0o700).create(&partial).unwrap();
+                fill(&root, &manifest, &partial, b"{}", b"{}", &|_| ()).unwrap();
+                let dest = if other_parent {
+                    t.join("elsewhere/dest")
+                } else {
+                    t.join("dest")
+                };
+                let placed = place(&partial, &dest, &manifest, &|_| ());
+                assert!(
+                    placed.is_ok(),
+                    "shape {n}, other parent {other_parent}: {placed:?}"
+                );
+                assert_eq!(
+                    fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
+                    0o555
+                );
+                for (path, bytes) in files.iter() {
+                    assert_eq!(&fs::read(dest.join(path)).unwrap(), bytes);
+                }
+                assert!(!partial.exists());
+                remove_content(&t).unwrap();
+            }
+        }
+    }
+
+    /// The top folder is writable by its owner between the rename and the `fchmod`; anything
+    /// added there in that moment is refused, and the copy is removed.
+    #[test]
+    fn something_added_to_the_top_folder_before_it_is_read_only_is_refused() {
+        let t = temp("added");
+        fs::create_dir(t.join("src")).unwrap();
+        fs::write(t.join("src/a"), b"a").unwrap();
+        let manifest = Manifest {
+            app_version: "1.0.0".into(),
+            platform: "p".into(),
+            min_shell_version: 1,
+            files: vec![FileEntry {
+                path: "a".into(),
+                size: 1,
+                sha256: Sha256::digest(b"a").into(),
+                executable: false,
+            }],
+            key_id: String::new(),
+        };
+        let root = open_dir(&t.join("src")).unwrap();
+        let partial = t.join(".dest.partial");
+        DirBuilder::new().mode(0o700).create(&partial).unwrap();
+        fill(&root, &manifest, &partial, b"{}", b"{}", &|_| ()).unwrap();
+        let result = place(&partial, &t.join("dest"), &manifest, &|d: &Path| {
+            fs::write(d.join("dropped.mjs"), b"x").unwrap();
+        });
+        assert!(
+            matches!(result, Err(Error::CopyMismatch(ref n)) if n == "dropped.mjs"),
+            "{result:?}"
+        );
+        assert!(
+            !t.join("dest").exists(),
+            "the refused copy was left in place"
+        );
         remove_content(&t).unwrap();
     }
 
