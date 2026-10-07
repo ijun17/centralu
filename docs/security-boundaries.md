@@ -434,9 +434,13 @@ step.
   also the folder of another, are refused. The writer refuses the same names (one table,
   `tests/fixtures/paths.json`, tests both).
 - **Into place atomically.** The copy goes into a new `0700` folder beside the destination, is read back
-  and hashed again, made read-only (`0444`, `0555` for executables and folders), and renamed onto the
-  destination with a rename that refuses an existing one (`renamex_np(RENAME_EXCL)` on macOS,
-  `renameat2(RENAME_NOREPLACE)` on Linux). Any refusal removes the partial folder.
+  and hashed again, and everything below its top is made read-only (`0444`, `0555` for executables and
+  folders). The top folder is renamed onto the destination with a rename that refuses an existing one
+  (`renamex_np(RENAME_EXCL)` on macOS, `renameat2(RENAME_NOREPLACE)` on Linux) and only then made `0555`,
+  through a descriptor opened before the rename: macOS refuses to rename a folder its owner cannot write
+  (always on macOS 14, across parents on macOS 27). In that moment only the owner can write to it, and
+  only at the top; a listing after the `fchmod` refuses any name the manifest does not account for. Any
+  refusal removes the copy.
 - **Other refusals:** a manifest for another platform, one that needs a newer shell, an unknown `format`,
   a manifest over 16 MiB or a signature file over 64 KiB, and a version lower than the highest this data
   folder has started unless the window asks for a rollback (`version::check_not_downgrade`).
