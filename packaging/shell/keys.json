@@ -1,0 +1,6 @@
+{
+  "_comment": "Public ed25519 keys (raw 32 bytes, base64) that verify content-manifest.json. The private keys exist only as the npm-publish environment secrets CONTENT_SIGNING_KEY and CONTENT_SIGNING_KEY_NEXT. See docs/plans/thin-shell.md section 4.",
+  "current": "iNJV6CVhHE3rBgIrCpSdpGegAkzBcFPN2DId7+7qsE8=",
+  "next": "TT9fBpDvVmCx6Yo6bkJV2IXoAZO+bhQSpDM8K+Ci2R0=",
+  "created": "2026-10-07"
+}
