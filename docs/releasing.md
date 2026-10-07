@@ -184,7 +184,7 @@ to `false` at the same time as the 1.0 bump.
 
 ## The content manifest (#440)
 
-The darwin job also stages the host (and `centralu-keeper`, once it exists) into
+The darwin job also stages the host and the bundled `centralu-keeper` into
 `apps/desktop/src-tauri/target/release/content/` and writes a signed `content-manifest.json` there
 (`scripts/content-manifest.mts`, formats in [security-boundaries.md](security-boundaries.md) "Signed
 content"). Nothing ships it yet; the thin shell will read it ([plans/thin-shell.md](plans/thin-shell.md)).
