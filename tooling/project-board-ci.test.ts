@@ -317,8 +317,10 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (path === R + '/rules/branches/main') {
   out([])
 } else if (path && path.startsWith(R + '/contents/.github/workflows/build.yml')) {
-  if (!st.workflow) fail('Not Found (HTTP 404)')
-  out(st.workflow)
+  // The base branch's workflow, or the pull request head's when the state gives one
+  const text = path.endsWith('?ref=main') ? st.workflow : (st.headWorkflow ?? st.workflow)
+  if (!text) fail('Not Found (HTTP 404)')
+  out(text)
 } else if (path && /\/check-runs\?/.test(path)) {
   out({ total_count: 0, check_runs: step('checkRuns') })
 } else if (path && /\/commits\/[^/]+\/status$/.test(path)) {
@@ -477,6 +479,27 @@ describe.skipIf(process.platform === 'win32')('the project board app: ci_status 
     expect(r.data.outcome).toBe('refused')
     expect(r.text.split('\n')[0]).toBe('Not merged: A required check failed.')
     expect(r.text).toContain('windows tests (job 12): FAIL app-runtime packages/agent-host/src/apps/external/lifecycle.test.ts')
+    expect(merges()).toEqual([])
+  })
+
+  it('counts a job the pull request itself adds as required, so its failure blocks the merge (#445)', async () => {
+    // #445 added a "content verify" job; read from main only, it was "not required" for that very pull request
+    const headWorkflow = WORKFLOW + ['  content:', '    name: content verify', ''].join('\n')
+    runtime(ghState({ headWorkflow, checkRuns: [[...green(), ghRun('content verify', 'failure', 15)]] }))
+    const status = await call('ci_status', { pr: 77 })
+    expect(status.data.verdict).toBe('failing')
+    expect(status.text).toContain('plus 1 job the pull request adds')
+    const r = await call('merge_when_green', { pr: 77 })
+    expect(r.isError).toBe(true)
+    expect(r.text.split('\n')[0]).toBe('Not merged: A required check failed.')
+    expect(merges()).toEqual([])
+  })
+
+  it('cannot make a check optional by removing its job in the pull request', async () => {
+    const headWorkflow = ['jobs:', '  verify:', '    name: verify', ''].join('\n')
+    runtime(ghState({ headWorkflow, checkRuns: [[ghRun('verify', 'success', 11), ghRun('windows tests', 'failure', 12), ghRun('linux-x64', 'success', 13)]] }))
+    const r = await call('merge_when_green', { pr: 77 })
+    expect(r.text.split('\n')[0]).toBe('Not merged: A required check failed.')
     expect(merges()).toEqual([])
   })
 

@@ -350,8 +350,12 @@ export async function resolveRef(repo, ref) {
  * The checks that must pass on `base`, and where that came from: branch protection and rulesets
  * first (what GitHub itself enforces), else the jobs of the CI workflows read from `base` itself, so
  * a pull request cannot make its own checks optional by editing them. `names` null: none found.
+ *
+ * With `head` (a pull request's head commit), the jobs its own workflows add count too: they can
+ * only add to the set, never remove from it. Without this a job a pull request introduces was "not
+ * required" for that very pull request, and #445 merged with its new job red.
  */
-export async function readRequired(repo, base, workflows, workflowCheckNames) {
+export async function readRequired(repo, base, workflows, workflowCheckNames, head) {
   checkRepo(repo)
   const names = new Set()
   // 404: not protected; 403: this login may not read protection (that needs admin). Rulesets are
@@ -367,22 +371,32 @@ export async function readRequired(repo, base, workflows, workflowCheckNames) {
   const found = []
   const unresolved = []
   const read = []
-  for (const path of workflows ?? []) {
-    let text
-    try {
-      text = await runGh(['api', '-H', 'Accept: application/vnd.github.raw+json', `repos/${repo}/contents/${path}?ref=${encodeURIComponent(base)}`])
-    } catch (e) {
-      if (e instanceof GitHubError && !FATAL.has(e.kind) && httpStatus(e) === 404) continue
-      throw e
+  let added = 0
+  for (const ref of head ? [base, head] : [base]) {
+    for (const path of workflows ?? []) {
+      let text
+      try {
+        text = await runGh(['api', '-H', 'Accept: application/vnd.github.raw+json', `repos/${repo}/contents/${path}?ref=${encodeURIComponent(ref)}`])
+      } catch (e) {
+        if (e instanceof GitHubError && !FATAL.has(e.kind) && httpStatus(e) === 404) continue
+        throw e
+      }
+      const w = workflowCheckNames(text)
+      const file = path.split('/').pop()
+      if (ref === base) {
+        found.push(...w.names)
+        unresolved.push(...w.unresolved.map((j) => `${file} job ${j}`))
+        read.push(file)
+      } else {
+        const before = new Set(found)
+        for (const n of w.names) if (!before.has(n)) (found.push(n), added++)
+        unresolved.push(...w.unresolved.map((j) => `${file} job ${j} (added by the pull request)`))
+      }
     }
-    const w = workflowCheckNames(text)
-    const file = path.split('/').pop()
-    found.push(...w.names)
-    unresolved.push(...w.unresolved.map((j) => `${file} job ${j}`))
-    read.push(file)
   }
   if (!found.length && !unresolved.length) return { names: null, unresolved: [], source: 'no required set found, so every reported check counts' }
-  return { names: [...new Set(found)], unresolved, source: `${read.join(', ')} on ${base}` }
+  const plus = added ? `, plus ${added} job${added === 1 ? '' : 's'} the pull request adds` : ''
+  return { names: [...new Set(found)], unresolved, source: `${read.join(', ')} on ${base}${plus}` }
 }
 
 /** Every check reported on a commit: check runs (GitHub Actions jobs among them) and commit statuses. */
