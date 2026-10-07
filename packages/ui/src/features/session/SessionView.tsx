@@ -2793,7 +2793,7 @@ const ChatRow = memo(function ChatRow({
   if (item.kind === 'assistant') {
     return (
       <div className="min-w-0" data-testid="msg-assistant">
-        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} />
+        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} />
       </div>
     )
   }
