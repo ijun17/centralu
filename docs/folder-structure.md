@@ -19,6 +19,7 @@ centralu/
 │  │  └─ src/main.tsx           # injects createWebPlatform() — the only place ① that knows an implementation
 │  └─ desktop/                  # Tauri entry point (created after M1)
 │     ├─ src/main.tsx           # injects createTauriPlatform() — the only place ②
+│     ├─ content-verify/        # Rust, no Tauri: verifies and copies signed content (thin shell, #440)
 │     └─ src-tauri/             # Rust: supervisor, git2, rusqlite, OS integration
 │        ├─ Cargo.toml          # the workspace: this app package and keeper/
 │        ├─ src/                # the window (Tauri); src/bin/centralu-keeper.rs is the keeper's main

@@ -149,6 +149,10 @@ pnpm release:npm                       # rehearsal: build, copy, verify, npm pac
 pnpm release:npm --publish             # publishes @centralu/darwin-arm64, then centralu
 ```
 
+By hand, the content manifest (below) is signed with a throwaway key and the script says so: the
+signing key exists only as a GitHub secret. Harmless while no shell reads the manifest; once one
+does, a darwin release has to come from `release.yml`.
+
 Linux and Windows have to come from CI first (`release.yml` with `dry_run` off), because the second command refuses to
 publish the shim while any pinned platform package is missing from the registry at this
 version.
@@ -177,6 +181,21 @@ exists because `latest` is empty while no stable release exists, and `npm i -g c
 stable release exists, moving `latest` onto a prerelease hands betas to everyone who asked
 for stable: change `also_latest=true` in the workflow's `guard` job and the input's default
 to `false` at the same time as the 1.0 bump.
+
+## The content manifest (#440)
+
+The darwin job also stages the host and the bundled `centralu-keeper` into
+`apps/desktop/src-tauri/target/release/content/` and writes a signed `content-manifest.json` there
+(`scripts/content-manifest.mts`, formats in [security-boundaries.md](security-boundaries.md) "Signed
+content"). Nothing ships it yet; the thin shell will read it ([plans/thin-shell.md](plans/thin-shell.md)).
+
+- A rehearsal signs with a key generated in memory. A publish runs with `--require-content-key`, signs
+  with `CONTENT_SIGNING_KEY` from the `npm-publish` environment, and checks the result against
+  `packaging/shell/keys.json` **before** anything is published, so a secret that does not match the
+  public key stops the release while it is still reversible.
+- The manifest and its signature are kept as the run's `content-manifest-darwin-arm64` artifact. That
+  upload cannot fail the job.
+- To check one by hand: `pnpm exec tsx scripts/content-manifest.mts verify <folder>`.
 
 ## Adding a platform
 

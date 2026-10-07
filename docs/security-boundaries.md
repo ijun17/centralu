@@ -405,6 +405,52 @@ be on the other end matters as much as on `keeper.sock`.
 - `CC_KEEPER_HANDOFF_HOLD_MS` makes an incoming keeper wait before it says ready. It exists for the
   integration test and changes nothing but timing.
 
+## Signed content (#440)
+
+With the thin shell ([plans/thin-shell.md](plans/thin-shell.md)), the keeper and the host run from a
+folder outside any signed app bundle, with the permissions the person granted to the shell. The boundary
+is **what may be started from that folder**: only files a release signed. The verifier is
+`apps/desktop/content-verify` (shared by the shell and, on a handoff, the keeper); the writer is
+`scripts/content-manifest.mts`. Nothing starts content through it yet; the shell that does is the next
+step.
+
+- **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
+  the app version, platform and minimum shell version. `content-manifest.json.sig` is an ed25519 signature
+  over the manifest's exact bytes, checked with `verify_strict` before anything in the manifest is parsed.
+  The key is chosen by id (the first 8 bytes of SHA-256 over the public key) among the keys compiled in
+  from `packaging/shell/keys.json` (`current` and `next`); an id that is not among them is refused.
+- **The private keys** exist only as the `npm-publish` environment secrets, behind the same approval as
+  the npm token. The release workflow passes `CONTENT_SIGNING_KEY` to the darwin platform job only, and
+  `release-npm.mts` takes it out of its environment before starting anything. A rehearsal has no
+  environment and signs with a key generated in memory, which no keys.json holds; a publish refuses to
+  sign with one (`--require-content-key`) and checks its signature against keys.json before publishing.
+- **Only listed files are copied, and what is hashed is what is copied.** Each path is walked one
+  component at a time with `openat` and `O_NOFOLLOW` from the content folder, and must end at a regular
+  file (`fstat`); a FIFO is opened non-blocking so it cannot stall the start. The file is read once:
+  every chunk is hashed and written to the copy in the same step, reading stops one chunk past the listed
+  size, and the size and hash must match. Unlisted files in the source are not copied.
+- **Paths** are relative and `/`-separated, with no empty, `.` or `..` component, no `\` and no control
+  character, and not the manifest's own names. Paths that differ only in ASCII case, and a path that is
+  also the folder of another, are refused. The writer refuses the same names (one table,
+  `tests/fixtures/paths.json`, tests both).
+- **Into place atomically.** The copy goes into a new `0700` folder beside the destination, is read back
+  and hashed again, made read-only (`0444`, `0555` for executables and folders), and renamed onto the
+  destination with a rename that refuses an existing one (`renamex_np(RENAME_EXCL)` on macOS,
+  `renameat2(RENAME_NOREPLACE)` on Linux). Any refusal removes the partial folder.
+- **Other refusals:** a manifest for another platform, one that needs a newer shell, an unknown `format`,
+  a manifest over 16 MiB or a signature file over 64 KiB, and a version lower than the highest this data
+  folder has started unless the window asks for a rollback (`version::check_not_downgrade`).
+
+Limits:
+
+- Another process of the same user can change the copy after it is verified, or start whatever it likes
+  with the same `node` and agent CLIs the keeper uses; the plan says so (§4). This protects against
+  running content the project did not sign, a partial or corrupted update, and a file dropped into
+  Centralu's folders inheriting the grants, not against the user's own processes.
+- Whoever holds a signing key can sign anything; rotating means moving `next` to `current` in a new shell
+  version, which is why the shell carries both.
+- Windows has no verifier copy yet (`verify_and_copy` is Unix only); it has no shell either (§8).
+
 ## App servers
 
 An app's server is code running as the user, with the user's files, network and processes. The

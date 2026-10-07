@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "appVersion": "0.0.0-fixture.1",
+  "platform": "darwin-arm64",
+  "minShellVersion": 1,
+  "files": [
+    {
+      "path": "centralu-keeper",
+      "size": 30,
+      "sha256": "eaf96bd4bf6d330a86dd99d3576df5e05eb86d1101cc9dac37458e8995db6a9f",
+      "executable": true
+    },
+    {
+      "path": "host/.hidden",
+      "size": 9,
+      "sha256": "f71d16ee97b5afbe123b0fa22e51ee83b05111ec2a023fa651db25b55dbff8fb",
+      "executable": false
+    },
+    {
+      "path": "host/bytes.bin",
+      "size": 256,
+      "sha256": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+      "executable": false
+    },
+    {
+      "path": "host/empty",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "executable": false
+    },
+    {
+      "path": "host/main.mjs",
+      "size": 28,
+      "sha256": "369fd0f1c37ecb9eb65d6f802db2cdf8ac3ecac33cba09e99f27c4e9c32fdb7d",
+      "executable": false
+    },
+    {
+      "path": "host/modules/x/ünï.txt",
+      "size": 14,
+      "sha256": "cfba917bb45eea5ebd1635f52537eec06b6232489cf58c95cfb9a6f49454b631",
+      "executable": false
+    }
+  ]
+}

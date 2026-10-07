@@ -104,3 +104,36 @@ describe('the environment gate stays conditional', () => {
     })
   }
 })
+
+/**
+ * The content signing key (docs/plans/thin-shell.md §4). It signs what a shell will run with the
+ * person's permissions, so where it can appear is as much a part of the gate as NPM_TOKEN.
+ */
+describe('the content signing key stays behind the gate', () => {
+  const platform = job('platform')
+  const keyLines = lines.filter((l) => !l.trim().startsWith('#') && l.includes('CONTENT_SIGNING_KEY'))
+
+  it('appears once, in the platform job, only for the target that writes a manifest', () => {
+    expect(keyLines).toHaveLength(1)
+    expect(platform).toContain(keyLines[0])
+    // An environment secret: present only when the job runs in npm-publish, which the
+    // environment line above makes conditional on a real release.
+    expect(keyLines[0]).toContain('secrets.CONTENT_SIGNING_KEY')
+    expect(keyLines[0], 'only the darwin job should hold the key').toContain("matrix.target == 'darwin-arm64'")
+    // Never the next key: rotation swaps the secrets, the release only ever signs with one.
+    expect(lines.join('\n')).not.toContain('CONTENT_SIGNING_KEY_NEXT')
+  })
+
+  it('a publish requires a real key and a rehearsal does not', () => {
+    const require = platform.find((l) => l.includes('--require-content-key'))
+    expect(require, 'the publish path must ask for --require-content-key').toBeDefined()
+    expect(require).toContain('"$DRY_RUN" = "false"')
+    expect(require).toContain('darwin-arm64')
+  })
+
+  it('the manifest upload cannot fail a job that has already published', () => {
+    const at = platform.findIndex((l) => l.includes('name: Keep the content manifest'))
+    expect(at).toBeGreaterThan(-1)
+    expect(platform.slice(at, at + 4).some((l) => l.trim() === 'continue-on-error: true')).toBe(true)
+  })
+})

@@ -114,8 +114,9 @@ module.exports = {
     // (introduced in M2).
     exclude: {
       // app-template/runtime: a minified build artifact with nothing worth reading
-      // (scripts/build-app-runtime.mjs).
-      path: '(spike|dist|node_modules|src-tauri/(target|gen|resources)|adapters/codex/generated|app-template/runtime|\\.test\\.tsx?$)',
+      // (scripts/build-app-runtime.mjs). content-verify: a Rust crate whose only scripts are
+      // signed test fixtures, read as bytes.
+      path: '(spike|dist|node_modules|src-tauri/(target|gen|resources)|desktop/content-verify|adapters/codex/generated|app-template/runtime|\\.test\\.tsx?$)',
     },
     tsConfig: { fileName: 'tsconfig.json' },
     /*

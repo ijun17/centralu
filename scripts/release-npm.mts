@@ -35,6 +35,7 @@ import {
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_NAME, APP_VERSION } from '../packages/protocol/src/brand.js'
+import { resolveSigningKey, trustedKeys, verifyContent, writeContentManifest, type SigningKey } from './content-manifest.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE_ROOT = join(ROOT, 'apps/desktop/src-tauri/target/release/bundle')
@@ -84,6 +85,22 @@ const otp = process.argv.find((a) => a.startsWith('--otp='))?.slice('--otp='.len
  * shadow the stable one).
  */
 const alsoLatest = process.argv.includes('--also-latest')
+/**
+ * The content signing key (docs/plans/thin-shell.md §4), taken out of the environment before
+ * anything is spawned: the verify run, `tauri build` and `npm publish` (with its lifecycle
+ * scripts) all inherit this process's environment, and none of them has any business holding it.
+ * `_NEXT` is never used here (rotation swaps the secrets) and is dropped for the same reason.
+ */
+const contentSigningPem = process.env.CONTENT_SIGNING_KEY
+delete process.env.CONTENT_SIGNING_KEY
+delete process.env.CONTENT_SIGNING_KEY_NEXT
+/**
+ * Fail a publish that would sign the content manifest with anything but a key in
+ * `packaging/shell/keys.json`. `release.yml` passes it for the targets that write a manifest when it
+ * publishes. Publishing by hand cannot sign for real (the key exists only as a GitHub secret), so
+ * without this flag a publish signs with a throwaway key and says so.
+ */
+const requireContentKey = process.argv.includes('--require-content-key')
 
 /**
  * A prerelease (`0.1.0-beta.1`) must always carry a tag — npm refuses to publish one
@@ -217,6 +234,14 @@ type Target = {
    * itself; anything shorter has to say in its comment why, and where the rest runs.
    */
   verify?: string[]
+  /**
+   * Write and sign a content manifest over the keeper and the host (docs/plans/thin-shell.md §4).
+   * Nothing ships it yet: the shell that reads it comes in a later step, so it is written beside the
+   * bundle, under `target/`, and the package is unchanged. `keeper` names the keeper executable
+   * inside the copied artifact: the bundled one, not cargo's, because the bundler signs it and so
+   * changes its bytes.
+   */
+  contentManifest?: { keeper: (dest: string) => string }
   /** the name the artifact takes inside the npm package — fixed, so the launcher can find it */
   artifact: string
   /** locate what the build just produced */
@@ -239,6 +264,7 @@ const TARGETS: Record<string, Target | undefined> = {
      * The `.dmg` is still built in CI, where a break in it should be visible.
      */
     bundles: 'app',
+    contentManifest: { keeper: (dest) => join(dest, 'Contents/MacOS', KEEPER_EXE) },
     artifact: `${APP_NAME}.app`,
     locate: () => join(BUNDLE_ROOT, 'macos', `${APP_NAME}.app`),
     install: (src, dest) => {
@@ -538,6 +564,8 @@ if (target && ARCH_PKG) {
   step('Verifying the bundle')
   target.check(dest)
 
+  if (target.contentManifest) signContent(target.id, target.contentManifest.keeper(dest))
+
   // If `files` does not actually point at what was packed, the tarball ships **empty inside**
   // — invisible until someone reads the pack log by eye. Since the name is read from one place
   // (APP_NAME), it is checked here too.
@@ -570,6 +598,54 @@ for (const pkgDir of ARCH_PKG ? [ARCH_PKG, MAIN_PKG] : [MAIN_PKG]) {
   }
   writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`)
   console.log(`  ${json.name as string}@${APP_VERSION}`)
+}
+
+/**
+ * Stage what the keeper and the host need into `target/release/content/` and sign a manifest over
+ * it. Which folder becomes "the content" the shell copies is decided in a later step (#440); for
+ * now this proves, on every release, that the release environment's key signs and that what it
+ * signs verifies against the public keys a shell would carry.
+ *
+ * Before publishing, on purpose: a key that does not match keys.json stops the release while
+ * nothing is on the registry, instead of failing the job after the platform package went out and
+ * leaving the shim job waiting on it.
+ */
+function signContent(platform: string, keeper: string): void {
+  step('Signing the content manifest')
+  const release = join(ROOT, 'apps/desktop/src-tauri/target/release')
+  const dir = join(release, 'content')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  cpSync(join(ROOT, 'apps/desktop/src-tauri/resources/host'), join(dir, 'host'), { recursive: true, dereference: true })
+  // `check` has already proved this file is there, executable and the right machine.
+  cpSync(keeper, join(dir, KEEPER_EXE))
+
+  let key: SigningKey
+  try {
+    key = resolveSigningKey({ dryRun: !publish, pem: contentSigningPem })
+  } catch (e) {
+    fail((e as Error).message)
+  }
+  if (publish && requireContentKey && key.throwaway) {
+    fail('--require-content-key: CONTENT_SIGNING_KEY is not set. Is this job running in the npm-publish environment?')
+  }
+  const { manifest } = writeContentManifest(dir, { appVersion: APP_VERSION, platform }, key)
+  try {
+    verifyContent(dir, {
+      platform,
+      keys: key.throwaway ? [{ name: 'throwaway', keyId: key.keyId, publicKey: key.publicKey }] : trustedKeys(),
+    })
+  } catch (e) {
+    fail(
+      `the content manifest does not verify: ${(e as Error).message}. ` +
+        (key.throwaway ? '' : 'CONTENT_SIGNING_KEY does not match packaging/shell/keys.json.'),
+    )
+  }
+  const files = (JSON.parse(manifest.toString('utf8')) as { files: unknown[] }).files.length
+  console.log(`  ${files} files, key ${key.keyId}${key.throwaway ? ' (throwaway: this run signs nothing a shell will accept)' : ''}`)
+  if (publish && key.throwaway) {
+    console.log('\n\x1b[33m  warning: published with a throwaway content key. Harmless while no shell reads the manifest.\x1b[0m')
+  }
 }
 
 /**

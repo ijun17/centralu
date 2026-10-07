@@ -1,0 +1,24 @@
+[package]
+name = "content-verify"
+version = "0.1.0"
+description = "Verifies Centralu's signed content manifest and copies the content it lists (docs/plans/thin-shell.md §4)"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+# Shared later by the shell and the keeper, so nothing Tauri and nothing that grows: the shell's
+# whole dependency list is meant to be an ed25519 check and a hash (thin-shell.md §3). Its bytes are
+# pinned per shell version, so every crate here is code that cannot be patched without asking every
+# user for their permissions again.
+[dependencies]
+# `verify_strict`: refuses small-order keys and non-canonical signatures, which plain `verify` allows.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# `openat` with O_NOFOLLOW for every component of a listed path, and an exclusive rename. Already
+# in the desktop crate's tree through tauri.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
