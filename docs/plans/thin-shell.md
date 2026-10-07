@@ -1,0 +1,157 @@
+# A fixed shell that holds macOS permissions: plan
+
+> **Status: draft for the owner's decision (§9), 2026-10-07.** Replaces the shape first proposed on #440
+> (shell = window + keeper). The measurements behind every choice here are in
+> [spikes/2026-10-thin-shell-tcc.md](../spikes/2026-10-thin-shell-tcc.md).
+
+## 1. Why
+
+Centralu is ad-hoc signed. macOS identifies an ad-hoc app by the cdhash of the build, so every update, and every
+local build, is a new app to it: Screen Recording, Accessibility and folder access stop applying to agents' tools
+until the person removes the old entry and grants again (#220). Updates ship several times a week; each one
+costing a trip to System Settings makes updating the thing people avoid.
+
+Goal: **an update never asks for permissions again**, without depending on an Apple Developer ID. Non-goals:
+smaller downloads, UI-only updates (possible later, §8), and Windows and Linux, which have no such permission
+model.
+
+## 2. The shape
+
+```
+/Applications/Centralu.app                 the window: Dock, menus, UI. Replaced on every update, as today.
+   │  opens through LaunchServices (not as its child)
+   ▼
+<data>/shell/Centralu.app                  the shell: LSUIElement, no window, bytes fixed across releases.
+   │  verifies the content's signature,    Permissions attach here, and only here.
+   │  copies it, spawns the keeper, exits
+   ▼
+keeper → host → agent CLIs → their tools   all judged as the shell; all replaceable in any release
+```
+
+Three facts from the measurement fix this shape:
+
+1. macOS judges a process by the app that **started its tree** (the responsible process). Grants follow the keeper
+   and everything below it through content replacements, keeper handoffs and the shell's own exit.
+2. The shell **cannot live inside the window's bundle**: nested there, Screen Recording follows the outer bundle,
+   so a window update loses it. Standalone, launched by the window through LaunchServices, it keeps both grants.
+3. The window must be a regular app of its own for the menu bar and shortcuts; then the Dock shows one icon, and a
+   pinned icon survives the bundle being replaced.
+
+## 3. The shell
+
+**Does only this:**
+
+1. Receive the content location from the window (an argument to the LaunchServices open).
+2. Verify the content's signed manifest with the public keys built into the shell (§4).
+3. Copy the verified files into `<data>/content/<version>/`, verify the copy, mark it read-only.
+4. Refuse a version lower than the highest it has started, unless the window asked for an explicit rollback.
+5. Spawn the keeper from the copy, wait for its ready line, exit.
+
+It has no UI, no network, no settings and no knowledge of the host. It does not stay resident: the measurement
+shows the grant holds after the shell exits (§9 decision 2 keeps the option).
+
+**Where it lives.** `<data>/shell/Centralu.app`, so `~/.centralu/shell/` for a release and `~/.centralu-dev/shell/`
+for development. A hidden folder keeps it out of Spotlight and Launchpad. Bundle id `app.centralu.agent`, display
+name per §9 decision 1; that name is what the permission prompt and the System Settings list show.
+
+**How it gets there.** The window carries the shell's bytes in `Contents/Resources/shell/` (only as a source for
+copying; it is never run from there). On start the window compares the installed shell's version with the one it
+carries and copies the shell out when it is missing or older. A newer installed shell is left alone.
+
+**Bytes that do not change.** A rebuild of the same source does not promise the same bytes, and different bytes
+are a new app to macOS. So the shell is built **once per shell version**, published as a release asset, and recorded
+in `packaging/shell/shell.lock` (version, sha256, cdhash). The release workflow downloads that artifact instead of
+building it and fails if the hash differs. Shell versions are rare and each one is a deliberate decision: it costs
+every user one more trip to System Settings.
+
+**Written in Rust**, in the workspace, with no Tauri and no AppKit run loop: a background-only binary with an
+`Info.plist`. Its whole dependency list is an ed25519 verifier and a hash.
+
+## 4. Verified content
+
+Running code from outside a signed bundle with the app's permissions needs a reason to trust that code.
+
+- **Manifest.** Each release writes `content-manifest.json`: the app version, the platform, the minimum shell
+  version, and the sha256 of every file the keeper and the host need (the keeper executable, `main.mjs`, native
+  modules, `schema.sql`, the bridge, the app template). The release workflow signs it with ed25519
+  (minisign format) using a key held only in the release environment's secrets, behind the same approval as the
+  npm token.
+- **Keys.** The shell carries the current and the next public key, so the signing key can rotate without a
+  shell version. A key fetched at run time would not do: whoever can change the content could change that key too.
+- **Copy, then run the copy.** The shell verifies the signature, copies, hashes the copy again and only then
+  spawns from it. Nothing runs from the window bundle directly.
+- **Handoff.** On an update the running keeper (already verified) verifies and copies the new content itself with
+  the same code and keys, then hands off as it does today. The shell is not involved, which is why its own code
+  can stay this small.
+
+What this protects, stated plainly: a release can only run code the project signed; a partly written or
+corrupted update is refused instead of half-running; a file dropped into Centralu's folders does not inherit the
+person's grants. What it does not: code running as the same user can already reach the permissions through the
+agent CLIs and `node` that the keeper starts from the person's `PATH`, which is the product working as intended.
+This design does not widen that, and does not pretend to close it.
+
+## 5. The keeper becomes its own executable
+
+Today the keeper is the window's binary started with `--keeper`. With the window and the shell apart, the keeper
+is a separate executable (`centralu-keeper`) in the content. The socket, the protocol with the window, the
+children service, the self-handoff and the host swap do not change. The keeper's host copies
+(`<data>/hosts/<key>`, `source::Copies`) move under the verified content folder.
+
+Development (`pnpm app:dev`, debug builds) keeps starting the keeper directly; there is nothing to hold
+permissions for, and a dev shell would be one more thing to rebuild.
+
+## 6. Update flow
+
+1. npm installs the new version; `centralu install` replaces `/Applications/Centralu.app` as today.
+2. The window relaunches (`apply_update_relaunch`), finds the keeper running, and asks it to take over the new
+   content.
+3. The keeper verifies and copies the new content, hands off to the new keeper, and the host swaps as today.
+4. No permission prompt. The shell only runs again when the keeper is not running (first start, after a
+   reboot, after "Quit completely").
+
+A content whose minimum shell version is higher than the installed shell asks the window to install the newer
+shell it carries; that is the one case that asks for permissions again, and the window says so before it happens.
+
+## 7. Versions
+
+| Version | Where | Changes when |
+|---|---|---|
+| Shell version (`shell 1`) | the shell's `Info.plist`, `shell.lock` | the shell's own code changes (rare, deliberate) |
+| App version (`0.1.0-beta.N`) | the window, the manifest | every release |
+| Minimum shell version | the manifest | the window–shell or shell–keeper contract changes |
+
+About shows both: "Centralu 0.1.0-beta.13 (shell 1)".
+
+## 8. Later, and going back
+
+- **UI-only updates** and **smaller downloads** become possible once the window loads the UI from verified content
+  rather than embedding it. Not part of this plan.
+- **With a Developer ID**, macOS identifies the window by team and bundle id, and the shell is no longer needed for
+  permissions. The window keeps the option to start the keeper itself (as in development), so going back is a
+  switch, and the verification stays as defence in depth.
+- **Windows and Linux** keep today's layout. The keeper split (§5) applies on Linux; the manifest check can follow
+  if it proves useful there.
+
+## 9. Decisions for the owner
+
+| # | Question | Proposal | Why |
+|---|---|---|---|
+| 1 | The name people see in the permission prompt and in System Settings | **"Centralu"** (bundle id `app.centralu.agent`) | That is the app they think they are granting. The prompt in the spike read "Centralu Agent Exp.app", which is accurate and confusing |
+| 2 | Shell lifetime | **Exit once the keeper is ready** | Measured: grants hold after the shell exits. No extra process. If a later macOS ties grants to a live parent, staying resident is a small change |
+| 3 | Shell location | **`<data>/shell/`** | Hidden from Spotlight and Launchpad, removed with the data folder, separate for dev and release |
+| 4 | Build the shell once and pin it | **Yes** (`shell.lock`, CI compares the hash) | Rebuilds are not byte-identical by promise; one stray rebuild would reset every user's permissions |
+| 5 | Migration | Ask once, after the first release with the shell, with a note in the update | Existing grants belong to the window's old cdhash; the shell is a new app to macOS |
+
+## 10. Work, in pull requests
+
+| Step | Estimate (agent work) |
+|---|---|
+| 1. The keeper as its own executable; the window starts it by path; host copies under the content folder | 1 day |
+| 2. Manifest writing and ed25519 signing in the release workflow; a verifier shared by shell and keeper | 1–2 days |
+| 3. The shell: verify, copy, spawn, exit; built once, `shell.lock`, CI hash check | 1–2 days |
+| 4. The window installs or upgrades the shell and starts the keeper through it; refusal messages | 1 day |
+| 5. Keeper handoff verifies and copies new content | 0.5–1 day |
+| 6. Tests: keeper e2e through the shell on CI; the spike's probe as a manual packaged-app check run before each shell version | 1 day |
+
+Every step lands behind the current behaviour until step 4 switches release builds over, so main keeps
+shipping in between.

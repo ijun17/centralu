@@ -1,0 +1,90 @@
+// Experiment content (outside any bundle): keeper / probe / window.
+import AppKit
+import ApplicationServices
+import CoreGraphics
+import Foundation
+import ScreenCaptureKit
+let buildTag = "@TAG@"
+let home = NSHomeDirectory() + "/centralu-shell-exp"
+let me = CommandLine.arguments[0]
+func log(_ s: String) {
+  let line = "[\(CommandLine.arguments.dropFirst().joined(separator: " ")) pid=\(getpid()) ppid=\(getppid()) tag=\(buildTag)] \(s)\n"
+  let h = FileHandle(forWritingAtPath: home + "/log.txt")!; h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile()
+}
+typealias RespFn = @convention(c) (pid_t) -> pid_t
+func responsible(_ p: pid_t) -> pid_t {
+  guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid") else { return -1 }
+  return unsafeBitCast(sym, to: RespFn.self)(p)
+}
+func spawn(_ args: [String], setsid: Bool) -> pid_t {
+  var pid: pid_t = 0
+  var attr: posix_spawnattr_t? = nil; posix_spawnattr_init(&attr)
+  if setsid { posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID)) }
+  var cargs = ([me] + args).map { strdup($0) } + [nil]
+  let rc = posix_spawn(&pid, me, nil, &attr, &cargs, environ)
+  if rc != 0 { log("spawn failed rc=\(rc)") }
+  return pid
+}
+func wait(_ p: pid_t) { var st: Int32 = 0; waitpid(p, &st, 0) }
+let role = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+let mode = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "normal"
+switch role {
+case "keeper":
+  log("start responsible=\(responsible(getpid()))")
+  if mode == "handoff" { _ = spawn(["keeper2", mode], setsid: false); log("handed off, exiting"); exit(0) }
+  fallthrough
+case "keeper2":
+  if role == "keeper2" { usleep(500_000); log("start (after handoff) responsible=\(responsible(getpid()))") }
+  if mode == "shell-exits" { sleep(3); log("shell should be gone now") }
+  let win: pid_t = mode.contains("show") ? spawn(["window", mode], setsid: false) : 0
+  if mode == "samewindow" {
+    let exe = home + "/content/current/CentraluExpSame.app/Contents/MacOS/centraluexp"
+    var p: pid_t = 0; var a = [strdup(exe), nil]
+    log("starting same-id window app rc=\(posix_spawn(&p, exe, nil, nil, &a, environ)) pid=\(p)")
+    wait(p); log("window app exited"); exit(0)
+  }
+  if mode == "appwindow" {
+    let exe = home + "/content/current/CentraluExp.app/Contents/MacOS/centraluexp"
+    var p: pid_t = 0; var a = [strdup(exe), nil]
+    log("starting window app rc=\(posix_spawn(&p, exe, nil, nil, &a, environ)) pid=\(p)")
+    wait(spawn(["probe", "peek"], setsid: true)); wait(p); log("window app exited"); exit(0)
+  }
+  wait(spawn(["probe", mode], setsid: true))
+  if win != 0 { wait(win) }
+  if mode == "window" { wait(spawn(["window", mode], setsid: false)) }
+  log("done")
+case "probe":
+  if mode.contains("request") {
+    log("requesting: screen recording, accessibility")
+    let r1 = CGRequestScreenCaptureAccess()
+    let r2 = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+    log("request returned screen=\(r1) ax=\(r2); staying alive 120s for the prompts")
+    sleep(120)
+  }
+  let sr = CGPreflightScreenCaptureAccess()
+  let ax = AXIsProcessTrusted()
+  let wins = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
+  let foreignNamed = wins.filter { ($0[kCGWindowOwnerPID as String] as? Int32) != getpid() && (($0[kCGWindowName as String] as? String) ?? "") != "" }.count
+  let sem = DispatchSemaphore(value: 0); var sck = "skipped"
+  if mode != "peek" && !mode.contains("request") { SCShareableContent.getWithCompletionHandler { c, e in sck = e != nil ? "DENIED(\((e! as NSError).code))" : "OK(\(c?.windows.count ?? 0) windows)"; sem.signal() } } else { sem.signal() }
+  _ = sem.wait(timeout: .now() + 10)
+  var focused: CFTypeRef?
+  let dockPid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier ?? 0
+  let axErr: AXError = (mode == "peek" || mode.contains("request")) ? .cannotComplete : AXUIElementCopyAttributeValue(AXUIElementCreateApplication(dockPid), kAXChildrenAttribute as CFString, &focused)
+  let axReal = axErr == .success ? "OK(dock children=\((focused as? [AnyObject])?.count ?? -1))" : "DENIED(\(axErr.rawValue))"
+  log("RESULT axReal=\(axReal) sck=\(sck) screenRecording=\(sr) accessibility=\(ax) foreignWindowTitlesVisible=\(foreignNamed) responsible=\(responsible(getpid()))")
+case "window":
+  let app = NSApplication.shared
+  app.setActivationPolicy(.accessory)
+  let w = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 420, height: 160), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+  w.title = "Thin-shell experiment: content window (tag \(buildTag))"
+  let label = NSTextField(labelWithString: "This window runs from outside the app bundle (content \(buildTag)).\nActivation policy: accessory. Look at the Dock and the menu bar.\nCloses itself in 2 minutes.")
+  label.frame = NSRect(x: 20, y: 40, width: 380, height: 80); w.contentView?.addSubview(label)
+  let field = NSTextField(frame: NSRect(x: 20, y: 12, width: 380, height: 24)); field.placeholderString = "Try typing, and ⌘C / ⌘V here"
+  w.contentView?.addSubview(field)
+  w.makeKeyAndOrderFront(nil); app.activate(ignoringOtherApps: true)
+  log("window shown, policy=accessory")
+  DispatchQueue.main.asyncAfter(deadline: .now() + (mode.contains("show") ? 120 : 6)) { log("window closing"); exit(0) }
+  app.run()
+default: print("usage")
+}

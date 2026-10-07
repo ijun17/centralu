@@ -1,0 +1,28 @@
+import AppKit
+let buildTag = "@TAG@"
+let home = NSHomeDirectory() + "/centralu-shell-exp"
+func log(_ s: String) { let h = FileHandle(forWritingAtPath: home + "/log.txt")!; h.seekToEndOfFile(); h.write("[winapp pid=\(getpid()) ppid=\(getppid()) tag=\(buildTag)] \(s)\n".data(using: .utf8)!); h.closeFile() }
+typealias RespFn = @convention(c) (pid_t) -> pid_t
+let resp = unsafeBitCast(dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid")!, to: RespFn.self)
+let app = NSApplication.shared
+app.setActivationPolicy(.regular)
+let main = NSMenu()
+let appItem = NSMenuItem(); main.addItem(appItem)
+let appMenu = NSMenu(); appMenu.addItem(withTitle: "Quit Centralu Exp", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"); appItem.submenu = appMenu
+let editItem = NSMenuItem(); main.addItem(editItem)
+let edit = NSMenu(title: "Edit")
+edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+editItem.submenu = edit
+app.mainMenu = main
+let w = NSWindow(contentRect: NSRect(x: 240, y: 240, width: 460, height: 170), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+w.title = "Experiment (가): window as its own app (content \(buildTag))"
+let label = NSTextField(labelWithString: "This window is a small app inside the content folder,\nstarted by the keeper. The shell has no Dock icon.\nCheck: Dock icon, menu bar name and menus, ⌘C / ⌘V, ⌘Tab.\nCloses itself in 3 minutes.")
+label.frame = NSRect(x: 20, y: 50, width: 420, height: 90); w.contentView?.addSubview(label)
+let field = NSTextField(frame: NSRect(x: 20, y: 14, width: 420, height: 24)); field.placeholderString = "Type here, try ⌘A ⌘C ⌘V"; w.contentView?.addSubview(field)
+w.makeKeyAndOrderFront(nil); app.activate(ignoringOtherApps: true)
+log("shown, policy=regular, bundle=\(Bundle.main.bundleIdentifier ?? "nil") name=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") ?? "nil") responsible=\(resp(getpid()))")
+DispatchQueue.main.asyncAfter(deadline: .now() + 180) { log("closing"); exit(0) }
+app.run()
