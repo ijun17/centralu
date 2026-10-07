@@ -236,6 +236,25 @@ jobs:
 
       - run: pnpm verify
 
+  # The content verifier (docs/plans/thin-shell.md §4): the signature check and the copy the shell
+  # and the keeper will run before starting anything from a content folder. A small crate with no
+  # Tauri, so it builds in seconds. Both Unix platforms, because the copy is `openat` and an
+  # exclusive rename, which are spelled differently on each (renamex_np, renameat2).
+  content-verify:
+    name: content verify (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: cargo test
+        run: cargo test --manifest-path apps/desktop/content-verify/Cargo.toml
+
   # The TypeScript suite on Windows (#14). Until this job existed `pnpm verify` ran only inside
   # release.yml, on Linux and macOS, so nothing ever told us what breaks on Windows.
   #

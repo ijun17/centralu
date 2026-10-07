@@ -11,7 +11,7 @@ export default tseslint.config(
   // .claude/: agents' git worktrees, each a whole checkout of this repository. Linted from
   // here, none of the path-scoped blocks below match them (3,422 false errors on 2026-10-03,
   // with two agents at work); each worktree runs its own lint.
-  { ignores: ['.claude/**','**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', '**/*.app/**',
+  { ignores: ['.claude/**','**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', 'apps/desktop/content-verify/**', '**/*.app/**',
     // The app template's runtime — a minified build artifact (scripts/build-app-runtime.mjs) —
     // and its copy in each project app committed here.
     'packages/agent-host/app-template/runtime/**', '.centralu/apps/*/runtime/**',

@@ -46,8 +46,9 @@ describe('which checks a workflow requires', () => {
   it("reads this repository's build workflow as the check names CI reports, matrix rows filled in", () => {
     const text = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')
     const w = workflowCheckNames(text)
-    // The names `gh pr checks` showed for #415, without the discord-notify job
-    expect([...w.names].sort()).toEqual(['darwin-arm64', 'keeper e2e', 'linux-arm64', 'linux-x64', 'verify', 'windows tests', 'windows-x64'])
+    // The names `gh pr checks` showed for #415, without the discord-notify job, plus the content
+    // verifier's two rows (#440)
+    expect([...w.names].sort()).toEqual(['content verify (macos-14)', 'content verify (ubuntu-24.04)', 'darwin-arm64', 'keeper e2e', 'linux-arm64', 'linux-x64', 'verify', 'windows tests', 'windows-x64'])
     expect(w.unresolved).toEqual([])
   })
 
