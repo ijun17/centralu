@@ -77,9 +77,19 @@ Running code from outside a signed bundle with the app's permissions needs a rea
 
 - **Manifest.** Each release writes `content-manifest.json`: the app version, the platform, the minimum shell
   version, and the sha256 of every file the keeper and the host need (the keeper executable, `main.mjs`, native
-  modules, `schema.sql`, the bridge, the app template). The release workflow signs it with ed25519
-  (minisign format) using a key held only in the release environment's secrets, behind the same approval as the
-  npm token.
+  modules, `schema.sql`, the bridge, the app template). The release workflow signs it with plain ed25519 over the
+  manifest's exact bytes (§9 decision 8) using a key held only in the release environment's secrets, behind the
+  same approval as the npm token. The formats (written by `scripts/content-manifest.mts`, read by
+  `apps/desktop/content-verify`):
+
+  | File | Shape |
+  |---|---|
+  | `content-manifest.json` | `{ "format": 1, "appVersion", "platform", "minShellVersion", "files": [{ "path", "size", "sha256", "executable" }] }`, two-space JSON with a trailing newline, files sorted by the UTF-8 bytes of their path. `platform` is Node's `process.platform-process.arch` (`darwin-arm64`), `sha256` 64 lowercase hex characters. A path is relative and `/`-separated with no empty, `.` or `..` component, no `\`, no control character; no two paths differ only in ASCII case. Unknown fields are ignored; a change an older verifier must not ignore bumps `format`, which it refuses |
+  | `content-manifest.json.sig` | `{ "format": 1, "algorithm": "ed25519", "keyId", "signature", "comment" }`. `signature` is the base64 of the 64-byte signature over the manifest file's exact bytes, nothing prepended, checked with `verify_strict` before the manifest is parsed. `comment` is for people and verifies nothing |
+  | Key id | The first 8 bytes of SHA-256 over the raw 32-byte public key, 16 lowercase hex characters. It selects which built-in key to check with; an id that is not built in is refused. Trust comes from the key being compiled in, not from the id |
+
+  Both files sit at the top of the content folder and are copied with it, so the keeper can verify its own folder
+  again on a handoff.
 - **Keys.** The shell carries the current and the next public key, so the signing key can rotate without a
   shell version. They are in `packaging/shell/keys.json`; the private keys exist only as the `npm-publish`
   environment secrets `CONTENT_SIGNING_KEY` and `CONTENT_SIGNING_KEY_NEXT`, generated straight into GitHub on
@@ -175,6 +185,7 @@ About shows both: "Centralu 0.1.0-beta.13 (shell 1)".
 | 5 | Migration | Ask once, after the first release with the shell, with a note in the update | Existing grants belong to the window's old cdhash; the shell is a new app to macOS |
 | 6 | Windows and Linux | **No shell; share the keeper split, the manifest and the content folder** (§8) | No code-hash permissions there; Windows needs a keeper first |
 | 7 | Signing keys | **Generated into the release environment's secrets** (§4) | Same approval gate as the npm token |
+| 8 | Signature format (maintainer, 2026-10-08, #445) | **Plain ed25519 over the manifest's exact bytes, in a small JSON `.sig`; key id = SHA-256 prefix of the public key** (§4), not minisign | Minisign prehashes with BLAKE2b, signs a second "trusted comment" and keeps random key ids in minisign key files; the keys were generated as plain ed25519 (PKCS#8) straight into the release environment, and the shell's whole dependency list is meant to be one ed25519 check and one hash. Nobody needs the minisign tool: `tsx scripts/content-manifest.mts verify <dir>` reads these files |
 
 ## 10. Work, in pull requests
 

@@ -9,7 +9,8 @@
 //!
 //! # Formats
 //!
-//! Written by `scripts/content-manifest.mts`; change the two together.
+//! Written by `scripts/content-manifest.mts` and described in docs/plans/thin-shell.md §4; change
+//! the three together.
 //!
 //! * `content-manifest.json`: `{ "format": 1, "appVersion", "platform", "minShellVersion",
 //!   "files": [{ "path", "size", "sha256", "executable" }] }`. `platform` is

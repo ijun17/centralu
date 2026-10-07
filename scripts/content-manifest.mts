@@ -8,7 +8,7 @@
  * whether to run the content is the Rust crate in `apps/desktop/content-verify`; `verifyContent`
  * below is the Node mirror of it, used by tests and by the release script to check its own output.
  *
- * Formats (the crate's README-less doc comment in src/lib.rs repeats them; change both together):
+ * Formats (also in docs/plans/thin-shell.md §4 and the crate docs in src/lib.rs; change all three together):
  *
  *   content-manifest.json  JSON, two-space indented, one trailing newline. `format` is 1.
  *                          `files` is sorted by path (byte order of the UTF-8 encoding). A path is
@@ -23,11 +23,7 @@
  *   key id                 the first 8 bytes of SHA-256 over the raw 32-byte public key, as 16
  *                          lowercase hex characters. It picks the key; it is not the trust.
  *
- * Not minisign, which §4 first named: minisign prehashes with BLAKE2b and signs a second "trusted
- * comment", and its key ids are random bytes kept in minisign key files. The keys were generated
- * as plain ed25519 (PKCS#8) straight into the release environment, and the verifier's whole
- * dependency list is meant to be an ed25519 check and a hash. Nobody needs the minisign tool to
- * read these: `tsx scripts/content-manifest.mts verify <dir>` does.
+ * Not minisign: docs/plans/thin-shell.md §9 decision 8 has the reasons.
  *
  * **The private key is never printed, logged or written.** It is read from the environment
  * (`CONTENT_SIGNING_KEY`, PKCS#8 PEM) or generated in memory for a dry run, and only its public
