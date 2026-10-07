@@ -61,7 +61,8 @@ let project: ProjectInfo
 let session: SessionInfo
 
 beforeEach(async () => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-reply-image-')))
+  // native: the host answers with the expanded path, and Windows' temp folder can be an 8.3 short name (RUNNER~1)
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-reply-image-')))
   // Outside the project: a reply's image may be anywhere on the machine
   elsewhere = join(root, 'elsewhere')
   mkdirSync(join(root, 'project', 'out'), { recursive: true })

@@ -1097,7 +1097,8 @@ describe('Platform contract: app import (web + real host)', () => {
  */
 describe('Platform contract: an image a reply names (web + real host)', () => {
   it('reads one a reply wrote, refuses one no reply wrote, and says a browser cannot reveal it', async () => {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-reply-image-')))
+    // native: the host answers with the expanded path, and Windows' temp folder can be an 8.3 short name (RUNNER~1)
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-contract-reply-image-')))
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
     writeFileSync(join(dir, 'shot.png'), png)
     writeFileSync(join(dir, 'other.png'), png)
