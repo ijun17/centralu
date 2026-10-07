@@ -594,7 +594,7 @@ async function ciStatus({ pr, ref, repo }) {
     sha = resolved
     base = r.defaultBranch
   }
-  const req = await readRequired(target, base, CI.workflows, workflowCheckNames)
+  const req = await readRequired(target, base, CI.workflows, workflowCheckNames, pr !== undefined ? sha : undefined)
   const checks = await evaluate(target, sha, req)
   const ci = ciLines(what, sha, req, checks, await failureDetails(target, checks))
   return ciAnswer(ci.summary, ci, { verdict: checks.verdict, head: sha })
@@ -639,7 +639,7 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
 
   let p = await readPr(repo, want.number)
   const firstHead = p.headRefOid
-  const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames)
+  const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
   const limitMs = Math.min(60, Math.max(0, Number(waitMinutes ?? CI.waitMinutes) || 0)) * 60_000
   const started = Date.now()
   const signal = ctx?.mcpReq?.signal
@@ -867,7 +867,7 @@ serveStdio(() => {
     {
       title: 'CI status of a pull request or commit',
       description:
-        'The required checks of a pull request (pr) or a branch, tag or commit (ref), and whether every one is reported and passed. Verdict green, pending, failing, or none (no checks reported, which is not green). The required set comes from branch protection, else the CI workflow jobs on the base branch. For each failed job: the first failing test line of its log, the error after it, and whether the known intermittent failures issue quotes it.',
+        'The required checks of a pull request (pr) or a branch, tag or commit (ref), and whether every one is reported and passed. Verdict green, pending, failing, or none (no checks reported, which is not green). The required set comes from branch protection, else the CI workflow jobs on the base branch plus any job a pull request adds. For each failed job: the first failing test line of its log, the error after it, and whether the known intermittent failures issue quotes it.',
       inputSchema: z.object({
         pr: itemRef.optional().describe(`A pull request: ${REF_HELP}`),
         ref: z.string().optional().describe('Instead of pr: a branch, tag or commit sha'),
