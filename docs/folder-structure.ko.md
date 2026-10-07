@@ -22,8 +22,9 @@ centralu/
 │  └─ desktop/                  # Tauri entry point (created after M1)
 │     ├─ src/main.tsx           # injects createTauriPlatform() — the only place ②
 │     └─ src-tauri/             # Rust: supervisor, git2, rusqlite, OS integration
-│        ├─ Cargo.toml
-│        └─ src/
+│        ├─ Cargo.toml          # the workspace: this app package and keeper/
+│        ├─ src/                # the window (Tauri); src/bin/centralu-keeper.rs is the keeper's main
+│        └─ keeper/             # crate centralu-keeper-core: keeper and host supervisor, no Tauri (#440)
 │
 ├─ packages/
 │  ├─ protocol/                 # the shared language: event and command schemas (zod). 0 dependencies

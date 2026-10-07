@@ -5,13 +5,15 @@
 //! Linux but has no Windows equivalent, so the owner's direction is the same on every OS: **start
 //! the new keeper, pass it every handle, let the old one exit** (#280, "The keeper's own upgrade").
 //!
-//! **Who starts whom.** The outgoing keeper (A) starts the incoming one (B) from the new build's
-//! executable **inside its bundle**, the path the attaching app reports (`current_exe`), as
-//! `centralu --keeper --take-over-fd 3 ...`. Never a copy of the executable: the keeper is the app's
-//! own signed executable precisely so macOS attributes it to Centralu (`app.centralu`, #220), and a
-//! copy outside the bundle would be a new, unsigned-looking program. The bundle being replaced
-//! later does not disturb B either: `tauri build` and `centralu install` both delete the old bundle
-//! and write a new one (new inodes), and a running executable whose file was unlinked keeps running.
+//! **Who starts whom.** The outgoing keeper (A) starts the incoming one (B) from the executable the
+//! attaching window names: the new build's `centralu-keeper` **inside its bundle** (`exe::to_start`,
+//! #440), as `centralu-keeper --keeper --take-over-fd 3 ...`. A window from before #440 names its own
+//! executable instead, and keepers from before #440 start whatever they are given with the same
+//! arguments; the window's executable answers `--keeper` by `exec`ing the `centralu-keeper` next to
+//! it with the channel still at descriptor 3 (`exe.rs`), so every pairing of old and new meets in
+//! the same B. The bundle being replaced later does not disturb B: `tauri build` and
+//! `centralu install` both delete the old bundle and write a new one (new inodes), and a running
+//! executable whose file was unlinked keeps running.
 //!
 //! **The channel** is one end of a `socketpair` that A puts at B's descriptor 3. It has no path,
 //! so no other process can connect to it at all (stronger than a 0600 socket file, and nothing to

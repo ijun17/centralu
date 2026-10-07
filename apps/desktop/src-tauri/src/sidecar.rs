@@ -6,9 +6,9 @@
 //! and prod share the same path.
 //!
 //! Two ways to get there (#280, option C step 1):
-//!   - **Keeper** (release builds on unix): the app finds or launches the keeper — this same
-//!     executable as `centralu --keeper`, detached into its own session — and attaches to it over
-//!     its control socket. The keeper holds the host, so quitting, crashing or replacing the app
+//!   - **Keeper** (release builds on unix): the app finds or launches the keeper — the
+//!     `centralu-keeper` executable next to its own (#440), detached into its own session — and
+//!     attaches to it over its control socket. The keeper holds the host, so quitting, crashing or replacing the app
 //!     does not end the host unless background mode is off, in which case the keeper stops it the
 //!     moment the last window detaches, as quitting always did.
 //!   - **Direct** (`pnpm app:dev` and other debug builds, `CC_HOST_CMD`, non-unix targets): the
@@ -395,7 +395,7 @@ mod link {
 
     use super::*;
     use crate::host_proc::{backoff, MAX_RESTARTS, STABLE_UPTIME};
-    use crate::keeper::{client, source::BuildSource, KeeperView, KEEPER_FLAG};
+    use crate::keeper::{client, exe as keeper_exe, source::BuildSource, KeeperView, KEEPER_FLAG};
     use serde_json::{json, Value};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -507,7 +507,11 @@ mod link {
         }
 
         fn launch_keeper(&self) -> std::io::Result<()> {
-            let exe = std::env::current_exe()?;
+            // The keeper executable next to this one (#440), or this one with `--keeper` when there is
+            // none. A debug build always runs it in its own executable: `tauri dev` does not rebuild
+            // `centralu-keeper`, so the one beside it may be older code (keeper::exe).
+            let me = std::env::current_exe()?;
+            let exe = if cfg!(debug_assertions) { me } else { keeper_exe::to_start(&me) };
             // The legacy folder moves before this creates the new one (keeper::prepare_default_dir).
             let _ = crate::keeper::prepare_default_dir(&self.data, self.dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
             let _ = std::fs::create_dir_all(&self.data);
@@ -522,7 +526,10 @@ mod link {
             }
             args.push("--app-version".into());
             args.push(env!("CARGO_PKG_VERSION").into());
-            let env: Vec<(String, String)> = if self.dev { vec![("CC_DEV".into(), "1".into())] } else { Vec::new() };
+            let mut env: Vec<(String, String)> = if self.dev { vec![("CC_DEV".into(), "1".into())] } else { Vec::new() };
+            if cfg!(debug_assertions) {
+                env.push((keeper_exe::IN_PROCESS_ENV.into(), "1".into()));
+            }
             client::launch_detached(&exe, &args, &env, &self.data.join("keeper.log"))
         }
 
@@ -678,12 +685,12 @@ mod link {
                 .unwrap_or(false)
         }
 
-        /// Switches to this window's build. The keeper is handed this app's own executable, inside
-        /// its bundle, so that a keeper of another build first hands itself over to this build's
-        /// keeper (#280 step 4): the same signed program, never a copy (#220). A keeper older than
+        /// Switches to this window's build. The keeper is handed this build's keeper executable, inside
+        /// its bundle (#440), so that a keeper of another build first hands itself over to this build's
+        /// keeper (#280 step 4): the program the bundle shipped, never a copy (#220). A keeper older than
         /// step 4 ignores the field and swaps only the host.
         pub fn switch_build(&self) -> Result<(), String> {
-            let exe = std::env::current_exe().ok();
+            let exe = std::env::current_exe().ok().map(|me| keeper_exe::to_start(&me));
             let mut req = json!({ "op": "switch", "source": self.app_build });
             if let Some(exe) = exe.filter(|_| !self.dev) {
                 req["keeper"] = json!({ "exe": exe });

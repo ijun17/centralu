@@ -424,6 +424,7 @@ dependencies = [
 name = "centralu"
 version = "0.1.0-beta.11"
 dependencies = [
+ "centralu-keeper-core",
  "libc",
  "objc2",
  "objc2-app-kit",
@@ -437,6 +438,15 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "trash",
+]
+
+[[package]]
+name = "centralu-keeper-core"
+version = "0.1.0-beta.11"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

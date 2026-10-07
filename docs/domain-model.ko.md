@@ -111,14 +111,14 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 호스트 | 세션, 스토어, 앱을 가진 Node 프로세스. 데이터 폴더마다 하나(소유 잠금) | `packages/agent-host/src/main.ts`; `dev-services/instance-lock.ts` | 서버, 백엔드, 사이드카(직접 경로만 그렇다) |
 | 스토어 | 호스트의 SQLite 데이터베이스 `<data>/store.db`. 쓰는 것은 호스트뿐이다 | `packages/agent-host/src/dev-services/store.ts`; [generated/schema.md](generated/schema.md) | |
 | 데이터 폴더 | `~/.centralu`(개발 중에는 `~/.centralu-dev`, `CC_DATA_DIR`로 바꿀 수 있다) | `packages/agent-host/src/data-dir.ts` | |
-| 키퍼 | 앱 자신의 실행 파일을 `centralu --keeper`로 띄운 것. 창에서 떨어져 돈다. 호스트를 띄우고 지켜보며, 오래 사는 자식들을 쥐고, 정문을 가진다. macOS 릴리스 빌드에서 쓰고, Linux와 디버그 빌드는 `CC_USE_KEEPER=1`일 때 쓴다 | `apps/desktop/src-tauri/src/keeper/`, 띄우는 곳은 `sidecar.rs`; [architecture.ko.md](architecture.ko.md) §4.1 | 데몬 |
-| 정문 | 키퍼의 루프백 포트 하나와 토큰. 지금의 호스트에게 바이트를 그대로 옮겨 주므로, 클라이언트는 호스트 자신의 포트를 보지 않는다 | `apps/desktop/src-tauri/src/keeper/front_door.rs`; [architecture.ko.md](architecture.ko.md) §4.2 | 프록시 |
-| 자식 서비스 | 키퍼의 `<data>/children.sock`. 호스트는 이것으로 키퍼에게 에이전트 CLI, 터미널, 명령 실행을 띄워 쥐고 있으라고 부탁하고, 그래서 그것들은 호스트보다 오래 산다 | `apps/desktop/src-tauri/src/keeper/children/`; `packages/agent-host/src/keeper/`; [architecture.ko.md](architecture.ko.md) §4.3 | |
-| 빌드별 사본 | `<data>/hosts/<build>/`: 키퍼가 돌리는 빌드의 호스트 사본. 다시 빌드해도 두 빌드가 섞이지 않는다 | `apps/desktop/src-tauri/src/keeper/source.rs` | |
-| 스왑 | 정문 뒤에서 도는 호스트를 다른 빌드의 호스트로 블루그린으로 바꾸는 것 | `apps/desktop/src-tauri/src/keeper/swap.rs`; `packages/agent-host/src/swap-control.ts`, `drain.ts` | 재시작 |
+| 키퍼 | 창의 실행 파일 옆에 실린 자기 실행 파일 `centralu-keeper`. 창에서 떨어져 돈다(0.1.0-beta.11까지는 창의 실행 파일을 `centralu --keeper`로 띄운 것이었고, 그렇게 띄우면 지금도 `centralu-keeper`로 바뀐다). 호스트를 띄우고 지켜보며, 오래 사는 자식들을 쥐고, 정문을 가진다. macOS 릴리스 빌드에서 쓰고, Linux와 디버그 빌드는 `CC_USE_KEEPER=1`일 때 쓴다 | `apps/desktop/src-tauri/keeper/` (Tauri 없는 크레이트 `centralu-keeper-core`), 띄우는 곳은 `sidecar.rs`; [architecture.ko.md](architecture.ko.md) §4.1 | 데몬 |
+| 정문 | 키퍼의 루프백 포트 하나와 토큰. 지금의 호스트에게 바이트를 그대로 옮겨 주므로, 클라이언트는 호스트 자신의 포트를 보지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.ko.md](architecture.ko.md) §4.2 | 프록시 |
+| 자식 서비스 | 키퍼의 `<data>/children.sock`. 호스트는 이것으로 키퍼에게 에이전트 CLI, 터미널, 명령 실행을 띄워 쥐고 있으라고 부탁하고, 그래서 그것들은 호스트보다 오래 산다 | `apps/desktop/src-tauri/keeper/src/keeper/children/`; `packages/agent-host/src/keeper/`; [architecture.ko.md](architecture.ko.md) §4.3 | |
+| 빌드별 사본 | `<data>/hosts/<build>/`: 키퍼가 돌리는 빌드의 호스트 사본. 다시 빌드해도 두 빌드가 섞이지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
+| 스왑 | 정문 뒤에서 도는 호스트를 다른 빌드의 호스트로 블루그린으로 바꾸는 것 | `apps/desktop/src-tauri/keeper/src/keeper/swap.rs`; `packages/agent-host/src/swap-control.ts`, `drain.ts` | 재시작 |
 | 드레인 | 스왑에서 나가는 호스트가 하는 일: 새 호출을 거절하고, 도는 호출에 10초를 주고, 떼어 놓고, 잠금을 풀고, 끝난다 | `packages/agent-host/src/drain.ts` | |
 | 떼어 놓기 / 멈추기 | 호스트가 떠나는 두 방식: **떼어 놓기**는 키퍼의 자식들을 다음 호스트를 위해 살려 두고, **멈추기**는 그것들을 끝낸다 | [architecture.ko.md](architecture.ko.md) §4.3 | |
-| 키퍼 인계 | 키퍼가 모든 디스크립터를 넘겨 더 새 키퍼로 자신을 바꾸는 것. 아무것도 다시 연결하지 않는다 | `apps/desktop/src-tauri/src/keeper/handoff/`; [architecture.ko.md](architecture.ko.md) §4.4 | (세션 인계와 다르다, §1.1) |
+| 키퍼 인계 | 키퍼가 모든 디스크립터를 넘겨 더 새 키퍼로 자신을 바꾸는 것. 아무것도 다시 연결하지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/handoff/`; [architecture.ko.md](architecture.ko.md) §4.4 | (세션 인계와 다르다, §1.1) |
 | Codex 브리지 | `codex app-server`가 세션을 위해 띄우는 작은 Node MCP 서버: Centralu 도구에 하나, 붙은 앱마다 하나. 정문을 거쳐(키퍼가 없으면 호스트 자신의 포트로) 호스트를 부른다. Claude에는 필요 없다: 그 서버들은 호스트 안에서 돈다 | `packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs` | 오케스트레이터 브리지(그보다 많이 나른다) |
 | `centralu serve` | 창도 키퍼도 없이 `127.0.0.1:17175`에서 호스트를 띄우는 npm 런처. 원격 모드 1단계용 | `packaging/npm/centralu/bin/serve.mjs`; [agent-host.ko.md](agent-host.ko.md) §4.7 | |
 | 스트림 에포크 | 호스트 수명마다 하나씩인 무작위 id. 다시 연결했을 때 에포크가 다르면 클라이언트는 다시 받기 대신 다시 맞춘다 | `packages/agent-host/src/transport/event-log.ts`; [protocol.ko.md](protocol.ko.md) | |
@@ -417,7 +417,7 @@ stateDiagram-v2
 flowchart TD
   app["Window: Tauri shell<br/>(Centralu executable)"]
   web["Webview: React UI"]
-  keeper["Keeper<br/>centralu --keeper, own session"]
+  keeper["Keeper<br/>centralu-keeper, own session"]
   host["Host: system Node<br/>&lt;data&gt;/hosts/&lt;build&gt;/main.mjs"]
   claude["claude CLI"]
   codex["codex app-server"]
@@ -443,7 +443,7 @@ flowchart TD
   host -. "children.sock: control + one stream per pipe" .-> keeper
 ```
 
-- 키퍼는 앱 자신의 실행 파일을 한 모드로 띄운 것이고, 떨어뜨려 띄우므로 앱을 끝내도 키퍼에게는 아무것도 가지
+- 키퍼는 창의 실행 파일 옆에 있는 자기 실행 파일이고, 떨어뜨려 띄우므로 앱을 끝내도 키퍼에게는 아무것도 가지
   않는다. 키퍼는 빌드별 사본에서 호스트를 띄우며 정문의 토큰을 `CC_HOST_TOKEN`으로 건네고, 호스트를 블루그린으로
   바꾼다. 호스트는 키퍼와 함께 죽는다(키퍼의 파이프에 걸린 `--watch-parent`).
 - 에이전트 CLI, 터미널, 명령 실행은 **키퍼의** 자식이다. 호스트가 `children.sock`으로 부탁하면 키퍼가 띄우고,

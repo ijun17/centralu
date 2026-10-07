@@ -1,10 +1,12 @@
 //! The keeper (#280, option C step 1).
 //!
-//! The keeper is **this same executable started as `centralu --keeper`**, not a separate binary
-//! (owner decision, 2026-10-04): one thing to sign and ship, and the same signature and bundle
-//! identifier as the app, so macOS should attribute privacy permissions to Centralu rather than
-//! to a new program (#220). `main()` branches into it before the Tauri app is built, so keeper
-//! mode never creates a window, loads the webview or registers with the window server.
+//! The keeper is **its own executable, `centralu-keeper`** (#440), shipped next to the window's
+//! executable and linking no Tauri and no webview. Until 0.1.0-beta.11 it was the window's
+//! executable started as `centralu --keeper`; that still works and turns into `centralu-keeper`
+//! (`exe.rs`), because keepers already installed hand over that way. Who it is for macOS privacy
+//! permissions did not change: macOS judges a process by the app that started its tree (the
+//! responsible process, measured for #440 in docs/spikes/2026-10-thin-shell-tcc.md), and the window starts
+//! the keeper either way.
 //!
 //! What it does:
 //!   - holds the host: launches it, restarts it by the same rules the app used, stops it;
@@ -26,13 +28,14 @@
 //!     the host and cutting every turn.
 //!
 //! Step 4 (`handoff/`) replaces the keeper itself: the new build's keeper is started from the new
-//! bundle's executable, the running one freezes and passes it every descriptor it owns (the
+//! bundle's keeper executable, the running one freezes and passes it every descriptor it owns (the
 //! sockets, the host's pipes, every child's pipes and pty, every relayed connection) with its
 //! state, and exits once the new one has rebuilt everything. Nothing is restarted and no address
 //! changes.
 
 pub mod children;
 pub mod client;
+pub mod exe;
 pub mod front_door;
 pub mod handoff;
 pub mod server;
@@ -53,7 +56,9 @@ use swap::SwapView;
 /// rather than guessing at its answers.
 pub const KEEPER_PROTOCOL: u32 = 1;
 
-/// The flag `main()` looks for.
+/// The flag the window's `main()` looks for. Every keeper start still passes it, so that the same
+/// command line works whether it names `centralu-keeper` (which ignores it) or, from an older window
+/// or keeper, the window's executable (which turns into the keeper on seeing it, `exe.rs`).
 pub const KEEPER_FLAG: &str = "--keeper";
 
 /// Exit code of a keeper that found another one already holding the data folder.

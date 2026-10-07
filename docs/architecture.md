@@ -93,11 +93,12 @@ agent-host (node, run standalone)         ▼
 
 ### 4.1 The keeper: the host outlives the window (#280, option C step 1)
 
-In the packaged app the Tauri app is no longer the host's parent. The host is held by the **keeper**: the
-same Centralu executable started as `centralu --keeper`, detached from the app into its own session.
+In the packaged app the Tauri app is no longer the host's parent. The host is held by the **keeper**: its own
+executable, `centralu-keeper`, shipped next to the window's (`Contents/MacOS/` on macOS, `usr/bin/` in the AppImage)
+and started detached from the app into its own session.
 
 ```
-Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own session)
+Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
    │                 unix socket     │ launch · watch · restart · swap
    │                 <data>/keeper.sock, 0600
    │                                 │
@@ -111,7 +112,10 @@ Tauri app (window)  ──attach──▶  keeper (centralu --keeper, own sessio
 
 | Decision | Why |
 |---|---|
-| The keeper is the app's own executable in a mode, not a second binary | One thing to sign and ship, and the same signature and bundle identifier, so macOS should attribute privacy permissions to Centralu rather than to a new program (#220). `main()` branches before the Tauri app is built, so keeper mode never opens a window or loads the webview. |
+| The keeper is its own executable, `centralu-keeper`, linking no Tauri and no webview (#440) | Until 0.1.0-beta.11 it was the window's executable in a mode (`centralu --keeper`), chosen so macOS would attribute privacy permissions to Centralu. Measured since: macOS judges a process by the app that started its tree (the responsible process, `docs/spikes/2026-10-thin-shell-tcc.md`, #443), not by the file it runs, so a keeper the window starts is the window's either way. A separate executable is what lets a later step start the keeper from verified content outside the bundle (`docs/plans/thin-shell.md` §5, #443). Its code is the crate `apps/desktop/src-tauri/keeper` (`centralu-keeper-core`, no Tauri dependency), and the binary is a target of the app package, so `tauri build` bundles it next to the window's with no extra step. Measured in a release bundle (macOS arm64, 2026-10-08): `centralu-keeper` is 0.8 MB and links only `libSystem` and `libiconv`; the window's `centralu` is 5.4 MB and links WebKit and AppKit. Tauri signs it ad hoc like the window, and `codesign --verify --deep --strict` on the bundle covers it. |
+| The window's executable still answers `--keeper`, by `exec`ing the keeper next to it | Keepers already installed hand over by starting the new build's *window* executable as `centralu --keeper --take-over-fd 3 ...`, and an older window starts its keeper the same way. `exec` keeps the pid (the outgoing keeper waits on that child), the arguments, the environment and every descriptor not marked close-on-exec, so the handoff channel at descriptor 3 and `keeper.log` on stdout and stderr reach `centralu-keeper` unchanged; the channel's close-on-exec flag is cleared once more before the `exec`. With no keeper beside it, the window's executable runs the keeper itself. |
+| Not on Windows | The keeper is built on unix sockets, descriptor passing and `flock`. Tauri leaves a binary out of the bundle when its required feature (`keeper-exe`) is not among the build's features, and `tauri.windows.conf.json` names none. |
+| A debug window runs the keeper in its own executable | `tauri dev` and `cargo run` build only the binary they run, so a `centralu-keeper` in `target/debug` may be older code than the window, and two binaries of one build are linked in no fixed order, so file times cannot tell. A debug window that opts into the keeper (`CC_USE_KEEPER=1`) starts itself with `--keeper` and `CC_KEEPER_IN_PROCESS=1`, as before #440. |
 | The app launches it detached (`setsid`, stdin `/dev/null`) | Quitting, crashing or replacing the app sends it nothing. launchd and `SMAppService` are later options, not step 1. |
 | The host is tied to the keeper (`--watch-parent` on the keeper's pipe) | A keeper that dies, however it dies, still takes its host with it: there is never an unowned host. |
 | Every host runs from a per-build copy, `<data>/hosts/<commit>/` | A rebuild or update rewrites the bundle; a host running from it read the Codex bridge, `schema.sql` and `app-template/` on demand and could mix two builds (2026-10-03). Once a host is up, the copies it does not run from are removed, except one a launch or a swap is still making or about to start: those are claimed until a host runs from them, and the cleanup reads which copy the host runs from when it runs, not when the ready line set it off (a cleanup once deleted the copy a swap had just made, #368). |
@@ -210,7 +214,8 @@ direction is the same on every OS: **start the new keeper, pass it every handle,
 
 ```
 keeper A (running build)                           keeper B (new build, from its own bundle)
- 1  starts B: centralu --keeper --take-over-fd 3  ──▶  hello
+ 1  starts B: centralu-keeper --keeper            ──▶  hello
+            --take-over-fd 3
  2  freezes: accepts nothing, parks every relay,
     pauses the host's stdout, freezes the child table,
     stops copying and removing host copies
@@ -235,7 +240,7 @@ answered "try again", and the app's retry reaches B.
 
 | Decision | Why |
 |---|---|
-| B is the new build's executable **inside its bundle**, the path the attaching app reports (`current_exe`), never a copy | The keeper is the app's own signed executable so macOS attributes it to Centralu (#220); a copy outside the bundle would be another program. Replacing the bundle later does not disturb B: `tauri build` deletes the old `.app` and writes a new one (`bundle_project`, tauri-bundler 2.10), and `centralu install` does `rmSync` then `ditto`, so the running executable's file is unlinked, not overwritten, and keeps running (the integration script deletes and rewrites keeper A's executable under it, and A goes on serving and hands over). An in-place overwrite is not something to rely on: a probe that overwrote a running keeper's file in place saw it keep answering for the 3 s it watched, its code being resident, but any page not yet loaded would come from the new file. Nothing in the tree overwrites in place. |
+| B is the new build's keeper executable **inside its bundle**, the path the attaching window names (`centralu-keeper` beside its own executable, `keeper::exe`), never a copy | It is the file the person installed, signed with the bundle. A window or keeper from before #440 names or starts the window's executable instead, which turns into the `centralu-keeper` beside it (§4.1), so every pairing of old and new ends in the same B; `scripts/keeper-handoff-integration.mjs --old-keeper` runs that against a real 0.1.0-beta.11 executable. Replacing the bundle later does not disturb B: `tauri build` deletes the old `.app` and writes a new one (`bundle_project`, tauri-bundler 2.10), and `centralu install` does `rmSync` then `ditto`, so the running executable's file is unlinked, not overwritten, and keeps running (the integration script deletes and rewrites keeper A's executable under it, and A goes on serving and hands over). An in-place overwrite is not something to rely on: a probe that overwrote a running keeper's file in place saw it keep answering for the 3 s it watched, its code being resident, but any page not yet loaded would come from the new file. Nothing in the tree overwrites in place. |
 | The channel is a `socketpair` end at B's descriptor 3, not a socket file | It has no path, so no other process can connect at all (stronger than `0600`), and there is nothing to clean up. B still checks the peer's uid. |
 | A **freezes** rather than drains | A byte A read but did not deliver would be lost with A (the #280 measurement's rule: the outgoing keeper must not read ahead, or must forward what it read). Frozen, A reads nothing more; everything it holds is in the snapshot. A relay is stopped between two copies, the host's reader between two lines, the child table between two passes. |
 | The commit point is A receiving `ready` | Before it, any failure (B not starting, B failing to rebuild, B dying, a timeout) rolls A back: it kills B and thaws, and since it closed nothing (the snapshot holds duplicates) and read nothing, it carries on exactly where it stopped. After it, A never resumes. B treats a channel that closes after `ready` without `commit` as A having died: it takes over if A is gone, since it holds the only copy of everything, and exits if A is still there. |

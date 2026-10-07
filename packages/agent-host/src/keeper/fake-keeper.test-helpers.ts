@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 /**
  * A stand-in for the keeper's child service, speaking its wire protocol (the Rust one is
- * `apps/desktop/src-tauri/src/keeper/children/`, tested there against real processes). It runs real
+ * `apps/desktop/src-tauri/keeper/src/keeper/children/`, tested there against real processes). It runs real
  * child processes — pipes only, a "pty" is pipes too — and records every request, so a test can say
  * what the host asked for and, as much, what it never asked for.
  *

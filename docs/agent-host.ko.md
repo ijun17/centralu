@@ -2,7 +2,7 @@
 
 > 영어 원본: [agent-host.md](agent-host.md) — 설계가 바뀌면 두 문서를 같은 PR에서 함께 갱신한다.
 
-독립 실행되는 Node 프로세스다. dev에서는 개발자가 직접 띄우고(`pnpm host`), 패키지된 앱에서는 키퍼(`centralu --keeper`, §4.1)가, `pnpm app:dev`에서는 Tauri 앱이 spawn하고 감시한다. **UI가 있든 없든 동일하게 동작해야 한다** — UI는 여러 번 닫혔다 다시 열릴 수 있고(재연결), 그동안 호스트는 세션을 계속 유지한다.
+독립 실행되는 Node 프로세스다. dev에서는 개발자가 직접 띄우고(`pnpm host`), 패키지된 앱에서는 키퍼(`centralu-keeper`, §4.1)가, `pnpm app:dev`에서는 Tauri 앱이 spawn하고 감시한다. **UI가 있든 없든 동일하게 동작해야 한다** — UI는 여러 번 닫혔다 다시 열릴 수 있고(재연결), 그동안 호스트는 세션을 계속 유지한다.
 
 ## 1. 내부 구조
 
@@ -364,7 +364,7 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 
 ### 4.1 호스트를 쥐는 쪽: 키퍼 (#280, 옵션 C 1단계)
 
-패키지된 앱에서 호스트의 부모는 앱이 아니라 키퍼다(`centralu --keeper`, 앱 실행 파일의 한 모드;
+패키지된 앱에서 호스트의 부모는 앱이 아니라 키퍼다(`centralu-keeper`, 창의 실행 파일 옆에 있는 자기 실행 파일, #440;
 [architecture.ko.md](architecture.ko.md) §4.1). 키퍼는 호스트를 `--port 0 --watch-parent --db <data>/store.db`와
 `CC_DATA_DIR=<data>`로 띄우고, stdin 파이프를 쥐며, 앱이 쓰던 규칙 그대로 다시 띄운다: 연속 실패 다섯 번,
 30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc.rs`,

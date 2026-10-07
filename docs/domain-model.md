@@ -109,14 +109,14 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Host | The Node process that owns sessions, the store and apps. One per data folder (ownership lock) | `packages/agent-host/src/main.ts`; `dev-services/instance-lock.ts` | server, backend, sidecar (only the direct path is) |
 | Store | The host's SQLite database, `<data>/store.db`; the only writer is the host | `packages/agent-host/src/dev-services/store.ts`; [generated/schema.md](generated/schema.md) | |
 | Data folder | `~/.centralu` (`~/.centralu-dev` in development; `CC_DATA_DIR` overrides) | `packages/agent-host/src/data-dir.ts` | |
-| Keeper | The app's own executable started as `centralu --keeper`, detached from the window. Starts and supervises the host, holds its long-lived children, and owns the front door. macOS release builds; Linux and debug builds with `CC_USE_KEEPER=1` | `apps/desktop/src-tauri/src/keeper/`, started by `sidecar.rs`; [architecture.md](architecture.md) §4.1 | daemon |
-| Front door | The keeper's one loopback port and token, relaying bytes to whichever host is current, so clients never see a host's own port | `apps/desktop/src-tauri/src/keeper/front_door.rs`; [architecture.md](architecture.md) §4.2 | proxy |
-| Children service | The keeper's `<data>/children.sock`, through which the host asks the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlive a host | `apps/desktop/src-tauri/src/keeper/children/`; `packages/agent-host/src/keeper/`; [architecture.md](architecture.md) §4.3 | |
-| Per-build copy | `<data>/hosts/<build>/`: the copy of a build's host that a keeper runs, so a rebuild cannot mix two builds | `apps/desktop/src-tauri/src/keeper/source.rs` | |
-| Swap | Replacing the running host with another build's, blue-green, behind the front door | `apps/desktop/src-tauri/src/keeper/swap.rs`; `packages/agent-host/src/swap-control.ts`, `drain.ts` | restart |
+| Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which still turns into it). Starts and supervises the host, holds its long-lived children, and owns the front door. macOS release builds; Linux and debug builds with `CC_USE_KEEPER=1` | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `sidecar.rs`; [architecture.md](architecture.md) §4.1 | daemon |
+| Front door | The keeper's one loopback port and token, relaying bytes to whichever host is current, so clients never see a host's own port | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.md](architecture.md) §4.2 | proxy |
+| Children service | The keeper's `<data>/children.sock`, through which the host asks the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlive a host | `apps/desktop/src-tauri/keeper/src/keeper/children/`; `packages/agent-host/src/keeper/`; [architecture.md](architecture.md) §4.3 | |
+| Per-build copy | `<data>/hosts/<build>/`: the copy of a build's host that a keeper runs, so a rebuild cannot mix two builds | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
+| Swap | Replacing the running host with another build's, blue-green, behind the front door | `apps/desktop/src-tauri/keeper/src/keeper/swap.rs`; `packages/agent-host/src/swap-control.ts`, `drain.ts` | restart |
 | Drain | What the outgoing host does in a swap: refuse new calls, give running ones 10 s, detach, release the lock, exit | `packages/agent-host/src/drain.ts` | |
 | Detach / stop | The two ways a host can leave: **detach** leaves the keeper's children running for the next host; **stop** ends them | [architecture.md](architecture.md) §4.3 | |
-| Keeper handoff | A keeper replacing itself with a newer keeper, passing every descriptor; nothing reconnects | `apps/desktop/src-tauri/src/keeper/handoff/`; [architecture.md](architecture.md) §4.4 | (not the session handoff, §1.1) |
+| Keeper handoff | A keeper replacing itself with a newer keeper, passing every descriptor; nothing reconnects | `apps/desktop/src-tauri/keeper/src/keeper/handoff/`; [architecture.md](architecture.md) §4.4 | (not the session handoff, §1.1) |
 | Codex bridge | A small Node MCP server that `codex app-server` starts for a session: one for Centralu's tools and one per attached app. It calls back into the host over the front door (or the host's own port without a keeper). Claude needs none: its servers run inside the host | `packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs` | orchestrator bridge (it carries more) |
 | `centralu serve` | The npm launcher running a host headless on `127.0.0.1:17175`, no window and no keeper, for remote mode phase 1 | `packaging/npm/centralu/bin/serve.mjs`; [agent-host.md](agent-host.md) §4.7 | |
 | Stream epoch | A random id per host life. A client whose epoch differs after a reconnect resyncs instead of replaying | `packages/agent-host/src/transport/event-log.ts`; [protocol.md](protocol.md) | |
@@ -420,7 +420,7 @@ Who starts whom, and who talks to whom over what. The parent/child edges are sol
 flowchart TD
   app["Window: Tauri shell<br/>(Centralu executable)"]
   web["Webview: React UI"]
-  keeper["Keeper<br/>centralu --keeper, own session"]
+  keeper["Keeper<br/>centralu-keeper, own session"]
   host["Host: system Node<br/>&lt;data&gt;/hosts/&lt;build&gt;/main.mjs"]
   claude["claude CLI"]
   codex["codex app-server"]
@@ -446,7 +446,7 @@ flowchart TD
   host -. "children.sock: control + one stream per pipe" .-> keeper
 ```
 
-- The keeper is the app's own executable in a mode, launched detached so quitting the app sends it nothing. It
+- The keeper is an executable of its own beside the window's, launched detached so quitting the app sends it nothing. It
   starts the host from the per-build copy, with the front door's token in `CC_HOST_TOKEN`, and swaps it blue-green.
   A host dies with its keeper (`--watch-parent` on the keeper's pipe).
 - Agent CLIs, terminals and command runs are the **keeper's** children, spawned when the host asks over

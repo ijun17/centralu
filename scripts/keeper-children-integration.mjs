@@ -6,7 +6,7 @@
  *   node scripts/keeper-children-integration.mjs [--no-build] [--no-codex] [--no-claude]
  *
  * Builds like `keeper-integration.mjs` (cargo build into a target folder under /tmp, never
- * `tauri build`; `pnpm bundle:host`) and runs `centralu --keeper` against a temporary
+ * `tauri build`; `pnpm bundle:host`) and runs `centralu-keeper --keeper` against a temporary
  * `CC_DATA_DIR`, with a scratch git folder under /tmp as the project. Models are the cheap ones:
  * claude `haiku`, codex `gpt-5.6-luna` at low effort. It costs a few cents of model use.
  *
@@ -35,7 +35,8 @@ import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-pr
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
-const BIN = join(TARGET, 'debug', 'centralu')
+// The keeper executable (#440), started the way a window of this build starts it
+const BIN = join(TARGET, 'debug', 'centralu-keeper')
 const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
 const FAKE_BUNDLE = '/tmp/centralu-keeper-test/Centralu.app'
 const WITH_CLAUDE = !process.argv.includes('--no-claude')

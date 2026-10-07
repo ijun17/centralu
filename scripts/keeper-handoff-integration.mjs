@@ -4,12 +4,14 @@
  * binaries, the real host, a real claude and a real codex.
  *
  *   node scripts/keeper-handoff-integration.mjs [--no-build] [--no-codex] [--no-claude]
+ *     [--old-keeper <exe>] [--handoff-via window|keeper]
  *
  * Builds like the other keeper scripts (`cargo build` into a target folder under /tmp, never
  * `tauri build`; `pnpm bundle:host`), then makes three "builds" A, B and C under /tmp: each is its
- * own copy of the executable next to its own copy of the bundled host, stamped with its own commit
- * (`handoff-A`, ...). A keeper's build is the host folder it was started with, exactly as in the
- * app, where the executable and the host folder sit in one bundle. Everything runs against a
+ * own copy of the two executables, the window's `centralu` and the keeper's `centralu-keeper` side
+ * by side as in `Contents/MacOS/` (#440), next to its own copy of the bundled host, stamped with its
+ * own commit (`handoff-A`, ...). A keeper's build is the host folder it was started with, exactly as
+ * in the app, where the executables and the host folder sit in one bundle. Everything runs against a
  * temporary `CC_DATA_DIR` and a scratch git folder; models are claude `haiku` and codex
  * `gpt-5.6-luna` at low effort.
  *
@@ -20,6 +22,12 @@
  * (#368).
  *
  * Checked:
+ *   - keeper A is started the way every earlier build started its keeper, as the window's executable
+ *     with `--keeper`, and becomes build A's `centralu-keeper` (same pid);
+ *   - the handoff to B is asked (by default) with B's *window* executable, the command line a keeper of
+ *     0.1.0-beta.11 or earlier writes (`centralu --keeper --take-over-fd 3 ...`), and B runs as B's
+ *     `centralu-keeper` with the handoff channel intact; the later handoffs are asked with the keeper
+ *     executable, as a window of this build asks, and run it;
  *   - keeper A (build A) with its host, a terminal printing a counter, a dev server, a claude turn
  *     mid-tool-call and a codex turn, hands over to keeper B (`upgrade`): same host pid, same child
  *     pids, the counter and the dev server's ticks continuous (nothing lost or doubled), each
@@ -38,6 +46,12 @@
  *     copy survives the cleanup that lands between copying and starting it;
  *   - stop ends the keeper, the host and every child.
  *
+ * `--old-keeper <exe>` makes build A's window executable that file (an earlier release's
+ * `Contents/MacOS/centralu`, copied, with no keeper beside it), so keeper A is a real old keeper and
+ * the handoff to B is the update an installed one goes through. `--handoff-via keeper` asks that
+ * first handoff with B's `centralu-keeper` rather than B's window executable: what a window of this
+ * build sends an old keeper after an update. Neither runs in CI (they need that release).
+ *
  * `--no-claude --no-codex` leaves the parts that need no model and no network: everything above
  * except the two agent turns. CI runs exactly that (the `keeper` job in
  * `.github/workflows/build.yml`); the agent parts stay a manual run.
@@ -47,7 +61,7 @@
  * the keepers' and the host's logs. `KEEP_TEMP=1` keeps the temporary folders for a look afterwards.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,6 +70,14 @@ import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-pr
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
 const BIN = join(TARGET, 'debug', 'centralu')
+const KEEPER_BIN = join(TARGET, 'debug', 'centralu-keeper')
+const argValue = (flag) => {
+  const i = process.argv.indexOf(flag)
+  return i === -1 ? null : process.argv[i + 1]
+}
+const OLD_KEEPER = argValue('--old-keeper')
+const HANDOFF_VIA = argValue('--handoff-via') ?? 'window'
+if (!['window', 'keeper'].includes(HANDOFF_VIA)) throw new Error(`--handoff-via is window or keeper, not ${HANDOFF_VIA}`)
 const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
 const WITH_CLAUDE = !process.argv.includes('--no-claude')
 const WITH_CODEX = !process.argv.includes('--no-codex')
@@ -141,8 +163,8 @@ function request(sock, body, timeoutMs = 8000) {
 const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
 const heldChildren = (data) => request(join(data, 'children.sock'), { op: 'hello', protocol: 1 }).then((r) => r.children ?? [])
 
-/** A "build": its own copy of the executable and of the host, stamped with its own commit */
-function makeBuild(root, name) {
+/** A "build": its own copy of the two executables and of the host, stamped with its own commit */
+function makeBuild(root, name, windowBin = BIN, keeperBin = KEEPER_BIN) {
   const dir = join(root, name)
   const host = join(dir, 'host')
   cpSync(HOST_SRC, host, { recursive: true })
@@ -150,8 +172,21 @@ function makeBuild(root, name) {
   const info = JSON.parse(readFileSync(infoPath, 'utf8'))
   writeFileSync(infoPath, JSON.stringify({ ...info, commit: `handoff-${name}`, builtAt: new Date().toISOString() }))
   const exe = join(dir, 'centralu')
-  cpSync(BIN, exe)
-  return { name, exe, host, commit: `handoff-${name}`, bundle: join(dir, 'Centralu.app') }
+  cpSync(windowBin, exe)
+  const keeper = join(dir, 'centralu-keeper')
+  if (keeperBin) cpSync(keeperBin, keeper)
+  return { name, exe, keeper: keeperBin ? keeper : null, host, commit: `handoff-${name}`, bundle: join(dir, 'Centralu.app') }
+}
+/** The executable a process runs now (`exec` changes it, the pid stays) */
+function exeOf(pid) {
+  if (process.platform === 'linux') {
+    try {
+      return readlinkSync(`/proc/${pid}/exe`)
+    } catch {
+      return ''
+    }
+  }
+  return (spawnSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' }).stdout ?? '').trim()
 }
 /** A user-folder app with a home view: the bundled template, placeholders filled in */
 function plantApp(data, id) {
@@ -340,7 +375,7 @@ function thirdKeeperRefused(b, data) {
 async function scenario() {
   const builds = mkdtempSync('/tmp/ckh-builds-')
   tempDirs.push(builds)
-  const A = makeBuild(builds, 'A')
+  const A = OLD_KEEPER ? makeBuild(builds, 'A', OLD_KEEPER, null) : makeBuild(builds, 'A')
   const B = makeBuild(builds, 'B')
   const C = makeBuild(builds, 'C')
   const data = mkdtempSync('/tmp/ckh-')
@@ -357,6 +392,12 @@ async function scenario() {
   let view = await readyView(sock)
   if (!check(view, 'keeper A brings the host up', existsSync(join(data, 'keeper.log')) ? keeperLog().slice(-2000) : '')) return
   check(view.keeper.build?.commit === 'handoff-A', 'keeper A says it is build A', JSON.stringify(view.keeper.build))
+  if (A.keeper) {
+    check(view.keeper.pid === keeperA.pid, 'keeper A is the process started as `centralu --keeper`', `${keeperA.pid} -> ${view.keeper.pid}`)
+    check(exeOf(keeperA.pid) === A.keeper, "and it runs build A's centralu-keeper", exeOf(keeperA.pid))
+  } else {
+    check(exeOf(keeperA.pid) === A.exe, `keeper A is the old keeper (${OLD_KEEPER})`, exeOf(keeperA.pid))
+  }
   // Background mode stays off: if the window's connection were dropped by the handoff, the next
   // keeper would see no window and stop everything
   const windowOut = join(data, 'window.jsonl')
@@ -403,13 +444,21 @@ async function scenario() {
   // ---- the bundle rewritten under a running keeper: delete, then write anew (tauri build's way)
   log('\nrewriting build A on disk while keeper A runs')
   rmSync(A.exe)
-  cpSync(BIN, A.exe)
+  cpSync(OLD_KEEPER ?? BIN, A.exe)
+  if (A.keeper) {
+    rmSync(A.keeper)
+    cpSync(KEEPER_BIN, A.keeper)
+  }
   await sleep(500)
   check(alive(keeperA.pid) && (await status(sock).catch(() => null))?.keeper?.pid === keeperA.pid, 'keeper A keeps running and answering from its unlinked executable')
 
-  // ---- the handoff A -> B
-  log('\nhanding keeper A over to keeper B')
-  const up = await request(sock, { op: 'upgrade', exe: B.exe, source: sourceOf(B) })
+  // ---- the handoff A -> B, asked by default with B's window executable: what a keeper of
+  // 0.1.0-beta.11 or earlier starts (`centralu --keeper --take-over-fd 3 ...`) from the path older
+  // windows report. `--handoff-via keeper` asks with B's keeper executable instead, which is what a
+  // window of this build sends an old keeper after an update.
+  const via = HANDOFF_VIA === 'keeper' ? B.keeper : B.exe
+  log(`\nhanding keeper A over to keeper B, through B's ${HANDOFF_VIA} executable`)
+  const up = await request(sock, { op: 'upgrade', exe: via, source: sourceOf(B) })
   check(up.ok, 'the upgrade is accepted', JSON.stringify(up))
   const t0 = Date.now()
   view = await waitFor(async () => {
@@ -420,6 +469,7 @@ async function scenario() {
   if (!check(view, 'keeper B answers on the same socket', keeperLog().slice(-2500))) return
   log(`  (handoff took ${Date.now() - t0} ms including the ${HOLD_MS} ms hold)`)
   const keeperB = view.keeper.pid
+  check(exeOf(keeperB) === B.keeper, `keeper B runs build B's centralu-keeper (started as ${via})`, exeOf(keeperB))
   check(await waitFor(() => !alive(keeperA.pid), 10_000), 'keeper A has exited')
   check(view.hostPid === hostPid, 'the host is the same process', `${hostPid} -> ${view.hostPid}`)
   check(alive(hostPid), 'and it is still running')
@@ -474,7 +524,7 @@ async function scenario() {
   // ---- a handoff that fails before the commit
   log('\nkeeper B handing over to keeper C, which is killed before the commit')
   const known = new Set(successorsInLog(data))
-  const up2 = await request(sock, { op: 'upgrade', exe: C.exe, source: sourceOf(C) })
+  const up2 = await request(sock, { op: 'upgrade', exe: C.keeper, source: sourceOf(C) })
   check(up2.ok, 'the second upgrade is accepted')
   const victim = await waitFor(() => successorsInLog(data).find((pid) => !known.has(pid)), 10_000, 50)
   if (victim) started.add(victim)
@@ -501,7 +551,8 @@ async function scenario() {
 
   // ---- "Switch to this build" from build C: keeper first, then the host
   log('\nswitching everything to build C (keeper, then host)')
-  const sw = await request(sock, { op: 'switch', source: sourceOf(C), keeper: { exe: C.exe } })
+  // What a window of this build sends: its keeper executable (sidecar.rs `switch_build`)
+  const sw = await request(sock, { op: 'switch', source: sourceOf(C), keeper: { exe: C.keeper } })
   check(sw.ok, 'the switch is accepted', JSON.stringify(sw))
   view = await waitFor(async () => {
     const v = await status(sock)
@@ -532,6 +583,7 @@ async function scenario() {
   const held = await heldChildren(data)
   for (const c of held) if (c.alive) heldPids.add(c.pid)
   const keeperC = view.keeper.pid
+  check(exeOf(keeperC) === C.keeper, "keeper C runs build C's centralu-keeper", exeOf(keeperC))
   const pids = [...heldPids].filter(alive)
   h2.close()
   host.close()
@@ -564,6 +616,8 @@ async function main() {
     if (r.status !== 0) throw new Error('cargo build failed')
   }
   if (!existsSync(BIN)) throw new Error(`no binary at ${BIN}`)
+  if (!existsSync(KEEPER_BIN)) throw new Error(`no keeper executable at ${KEEPER_BIN}`)
+  if (OLD_KEEPER && !existsSync(OLD_KEEPER)) throw new Error(`no old keeper at ${OLD_KEEPER}`)
   await scenario()
 }
 
