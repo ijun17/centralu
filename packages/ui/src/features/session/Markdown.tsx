@@ -1,10 +1,12 @@
 import { Fragment, memo, useRef, type ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../../store/store.js'
 import { requestViewerJump } from '../viewer/jump.js'
 import { parseFileRef, type FileRef } from './filePath.js'
 import { advanceSplit, piecesOf, type MarkdownSplit } from './markdownBlocks.js'
+import { localImagePath } from './localImages.js'
+import { ReplyImage } from './ReplyImage.jsx'
 
 /**
  * Rendering the agent's response.
@@ -19,16 +21,22 @@ import { advanceSplit, piecesOf, type MarkdownSplit } from './markdownBlocks.js'
  * `projectRoot` is the session's project directory, or null when it has none (the
  * orchestrator). It is what decides whether a backticked path is a file the person can open —
  * see `parseFileRef`.
+ *
+ * `sessionId` is given for an agent's reply, and only there: a local image in it is read by that session's host,
+ * which reads only a path one of the session's replies wrote (`ReplyImage`). Elsewhere a local image is not loaded.
  */
 export const Markdown = memo(function Markdown({
   text,
   projectRoot,
   projectId = null,
+  sessionId = null,
 }: {
   text: string
   projectRoot: string | null
   /** The project of the file the link opens — the owner of projectRoot (#182) */
   projectId?: string | null
+  /** The session whose reply this is; null where a local image is not to be read */
+  sessionId?: string | null
 }) {
   /*
    * While a reply streams, its finished blocks are rendered once and kept, and only the block still being written is
@@ -43,7 +51,7 @@ export const Markdown = memo(function Markdown({
       {piecesOf(split.current).map((piece, i) => (
         <Fragment key={i}>
           {i > 0 && '\n'}
-          <MarkdownBlock text={piece} projectRoot={projectRoot} projectId={projectId} />
+          <MarkdownBlock text={piece} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} />
         </Fragment>
       ))}
     </div>
@@ -55,15 +63,34 @@ export const MarkdownBlock = memo(function MarkdownBlock({
   text,
   projectRoot,
   projectId,
+  sessionId = null,
 }: {
   text: string
   projectRoot: string | null
   projectId: string | null
+  sessionId?: string | null
 }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      urlTransform={keepLocalImages}
       components={{
+        /*
+         * An image branches the way a link does. A web address is an ordinary `<img>`, as before (the desktop CSP
+         * decides whether it loads; it is not widened here). A file path never reaches `src`: the window could not
+         * load it anyway, which is what drew WKWebView's broken-image mark, so the session's host reads it and the
+         * bytes come back as a `data:` URL (`ReplyImage`). Anything else (`data:`, `javascript:`) the URL rule has
+         * already emptied, and only the alt text is left, like an `a` whose href is not kept.
+         */
+        img: ({ node: _node, src, alt, ...props }) => {
+          const label = typeof alt === 'string' ? alt : ''
+          if (typeof src !== 'string' || !src) return label ? <span>{label}</span> : null
+          if (/^https?:/i.test(src)) return <img {...props} src={src} alt={label} />
+          const path = localImagePath(src)
+          if (path === null) return label ? <span>{label}</span> : null
+          if (!sessionId) return <span className="readout text-ink-faint">{label || path}</span>
+          return <ReplyImage key={path} path={path} alt={label} sessionId={sessionId} />
+        },
         /*
          * Links branch three ways (extended in #39):
          *  - If href is a file in this project, it is the same file link as a backticked
@@ -122,6 +149,13 @@ export const MarkdownBlock = memo(function MarkdownBlock({
     </ReactMarkdown>
   )
 })
+
+/**
+ * react-markdown's URL rule, except that an image's file path is kept: the rule would empty `file:` and keep the rest,
+ * and the `img` component above needs the destination as written either way. It never reaches the DOM from there.
+ */
+const keepLocalImages: UrlTransform = (url, key, node) =>
+  key === 'src' && node.tagName === 'img' && localImagePath(url) !== null ? url : defaultUrlTransform(url)
 
 /** A link's href may be percent-encoded — if it cannot be decoded, judge it on the raw text */
 function tryDecode(href: string): string {

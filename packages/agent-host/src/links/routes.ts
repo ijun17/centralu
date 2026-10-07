@@ -79,6 +79,12 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'sessions.markRead': session(),
   'messages.load': session(messages),
   'messages.subagent': session(messages),
+  // Read on the machine the session runs on; the path it resolved is that machine's, so there is nothing to reveal here
+  'messages.image': session((r) => {
+    if (!r || typeof r !== 'object' || !('file' in r)) return r
+    const { file: _file, ...rest } = r as Record<string, unknown>
+    return rest
+  }),
   'trash.read': session(messages),
   'trash.restore': session((r, q) =>
     r && typeof r === 'object'

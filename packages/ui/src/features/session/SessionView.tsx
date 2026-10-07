@@ -20,7 +20,7 @@ import { QuestionCard } from '../approval/QuestionCard.jsx'
 import { ChevronIcon, CloseIcon, CrownIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Kbd } from '../../components/primitives.jsx'
-import { Modal } from '../../components/Modal.jsx'
+import { ZoomableImage } from './ZoomableImage.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { InlineViewSlot } from './InlineView.jsx'
@@ -2793,7 +2793,7 @@ const ChatRow = memo(function ChatRow({
   if (item.kind === 'assistant') {
     return (
       <div className="min-w-0" data-testid="msg-assistant">
-        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} />
+        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} />
       </div>
     )
   }
@@ -2901,39 +2901,6 @@ function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?
         thumbClassName="max-h-80 max-w-full rounded-lg border border-line"
       />
     </div>
-  )
-}
-
-/** A thumbnail-plus-zoom pair — an agent image (#40) and a user attachment use the same zoom */
-function ZoomableImage({
-  src,
-  alt,
-  thumbClassName,
-  onError,
-}: {
-  src: string
-  alt: string
-  thumbClassName: string
-  onError?: () => void
-}) {
-  const [zoom, setZoom] = useState(false)
-  return (
-    <>
-      <button type="button" onClick={() => setZoom(true)} title={alt} className="block cursor-zoom-in">
-        <img src={src} alt={alt} className={thumbClassName} onError={onError} />
-      </button>
-      {zoom && (
-        <Modal onClose={() => setZoom(false)} testId="image-lightbox">
-          {/* vh/vw know nothing about zoom — the same correction as every other modal
-          (index.css --text-zoom) */}
-          <img
-            src={src}
-            alt={alt}
-            className="max-h-[calc(90vh/var(--text-zoom))] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line"
-          />
-        </Modal>
-      )}
-    </>
   )
 }
 

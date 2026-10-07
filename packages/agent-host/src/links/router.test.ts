@@ -91,6 +91,19 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     expect(m2.calls).toEqual([])
   })
 
+  it("reads a reply's image on the session's own machine, and keeps that machine's path out of the hub's answer", async () => {
+    const { router, local, localAnswers, m1 } = rig()
+    m1.answers['messages.image'] = { ok: false, reason: 'too_large', message: 'big', file: '/remote/home/big.png' }
+    const remote = await router.handle('messages.image', { sessionId: 'm1.s1', path: '~/big.png' })
+    expect(m1.calls).toEqual([{ method: 'messages.image', params: { sessionId: 's1', path: '~/big.png' } }])
+    // Without a file there is nothing for "Show in Finder" to open on this computer
+    expect(remote).toEqual({ ok: false, reason: 'too_large', message: 'big' })
+
+    localAnswers['messages.image'] = { ok: false, reason: 'too_large', message: 'big', file: '/Users/me/big.png' }
+    expect(await router.handle('messages.image', { sessionId: 's1', path: '~/big.png' })).toMatchObject({ file: '/Users/me/big.png' })
+    expect(local).toHaveLength(1)
+  })
+
   it('sends a project-keyed call by its project, and a terminal call by its terminal', async () => {
     const { router, m1 } = rig()
     m1.answers['terminal.create'] = { terminalId: 'term-4', cwd: '/srv/app', title: 'zsh', history: '', alive: true }

@@ -603,6 +603,10 @@ export function createRpcHandler(
       const { sessionId, limit, beforeSeq } = RpcMethods['messages.load'].params.parse(p)
       return mgr.loadMessages(sessionId, limit, beforeSeq)
     },
+    'messages.image': async (p) => {
+      const { sessionId, path } = RpcMethods['messages.image'].params.parse(p)
+      return mgr.messageImage(sessionId, path)
+    },
     'messages.subagent': async (p) => {
       const { sessionId, parentCallId, afterSeq, limit } = RpcMethods['messages.subagent'].params.parse(p)
       return mgr.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)

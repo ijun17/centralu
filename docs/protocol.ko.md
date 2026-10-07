@@ -197,7 +197,7 @@ type ApprovalDetail =
 | 백그라운드 작업 | `agents.stopBackgroundTask, agents.clearBackgroundTasks` | #290: 어댑터가 `stoppable`로 표시한 작업 하나를 멈춘다(그 끝은 `background_tasks`로 온다). 끝난 것을 목록에서 걷는다 |
 | 에이전트 CLI 버전 | `agents.versions, agents.setAutoApplyVersions, agents.applyVersions` | #297: 설치된 CLI(`force: false`는 30초 안의 읽기로 답한다 — 창이 포커스를 얻을 때), "새로 설치된 에이전트 CLI로 idle 세션 옮기기"(기본 켜짐), 오래된 CLI를 돌리는 idle 세션을 모두 다시 띄우고 `{ restarted, busy }`로 답한다. 세션이 돌리는 버전은 `SessionInfo.agentVersion`이며 프로세스가 없으면 null이다. 모두 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 아무것도 보이지 않는다([agent-host.ko.md](agent-host.ko.md) §4.6) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
-| messages | `messages.load, messages.subagent, messages.search` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색 |
+| messages | `messages.load, messages.subagent, messages.search, messages.image` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색; 답장이 적은 로컬 이미지(`![a](/path/shot.png)`). 창은 파일 경로를 직접 읽을 수 없어 세션의 호스트가 읽는다: `{ sessionId, path }`, `path`는 답장에 적힌 그대로. 답은 `{ ok: true, mime, data, file? }` 또는 `{ ok: false, reason, message, file? }`. `reason`은 `not_mentioned`(이 세션의 어느 답장에도 없다. 아무것도 건드리지 않는다), `not_found`, `not_an_image`(바이트로 판단: PNG, JPEG, GIF, WebP만), `too_large`(`IMAGE_PREVIEW_MAX_BYTES`, 10 MB), `unreadable`. `file`은 호스트 기기에서 해석한 경로로, 파일 관리자에서 보여 줄 때 쓴다. 거절은 오류가 아니라 답이다. 추가만 한 것이라 이전 호스트는 "Unknown method"로 답하고, 창은 그것을 이미지 자리에 보인다([security-boundaries.md](security-boundaries.md), "Images a reply names") |
 | machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: 허브가 다른 기기에 거는 링크 (§6). 언제나 허브 자신의 것이고 전달되지 않는다 |
 | grid | `grid.get, grid.set` | 그리드의 패널들, 순서대로, 통째로 쓴다 (product spec §5.4). 하나하나가 `GridPanel`이다: `{ kind: 'session', sessionId }` 또는 `{ kind: 'app', projectId: string \| null, appId, span? }` (`null`은 사용자 폴더의 앱) — #288. `span`(#306)은 사람이 그 앱 패널의 머리글에서 고른 `{ cols, rows }`이고, 각 1에서 4, 고르지 않았으면 없다; 그 이전의 host는 이것을 걷어 내고 패널은 기본값으로 돌아간다. 바꾸지 않고 넓혔으므로 (§4) `PROTOCOL_VERSION`은 1 그대로다: `grid.get { tagged: true }`와 `grid.set { panels }`는 패널로 말하고, 그것이 없으면 둘 다 #288 이전의 모양, 세션 id만의 목록으로 말한다 (이전 UI의 `grid.set { sessionIds }`는 목록을 그 세션들로 바꾼다). UI는 `panels` 옆에 `sessionIds`도 보내고 id만의 목록을 세션 패널로 읽으므로, 한 빌드 차이의 UI와 host는 어느 쪽으로든 계속 함께 돈다; 이전 필드는 한 릴리스 뒤에 빠진다. `grid.set`은 최대 256개를 받고 저장한 것을 돌려준다: 중복, 모르는 세션, 등록되지 않은 프로젝트의 앱은 빠진다. 앱이 있는지는 확인하지 않는다 — 앱 목록은 폴더보다 늦을 수 있고, 찾지 못한 앱은 화면이 빼고 그린다. 모양은 패널의 정체성뿐이라 그대로 클라이언트로 옮겨 갈 수 있다 (#82) |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
@@ -317,6 +317,8 @@ type ProtocolError = {
   OS가 쓸 경로)와 앱 화면 호출(`apps.viewFrame`, `apps.openView`, `apps.readResource`,
   `apps.invoke`, `apps.inlineReopen`, `apps.viewMessage`)은 다른 기기의 프로젝트나 세션이면 거절된다.
   화면의 주소는 그 호스트의 포트를 담고 있어서, 2단계에서 허브를 거치는 프록시로 연다.
+  `messages.image`는 세션이 도는 기기에서 읽고, 허브는 그 답에서 `file`을 뺀다: 그 경로는 다른 기기의
+  것이라 창은 그 파일을 보여 주겠다고 하지 않는다.
 - **기기가 닿지 않을 때.** `sessions.list`와 `projects.list`는 허브의 헤더 미러로 그 기기를 대신
   답하고, 각 행에 `unreachable: true`를, `live`에는 마지막으로 들은 값을 싣는다. UI는 그 행을 지우지
   않고 깨우지도 않는다. 그 기기로 가는 호출은 바로 실패한다(§5).

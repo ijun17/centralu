@@ -32,6 +32,7 @@ import type {
   CreateSessionParams,
   ExternalAppInfo,
   GridPanel,
+  MessageImage,
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
@@ -118,6 +119,7 @@ import { isMissingPathError } from '../dev-services/path-guard.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
 import { attachmentBytes, saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
+import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '../dev-services/message-image.js'
 import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 
@@ -5962,6 +5964,31 @@ export class SessionManager {
     if (!m) return
     m.lastReadSeq = Math.max(m.lastReadSeq, seq)
     this.store.markRead(sessionId, seq)
+  }
+
+  /**
+   * A local image one of this session's replies names (`messages.image`; dev-services/message-image.ts).
+   *
+   * The reply is asked first, before the path is resolved or anything on disk is touched: a path no reply of this
+   * session wrote is refused without saying whether it exists. A reply still streaming is asked too, from memory: its
+   * row is written every two seconds (`STREAM_FLUSH_MS`), and the window draws the image as soon as the `)` arrives.
+   * A relative path is read against the folder the session runs in, as the agent that wrote it meant it.
+   */
+  async messageImage(sessionId: string, written: string): Promise<MessageImage> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!this.repliesName(sessionId, written)) {
+      return { ok: false, reason: 'not_mentioned', message: 'No reply in this session names this path, so it is not read' }
+    }
+    const abs = resolveWrittenPath(written, this.cwdFor(m))
+    if (abs === null) return { ok: false, reason: 'not_found', message: `${written} is not a path on this machine` }
+    return readMessageImage(abs)
+  }
+
+  private repliesName(sessionId: string, written: string): boolean {
+    const open = this.streams.get(sessionId)
+    if (open?.kind === 'text' && mentions(open.text, written)) return true
+    return writtenForms(written).some((form) => this.store.replyTextsContaining(sessionId, form).some((text) => mentions(text, written)))
   }
 
   /**

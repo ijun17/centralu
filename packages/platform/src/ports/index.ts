@@ -30,6 +30,7 @@ import type {
   SavedCommand,
   SessionInfo,
   StoredMessage,
+  MessageImage,
   TrashedSession,
   UsageSnapshot,
   TerminalInfo,
@@ -198,6 +199,12 @@ export interface AgentPort {
    * when the person opens that card's steps — they are never part of `loadMessages`.
    */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit?: number): Promise<StoredMessage[]>
+  /**
+   * A local image one of this session's replies names, read by the host the session runs on (`messages.image`). The
+   * window cannot load a file path itself; the host reads only a path a reply wrote, only a real PNG, JPEG, GIF or WebP,
+   * and at most 10 MB, and says why when it does not (docs/security-boundaries.md, "Images a reply names").
+   */
+  messageImage(sessionId: string, path: string): Promise<MessageImage>
   capabilities(tool: ToolName, machine?: MachineRef): Promise<AdapterCapabilities>
   /**
    * This session's slash commands (skills).
@@ -310,6 +317,11 @@ export interface FsPort {
   trash(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
   /** Show it in the desktop's file manager (#19). Unsupported in a browser, with a reason */
   reveal(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
+  /**
+   * Show the file a `messageImage` answer named (its `file`) in the desktop's file manager. That path is the host's,
+   * resolved and opened by it; the window never builds one. Unsupported in a browser, with a reason.
+   */
+  revealMessageImage(file: string): Promise<{ supported: boolean; reason?: string }>
 }
 
 /** What it is calling about — this decides how strong the sound and the dock bounce are */
