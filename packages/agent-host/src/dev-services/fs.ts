@@ -5,6 +5,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
+import { clonesFiles } from '../os.js'
 
 /**
  * The file tree and viewer service (C-1).
@@ -377,7 +378,7 @@ export async function copyTree(
 
 /** A macOS clonefile copy. Returns false wherever it cannot happen (a different volume, not APFS, not macOS) */
 async function cloneTree(src: string, dst: string): Promise<boolean> {
-  if (process.platform !== 'darwin') return false
+  if (!clonesFiles()) return false
   return new Promise<boolean>((done) => {
     // -c demands clonefile (used if it can be, failed otherwise — it never quietly falls back to a copy on its own)
     const p = spawn('/bin/cp', ['-Rc', src, dst], { stdio: 'ignore' })

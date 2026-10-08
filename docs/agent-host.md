@@ -21,6 +21,7 @@ agent-host/src/
 ├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
+├─ os.ts               # what differs between OSes, asked by name (architecture.md §2)
 ├─ data-dir.ts          # locating and migrating the data directory
 ├─ idle.ts              # the one rule for "is anything running a person would lose" (#352)
 └─ updates.ts           # update checks, installing, "apply automatically when idle"

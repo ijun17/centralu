@@ -1,8 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { posix, win32 } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, type UpdateStatus } from '@cc/protocol'
+import { installedCopyPath } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
 
 /**
@@ -79,32 +78,8 @@ export type UpdateDeps = {
   writeAutoApply?: (enabled: boolean) => void
 }
 
-/**
- * Where `centralu install` would have put the app on this platform.
- *
- * These paths are the launcher's (`installedPaths` and `windowsInstall` in
- * `packaging/npm/centralu/bin/platform.mjs`), and they are re-derived rather than imported for the
- * same reason the version compare is: the launcher is a published npm package, not a workspace
- * dependency. They must stay in step — if they drift, the symptom is that updating leaves the
- * *old* app in place while npm holds the new one, and the person keeps launching the old one with
- * no sign that anything is wrong. Up to 0.1.0-beta.12 Windows fell through to the Linux path here,
- * so the copy in `%LOCALAPPDATA%\Programs` was never refreshed by an in-app update.
- *
- * Windows reads the same environment the launcher does, so the `centralu install` this decides on
- * writes where this looked.
- */
-export function installedCopyPath(
-  platform: NodeJS.Platform = process.platform,
-  env: Record<string, string | undefined> = process.env,
-  home: string = homedir(),
-): string {
-  if (platform === 'darwin') return `/Applications/${APP_NAME}.app`
-  if (platform === 'win32') {
-    const local = env.LOCALAPPDATA || win32.join(home, 'AppData', 'Local')
-    return win32.join(local, 'Programs', APP_NAME)
-  }
-  return posix.join(home, '.local/share/applications', `${APP_SLUG}.desktop`)
-}
+/** Where `centralu install` would have put the app on this platform: a platform module's answer (`os.ts`). */
+export { installedCopyPath }
 
 function existingInstalledCopy(): string | null {
   const path = installedCopyPath()

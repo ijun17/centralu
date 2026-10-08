@@ -47,6 +47,17 @@ Large changes were **expected** in this project from the start. The architecture
 
 The heart of it: **the only place that knows an implementation is the apps entry point.** Everything else knows only interfaces and schemas.
 
+**Which OS this is is asked in platform modules only** (`local/platform-checks`, `tooling/eslint-platform-checks.js`).
+In the packages, the apps and the npm launcher, reading `process.platform` (or `os.platform()`) and comparing
+anything with an OS name (`=== 'win32'`, `case 'darwin':`) is a lint error outside `PLATFORM_MODULES` in
+`eslint.config.js`: `os.ts` (the host's questions named for what differs: `hasPs`, `clonesFiles`,
+`locksRunningPrograms`, `pathsOf`, `installedCopyPath`), `env-path.ts` and `tool-launch.ts` (finding and starting a
+tool), `dev-services/kill-tree.ts` (ending a process tree; `hasProcessGroups`), `dev-services/terminal.ts` (the
+shell), `adapters/claude/exe-link.ts` (Claude Code's Windows start; `windowsStart`) and the launcher's `platform.mjs`.
+Code elsewhere asks one of those a question named for what differs, so each OS's answer is written once and a new
+OS is a change to those files. Tests and build scripts are not checked. The Rust side's equivalent for how the host
+starts is `start_plan` ([agent-host.md](agent-host.md) §4.0).
+
 ## 3. The design patterns used — where, and why
 
 Patterns are not decoration, they are defences against the axes of change (C1~C6). Which axis each pattern blocks is stated.

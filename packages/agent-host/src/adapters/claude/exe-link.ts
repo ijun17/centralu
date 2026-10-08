@@ -143,8 +143,19 @@ export type ClaudeRun = {
   key: string | null
 }
 
+/**
+ * Whether Claude Code is started the Windows way on `platform` (#353): from a link of its own
+ * (Windows locks a running program's file, so npm could not update one a session runs), spaced apart
+ * (the sign-in lives in a file two starts race to refresh), and given time to exit when the host
+ * leaves (Node's job object ends children with their parent). macOS and Linux need none of it.
+ */
+export function windowsStart(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'win32'
+}
+
 type Options = {
-  platform: NodeJS.Platform
+  /** Default: this host's */
+  platform?: NodeJS.Platform
   /** The data folder (`CC_DATA_DIR`); the links live in `<data>/tools/claude` */
   root: () => string
   fs?: ExeFs
@@ -172,7 +183,7 @@ export class ClaudeLinks {
   }
 
   get enabled(): boolean {
-    return this.opts.platform === 'win32'
+    return windowsStart(this.opts.platform)
   }
 
   private base(): string {

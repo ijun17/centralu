@@ -156,6 +156,17 @@ export type KillOs = {
 }
 
 /**
+ * Whether a process started `detached` gets a group of its own that can be signalled as one, and
+ * what it leaves behind is swept by that group (`stopGroup`). Not on Windows (#14): there `detached`
+ * means a process with no console, whose every console child opens a visible window, and a tree is
+ * ended with `taskkill /T` (`shootWindows`) and its leftovers found by parent links
+ * (`collectOrphansWindows`).
+ */
+export function hasProcessGroups(platform: NodeJS.Platform = process.platform): boolean {
+  return platform !== 'win32'
+}
+
+/**
  * Windows (#14) has no process groups and no signals. `taskkill /T /F` ends a pid and its
  * descendants (it walks the parent links itself), which is the one tool for the job. It is named by
  * its full path under the system folder: a bare `taskkill` would be looked up in the working
