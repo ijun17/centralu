@@ -4030,3 +4030,81 @@ describe('linked machines (#82)', () => {
     expect(useStore.getState().projects[p.id]?.machine).toBe('box')
   })
 })
+
+/**
+ * Back and forward between screens (#374). History is written by one subscriber, whichever action changed the
+ * screen, so these go through the store's ordinary doors — the sidebar's, the grid button's, an app's — and read
+ * what is on screen after each step.
+ */
+describe('back and forward between screens (#374)', () => {
+  const live = async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('nav-a', sessionInfo('nav-a'))
+    mock.sessions.set('nav-b', sessionInfo('nav-b'))
+    mock.sessions.set('nav-c', sessionInfo('nav-c'))
+    mock.externalAppList = [appInfo('slider')]
+    useStore.setState({ settingsOpen: false, view: 'focus', focusedApp: null, focusedSessionId: null })
+    await useStore.getState().attach(mock)
+    return mock
+  }
+  const st = () => useStore.getState()
+
+  it('goes back and forward between sessions, the grid and an app page', async () => {
+    await live()
+    st().focusSession('nav-a')
+    st().focusSession('nav-b')
+    st().setView('grid')
+    st().openApp('p1', 'slider')
+
+    st().goBack()
+    expect(st().view).toBe('grid')
+    st().goBack()
+    expect(st()).toMatchObject({ view: 'focus', focusedSessionId: 'nav-b' })
+    st().goBack()
+    expect(st()).toMatchObject({ view: 'focus', focusedSessionId: 'nav-a' })
+    st().goForward()
+    st().goForward()
+    expect(st().view).toBe('grid')
+    st().goForward()
+    expect(st()).toMatchObject({ view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } })
+  })
+
+  it('does not record a change inside a screen: a session picked inside the grid', async () => {
+    await live()
+    useStore.setState({ gridPanels: ['nav-b', 'nav-c'].map((sessionId) => ({ kind: 'session' as const, sessionId })) })
+    st().focusSession('nav-a')
+    st().setView('grid')
+    st().focusSession('nav-b', { preferGrid: true, reveal: false })
+    st().focusSession('nav-c', { preferGrid: true, reveal: false })
+    expect(st().nav.entries.map((e) => e.kind)).toEqual(['session', 'grid'])
+  })
+
+  it('skips a session deleted since it was seen', async () => {
+    await live()
+    st().focusSession('nav-a')
+    st().focusSession('nav-b')
+    st().focusSession('nav-c')
+    await st().deleteSession('nav-b')
+    st().focusSession('nav-c')
+    st().goBack()
+    expect(st().focusedSessionId).toBe('nav-a')
+  })
+
+  it('closing Settings is a step back, and forward opens it again', async () => {
+    await live()
+    st().focusSession('nav-a')
+    st().toggleSettings(true)
+    st().toggleSettings(false)
+    st().goForward()
+    expect(st().settingsOpen).toBe(true)
+    st().goBack()
+    expect(st()).toMatchObject({ settingsOpen: false, focusedSessionId: 'nav-a' })
+  })
+
+  it('starts after a restart at the restored screen, not at the steps the restore took', async () => {
+    const mock = await live()
+    mock.workspaceSnapshot = { focusedSessionId: 'nav-a', view: 'grid' } as never
+    await st().attach(mock)
+    expect(st().nav).toEqual({ entries: [{ kind: 'grid' }], index: 0 })
+  })
+})
