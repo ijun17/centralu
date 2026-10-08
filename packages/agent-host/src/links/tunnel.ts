@@ -47,6 +47,9 @@ export type RemoteInstall = {
  */
 export type HostStart = { how: 'detached' | 'link_bound'; note: string | null }
 
+/** What one remote command printed, and its exit code as ssh passed it on (`Tunnel.exec`) */
+export type RemoteRun = { code: number | null; stdout: string; stderr: string }
+
 export type Endpoint = {
   /** Where the hub connects: always the hub's own loopback */
   url: string
@@ -69,6 +72,11 @@ export interface Tunnel {
    * cannot start anything (a direct tunnel)
    */
   startHost?(): Promise<HostStart>
+  /**
+   * Runs one command on the remote, in its shell's terms, and answers what it printed (the installer,
+   * install.ts). Rejects when the machine cannot be reached. Absent where there is no shell (a direct tunnel)
+   */
+  exec?(command: string): Promise<RemoteRun>
   /** The transport went away by itself (the ssh process exited) */
   onDown(listener: (reason: string) => void): void
   close(): Promise<void>
@@ -201,13 +209,25 @@ export function wslKeepAlive(spec: RemoteSpec | undefined): string | null {
   return `wsl.exe -d ${distro} --exec sleep infinity`
 }
 
+/**
+ * `$m`, the managed launcher's path (plan §10.1), in each shell: under `CC_DATA_DIR` when the ssh
+ * session has it, else under `~/.centralu`, as `serve` and the installer resolve the data folder
+ */
+export const MANAGED_SH = 'm="${CC_DATA_DIR:-$HOME/.centralu}/remote/bin/centralu"'
+export const MANAGED_PS =
+  "$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }; $m = Join-Path $d 'remote\\bin\\centralu.cmd'"
+
 /** What the remote command prints when it finds no Centralu to run (`connectionCommand`) */
 export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
 
 /**
  * The remote command that prints the connection line (docs/agent-host.md §4.7), in the remote
- * shell's terms: `centralu` on the PATH an ssh command gets, else the launcher `serve` keeps
- * (`~/.centralu/bin/centralu`, `centralu.cmd` on Windows), else `NOT_FOUND` on stdout.
+ * shell's terms: the managed launcher the hub's installer wrote (`<data>/remote/bin/centralu`,
+ * `centralu.cmd` on Windows; docs/plans/remote-hub.md §10.1), else `centralu` on the PATH an ssh
+ * command gets, else the launcher `serve` keeps (`~/.centralu/bin/centralu`), else `NOT_FOUND` on
+ * stdout. The managed launcher comes first, so a machine with both an npm install and one the hub
+ * made runs the version the hub installed. `<data>` is `CC_DATA_DIR` there, else `~/.centralu`:
+ * the rule `serve` and the installer (install.ts) use.
  *
  * **The fallback is decided on the remote, in one command, and "not found" is said on stdout.**
  * Exit codes do not survive the way there (measured on a Windows laptop, 2026-10-05): Windows
@@ -242,13 +262,15 @@ function remoteCommand(spec: RemoteSpec, args: 'serve --connection' | 'serve --d
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)
     return powershell(
-      `if (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu ${args} } ` +
+      `${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
+        `elseif (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu ${args} } ` +
         "else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
-    `if command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
+    `${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
+    `elif command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
     `elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec "$HOME/.centralu/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`
   if (spec.shell === 'posix') return custom ? `${custom} ${args}` : `sh -c '${lookup}'`
@@ -382,6 +404,18 @@ export class SshTunnel implements Tunnel {
       return { how: 'link_bound', note: answer.message }
     }
     throw new Error(answer.message)
+  }
+
+  /**
+   * Runs one command there the way the connection line is asked for (batch mode, `--` before the
+   * target), and answers what it printed. For the installer (install.ts): the command is already in
+   * the remote shell's terms. `close()` ends it like any asking ssh
+   */
+  async exec(command: string): Promise<RemoteRun> {
+    this.ifClosed()
+    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, command])
+    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    return r
   }
 
   /** The connection line again until the link-bound host answers, or the forward that runs it ends */
