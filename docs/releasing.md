@@ -197,6 +197,39 @@ content"). Nothing ships it yet; the thin shell will read it ([plans/thin-shell.
   upload cannot fail the job.
 - To check one by hand: `pnpm exec tsx scripts/content-manifest.mts verify <folder>`.
 
+## The macOS shell (#440)
+
+The shell (`apps/desktop/src-tauri/shell`, [plans/thin-shell.md](plans/thin-shell.md) §3) is not built
+by `release.yml` and not built per release. macOS identifies it by its cdhash, so its bytes are built
+**once per shell version** and pinned; every new shell version asks every person for their permissions
+again. Nothing ships it yet: the window starts carrying it in step 4 of the plan.
+
+Publishing a shell version (shell v1 is the first):
+
+1. The source says the version: `SHELL_VERSION` in `shell/src/lib.rs` and `CentraluShellVersion` (and
+   `CFBundleVersion`) in `shell/Info.plist`, merged on `main`. `tooling/shell-bundle.test.ts` keeps them
+   equal.
+2. Before building it for good, run the spike's probe against a local build of the shell
+   ([spikes/2026-10-thin-shell-tcc.md](spikes/2026-10-thin-shell-tcc.md)): a keeper it starts is judged as
+   the shell, grants hold after the shell exits, and the shell is not listed as "not responding"
+   (`lsappinfo`, Activity Monitor) while it waits. This is the one check that goes through LaunchServices
+   and real permission prompts, so it is done by hand.
+3. Actions → **shell release** → Run workflow on `main` with that version. The `guard` job refuses a
+   version that is already in `shell.lock` or already has a `shell-v<N>` release. The `build` job (macOS
+   arm64, no cache) builds, ad-hoc signs, checks the signature, identity, architecture and linkage, zips
+   reproducibly, and prints the zip's sha256, the cdhash and the `shell.lock` entry. `publish` creates the
+   prerelease `shell-v<N>` (never marked latest) with the zip.
+4. Add the printed entry to `shells` in `packaging/shell/shell.lock`, in a pull request. That entry is
+   what every later release ships.
+
+Never rebuild a published version. If a run fails before `publish`, run it again. If the release exists
+but its entry was never merged, nothing has shipped it: delete the `shell-v<N>` release and its tag, then
+run again. Once an entry is merged, a fix is a new shell version.
+
+`pnpm exec tsx scripts/shell-bundle.mts build --out <dir> --target-dir <dir>` makes the same bundle
+locally (only for looking at it; a local build is a different identity to macOS). The CI checks of the
+shell itself (unit tests and `scripts/shell-integration.mts`) run in the `keeper e2e` job.
+
 ## Adding a platform
 
 1. Add an entry to `TARGETS` in `scripts/release-npm.mts` — bundle location, how to copy

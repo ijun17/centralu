@@ -1,0 +1,45 @@
+[package]
+name = "centralu-shell"
+description = "The fixed shell that holds macOS permissions: verifies content, copies it, starts the keeper, exits (docs/plans/thin-shell.md §3)"
+# Not the app's version: the shell has its own, an integer (`SHELL_VERSION` in src/lib.rs, the
+# `CentraluShellVersion` in Info.plist, packaging/shell/shell.lock), and is built once per shell
+# version. This number only follows it so a reader is not misled into thinking the shell moves with
+# every release.
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[lib]
+name = "centralu_shell"
+
+[[bin]]
+name = "centralu-shell"
+path = "src/main.rs"
+
+# What the shell links is code that cannot be patched without asking every person for their
+# permissions again (thin-shell.md §3), so nothing here is new to the workspace: the verifier, the
+# keeper's start (the same `keeper::exe::Start` the window uses, so the shell starts exactly what the
+# window would), and the JSON and libc the two already use.
+[dependencies]
+content-verify = { path = "../../content-verify" }
+centralu-keeper-core = { path = "../keeper" }
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Signing test content in the unit tests, as scripts/content-manifest.mts does in a release.
+[dev-dependencies]
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+base64 = "0.22"
+
+[features]
+# A test build of the shell that also trusts one more public key, given at compile time in
+# CENTRALU_SHELL_TEST_KEY (raw 32 bytes, base64), so the integration test can sign content with a
+# throwaway key and see the shell start a keeper from it. A release build refuses to compile with it
+# (`compile_error!` in src/keys.rs), the release workflow never passes it, and
+# tooling/shell-bundle.test.ts and shell-release-workflow.test.ts check both: the shell people
+# install trusts packaging/shell/keys.json and nothing else.
+test-key = []

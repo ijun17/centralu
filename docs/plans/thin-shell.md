@@ -1,6 +1,6 @@
 # A fixed shell that holds macOS permissions: plan
 
-> **Status: decided by the owner on 2026-10-07 (§9).** Replaces the shape first proposed on #440
+> **Status: decided by the owner on 2026-10-07 (§9). Steps 1–3 built (§10).** Replaces the shape first proposed on #440
 > (shell = window + keeper). The measurements behind every choice here are in
 > [spikes/2026-10-thin-shell-tcc.md](../spikes/2026-10-thin-shell-tcc.md).
 
@@ -70,6 +70,20 @@ every user one more trip to System Settings.
 
 **Written in Rust**, in the workspace, with no Tauri and no AppKit run loop: a background-only binary with an
 `Info.plist`. Its whole dependency list is an ed25519 verifier and a hash.
+
+**No run loop is needed (decided in step 3, 2026-10-08).** "Not responding" (the red label in Activity Monitor, the
+spinning cursor) is the window server's verdict on a process that is *connected to it* and does not handle its
+events; a process that never connects cannot get it (Apple DTS:
+[developer.apple.com/forums/thread/777284](https://developer.apple.com/forums/thread/777284), and TN2083 on
+daemons and agents not linking AppKit). The shell links only `libSystem` and `libiconv` (`otool -L`; no AppKit,
+CoreGraphics or SkyLight), so it has no way to open that connection, and `LSUIElement` keeps it out of the Dock.
+LaunchServices also expects an app it launched to check in, which a plain executable never does; whether that
+shows anywhere for a background-only app was not observed here. The linkage is checked on every build (`scripts/shell-integration.mts` in CI, the shell
+release workflow). Not measured through LaunchServices in step 3, because that launch can raise permission
+prompts on the machine running it; the manual check before each shell version (§10 step 6,
+[releasing.md](../releasing.md)) looks at `lsappinfo` and Activity Monitor while the shell waits for a keeper.
+If a later macOS shows it as not responding, the fix is a run loop on the main thread with the work on another,
+which is a new shell version.
 
 ## 4. Verified content
 
@@ -200,3 +214,32 @@ About shows both: "Centralu 0.1.0-beta.13 (shell 1)".
 
 Every step lands behind the current behaviour until step 4 switches release builds over, so main keeps
 shipping in between.
+
+Status: steps 1 and 2 are merged (#444, #445; the host copies have not moved under the content folder yet, §5).
+Step 3 is §10.1 (#448). Steps 4 to 6 are open.
+
+### 10.1 Step 3 as built (2026-10-08)
+
+The shell is `apps/desktop/src-tauri/shell` (crate `centralu-shell`), a member of the app's Cargo workspace but
+not a default member, so app builds never build it. What the plan left open, and how it was settled:
+
+| Question | Choice | Why |
+|---|---|---|
+| The command line | `centralu-shell --content <dir> --data-dir <dir> [--bundle-path <path>] [--nonce <id>] [--rollback]`; absolute paths, no `..`, every flag once, nothing else | LaunchServices starts it with `/` as its folder and launchd's environment, so everything is an argument. `--bundle-path` is passed on to the keeper for its build record |
+| How the window learns the result | Exit code, one line on stderr, a `[shell]` line in `<data>/keeper.log`, and `<data>/shell-status.json` (`format` 1) carrying the window's nonce | A shell opened through LaunchServices is not the window's child: its exit code and stderr reach no one. The status file is replaced whole (temporary name, rename) and `0600` |
+| Exit codes and status reasons | `0` started (or a keeper already answered), `2` `usage`, `10` `content`, `11` `shell-too-old`, `12` `downgrade`, `13` `copy`, `14` `keeper-start`, `15` `keeper-exited`, `16` `keeper-timeout` | One reason per thing the window says differently: `content` is "this build is not what was signed", `shell-too-old` is the one case that installs a newer shell (§6), `downgrade` asks about a rollback |
+| "Ready" | The keeper answers `status` on `<data>/keeper.sock` (`client::alive`, the window's own test), within 25 s; a keeper that exits with "already running" while another answers counts as ready | The keeper's stdout goes to `keeper.log`, as when the window starts it, so a ready line would need a second channel. A keeper that never answers is killed, so the window's fallback start is not kept waiting on its lock |
+| A keeper already answering | Exit 0 at once, nothing verified, copied or started | The window only opens the shell when no keeper answers; this is the race where one appeared meanwhile |
+| How the keeper is started | `keeper::exe::Start` from `centralu-keeper-core`, the same code the window's `sidecar.rs` now uses: same arguments, own session, output to `keeper.log`; `--host-source` is the copy's `host/` | What the shell starts is what the window would have started, from another place. The keeper crate adds `serde` and `libc` to the shell and nothing new |
+| `<data>/content/` | `<version>/` (the read-only verified copy with its manifest and signature), `highest-started` (the downgrade floor), and briefly `.<version>.partial-*` while copying | One folder per app version; the floor lives beside what it guards |
+| The same version already copied | Verified where it is (`verify_in_place`) and reused if its manifest bytes equal the source's; otherwise removed and copied again | A restart after a reboot should not copy hundreds of megabytes again, and must not trust a folder anyone of the user's could have edited |
+| The downgrade floor | Raised only after the keeper answered; `--rollback` sets it to the version rolled back to; an unreadable floor is logged and replaced, not a refusal | A failed start must not lock the person out of the version they had; a rollback must survive the next reboot |
+| The data folder | The window's: the shell refuses a missing one and never creates or migrates it; a `--content` under `<data>/content/` is refused | Migration rules in pinned bytes could never change. The copy is removed and redone when it does not verify, which must never reach the source |
+| Usage descriptions | Camera, microphone, Bluetooth, contacts, calendars, reminders, photos, speech recognition, Apple Events, protected folders, network volumes, removable volumes, local network | macOS asks the responsible app (the shell) and ends the asking process when its description is missing; adding one later is a new shell version |
+| The icon | `icons/icon.icns` as it is when the shell version is built | Shown next to "Centralu" in System Settings; a later icon change reaches it only with a new shell version |
+| Test keys | One extra key only behind the `test-key` feature, refused at compile time without `debug_assertions` | The integration test needs a shell that trusts a throwaway key; the shell people install trusts keys.json alone (security-boundaries.md "Signed content") |
+
+Left for later steps: the window opening the shell and reading `shell-status.json` (step 4), removing old
+`<data>/content/<version>/` folders and leftover `.partial-*` folders (the keeper, step 5), and moving the
+keeper's host copies (`<data>/hosts/`) under the content folder (§5). `fetchPinned` (`scripts/shell-bundle.mts`)
+checks a downloaded shell against `shell.lock`; the release starts using it when the window carries the shell.

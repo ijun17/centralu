@@ -45,7 +45,7 @@ pub use manifest::{
 };
 
 #[cfg(unix)]
-pub use copy::{remove_content, verify_and_copy};
+pub use copy::{read_verified_manifest, remove_content, verify_and_copy, verify_in_place};
 
 /// The manifest's file name, at the top of a content folder.
 pub const MANIFEST_NAME: &str = "content-manifest.json";

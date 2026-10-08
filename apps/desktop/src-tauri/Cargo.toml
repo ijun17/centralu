@@ -1,8 +1,13 @@
-# The app and the keeper's own crate (`keeper/`, #440) build as one workspace: one Cargo.lock, one
-# target folder, one version. The version lives here once; tooling/brand.test.ts checks it.
+# The app, the keeper's own crate (`keeper/`, #440) and the shell (`shell/`, thin-shell plan §3)
+# build as one workspace: one Cargo.lock, one target folder. The app's version lives here once;
+# tooling/brand.test.ts checks it. The shell has a version of its own (shell/Cargo.toml).
 [workspace]
-members = ["keeper"]
-# Both, so `cargo test --lib` on this manifest (CI, AGENTS.md) still runs the keeper's tests.
+members = ["keeper", "shell"]
+# The app and the keeper, so `cargo test --lib` on this manifest (CI, AGENTS.md) still runs the
+# keeper's tests. Not the shell: a plain `cargo build` here (which is what `tauri build` runs, on
+# every platform) would build it in every app build for nothing. The shell is built once per shell
+# version and pinned (packaging/shell/), never per app build; its tests run with `-p centralu-shell`
+# (the `keeper e2e` job, docs/plans/thin-shell.md §3).
 default-members = [".", "keeper"]
 
 [workspace.package]

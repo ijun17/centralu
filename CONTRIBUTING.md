@@ -160,6 +160,15 @@ If you touched Rust:
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 ```
 
+The macOS shell that holds permissions (`apps/desktop/src-tauri/shell`, [plans/thin-shell.md](docs/plans/thin-shell.md))
+is not a default member of that workspace, so the line above skips it. If you touched it, or the
+verifier or the keeper start it uses:
+
+```bash
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-shell
+pnpm exec tsx scripts/shell-integration.mts   # the real binary against signed test content
+```
+
 **Some defects only reproduce in the packaged app.** If you changed anything to do with
 PATH, bundling or native modules, run `pnpm app` and check the real `.app` — dev mode
 inherits PATH from your terminal, so it will never reproduce that class of bug.

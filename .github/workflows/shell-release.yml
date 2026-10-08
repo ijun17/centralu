@@ -1,0 +1,189 @@
+# Builds one shell version, once, and publishes it as a release asset (docs/plans/thin-shell.md §3,
+# §6.1). Run by hand, and only when a new shell version has been decided: every new shell version
+# asks every person for their macOS permissions again.
+#
+# Why build once: macOS identifies the ad-hoc signed shell by its cdhash, and a rebuild of the same
+# source is not promised to give the same bytes. So the bytes made here are the ones every release
+# ships: `scripts/release-npm.mts` downloads this asset and refuses it unless its sha256 matches
+# `packaging/shell/shell.lock`, and the window refuses to install a shell whose cdhash differs. Adding
+# the entry this run prints to shell.lock is a reviewed pull request.
+#
+#     guard (ubuntu) ── build (macOS arm64, read-only) ── publish (writes the release, builds nothing)
+#
+# The release is `shell-v<N>`, a prerelease that is never marked latest, so the app's own releases
+# (`v*`, release.yml) stay what GitHub shows. A version that already has a release or a lock entry is
+# refused: a shell version is built once.
+name: shell release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The shell version to build (SHELL_VERSION in apps/desktop/src-tauri/shell/src/lib.rs)'
+        required: true
+        type: string
+
+concurrency:
+  group: shell-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: check the version against the repo
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - id: check
+        env:
+          # Through the environment, never pasted into the script (release.yml explains why).
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$INPUT_VERSION" in
+            ''|*[!0-9]*) echo "::error::the version is a positive integer, not '$INPUT_VERSION'"; exit 1 ;;
+          esac
+          source=$(sed -n 's/^pub const SHELL_VERSION: u64 = \([0-9]*\);$/\1/p' apps/desktop/src-tauri/shell/src/lib.rs)
+          plist=$(tr -d '\n\t ' < apps/desktop/src-tauri/shell/Info.plist | sed -n 's/.*<key>CentraluShellVersion<\/key><integer>\([0-9]*\)<\/integer>.*/\1/p')
+          if [ "$source" != "$INPUT_VERSION" ] || [ "$plist" != "$INPUT_VERSION" ]; then
+            echo "::error::asked for shell $INPUT_VERSION; src/lib.rs says $source and Info.plist says $plist"
+            exit 1
+          fi
+          pinned=$(node -e 'const l = JSON.parse(require("fs").readFileSync("packaging/shell/shell.lock", "utf8")); console.log(l.shells.some((s) => s.version === Number(process.argv[1])) ? "yes" : "no")' "$INPUT_VERSION")
+          if [ "$pinned" != "no" ]; then
+            echo "::error::packaging/shell/shell.lock already pins shell $INPUT_VERSION; a shell version is built once"
+            exit 1
+          fi
+          if gh release view "shell-v$INPUT_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::the release shell-v$INPUT_VERSION already exists; a shell version is built once"
+            exit 1
+          fi
+          echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build shell ${{ needs.guard.outputs.version }} (darwin-arm64)
+    needs: guard
+    # Apple silicon, like the darwin-arm64 package the shell ships in.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - run: pnpm install --frozen-lockfile
+
+      # A fresh target folder and no cache: what is pinned is built from this commit alone. No
+      # feature is passed: the shell made here trusts packaging/shell/keys.json and nothing else
+      # (tooling/shell-release-workflow.test.ts keeps it that way).
+      - name: Build, sign and zip the shell
+        env:
+          # The oldest macOS the shell's Info.plist admits (LSMinimumSystemVersion), stated rather
+          # than left to the toolchain's default, which a later Rust could raise.
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
+          CARGO_INCREMENTAL: '0'
+        run: pnpm exec tsx scripts/shell-bundle.mts build --out "$RUNNER_TEMP/shell" --target-dir "$RUNNER_TEMP/shell-target" --json "$RUNNER_TEMP/shell/entry.json"
+
+      - name: Check what was built
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/shell/Centralu.app"
+          /usr/bin/codesign --verify --strict --deep "$app"
+          /usr/bin/codesign -d -vvv "$app" 2>&1 | grep -q '^Identifier=app.centralu.agent$'
+          [ "$(lipo -archs "$app/Contents/MacOS/centralu-shell")" = "arm64" ]
+          # Nothing that can connect to the window server (AppKit, CoreGraphics, SkyLight): a process
+          # without that connection cannot be shown as "not responding" (thin-shell.md §3).
+          extra=$(otool -L "$app/Contents/MacOS/centralu-shell" | tail -n +2 | awk '{print $1}' | grep -v -x -e /usr/lib/libSystem.B.dylib -e /usr/lib/libiconv.2.dylib || true)
+          [ -z "$extra" ] || { echo "::error::the shell links more than libSystem and libiconv: $extra"; exit 1; }
+          # Run it, not through LaunchServices and with nothing to start: a refusal still writes its
+          # status, which says whether this build trusts a key beyond keys.json.
+          data=$(mktemp -d)
+          code=0
+          "$app/Contents/MacOS/centralu-shell" --content "$data/no-content" --data-dir "$data" --nonce check || code=$?
+          [ "$code" = "10" ] || { echo "::error::expected a content refusal (10), got $code"; exit 1; }
+          node -e 'const s = require(process.argv[1]); if (s.testBuild !== false || s.nonce !== "check") process.exit(1)' "$data/shell-status.json"
+          # The zip depends only on the bundle: zipping it again gives the same bytes.
+          first=$(shasum -a 256 "$RUNNER_TEMP/shell/"Centralu-shell-v*.zip | cut -d' ' -f1)
+          pnpm exec tsx scripts/shell-bundle.mts zip "$app" "$RUNNER_TEMP/again.zip"
+          [ "$first" = "$(shasum -a 256 "$RUNNER_TEMP/again.zip" | cut -d' ' -f1)" ] || { echo "::error::zipping the same bundle twice gave different bytes"; exit 1; }
+
+      - name: Print the zip's sha256, the cdhash and the shell.lock entry
+        run: |
+          set -euo pipefail
+          node -e 'const e = require(process.argv[1]); const entry = { version: e.version, platform: e.platform, sha256: e.sha256, cdhash: e.cdhash, url: e.url }; console.log(`sha256: ${e.sha256}`); console.log(`cdhash: ${e.cdhash}`); console.log("shell.lock entry:"); console.log(JSON.stringify(entry, null, 2))' "$RUNNER_TEMP/shell/entry.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: centralu-shell
+          path: |
+            ${{ runner.temp }}/shell/Centralu-shell-v*.zip
+            ${{ runner.temp }}/shell/entry.json
+          if-no-files-found: error
+
+  # The only job that can write, and it builds nothing: it takes the zip the build job checked.
+  publish:
+    name: publish shell ${{ needs.guard.outputs.version }}
+    needs: [guard, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: centralu-shell
+          path: shell
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          zip=$(ls shell/Centralu-shell-v"$VERSION"-*.zip)
+          sha=$(sha256sum "$zip" | cut -d' ' -f1)
+          [ "$sha" = "$(node -e 'console.log(require(process.argv[1]).sha256)' "$PWD/shell/entry.json")" ] || { echo "::error::the zip changed between the build and here"; exit 1; }
+          {
+            echo "The macOS shell, version $VERSION, built once from $GITHUB_SHA by run $GITHUB_RUN_ID."
+            echo
+            echo "Not an app to download: Centralu installs it into its data folder (docs/plans/thin-shell.md)."
+            echo
+            echo "sha256: \`$sha\`"
+          } > notes.md
+          gh release create "shell-v$VERSION" "$zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Centralu shell $VERSION" \
+            --notes-file notes.md \
+            --prerelease \
+            --latest=false
+
+      - name: Say what to add to shell.lock
+        run: |
+          set -euo pipefail
+          entry=$(node -e 'const e = require(process.argv[1]); console.log(JSON.stringify({ version: e.version, platform: e.platform, sha256: e.sha256, cdhash: e.cdhash, url: e.url }, null, 2))' "$PWD/shell/entry.json")
+          echo "$entry"
+          {
+            echo "## Shell $(node -e 'console.log(require(process.argv[1]).version)' "$PWD/shell/entry.json") is published"
+            echo
+            echo "Add this entry to \`shells\` in \`packaging/shell/shell.lock\`, in a pull request:"
+            echo
+            echo '```json'
+            echo "$entry"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

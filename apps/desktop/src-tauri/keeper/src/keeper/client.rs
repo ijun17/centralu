@@ -117,6 +117,16 @@ pub fn attach(
  * (another one already holds the folder) does not linger as a zombie while the app runs.
  */
 pub fn launch_detached(exe: &Path, args: &[String], env: &[(String, String)], log: &Path) -> io::Result<()> {
+    let mut child = spawn_detached(exe, args, env, log)?;
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// `launch_detached` without the reaping thread: the caller waits on the child itself. The shell
+/// does, to tell a keeper that exited at once from one that is still starting.
+pub fn spawn_detached(exe: &Path, args: &[String], env: &[(String, String)], log: &Path) -> io::Result<std::process::Child> {
     // User-only, like everything else the keeper writes: the host's stderr lands here too.
     let out = OpenOptions::new().create(true).append(true).mode(0o600).open(log)?;
     let err = out.try_clone()?;
@@ -126,11 +136,7 @@ pub fn launch_detached(exe: &Path, args: &[String], env: &[(String, String)], lo
         cmd.env(k, v);
     }
     sys::new_session(&mut cmd);
-    let mut child = cmd.spawn()?;
-    thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(())
+    cmd.spawn()
 }
 
 /// Makes sure a keeper answers on `sock`, launching one with `launch` if none does, and waits up
