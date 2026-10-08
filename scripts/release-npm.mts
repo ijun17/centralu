@@ -184,6 +184,24 @@ function checkLinuxHost(pkgDir: string): void {
   const info = JSON.parse(readFileSync(join(pkgDir, 'host/bundle-info.json'), 'utf8')) as { platform?: string; arch?: string }
   if (`${info.platform}-${info.arch}` !== HOST) fail(`the unpacked host was bundled for ${info.platform}-${info.arch}, not ${HOST}`)
   console.log('  unpacked host present (for centralu serve)')
+  checkRemoteRuntime(join(pkgDir, 'host'))
+}
+
+/**
+ * The pinned Node for remotes is in the host bundle, and is the pin (docs/plans/remote-hub.md §10.3).
+ *
+ * A hub reads this file to tell a remote which Node archive hash to accept. `bundle.mjs` copies it;
+ * this catches a bundle built before the pin moved, which would send every remote a hash for another
+ * Node and fail each install with a checksum error. The pin itself was checked against Node's signed
+ * SHASUMS256.txt by the release's first job (`scripts/node-pin.mjs`).
+ */
+function checkRemoteRuntime(hostDir: string): void {
+  const file = join(hostDir, 'remote-runtime.json')
+  if (!existsSync(file)) fail(`${file} is missing: a hub on this build could not install Centralu on another machine`)
+  if (readFileSync(file, 'utf8') !== readFileSync(join(ROOT, 'packaging/remote-runtime.json'), 'utf8')) {
+    fail(`${file} differs from packaging/remote-runtime.json: the host was bundled before the Node pin moved. Run pnpm bundle:host again`)
+  }
+  console.log('  pinned Node for remotes present (remote-runtime.json)')
 }
 
 /** The keeper's own executable, shipped next to the window's on macOS and Linux (#440) */
@@ -295,6 +313,9 @@ const TARGETS: Record<string, Target | undefined> = {
       // (d) the keeper executable beside it (#440). Without it the app still runs (the window's
       // executable runs the keeper itself), so nothing else would notice it missing.
       checkKeeperExe(join(dest, 'Contents/MacOS', KEEPER_EXE), 'arm64')
+
+      // (e) the pinned Node for remotes, which a Mac hub sends to the machines it installs
+      checkRemoteRuntime(join(dest, 'Contents/Resources/resources/host'))
     },
   },
 
@@ -487,6 +508,7 @@ const TARGETS: Record<string, Target | undefined> = {
         if (!existsSync(join(dest, rel))) fail(`${rel} is missing from the package — the app would not start its host or its terminal`)
       }
       console.log('  GUI subsystem, host and conpty present')
+      checkRemoteRuntime(join(dest, 'resources/host'))
 
       // (c) machine type — 0x8664 is IMAGE_FILE_MACHINE_AMD64, the field right after `PE\0\0`
       const machine = pe.readUInt16LE(at + 4)

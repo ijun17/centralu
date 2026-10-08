@@ -139,6 +139,18 @@ jobs:
             echo "- triggered by: \`$GITHUB_EVENT_NAME\` \`$GITHUB_REF_NAME\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The Node a remote runs (docs/plans/remote-hub.md §10.3). Every platform package carries
+      # packaging/remote-runtime.json in its host, and a hub sends the remote the hash for its
+      # platform from there. Checked here, before anything is built, against nodejs.org's
+      # SHASUMS256.txt and its signature by the releaser the pin names (key from nodejs/release-keys
+      # at the pinned commit). Node's own modules and `gpgv`, which ubuntu images carry, so no install.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Check the pinned Node against its signed SHASUMS256.txt
+        run: node scripts/node-pin.mjs
+
   # One job per platform package, each building on the platform it ships to.
   #
   # `scripts/release-npm.mts` has no cross-build switch on purpose: every check it runs

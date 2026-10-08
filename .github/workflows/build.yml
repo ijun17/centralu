@@ -291,6 +291,55 @@ jobs:
           CC_DATA_DIR: ${{ runner.temp }}\centralu-data
         run: pnpm test
 
+  # The host's tests on the Node a remote runs (docs/plans/remote-hub.md §10.2; owner decision 1 of
+  # §10.9, 2026-10-08). A machine the hub installs runs the host on the Node pinned in
+  # packaging/remote-runtime.json, not on the 22 every other job here uses, so a host change that
+  # only works on 22 would pass every other check and break every remote. Added beside the jobs above,
+  # not in place of them: the app's own host still runs on whatever Node the person has, 22 or later.
+  #
+  # The host, its protocol and the npm launcher, which is what a remote runs. Linux and Windows,
+  # the two systems the installer serves. The version comes from the pin itself, so moving the pin
+  # (scripts/node-pin.mjs --set) moves this job with it; tooling/node-pin.test.ts holds the two together.
+  host-tests-remote-node:
+    name: host tests, remote Node (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Read the pinned Node
+        id: pin
+        shell: bash
+        run: echo "node=$(node -p 'require("./packaging/remote-runtime.json").node.version')" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ steps.pin.outputs.node }}
+          cache: pnpm
+
+      # The native modules (better-sqlite3, node-pty) are fetched or built for the Node running here
+      - run: pnpm install --frozen-lockfile
+
+      - name: Say which Node runs the tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          have=$(node -p 'process.versions.node')
+          echo "node $have (pinned ${{ steps.pin.outputs.node }})"
+          [ "$have" = "${{ steps.pin.outputs.node }}" ] || { echo "::error::the tests would run on Node $have, not the pinned ${{ steps.pin.outputs.node }}"; exit 1; }
+
+      - name: pnpm test (host, protocol, launcher)
+        shell: bash
+        env:
+          # Never the real data folder, on any OS (AGENTS.md)
+          CC_DATA_DIR: ${{ runner.temp }}/centralu-data
+        run: pnpm exec vitest run packages/agent-host packages/protocol tooling/launcher-
+
   # The keeper end to end, with the real binary and the real host (2026-10-05). Neither the unit
   # tests nor e2e start a keeper: when #329 put an `await` in the host's startup before the server
   # existed, every host restart that held a terminal or a dev server crashed five times until the

@@ -13,3 +13,7 @@ packages/agent-host/app-template/runtime/** linguist-generated=true -diff
 # (apps/desktop/content-verify/tests/writer.rs). One of them holds every byte value, CR LF included,
 # so no line-ending conversion may touch them.
 apps/desktop/content-verify/tests/fixtures/writer/** -text
+
+# Node's SHASUMS256.txt, its detached signature and the release key that signed it: gpgv checks the
+# signature over these exact bytes (tooling/node-pin.test.ts)
+tooling/fixtures/node-pin/** -text
