@@ -43,7 +43,7 @@ import {
   UpdateStatus,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
-import { MachineId, MachineInfo, RemoteShell } from './machines.js'
+import { MachineId, MachineInfo, MachineInstallResult, RemoteShell } from './machines.js'
 import { parseTolerant } from './tolerant.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
@@ -1979,6 +1979,15 @@ export const RpcMethods = {
    * question comes again. Refused when the protocols differ.
    */
   'machines.acceptVersions': { params: z.object({ machineId: MachineId }), result: MachineInfo },
+  /**
+   * Installs this hub's version on a linked machine over its ssh (docs/plans/remote-hub.md §10.2):
+   * the pinned Node and the npm packages, checked against the release's pin and the registry's
+   * signed metadata, beside what is there, with `current` switched to it and `previous` kept. A
+   * host running there is not touched; the next start runs the new version (stopping and starting
+   * it in order is phase 3 step 4). Refused by a development hub (its version is not on npm) and for
+   * a machine that runs a command of its own; answers when the install is done or refused
+   */
+  'machines.install': { params: z.object({ machineId: MachineId }), result: MachineInstallResult },
   /**
    * Stops this host the way a signal would: agents, terminals, command runs and app processes
    * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host.md

@@ -333,8 +333,9 @@ works as before.
   `.mjs` from the hub's host bundle, run on the Node step 1 placed. The remote's old install never decides how the new
   one is installed: the newer side brings the rules, as it brings the version.
 - **Unpacking uses the system's `tar`.** Linux has it; Windows has `tar.exe` (bsdtar, which also reads `.zip`) since
-  Windows 10 1803. Measured: the Node zip unpacked in 1.4 s with `tar.exe` and in 20.6 s with `Expand-Archive`, which
-  stays as the fallback for an older Windows.
+  Windows 10 1803. Measured: the Node zip unpacked in 1.4 s with `tar.exe` and in 20.6 s with `Expand-Archive`.
+  *Built (step 3) without the `Expand-Archive` fallback*: step 2 needs `tar` for the npm tarballs too, so a Windows
+  without `tar.exe` is refused by the preflight instead (S7).
 - **Node is pruned to what the host runs**: `include/` (67 MB) and npm and corepack (19 MB) are removed, which takes
   the Linux folder from 208 to 122 MB. It is not put on PATH, so the person's own tools keep finding theirs. What runs
   on it: the host, the Codex bridge (`process.execPath`, `adapters/codex`), and on Windows the `.js` entry of an
@@ -539,9 +540,32 @@ The owner took every recommendation of the design. Each line keeps the question,
 |---|---|---|
 | 1 | The release records the pinned Node (version and SHA-256 per platform, from a signature-checked `SHASUMS256.txt`) as `remote-runtime.json` in the host bundle; CI runs the host's tests on that Node too. **Done** | 0.5–1 day |
 | 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running. **Done**: `host.stop`, `MachineStatus` `starting` and `MachineInfo.hostStarted` (additive), the link-bound fallback when WMI is blocked ([agent-host.md](../agent-host.md) §4.7, §4.8) | 1.5–2 days |
-| 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL | 2–3 days |
+| 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL. **Done** as `machines.install` (additive), [agent-host.md](../agent-host.md) §4.8; the posix scripts run for real in the tests, the Windows and WSL ones are checked as built but **not yet run on a Windows machine** (choices below) | 2–3 days |
 | 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows | 2–3 days |
 | 5 | (Owner decision 2) Host-only packages in the release | 1 day |
 | 6 | (Owner decisions 4, 5) Boot autostart; the remote keeper after #350 | 1 day; 3–5 days |
 
 Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind phase 1's manual path, which keeps working.
+
+**Choices made building step 3** (within §10.1–§10.3):
+
+- **The preflight reports, the hub decides.** The script per shell prints facts on one line (`CENTRALU-PREFLIGHT
+  os=… arch=… glibc=… musl=… freeKb=… tar=… gzip=… fetch=… sha=…`) and `preflight()` in `install.ts` turns them into a
+  platform or one sentence, so every refusal is tested on any machine. Space asked for: 600 MB on Linux, 300 MB on
+  Windows (the peak of §10.7 with room).
+- **Three ssh commands**: preflight, Node, Centralu. The hub reads and checks the registry metadata between the first
+  two, so a refused machine or a bad signature downloads nothing. Each answers a `CENTRALU-INSTALL` word; the hub
+  writes the sentences (exit codes do not survive Windows, §4.8 of agent-host.md).
+- **The `.mjs` travels gzipped in base64 inside its step's script**, written to `<data>/remote/.install-<pid>.mjs` and
+  removed after. Gzip keeps every step under Windows' 32,767-character command line in all three shells, WSL's double
+  encoding included (a test holds it under 30,000).
+- **Registry signatures**: the version document `/<name>/<version>` and the keys at `/-/npm/v1/keys`, over TLS; a
+  signature counts only from a published key that has not expired, over `<name>@<version>:<integrity>`. Checked
+  against the live registry for 0.1.0-beta.13 while building. The tarball must come from the registry's own origin.
+- **The launcher text comes from the installed version's `serve.mjs`** (`managedLauncherScript`), written only when
+  there is none. **Pointers** are written to a temporary file and renamed over; `previous` before `current`.
+- **The data folder is `CC_DATA_DIR` there, else `~/.centralu`**, in the lookup, the scripts and the `.mjs` alike.
+- **Install also switches `current`** and prunes to current and previous; the running host keeps running from what is
+  now `previous`, so nothing in use is removed. Step 4 wraps this in stop, switch, start and check.
+- **On Windows the `.mjs` runs `%SystemRoot%\System32\tar.exe` by its full path**: a GNU tar earlier on PATH (Git's)
+  reads `C:` in an archive path as a remote host.

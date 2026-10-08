@@ -100,3 +100,21 @@ export const MachineInfo = z.object({
     .default(null),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
+
+/** One side of a managed install: a Centralu version and the Node it runs on (`current` / `previous` there) */
+export const InstalledVersion = z.object({ version: z.string(), node: z.string() })
+export type InstalledVersion = z.infer<typeof InstalledVersion>
+
+/**
+ * What `machines.install` did there (docs/plans/remote-hub.md §10.2): the version `current` names
+ * now, the one kept as `previous` (the rollback target), the versions it removed, and folders it could
+ * not remove (a Windows program still running from them). `machine` is the row after it
+ */
+export const MachineInstallResult = z.object({
+  machine: MachineInfo,
+  current: InstalledVersion,
+  previous: InstalledVersion.nullable(),
+  removed: z.array(z.string()).default([]),
+  left: z.array(z.string()).default([]),
+})
+export type MachineInstallResult = z.infer<typeof MachineInstallResult>

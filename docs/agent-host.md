@@ -1005,6 +1005,7 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 | Router | `router.ts`, `routes.ts` | In front of `HostServer.onRpc`: sends a call to the machine its ids name, merges lists, answers the rest locally |
 | Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
 | Mirror | `stored.ts`, store v46 `machine_headers` | Each machine's sessions and projects as last listed, for when it cannot be reached |
+| Installer | `install.ts`, `registry.ts`, `remote-install.mjs` | `machines.install`: preflight, the pinned Node and the npm packages on the remote, checked against the release's pin and the registry's signed metadata (below) |
 
 The three choke points of §5 of the plan are where it sits: the router is the `onRpc` the server calls, a link puts
 the remote's events into `server.broadcast` (so they get the hub's own `seq` and replay) and its terminal frames into
@@ -1034,12 +1035,34 @@ command to whatever login shell the remote account has:
 
 | Shell | The connection command | Measured on |
 |---|---|---|
-| `posix` | `sh -c 'if command -v centralu …; then exec centralu serve --connection; elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | the fake ssh of `tunnel.test.ts` |
-| `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`Get-Command centralu`, then `%USERPROFILE%\.centralu\bin\centralu.cmd`) | Windows 11, OpenSSH, PowerShell 5.1 |
+| `posix` | `sh -c 'm="${CC_DATA_DIR:-$HOME/.centralu}/remote/bin/centralu"; if [ -x "$m" ]; then exec "$m" serve --connection; elif command -v centralu …; then exec centralu …; elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | the fake ssh of `tunnel.test.ts`; the order by a real `sh` there |
+| `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`<data>\remote\bin\centralu.cmd`, then `Get-Command centralu`, then `%USERPROFILE%\.centralu\bin\centralu.cmd`) | Windows 11, OpenSSH, PowerShell 5.1 (before the managed launcher was added) |
 | `wsl` | The same PowerShell wrapper around `wsl.exe -d '<distro>' -- bash -lc 'echo <base64> \| base64 -d \| bash -l'`, the script being the POSIX lookup with `/mnt/*` taken off PATH | Ubuntu 24.04 in WSL2 on that laptop |
+
+The managed launcher the installer writes (below) comes first, so a machine with both an npm install and one the hub
+made runs the version the hub installed; a phase 1 machine finds `centralu` as before.
 
 A machine can name its own command in place of `centralu` (`MachineInfo.command`): a source checkout, a data folder
 other than `~/.centralu`. It runs as given, with no fallback.
+
+**Installing on a machine** (phase 3, plan §10.2; `install.ts`, `registry.ts`, `remote-install.mjs`).
+`machines.install` installs the hub's own version there over the same ssh, in three remote commands, each a script for
+that machine's shell sent the way the lookup is (base64 to `sh`, to `bash -l` inside WSL, `-EncodedCommand` to
+PowerShell):
+
+| Step | What runs there | What the hub does |
+|---|---|---|
+| 0. Preflight | Prints one `CENTRALU-PREFLIGHT` line: `uname`, `getconf GNU_LIBC_VERSION`, musl, free space where the data folder is, `tar`, `gzip`, `curl`/`wget`, a SHA-256 tool (Windows: architecture, `tar.exe`, `curl.exe`) | Decides (`preflight`): glibc 2.34 or later, no musl, a published platform, the tools, 600 MB free (300 on Windows); otherwise one sentence and nothing is downloaded |
+| — | — | Reads `centralu@<v>` and `@centralu/<platform>@<v>` from the npm registry and checks each `dist.signatures` against the registry's keys (`/-/npm/v1/keys`, unexpired), as `npm audit signatures` does |
+| 1. Node | Downloads the pinned archive from nodejs.org, compares its SHA-256 with the one the hub sends from `remote-runtime.json`, unpacks it with the system's tar (`System32\tar.exe` on Windows) into a `.partial-node-*` folder, keeps only `bin/node` (`node.exe`) and `LICENSE`, and renames it to `<data>/remote/node/v<N>/` | Sends the archive's name and hash; reads `CENTRALU-INSTALL node ok` or a failure code |
+| 2. Centralu | `remote-install.mjs`, written there gzipped in base64 and run on that Node: takes `install.lock`, fetches both tarballs, refuses any whose sha512 is not the integrity the hub sent, unpacks them in npm's layout into `.partial-<v>-<pid>/`, drops the AppImage or `centralu.exe`, writes `install.json`, renames the folder to `versions/<v>/`, writes the managed launcher if there is none (`managedLauncherScript` from that version's `serve.mjs`; never rewritten), moves `current` to `previous` and writes `current`, each by a rename over the file, and removes versions and Nodes neither names | Reads `CENTRALU-INSTALL done <json>`: `current`, `previous`, what was removed and what could not be (a Windows program running from it) |
+
+The remote prints codes, the hub turns them into sentences (`node_hash`, `integrity`, `download`, `busy`, …); exit
+codes are not read, as for the lookup. A host running there is not touched: the old version becomes `previous` and
+keeps its folder, and the next start runs the new one. When the link is not connected the hub opens it again at once,
+and the lookup finds the managed launcher. A development hub refuses (its version is not on npm), and so does a
+machine with a command of its own. Stopping the running host and starting the new one in order, rollback and
+uninstall are phase 3 step 4.
 
 | Decision | Why |
 |---|---|

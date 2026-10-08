@@ -1535,12 +1535,17 @@ Platforms: all.
 **RE3. The fallback is decided on the remote and reported as a word.**
 Happened: nvm, fnm, volta and `~/.npm-global` put npm's folder on PATH only in interactive shells; Windows OpenSSH runs
 the command under PowerShell, which turns any failure into 1, and a missing command can arrive as 0 (2026-10-05).
-Rule: one remote command tries `centralu`, the managed launcher and `<data>/bin/centralu`, then prints
-`CENTRALU-NOT-FOUND`; the hub reads the word, not the exit code; POSIX runs the lookup under `sh -c` (fish).
+Rule: one remote command tries the managed launcher (`<data>/remote/bin/centralu`), then `centralu` on PATH, then
+`~/.centralu/bin/centralu`, then prints `CENTRALU-NOT-FOUND`; the hub reads the word, not the exit code; POSIX runs
+the lookup under `sh -c` (fish). The installer's steps answer `CENTRALU-PREFLIGHT` and `CENTRALU-INSTALL` words the
+same way.
 Guard: `host/links/tunnel.test.ts` "says Centralu is not installed when neither answers, whatever exit code the shell
 passed on, and that ssh failed when it cannot connect"; `host/links/tunnel.test.ts` "a POSIX remote runs the lookup
-under sh, so a login shell like fish runs it too; the person’s own command runs as given".
-Platforms: all remotes.
+under sh, so a login shell like fish runs it too; the person’s own command runs as given";
+`host/links/tunnel.test.ts` "runs the managed launcher before centralu on PATH and before the launcher serve keeps
+(plan §10.1)" (by a real `sh`); `host/links/tunnel.test.ts` "a Windows remote tries the managed launcher before
+centralu on PATH too" (the decoded script only).
+Platforms: all remotes. *Changed by phase 3 step 3.*
 
 **RE4. Nothing but plain words crosses PowerShell.**
 Happened: PowerShell 5.1 mangles double quotes passed to native programs (#410).
@@ -1623,21 +1628,60 @@ one rename; a managed `serve` leaves `<data>/bin/` alone.
 Guard: `tooling/launcher-serve.test.ts` "runs the version current names on its Node, marked managed, and follows current
 when it moves"; `tooling/launcher-serve.test.ts` "leaves <data>/bin/centralu alone under the managed launcher, and keeps
 it otherwise"; `tooling/launcher-serve.test.ts` "reads current and previous as two plain words, and nothing that could
-leave the install".
-Platforms: all remotes. *Changed by #462.*
+leave the install". The installer's side: `host/links/install.test.ts` "replaces current by a rename, never by writing
+into the file the launcher reads"; `host/links/install.test.ts` "moves the old current to previous before current
+changes"; the launcher written once: `host/links/install.test.ts` "keeps current and previous only: a third version
+removes the first".
+Platforms: all remotes. *Changed by #462 and phase 3 step 3.*
 
 **RE13. A running version on Windows cannot be deleted.**
 Happened: removing a running `node.exe` was refused; renaming its folder was allowed (remote-hub.md §10.5).
 Rule: install beside, stop, switch, start, check the version that answers, and delete old versions only after the old
-host is gone; keep `current` and `previous`.
-Guard: **UNGUARDED** (phase 3 step 4, not built).
-Platforms: Windows remotes.
+host is gone; keep `current` and `previous`. The installer (step 3) switches `current` and prunes to current and
+previous only, so the version a running host uses becomes `previous` and stays; a folder that cannot be removed is
+reported in `left`, never fatal.
+Guard: keeping current and previous: `host/links/install.test.ts` "keeps current and previous only: a third version
+removes the first". Stop before switch, and the Windows refusal itself: **UNGUARDED** (phase 3 step 4, not built).
+Platforms: Windows remotes. *Changed by phase 3 step 3.*
 
 **RE14. A refused token is asked again once.**
 Rule: a 4001 or 4002 refusal re-reads the connection line once; a second refusal in a row is reported and backed off.
 Guard: `host/links/links.test.ts` "a refused token asks the remote again once, then reports and backs off instead of
 looping".
 Platforms: all.
+
+**RE15. A remote checks what it downloads against values that did not travel with it.**
+Happened: designed and measured in remote-hub.md §10.3 and §10.7: a `SHASUMS256.txt` fetched beside the archive only
+catches corruption, and the remote's old install must not decide how the new one is installed.
+Rule: the Node archive's SHA-256 is the one the release pinned (`remote-runtime.json`), sent by the hub; each npm
+tarball's sha512 is the `integrity` the hub read from version metadata whose registry signature it checked (a
+published, unexpired key, over `<name>@<version>:<integrity>`); a mismatch stops before unpacking and leaves at most
+nothing, and what ran before keeps running.
+Guard: `host/links/install.test.ts` "refuses a Node archive whose SHA-256 is not the pinned one, and leaves nothing";
+`host/links/install.test.ts` "refuses a package whose bytes are not what the signed metadata names, and keeps what
+runs"; `host/links/registry.test.ts` "refuses metadata signed by a key the registry does not publish";
+`host/links/registry.test.ts` "refuses a signature made with a key that has expired". The PowerShell Node step
+(`Get-FileHash`) is checked as text only: `host/links/install.test.ts` "a Windows remote checks the Node zip with
+Get-FileHash and unpacks it with System32 tar.exe".
+Platforms: all remotes; the Windows path is not run in CI.
+
+**RE16. Refuse a machine the published host cannot run on before downloading anything.**
+Happened: both native modules in `@centralu/linux-x64` reference `GLIBC_2.34` symbols, and the bundles carry no musl
+build of node-pty (remote-hub.md §10.2): installed anyway, the host would die at its first `require`.
+Rule: the preflight refuses glibc below 2.34, musl, an architecture with no package, a missing `tar`, `gzip`,
+downloader or SHA-256 tool, and too little space, each in one sentence, and the hub asks the registry nothing until it
+passes.
+Guard: `host/links/install.test.ts` "refuses, in one sentence each, what the published host cannot run on or the
+install cannot do"; `host/links/install.test.ts` "refuses before downloading anything: an old glibc there, or registry
+metadata whose signature fails".
+Platforms: Linux and Windows remotes.
+
+**RE17. Every installer step fits one Windows command line.**
+Happened: CreateProcess takes 32,767 characters, and a WSL script is base64 inside UTF-16LE base64 (about 5.3
+characters per byte of script).
+Rule: the step-2 `.mjs` travels gzipped; every step's command stays under 30,000 characters in all three shells.
+Guard: `host/links/install.test.ts` "fits one Windows command line in every shell, the installer itself included".
+Platforms: Windows and WSL remotes.
 
 ## 14. How the runtime is tested
 

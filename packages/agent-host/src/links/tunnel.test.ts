@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { connectionCommand, lastLine, parseConnectionLine, SshTunnel, type RemoteSpec } from './tunnel.js'
 
 /**
@@ -149,7 +150,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     expect(ep.line).toMatchObject({ port: remotePort, version: '0.1.0-beta.11', hostRunning: true })
     const [ask, forward] = (logged() as unknown[]).filter((x): x is string[] => Array.isArray(x))
     expect(ask!.slice(0, -1)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', 'box'])
-    expect(ask!.at(-1)).toMatch(/^sh -c 'if command -v centralu .* serve --connection; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
+    expect(ask!.at(-1)).toMatch(/^sh -c 'm=.*; if \[ -x "\$m" \]; then .*elif command -v centralu .* serve --connection; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
     expect(forward).toContain('-N')
     for (const opt of ['BatchMode=yes', 'ExitOnForwardFailure=yes', 'ServerAliveInterval=15', 'GatewayPorts=no']) expect(forward).toContain(opt)
     const spec = forward![forward!.indexOf('-L') + 1]!
@@ -245,10 +246,10 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     await tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()
     const runs = (logged() as { shell?: string; run?: string }[]).filter((x) => x.shell)
     expect(runs[0]!.shell).toBe('powershell')
-    expect(runs[0]!.run).toContain("if (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu serve --connection } else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'")
+    expect(runs[0]!.run).toContain("elseif (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu serve --connection } else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'")
     expect(runs[1]!.shell).toBe('wsl:Ubuntu-24.04')
     // Windows' drives are off PATH inside the distro: its npm shim must not answer for the distro
-    expect(runs[1]!.run).toMatch(/^PATH=\$\(printf %s "\$PATH" \| tr : '\\n' \| grep -v '\^\/mnt\/' \| paste -sd: -\); if command -v centralu/)
+    expect(runs[1]!.run).toMatch(/^PATH=\$\(printf %s "\$PATH" \| tr : '\\n' \| grep -v '\^\/mnt\/' \| paste -sd: -\); m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu/)
     // The WSL forward holds a process in the distro, so WSL does not stop it under the link
     const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
     expect(forwards[0]).toContain('-N')
@@ -280,7 +281,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
       }
       const detaches = runs().filter((r) => r.run!.includes('serve --detach'))
       expect(detaches.map((r) => r.shell)).toEqual(['posix', 'powershell', 'wsl:Ubuntu-24.04'])
-      expect(detaches[0]!.run).toMatch(/^sh -c .if command -v centralu .*then exec centralu serve --detach; elif .* exec "\$HOME\/.centralu\/bin\/centralu" serve --detach; else echo CENTRALU-NOT-FOUND/)
+      expect(detaches[0]!.run).toMatch(/^sh -c .m=.*if \[ -x "\$m" \]; then exec "\$m" serve --detach; elif command -v centralu .*then exec centralu serve --detach; elif .* exec "\$HOME\/.centralu\/bin\/centralu" serve --detach; else echo CENTRALU-NOT-FOUND/)
       expect(detaches[1]!.run).toContain('{ & centralu serve --detach }')
       // A detached host needs nothing from the forward: a plain -N (and the distro keep-alive for WSL)
       const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
@@ -328,6 +329,39 @@ describe('the remote command per shell (#82)', () => {
     // Nothing inside closes the single quotes early
     expect(cmd.slice("sh -c '".length, -1)).not.toContain("'")
     expect(connectionCommand({ shell: 'posix', command: 'x' })).toBe('x serve --connection')
+  })
+
+  // Run by a real sh, as a POSIX remote would: the order is the shell's, not a string's
+  it.skipIf(process.platform === 'win32')('runs the managed launcher before centralu on PATH and before the launcher serve keeps (plan §10.1)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cc-lookup-'))
+    try {
+      const put = (file: string, word: string) => {
+        mkdirSync(dirname(file), { recursive: true })
+        writeFileSync(file, `#!/bin/sh\necho ${word} "$@"\n`)
+        chmodSync(file, 0o755)
+      }
+      const run = (env: Record<string, string> = {}) =>
+        execFileSync('/bin/sh', ['-c', connectionCommand({ shell: 'posix' })], { env: { HOME: home, PATH: `${join(home, 'path')}:/usr/bin:/bin`, ...env }, encoding: 'utf8' }).trim()
+      put(join(home, '.centralu', 'bin', 'centralu'), 'npm-launcher')
+      expect(run()).toBe('npm-launcher serve --connection')
+      put(join(home, 'path', 'centralu'), 'on-path')
+      expect(run()).toBe('on-path serve --connection')
+      put(join(home, '.centralu', 'remote', 'bin', 'centralu'), 'managed')
+      expect(run()).toBe('managed serve --connection')
+      // Under CC_DATA_DIR the managed launcher is looked for there, as serve and the installer put it
+      put(join(home, 'data', 'remote', 'bin', 'centralu'), 'managed-data')
+      expect(run({ CC_DATA_DIR: join(home, 'data') })).toBe('managed-data serve --connection')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('a Windows remote tries the managed launcher before centralu on PATH too', () => {
+    const ps = decode(connectionCommand({ shell: 'powershell' }))
+    const managed = ps.indexOf("$m = Join-Path $d 'remote\\bin\\centralu.cmd'; if (Test-Path $m) { & $m serve --connection }")
+    expect(managed).toBeGreaterThan(-1)
+    expect(ps.indexOf('elseif (Get-Command centralu')).toBeGreaterThan(managed)
+    expect(ps).toContain("$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }")
   })
 
   it('nothing that is not base64 crosses PowerShell, so no quote is re-parsed on the way', () => {
