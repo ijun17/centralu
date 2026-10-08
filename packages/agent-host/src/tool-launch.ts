@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { win32 } from 'node:path'
 import { whichTool } from './env-path.js'
@@ -12,7 +13,8 @@ import { whichTool } from './env-path.js'
  * carry JSON and prompts, and cmd.exe would read `%`, `^`, `&` and quotes in them as its own. So
  * the batch file is read for the program it starts, and that is started instead: a `.js` entry
  * through this same Node, or an `.exe` directly. A native install (`claude.exe`) needs none of
- * this.
+ * this. `npm.cmd` and `npx.cmd` themselves are batch files too, of a different shape
+ * (`nodeShimEntry`), and are read the same way.
  */
 export type ToolLaunch = { command: string; args: string[] }
 
@@ -22,6 +24,8 @@ type Deps = {
   exists: (path: string) => boolean
   /** The Node that runs a `.js` entry: the host's own */
   node: string
+  /** Run a `.js` with that Node and return its stdout, or null when it fails (npm's prefix lookup) */
+  runJs?: (script: string) => string | null
 }
 
 const realDeps = (): Deps => ({
@@ -29,6 +33,13 @@ const realDeps = (): Deps => ({
   read: (path) => readFileSync(path, 'utf8'),
   exists: existsSync,
   node: process.execPath,
+  runJs: (script) => {
+    try {
+      return execFileSync(process.execPath, [script], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
+    } catch {
+      return null
+    }
+  },
 })
 
 export function launchFor(path: string, deps: Deps = realDeps()): ToolLaunch {
@@ -40,10 +51,10 @@ export function launchFor(path: string, deps: Deps = realDeps()): ToolLaunch {
   } catch {
     return plain
   }
+  const dir = win32.dirname(path)
   const relative = shimTarget(text)
-  if (!relative) return plain
-  const target = win32.resolve(win32.dirname(path), relative)
-  if (!deps.exists(target)) return plain
+  const target = relative ? win32.resolve(dir, relative) : nodeShimEntry(text, dir, deps)
+  if (!target || !deps.exists(target)) return plain
   if (/\.(c|m)?js$/i.test(target)) return { command: deps.node, args: [target] }
   if (/\.exe$/i.test(target)) return { command: target, args: [] }
   return plain
@@ -68,6 +79,41 @@ export function shimTarget(text: string): string | null {
     return rel
   }
   return null
+}
+
+/**
+ * The `.js` that the `npm.cmd` or `npx.cmd` shipped with Node starts, or null for any other file.
+ *
+ * Those two are not cmd-shim output. They set variables and start the last of them, so the quoted
+ * paths `shimTarget` looks for are not there (read on Windows 11 with Node 24.21, 2026-10-08):
+ *
+ *   SET "NODE_EXE=%~dp0\node.exe"
+ *   SET "NPM_PREFIX_JS=%~dp0\node_modules\npm\bin\npm-prefix.js"
+ *   SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"
+ *   FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (
+ *     SET "NPM_PREFIX_NPM_CLI_JS=%%F\node_modules\npm\bin\npm-cli.js"
+ *   )
+ *   IF EXIST "%NPM_PREFIX_NPM_CLI_JS%" ( SET "NPM_CLI_JS=%NPM_PREFIX_NPM_CLI_JS%" )
+ *   "%NODE_EXE%" "%NPM_CLI_JS%" %*
+ *
+ * The middle part is followed too: after `npm i -g npm`, the npm in the global prefix is the one
+ * the shim runs, and it is the one the person's own terminal runs. A prefix that cannot be asked
+ * for falls back to the npm beside Node, which is what the shim does as well.
+ */
+export function nodeShimEntry(text: string, dir: string, deps: Pick<Deps, 'exists' | 'runJs'>): string | null {
+  const started = /^\s*"%NODE_EXE%"\s+"%(\w+)%"\s+%\*\s*$/m.exec(text)?.[1]
+  if (!started) return null
+  const set = (name: string) =>
+    new RegExp(`^\\s*SET\\s+"${name}=%~dp0\\\\?([^"%]+)"`, 'im').exec(text)?.[1]?.trim() ?? null
+  const relative = set(started)
+  if (!relative) return null
+  const base = win32.resolve(dir, relative)
+  const prefixJs = set('NPM_PREFIX_JS')
+  if (!prefixJs || !deps.runJs) return base
+  const prefix = deps.runJs(win32.resolve(dir, prefixJs))?.trim().split(/\r?\n/).pop()?.trim()
+  if (!prefix || !win32.isAbsolute(prefix)) return base
+  const inPrefix = win32.join(prefix, 'node_modules', 'npm', 'bin', win32.basename(base))
+  return deps.exists(inPrefix) ? inPrefix : base
 }
 
 /**

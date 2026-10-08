@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { posix, win32 } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, type UpdateStatus } from '@cc/protocol'
+import { resolveCommand, type ToolLaunch } from './tool-launch.js'
 
 /**
  * The in-app update check (issue #43).
@@ -67,6 +68,8 @@ export type UpdateDeps = {
   fetchLatest?: (timeoutMs: number) => Promise<LatestResult>
   /** Run a command to completion, rejecting with its stderr */
   run?: (file: string, args: string[]) => Promise<void>
+  /** The copy `centralu install` made, when there is one (`installedCopyPath`) */
+  installedCopy?: () => string | null
   now?: () => number
   /** Where the persisted "check automatically" answer lives across restarts */
   readAuto?: () => boolean
@@ -79,17 +82,33 @@ export type UpdateDeps = {
 /**
  * Where `centralu install` would have put the app on this platform.
  *
- * These two paths are the launcher's (`packaging/npm/centralu/bin/centralu.mjs`), and
- * they are re-derived rather than imported for the same reason the version compare is:
- * the launcher is a published npm package, not a workspace dependency. They must stay
- * in step — if they drift, the symptom is that updating leaves the *old* app in
- * `/Applications` while npm holds the new one, and the person keeps launching the old
- * one with no sign that anything is wrong.
+ * These paths are the launcher's (`installedPaths` and `windowsInstall` in
+ * `packaging/npm/centralu/bin/platform.mjs`), and they are re-derived rather than imported for the
+ * same reason the version compare is: the launcher is a published npm package, not a workspace
+ * dependency. They must stay in step — if they drift, the symptom is that updating leaves the
+ * *old* app in place while npm holds the new one, and the person keeps launching the old one with
+ * no sign that anything is wrong. Up to 0.1.0-beta.12 Windows fell through to the Linux path here,
+ * so the copy in `%LOCALAPPDATA%\Programs` was never refreshed by an in-app update.
+ *
+ * Windows reads the same environment the launcher does, so the `centralu install` this decides on
+ * writes where this looked.
  */
-function installedCopyPath(): string {
-  return process.platform === 'darwin'
-    ? `/Applications/${APP_NAME}.app`
-    : join(homedir(), '.local/share/applications', `${APP_SLUG}.desktop`)
+export function installedCopyPath(
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+  home: string = homedir(),
+): string {
+  if (platform === 'darwin') return `/Applications/${APP_NAME}.app`
+  if (platform === 'win32') {
+    const local = env.LOCALAPPDATA || win32.join(home, 'AppData', 'Local')
+    return win32.join(local, 'Programs', APP_NAME)
+  }
+  return posix.join(home, '.local/share/applications', `${APP_SLUG}.desktop`)
+}
+
+function existingInstalledCopy(): string | null {
+  const path = installedCopyPath()
+  return existsSync(path) ? path : null
 }
 
 /**
@@ -115,14 +134,53 @@ async function fetchLatestFromRegistry(timeoutMs: number): Promise<LatestResult>
   }
 }
 
-function runCommand(file: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout: INSTALL_TIMEOUT_MS }, (err, _stdout, stderr) => {
-      if (!err) return resolve()
-      // The last line of npm's own complaint is worth more than "command failed" —
-      // EACCES on a system Node and "no such command" are different errands.
-      const detail = String(stderr).trim().split('\n').filter(Boolean).pop()
-      reject(new Error(detail || err.message))
+/**
+ * The program and arguments that run `file args` without a shell.
+ *
+ * On Windows `npm` and `centralu` are batch files (Node's `npm.cmd`, and npm's shim
+ * `centralu.cmd`). `execFile` without a shell does not find a bare `npm` at all (libuv tries
+ * `.com` and `.exe` only: ENOENT, the "Update failed" of every Windows build up to
+ * 0.1.0-beta.12), and given the `.cmd` by its path Node refuses it (EINVAL since
+ * CVE-2024-27980). A shell would work, and the launcher's own `update` uses one, but
+ * `tool-launch.ts` already reads a batch file for the program it starts, so the same is done
+ * here and no argument passes through cmd.exe. Elsewhere this is `file args` unchanged.
+ */
+export function commandFor(
+  file: string,
+  args: string[],
+  resolve: (file: string) => ToolLaunch = (f) => resolveCommand(f),
+): { file: string; args: string[] } {
+  const launch = resolve(file)
+  return { file: launch.command, args: [...launch.args, ...args] }
+}
+
+/**
+ * The line of a failed command's stderr that says why, which is worth more than "command
+ * failed": EACCES on a system Node and "no such command" are different errands.
+ *
+ * npm puts its cause last, then ends every failure with where its log went, which says nothing
+ * about why, so that line is passed over. The launcher (`centralu install`) puts its cause first
+ * and what to do after it ("Windows would not replace … — Centralu is probably still running",
+ * then "Quit it, then run the command again", which reads wrong inside the app).
+ */
+export function failureDetail(file: string, stderr: string): string | null {
+  const lines = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/complete log of this run/i.test(l))
+  return (file === 'npm' ? lines.at(-1) : lines[0]) ?? null
+}
+
+export function runCommand(file: string, args: string[], resolve?: (file: string) => ToolLaunch): Promise<void> {
+  const cmd = commandFor(file, args, resolve)
+  return new Promise((done, reject) => {
+    // windowsHide: npm and the launcher are console programs; no window for them, whatever console the host has
+    execFile(cmd.file, cmd.args, { timeout: INSTALL_TIMEOUT_MS, windowsHide: true }, (err, _stdout, stderr) => {
+      if (!err) return done()
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return reject(new Error(`${file} was not found on PATH (${err.message})`))
+      }
+      reject(new Error(failureDetail(file, String(stderr)) || err.message))
     })
   })
 }
@@ -141,6 +199,7 @@ export class UpdateService {
     this.deps = {
       fetchLatest: deps.fetchLatest ?? fetchLatestFromRegistry,
       run: deps.run ?? runCommand,
+      installedCopy: deps.installedCopy ?? existingInstalledCopy,
       now: deps.now ?? Date.now,
       // If no place to persist it is given, treat auto-update as on — the same default that main.ts
       // passes in.
@@ -343,6 +402,8 @@ export class UpdateService {
   }
 
   private async runApply(version: string): Promise<void> {
+    let packageInstalled = false
+    const copy = this.deps.installedCopy()
     try {
       /*
        * **Pin the exact version instead of asking for `@latest`.**
@@ -353,6 +414,7 @@ export class UpdateService {
        * Naming the version we found does not consult it.
        */
       await this.deps.run('npm', ['i', '-g', `${APP_SLUG}@${version}`])
+      packageInstalled = true
       /*
        * Refresh the copy that gets launched.
        *
@@ -369,16 +431,28 @@ export class UpdateService {
        * that — the launcher has always done exactly this to a running app — but there is a
        * gap of a second or two where paths inside the bundle do not resolve, which is one
        * more reason the honest end of this is "restart" and not "carry on".
+       *
+       * **On Windows it renames the folder we are running out of** (`Centralu` aside to
+       * `Centralu.old-<time>`, then `Centralu.new` into its place). NTFS allows that with the
+       * exe and the host's native modules mapped, as long as no process has its working
+       * directory inside (measured on Windows 11, 2026-10-08), which the app sees to at start
+       * (`leave_app_folder` in `src-tauri/src/lib.rs`). The running app keeps the old files
+       * it has open; the next start runs the new folder. The old one cannot be deleted while
+       * it runs and is left for the next install to sweep.
        */
-      if (existsSync(installedCopyPath())) await this.deps.run(APP_SLUG, ['install'])
+      if (copy) await this.deps.run(APP_SLUG, ['install'])
       this.status = { ...this.status, phase: 'restart_required', error: null }
     } catch (e) {
       /*
-       * Say which half failed. "npm i -g worked but the /Applications copy did not get
-       * refreshed" leaves the user launching the old app forever with no sign of it, and
-       * that is the outcome most worth naming.
+       * Say which half failed. "npm i -g worked but the installed copy did not get
+       * refreshed" leaves the person launching the old app forever with no sign of it, and
+       * that is the outcome most worth naming, with the one command that finishes it.
        */
-      this.status = { ...this.status, phase: 'failed', error: (e as Error).message }
+      const reason = (e as Error).message
+      const error = packageInstalled
+        ? `npm installed ${version}, but the copy at ${copy} was not replaced (${reason}). Quit ${APP_NAME}, then run "${APP_SLUG} install" in a terminal.`
+        : reason
+      this.status = { ...this.status, phase: 'failed', error }
     }
     this.emit()
   }
