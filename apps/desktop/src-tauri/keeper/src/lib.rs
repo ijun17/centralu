@@ -17,6 +17,7 @@
 pub mod host_proc;
 #[cfg(unix)]
 pub mod keeper;
+pub mod os;
 pub mod start_plan;
 
 // Which OS this is is asked in the OS layer only (docs/plans/runtime-unification.md step 1).

@@ -1,12 +1,76 @@
 //! Finding the Node that runs the bundled host: the rule, the cache and the candidate lists of
-//! every OS. Which list and which first look apply here is the OS module's (`os`); the lists
-//! themselves are plain data, so their tests run on any OS.
+//! every OS. Which list, which first look and which hint apply here is decided by
+//! `start_plan::Os::current`; the lists themselves are plain data, so their tests run on any OS.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use super::hide_console;
-use super::os::{fallback_node_paths, probe_first, FIRST_LOOK, INSTALL_NODE_HINT, UPGRADE_NODE_HINT};
+use crate::os;
+use crate::start_plan::Os;
+
+/// Told to someone who has no Node at all, so it has to name a command they can actually
+/// run. `brew` was hardcoded, which on Linux points at a package manager that is not
+/// there — the one message whose whole job is to unblock a stuck user would have sent
+/// them somewhere else.
+pub(super) fn install_node_hint(os: Os) -> &'static str {
+    match os {
+        Os::MacOs => "`brew install node`",
+        Os::Linux => "your distribution's package manager (for example, `apt install nodejs`)",
+        Os::Windows => "`winget install OpenJS.NodeJS.LTS`",
+    }
+}
+
+pub(super) fn upgrade_node_hint(os: Os) -> &'static str {
+    match os {
+        Os::MacOs => "`brew upgrade node`",
+        Os::Linux => "your distribution's package manager",
+        Os::Windows => "`winget upgrade OpenJS.NodeJS.LTS`",
+    }
+}
+
+/// The first place `pick_node` asks, named in the "looked in" list.
+pub(super) fn first_look(os: Os) -> &'static str {
+    match os {
+        Os::Windows => "PATH",
+        Os::MacOs | Os::Linux => "login shell PATH",
+    }
+}
+
+/// The first look itself: the login shell on unix; on Windows, PATH as Explorer handed it over.
+fn probe_first() -> Option<String> {
+    match Os::current() {
+        Os::Windows => {
+            let path = std::env::var_os("PATH")?;
+            first_on_path(std::env::split_paths(&path), "node.exe", |p| p.is_file())
+        }
+        Os::MacOs | Os::Linux => os::probe_login_shell(),
+    }
+}
+
+/// The fallback for when the first look finds nothing: where installers and version managers put
+/// Node.
+fn fallback_node_paths() -> Vec<String> {
+    match Os::current() {
+        Os::Windows => windows_node_paths(|name| std::env::var(name).ok().filter(|v| !v.is_empty()), nvm_windows_versions),
+        Os::MacOs | Os::Linux => node_paths_under(&std::env::var("HOME").unwrap_or_default()),
+    }
+}
+
+/// nvm-windows' version folders (`v22.3.1`), newest first, compared as numbers.
+fn nvm_windows_versions(home: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(home) else { return Vec::new() };
+    let mut versions: Vec<(Vec<u32>, String)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let parts = version_parts(&name);
+            (name.starts_with('v') && !parts.is_empty()).then_some((parts, name))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions.into_iter().map(|(_, n)| n).collect()
+}
 
 /// The guidance shown to the person verbatim when Node cannot be found.
 ///
@@ -18,8 +82,9 @@ pub(super) fn node_missing_message(looked: &[String]) -> String {
     format!(
         "Could not find Node.js. Centralu requires Node {MIN_NODE_MAJOR} or newer.\n\
          Check with `node --version` in a terminal, and if it is missing, install it with \
-         {INSTALL_NODE_HINT} or from https://nodejs.org, then restart the app.\n\
+         {} or from https://nodejs.org, then restart the app.\n\
          Looked in: {}",
+        install_node_hint(Os::current()),
         looked.join(", ")
     )
 }
@@ -53,7 +118,6 @@ pub fn resolve_node() -> Result<String, String> {
 
 /// The first `<dir>\<name>` that exists, over the absolute entries of PATH only: a relative entry
 /// would be resolved against whatever the working directory happens to be.
-#[cfg_attr(unix, allow(dead_code))]
 pub(super) fn first_on_path(
     dirs: impl IntoIterator<Item = std::path::PathBuf>,
     name: &str,
@@ -87,7 +151,7 @@ pub(super) fn remember_found(
 /// fact that it hit an old one, and shows that as the reason if nothing newer turns up
 /// ("needs an upgrade" is closer to what the person actually has to do than "not found").
 pub(super) fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> Result<String, String> {
-    let mut looked = vec![FIRST_LOOK.to_string()];
+    let mut looked = vec![first_look(Os::current()).to_string()];
     let mut ordered: Vec<String> = from_shell.into_iter().collect();
 
     for candidate in fallbacks {
@@ -110,21 +174,10 @@ pub(super) fn pick_node(from_shell: Option<String>, fallbacks: Vec<String>) -> R
     Err(too_old.unwrap_or_else(|| node_missing_message(&looked)))
 }
 
-/// Pulls the path out of the marked line among whatever the shell printed.
-#[cfg_attr(not(unix), allow(dead_code))]
-pub(super) fn parse_probe_output(out: &str) -> Option<String> {
-    out.lines()
-        .find_map(|l| l.trim().strip_prefix("__CC_NODE__:"))
-        .map(str::trim)
-        .filter(|p| !p.is_empty() && Path::new(p).exists())
-        .map(str::to_string)
-}
-
 /// Where Windows installers put `node.exe`, read from the environment variables they set.
 ///
 /// Built with `\` by hand rather than `Path::join`, so the list is the same string on every OS
 /// and its test runs anywhere. `versions` lists nvm-windows' installed versions, newest first.
-#[cfg_attr(unix, allow(dead_code))]
 pub(super) fn windows_node_paths(env: impl Fn(&str) -> Option<String>, versions: impl Fn(&str) -> Vec<String>) -> Vec<String> {
     let mut paths = Vec::new();
     // The official installer (Chocolatey and winget wrap it), machine-wide.
@@ -157,7 +210,6 @@ pub(super) fn windows_node_paths(env: impl Fn(&str) -> Option<String>, versions:
     paths
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
 pub(super) fn node_paths_under(home: &str) -> Vec<String> {
     let mut paths = vec![
         "/opt/homebrew/bin/node".to_string(),
@@ -180,7 +232,6 @@ pub(super) fn node_paths_under(home: &str) -> Vec<String> {
 ///
 /// The names look like `v22.3.1`, so a lexical sort would wrongly put v9 ahead of v22.
 /// Compared as numbers instead.
-#[cfg_attr(not(unix), allow(dead_code))]
 pub(super) fn nvm_versions(root: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
@@ -227,8 +278,9 @@ pub(super) fn check_node_version(path: &str) -> Result<String, String> {
     if major < MIN_NODE_MAJOR {
         return Err(format!(
             "Node {MIN_NODE_MAJOR} or newer is required, but {path} is {}.\n\
-             {UPGRADE_NODE_HINT}, or switch to {MIN_NODE_MAJOR} or newer with nvm or mise, then restart the app.",
-            raw.trim()
+             {}, or switch to {MIN_NODE_MAJOR} or newer with nvm or mise, then restart the app.",
+            raw.trim(),
+            upgrade_node_hint(Os::current())
         ));
     }
     Ok(path.to_string())

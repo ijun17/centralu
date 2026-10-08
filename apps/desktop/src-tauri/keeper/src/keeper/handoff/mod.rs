@@ -80,7 +80,8 @@ use super::front_door::{DoorFreeze, FrontDoor};
 use super::server::{self, Keeper, Options, State};
 use super::source::{self, BuildSource};
 use super::swap::{Phase, SwapView};
-use super::{sys, KeeperInfo, KEEPER_FLAG, KEEPER_PROTOCOL};
+use super::{KeeperInfo, KEEPER_FLAG, KEEPER_PROTOCOL};
+use crate::os;
 use crate::host_proc::{ForeignAdopt, HostInfo, HostStatus, Supervisor};
 
 /// The snapshot format. A newer keeper reads an older keeper's snapshot (the outgoing keeper is
@@ -471,7 +472,7 @@ fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
     let lock = std::fs::File::from(u.fd(snap.lock)?);
     // The lock is held through the shared open file description; taking it again on that same
     // description succeeds, and proves this really is the keeper.lock the outgoing keeper holds.
-    match sys::try_lock(&lock) {
+    match os::try_lock(&lock) {
         Ok(true) => {}
         Ok(false) => return Err("the passed keeper.lock is not the one held".into()),
         Err(e) => return Err(format!("cannot check keeper.lock: {e}")),
@@ -528,12 +529,9 @@ pub(super) fn take(opts: Options, fd: RawFd) -> i32 {
     let mut ch = unsafe { UnixStream::from(OwnedFd::from_raw_fd(fd)) };
     // SAFETY: fcntl on our own descriptor; nothing we start later inherits the channel.
     unsafe { libc::fcntl(ch.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
-    match sys::peer_uid(&ch) {
-        Ok(uid) if uid == sys::my_uid() => {}
-        other => {
-            log(&format!("refusing a handoff channel from another user ({other:?})"));
-            return EXIT_ABORTED;
-        }
+    if let Err(who) = os::peer_is_this_user(&ch) {
+        log(&format!("refusing a handoff channel from another user ({who})"));
+        return EXIT_ABORTED;
     }
     let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
     let build = server::own_build(&opts);

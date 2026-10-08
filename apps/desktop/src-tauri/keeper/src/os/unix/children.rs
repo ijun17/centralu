@@ -12,6 +12,8 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
+use crate::os::this_unix::ExitBackend;
+
 /// A started child. For a pty, `out` is the master and carries both directions.
 pub struct Spawned {
     pub pid: i32,
@@ -170,6 +172,33 @@ pub fn read_fd(fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
     }
 }
 
+/// What one non-blocking read of a child's output said.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Output {
+    Bytes(usize),
+    /// The stream is over: end of file, or EIO from a pty master once every slave descriptor is
+    /// closed (lessons CH3), or any other error, which ends the stream the same way.
+    End,
+    /// Nothing to read now.
+    Again,
+    /// A signal interrupted the read: try again.
+    Interrupted,
+}
+
+pub fn read_output(fd: RawFd, buf: &mut [u8]) -> Output {
+    output_of(read_fd(fd, buf))
+}
+
+fn output_of(read: io::Result<usize>) -> Output {
+    match read {
+        Ok(0) => Output::End,
+        Ok(n) => Output::Bytes(n),
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Output::Again,
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => Output::Interrupted,
+        Err(_) => Output::End,
+    }
+}
+
 pub fn write_fd(fd: RawFd, buf: &[u8]) -> io::Result<usize> {
     // SAFETY: buf is valid for buf.len() bytes.
     let n = unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len()) };
@@ -280,6 +309,8 @@ pub fn exists(pid: i32) -> bool {
 /**
  * Learns that a child exited, and how.
  *
+ * What the OS offers differs (`ExitBackend` in `macos.rs` and `linux.rs`):
+ *
  * - **macOS: kqueue `EVFILT_PROC` with `NOTE_EXIT | NOTE_EXITSTATUS`.** It works for a process
  *   that is not our child and still returns the exit status (measured in #280: status `7 << 8` for
  *   `exit 7` seen by a non-parent). A keeper that took its children over from another keeper
@@ -300,10 +331,7 @@ pub fn exists(pid: i32) -> bool {
  * on every tick.
  */
 pub struct ExitWatch {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    kq: OwnedFd,
-    #[cfg(target_os = "linux")]
-    pidfds: HashMap<i32, OwnedFd>,
+    backend: ExitBackend,
     /// Children watched by polling `waitpid` (no kqueue registration, no pidfd).
     polled: Vec<i32>,
     /// Exits learned while registering (the child was already gone).
@@ -316,22 +344,28 @@ pub struct ExitWatch {
     known: HashMap<i32, ExitStatus>,
 }
 
+/// What an `ExitBackend` made of a child it was asked to watch.
+pub enum Watch {
+    /// The OS will say when it exits.
+    Registered,
+    /// It is already gone (kqueue refuses a zombie): reap it now, or poll for it if it is not ours.
+    Gone,
+    /// The OS cannot watch it: poll.
+    Poll,
+}
+
+/// A child the backend has news of, or may have.
+pub struct Seen {
+    pub pid: i32,
+    /// The OS reported the exit with its status (kqueue). `None`: the backend only knows the child
+    /// may have changed (a pidfd), and `ExitBackend::gone` says whether it ended.
+    pub exited: Option<ExitStatus>,
+}
+
 impl ExitWatch {
     pub fn new() -> io::Result<Self> {
         Ok(ExitWatch {
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            kq: {
-                // SAFETY: kqueue takes no arguments.
-                let fd = unsafe { libc::kqueue() };
-                if fd < 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                set_cloexec(fd)?;
-                // SAFETY: kqueue just returned it.
-                unsafe { OwnedFd::from_raw_fd(fd) }
-            },
-            #[cfg(target_os = "linux")]
-            pidfds: HashMap::new(),
+            backend: ExitBackend::new()?,
             polled: Vec::new(),
             ready: Vec::new(),
             unreaped: Vec::new(),
@@ -351,51 +385,19 @@ impl ExitWatch {
     }
 
     pub fn watch(&mut self, pid: i32) {
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        {
-            let ev = libc::kevent {
-                ident: pid as libc::uintptr_t,
-                filter: libc::EVFILT_PROC,
-                flags: libc::EV_ADD | libc::EV_ONESHOT,
-                fflags: libc::NOTE_EXIT | libc::NOTE_EXITSTATUS,
-                data: 0,
-                udata: std::ptr::null_mut(),
-            };
-            // SAFETY: one valid changelist entry, no event list.
-            let rc = unsafe { libc::kevent(self.kq.as_raw_fd(), &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
-            if rc == 0 {
-                return;
-            }
-            // ESRCH: it is already gone. Reap it now, or poll for it if it is not ours.
-            match try_reap(pid) {
+        match self.backend.watch(pid) {
+            Watch::Registered => {}
+            Watch::Gone => match try_reap(pid) {
                 Some(st) => self.ready.push((pid, st)),
                 None => self.polled.push(pid),
-            }
+            },
+            Watch::Poll => self.polled.push(pid),
         }
-        #[cfg(target_os = "linux")]
-        {
-            // SAFETY: pidfd_open(pid, 0) takes no pointers.
-            let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as libc::c_int;
-            if fd >= 0 {
-                let _ = set_cloexec(fd);
-                // SAFETY: the syscall just returned it.
-                self.pidfds.insert(pid, unsafe { OwnedFd::from_raw_fd(fd) });
-            } else {
-                self.polled.push(pid);
-            }
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux")))]
-        self.polled.push(pid);
     }
 
     /// Descriptors to poll for readability.
     pub fn fds(&self) -> Vec<RawFd> {
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        return vec![self.kq.as_raw_fd()];
-        #[cfg(target_os = "linux")]
-        return self.pidfds.values().map(|f| f.as_raw_fd()).collect();
-        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux")))]
-        return Vec::new();
+        self.backend.fds()
     }
 
     /// Whether some child can only be found by polling (the reactor then ticks faster).
@@ -406,55 +408,31 @@ impl ExitWatch {
     /// Exits since the last call.
     pub fn collect(&mut self) -> Vec<(i32, ExitStatus)> {
         let mut out = std::mem::take(&mut self.ready);
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        loop {
-            let mut evs: [libc::kevent; 32] = unsafe { std::mem::zeroed() };
-            let zero = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-            // SAFETY: an event list of 32 valid entries, a zero timeout.
-            let n = unsafe { libc::kevent(self.kq.as_raw_fd(), std::ptr::null(), 0, evs.as_mut_ptr(), 32, &zero) };
-            if n <= 0 {
-                break;
-            }
-            for ev in &evs[..n as usize] {
-                if ev.filter != libc::EVFILT_PROC || ev.fflags & libc::NOTE_EXIT == 0 {
-                    continue;
+        for Seen { pid, exited } in self.backend.seen() {
+            // Ours: reap it (and take waitpid's word for the status). Not ours: the status came
+            // with the event, or from the outgoing keeper, or from the zombie. An exit event can
+            // fire a moment before the zombie is waitable; such a child is reaped on a later pass.
+            match (reap(pid), exited) {
+                (Reap::Reaped(st), _) => {
+                    self.backend.forget(pid);
+                    out.push((pid, st));
                 }
-                let pid = ev.ident as i32;
-                // Ours: reap it (and take waitpid's word for the status). Not ours: the status
-                // came with the event. NOTE_EXIT can fire a moment before the zombie is waitable;
-                // such a child is reaped on a later pass.
-                let st = match reap(pid) {
-                    Reap::Reaped(st) => st,
-                    Reap::Running => {
-                        self.unreaped.push(pid);
-                        ExitStatus::from_wait_status(ev.data as i32)
-                    }
-                    Reap::NotOurs => ExitStatus::from_wait_status(ev.data as i32),
-                };
-                out.push((pid, st));
-            }
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let pids: Vec<i32> = self.pidfds.keys().copied().collect();
-            for pid in pids {
-                match reap(pid) {
-                    Reap::Reaped(st) => {
-                        self.pidfds.remove(&pid);
+                (Reap::Running, Some(st)) => {
+                    self.unreaped.push(pid);
+                    out.push((pid, st));
+                }
+                (Reap::Running, None) => {}
+                (Reap::NotOurs, Some(st)) => out.push((pid, st)),
+                // Taken over from another keeper: the backend says it has gone; init reaps it.
+                // Without this a readable pidfd would wake every poll forever.
+                (Reap::NotOurs, None) => {
+                    if self.backend.gone(pid) {
+                        self.backend.forget(pid);
+                        let st = match self.known.remove(&pid) {
+                            Some(st) => st,
+                            None => ExitBackend::zombie_status(pid).unwrap_or(ExitStatus { code: None, signal: None }),
+                        };
                         out.push((pid, st));
-                    }
-                    Reap::Running => {}
-                    // Taken over from another keeper: the pidfd says it has gone; init reaps it.
-                    // Without this the readable pidfd would wake every poll forever.
-                    Reap::NotOurs => {
-                        if self.pidfds.get(&pid).map(|f| pidfd_exited(f.as_raw_fd())).unwrap_or(true) {
-                            self.pidfds.remove(&pid);
-                            let st = match self.known.remove(&pid) {
-                                Some(st) => st,
-                                None => proc_exit_status(pid).unwrap_or(ExitStatus { code: None, signal: None }),
-                            };
-                            out.push((pid, st));
-                        }
                     }
                 }
             }
@@ -475,27 +453,11 @@ impl ExitWatch {
     }
 }
 
-/// Whether a pidfd reports its process gone (readable), without waiting.
-#[cfg(target_os = "linux")]
-fn pidfd_exited(fd: RawFd) -> bool {
-    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
-    // SAFETY: one valid pollfd, no wait.
-    unsafe { libc::poll(&mut p, 1, 0) == 1 }
-}
-
-/// A zombie's exit status from `/proc/<pid>/stat` (field 52, `exit_code`, the raw wait status;
-/// Linux 3.5+). Only a process in state `Z` qualifies: anything else under that pid is not the
-/// child that exited.
-#[cfg(target_os = "linux")]
-fn proc_exit_status(pid: i32) -> Option<ExitStatus> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    parse_proc_exit(&stat)
-}
-
-/// The parsing half of `proc_exit_status`. The command name (field 2) may hold spaces and
-/// parentheses, so fields are counted from the last `)`.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn parse_proc_exit(stat: &str) -> Option<ExitStatus> {
+/// A zombie's exit status from the text of `/proc/<pid>/stat` (field 52, `exit_code`, the raw wait
+/// status; Linux 3.5+). Only a process in state `Z` qualifies: anything else under that pid is not
+/// the child that exited. The command name (field 2) may hold spaces and parentheses, so fields are
+/// counted from the last `)`. Plain parsing, so it is tested on every OS; Linux reads the file.
+pub fn parse_proc_exit(stat: &str) -> Option<ExitStatus> {
     let rest = &stat[stat.rfind(')')? + 1..];
     let fields: Vec<&str> = rest.split_whitespace().collect();
     // fields[0] is field 3 (state); field 52 is fields[49].
@@ -593,6 +555,66 @@ mod tests {
         write_fd(fd, b"\n").unwrap();
         read_until(&mut got, "50 132");
         wait_exit(&mut w, s.pid);
+    }
+
+    fn cloexec(fd: RawFd) -> bool {
+        // SAFETY: fcntl on a descriptor the test holds.
+        unsafe { libc::fcntl(fd, libc::F_GETFD) & libc::FD_CLOEXEC != 0 }
+    }
+
+    /// Everything a child wrote, and whether its stream ended, read until `deadline`.
+    fn read_to_end(fd: RawFd, deadline: Duration) -> (String, bool) {
+        let end = Instant::now() + deadline;
+        let mut got = Vec::new();
+        while Instant::now() < end {
+            let mut b = [0u8; 1024];
+            match read_output(fd, &mut b) {
+                Output::Bytes(n) => got.extend_from_slice(&b[..n]),
+                Output::End => return (String::from_utf8_lossy(&got).to_string(), true),
+                Output::Again | Output::Interrupted => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        (String::from_utf8_lossy(&got).to_string(), false)
+    }
+
+    /// CH3: once a pty child has exited (its slave side all closed), reading the master ends the
+    /// stream (Linux reports EIO, not 0), after everything the child wrote.
+    #[test]
+    fn a_pty_whose_child_has_gone_reads_to_its_end() {
+        let mut w = ExitWatch::new().unwrap();
+        let s = spawn_pty("/bin/sh", &["-c".into(), "printf finished".into()], "/", &env(), 80, 24).unwrap();
+        w.watch(s.pid);
+        // Read first: on macOS an exiting child waits for the terminal's output to drain.
+        let (got, ended) = read_to_end(s.out.as_raw_fd(), Duration::from_secs(5));
+        wait_exit(&mut w, s.pid);
+        assert!(got.contains("finished"), "{got:?}");
+        assert!(ended, "the stream never ended");
+    }
+
+    /// CH3, wherever the OS reports it: Linux says EIO where macOS says 0.
+    #[test]
+    fn eio_ends_the_stream() {
+        assert_eq!(output_of(Err(io::Error::from_raw_os_error(libc::EIO))), Output::End);
+        assert_eq!(output_of(Ok(0)), Output::End);
+        assert_eq!(output_of(Ok(3)), Output::Bytes(3));
+        assert_eq!(output_of(Err(io::Error::from_raw_os_error(libc::EAGAIN))), Output::Again);
+        assert_eq!(output_of(Err(io::Error::from_raw_os_error(libc::EINTR))), Output::Interrupted);
+    }
+
+    /// CH4: `openpty` does not set close-on-exec. The master stays in the keeper and the slave is
+    /// open in it while the child starts, so without the flag every later child (this one's own
+    /// descriptors past 2 included) inherits terminals it has no business with.
+    #[test]
+    fn neither_end_of_a_pty_is_inherited() {
+        let mut w = ExitWatch::new().unwrap();
+        // A terminal on any descriptor past stderr is a pty end that leaked into the child.
+        let script = "i=3; while [ $i -lt 256 ]; do [ -t $i ] && printf 'leak%s ' $i; i=$((i+1)); done; printf checked";
+        let s = spawn_pty("/bin/sh", &["-c".into(), script.into()], "/", &env(), 80, 24).unwrap();
+        w.watch(s.pid);
+        assert!(cloexec(s.out.as_raw_fd()), "the master is inheritable");
+        let (got, _) = read_to_end(s.out.as_raw_fd(), Duration::from_secs(10));
+        wait_exit(&mut w, s.pid);
+        assert!(got.contains("checked") && !got.contains("leak"), "{got:?}");
     }
 
     #[test]

@@ -1,48 +1,25 @@
-//! The unix side of `host_proc`: process groups and signals, the stdout reader a keeper can freeze
-//! and hand over (#280 step 4), and the login shell that knows where Node is. Everything here is
-//! what `windows.rs` provides differently, plus what only the keeper does.
+//! What only the keeper does with a host (#280 step 4): the stdout reader that can be frozen and
+//! handed over, and supervising a host another keeper started. The keeper runs on unix only until
+//! the OS layer has a Windows half (docs/plans/runtime-unification.md step 9); the process
+//! mechanism itself is `crate::os`.
 
-use std::io::{BufReader, Write};
-use std::path::Path;
-use std::process::{ChildStdout, Command, Stdio};
+use std::io::Write;
+use std::process::ChildStdout;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{HostInfo, HostProc, Launcher, Lines, StatusSink, Supervisor};
+use crate::os::pid_alive;
 
 /// A host's stdout reader that can be paused for a keeper handoff.
 pub type Gate = Arc<LineGate>;
-
-/// On unix stdin is kept open until the end, so EOF does not race the signal into a second
-/// `shutdown()` (`stop_pid_gracefully`).
-pub(super) const CLOSE_STDIN_TO_STOP: bool = false;
-
-/// The group outlives its leader and its number is not reused while anyone is in it, so it is
-/// signalled whether or not the host has ended (`stop_pid_gracefully`).
-pub(super) const SIGNAL_GROUP_AFTER_EXIT: bool = true;
-
-/// A group of its own, led by the host (`spawn_host`).
-pub(super) fn own_group(cmd: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    cmd.process_group(0);
-}
-
-/// A no-op off Windows.
-pub fn hide_console(cmd: &mut Command) {
-    let _ = cmd;
-}
 
 /// A reader that can be paused for a keeper handoff (#280 step 4).
 pub(super) fn host_lines(stdout: ChildStdout) -> (Lines, Option<Gate>) {
     let out = HostOut::new(stdout.into(), Vec::new());
     let gate = out.gate();
     (Box::new(out), Some(gate))
-}
-
-/// `.bin/tsx`, a sh script, runs as it is.
-pub(super) fn tsx_program(root: &str, _args: &mut Vec<String>) -> String {
-    format!("{root}/node_modules/.bin/tsx")
 }
 
 impl Supervisor {
@@ -340,132 +317,4 @@ pub struct ForeignAdopt {
     pub stdout: std::os::fd::OwnedFd,
     pub buffered: Vec<u8>,
     pub info: HostInfo,
-}
-
-/// Whether a process exists and is not a zombie waiting for someone else to reap it.
-pub(super) fn pid_alive(pid: u32) -> bool {
-    // SAFETY: signal 0 only checks.
-    let rc = unsafe { libc::kill(pid as i32, 0) };
-    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-/// SIGTERM to the single host process only — children (codex, etc.) are cleaned up by the
-/// host itself via EOF (#57).
-pub fn kill_pid(pid: u32) {
-    if let Some(pid) = signal_target(pid) {
-        // SAFETY: a plain syscall to one positive pid.
-        unsafe { libc::kill(pid, libc::SIGTERM) };
-    }
-}
-
-/**
- * The pid or process group number a signal may be sent to, or None for the numbers that mean
- * something else to `kill(2)`: 0 (the caller's own group), 1 (as a group, `-1` is every process
- * the user may signal) and anything that does not fit a positive `pid_t` (it would turn negative).
- */
-pub(super) fn signal_target(pid: u32) -> Option<i32> {
-    i32::try_from(pid).ok().filter(|&p| p > 1)
-}
-
-/**
- * SIGTERM to the process group `pid` leads (`spawn_host` made the group number the host's pid),
- * never to the caller's own group.
- *
- * `kill(2)` with the number negated, not `/bin/kill -TERM -<pid>` as before (#350). procps-ng
- * 4.0.4's `kill` (Ubuntu 24.04) reads a `-<pid>` that follows a signal option as more options and
- * signals the group named by **its first digit**: `-12345` became `kill(-1, SIGTERM)`, every
- * process the user may signal, and `-40000` became group 4. macOS's `kill` reads it as a group,
- * which is why only Linux ever saw it (docs/spikes/2026-10-linux-keeper.md).
- */
-pub fn kill_group(pid: u32) {
-    let Some(pgid) = signal_target(pid) else { return };
-    // SAFETY: getpgrp takes no arguments.
-    if pgid == unsafe { libc::getpgrp() } {
-        return;
-    }
-    // SAFETY: a plain syscall; a negative pid is the group, and `signal_target` ruled out 0 and 1.
-    unsafe { libc::kill(-pgid, libc::SIGTERM) };
-}
-
-/// Told to someone who has no Node at all, so it has to name a command they can actually
-/// run. `brew` was hardcoded, which on Linux points at a package manager that is not
-/// there — the one message whose whole job is to unblock a stuck user would have sent
-/// them somewhere else.
-#[cfg(target_os = "macos")]
-pub(super) const INSTALL_NODE_HINT: &str = "`brew install node`";
-#[cfg(not(target_os = "macos"))]
-pub(super) const INSTALL_NODE_HINT: &str = "your distribution's package manager (for example, `apt install nodejs`)";
-
-#[cfg(target_os = "macos")]
-pub(super) const UPGRADE_NODE_HINT: &str = "`brew upgrade node`";
-#[cfg(not(target_os = "macos"))]
-pub(super) const UPGRADE_NODE_HINT: &str = "your distribution's package manager";
-
-/// The first place `pick_node` asks, named in the "looked in" list.
-pub(super) const FIRST_LOOK: &str = "login shell PATH";
-
-pub(super) fn probe_first() -> Option<String> {
-    probe_login_shell()
-}
-
-/// Asks the login shell where node is. It has to be interactive (-i) for .zshrc's nvm/mise
-/// initialization to run.
-///
-/// Only the line carrying the marker is picked out, so it does not matter what else the shell
-/// configuration prints.
-pub(super) fn probe_login_shell() -> Option<String> {
-    use std::io::Read;
-
-    let shell = std::env::var("SHELL").ok()?;
-    if !Path::new(&shell).exists() {
-        return None;
-    }
-
-    let mut cmd = Command::new(&shell);
-    cmd.args(["-ilc", "command -p echo \"__CC_NODE__:$(command -v node)\""])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        // So the shell's initialization script does not put up an interactive prompt.
-        .env("TERM", "dumb")
-        .env("CI", "1");
-    // A session of its own, not only a group: its group is still its pid, which `kill_group`
-    // below needs, and it has no controlling terminal. An interactive shell in a background group
-    // of a terminal's session is stopped (SIGTTOU) when it sets up job control, so an app started
-    // from a terminal (the npm launcher runs the AppImage attached to one) waited out the 5 s
-    // below and fell back to the fixed paths. Measured in WSL2 Ubuntu 24.04: state `T` in a group
-    // of its own, the answer in 0.04 s in a session of its own (docs/spikes/2026-10-linux-keeper.md).
-    crate::keeper::sys::new_session(&mut cmd);
-
-    let mut child = cmd.spawn().ok()?;
-    let pid = child.id();
-    let stdout = child.stdout.take()?;
-
-    // **Getting stuck here would fail the whole app's launch.** Shell configurations really do
-    // sometimes wait forever (waiting on prompt input, for example), so this cuts it off on a
-    // timer and kills the whole group.
-    let (tx, rx) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        let mut buf = String::new();
-        let _ = BufReader::new(stdout).read_to_string(&mut buf);
-        let _ = tx.send(buf);
-    });
-    let out = match rx.recv_timeout(Duration::from_secs(5)) {
-        Ok(out) => out,
-        Err(_) => {
-            kill_group(pid);
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-    };
-    let _ = child.wait();
-
-    super::node::parse_probe_output(&out)
-}
-
-/// The fallback for when the shell cannot be used. Checks not just Homebrew but the common
-/// locations of version managers too.
-pub(super) fn fallback_node_paths() -> Vec<String> {
-    super::node::node_paths_under(&std::env::var("HOME").unwrap_or_default())
 }

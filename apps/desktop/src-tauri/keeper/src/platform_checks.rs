@@ -33,14 +33,9 @@ const WINDOW_INTEGRATION: &[&str] = &["src/ide.rs"];
 
 /// Today's sites outside the OS layer, with how many each has. Only shrinks.
 const NOT_YET: &[(&str, usize)] = &[
-    // Step 2 moves the keeper's mechanism into `os/`.
-    ("keeper/src/host_proc/mod.rs", 17),
-    ("keeper/src/host_proc/node.rs", 5),
-    ("keeper/src/host_proc/unix.rs", 4),
-    ("keeper/src/keeper/children/proc.rs", 15),
-    ("keeper/src/keeper/handoff/wire.rs", 2),
-    ("keeper/src/keeper/sys.rs", 3),
-    // The keeper is unix-only until step 9 brings `os/windows.rs`.
+    // The keeper is unix-only until step 9 gives the OS layer a Windows half: the keeper's module,
+    // its executable, and the keeper's half of the host supervisor (`host_proc/handover.rs`).
+    ("keeper/src/host_proc/mod.rs", 6),
     ("keeper/src/lib.rs", 1),
     ("src/bin/centralu-keeper.rs", 2),
     // The window's start and quit (step 7). `src/lib.rs` also holds the window's own OS
