@@ -271,7 +271,10 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     // Raised from 1.5MB for the theme engine and its Settings editor (#312 step 3): 1,495,774B
     // on main at 2bafb869's successor, 1,516,889B with it (+21KB, no dependency). Main was 4KB
     // under the old line, so any feature would have crossed it next.
-    expect(jsBytes).toBeLessThan(1_600_000)
+    //
+    // Raised from 1.6MB for updating linked machines from Settings → Machines (#82, phase 3
+    // step 4): 1,604,944B with it, no dependency. Main sat just under the old line again.
+    expect(jsBytes).toBeLessThan(1_650_000)
   })
 })
 

@@ -541,7 +541,7 @@ The owner took every recommendation of the design. Each line keeps the question,
 | 1 | The release records the pinned Node (version and SHA-256 per platform, from a signature-checked `SHASUMS256.txt`) as `remote-runtime.json` in the host bundle; CI runs the host's tests on that Node too. **Done** | 0.5–1 day |
 | 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running. **Done**: `host.stop`, `MachineStatus` `starting` and `MachineInfo.hostStarted` (additive), the link-bound fallback when WMI is blocked ([agent-host.md](../agent-host.md) §4.7, §4.8) | 1.5–2 days |
 | 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL. **Done** as `machines.install` (additive), [agent-host.md](../agent-host.md) §4.8; the posix scripts run for real in the tests, the Windows and WSL ones are checked as built but **not yet run on a Windows machine** (choices below) | 2–3 days |
-| 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows | 2–3 days |
+| 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows. **Done** as `machines.update`, `machines.rollback`, `machines.uninstall` and `machines.activity` (with the remote's `host.activity`), `MachineInfo.install`, `MachineInfo.operation` and the status `updating` (all additive), [agent-host.md](../agent-host.md) §4.8 (choices below); the posix path runs for real in the tests, the Windows and WSL paths **not yet run on a Windows machine** | 2–3 days |
 | 5 | (Owner decision 2) Host-only packages in the release | 1 day |
 | 6 | (Owner decisions 4, 5) Boot autostart; the remote keeper after #350 | 1 day; 3–5 days |
 
@@ -569,3 +569,24 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
   now `previous`, so nothing in use is removed. Step 4 wraps this in stop, switch, start and check.
 - **On Windows the `.mjs` runs `%SystemRoot%\System32\tar.exe` by its full path**: a GNU tar earlier on PATH (Git's)
   reads `C:` in an archive path as a remote host.
+
+**Choices made building step 4** (within §10.5):
+
+- **The update's install does not switch** (`activate: false`), and writes no launcher when there is none yet: until
+  the running host is stopped, the lookup must still find the Centralu that runs, so `serve --stop` is that version's
+  own. Step 3's `machines.install` keeps switching at once, for a machine where nothing runs.
+- **The later steps reuse `remote-install.mjs`** (`action: 'pointers'` and `'prune'`), run on the Node of a version that
+  is there, so the pointer rules (rename over, `previous` before `current`, `install.lock`) live in one file.
+  Uninstall is a shell script instead: on Windows the Node that would run the `.mjs` is one of the files to remove.
+- **The link is held from the stop to the check**: no reconnect, no start of a host of its own, Reconnect included.
+  Without it the link's automatic start (decision 7) could start the old version between the stop and the switch.
+- **The check is the link's own hello**: the link opens again, and only a hello whose `build.version` is the target ends
+  it; a host of another version answering in time counts as a failure.
+- **Rollback clears `previous`** rather than swapping the two: the version it left stays on disk (nothing is pruned), so
+  the next update finds it and downloads nothing, and "Roll back" is never offered towards the newer version or two
+  steps back.
+- **A failed first update over an npm install** puts back no pointer and removes the launcher, so the lookup finds the
+  npm install again.
+- **What stops is the remote's own count** (`host.activity`, the `hostBusy` rule counted). A remote predating it is said
+  as "anything running"; no remote has a keeper yet, so the prompt always says the agents stop.
+- **Uninstall keeps the autostart question for step 6**: nothing writes one yet, so there is none to remove.
