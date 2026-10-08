@@ -257,8 +257,12 @@ impl Reason {
         match self {
             Reason::HostCommand => "CC_HOST_CMD is set: the window runs that host itself",
             Reason::NoKeeperHere => "the keeper is built on unix sockets, descriptor passing and flock; Windows has no keeper yet",
+            // The keeper's scripts pass on Linux (the `keeper e2e (linux)` job), but it runs from inside
+            // the AppImage: after a switch to a newer AppImage's build it runs from that AppImage's
+            // mount, which goes when that window quits, and a later page-in of its code can end it
+            // with SIGBUS (a debug keeper did, docs/spikes/2026-10-linux-keeper.md §6).
             Reason::KeeperOptIn => {
-                "on Linux the keeper only runs with CC_USE_KEEPER=1: it has not been run there, and an AppImage unmounts its files when the app exits"
+                "on Linux the keeper only runs with CC_USE_KEEPER=1: it runs from inside the AppImage, whose mount can go before the keeper does"
             }
             Reason::DebugDirect => "a debug build is the host's parent unless CC_USE_KEEPER=1",
             Reason::KeeperAnswers => "a keeper already answers on keeper.sock",

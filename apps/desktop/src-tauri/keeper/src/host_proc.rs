@@ -1006,27 +1006,45 @@ impl Drop for Running {
 /// host itself via EOF (#57).
 #[cfg(unix)]
 pub fn kill_pid(pid: u32) {
-    let _ = Command::new("/bin/kill")
-        .arg("-TERM")
-        .arg(format!("{pid}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    if let Some(pid) = signal_target(pid) {
+        // SAFETY: a plain syscall to one positive pid.
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+}
+
+/**
+ * The pid or process group number a signal may be sent to, or None for the numbers that mean
+ * something else to `kill(2)`: 0 (the caller's own group), 1 (as a group, `-1` is every process
+ * the user may signal) and anything that does not fit a positive `pid_t` (it would turn negative).
+ */
+#[cfg(unix)]
+fn signal_target(pid: u32) -> Option<i32> {
+    i32::try_from(pid).ok().filter(|&p| p > 1)
 }
 
 /// Windows: nothing to send. Closing stdin (in `stop_pid_gracefully`) is the request to stop.
 #[cfg(not(unix))]
 pub fn kill_pid(_pid: u32) {}
 
-/// SIGTERM to the whole process group (a negative pid means the group).
+/**
+ * SIGTERM to the process group `pid` leads (`spawn_host` made the group number the host's pid),
+ * never to the caller's own group.
+ *
+ * `kill(2)` with the number negated, not `/bin/kill -TERM -<pid>` as before (#350). procps-ng
+ * 4.0.4's `kill` (Ubuntu 24.04) reads a `-<pid>` that follows a signal option as more options and
+ * signals the group named by **its first digit**: `-12345` became `kill(-1, SIGTERM)`, every
+ * process the user may signal, and `-40000` became group 4. macOS's `kill` reads it as a group,
+ * which is why only Linux ever saw it (docs/spikes/2026-10-linux-keeper.md).
+ */
 #[cfg(unix)]
 pub fn kill_group(pid: u32) {
-    let _ = Command::new("/bin/kill")
-        .arg("-TERM")
-        .arg(format!("-{pid}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    let Some(pgid) = signal_target(pid) else { return };
+    // SAFETY: getpgrp takes no arguments.
+    if pgid == unsafe { libc::getpgrp() } {
+        return;
+    }
+    // SAFETY: a plain syscall; a negative pid is the group, and `signal_target` ruled out 0 and 1.
+    unsafe { libc::kill(-pgid, libc::SIGTERM) };
 }
 
 /// Windows: the host and every process under it, forcibly. `taskkill` is named by its full path
@@ -1282,10 +1300,13 @@ fn probe_login_shell() -> Option<String> {
         // So the shell's initialization script does not put up an interactive prompt.
         .env("TERM", "dumb")
         .env("CI", "1");
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    // A session of its own, not only a group: its group is still its pid, which `kill_group`
+    // below needs, and it has no controlling terminal. An interactive shell in a background group
+    // of a terminal's session is stopped (SIGTTOU) when it sets up job control, so an app started
+    // from a terminal (the npm launcher runs the AppImage attached to one) waited out the 5 s
+    // below and fell back to the fixed paths. Measured in WSL2 Ubuntu 24.04: state `T` in a group
+    // of its own, the answer in 0.04 s in a session of its own (docs/spikes/2026-10-linux-keeper.md).
+    crate::keeper::sys::new_session(&mut cmd);
 
     let mut child = cmd.spawn().ok()?;
     let pid = child.id();
@@ -1469,6 +1490,79 @@ fn check_node_version(path: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /**
+     * `kill_group` reaches the whole group the host leads and nothing outside it (#350). It used to
+     * run `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (Ubuntu 24.04) turns into a signal to the
+     * group named by the pid's first digit: there the leader and its child below survived, and a
+     * pid starting with 1 sent SIGTERM to every process of the user, this test's runner included.
+     * macOS's `kill` reads the argument as a group, so only a Linux run tells the two apart.
+     */
+    #[cfg(unix)]
+    #[test]
+    fn kill_group_signals_the_group_the_pid_leads_and_nothing_else() {
+        use std::io::BufRead;
+        use std::os::unix::process::{CommandExt, ExitStatusExt};
+
+        // A leader of a group of its own with a child in that group, and a bystander in another.
+        let mut leader = Command::new("/bin/sh")
+            .args(["-c", "sleep 60 & echo $!; wait"])
+            .stdout(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut bystander = Command::new("sleep").arg("60").process_group(0).spawn().unwrap();
+        let mut line = String::new();
+        BufReader::new(leader.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let member: u32 = line.trim().parse().unwrap();
+
+        kill_group(leader.id());
+
+        let end = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(st) = leader.try_wait().unwrap() {
+                break Some(st);
+            }
+            if Instant::now() > end {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
+        // Reparented once its shell ended, so it is reaped by whoever adopts it.
+        while pid_alive(member) && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let member_gone = !pid_alive(member);
+        let bystander_running = bystander.try_wait().unwrap().is_none();
+        if status.is_none() {
+            let _ = leader.kill();
+            let _ = leader.wait();
+        }
+        if !member_gone {
+            // SAFETY: a plain syscall to the test's own grandchild.
+            unsafe { libc::kill(member as i32, libc::SIGKILL) };
+        }
+        let _ = bystander.kill();
+        let _ = bystander.wait();
+
+        assert_eq!(status.and_then(|s| s.signal()), Some(libc::SIGTERM), "the group's leader got no SIGTERM");
+        assert!(member_gone, "the leader's child in the same group is still running");
+        assert!(bystander_running, "a process outside the group was signalled");
+    }
+
+    /// The numbers `kill(2)` reads as something other than one process or one group are never
+    /// signalled: 0 is the caller's own group, -1 is everyone, and a pid past `i32::MAX` would turn
+    /// negative (#350).
+    #[cfg(unix)]
+    #[test]
+    fn signals_go_only_to_a_real_pid_or_group() {
+        assert_eq!(signal_target(0), None);
+        assert_eq!(signal_target(1), None);
+        assert_eq!(signal_target(i32::MAX as u32 + 1), None);
+        assert_eq!(signal_target(u32::MAX), None);
+        assert_eq!(signal_target(2), Some(2));
+        assert_eq!(signal_target(12345), Some(12345));
+    }
 
     /// The dev host runs the source from the workspace root; moving this crate (#440) moved the
     /// root one folder further up.

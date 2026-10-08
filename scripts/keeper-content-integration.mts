@@ -36,7 +36,7 @@
  * start, is killed before it exits (`keeper-test-processes.mjs`). `KEEP_TEMP=1` keeps the folders.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -98,8 +98,20 @@ const real = (p: string) => {
     return p
   }
 }
-/** The executable a process runs now */
-const exeOf = (pid: number) => (spawnSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' }).stdout ?? '').trim()
+/**
+ * The executable a process runs now. Linux's `ps -o comm=` gives the name alone (`centralu-keeper`),
+ * not the path macOS's gives, so there it is read from /proc as keeper-handoff-integration.mjs does.
+ */
+function exeOf(pid: number): string {
+  if (process.platform === 'linux') {
+    try {
+      return readlinkSync(`/proc/${pid}/exe`)
+    } catch {
+      return ''
+    }
+  }
+  return (spawnSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' }).stdout ?? '').trim()
+}
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 

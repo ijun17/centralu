@@ -441,7 +441,7 @@ the code the plan replaced.
 | macOS debug (`pnpm app:dev`) | none | `Direct` | the window runs the source host through tsx, `CC_DEV=1` | the app is the host's parent, as before the keeper; a bundled host left in `target/debug` is ignored |
 | macOS or Linux debug | `CC_USE_KEEPER=1` | `KeeperInProcess` | the window starts itself as `centralu --keeper` with `CC_KEEPER_IN_PROCESS=1`; the keeper runs the source host | `tauri dev` builds only the window, so a `centralu-keeper` beside it may be older code ([architecture.md](architecture.md) §4.1) |
 | any | `CC_HOST_CMD` (any value) | `Direct` | that command line (a blank value: the bundled or source host) | the escape hatch for running some other host |
-| Linux release (AppImage, deb, rpm) | none | `Direct` | the window runs the bundled host through the system Node | the keeper has not been run on Linux, and an AppImage unmounts its files when the app exits (#295) |
+| Linux release (AppImage, deb, rpm) | none | `Direct` | the window runs the bundled host through the system Node | the keeper runs from inside the AppImage: after a switch to a newer AppImage's build it runs from that AppImage's mount, which goes when that window quits, and a debug keeper then died of SIGBUS; it has to run from a copy first ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6, #295) |
 | Linux debug | none | `Direct` | the source host through tsx | as above |
 | Linux release | `CC_USE_KEEPER=1` | `KeeperBeside` | the keeper beside the window (`usr/bin/` in the AppImage) | no shell off macOS |
 | Windows, release or debug | `CC_USE_KEEPER` is ignored | `Direct` | the bundled host (release) or the source host (debug), no console window (§1) | the keeper is built on unix sockets, descriptor passing and `flock` |
@@ -489,7 +489,9 @@ launch or a swap holds (`source::Copies`): a launch holds its copy until the kee
 a swap until its new host is adopted or it gives up. Copying and cleaning take one lock, the cleanup reads which copy
 the host runs from when it runs, and a keeper handing itself over stops both at the freeze. Without the hold, the
 cleanup a keeper's newly adopted host set off deleted the copy a swap had just made ("Cannot find module
-.../hosts/<key>/main.mjs", #368).
+.../hosts/<key>/main.mjs", #368). A complete copy is used even when the folder it came from is gone: on Linux that
+folder is inside an AppImage, mounted only while something holds it open, and a keeper that took over from a newer
+AppImage's window outlives that window's mount ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
 
 A keeper the shell started (its own executable in `<data>/content/<version>/`) makes no copies: its hosts run from
 the verified copy's `host/` folder, which is read-only and was checked against the signed manifest
@@ -540,8 +542,11 @@ because none of this shows in unit tests or e2e: #329's `await` before the serve
 restart that held a terminal (#348), and only a hand run of the children script noticed. The claude and codex
 turns stay manual. Each script ends every process it started and everything those started, pass or fail, found
 from one process table rather than by name (`scripts/keeper-test-processes.mjs`), and prints the end of
-`keeper.log` and `host.log` when a check fails. Not on Linux yet: a trial on ubuntu-24.04 (2026-10-05) ended when,
-right after the first scenario's keeper stopped, a SIGTERM reached the script itself, outside the keeper's process group.
+`keeper.log` and `host.log` when a check fails. The `keeper e2e (linux)` job runs the same scripts and the keeper
+crate's unit tests on ubuntu-24.04. A first trial there (2026-10-05) ended when SIGTERM reached the script itself: the
+stop path ran `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 sends to the group named by the pid's first digit, so a
+host pid starting with 1 signalled every process of the user (#350). Both stop functions call `kill(2)` now
+([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md)).
 
 ### 4.2 The front door and the swap, seen from the host (#280, option C step 3)
 

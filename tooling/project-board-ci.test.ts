@@ -47,8 +47,8 @@ describe('which checks a workflow requires', () => {
     const text = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')
     const w = workflowCheckNames(text)
     // The names `gh pr checks` showed for #415, without the discord-notify job, plus the content
-    // verifier's two rows (#440)
-    expect([...w.names].sort()).toEqual(['content verify (macos-14)', 'content verify (ubuntu-24.04)', 'darwin-arm64', 'keeper e2e', 'linux-arm64', 'linux-x64', 'verify', 'windows tests', 'windows-x64'])
+    // verifier's two rows (#440) and the keeper's Linux job (#350)
+    expect([...w.names].sort()).toEqual(['content verify (macos-14)', 'content verify (ubuntu-24.04)', 'darwin-arm64', 'keeper e2e', 'keeper e2e (linux)', 'linux-arm64', 'linux-x64', 'verify', 'windows tests', 'windows-x64'])
     expect(w.unresolved).toEqual([])
   })
 

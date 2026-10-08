@@ -142,23 +142,29 @@ pub fn hosts_dir(data: &Path) -> PathBuf {
 /// The copy is written to a temporary folder and renamed into place, so a keeper that dies half
 /// way leaves a `.tmp-*` folder (removed by the next cleanup), never a half copy under the
 /// real name.
+///
+/// A complete copy is reused even when the folder it came from is gone. On Linux that folder is
+/// inside the AppImage, which exists only while it is mounted: a keeper that took over from a
+/// window of a newer AppImage keeps running after that window quits and its mount goes, and every
+/// later host restart used to fail on the missing source and give up (measured in WSL2,
+/// docs/spikes/2026-10-linux-keeper.md).
 pub fn copy_into(data: &Path, src: &BuildSource) -> Result<PathBuf, String> {
     let from = src.host_dir.as_deref().ok_or("this build has no host folder to copy")?;
     let from = Path::new(from);
-    if !from.join("main.mjs").is_file() {
-        return Err(format!("no host in {} (main.mjs is missing)", from.display()));
-    }
     let hosts = hosts_dir(data);
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&hosts)
-        .map_err(|e| format!("cannot create {}: {e}", hosts.display()))?;
     let key = src.key();
     let target = hosts.join(&key);
     if complete(&target) {
         return Ok(target);
     }
+    if !from.join("main.mjs").is_file() {
+        return Err(format!("no host in {} (main.mjs is missing)", from.display()));
+    }
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&hosts)
+        .map_err(|e| format!("cannot create {}: {e}", hosts.display()))?;
     let tmp = hosts.join(format!(".tmp-{key}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     copy_tree(from, &tmp).map_err(|e| format!("copying the host from {} failed: {e}", from.display()))?;
@@ -595,6 +601,23 @@ mod tests {
         assert!(again.join("main.mjs").is_file() && !again.join("marker").exists(), "a half copy is replaced");
         let _ = fs::remove_dir_all(&data);
         let _ = fs::remove_dir_all(&bundle);
+    }
+
+    /// An AppImage's host folder exists only while the AppImage is mounted. A keeper whose host
+    /// came from a window that has since quit restarts that host from the copy it already made.
+    #[test]
+    fn a_complete_copy_outlives_the_folder_it_came_from() {
+        let data = temp("gone-data");
+        let bundle = temp("gone-bundle");
+        fake_host(&bundle, "abc1234", "t1");
+        let src = BuildSource::from_host_dir(&bundle, None, None);
+        let copy = copy_into(&data, &src).unwrap();
+        fs::remove_dir_all(&bundle).unwrap();
+        assert_eq!(copy_into(&data, &src), Ok(copy.clone()), "the copy is still there to run");
+
+        fs::remove_file(copy.join("main.mjs")).unwrap();
+        assert!(copy_into(&data, &src).unwrap_err().contains("main.mjs"), "a half copy with no source is refused");
+        let _ = fs::remove_dir_all(&data);
     }
 
     #[test]

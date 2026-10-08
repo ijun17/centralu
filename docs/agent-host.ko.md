@@ -383,7 +383,7 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 | macOS 디버그(`pnpm app:dev`) | 없음 | `Direct` | 창이 tsx로 소스 호스트를 돌린다, `CC_DEV=1` | 키퍼 이전처럼 앱이 호스트의 부모다. `target/debug`에 남은 번들 호스트는 무시한다 |
 | macOS나 Linux 디버그 | `CC_USE_KEEPER=1` | `KeeperInProcess` | 창이 `CC_KEEPER_IN_PROCESS=1`과 함께 자신을 `centralu --keeper`로 띄우고, 키퍼는 소스 호스트를 돌린다 | `tauri dev`는 창만 빌드하므로 옆의 `centralu-keeper`가 더 오래된 코드일 수 있다([architecture.md](architecture.md) §4.1) |
 | 어디서나 | `CC_HOST_CMD`(값 무관) | `Direct` | 그 명령줄(빈 값이면 번들된 호스트나 소스 호스트) | 다른 호스트를 돌리는 비상구 |
-| Linux 릴리스(AppImage, deb, rpm) | 없음 | `Direct` | 창이 시스템 Node로 번들된 호스트를 돌린다 | Linux에서 키퍼를 돌려 본 적이 없고, AppImage는 앱이 끝나면 파일을 언마운트한다(#295) |
+| Linux 릴리스(AppImage, deb, rpm) | 없음 | `Direct` | 창이 시스템 Node로 번들된 호스트를 돌린다 | 키퍼가 AppImage 안에서 돈다: 더 새 AppImage의 빌드로 전환하면 그 AppImage의 마운트에서 돌게 되는데, 그 마운트는 그 창이 끝나면 사라지고, 그 뒤 디버그 키퍼는 SIGBUS로 죽었다. 먼저 사본에서 돌아야 한다([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6, #295) |
 | Linux 디버그 | 없음 | `Direct` | tsx로 소스 호스트 | 위와 같다 |
 | Linux 릴리스 | `CC_USE_KEEPER=1` | `KeeperBeside` | 창 옆의 키퍼(AppImage의 `usr/bin/`) | macOS 밖에는 셸이 없다 |
 | Windows, 릴리스와 디버그 | `CC_USE_KEEPER`는 무시 | `Direct` | 번들된 호스트(릴리스)나 소스 호스트(디버그), 콘솔 창 없이(§1) | 키퍼는 unix 소켓, 디스크립터 전달, `flock` 위에 지어졌다 |
@@ -427,7 +427,9 @@ nonce가 적힌 `<data>/shell-status.json`을 최대 45초 기다린다. 셸은 
 것으로 적을 때까지, 교체는 새 호스트를 넘겨받거나 포기할 때까지 붙잡는다. 복사와 정리는 한 잠금을 거치고, 정리는
 호스트가 어느 사본에서 도는지를 도는 그때 읽으며, 스스로를 넘겨주는 키퍼는 얼릴 때 둘 다 멈춘다. 붙잡기가 없을 때는
 키퍼가 막 넘겨받은 호스트가 부른 정리가 교체가 방금 만든 사본을 지웠다("Cannot find module
-.../hosts/<key>/main.mjs", #368).
+.../hosts/<key>/main.mjs", #368). 온전한 사본은 원래 폴더가 사라져도 그대로 쓴다: Linux에서 그 폴더는 AppImage
+안에 있어 누군가 붙들고 있는 동안만 마운트되고, 더 새 AppImage의 창에게서 넘겨받은 키퍼는 그 창의 마운트보다 오래
+산다([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
 
 셸이 띄운 키퍼(자기 실행 파일이 `<data>/content/<version>/`에 있는 키퍼)는 사본을 만들지 않는다: 호스트를 검증된
 사본의 `host/` 폴더에서 그대로 돌린다. 그 폴더는 읽기 전용이고 서명된 매니페스트와 대조를 마쳤다
@@ -478,8 +480,11 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 쥔 호스트의 재시작을 모두 크래시시켰고(#348), 알아챈 것은 손으로 돌린 children 스크립트뿐이었다. claude와 codex
 턴은 손으로 돌리는 채로 남는다. 각 스크립트는 통과하든 실패하든 자기가 띄운 프로세스와 그것들이 띄운 것까지 모두
 끝낸다. 이름이 아니라 프로세스 표 하나로 찾는다(`scripts/keeper-test-processes.mjs`). 검사가 실패하면
-`keeper.log`와 `host.log`의 끝을 찍는다. Linux에서는 아직 돌리지 않는다: ubuntu-24.04에서 해 본 시도(2026-10-05)는 첫
-시나리오의 키퍼가 멈춘 직후 키퍼의 프로세스 그룹 밖에 있는 스크립트 자신에게 SIGTERM이 닿아 끝났다.
+`keeper.log`와 `host.log`의 끝을 찍는다. `keeper e2e (linux)` 잡은 같은 스크립트와 키퍼 크레이트의 단위 테스트를
+ubuntu-24.04에서 돌린다. 그곳의 첫 시도(2026-10-05)는 스크립트 자신에게 SIGTERM이 닿아 끝났다: 멈추는 길이
+`/bin/kill -TERM -<pid>`를 썼는데, procps-ng 4.0.4는 이것을 pid의 **첫 자리 숫자**가 가리키는 그룹에 보내므로 1로
+시작하는 호스트 pid는 사용자의 모든 프로세스에 신호를 보냈다(#350). 이제 두 멈춤 함수 모두 `kill(2)`를 직접 부른다
+([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md)).
 
 ### 4.2 호스트에서 본 정문과 교체 (#280, 옵션 C 3단계)
 
