@@ -1006,6 +1006,7 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 | Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
 | Mirror | `stored.ts`, store v46 `machine_headers` | Each machine's sessions and projects as last listed, for when it cannot be reached |
 | Installer | `install.ts`, `registry.ts`, `remote-install.mjs` | `machines.install`: preflight, the pinned Node and the npm packages on the remote, checked against the release's pin and the registry's signed metadata (below) |
+| Update | `update.ts` | `machines.update`, `machines.rollback`, `machines.uninstall`: stop the remote's host, switch its pointers, start and check, or put back (below) |
 
 The three choke points of §5 of the plan are where it sits: the router is the `onRpc` the server calls, a link puts
 the remote's events into `server.broadcast` (so they get the hub's own `seq` and replay) and its terminal frames into
@@ -1061,8 +1062,30 @@ The remote prints codes, the hub turns them into sentences (`node_hash`, `integr
 codes are not read, as for the lookup. A host running there is not touched: the old version becomes `previous` and
 keeps its folder, and the next start runs the new one. When the link is not connected the hub opens it again at once,
 and the lookup finds the managed launcher. A development hub refuses (its version is not on npm), and so does a
-machine with a command of its own. Stopping the running host and starting the new one in order, rollback and
-uninstall are phase 3 step 4.
+machine with a command of its own.
+
+**Updating, rolling back and uninstalling** (phase 3 step 4, plan §10.5; `update.ts`). Each is one call
+(`machines.update`, `machines.rollback`, `machines.uninstall`, additive) that answers when it is done or failed; its
+steps arrive meanwhile as the machine's `operation` (`{ kind, step, target, at }`, additive) in `machine_status`, and
+the row's status is `updating` (additive; an older window reads it as unreachable) while the host there is down. One
+at a time per machine, and the remote's `install.lock` guards the files.
+
+| Step | Update | Rollback | Uninstall |
+|---|---|---|---|
+| Install beside | `machines.install`'s steps with `activate: false`: the new version lands in `versions/<v>/`, nothing points at it, nothing is removed, and no launcher is written yet, so the lookup still finds what runs | — | — |
+| Hold | The link stops reconnecting and starting a host of its own (Reconnect included) until the check; it would otherwise start the old version between the stop and the switch | the same | the same |
+| Stop | `centralu serve --stop` through the lookup: the running version stops itself in order (§4.7). Not stopped: the call fails and nothing is switched | the same | the same; not stopped, nothing is removed |
+| Switch | `remote-install.mjs` with `action: 'pointers'`: `previous` = the old `current`, `current` = the new one, each by rename; the launcher is written now if there is none | `current` = `previous`, `previous` removed: one step back only | `<data>/remote/` removed, by a script per shell (a running `node.exe` could not remove itself) |
+| Start | `serve --detach` (`Tunnel.startHost`) | the same | — |
+| Check | The link opens again; only a hello whose `build.version` is the target ends it, within 30 s | the same | — |
+| After | Success: `action: 'prune'` removes what neither pointer names. Failure: the end of `host.log`, `serve --stop` again, the old pointers back (none, after a first update over an npm install: then the launcher goes too), the old version started if one was running, and the call fails with that sentence | Failure: the same, towards the version it left | The link opens again and finds what is left (an npm install, or nothing) |
+
+What would stop is asked of the remote first: `machines.activity` calls the remote's `host.activity` (additive), which
+counts what `hostBusy` counts (`activityCounts`, idle.ts): working sessions, approvals and questions waiting,
+background work, terminals and running commands. While the link is held at `versions_differ` on one protocol it asks
+over a short connection of its own. A remote that predates the call answers nothing, and the prompt says "anything
+running". No remote runs a keeper today (plan §10.4), so on Linux and Windows an update ends the agents there; their
+sessions resume on the new host through their stored ids, as after any restart.
 
 | Decision | Why |
 |---|---|
@@ -1078,7 +1101,7 @@ uninstall are phase 3 step 4.
 
 **The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
 (ssh failed, the forward or the socket dropped; retried with backoff from 2 s to a minute); `starting` (no host ran
-there; the link is starting one, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
+there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
 it restarts).

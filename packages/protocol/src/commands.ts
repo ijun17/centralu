@@ -43,7 +43,7 @@ import {
   UpdateStatus,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
-import { MachineId, MachineInfo, MachineInstallResult, RemoteShell } from './machines.js'
+import { HostActivity, MachineId, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell } from './machines.js'
 import { parseTolerant } from './tolerant.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
@@ -1983,11 +1983,39 @@ export const RpcMethods = {
    * Installs this hub's version on a linked machine over its ssh (docs/plans/remote-hub.md §10.2):
    * the pinned Node and the npm packages, checked against the release's pin and the registry's
    * signed metadata, beside what is there, with `current` switched to it and `previous` kept. A
-   * host running there is not touched; the next start runs the new version (stopping and starting
-   * it in order is phase 3 step 4). Refused by a development hub (its version is not on npm) and for
+   * host running there is not touched; the next start runs the new version (`machines.update` stops
+   * and starts it in order). Refused by a development hub (its version is not on npm) and for
    * a machine that runs a command of its own; answers when the install is done or refused
    */
   'machines.install': { params: z.object({ machineId: MachineId }), result: MachineInstallResult },
+  /**
+   * Updates a linked machine to this hub's version (docs/plans/remote-hub.md §10.5): installs it beside
+   * the running one, stops the running host in order (`centralu serve --stop`; without a keeper its
+   * agents end and resume on the new host, a turn in progress is lost), switches `current`, starts it
+   * (`serve --detach`) and waits at most 30 s for a hello from the new version. When none comes, the
+   * old version is put back and started, and the call fails with the end of the new host's log. On
+   * success only the current and previous versions are kept. Progress is the machine's `operation`
+   * in `machine_status`. Refused like `machines.install`
+   */
+  'machines.update': { params: z.object({ machineId: MachineId }), result: MachineInstallResult },
+  /**
+   * Switches a machine back to the version the hub installed before (`previous`), stopping and starting
+   * its host as `machines.update` does and checking the same way. One step only: `previous` is cleared,
+   * so a second rollback is not offered (a store migrated twice may not read on the older build)
+   */
+  'machines.rollback': { params: z.object({ machineId: MachineId }), result: MachineInstallResult },
+  /**
+   * Stops the host there and removes what the hub installed (`<data>/remote/`), keeping the machine's
+   * data and an npm install of its own. The machine stays linked
+   */
+  'machines.uninstall': { params: z.object({ machineId: MachineId }), result: MachineUninstallResult },
+  /**
+   * What would stop on a linked machine if its host stopped now (`host.activity`, asked of it), for the
+   * "Update <machine>" prompt. Null when the machine cannot say (unreachable, other protocol, older)
+   */
+  'machines.activity': { params: z.object({ machineId: MachineId }), result: z.object({ activity: HostActivity.nullable() }) },
+  /** What would stop if this host stopped now (the `hostBusy` rule); for a hub's `machines.activity` */
+  'host.activity': { params: z.object({}), result: HostActivity },
   /**
    * Stops this host the way a signal would: agents, terminals, command runs and app processes
    * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host.md

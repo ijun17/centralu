@@ -1441,6 +1441,19 @@ export class MockPlatform implements Platform {
     this.emit({ type: 'machine_status', machine: { ...next } })
     return { ...next }
   }
+  /** Installs or updates a mock machine to this mock's own version at once: no steps, nothing stops */
+  private mockInstall(machineId: string, _kind: 'install' | 'update') {
+    const m = this.machinesList.find((x) => x.id === machineId)
+    const current = { version: m?.versions?.hub.version ?? '0.0.0', node: '24.21.0' }
+    const previous = m?.install?.current ?? null
+    const machine = this.machineRow(machineId, {
+      status: 'connected',
+      error: null,
+      versions: m?.versions ? { ...m.versions, remote: m.versions.hub, older: null } : null,
+      install: { managed: true, current, previous },
+    })
+    return { machine, current, previous, removed: [], left: [] }
+  }
   readonly machines = {
     list: async () => this.machinesList.map((m) => ({ ...m })),
     add: async (spec: { name: string; sshTarget: string; shell: MachineInfo['shell']; wslDistro?: string | null; command?: string | null }) => {
@@ -1461,6 +1474,8 @@ export class MockPlatform implements Platform {
         localPort: null,
         sameLocalPort: false,
         hostStarted: null,
+        install: null,
+        operation: null,
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })
@@ -1477,6 +1492,16 @@ export class MockPlatform implements Platform {
       if (v && !v.compatible) throw Object.assign(new Error('The two sides speak different protocols; one of them has to be updated first'), { code: 'internal' })
       return this.machineRow(machineId, { status: 'connected', error: null, versions: v ? { ...v, accepted: true } : null })
     },
+    install: async (machineId: string) => this.mockInstall(machineId, 'install'),
+    update: async (machineId: string) => this.mockInstall(machineId, 'update'),
+    rollback: async (machineId: string) => {
+      const prev = this.machinesList.find((m) => m.id === machineId)?.install?.previous
+      if (!prev) throw Object.assign(new Error('There is no earlier version installed there to go back to'), { code: 'internal' })
+      const machine = this.machineRow(machineId, { status: 'versions_differ', install: { managed: true, current: prev, previous: null } })
+      return { machine, current: prev, previous: null, removed: [], left: [] }
+    },
+    uninstall: async (machineId: string) => ({ machine: this.machineRow(machineId, { status: 'not_running', install: { managed: false, current: null, previous: null } }), stopped: true }),
+    activity: async () => ({ working: 1, approvals: 0, questions: 0, background: 0, terminals: 1, commandRuns: 0 }),
   }
 
   readonly processes = {

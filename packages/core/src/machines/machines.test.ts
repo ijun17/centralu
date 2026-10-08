@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { hostStartNote, isAway, MACHINE_STATUS_LABEL, machineProblem, versionPrompt } from './machines.js'
+import { hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -16,6 +16,8 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   localPort: null,
   sameLocalPort: false,
   hostStarted: null,
+  install: null,
+  operation: null,
   ...patch,
 })
 
@@ -92,6 +94,17 @@ describe('the version prompt (#82, plan §4)', () => {
     expect(p).toMatchObject({ compatible: true, older: 'remote', target: '0.1.0-beta.12', remoteCommand: 'npm i -g centralu@0.1.0-beta.12' })
   })
 
+  it('an older remote is updated from here, unless this computer runs a development build or the machine a command of its own', () => {
+    const p = versionPrompt(machine({ status: 'versions_differ', versions: versions({}) }))!
+    expect(p.updateHere).toBe(true)
+    expect(p.text).toMatch(/Update it, or connect anyway\.$/)
+    const dev = versions({})
+    expect(versionPrompt(machine({ status: 'versions_differ', versions: { ...dev, hub: { ...dev.hub, dev: true } } }))!.updateHere).toBe(false)
+    const own = versionPrompt(machine({ status: 'versions_differ', versions: versions({}), command: '~/bin/centralu' }))!
+    expect(own.updateHere).toBe(false)
+    expect(own.text).toMatch(/Update it there, or connect anyway\.$/)
+  })
+
   it('an older hub: update this computer, no remote command', () => {
     const p = versionPrompt(
       machine({
@@ -133,5 +146,27 @@ describe('a remote host this computer started (remote-hub.md §10.9, decision 7)
     expect(hostStartNote(machine({ hostStarted: { how: 'link_bound', at: 1, note: 'Windows did not start Centralu through WMI.' } }))).toBe(
       'Centralu runs there only while this computer is linked, and stops with the link. Windows did not start Centralu through WMI.',
     )
+  })
+})
+
+describe('the update prompt and the install rows (plan §10.5)', () => {
+  it('names what stops there, from the remote’s own count, and says unknown as anything running', () => {
+    expect(updateStops('Box', { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 })).toBe(
+      'Updating stops Centralu on Box while it switches, and with it 2 working sessions, 1 session waiting on an approval and 1 terminal. Sessions resume on the new version; a turn in progress is lost.',
+    )
+    expect(updateStops('Box', { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0 })).toBe(
+      'Nothing is running on Box. Updating stops Centralu there and starts the new version.',
+    )
+    expect(updateStops('Box', null)).toMatch(/^Updating stops Centralu on Box while it switches: any agent working there stops/)
+  })
+
+  it('says the step while an operation runs, and what this computer installed', () => {
+    expect(operationNote(machine({ operation: { kind: 'update', step: 'stop', target: '0.1.0-beta.14', at: 1 } }))).toBe('Updating to 0.1.0-beta.14: stopping Centralu there…')
+    expect(operationNote(machine({ operation: { kind: 'update', step: 'roll_back', target: '0.1.0-beta.14', at: 1 } }))).toMatch(/putting the old version back/)
+    expect(operationNote(machine({}))).toBeNull()
+    expect(installNote(machine({ install: { managed: true, current: { version: '2', node: '24' }, previous: { version: '1', node: '24' } } }))).toBe(
+      'Installed from this computer: Centralu 2 (1 kept to roll back to)',
+    )
+    expect(installNote(machine({ install: { managed: false, current: null, previous: null } }))).toBeNull()
   })
 })

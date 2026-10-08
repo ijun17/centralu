@@ -20,6 +20,7 @@ import type {
   ThemeFileEntry,
   UpdateStatus,
   AgentVersions,
+  HostActivity,
   MachineInfo,
   RemoteShell,
 } from '@cc/protocol'
@@ -965,6 +966,14 @@ export type AppState = {
   removeMachine(machineId: string): Promise<void>
   reconnectMachine(machineId: string): Promise<void>
   acceptMachineVersions(machineId: string): Promise<void>
+  /**
+   * Installs, updates, rolls back or removes the Centralu this computer installs on a machine
+   * (docs/plans/remote-hub.md §10.5). True when it was done; a refusal or failure is a toast in the
+   * host's words (an update that did not take says which version runs there now)
+   */
+  changeMachineInstall(machineId: string, kind: 'install' | 'update' | 'rollback' | 'uninstall'): Promise<boolean>
+  /** What would stop on a machine if its host stopped now, for the update prompt; null when unknown */
+  machineActivity(machineId: string): Promise<HostActivity | null>
   checkMachineAgentVersions(machineId: string, force?: boolean): Promise<void>
   /** Opens Settings on one category, e.g. Machines from a machine's header in the sidebar */
   settingsRequest: { category: string; at: number } | null
@@ -3923,6 +3932,27 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({ machines: withAnswered(s.machines, m) }))
     } catch (e) {
       set({ toast: `Could not reconnect: ${(e as Error).message}` })
+    }
+  },
+
+  async changeMachineInstall(machineId, kind) {
+    const port = get().platform!.machines
+    try {
+      const r = await port[kind](machineId)
+      set((s) => ({ machines: withAnswered(s.machines, r.machine) }))
+      return true
+    } catch (e) {
+      const what = { install: 'Install', update: 'Update', rollback: 'Rollback', uninstall: 'Uninstall' }[kind]
+      set({ toast: `${what} failed: ${(e as Error).message}` })
+      return false
+    }
+  },
+
+  async machineActivity(machineId) {
+    try {
+      return await get().platform!.machines.activity(machineId)
+    } catch {
+      return null
     }
   },
 

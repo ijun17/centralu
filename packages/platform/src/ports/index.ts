@@ -46,6 +46,9 @@ import type {
   UpdateStatus,
   AgentVersions,
   MachineInfo,
+  MachineInstallResult,
+  MachineUninstallResult,
+  HostActivity,
   RemoteShell,
 } from '@cc/protocol'
 
@@ -1037,6 +1040,17 @@ export interface MachinesPort {
   reconnect(machineId: string): Promise<MachineInfo>
   /** Connects although the versions differ (one protocol only): the person declined to align them (plan §4) */
   acceptVersions(machineId: string): Promise<MachineInfo>
+  /**
+   * Installs, updates, rolls back or removes the Centralu this computer installs there over ssh
+   * (docs/plans/remote-hub.md §10.5). Each answers when done or refused; its steps arrive meanwhile as
+   * the machine's `operation`. Update and rollback stop the host there, and with it its agents
+   */
+  install(machineId: string): Promise<MachineInstallResult>
+  update(machineId: string): Promise<MachineInstallResult>
+  rollback(machineId: string): Promise<MachineInstallResult>
+  uninstall(machineId: string): Promise<MachineUninstallResult>
+  /** What would stop there if its host stopped now; null when the machine cannot say */
+  activity(machineId: string): Promise<HostActivity | null>
 }
 
 export interface Platform {

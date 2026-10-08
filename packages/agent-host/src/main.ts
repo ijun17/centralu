@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
 import { APP_VERSION, DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, PROTOCOL_VERSION, RESERVED_APP_IDS } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
-import type { ActivitySnapshot } from './idle.js'
+import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
@@ -521,6 +521,7 @@ const router = new Router({
     heldPids: held?.heldPids,
     machines: links,
     stopHost: startedByServe && !underKeeper ? () => stopFromRequest() : undefined,
+    activity: () => activityCounts(activity()),
   }),
   machines: () => links.all(),
 })

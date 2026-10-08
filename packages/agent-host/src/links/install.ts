@@ -46,15 +46,15 @@ export type PreflightFacts = {
 }
 
 const PREFLIGHT = 'CENTRALU-PREFLIGHT'
-const STEP = 'CENTRALU-INSTALL'
+export const STEP = 'CENTRALU-INSTALL'
 /** The oldest glibc the published native modules load on (they reference GLIBC_2.34 symbols; plan §10.2) */
 export const MIN_GLIBC = [2, 34] as const
 /** Space a first install needs at its peak: downloads and unpacked folders side by side (plan §10.7), with room */
 export const NEED_MB: Record<'linux' | 'win32', number> = { linux: 600, win32: 300 }
 
 /** The data folder on the remote, in each shell: `CC_DATA_DIR`, else `~/.centralu` (serve.mjs's rule) */
-const DATA_SH = 'd="${CC_DATA_DIR:-$HOME/.centralu}"; r="$d/remote"'
-const DATA_PS = "$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }; $r = Join-Path $d 'remote'"
+export const DATA_SH = 'd="${CC_DATA_DIR:-$HOME/.centralu}"; r="$d/remote"'
+export const DATA_PS = "$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }; $r = Join-Path $d 'remote'"
 
 const PREFLIGHT_SH = `${DATA_SH}
 p="$d"; while [ ! -d "$p" ]; do p=$(dirname "$p"); done
@@ -195,14 +195,25 @@ export type InstallParams = {
   /** Who installed it, for `install.json` */
   hub: string
   packages: { name: string; tarball: string; integrity: string }[]
+  /** False: install beside and point nothing at it yet (an update switches after stopping the host) */
+  activate?: boolean
 }
+
+/**
+ * The update's later steps, run by the same `.mjs` on the Node `node` names (plan §10.5): write both
+ * pointers as given, or remove what neither names. `version` is only checked as a word
+ */
+export type PointerParams = { action: 'pointers'; version: string; node: string; current: InstalledVersion | null; previous: InstalledVersion | null }
+export type PruneParams = { action: 'prune'; version: string; node: string }
+
+export type InstalledVersion = { version: string; node: string }
 
 /**
  * Step 2 in the remote's shell: writes `remote-install.mjs` (gzip, then base64, so it fits one
  * PowerShell command line) beside the install and runs it on the pinned Node with `params` as one
  * base64 word.
  */
-export function installCommand(spec: RemoteSpec, script: string, params: InstallParams): string {
+export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | PointerParams | PruneParams): string {
   if (!PLAIN.test(params.version) || !PLAIN.test(params.node)) throw new Error('Not a version to install')
   const gz = gzipSync(Buffer.from(script, 'utf8'), { level: 9 }).toString('base64')
   const arg = Buffer.from(JSON.stringify(params), 'utf8').toString('base64')
@@ -226,6 +237,8 @@ Remove-Item -Force $f -ErrorAction SilentlyContinue
 export type InstallResult = {
   current: { version: string; node: string }
   previous: { version: string; node: string } | null
+  /** With `activate: false`: what was placed beside (`current` and `previous` are then unchanged, and may be null) */
+  installed?: InstalledVersion
   removed: string[]
   /** Folders that could not be removed (a Windows program still running from them) */
   left: string[]
@@ -248,6 +261,10 @@ function failure(target: string, code: string, detail: string): string {
       return `Centralu ${detail} predates installs from the app; install a newer version`
     case 'node_runs':
       return `The Node downloaded on ${target} does not run there`
+    case 'missing':
+      return `Centralu ${detail} is no longer installed on ${target}`
+    case 'remove':
+      return `What this computer installed on ${target} could not be removed: ${detail || 'no reason given'}`
     default:
       return `Installing on ${target} failed (${[code, detail].filter(Boolean).join(': ')})`
   }
@@ -285,6 +302,8 @@ export type InstallOptions = {
   nodeDist?: string
   /** Each step as it starts, for progress */
   onStep?: (step: 'preflight' | 'registry' | 'node' | 'centralu') => void
+  /** False: install beside without switching `current` or removing anything (`machines.update`) */
+  activate?: boolean
 }
 
 /** Steps 0 to 2 against one machine. Rejects with one sentence for the person */
@@ -300,10 +319,10 @@ export async function installRemote(o: InstallOptions): Promise<InstallResult> {
   const url = `${(o.nodeDist ?? 'https://nodejs.org/dist').replace(/\/+$/, '')}/v${nodeVersion}/${archive.file}`
   readStep(await o.exec(nodeCommand(o.spec, { version: nodeVersion, url, sha256: archive.sha256 })), 'node ok', o.target)
   o.onStep?.('centralu')
-  const params: InstallParams = { version: o.version, node: nodeVersion, platform: pf.platform, hub: `${hostname()} (Centralu ${o.version})`, packages: packages.map(({ name, tarball, integrity }) => ({ name, tarball, integrity })) }
+  const params: InstallParams = { version: o.version, node: nodeVersion, platform: pf.platform, hub: `${hostname()} (Centralu ${o.version})`, packages: packages.map(({ name, tarball, integrity }) => ({ name, tarball, integrity })), ...(o.activate === false ? { activate: false } : {}) }
   const done = readStep(await o.exec(installCommand(o.spec, o.script, params)), 'done', o.target)
   const r = JSON.parse(done) as InstallResult
-  return { current: r.current, previous: r.previous ?? null, removed: r.removed ?? [], left: r.left ?? [] }
+  return { current: r.current, previous: r.previous ?? null, removed: r.removed ?? [], left: r.left ?? [], ...(r.installed ? { installed: r.installed } : {}) }
 }
 
 /** A file the host bundle carries beside `main.mjs` (bundle.mjs), or the source tree's copy while developing */

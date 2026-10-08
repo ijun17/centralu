@@ -26,8 +26,11 @@ export type MachineId = z.infer<typeof MachineId>
  *   versions_differ  the two sides run different versions; nothing connects until they are aligned
  *                    or the person declines (`machines.acceptVersions`, plan §4)
  *   refused          the remote host turned the hub's hello away and asking again did not help
+ *   updating         the hub is stopping, switching or removing the Centralu it installed there
+ *                    (`machines.update` / `rollback` / `uninstall`; `operation` says which step). The
+ *                    link waits meanwhile. An older window reads it as unreachable
  */
-export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting'])
+export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting', 'updating'])
 export type MachineStatus = z.infer<typeof MachineStatus>
 
 export const MachineSide = z.object({
@@ -60,6 +63,29 @@ export const MachineVersions = z.object({
   accepted: z.boolean().default(false),
 })
 export type MachineVersions = z.infer<typeof MachineVersions>
+
+/** One side of a managed install: a Centralu version and the Node it runs on (`current` / `previous` there) */
+export const InstalledVersion = z.object({ version: z.string(), node: z.string() })
+export type InstalledVersion = z.infer<typeof InstalledVersion>
+
+/**
+ * A step of what the hub does to the Centralu it installs on a machine (docs/plans/remote-hub.md §10.5):
+ *
+ *   install    preflight, registry, node, centralu (install.ts)
+ *   update     those, then stop (the running host, `serve --stop`), switch (`current`), start
+ *              (`serve --detach`), check (a hello from the new version within 30 s), then prune, or
+ *              roll_back when the check failed
+ *   rollback   stop, switch, start, check
+ *   uninstall  stop, remove
+ */
+export const MachineOperation = z.object({
+  kind: z.enum(['install', 'update', 'rollback', 'uninstall']).catch('update'),
+  step: z.string(),
+  /** The version it brings the machine to, when there is one */
+  target: z.string().nullable().default(null),
+  at: z.number(),
+})
+export type MachineOperation = z.infer<typeof MachineOperation>
 
 export const MachineInfo = z.object({
   id: MachineId,
@@ -98,12 +124,24 @@ export const MachineInfo = z.object({
     .nullable()
     .catch(null)
     .default(null),
+  /**
+   * What the hub installed there, as the remote's connection line last said (docs/plans/remote-hub.md
+   * §10.5, S12): `managed` when the running `centralu` is that install, `current` and `previous` (the
+   * rollback target) from its pointer files. Null when the machine has not answered, or predates the
+   * field. Additive
+   */
+  install: z
+    .object({ managed: z.boolean().catch(false), current: InstalledVersion.nullable().catch(null), previous: InstalledVersion.nullable().catch(null) })
+    .nullable()
+    .catch(null)
+    .default(null),
+  /**
+   * An install, update, rollback or uninstall the hub is running there, and its step, while it runs
+   * (`machines.install` / `update` / `rollback` / `uninstall`). Null otherwise. Additive
+   */
+  operation: MachineOperation.nullable().catch(null).default(null),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
-
-/** One side of a managed install: a Centralu version and the Node it runs on (`current` / `previous` there) */
-export const InstalledVersion = z.object({ version: z.string(), node: z.string() })
-export type InstalledVersion = z.infer<typeof InstalledVersion>
 
 /**
  * What `machines.install` did there (docs/plans/remote-hub.md §10.2): the version `current` names
@@ -118,3 +156,26 @@ export const MachineInstallResult = z.object({
   left: z.array(z.string()).default([]),
 })
 export type MachineInstallResult = z.infer<typeof MachineInstallResult>
+
+/**
+ * What `machines.uninstall` did: the row after it, and whether a host was running there that it stopped.
+ * The remote's data (its store, `serve.json`, logs) stays, as `centralu uninstall` keeps history
+ */
+export const MachineUninstallResult = z.object({ machine: MachineInfo, stopped: z.boolean() })
+export type MachineUninstallResult = z.infer<typeof MachineUninstallResult>
+
+/**
+ * What would stop if a host stopped now (the `hostBusy` rule, docs/agent-host.md): its live sessions
+ * that are working, waiting on an approval, asking a question, or running background work, its open
+ * terminals and its running project commands. `host.activity` answers it about one host. A remote
+ * host has no keeper today (plan §10.4), so stopping it ends all of these
+ */
+export const HostActivity = z.object({
+  working: z.number().int().default(0),
+  approvals: z.number().int().default(0),
+  questions: z.number().int().default(0),
+  background: z.number().int().default(0),
+  terminals: z.number().int().default(0),
+  commandRuns: z.number().int().default(0),
+})
+export type HostActivity = z.infer<typeof HostActivity>

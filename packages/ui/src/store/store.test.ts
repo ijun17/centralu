@@ -3893,7 +3893,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
 describe('linked machines (#82)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, hostStarted: null, ...over,
+    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, ...over,
   })
 
   it('machine_status replaces that machine\'s row whole', async () => {
@@ -3903,6 +3903,21 @@ describe('linked machines (#82)', () => {
     expect(useStore.getState().machines['box']?.status).toBe('connected')
     mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable', error: 'ssh could not reach me@box: timed out' }) })
     expect(useStore.getState().machines['box']).toMatchObject({ status: 'unreachable', error: 'ssh could not reach me@box: timed out' })
+  })
+
+  it('an update from here replaces the row with the host’s answer, and a failure is a toast in the host’s words (plan §10.5)', async () => {
+    const mock = new MockPlatform()
+    const versions = { hub: { version: '2.0.0', protocolVersion: 1, dev: false }, remote: { version: '1.0.0', protocolVersion: 1, dev: false }, older: 'remote' as const, compatible: true, sameChannel: true, accepted: false }
+    mock.machinesList = [box({ status: 'versions_differ', versions, install: { managed: true, current: { version: '1.0.0', node: '24' }, previous: null } })]
+    await useStore.getState().attach(mock)
+    expect(await useStore.getState().changeMachineInstall('box', 'update')).toBe(true)
+    expect(useStore.getState().machines['box']).toMatchObject({ status: 'connected', install: { current: { version: '2.0.0' }, previous: { version: '1.0.0' } } })
+    expect(await useStore.getState().machineActivity('box')).toMatchObject({ working: 1, terminals: 1 })
+    mock.machines.update = async () => {
+      throw new Error('Centralu 2.0.0 did not start on box (it did not answer within 30 s); it runs Centralu 1.0.0 again.')
+    }
+    expect(await useStore.getState().changeMachineInstall('box', 'update')).toBe(false)
+    expect(useStore.getState().toast).toBe('Update failed: Centralu 2.0.0 did not start on box (it did not answer within 30 s); it runs Centralu 1.0.0 again.')
   })
 
   it('a resync re-reads that machine\'s sessions and projects and leaves every other row as it was', async () => {

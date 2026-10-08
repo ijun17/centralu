@@ -1,4 +1,4 @@
-import type { MachineInfo, MachineStatus } from '@cc/protocol'
+import type { HostActivity, MachineInfo, MachineStatus } from '@cc/protocol'
 
 /**
  * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's
@@ -33,6 +33,7 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   versions_differ: 'version mismatch',
   refused: 'refused',
   starting: 'starting',
+  updating: 'updating',
 }
 
 export type MachineProblem = {
@@ -117,19 +118,25 @@ export type VersionPrompt = {
   older: 'hub' | 'remote' | null
   /** The version to bring the older side to */
   target: string | null
-  /** For an older remote, the exact command to run there (phase 1 has no update over ssh) */
+  /** For an older remote, the exact command to run there, for when this computer cannot update it */
   remoteCommand: string | null
+  /**
+   * This computer can update the remote itself (`machines.update`, plan §10.5): the remote is older,
+   * this computer runs a published release, and the machine runs no command of the person's own
+   */
+  updateHere: boolean
   /** One sentence for the person */
   text: string
 }
 
-export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions'>): VersionPrompt | null {
+export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions'> & Partial<Pick<MachineInfo, 'command'>>): VersionPrompt | null {
   const v = m.versions
   if (!v || m.status !== 'versions_differ') return null
   const hub = v.hub.version
   const remote = v.remote.version
   const target = v.older === 'hub' ? remote : v.older === 'remote' ? hub : null
   const remoteCommand = v.older === 'remote' ? `npm i -g centralu@${hub}` : null
+  const updateHere = v.older === 'remote' && !v.hub.dev && !m.command
   let text: string
   if (!v.compatible) {
     const side = v.older === 'hub' ? 'this computer' : v.older === 'remote' ? m.name : 'one side'
@@ -137,9 +144,72 @@ export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions
   } else if (v.older === 'hub') {
     text = `${m.name} runs Centralu ${remote}, newer than this computer's ${hub}. Update this computer, or connect anyway.`
   } else if (v.older === 'remote') {
-    text = `${m.name} runs Centralu ${remote}, older than this computer's ${hub}. Update it there, or connect anyway.`
+    text = `${m.name} runs Centralu ${remote}, older than this computer's ${hub}. Update it${updateHere ? '' : ' there'}, or connect anyway.`
   } else {
     text = `${m.name} runs Centralu ${remote} and this computer runs ${hub}${v.sameChannel ? '' : ', from another release channel'}. Align them, or connect anyway.`
   }
-  return { compatible: v.compatible, older: v.older, target, remoteCommand, text }
+  return { compatible: v.compatible, older: v.older, target, remoteCommand, updateHere, text }
+}
+
+/** Plural for counts in a sentence: "1 terminal", "2 terminals" */
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * What the "Update <machine>" prompt says will stop (plan §10.5): the remote's host stops while it
+ * switches, and with no keeper there (Linux and Windows remotes today) its agents end with it. Their
+ * sessions resume on the new version through their stored ids; a turn in progress is lost. `activity`
+ * is the remote's own count (`machines.activity`); unknown is said as "anything running"
+ */
+export function updateStops(name: string, activity: HostActivity | null | undefined): string {
+  const after = 'Sessions resume on the new version; a turn in progress is lost.'
+  if (!activity) {
+    return `Updating stops Centralu on ${name} while it switches: any agent working there stops, and so do its terminals and running commands. ${after}`
+  }
+  const parts = [
+    activity.working ? count(activity.working, 'working session', 'working sessions') : null,
+    activity.approvals ? count(activity.approvals, 'session waiting on an approval', 'sessions waiting on an approval') : null,
+    activity.questions ? count(activity.questions, 'session asking a question', 'sessions asking a question') : null,
+    activity.background ? count(activity.background, 'session running background work', 'sessions running background work') : null,
+    activity.terminals ? count(activity.terminals, 'terminal', 'terminals') : null,
+    activity.commandRuns ? count(activity.commandRuns, 'running command', 'running commands') : null,
+  ].filter((x): x is string => x !== null)
+  if (parts.length === 0) return `Nothing is running on ${name}. Updating stops Centralu there and starts the new version.`
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
+  return `Updating stops Centralu on ${name} while it switches, and with it ${list}. ${after}`
+}
+
+const STEP_TEXT: Record<string, string> = {
+  preflight: 'checking the machine',
+  registry: 'checking the packages',
+  node: 'installing Node',
+  centralu: 'installing Centralu',
+  stop: 'stopping Centralu there',
+  switch: 'switching versions',
+  start: 'starting Centralu there',
+  check: 'waiting for it to answer',
+  prune: 'removing old versions',
+  roll_back: 'did not answer; putting the old version back',
+  remove: 'removing it',
+}
+
+/** The row's line while the hub installs, updates, rolls back or removes Centralu there; null otherwise */
+export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null {
+  const o = m.operation
+  if (!o) return null
+  const what =
+    o.kind === 'install'
+      ? `Installing Centralu${o.target ? ` ${o.target}` : ''}`
+      : o.kind === 'update'
+        ? `Updating to ${o.target ?? 'this computer’s version'}`
+        : o.kind === 'rollback'
+          ? `Rolling back to ${o.target ?? 'the earlier version'}`
+          : 'Removing Centralu'
+  return `${what}: ${STEP_TEXT[o.step] ?? o.step}…`
+}
+
+/** What the row says about the Centralu this computer installed there; null when it installed none */
+export function installNote(m: Pick<MachineInfo, 'install'>): string | null {
+  const i = m.install
+  if (!i?.current) return null
+  return `Installed from this computer: Centralu ${i.current.version}${i.previous ? ` (${i.previous.version} kept to roll back to)` : ''}`
 }

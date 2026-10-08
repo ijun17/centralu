@@ -1,4 +1,4 @@
-import { liveBackgroundTasks, type SessionInfo, type SessionState } from '@cc/protocol'
+import { liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
 
 /**
  * The one rule for "is anything running that a person would lose" (#280, #352).
@@ -69,6 +69,23 @@ export function sessionBusy(s: SessionActivity): boolean {
  */
 export function hostBusy(s: ActivitySnapshot): boolean {
   return s.terminals > 0 || s.commandRuns > 0 || s.sessions.some(sessionBusy)
+}
+
+/**
+ * What `hostBusy` counts, counted (`host.activity`, for a hub's "Update <machine>" prompt, plan §10.5).
+ * Each busy session counts once, under the first of: an approval waiting, a question waiting, a
+ * turn running, background work. `hostBusy(s)` is true exactly when one of the counts is above zero
+ */
+export function activityCounts(s: ActivitySnapshot): HostActivity {
+  const c: HostActivity = { working: 0, approvals: 0, questions: 0, background: 0, terminals: s.terminals, commandRuns: s.commandRuns }
+  for (const x of s.sessions) {
+    if (!sessionBusy(x)) continue
+    if (x.pendingApproval || x.state === 'waiting_approval') c.approvals++
+    else if ((x.pendingQuestions?.length ?? 0) > 0) c.questions++
+    else if (BUSY_STATES.has(x.state)) c.working++
+    else c.background++
+  }
+  return c
 }
 
 /**

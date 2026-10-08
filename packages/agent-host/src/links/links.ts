@@ -1,11 +1,13 @@
-import type { MachineInfo, MachineInstallResult, MachineSide, MachineStatus, MachineVersions, NormalizedEvent } from '@cc/protocol'
-import { installRemote, type RemoteRuntime } from './install.js'
+import { HostActivity } from '@cc/protocol'
+import type { MachineInfo, MachineInstallResult, MachineOperation, MachineSide, MachineStatus, MachineUninstallResult, MachineVersions, NormalizedEvent } from '@cc/protocol'
+import { installRemote, type InstallResult, type RemoteRuntime } from './install.js'
+import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import type { RegistryOptions } from './registry.js'
 import { newMachineId, splitQualified } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import type { Endpoint, HostStart, RemoteSpec, Tunnel } from './tunnel.js'
+import type { Endpoint, HostStart, RemoteInstall, RemoteRun, RemoteSpec, Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 
 /**
@@ -64,6 +66,8 @@ export type LinkDeps = {
   retryMs?: [number, number]
   /** What `machines.install` sends (install.ts). Without it this hub installs nothing */
   installer?: LinkInstaller
+  /** For tests: how long an updated host has to answer (update.ts `CHECK_MS`) */
+  checkMs?: number
 }
 
 export type LinkInstaller = {
@@ -77,6 +81,13 @@ export type LinkInstaller = {
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+const linkError = (message: string) => Object.assign(new Error(message), { code: 'internal' })
+
+/** The connection line's `install`, as the row shows it; null when the remote did not say */
+function installOf(i: RemoteInstall | undefined): MachineInfo['install'] {
+  return i ? { managed: i.managed, current: i.current, previous: i.previous } : null
+}
 
 /** A session the hub does not show: the remote's orchestrator and its coordinators (§3.4) */
 function hiddenKind(s: unknown): boolean {
@@ -102,8 +113,19 @@ export class LinkedMachine implements RoutedMachine {
   private opening: Promise<void> | null = null
   /** A refusal was already answered by asking the remote again; the next one is reported and backed off */
   private refusedOnce = false
-  /** One install at a time per machine (the remote also holds `install.lock`) */
-  private installing = false
+  /** One install, update, rollback or uninstall at a time per machine (the remote also holds `install.lock`) */
+  private busy = false
+  /** That operation and its step, for the row (`MachineInfo.operation`) */
+  private operation: MachineOperation | null = null
+  /**
+   * While an update stops, switches and starts the host there, the link neither reconnects nor
+   * starts a host of its own: it would start the old version between the stop and the switch
+   */
+  private held = false
+  /** Called with the version of every hello, while an update waits for the new one */
+  private helloWaiters = new Set<(version: string | null) => void>()
+  /** What the hub installed there, from the last connection line (plan §10.5, S12) */
+  private installed: MachineInfo['install'] = null
 
   constructor(
     private record: MachineRecord,
@@ -140,6 +162,8 @@ export class LinkedMachine implements RoutedMachine {
       localPort: this.endpoint && this.endpoint.localPort > 0 ? this.endpoint.localPort : null,
       sameLocalPort: this.endpoint ? this.endpoint.localPort === this.endpoint.line.port : false,
       hostStarted: this.hostStarted,
+      install: this.installed,
+      operation: this.operation,
     }
   }
 
@@ -198,37 +222,174 @@ export class LinkedMachine implements RoutedMachine {
    * there keeps running; a link that is not connected (nothing was installed, or nothing runs) opens
    * again at once, and finds the managed launcher first
    */
-  async install(): Promise<MachineInstallResult> {
-    const fail = (message: string) => Object.assign(new Error(message), { code: 'internal' })
-    const installer = this.deps.installer
-    const exec = this.tunnel.exec?.bind(this.tunnel)
-    if (!installer || !exec) throw fail(`This computer cannot install on ${this.name}`)
-    if (this.deps.hub.dev) {
-      throw fail(`A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (npm i -g centralu)`)
-    }
-    if (this.record.remote.command) throw fail(`${this.name} runs a command of its own in place of centralu; clear it to use an installed one`)
-    if (this.installing) throw fail(`Already installing on ${this.name}`)
-    this.installing = true
-    try {
+  install(): Promise<MachineInstallResult> {
+    return this.operate('install', this.deps.hub.version, async (c, installer) => {
       const r = await installRemote({
-        exec,
-        spec: this.record.remote,
-        target: this.record.sshTarget,
+        exec: c.exec,
+        spec: c.spec,
+        target: c.target,
         version: this.deps.hub.version,
         runtime: installer.runtime(),
-        script: installer.script(),
+        script: c.script,
         registry: installer.registry,
         nodeDist: installer.nodeDist,
-        onStep: (step) => this.deps.log?.(`[links] ${this.name}: installing Centralu ${this.deps.hub.version}: ${step}`),
-      }).catch((err: unknown) => {
-        this.deps.log?.(`[links] ${this.name}: install failed: ${(err as Error).message}`)
-        throw fail((err as Error).message)
+        onStep: c.step,
       })
       this.deps.log?.(`[links] ${this.name}: installed Centralu ${r.current.version} on Node ${r.current.node}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
-      if (this.status !== 'connected' && !this.stopped) this.reconnect()
-      return { machine: this.info(), ...r }
+      return this.installedNow(r)
+    })
+  }
+
+  /** `machines.update` (update.ts, plan §10.5): install beside, stop, switch, start, check, or put back */
+  update(): Promise<MachineInstallResult> {
+    return this.operate('update', this.deps.hub.version, async (c, installer) => {
+      const r = await updateRemote(c, {
+        version: this.deps.hub.version,
+        runtime: installer.runtime(),
+        registry: installer.registry,
+        nodeDist: installer.nodeDist,
+      })
+      this.deps.log?.(`[links] ${this.name}: updated to Centralu ${r.current.version}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
+      return this.installedNow(r)
+    })
+  }
+
+  /** `machines.rollback`: back to `previous`, one step */
+  rollback(): Promise<MachineInstallResult> {
+    const current = this.installed?.current
+    const previous = this.installed?.previous
+    if (!current || !previous) return Promise.reject(linkError(`There is no earlier version installed on ${this.name} to go back to`))
+    return this.operate('rollback', previous.version, async (c) => {
+      const r = await rollbackRemote(c, { current, previous })
+      this.deps.log?.(`[links] ${this.name}: rolled back to Centralu ${r.current.version}`)
+      return this.installedNow(r)
+    })
+  }
+
+  /** `machines.uninstall`: stops the host there and removes what the hub installed; the data stays */
+  uninstall(): Promise<MachineUninstallResult> {
+    if (!this.installed?.current) return Promise.reject(linkError(`Nothing this computer installed is on ${this.name}`))
+    return this.operate('uninstall', null, async (c) => {
+      const r = await uninstallRemote(c)
+      this.installed = { managed: false, current: null, previous: null }
+      this.deps.log?.(`[links] ${this.name}: removed the Centralu this computer installed; its data stays`)
+      return { machine: this.info(), stopped: r.stopped }
+    })
+  }
+
+  /**
+   * What would stop there if its host stopped now (`host.activity` on the remote), for the "Update"
+   * prompt. Through the link when connected; while the link is held at `versions_differ` on one
+   * protocol, through a short connection of its own. Null when the machine cannot say
+   */
+  activity(): Promise<HostActivity | null> {
+    const read = (r: unknown): HostActivity | null => {
+      const p = HostActivity.safeParse(r)
+      return p.success ? p.data : null
+    }
+    if (this.client?.connected) return this.client.call('host.activity', {}).then(read, () => null)
+    const e = this.endpoint
+    if (!e?.url || this.versions?.compatible === false || this.held) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      let settled = false
+      const done = (v: HostActivity | null) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        client.close()
+        resolve(v)
+      }
+      const client = new RemoteClient(
+        { ...this.deps.client, url: e.url, token: e.token, handshakeTimeoutMs: 5_000, callTimeoutMs: 5_000 },
+        { hello: () => void client.call('host.activity', {}).then(read, () => null).then(done), refused: () => done(null) },
+      )
+      const timer = setTimeout(() => done(null), 8_000)
+      client.connect()
+    })
+  }
+
+  private installedNow(r: InstallResult): MachineInstallResult {
+    this.installed = { managed: true, current: r.current, previous: r.previous }
+    return { machine: this.info(), current: r.current, previous: r.previous, removed: r.removed, left: r.left }
+  }
+
+  /**
+   * Runs one install, update, rollback or uninstall: refused where this hub cannot install (no
+   * installer or shell, a development build, a command of the person's own), one at a time, with its
+   * steps in the row. Afterwards the link opens again, also after a failure
+   */
+  private async operate<T>(kind: MachineOperation['kind'], target: string | null, fn: (c: HostControl, installer: LinkInstaller) => Promise<T>): Promise<T> {
+    const installer = this.deps.installer
+    const tunnelExec = this.tunnel.exec?.bind(this.tunnel)
+    if (!installer || !tunnelExec) throw linkError(`This computer cannot install on ${this.name}`)
+    if (this.deps.hub.dev && (kind === 'install' || kind === 'update')) {
+      throw linkError(`A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (npm i -g centralu)`)
+    }
+    if (this.record.remote.command) throw linkError(`${this.name} runs a command of its own in place of centralu; clear it to use an installed one`)
+    if (this.busy) throw linkError(`${this.name} is busy with ${this.operation?.kind ?? 'another change'}; wait until it is done`)
+    this.busy = true
+    const at = Date.now()
+    const step = (s: UpdateStep) => {
+      this.deps.log?.(`[links] ${this.name}: ${kind}${target ? ` ${target}` : ''}: ${s}`)
+      this.operation = { kind, step: s, target, at }
+      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+    }
+    try {
+      return await fn(this.control(tunnelExec, installer.script(), step), installer)
+    } catch (err) {
+      this.deps.log?.(`[links] ${this.name}: ${kind} failed: ${(err as Error).message}`)
+      throw linkError((err as Error).message)
     } finally {
-      this.installing = false
+      this.busy = false
+      const wasHeld = this.held
+      this.held = false
+      this.operation = null
+      if (!this.stopped && (wasHeld || this.status !== 'connected')) this.reconnect()
+      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+    }
+  }
+
+  /** What update.ts runs things there with */
+  private control(exec: (command: string) => Promise<RemoteRun>, script: string, step: (s: UpdateStep) => void): HostControl {
+    const hold = async () => {
+      this.held = true
+      clearTimeout(this.retryTimer)
+      // An opening already under way finishes first: it may be about to start a host of its own
+      await this.opening?.catch(() => undefined)
+      clearTimeout(this.retryTimer)
+      this.client?.close()
+      this.client = null
+      this.setStatus('updating', null)
+    }
+    return {
+      exec,
+      spec: this.record.remote,
+      target: this.record.sshTarget,
+      script,
+      hold,
+      step,
+      start: async () => {
+        if (!this.tunnel.startHost) throw new Error(`This computer cannot start Centralu on ${this.name}`)
+        const started = await this.tunnel.startHost()
+        this.hostStarted = { ...started, at: Date.now() }
+      },
+      answers: (version, ms) =>
+        new Promise<boolean>((resolve) => {
+          const waiter = (v: string | null) => {
+            if (v !== version) return
+            clearTimeout(timer)
+            this.helloWaiters.delete(waiter)
+            resolve(true)
+          }
+          // No hello from that version in time: the link is held again before the version is put back
+          const timer = setTimeout(() => {
+            this.helloWaiters.delete(waiter)
+            void hold().then(() => resolve(false))
+          }, this.deps.checkMs ?? ms)
+          this.helloWaiters.add(waiter)
+          this.held = false
+          this.reconnect()
+        }),
     }
   }
 
@@ -241,6 +402,7 @@ export class LinkedMachine implements RoutedMachine {
   }
 
   private open(): Promise<void> {
+    if (this.held) return Promise.resolve()
     this.opening ??= this.doOpen().finally(() => {
       this.opening = null
     })
@@ -259,7 +421,9 @@ export class LinkedMachine implements RoutedMachine {
      * the consent (§3.2), so nobody is asked; the row and host.log say it happened. Once per opening:
      * a start that did not take is reported and retried with the backoff, not in a loop.
      */
+    this.installed = installOf(endpoint.line.install)
     if (!endpoint.line.hostRunning && this.tunnel.startHost) {
+      if (this.held) return
       this.setStatus('starting', null)
       this.deps.log?.(`[links] ${this.name}: no Centralu host is running there; starting one (centralu serve --detach)`)
       let started: HostStart
@@ -280,7 +444,9 @@ export class LinkedMachine implements RoutedMachine {
       this.setStatus('starting', null)
       endpoint = await this.openTunnel()
       if (!endpoint) return
+      this.installed = installOf(endpoint.line.install)
     }
+    if (this.held) return
     this.endpoint = endpoint
     if (!endpoint.line.hostRunning) {
       this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`centralu serve\` is running there`)
@@ -371,6 +537,7 @@ export class LinkedMachine implements RoutedMachine {
 
   private async onHello(client: RemoteClient, h: RemoteHello): Promise<void> {
     if (this.client !== client) return
+    for (const w of [...this.helloWaiters]) w(h.build?.version ?? null)
     // The host that answered may not be the one the connection line described (restarted since)
     if (h.build) {
       const v = this.check({ version: h.build.version ?? this.versions?.remote.version ?? 'unknown', protocolVersion: h.build.protocolVersion, dev: h.build.commit === 'dev' })
@@ -428,12 +595,14 @@ export class LinkedMachine implements RoutedMachine {
     if (this.stopped) return
     this.client?.close()
     this.client = null
+    // The update stopped the host on purpose; it reconnects when it is done
+    if (this.held) return
     this.setStatus('unreachable', `The connection to ${this.name} ended (${reason}); reconnecting`)
     this.retryLater()
   }
 
   private retryLater(fixedMs?: number): void {
-    if (this.stopped) return
+    if (this.stopped || this.held) return
     clearTimeout(this.retryTimer)
     const [first, max] = this.deps.retryMs ?? [2_000, 60_000]
     const delay = fixedMs ?? Math.min(max, first * 2 ** this.attempt++)
@@ -512,6 +681,22 @@ export class Links {
 
   install(id: string): Promise<MachineInstallResult> {
     return this.need(id).install()
+  }
+
+  update(id: string): Promise<MachineInstallResult> {
+    return this.need(id).update()
+  }
+
+  rollback(id: string): Promise<MachineInstallResult> {
+    return this.need(id).rollback()
+  }
+
+  uninstall(id: string): Promise<MachineUninstallResult> {
+    return this.need(id).uninstall()
+  }
+
+  activity(id: string): Promise<HostActivity | null> {
+    return this.need(id).activity()
   }
 
   private need(id: string): LinkedMachine {

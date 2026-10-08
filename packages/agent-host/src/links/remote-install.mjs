@@ -1,7 +1,8 @@
 // Centralu's remote installer, step 2 (docs/plans/remote-hub.md §10.2). The hub sends this file over
 // ssh and runs it on the pinned Node that step 1 placed; it never runs on the hub. It imports Node's
 // own modules only, and reads one argument: the base64 of a JSON object the hub wrote
-// ({ version, node, platform, hub, packages: [{ name, tarball, integrity }] }).
+// ({ version, node, platform, hub, packages: [{ name, tarball, integrity }], activate? }), or for the
+// update's later steps ({ action: 'pointers', current, previous } and { action: 'prune' }; plan §10.5).
 //
 // It prints one line for the hub to read, `CENTRALU-INSTALL done <json>` or
 // `CENTRALU-INSTALL fail <code> <detail>`, and nothing that matters on its exit code (exit codes do
@@ -196,17 +197,77 @@ export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(hom
         rmSync(partial, { recursive: true, force: true })
       }
     }
-    // The launcher reads `current` at every start and never changes (S8): written once, never over
-    const launcher = join(l.bin, platform === 'win32' ? 'centralu.cmd' : 'centralu')
-    if (!existsSync(launcher)) {
-      const serve = await import(pathToFileURL(join(dir, 'node_modules', 'centralu', 'bin', 'serve.mjs')).href)
-      if (typeof serve.managedLauncherScript !== 'function') throw new Refusal('no_launcher', p.version)
-      mkdirSync(l.bin, { recursive: true })
-      writeAtomic(launcher, serve.managedLauncherScript(platform))
-      if (platform !== 'win32') chmodSync(launcher, 0o755)
+    // An update installs beside and switches later, once the running host is stopped (plan §10.5):
+    // nothing is pointed at the new version and nothing is removed yet. Without a `current`, no
+    // launcher either, so the lookup still finds the Centralu that runs now
+    if (p.activate === false) {
+      return { installed: { version: p.version, node: p.node }, current: readPointer(l.current), previous: readPointer(l.previous), removed: [], left: [] }
     }
+    const launcher = await ensureManagedLauncher(l, dir, p.version, platform)
     const pointers = switchTo(l, { version: p.version, node: p.node })
     return { ...pointers, ...prune(l), launcher }
+  } finally {
+    unlock()
+  }
+}
+
+function launcherPath(l, platform) {
+  return join(l.bin, platform === 'win32' ? 'centralu.cmd' : 'centralu')
+}
+
+/** The launcher reads `current` at every start and never changes (S8): written once, never over */
+async function ensureManagedLauncher(l, dir, version, platform) {
+  const launcher = launcherPath(l, platform)
+  if (!existsSync(launcher)) {
+    const serve = await import(pathToFileURL(join(dir, 'node_modules', 'centralu', 'bin', 'serve.mjs')).href)
+    if (typeof serve.managedLauncherScript !== 'function') throw new Refusal('no_launcher', version)
+    mkdirSync(l.bin, { recursive: true })
+    writeAtomic(launcher, serve.managedLauncherScript(platform))
+    if (platform !== 'win32') chmodSync(launcher, 0o755)
+  }
+  return launcher
+}
+
+const pointerOf = (v) => (v && WORD.test(v.version) && WORD.test(v.node) ? { version: v.version, node: v.node } : null)
+
+/**
+ * Writes both pointers as given (plan §10.5 steps 3 and 5, and rollback): `previous` first, then
+ * `current`, each by rename; a null `previous` removes that file. `current` must name a version and a
+ * Node that are both there. A null `current` puts the machine back to having no managed version: the
+ * pointers and the launcher go, so the lookup finds the Centralu it ran before (an npm install).
+ * Nothing is removed from `versions/` or `node/`
+ */
+export async function setPointers(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu'), platform = process.platform } = {}) {
+  const l = remoteLayout(dataDir)
+  mkdirSync(l.root, { recursive: true })
+  const unlock = lock(l)
+  try {
+    const current = pointerOf(p.current)
+    const previous = pointerOf(p.previous)
+    if (!current) {
+      for (const f of [l.previous, l.current, launcherPath(l, platform)]) rmSync(f, { force: true })
+      return { current: null, previous: null }
+    }
+    const dir = join(l.versions, current.version)
+    const node = join(l.node, `v${current.node}`)
+    if (!existsSync(join(dir, 'install.json')) || !existsSync(node)) throw new Refusal('missing', `${current.version} ${current.node}`)
+    await ensureManagedLauncher(l, dir, current.version, platform)
+    if (previous) writeAtomic(l.previous, `${previous.version} ${previous.node}\n`)
+    else rmSync(l.previous, { force: true })
+    writeAtomic(l.current, `${current.version} ${current.node}\n`)
+    return { current, previous }
+  } finally {
+    unlock()
+  }
+}
+
+/** Plan §10.5 step 6, on its own: what is neither `current` nor `previous` goes */
+export function pruneNow({ dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu') } = {}) {
+  const l = remoteLayout(dataDir)
+  mkdirSync(l.root, { recursive: true })
+  const unlock = lock(l)
+  try {
+    return { current: readPointer(l.current), previous: readPointer(l.previous), ...prune(l) }
   } finally {
     unlock()
   }
@@ -215,7 +276,7 @@ export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(hom
 async function main() {
   try {
     const p = JSON.parse(Buffer.from(process.argv[2] ?? '', 'base64').toString('utf8'))
-    const r = await install(p)
+    const r = p.action === 'pointers' ? await setPointers(p) : p.action === 'prune' ? pruneNow() : await install(p)
     process.stdout.write(`CENTRALU-INSTALL done ${JSON.stringify(r)}\n`)
   } catch (err) {
     const code = err instanceof Refusal ? err.code : 'error'
