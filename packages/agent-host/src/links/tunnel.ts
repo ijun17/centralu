@@ -283,6 +283,20 @@ function remoteCommand(spec: RemoteSpec, args: 'serve --connection' | 'serve --d
   return powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
 }
 
+/**
+ * A script in the remote shell's terms (the installer, install.ts), sent the way `remoteCommand`
+ * sends its lookup: base64 piped to `sh` on POSIX (so a login shell like fish runs it too), and to
+ * `bash -l` inside a WSL distro; PowerShell's own `-EncodedCommand` on Windows.
+ */
+export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string }): string {
+  if (spec.shell === 'powershell') return powershell(script.ps)
+  const b64 = Buffer.from(script.sh, 'utf8').toString('base64')
+  if (spec.shell === 'posix') return `printf %s ${b64} | base64 -d | sh`
+  const distro = spec.wslDistro ?? ''
+  if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
+  return powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
+}
+
 export type SshTunnelOptions = {
   /** What the person typed: a host alias from ~/.ssh/config, or user@host */
   target: string
