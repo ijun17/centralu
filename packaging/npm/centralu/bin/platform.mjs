@@ -138,6 +138,16 @@ export function windowsInstall(env, home) {
 }
 
 /**
+ * Which of the names in `%LOCALAPPDATA%\Programs` are copies an earlier `centralu install` renamed
+ * aside (`Centralu.old-<time>`). Only those: the folder is shared with every other per-user
+ * program, and `Centralu` itself and a `Centralu.new` being assembled are not leftovers.
+ */
+export function asideCopies(names) {
+  const prefix = `${APP_NAME}.old-`.toLowerCase()
+  return names.filter((n) => n.toLowerCase().startsWith(prefix) && /^\d+$/.test(n.slice(prefix.length)))
+}
+
+/**
  * What `centralu install` creates, per platform. `uninstall` removes exactly these and
  * `update` refreshes them when the first one exists.
  */

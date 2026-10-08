@@ -25,6 +25,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { copyDiffers, isNewer } from './semver.mjs'
 import {
+  asideCopies,
   busyMessage,
   earlyExitMessage,
   executableIn,
@@ -42,7 +43,7 @@ import {
   windowsInstall,
 } from './platform.mjs'
 import { parseServeArgs, printConnection, rotateToken, runServe, SERVE_HELP } from './serve.mjs'
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -322,6 +323,7 @@ function installDesktopEntry(app) {
 function installWindows(app) {
   const staging = `${WIN.dir}.new`
   const aside = `${WIN.dir}.old-${Date.now()}`
+  sweepAsideCopies()
   rmSync(staging, { recursive: true, force: true })
   mkdirSync(dirname(WIN.dir), { recursive: true })
   cpSync(app, staging, { recursive: true })
@@ -356,6 +358,32 @@ function installWindows(app) {
   console.log(`Installed: ${WIN.dir}`)
   console.log(`Start menu: ${WIN.shortcut}`)
   console.log('It can now be found in Start and Windows search, and `centralu` starts this copy too.')
+}
+
+/**
+ * Removes the copies earlier installs renamed aside (`Centralu.old-<time>`), whichever can go.
+ *
+ * An update from inside the app renames the running copy aside, and Windows will not delete a
+ * running exe, so that copy stays until the app quits. Nothing else would ever remove it, and
+ * each in-app update would leave one more (about 70 files each, measured 2026-10-08). One still
+ * in use is left for the next install; deleting what can be deleted from it does not disturb the
+ * app running from it, which reaches its files by the folder's original path, now the new copy.
+ */
+function sweepAsideCopies() {
+  const parent = dirname(WIN.dir)
+  let names
+  try {
+    names = readdirSync(parent)
+  } catch {
+    return
+  }
+  for (const name of asideCopies(names)) {
+    try {
+      rmSync(join(parent, name), { recursive: true, force: true })
+    } catch {
+      // Still in use: the next install tries again
+    }
+  }
 }
 
 function uninstall() {

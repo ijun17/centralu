@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
+  asideCopies,
   busyMessage,
   earlyExitMessage,
   executableIn,
@@ -122,6 +123,12 @@ describe('`centralu install` on Windows', () => {
     expect(installedPaths('win32', ENV, HOME)).toEqual([w.dir, w.shortcut])
     expect(installedPaths('darwin', {}, '/Users/me')).toEqual(['/Applications/Centralu.app'])
     expect(installedPaths('linux', {}, '/home/me')).toEqual(['/home/me/.local/share/applications/centralu.desktop'])
+  })
+
+  it('sweeps only the copies an earlier install renamed aside, nothing else in the shared Programs folder', () => {
+    expect(
+      asideCopies(['Centralu', 'Centralu.new', 'Centralu.old-1791443525027', 'centralu.OLD-17', 'Centralu.old-x', 'Microsoft VS Code', 'Centralu.old-']),
+    ).toEqual(['Centralu.old-1791443525027', 'centralu.OLD-17'])
   })
 
   it('passes the shortcut paths to PowerShell through the environment, never the script text', () => {
