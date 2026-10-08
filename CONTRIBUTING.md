@@ -167,6 +167,7 @@ verifier or the keeper start it uses:
 ```bash
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-shell
 pnpm exec tsx scripts/shell-integration.mts   # the real binary against signed test content
+pnpm exec tsx scripts/keeper-content-integration.mts   # a keeper from verified content handing over
 ```
 
 **Some defects only reproduce in the packaged app.** If you changed anything to do with
