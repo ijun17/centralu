@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { CreateSessionOpts } from '../contract.js'
 
 /**
  * A session that fails to get ready (handshake) never has its handle handed out, so there is
@@ -83,13 +84,13 @@ describe('codex session readiness failure', () => {
 
 
 describe('codex approval requests', () => {
-  const createLiveSession = async () => {
+  const createLiveSession = async (extra: Partial<CreateSessionOpts> = {}) => {
     state.failInitialize = false
     state.instances.length = 0
     const events: unknown[] = []
     const adapter = new CodexAdapter()
     const handle = await adapter.createSession(
-      { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' },
+      { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', ...extra },
       (event) => events.push(event),
     )
     return { handle, events, client: state.instances[0]! }
@@ -220,7 +221,7 @@ describe('codex approval requests', () => {
   })
 
   it('accepts our own management MCP elicitation only through an elicitation response, not by bypassing approval', async () => {
-    const { client } = await createLiveSession()
+    const { client } = await createLiveSession({ orchestratorTools: {} as never, toolProfile: 'reader', orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 't' } })
 
     client.trigger({ id: 13, method: 'mcp/elicitation/create', params: { serverName: 'centralu' } })
 
@@ -228,6 +229,19 @@ describe('codex approval requests', () => {
       id: 13,
       payload: { action: 'accept', content: null, _meta: null },
     })
+  })
+
+  /*
+   * #382: only the server this thread was given is ours. A thread without it (an agent an app stood up, the set turned
+   * off in Settings) can still load a `centralu` server from the person's own ~/.codex/config.toml, and accepting its
+   * elicitations would approve that server's tools under every preset.
+   */
+  it("declines a centralu elicitation on a thread that was not given Centralu's server", async () => {
+    const { client } = await createLiveSession()
+
+    client.trigger({ id: 15, method: 'mcp/elicitation/create', params: { serverName: 'centralu' } })
+
+    expect(client.responses).toContainEqual({ id: 15, payload: { action: 'decline', content: null, _meta: null } })
   })
 })
 

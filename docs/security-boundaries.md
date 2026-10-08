@@ -47,6 +47,115 @@ JSON framing prevents ambiguous transcript-line assembly; it does **not** make t
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
 remain the deterministic authorization boundaries.
 
+## What each session's tools can do (#382)
+
+One place for what each kind of session can call and when the person is asked. Each piece was
+decided in its own issue; this is the whole matrix, audited against the code before 1.0.
+
+### Which tools a session has
+
+The host gives a session one profile (`toolProfileOf` in `sessions/manager.ts`), and the profile
+decides both which tools the session sees and which calls run (`profileAllows` in
+`sessions/orchestrator-tools.ts`). Claude's in-process server is built from the profile
+(`adapters/claude/orchestrator-mcp.ts`, `toolDefsFor`); Codex calls through the bridge, and the host
+checks the profile again on every call (`SessionManager.runOrchestratorTool`), so a name the
+session was not given is refused even when the bridge asks for it.
+
+| Profile | Which sessions | What its tools see |
+|---|---|---|
+| `orchestrator` | The central orchestrator | Every session |
+| `manager` | A project's worktree manager: it has a worktree child or holds the project's manager slot | Its own worktree sessions |
+| `scoped` | A coordinating session | Its member sessions |
+| `builder` | An app's builder session | Its own app (`check`) |
+| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at their own project" is on | Its own project; another project only through a consent card |
+| none | A session with the switch off, a session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
+
+The matrix below is checked against `profileAllows` and `toolDefsFor` by a test
+(`sessions/tool-matrix.test.ts`), so adding a tool or moving one between profiles fails until this
+table says the same. "yes" means the session sees the tool and its calls run; "—" means the tool
+is not listed for it and a call by name is refused (`Not a tool of this session`).
+
+<!-- tool-matrix:start -->
+| Tool | orchestrator | manager | scoped | builder | reader | none |
+|---|---|---|---|---|---|---|
+| `list_sessions` | yes | yes | yes | — | — | — |
+| `read_session` | yes | yes | yes | — | yes | — |
+| `send_to_session` | yes | yes | yes | — | — | — |
+| `recall` | yes | — | — | — | yes | — |
+| `app_guide` | yes | — | — | — | yes | — |
+| `update_session_settings` | yes | — | — | — | — | — |
+| `propose_project` | yes | — | — | — | — | — |
+| `create_session` | yes | — | — | — | — | — |
+| `propose_worktree_session` | yes | yes | — | — | — | — |
+| `delete_worktree_session` | — | yes | — | — | — | — |
+| `propose_skill` | yes | — | — | — | — | — |
+| `propose_mcp_server` | yes | — | — | — | — | — |
+| `check` | — | — | — | yes | — | — |
+| `create_app` | yes | — | — | — | — | — |
+| `ask_project` | — | — | — | — | yes | — |
+| `find_apps` | — | — | — | — | yes | — |
+| `attach_app` | — | — | — | — | yes | — |
+| `detach_app` | — | — | — | — | yes | — |
+<!-- tool-matrix:end -->
+
+A reader's `read_session` without an id lists its project's sessions; that is why it has no
+`list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)`), and
+the object behind them refuses every acting call (`readerToolsFor`).
+
+Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the
+user-folder apps, a project's sessions that project's apps, and a builder its own app
+(`givesApp` in `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4). An agent an
+app started gets none (`appsFor`).
+
+### When the person is asked
+
+"Allowed" runs without a card, "asks" raises a card in the calling session, "refused" fails the call
+without asking. "Bypass" is the person's own global setting (`defaultMode: "bypassPermissions"` in
+`~/.claude/settings.json`; `approval_policy = "never"` in `~/.codex/config.toml`), which only the
+`normal` preset reads.
+
+| Call | Claude `safe` | Claude `normal` | Claude `normal` + bypass | Claude `auto` | Codex `safe` | Codex `normal` | Codex `normal` + bypass | Codex `auto` | Enforced in |
+|---|---|---|---|---|---|---|---|---|---|
+| A Centralu tool the profile has | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/index.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/index.ts`, `mcpConfig`, `onServerRequest`) |
+| A Centralu tool the profile does not have | refused | refused | refused | refused | refused | refused | refused | refused | `profileAllows` (exposure and execution) |
+| `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
+| `ask_project` from a session that was itself asked | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (depth one) |
+| `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
+| `attach_app`, a user-folder app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card: the person's own folder) |
+| `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `AppAccess.gate` |
+| An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
+| Any other app tool | asks | asks | allowed | allowed | asks | asks | **refused** | allowed | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `APP_APPROVAL_MODE` (`prompt`, `writes`, `approve`) |
+| The agent's own tools (commands, edits) | asks, reads run | the person's settings | allowed | allowed | asks, reads run | the person's settings | allowed | allowed | `permissionOptionsFor` in each adapter |
+
+Rows that differ by session:
+
+- **The orchestrator and coordinators on Claude** read no settings files (`settingSources: []`), so the
+  person's bypass does not reach them: under `normal` an app tool and their own commands ask. On
+  Codex `~/.codex` still loads, so the bypass applies there.
+- **An agent an app started** (`run_agent`, `SessionManager.runAppAgent`) is `safe` whatever the
+  calling session uses, has no Centralu server and no apps. Reads run; everything else asks.
+- **A session `ask_project` opened** in the other project starts under `normal` with that project's
+  trust (`askProject`), like a session the person opens there; under the person's bypass it runs
+  freely. It holds the reader set, so it can attach apps (with its own consent card) but cannot ask a
+  third project.
+- **A builder's `check`** starts its app and runs the app's code without a card, like any Centralu
+  tool. Builders exist only in trusted projects and the user folder.
+
+The **Codex `normal` + bypass** cell is refused, not allowed: `writes` needs an approval and the
+person's `approval_policy = "never"` refuses it ("requires approval, but approval policy is never").
+Claude lets the same call through. Confirmed from Codex source only, not by a logged-in run; whether
+to follow the person's policy here is an open question in #382.
+
+### Turning things off
+
+| Change | orchestrator | manager | scoped | builder | reader |
+|---|---|---|---|---|---|
+| "Let sessions look at their own project" off | — | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once and come back if it is turned on again (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`); the schemas leave Claude at the next start |
+| Its project loses trust | No change (reads no project files) | Settings files at the next start | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` still runs (with the card) |
+| The other project loses trust | — | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, and the session it opens there follows its trust |
+| The person revokes a pair in Settings | — | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again |
+| Sharing of an app turned off | — | — | — | — | Leaves every session that attached it |
+
 ## Tool output in the store
 
 The store keeps every tool call whole ([#221](https://github.com/ijun17/centralu/issues/221)): the call's raw

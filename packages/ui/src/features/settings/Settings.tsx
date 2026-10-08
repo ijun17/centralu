@@ -829,9 +829,10 @@ function SessionToolsSwitch() {
       </label>
       <p className="mt-1 text-xs leading-body text-ink-faint">
         Every session can read the other sessions in its project, search that project&apos;s past
-        conversations, and read Centralu&apos;s guide. It cannot send to or create sessions — that
-        stays with the orchestrator. Turning this off stops those tools at once; turning it on
-        reaches a session the next time it starts.
+        conversations, and read Centralu&apos;s guide. With your consent it can also ask another
+        project to do a task and attach apps other projects share. It cannot send to or create
+        sessions in its own project — that stays with the orchestrator. Turning this off stops those tools at once,
+        apps it attached included; turning it on reaches a session the next time it starts.
       </p>
     </div>
   )

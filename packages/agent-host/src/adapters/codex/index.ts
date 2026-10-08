@@ -239,6 +239,8 @@ class CodexSession implements SessionHandle {
   private elicitations = new Set<string>()
   /** App servers loaded onto this thread through the bridge — only elicitations under those names go to our cards */
   private appServers = new Set<string>()
+  /** Whether this thread was given Centralu's own server — only then is an elicitation under that name ours to accept (#382) */
+  private ownServer = false
   private reqCounter = 0
   private alwaysAllow = new AlwaysAllowRules()
   /**
@@ -556,6 +558,7 @@ class CodexSession implements SessionHandle {
     const bridge = this.opts.orchestratorBridge
     const servers: Record<string, unknown> = {}
     const orchestrator = !!(this.opts.orchestratorTools && bridge)
+    this.ownServer = orchestrator
     if (orchestrator) {
       servers[ORCHESTRATOR_MCP_NAME] = {
         command: process.execPath,
@@ -851,7 +854,8 @@ class CodexSession implements SessionHandle {
         this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
         return
       }
-      const ours = p.serverName === ORCHESTRATOR_MCP_NAME
+      // Only the server we loaded: without it, a `centralu` server could come from the person's own config.toml (#382)
+      const ours = p.serverName === ORCHESTRATOR_MCP_NAME && this.ownServer
       this.client.respond(r.id, { action: ours ? 'accept' : 'decline', content: null, _meta: null })
       return
     }

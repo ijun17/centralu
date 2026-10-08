@@ -4117,6 +4117,10 @@ export class SessionManager {
   setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
     const current = this.uiPreferences()
     this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), ...patch }))
+    // The session tools switch also decides the apps a session attached through them (#382): recount every live one
+    if (patch.sessionTools !== undefined && patch.sessionTools !== current.sessionTools) {
+      for (const id of this.meta.keys()) this.appsHub?.sessionAppsChanged(id)
+    }
     return { ...current, ...patch }
   }
 
@@ -5572,7 +5576,12 @@ export class SessionManager {
       ...opts,
       onDemand: {
         attached: (id) => this.appAccess?.attached(id) ?? [],
-        allowed: (session, app) => this.appAccess?.allowed(session, app) ?? false,
+        /*
+         * Only while the session holds the reader set (#382): attach_app and detach_app are part of it, so a
+         * session the person turned the set off for (or that became a manager) would keep tools it can no
+         * longer detach. The records stay; they count again once the set is back.
+         */
+        allowed: (session, app) => this.toolProfileOf(session.id) === 'reader' && (this.appAccess?.allowed(session, app) ?? false),
       },
     })
     this.appAccess = new AppAccess({
