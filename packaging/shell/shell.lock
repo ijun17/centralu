@@ -1,5 +1,13 @@
 {
   "_comment": "The shell builds that may ship, one entry per shell version (docs/plans/thin-shell.md section 6.1). Each was built once by .github/workflows/shell-release.yml and published as a prerelease asset; the release script downloads the asset and refuses one whose zip sha256 or bundle cdhash differs, and the window installs a copy only if its files hash to what the release recorded beside it (docs/plans/thin-shell.md section 10.2). A new entry is a reviewed change: every new shell version asks every person for their macOS permissions again. Fields: version (CentraluShellVersion), platform, sha256 (of the zip), cdhash (codesign's CDHash, sha256 truncated to 20 bytes, hex), url (the release asset).",
   "format": 1,
-  "shells": []
+  "shells": [
+    {
+      "version": 1,
+      "platform": "darwin-arm64",
+      "sha256": "77b243ec8c0d7274202c5689f40cc3f16614531189c6e67f0543c93e32608c74",
+      "cdhash": "b17f0a9bae1e7d49b642e16243f73a7a86e737fb",
+      "url": "https://github.com/ijun17/centralu/releases/download/shell-v1/Centralu-shell-v1-darwin-arm64.zip"
+    }
+  ]
 }
