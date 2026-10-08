@@ -4084,17 +4084,12 @@ export class SessionManager {
    * Screen preferences (UiPreferences) — read as one blob, and written back accepting **only what
    * changed.**
    *
-   * Corrupted JSON is treated the same as if it did not exist (parseUiPreferences). The app failing
-   * to start because of a single broken setting is worse than losing one value the person had chosen.
+   * Corrupted JSON is treated the same as if it did not exist (parseUiPreferences), and said once on
+   * stderr with the row it came from. The app failing to start because of a single broken setting is
+   * worse than losing one value the person had chosen.
    */
   uiPreferences(): UiPreferences {
-    const raw = this.store.appSetting(UI_PREFS_KEY)
-    let stored: unknown
-    try {
-      stored = raw === null ? undefined : JSON.parse(raw)
-    } catch {
-      stored = undefined
-    }
+    const stored = this.storedUiPreferences()
     const prefs = parseUiPreferences(stored)
     /*
      * The text size moved here from the workspace snapshot (#312 step 5), where the screen kept
@@ -4102,22 +4097,47 @@ export class SessionManager {
      * the snapshot's step and writes it into the record, and from then on the record has the
      * field, so a snapshot an older window still writes never overrides a size chosen since.
      */
-    const hasTextSize = typeof stored === 'object' && stored !== null && 'textSize' in stored
-    if (!hasTextSize) {
+    if (!('textSize' in stored)) {
       const legacy = textSizeFromLegacyStep(this.loadWorkspace()?.textScale)
       if (legacy !== null) {
         prefs.textSize = legacy
-        this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify(prefs))
+        this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, textSize: legacy }))
       }
     }
     return prefs
   }
 
+  /**
+   * Writes the patch **over the stored record, not over this build's reading of it** (#384). Another
+   * build reads and writes the same row: during a host swap, and after a person goes back a release.
+   * A field this build does not know, or a value it cannot read (a theme mode a newer build added),
+   * stays as it was unless the patch sets it, so changing the text size in an older build does not
+   * reset what a newer one chose.
+   */
   setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
-    const next: UiPreferences = { ...this.uiPreferences(), ...patch }
-    this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify(next))
-    return next
+    const current = this.uiPreferences()
+    this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), ...patch }))
+    return { ...current, ...patch }
   }
+
+  /** The stored record as written, every field kept; `{}` for none or for one that is not a JSON object */
+  private storedUiPreferences(): Record<string, unknown> {
+    const raw = this.store.appSetting(UI_PREFS_KEY)
+    if (raw === null) return {}
+    try {
+      const v: unknown = JSON.parse(raw)
+      if (typeof v === 'object' && v !== null && !Array.isArray(v)) return v as Record<string, unknown>
+    } catch {
+      /* said below */
+    }
+    if (!this.brokenPrefsSaid) {
+      this.brokenPrefsSaid = true
+      console.error(`[agent-host] app_settings.${UI_PREFS_KEY} is not a JSON object; screen preferences read as their defaults until the next change`)
+    }
+    return {}
+  }
+
+  private brokenPrefsSaid = false
 
   /** The settings screen must be able to see and delete rules (FR-3: make the outcome visible) */
   listApprovalRules(): {
