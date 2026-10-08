@@ -10,9 +10,10 @@
 //!     `centralu-keeper` executable next to its own (#440), detached into its own session — and
 //!     attaches to it over its control socket. A macOS release first asks the shell to start it
 //!     (`crate::shell`, thin-shell plan §6): the shell holds macOS permissions across updates, and
-//!     when it does not start a keeper the window starts one itself, as before, and says why. The keeper holds the host, so quitting, crashing or replacing the app
-//!     does not end the host unless background mode is off, in which case the keeper stops it the
-//!     moment the last window detaches, as quitting always did.
+//!     when it does not start a keeper the window starts one itself, as before, and says why. The
+//!     keeper holds the host, so quitting, crashing or replacing the app does not end the host
+//!     unless background mode is off, in which case the keeper stops it the moment the last window
+//!     detaches, as quitting always did.
 //!   - **Direct** (`pnpm app:dev` and other debug builds, `CC_HOST_CMD`, non-unix targets): the
 //!     app is the host's parent, exactly as before. `CC_USE_KEEPER=1` opts a debug build into
 //!     the keeper path.
