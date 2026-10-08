@@ -1300,10 +1300,13 @@ fn probe_login_shell() -> Option<String> {
         // So the shell's initialization script does not put up an interactive prompt.
         .env("TERM", "dumb")
         .env("CI", "1");
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    // A session of its own, not only a group: its group is still its pid, which `kill_group`
+    // below needs, and it has no controlling terminal. An interactive shell in a background group
+    // of a terminal's session is stopped (SIGTTOU) when it sets up job control, so an app started
+    // from a terminal (the npm launcher runs the AppImage attached to one) waited out the 5 s
+    // below and fell back to the fixed paths. Measured in WSL2 Ubuntu 24.04: state `T` in a group
+    // of its own, the answer in 0.04 s in a session of its own (docs/spikes/2026-10-linux-keeper.md).
+    crate::keeper::sys::new_session(&mut cmd);
 
     let mut child = cmd.spawn().ok()?;
     let pid = child.id();
