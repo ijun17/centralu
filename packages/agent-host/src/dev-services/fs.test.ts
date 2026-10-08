@@ -25,6 +25,7 @@ import {
   resolveExisting,
   safeJoin,
 } from './fs.js'
+import { runGit } from './git-exec.js'
 
 /**
  * Checks the side that **changes** files (#18, #19).
@@ -143,17 +144,28 @@ describe('listDir — a project that is not a repository', () => {
    * bytes). Below that, our write finishes before git is gone and just goes through, which is how
    * this bug survived for weeks. Two Linux runners in CI hit it at a much smaller size, on timing
    * alone.
+   *
+   * The list is handed to the same call `listDir` makes rather than made of files (#368): 400
+   * files with 200-character names were enough, but creating them took seconds on a loaded
+   * Windows runner and the test passed its 15s limit there. A list of a megabyte, with no files,
+   * overflows any pipe buffer.
    */
-  it('the list comes back even with many files — the host survives even if git dies first', async () => {
-    const long = 'n'.repeat(200)
-    const names = Array.from({ length: 400 }, (_, i) => `${String(i).padStart(4, '0')}-${long}.txt`)
-    // 400 x 206 bytes ~= 82KB — reliably exceeds the buffer
-    expect(names.join('\n').length).toBeGreaterThan(65_536)
-    for (const n of names) writeFileSync(join(root, n), '')
+  it('the host survives even if git dies before reading a list longer than the pipe holds', async () => {
+    const input = Array.from({ length: 5_000 }, (_, i) => `${String(i).padStart(4, '0')}-${'n'.repeat(200)}.txt`).join('\0')
+    expect(input.length).toBeGreaterThan(16 * 65_536)
+    const failed = await runGit(root, ['check-ignore', '--stdin', '-z'], { input }).then(
+      () => null,
+      (e: { code?: unknown }) => e,
+    )
+    expect(failed?.code).toBe(128) // fatal: not a git repository
+  })
 
+  it('nothing is ignored, so every entry is listed as not ignored', async () => {
+    const names = ['a.txt', 'b.log', 'c.md']
+    for (const n of names) writeFileSync(join(root, n), '')
     const entries = await listDir(root, '')
-    expect(entries).toHaveLength(names.length)
-    // Not a repository, so nothing is ignored either — painting everything as ignored just because it could not be asked would leave the tree empty
+    expect(entries.map((e) => e.name)).toEqual(names)
+    // Painting everything as ignored just because git could not be asked would leave the tree empty
     expect(entries.every((e) => !e.ignored)).toBe(true)
   })
 })
