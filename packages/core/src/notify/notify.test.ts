@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
-import { DEFAULT_NOTIFY_POLICY, allDoneNotification, badgeCount, notificationFor } from './notify.js'
+import { DEFAULT_NOTIFY_POLICY, allDoneNotification, badgeCount, notificationFor, readNotifyPolicy } from './notify.js'
+
+describe('readNotifyPolicy: the policy a snapshot from another build holds (#384)', () => {
+  it('an older snapshot without a later switch takes that switch on by default, not off', () => {
+    const older = { approval: false, error: true, allDone: true, whenFocused: false, sound: false }
+    expect(readNotifyPolicy(older)).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false, sound: false })
+  })
+
+  it('a newer snapshot keeps the switches this build knows and drops the rest', () => {
+    const newer = { ...DEFAULT_NOTIFY_POLICY, error: false, quietHours: { from: 22, to: 7 } }
+    expect(readNotifyPolicy(newer)).toEqual({ ...DEFAULT_NOTIFY_POLICY, error: false })
+  })
+
+  it('a broken value is no choice: each bad switch, or the whole policy, is the default', () => {
+    expect(readNotifyPolicy({ done: 'yes', sound: false })).toEqual({ ...DEFAULT_NOTIFY_POLICY, sound: false })
+    expect(readNotifyPolicy('loud')).toEqual(DEFAULT_NOTIFY_POLICY)
+    expect(readNotifyPolicy([true])).toEqual(DEFAULT_NOTIFY_POLICY)
+  })
+})
 
 const s = (state: SessionState, name = 'session') => ({ id: 's1', name, state })
 const bg = { appFocused: false }
