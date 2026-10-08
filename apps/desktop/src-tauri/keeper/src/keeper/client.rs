@@ -139,18 +139,13 @@ pub fn spawn_detached(exe: &Path, args: &[String], env: &[(String, String)], log
     cmd.spawn()
 }
 
-/// Makes sure a keeper answers on `sock`, launching one with `launch` if none does, and waits up
-/// to `timeout` for it. A keeper that is still stopping holds its lock until it exits; the new
-/// one waits for that lock, so this waits too.
-pub fn ensure(sock: &Path, launch: impl FnOnce() -> io::Result<()>, timeout: Duration) -> Result<bool, String> {
-    if alive(sock) {
-        return Ok(false);
-    }
-    launch().map_err(|e| format!("could not launch the keeper: {e}"))?;
+/// Waits up to `timeout` for a keeper just launched to answer on `sock`. A keeper that is still
+/// stopping holds its lock until it exits; the new one waits for that lock, so this waits too.
+pub fn wait_alive(sock: &Path, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if alive(sock) {
-            return Ok(true);
+            return Ok(());
         }
         thread::sleep(Duration::from_millis(100));
     }

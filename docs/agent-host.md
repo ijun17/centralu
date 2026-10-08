@@ -419,6 +419,46 @@ Thanks to this design, half of FR-10 (restore on restart) is the same code path 
 
 **One host per data folder** (`dev-services/instance-lock.ts`). Two hosts on one folder would each hold their own session list and write to the same `store.db`. Ownership is an exclusive SQLite transaction (`BEGIN EXCLUSIVE` on `host-ownership.sqlite`, DELETE journal mode) that the host holds for its whole lifetime (#82): taking it is atomic, a second host is refused at once, and the operating system releases it when the host dies, however it dies, so a crash leaves nothing stale. `host.lock` (pid and start time) remains as the description of the owner in the conflict message, and for older hosts that know only that file: a live, matching `host.lock` still refuses the start. Before #82 ownership was the file alone, checked and then written: 8 hosts started at once produced 2 owners. This is single-machine ownership — not a distributed lease, and not for a data folder on a network filesystem.
 
+### 4.0 How the host starts, on each platform
+
+This is the one list. The window decides in one pure function, `start_plan::plan` in the keeper crate
+(`apps/desktop/src-tauri/keeper/src/start_plan.rs`), from what it knows: the OS, debug or release, the variables
+below, whether a bundled host is in its resources, whether a keeper answers on `<data>/keeper.sock`, whether the shell
+already fell back once in this window's life, and whether `centralu-keeper` is next to its executable. Every start site
+asks it: the window's first start and its retries, each keeper start, and `centralu --keeper`. Each row below is a row
+of its table test (`every_row_of_the_start_table`), and a second test checks every combination of those facts against
+the code the plan replaced.
+
+| Where | Variables | Mode | What runs | Why |
+|---|---|---|---|---|
+| macOS release | none | `ThroughShell` | the window opens `<data>/shell/Centralu.app` through LaunchServices, which starts `centralu-keeper` from `<data>/content/<version>/` and the host from that verified copy (§4.1) | the shell holds macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)) |
+| macOS release | `CC_SHELL_UNPINNED=1` | `ThroughShell` | the same, and a shell the window carries unpinned is opened too | checking the path by hand with a temporary `CC_DATA_DIR` |
+| macOS release, the shell fell back (refused, not carried, unpinned, not installable, not opened, no report) | none | `KeeperBeside` | the window starts the `centralu-keeper` next to its own executable; the host runs from `<data>/hosts/<key>/` | agents must keep working; the window does so for the rest of its life |
+| macOS release | `CC_KEEPER_HOST_SOURCE` (any value) | `KeeperBeside` | the keeper beside the window, running the named folder (a blank value: the bundled host) | the keeper scripts' way of naming a host, which the shell would not run |
+| macOS release with no bundled host (`cargo run --release`) | none | `KeeperBeside` | the keeper beside the window, the source host, the dev data folder | there is nothing for the shell to verify |
+| any release starting a keeper with no `centralu-keeper` beside the window | | `KeeperInWindowExe` | the window's executable as `centralu --keeper` runs the keeper itself | a bundle assembled by hand |
+| a keeper already answers | | `Attach` | nothing is started; the window attaches | one keeper per data folder |
+| macOS debug (`pnpm app:dev`) | none | `Direct` | the window runs the source host through tsx, `CC_DEV=1` | the app is the host's parent, as before the keeper; a bundled host left in `target/debug` is ignored |
+| macOS or Linux debug | `CC_USE_KEEPER=1` | `KeeperInProcess` | the window starts itself as `centralu --keeper` with `CC_KEEPER_IN_PROCESS=1`; the keeper runs the source host | `tauri dev` builds only the window, so a `centralu-keeper` beside it may be older code ([architecture.md](architecture.md) §4.1) |
+| any | `CC_HOST_CMD` (any value) | `Direct` | that command line (a blank value: the bundled or source host) | the escape hatch for running some other host |
+| Linux release (AppImage, deb, rpm) | none | `Direct` | the window runs the bundled host through the system Node | the keeper has not been run on Linux, and an AppImage unmounts its files when the app exits (#295) |
+| Linux debug | none | `Direct` | the source host through tsx | as above |
+| Linux release | `CC_USE_KEEPER=1` | `KeeperBeside` | the keeper beside the window (`usr/bin/` in the AppImage) | no shell off macOS |
+| Windows, release or debug | `CC_USE_KEEPER` is ignored | `Direct` | the bundled host (release) or the source host (debug), no console window (§1) | the keeper is built on unix sockets, descriptor passing and `flock` |
+| `centralu --keeper` | `CC_KEEPER_IN_PROCESS` | `KeeperInProcess` | the keeper runs in the window's executable | a debug window asked |
+| `centralu --keeper`, `centralu-keeper` beside it | none | `KeeperBeside` | `exec`s into `centralu-keeper`: same pid, arguments and descriptors | a keeper of 0.1.0-beta.11 or earlier handing over, and windows from before #440, start the window's executable this way |
+| `centralu --keeper`, nothing beside it | none | `KeeperInWindowExe` | the keeper runs in the window's executable | |
+
+Not decided by the window, each in its own place:
+
+| What | Where it is decided |
+|---|---|
+| What the shell does once opened: install or keep, pinned or not, verify, copy, and the reasons it refuses | `shell::prepare`, `shell::install::plan`, `shell::start::start` in the window; the shell crate ([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
+| A keeper started directly handing itself over (§4.4): to the executable the window names, `centralu-keeper` since #444 or the window's executable before #440 (then the `centralu --keeper` rows above) | `server::switch`, `server::upgrade` |
+| A keeper from verified content handing itself over: verifies and copies the new content, then hands over to `<data>/content/<new>/centralu-keeper` | `server::content_route` (§4.4) |
+| `centralu serve` on a remote: the npm launcher runs the bundled host on the system Node; no window, no keeper | `packaging/npm/centralu/bin/serve.mjs` (§4.7) |
+| `pnpm dev` and e2e: `pnpm host` runs the source host; no window, no keeper | `CONTRIBUTING.md` |
+
 ### 4.1 Who holds the host: the keeper (#280, option C step 1)
 
 In the packaged app the host's parent is the keeper (`centralu-keeper`, an executable of its own next to the
@@ -439,7 +479,7 @@ it are judged by macOS as the shell. If the shell refuses or does not report, th
 from its own bundle, as every other build does, for the rest of its life, and keeps the reason for `host_build`
 (`shell`): a release shows it in the build bar, a build whose shell is unpinned (a local `pnpm app`, a
 rehearsal) only writes it to `keeper.log` as a `[window]` line, and never installs or opens that shell.
-Debug builds, `CC_KEEPER_HOST_SOURCE`, Linux and Windows start the keeper (or the host) directly, as before.
+Debug builds, `CC_KEEPER_HOST_SOURCE`, Linux and Windows start the keeper (or the host) directly, as before (§4.0).
 
 **Per-build copies.** Before each launch the keeper copies the bundle's `resources/host` folder to
 `<data>/hosts/<key>/` (temporary folder, then rename) and runs `main.mjs` from there. The key is the commit

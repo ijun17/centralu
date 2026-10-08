@@ -5,21 +5,21 @@
 //! back if it dies. The communication itself is done by the UI directly over WS — the reason dev
 //! and prod share the same path.
 //!
-//! Two ways to get there (#280, option C step 1):
-//!   - **Keeper** (release builds on unix): the app finds or launches the keeper — the
-//!     `centralu-keeper` executable next to its own (#440), detached into its own session — and
-//!     attaches to it over its control socket. A macOS release first asks the shell to start it
-//!     (`crate::shell`, thin-shell plan §6): the shell holds macOS permissions across updates, and
-//!     when it does not start a keeper the window starts one itself, as before, and says why. The
-//!     keeper holds the host, so quitting, crashing or replacing the app does not end the host
-//!     unless background mode is off, in which case the keeper stops it the moment the last window
-//!     detaches, as quitting always did.
-//!   - **Direct** (`pnpm app:dev` and other debug builds, `CC_HOST_CMD`, non-unix targets): the
-//!     app is the host's parent, exactly as before. `CC_USE_KEEPER=1` opts a debug build into
-//!     the keeper path.
+//! Two ways to get there (#280, option C step 1); which one is `start_plan::plan`'s answer, and
+//! docs/agent-host.md §4.0 lists it per platform:
+//!   - **Keeper**: the app finds or launches the keeper — the `centralu-keeper` executable next to
+//!     its own (#440), detached into its own session — and attaches to it over its control socket.
+//!     A macOS release first asks the shell to start it (`crate::shell`, thin-shell plan §6): the
+//!     shell holds macOS permissions across updates, and when it does not start a keeper the window
+//!     starts one itself, as before, and says why. The keeper holds the host, so quitting, crashing
+//!     or replacing the app does not end the host unless background mode is off, in which case the
+//!     keeper stops it the moment the last window detaches, as quitting always did.
+//!   - **Direct**: the app is the host's parent, exactly as before.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+use centralu_keeper_core::start_plan::{self, Env, Facts, Host, Plan};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -121,53 +121,27 @@ fn emit(app: &AppHandle, status: &HostStatus) {
     let _ = app.emit("host-status", status);
 }
 
-/// The bundled host lives in the resource directory in a release build (F-0).
-///
-/// **Do not decide dev vs. prod by existence alone** — `tauri dev`'s resource_dir is
-/// target/debug/, and once a release build has been made even once, a bundle stays copied there
-/// too. If existence alone decided it, dev would launch that stale bundled host without CC_DEV,
-/// so source edits would not take effect and it would grab the release app's data folder as
-/// well. A dev build unconditionally uses the source host (docs/architecture.md §4 — dev runs
-/// the source directly via tsx, plus CC_DEV=1).
-fn bundled_host_dir(app: &AppHandle) -> Option<PathBuf> {
-    if cfg!(debug_assertions) {
-        return None;
-    }
-    app.path()
-        .resource_dir()
-        .ok()
-        .map(|d| d.join("resources/host"))
-        .filter(|p| p.join("main.mjs").exists())
+/// How this window starts its host: the start plan's answer, and what it needs from the window's
+/// resource folder (`Contents/Resources` in the macOS bundle, where the shell and the signed content
+/// are carried too).
+struct Start {
+    plan: Plan,
+    #[cfg_attr(not(unix), allow(dead_code))] // only a keeper asks the plan again
+    facts: Facts,
+    /// The bundled host's folder (F-0), when the plan runs it. A debug build never does, though one
+    /// may be there: `tauri dev`'s resource folder is target/debug/, where a release build leaves a
+    /// bundled host behind (`Plan::dev`).
+    bundled: Option<PathBuf>,
+    #[cfg_attr(not(unix), allow(dead_code))]
+    resources: Option<PathBuf>,
 }
 
-/**
- * The window's `Contents/Resources`, where it carries the shell and the signed content, when this
- * build starts its keeper through the shell: a macOS release build (thin-shell plan §6, §8). Debug
- * builds, Linux and Windows never do, and neither does a release run with `CC_KEEPER_HOST_SOURCE`
- * (the keeper scripts' way of naming the host to run, which the shell would not use).
- */
-#[cfg(unix)]
-fn shell_resources(app: &AppHandle) -> Option<PathBuf> {
-    if !cfg!(target_os = "macos") || cfg!(debug_assertions) || std::env::var_os("CC_KEEPER_HOST_SOURCE").is_some() {
-        return None;
-    }
-    app.path().resource_dir().ok()
-}
-
-#[cfg_attr(not(unix), allow(dead_code))] // off unix the answer is always no, and nobody asks
-fn use_keeper() -> bool {
-    if std::env::var("CC_HOST_CMD").is_ok() || !cfg!(unix) {
-        return false;
-    }
-    let opted_in = std::env::var("CC_USE_KEEPER").as_deref() == Ok("1");
-    // The keeper has only ever run on macOS (#295). On Linux it compiles in CI but was never
-    // started, and an AppImage unmounts its files when the app exits, which may take a
-    // background keeper's executable with it. Until someone runs it there, Linux keeps the
-    // direct host path unless CC_USE_KEEPER=1 asks for the keeper.
-    if !cfg!(target_os = "macos") {
-        return opted_in;
-    }
-    !cfg!(debug_assertions) || opted_in
+fn start_plan(app: &AppHandle) -> Start {
+    let resources = app.path().resource_dir().ok();
+    let found = resources.as_ref().map(|d| d.join("resources/host")).filter(|p| p.join("main.mjs").exists());
+    let facts = Facts::window(Env::current(), found.is_some());
+    let plan = start_plan::plan(&facts);
+    Start { bundled: found.filter(|_| !plan.dev), plan, facts, resources }
 }
 
 impl Supervisor {
@@ -197,13 +171,13 @@ impl Supervisor {
 
     /// Starts supervising. The app still comes up even if this fails (the UI shows the status).
     pub fn start(&self, app: AppHandle) {
-        let bundled = bundled_host_dir(&app);
+        let start = start_plan(&app);
         #[cfg(unix)]
-        if use_keeper() {
+        if start.plan.mode.keeper() {
             if let Ok(mut c) = self.inner.lock() {
                 *c = Choice::Keeper;
             }
-            let link = Arc::new(link::KeeperLink::new(bundled, shell_resources(&app)));
+            let link = Arc::new(link::KeeperLink::new(start.facts, start.bundled, start.resources));
             if let Ok(mut k) = self.keeper.lock() {
                 *k = Some(link.clone());
             }
@@ -213,7 +187,7 @@ impl Supervisor {
         if let Ok(mut c) = self.inner.lock() {
             *c = Choice::Direct;
         }
-        self.direct.start(Arc::new(TauriSink(app)), direct_launcher(bundled));
+        self.direct.start(Arc::new(TauriSink(app)), direct_launcher(&start));
     }
 
     /// Retry from the failure screen (#184).
@@ -222,8 +196,8 @@ impl Supervisor {
             #[cfg(unix)]
             Choice::Keeper => self.link().map(|l| l.restart(app)).unwrap_or(false),
             _ => {
-                let bundled = bundled_host_dir(&app);
-                self.direct.restart(Arc::new(TauriSink(app)), direct_launcher(bundled))
+                let start = start_plan(&app);
+                self.direct.restart(Arc::new(TauriSink(app)), direct_launcher(&start))
             }
         }
     }
@@ -342,19 +316,19 @@ impl Supervisor {
 }
 
 /// The direct path's launch: the bundled host through the system Node, `CC_HOST_CMD`, or the
-/// source through tsx — exactly what the app ran before the keeper existed.
-fn direct_launcher(bundled: Option<PathBuf>) -> Launcher {
+/// source through tsx — exactly what the app ran before the keeper existed. The plan's `host` says
+/// which.
+fn direct_launcher(start: &Start) -> Launcher {
+    let (host, dev, bundled) = (start.plan.host, start.plan.dev, start.bundled.clone());
     Arc::new(move || {
-        let mut launch: HostLaunch = if let Some((program, args)) = host_proc::host_cmd_override() {
-            HostLaunch { program, args, env: Vec::new() }
-        } else if let Some(dir) = &bundled {
-            host_proc::bundled_launch(&dir.join("main.mjs"), &[])?
-        } else {
-            return Ok(host_proc::source_launch(&[]));
+        let mut launch: HostLaunch = match (host, host_proc::host_cmd_override(), &bundled) {
+            (Some(Host::Command), Some((program, args)), _) => HostLaunch { program, args, env: Vec::new() },
+            (Some(Host::Bundle), _, Some(dir)) => host_proc::bundled_launch(&dir.join("main.mjs"), &[])?,
+            _ => return Ok(host_proc::source_launch(&[])),
         };
         // A host launched from dev uses a **different data folder** than the release app.
         // If two hosts held the same folder, the session lists would get out of sync.
-        if bundled.is_none() {
+        if dev {
             launch.env.push(("CC_DEV".into(), "1".into()));
         }
         Ok::<_, LaunchError>(launch)
@@ -418,6 +392,7 @@ mod link {
     use super::*;
     use crate::host_proc::{backoff, MAX_RESTARTS, STABLE_UPTIME};
     use crate::keeper::{client, exe as keeper_exe, source::BuildSource, KeeperView};
+    use centralu_keeper_core::start_plan::{Shell, StartMode};
     use serde_json::{json, Value};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -441,22 +416,29 @@ mod link {
     }
 
     pub struct KeeperLink {
+        /// What the window knew when it started, for asking the start plan again on every attempt.
+        facts: Facts,
         dev: bool,
         data: PathBuf,
         sock: PathBuf,
         host_dir: Option<PathBuf>,
         app_build: BuildSource,
-        /// Where the shell and the signed content are carried, when keepers start through the shell.
-        shell_resources: Option<PathBuf>,
+        /// The window's resource folder, where the shell and the signed content are carried.
+        resources: Option<PathBuf>,
         state: Mutex<LinkState>,
     }
 
     impl KeeperLink {
-        pub fn new(bundled: Option<PathBuf>, shell_resources: Option<PathBuf>) -> Self {
+        pub fn new(facts: Facts, bundled: Option<PathBuf>, resources: Option<PathBuf>) -> Self {
+            let plan = start_plan::plan(&facts);
             // A debug build opted into the keeper runs the source host and uses the dev data
             // folder, like its direct path.
-            let dev = bundled.is_none();
-            let host_dir = std::env::var("CC_KEEPER_HOST_SOURCE").ok().filter(|s| !s.trim().is_empty()).map(PathBuf::from).or(bundled);
+            let dev = plan.dev;
+            let host_dir = match plan.host {
+                Some(Host::Named) => std::env::var(start_plan::KEEPER_HOST_SOURCE_ENV).ok().map(PathBuf::from),
+                Some(Host::Bundle) => bundled,
+                _ => None,
+            };
             let exe = std::env::current_exe().unwrap_or_default();
             let app_build = match &host_dir {
                 Some(dir) => BuildSource::from_host_dir(
@@ -468,14 +450,29 @@ mod link {
             };
             let data = crate::keeper::data_dir_with(dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
             KeeperLink {
+                facts,
                 dev,
                 sock: crate::keeper::socket_path(&data),
                 data,
                 host_dir,
                 app_build,
-                shell_resources: shell_resources.filter(|_| !dev),
+                resources,
                 state: Mutex::new(LinkState::default()),
             }
+        }
+
+        /// The start plan now: whether a keeper answers, whether the shell already fell back, and
+        /// whether a `centralu-keeper` is beside this executable.
+        fn plan(&self, keeper_answering: bool) -> StartMode {
+            let shell_off = self.state.lock().map(|s| s.shell_off).unwrap_or(true);
+            let keeper_beside = std::env::current_exe().map(|me| keeper_exe::keeper_beside(&me)).unwrap_or(false);
+            let facts = Facts {
+                keeper_answering,
+                shell: if shell_off { Shell::FellBack } else { Shell::Untried },
+                keeper_beside,
+                ..self.facts
+            };
+            start_plan::plan(&facts).mode
         }
 
         pub fn info(&self) -> Option<HostInfo> {
@@ -536,19 +533,32 @@ mod link {
             Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
         }
 
-        fn launch_keeper(&self) -> std::io::Result<()> {
-            // The keeper executable next to this one (#440), or this one with `--keeper` when there is
-            // none. A debug build always runs it in its own executable: `tauri dev` does not rebuild
-            // `centralu-keeper`, so the one beside it may be older code (keeper::exe).
+        /// Starts a keeper the way the plan says (`mode`, never `Direct` or `Attach` here).
+        fn launch_keeper(&self, mode: StartMode) -> std::io::Result<()> {
             let me = std::env::current_exe()?;
-            let exe = if cfg!(debug_assertions) { me } else { keeper_exe::to_start(&me) };
             // The legacy folder moves before this creates the new one (keeper::prepare_default_dir).
             let _ = crate::keeper::prepare_default_dir(&self.data, self.dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
             let _ = std::fs::create_dir_all(&self.data);
-            if self.through_shell() {
-                return Ok(());
-            }
-            let start = self.keeper_start();
+            let mode = match mode {
+                StartMode::ThroughShell { allow_unpinned } => {
+                    if self.through_shell(allow_unpinned) {
+                        return Ok(());
+                    }
+                    // The shell fell back: the plan now says how the window starts it itself.
+                    self.plan(false)
+                }
+                m => m,
+            };
+            // The keeper executable next to this one (#440), or this one with `--keeper` when there is
+            // none. A debug build always runs it in its own executable: `tauri dev` does not rebuild
+            // `centralu-keeper`, so the one beside it may be older code (keeper::exe).
+            let (exe, in_process) = match mode {
+                StartMode::KeeperBeside => (keeper_exe::beside(&me), false),
+                StartMode::KeeperInProcess => (me, true),
+                // KeeperInWindowExe: `--keeper` then runs the keeper in this executable
+                _ => (me, false),
+            };
+            let start = self.keeper_start(in_process);
             client::launch_detached(&exe, &start.args(), &start.env(), &start.log_path())
         }
 
@@ -558,12 +568,8 @@ mod link {
          * then does for the rest of its life. The reason is kept for `HostBuild.shell`, shown or only
          * logged as `Report::notify` says.
          */
-        fn through_shell(&self) -> bool {
-            let Some(resources) = &self.shell_resources else { return false };
-            if self.state.lock().map(|s| s.shell_off).unwrap_or(true) {
-                return false;
-            }
-            let allow_unpinned = std::env::var(crate::shell::UNPINNED_ENV).as_deref() == Ok("1");
+        fn through_shell(&self, allow_unpinned: bool) -> bool {
+            let Some(resources) = &self.resources else { return false };
             let world = crate::shell::Real::new(&self.data);
             let Some(report) = crate::shell::start_keeper(resources, &self.data, self.app_build.bundle_path.clone(), allow_unpinned, &world)
             else {
@@ -578,14 +584,14 @@ mod link {
         }
 
         /// How this window starts a keeper (and, in the same words, how the shell does: `keeper::exe::Start`).
-        fn keeper_start(&self) -> keeper_exe::Start {
+        fn keeper_start(&self, in_process: bool) -> keeper_exe::Start {
             keeper_exe::Start {
                 data_dir: self.data.clone(),
                 host_source: self.host_dir.clone(),
                 bundle_path: self.app_build.bundle_path.clone(),
                 app_version: env!("CARGO_PKG_VERSION").into(),
                 dev: self.dev,
-                in_process: cfg!(debug_assertions),
+                in_process,
             }
         }
 
@@ -646,7 +652,11 @@ mod link {
 
         /// One attachment, from finding the keeper to losing it.
         fn attach_once(self: &Arc<Self>, app: &AppHandle) -> Result<(), String> {
-            client::ensure(&self.sock, || self.launch_keeper(), Duration::from_secs(25))?;
+            let mode = self.plan(client::alive(&self.sock));
+            if mode != StartMode::Attach {
+                self.launch_keeper(mode).map_err(|e| format!("could not launch the keeper: {e}"))?;
+                client::wait_alive(&self.sock, Duration::from_secs(25))?;
+            }
             let (closed_tx, closed_rx) = mpsc::channel::<()>();
             let me = self.clone();
             let app2 = app.clone();
@@ -801,7 +811,7 @@ mod tests {
     fn the_direct_path_stays_the_default_for_debug_builds() {
         // `pnpm app:dev` must keep running the host as the app's own child, unchanged.
         if cfg!(debug_assertions) && std::env::var("CC_USE_KEEPER").is_err() && std::env::var("CC_HOST_CMD").is_err() {
-            assert!(!use_keeper());
+            assert!(!start_plan::plan(&Facts::window(Env::current(), true)).mode.keeper());
         }
     }
 

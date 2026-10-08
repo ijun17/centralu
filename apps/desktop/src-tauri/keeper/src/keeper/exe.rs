@@ -31,7 +31,7 @@ pub const KEEPER_EXE: &str = "centralu-keeper";
 
 /// Set by a debug window on the keeper it starts: run the keeper in the window's executable, do not
 /// `exec` the `centralu-keeper` next to it. Removed again before the keeper starts anything.
-pub const IN_PROCESS_ENV: &str = "CC_KEEPER_IN_PROCESS";
+pub const IN_PROCESS_ENV: &str = crate::start_plan::KEEPER_IN_PROCESS_ENV;
 
 /**
  * How a keeper is started: its arguments, the environment it gets on top of the starter's, and
@@ -107,13 +107,18 @@ pub fn to_start(window_exe: &Path) -> PathBuf {
     }
 }
 
+/// Whether a `centralu-keeper` other than `window_exe` itself is next to `window_exe`.
+pub fn keeper_beside(window_exe: &Path) -> bool {
+    let keeper = beside(window_exe);
+    keeper.is_file() && keeper != window_exe
+}
+
 /// What `centralu --keeper` should `exec`, if anything: the keeper next to it, unless asked to run
-/// in-process or there is none (or this already is it).
+/// in-process or there is none (or this already is it). The start plan decides (`Who::KeeperFlag`).
 pub fn exec_target(window_exe: &Path, in_process: bool) -> Option<PathBuf> {
-    if in_process {
-        return None;
-    }
-    Some(to_start(window_exe)).filter(|k| k != window_exe)
+    use crate::start_plan::{plan, Facts, StartMode};
+    let facts = Facts::keeper_flag(in_process, keeper_beside(window_exe));
+    (plan(&facts).mode == StartMode::KeeperBeside).then(|| beside(window_exe))
 }
 
 /// The descriptor a handoff passes (`--take-over-fd N`), if the arguments name one.

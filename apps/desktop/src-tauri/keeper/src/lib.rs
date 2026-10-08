@@ -6,6 +6,9 @@
 //!   - the window (`centralu`), which talks to a keeper through `keeper::client`, and in direct
 //!     mode (debug builds, Windows) supervises the host itself with `host_proc`.
 //!
+//! Which of those holds the host, and how it is started, is decided in one place for both programs:
+//! `start_plan`.
+//!
 //! It is a crate of its own so that the keeper's link cannot reach Tauri, WebKit or AppKit by
 //! accident: its dependencies are `serde`, `serde_json` and `libc`, and anything else has to be
 //! added here, in plain sight. A later step starts the keeper from verified content outside the
@@ -14,3 +17,4 @@
 pub mod host_proc;
 #[cfg(unix)]
 pub mod keeper;
+pub mod start_plan;

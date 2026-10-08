@@ -362,6 +362,45 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 
 **데이터 폴더 하나에 호스트 하나** (`dev-services/instance-lock.ts`). 한 폴더에 호스트가 둘이면 각자 제 세션 목록을 들고 같은 `store.db`에 쓴다. 소유권은 호스트가 살아 있는 내내 쥐는 배타적 SQLite 트랜잭션이다(`host-ownership.sqlite`에 `BEGIN EXCLUSIVE`, DELETE 저널 모드) (#82). 잡는 일은 원자적이고, 두 번째 호스트는 곧바로 거절되며, 호스트가 어떻게 죽든 운영체제가 풀어 주므로 크래시가 낡은 흔적을 남기지 않는다. `host.lock`(pid와 시작 시각)은 충돌 메시지에 주인을 적는 설명으로, 그리고 그 파일만 아는 옛 호스트를 위해 남는다: 살아 있고 맞아떨어지는 `host.lock`은 여전히 시작을 거절한다. #82 전에는 파일 하나를 확인하고 나서 쓰는 방식이라, 동시에 띄운 호스트 8개에서 주인이 2개 나왔다. 한 기계 안의 소유권이다 — 분산 임대가 아니고, 네트워크 파일시스템 위의 데이터 폴더용도 아니다.
 
+### 4.0 플랫폼별로 호스트가 뜨는 방식
+
+목록은 여기 하나다. 창은 키퍼 크레이트의 순수 함수 하나, `start_plan::plan`
+(`apps/desktop/src-tauri/keeper/src/start_plan.rs`)에서 아는 것으로 정한다: OS, 디버그인지 릴리스인지, 아래 변수들,
+리소스에 번들된 호스트가 있는지, `<data>/keeper.sock`에 키퍼가 답하는지, 이 창이 사는 동안 셸이 이미 한 번 물러났는지,
+실행 파일 옆에 `centralu-keeper`가 있는지. 모든 시작 지점이 이것에 묻는다: 창의 첫 시작과 재시도, 키퍼를 띄울 때마다,
+그리고 `centralu --keeper`. 아래 각 행은 표 테스트(`every_row_of_the_start_table`)의 한 행이고, 두 번째 테스트는 그
+사실들의 모든 조합을 이 함수가 대신한 코드와 맞대 본다.
+
+| 어디서 | 변수 | 방식 | 무엇이 도는가 | 이유 |
+|---|---|---|---|---|
+| macOS 릴리스 | 없음 | `ThroughShell` | 창이 LaunchServices로 `<data>/shell/Centralu.app`을 열고, 셸이 `<data>/content/<version>/`에서 `centralu-keeper`를, 그 검증된 사본에서 호스트를 띄운다(§4.1) | 셸이 업데이트를 건너 macOS 권한을 쥔다([plans/thin-shell.md](plans/thin-shell.md)) |
+| macOS 릴리스 | `CC_SHELL_UNPINNED=1` | `ThroughShell` | 같고, 창이 고정되지 않은 셸을 싣고 있어도 연다 | 임시 `CC_DATA_DIR`로 손수 경로를 확인할 때 |
+| macOS 릴리스, 셸이 물러남(거절, 안 실림, 고정 안 됨, 설치 실패, 열리지 않음, 보고 없음) | 없음 | `KeeperBeside` | 창이 자기 실행 파일 옆의 `centralu-keeper`를 띄우고, 호스트는 `<data>/hosts/<key>/`에서 돈다 | 에이전트는 계속 돌아야 한다. 창이 사는 동안 계속 이렇게 한다 |
+| macOS 릴리스 | `CC_KEEPER_HOST_SOURCE`(값 무관) | `KeeperBeside` | 창 옆의 키퍼가 그 폴더를 돌린다(빈 값이면 번들된 호스트) | 키퍼 스크립트가 호스트를 지정하는 방법이고, 셸은 그 호스트를 돌리지 않는다 |
+| 번들된 호스트가 없는 macOS 릴리스(`cargo run --release`) | 없음 | `KeeperBeside` | 창 옆의 키퍼, 소스 호스트, 개발용 데이터 폴더 | 셸이 검증할 것이 없다 |
+| 창 옆에 `centralu-keeper`가 없을 때 키퍼를 띄우는 모든 릴리스 | | `KeeperInWindowExe` | `centralu --keeper`로 뜬 창의 실행 파일이 직접 키퍼를 돈다 | 손으로 조립한 번들 |
+| 키퍼가 이미 답함 | | `Attach` | 아무것도 띄우지 않고 붙는다 | 데이터 폴더 하나에 키퍼 하나 |
+| macOS 디버그(`pnpm app:dev`) | 없음 | `Direct` | 창이 tsx로 소스 호스트를 돌린다, `CC_DEV=1` | 키퍼 이전처럼 앱이 호스트의 부모다. `target/debug`에 남은 번들 호스트는 무시한다 |
+| macOS나 Linux 디버그 | `CC_USE_KEEPER=1` | `KeeperInProcess` | 창이 `CC_KEEPER_IN_PROCESS=1`과 함께 자신을 `centralu --keeper`로 띄우고, 키퍼는 소스 호스트를 돌린다 | `tauri dev`는 창만 빌드하므로 옆의 `centralu-keeper`가 더 오래된 코드일 수 있다([architecture.md](architecture.md) §4.1) |
+| 어디서나 | `CC_HOST_CMD`(값 무관) | `Direct` | 그 명령줄(빈 값이면 번들된 호스트나 소스 호스트) | 다른 호스트를 돌리는 비상구 |
+| Linux 릴리스(AppImage, deb, rpm) | 없음 | `Direct` | 창이 시스템 Node로 번들된 호스트를 돌린다 | Linux에서 키퍼를 돌려 본 적이 없고, AppImage는 앱이 끝나면 파일을 언마운트한다(#295) |
+| Linux 디버그 | 없음 | `Direct` | tsx로 소스 호스트 | 위와 같다 |
+| Linux 릴리스 | `CC_USE_KEEPER=1` | `KeeperBeside` | 창 옆의 키퍼(AppImage의 `usr/bin/`) | macOS 밖에는 셸이 없다 |
+| Windows, 릴리스와 디버그 | `CC_USE_KEEPER`는 무시 | `Direct` | 번들된 호스트(릴리스)나 소스 호스트(디버그), 콘솔 창 없이(§1) | 키퍼는 unix 소켓, 디스크립터 전달, `flock` 위에 지어졌다 |
+| `centralu --keeper` | `CC_KEEPER_IN_PROCESS` | `KeeperInProcess` | 창의 실행 파일 안에서 키퍼가 돈다 | 디버그 창이 요청했다 |
+| `centralu --keeper`, 옆에 `centralu-keeper` 있음 | 없음 | `KeeperBeside` | `centralu-keeper`로 `exec`한다: 같은 pid, 인자, 디스크립터 | 0.1.0-beta.11 이하의 키퍼가 넘겨줄 때와 #440 이전의 창이 창의 실행 파일을 이렇게 띄운다 |
+| `centralu --keeper`, 옆에 아무것도 없음 | 없음 | `KeeperInWindowExe` | 창의 실행 파일 안에서 키퍼가 돈다 | |
+
+창이 정하지 않는 것, 각자 제자리에서:
+
+| 무엇 | 어디서 정하는가 |
+|---|---|
+| 열린 셸이 하는 일: 설치할지 둘지, 고정됐는지, 검증, 복사, 거절 이유 | 창의 `shell::prepare`, `shell::install::plan`, `shell::start::start`, 그리고 셸 크레이트([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
+| 직접 띄운 키퍼의 넘겨주기(§4.4): 창이 지정한 실행 파일로. #444부터는 `centralu-keeper`, #440 이전에는 창의 실행 파일(그러면 위의 `centralu --keeper` 행) | `server::switch`, `server::upgrade` |
+| 검증된 콘텐츠에서 뜬 키퍼의 넘겨주기: 새 콘텐츠를 검증하고 복사한 뒤 `<data>/content/<new>/centralu-keeper`로 넘겨준다 | `server::content_route`(§4.4) |
+| 원격의 `centralu serve`: npm 런처가 시스템 Node로 번들된 호스트를 돌린다. 창도 키퍼도 없다 | `packaging/npm/centralu/bin/serve.mjs`(§4.7) |
+| `pnpm dev`와 e2e: `pnpm host`가 소스 호스트를 돌린다. 창도 키퍼도 없다 | `CONTRIBUTING.md` |
+
 ### 4.1 호스트를 쥐는 쪽: 키퍼 (#280, 옵션 C 1단계)
 
 패키지된 앱에서 호스트의 부모는 앱이 아니라 키퍼다(`centralu-keeper`, 창의 실행 파일 옆에 있는 자기 실행 파일, #440;
@@ -379,7 +418,7 @@ nonce가 적힌 `<data>/shell-status.json`을 최대 45초 기다린다. 셸은 
 모두를 macOS는 셸로 판단한다. 셸이 거절하거나 보고하지 않으면 창은 다른 모든 빌드처럼 자기 번들에서 키퍼를 직접
 띄우고(창이 살아 있는 동안 계속), 그 이유를 `host_build`(`shell`)에 남긴다. 릴리스는 빌드 바에 보여 주고, 셸이
 고정되지 않은 빌드(로컬 `pnpm app`, 리허설)는 `keeper.log`에 `[window]` 줄로만 적으며 그 셸을 설치하지도 열지도
-않는다. 디버그 빌드, `CC_KEEPER_HOST_SOURCE`, Linux와 Windows는 전처럼 키퍼(또는 호스트)를 직접 띄운다.
+않는다. 디버그 빌드, `CC_KEEPER_HOST_SOURCE`, Linux와 Windows는 전처럼 키퍼(또는 호스트)를 직접 띄운다(§4.0).
 
 **빌드별 사본.** 띄울 때마다 키퍼는 번들의 `resources/host` 폴더를 `<data>/hosts/<key>/`에 복사하고(임시 폴더에
 쓴 뒤 rename) 거기서 `main.mjs`를 돌린다. key는 `bundle-info.json`에 찍힌 커밋이다. `-dirty`나 `unknown`
