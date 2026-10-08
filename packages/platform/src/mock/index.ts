@@ -157,8 +157,15 @@ export class MockPlatform implements Platform {
   readonly pickedFileAsks: { title: string; extensions: string[] }[] = []
   /** The side that listens for app links (M4 E-4) — `openAppLink` hands one over like the OS would */
   private readonly appLinkListeners = new Set<(link: string) => void>()
+  /**
+   * Links handed over before anyone listened. The Tauri shell keeps these until the window takes
+   * them (`take_app_links`), so a link that arrives while the UI is still starting is not lost; the
+   * mock does the same (#424: WebKit starts the UI later than the e2e handed the link over).
+   */
+  private readonly pendingAppLinks: string[] = []
   /** As if the OS handed this app a link (M4 E-4, called by e2e) — passes it through raw, unfiltered by the shell */
   openAppLink(link: string): void {
+    if (this.appLinkListeners.size === 0) this.pendingAppLinks.push(link)
     for (const l of this.appLinkListeners) l(link)
   }
   /** The orchestrator tool chosen on the intro screen (#63) — the real thing writes it to app_settings */
@@ -2527,6 +2534,7 @@ export class MockPlatform implements Platform {
     },
     onAppLink: (cb: (link: string) => void) => {
       this.appLinkListeners.add(cb)
+      for (const link of this.pendingAppLinks.splice(0)) cb(link)
       return () => void this.appLinkListeners.delete(cb)
     },
   }
