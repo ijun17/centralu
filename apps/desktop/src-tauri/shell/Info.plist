@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The shell's Info.plist (docs/plans/thin-shell.md §3). Part of the shell's pinned bytes: the code
+  signature seals it, so any change here is a new shell version, which asks every person for their
+  permissions again. scripts/shell-bundle.mts copies it into Centralu.app/Contents/ unchanged;
+  tooling/shell-bundle.test.ts keeps it in step with src/lib.rs.
+
+  - The name is what the permission prompt and System Settings show (§9 decision 1).
+  - LSUIElement: no Dock icon and no menu bar; the window app has those (§3).
+  - CentraluShellVersion: SHELL_VERSION in src/lib.rs, the version shell.lock pins.
+  - The usage descriptions: macOS asks the responsible app for these when an agent's tool reaches
+    for the camera, the microphone, another app (Apple Events), a protected folder, the local
+    network, Bluetooth, contacts, calendars, reminders, photos or speech recognition. Without one,
+    such a request ends the process that made it (camera, microphone, Bluetooth, contacts,
+    calendars) or is denied without asking. They cannot be added later without a new shell
+    version, so the list is wider than what agents are known to use today.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>Centralu</string>
+  <key>CFBundleExecutable</key>
+  <string>centralu-shell</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
+  <key>CFBundleIdentifier</key>
+  <string>app.centralu.agent</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>Centralu</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CentraluShellVersion</key>
+  <integer>1</integer>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to control another app.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use Bluetooth.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use your calendars.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use your calendars.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use the camera.</string>
+  <key>NSContactsUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use your contacts.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to read or write files on your Desktop.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to read or write files in your Documents folder.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to read or write files in your Downloads folder.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to reach a device on your local network.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use the microphone.</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to read or write files on a network volume.</string>
+  <key>NSPhotoLibraryUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use your photo library.</string>
+  <key>NSRemindersFullAccessUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use your reminders.</string>
+  <key>NSRemindersUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use your reminders.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to read or write files on a removable volume.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>A tool an agent runs in Centralu wants to use speech recognition.</string>
+</dict>
+</plist>

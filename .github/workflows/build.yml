@@ -360,3 +360,15 @@ jobs:
       - name: keeper handing itself over
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
         run: node scripts/keeper-handoff-integration.mjs --no-build --no-claude --no-codex
+
+      # The shell that holds macOS permissions (docs/plans/thin-shell.md §3). Here because this job
+      # already has the workspace's debug dependencies built and cached: the shell's unit tests and
+      # its two debug builds (one trusting a throwaway key) compile only the shell crate on top.
+      # It is not a default member of the workspace, so `cargo build` above does not build it.
+      - name: shell unit tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-shell
+
+      - name: shell (verify, copy, start the keeper from the copy, refusals)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: pnpm exec tsx scripts/shell-integration.mts

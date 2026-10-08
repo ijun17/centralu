@@ -1,0 +1,5 @@
+{
+  "_comment": "The shell builds that may ship, one entry per shell version (docs/plans/thin-shell.md section 6.1). Each was built once by .github/workflows/shell-release.yml and published as a prerelease asset; the release script downloads the asset and refuses one whose sha256 differs, and the window refuses to install a shell whose cdhash differs. A new entry is a reviewed change: every new shell version asks every person for their macOS permissions again. Fields: version (CentraluShellVersion), platform, sha256 (of the zip), cdhash (codesign's CDHash, sha256 truncated to 20 bytes, hex), url (the release asset).",
+  "format": 1,
+  "shells": []
+}
