@@ -71,7 +71,9 @@ export class AppVersions {
     for (const name of names) {
       if (name.startsWith('.')) continue
       try {
-        out.push(JSON.parse(readFileSync(join(dir, name, 'meta.json'), 'utf8')) as Snapshot)
+        const meta = JSON.parse(readFileSync(join(dir, name, 'meta.json'), 'utf8')) as Partial<Snapshot> | null
+        // A record without the id and time the list sorts by is not a version this build can show or restore (#384)
+        if (meta && typeof meta === 'object' && typeof meta.id === 'string' && typeof meta.at === 'number') out.push(meta as Snapshot)
       } catch {
         // A half-deleted version — do not list it
       }
