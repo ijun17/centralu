@@ -3,8 +3,8 @@
 //! LaunchServices to start the keeper, and read how that went (`start`). When it does not start a
 //! keeper the window starts one directly, as before, and says why (`Report`).
 //!
-//! Used by a macOS release build only (`sidecar.rs` decides). Debug builds, Linux and Windows start
-//! the keeper (or the host) as they always did.
+//! Used by a macOS release build only (`start_plan::StartMode::ThroughShell`, docs/agent-host.md
+//! §4.0). Debug builds, Linux and Windows start the keeper (or the host) as they always did.
 //!
 //! **A shell the window carries unpinned** (a local `pnpm app` build or a release rehearsal, whose
 //! shell was built on the spot rather than taken from `shell.lock`) is neither installed nor opened:
@@ -12,7 +12,8 @@
 //! throwaway key, which the shell refuses anyway, and opening it would cost a launch, could ask for
 //! access to the folder the build sits in (a build under `~/Desktop` asks in the shell's name), and
 //! would leave unpinned bytes where people's permissions are meant to attach. `CC_SHELL_UNPINNED=1`
-//! opens it anyway, for checking the path by hand against a temporary `CC_DATA_DIR`.
+//! (read with the other start variables in `start_plan::Env`) opens it anyway, for checking the
+//! path by hand against a temporary `CC_DATA_DIR`.
 
 pub mod install;
 pub mod start;
@@ -28,9 +29,6 @@ use serde_json::Value;
 
 use install::{Carried, Installed, Plan};
 use start::{Fallback, Outcome, Request, World};
-
-/// Opens an unpinned shell anyway (module docs).
-pub const UNPINNED_ENV: &str = "CC_SHELL_UNPINNED";
 
 /// How this window's keeper start went, for the UI (`HostBuild.shell`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
