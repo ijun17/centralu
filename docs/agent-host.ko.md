@@ -406,8 +406,9 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 패키지된 앱에서 호스트의 부모는 앱이 아니라 키퍼다(`centralu-keeper`, 창의 실행 파일 옆에 있는 자기 실행 파일, #440;
 [architecture.ko.md](architecture.ko.md) §4.1). 키퍼는 호스트를 `--port 0 --watch-parent --db <data>/store.db`와
 `CC_DATA_DIR=<data>`로 띄우고, stdin 파이프를 쥐며, 앱이 쓰던 규칙 그대로 다시 띄운다: 연속 실패 다섯 번,
-30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc.rs`,
-키퍼와 앱의 직접 경로가 함께 쓴다). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
+30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc/`,
+키퍼와 앱의 직접 경로가 함께 쓴다: 모든 OS가 함께 쓰는 로직은 `mod.rs`, OS마다 다른 것은 같은 작은 인터페이스 뒤의
+`unix.rs`와 `windows.rs`, Node 찾기는 `node.rs`). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
 
 **키퍼를 띄우는 쪽.** `<data>/keeper.sock`에서 답하는 키퍼가 없을 때 창이 띄운다. macOS 릴리스는 먼저 셸에게
 맡긴다([plans/thin-shell.md](plans/thin-shell.md) §6, §10.2, 창의 `src/shell/`): 자기가 싣고 온 셸로
