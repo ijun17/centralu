@@ -128,7 +128,7 @@ async function putBack(c: HostControl, to: InstalledVersion, why: string, was: {
   c.step('roll_back')
   const tail = await hostLogTail(c).catch(() => '')
   const log = tail ? ` The end of its host.log: ${tail}` : ''
-  const back = was.current ? `Centralu ${was.current.version}` : 'the Centralu it ran before'
+  const back = was.current ? `Centralu ${was.current.version}` : 'the Centralu that was there'
   try {
     // A new host that came up late, or half, goes before the old one starts on the same port
     await stopRemoteHost(c).catch(() => undefined)
@@ -137,7 +137,7 @@ async function putBack(c: HostControl, to: InstalledVersion, why: string, was: {
   } catch (err) {
     throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}), and putting back ${back} failed too: ${(err as Error).message}.${log}`)
   }
-  throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}); it runs ${back} again.${log}`)
+  throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}); ${was.running ? `it runs ${back} again` : `${back} is back in place`}.${log}`)
 }
 
 export type UpdateOptions = Omit<InstallOptions, 'exec' | 'spec' | 'target' | 'script' | 'onStep' | 'activate'>

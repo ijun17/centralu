@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -26,14 +26,14 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
 
-async function remoteHost(port = 0, store = new Store()) {
+async function remoteHost(port = 0, store = new Store(), o: { version?: string; activity?: () => HostActivity } = {}) {
     const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
-    onRpc: createRpcHandler(mgr, adapters),
-    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
+    onRpc: createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}),
+    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
   })
   const p = await server.listen()
   let closed = false
@@ -486,5 +486,114 @@ describe('machines.install (#82, plan §10.2)', () => {
     const dev = await hubHost(() => lineFor(1), new Store(), true, { tunnelFor: () => tunnel, installer, hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true } })
     await expect((await ui(dev.port)).call('machines.install', { machineId: 'm1' })).rejects.toThrow(/development build is not published/)
     expect(runs).toHaveLength(3)
+  })
+})
+
+describe('machines.update through the link (#82, plan §10.5)', () => {
+  const NODE = '24.21.0'
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  /** What each remote command is, read back from the script the hub sent */
+  const classify = (cmd: string): string => {
+    if (cmd.includes('serve --stop')) return 'stop'
+    const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
+    const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
+    if (script.includes('CENTRALU-PREFLIGHT')) return 'preflight'
+    if (script.includes('say node ok')) return 'node'
+    if (script.includes('host.log')) return 'tail'
+    const arg = /"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)?.[1]
+    const p = arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean }) : null
+    return p?.action ?? (p?.activate === false ? 'install_beside' : 'install')
+  }
+
+  async function setup(o: { startsVersion: string }) {
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    cleanups.push(() => reg.close())
+    const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
+    let running = await remoteHost(0, new Store(), { version: '0.0.1', activity: () => activity })
+    let line = lineFor(running.port, { version: '0.0.1' })
+    const runs: string[] = []
+    const old = { version: '0.0.1', node: NODE }
+    const next = { version: APP_VERSION, node: NODE }
+    const done = (o: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(o)}\n`
+    let hub: Hub | null = null
+    const exec = async (cmd: string) => {
+      const kind = classify(cmd)
+      runs.push(kind)
+      const out = (stdout: string) => ({ code: 0, stderr: '', stdout })
+      switch (kind) {
+        case 'preflight':
+          return out('CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n')
+        case 'node':
+          return out('CENTRALU-INSTALL node ok\n')
+        case 'install_beside':
+          return out(done({ installed: next, current: old, previous: null, removed: [], left: [] }))
+        case 'stop': {
+          await running.close()
+          line = { ...line, hostRunning: false }
+          // The person presses Reconnect while the host is down: the link must not open, or start a host, now
+          hub!.links.reconnect('m1')
+          await sleep(200)
+          return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
+        }
+        case 'pointers':
+          return out(done({ current: next, previous: old }))
+        case 'prune':
+          return out(done({ current: next, previous: old, removed: [], left: [] }))
+        case 'tail':
+          return out('host: the store was written by a newer Centralu\n')
+        default:
+          return out('')
+      }
+    }
+    const startHost = async (): Promise<HostStart> => {
+      runs.push('start')
+      running = await remoteHost(0, new Store(), { version: runs.includes('tail') ? '0.0.1' : o.startsVersion })
+      line = lineFor(running.port, { version: running === null ? '' : runs.includes('tail') ? '0.0.1' : o.startsVersion })
+      return { how: 'detached', note: null }
+    }
+    const tunnel = Object.assign(
+      new DirectTunnel(() => {
+        runs.push('open')
+        return line
+      }),
+      { exec, startHost },
+    )
+    const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
+    hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500 })
+    const u = await ui(hub.port)
+    await until(() => status(hub!) === 'versions_differ')
+    return { hub, u, runs, activity }
+  }
+
+  it('says what would stop, holds the link while the host is down, reports each step, and answers once the new version said hello', async () => {
+    const { hub, u, runs, activity } = await setup({ startsVersion: APP_VERSION })
+    // The prompt's question, asked of the remote over a connection of its own while the link waits on versions
+    expect(await u.call('machines.activity', { machineId: 'm1' })).toEqual({ activity })
+    expect(hub.links.list()[0]!.install).toBeNull()
+    const r = await u.call('machines.update', { machineId: 'm1' })
+    expect(r).toMatchObject({ current: { version: APP_VERSION }, previous: { version: '0.0.1' }, machine: { install: { managed: true, current: { version: APP_VERSION } } } })
+    // Nothing opened the link between stopping the old host and starting the new one, though Reconnect was pressed
+    const between = runs.slice(runs.indexOf('stop'), runs.indexOf('start'))
+    expect(between).toEqual(['stop', 'pointers'])
+    expect(runs.filter((k) => k !== 'open')).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
+    const steps = u
+      .events()
+      .filter((e) => e.type === 'machine_status' && e.machine.operation)
+      .map((e) => e.machine.operation.step as string)
+    expect([...new Set(steps)]).toEqual(['preflight', 'registry', 'node', 'centralu', 'stop', 'switch', 'start', 'check', 'prune'])
+    expect(u.events().some((e) => e.type === 'machine_status' && e.machine.status === 'updating')).toBe(true)
+    await until(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.operation).toBeNull()
+  })
+
+  it('puts the old version back when the host that answers is not the new one, and says so', async () => {
+    const { hub, u, runs } = await setup({ startsVersion: '0.0.9' })
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(
+      /Centralu .* did not start on box \(it did not answer within 30 s\); it runs Centralu 0\.0\.1 again\. The end of its host\.log: host: the store was written by a newer Centralu/,
+    )
+    expect(runs.filter((k) => k !== 'open')).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'tail', 'stop', 'pointers', 'start'])
+    // Back on the old version, the prompt is there again
+    await until(() => status(hub) === 'versions_differ')
+    expect(hub.links.list()[0]!.versions?.remote.version).toBe('0.0.1')
   })
 })
