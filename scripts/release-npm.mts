@@ -35,7 +35,8 @@ import {
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_NAME, APP_VERSION } from '../packages/protocol/src/brand.js'
-import { resolveSigningKey, trustedKeys, verifyContent, writeContentManifest, type SigningKey } from './content-manifest.mjs'
+import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
+import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE_ROOT = join(ROOT, 'apps/desktop/src-tauri/target/release/bundle')
@@ -235,13 +236,12 @@ type Target = {
    */
   verify?: string[]
   /**
-   * Write and sign a content manifest over the keeper and the host (docs/plans/thin-shell.md §4).
-   * Nothing ships it yet: the shell that reads it comes in a later step, so it is written beside the
-   * bundle, under `target/`, and the package is unchanged. `keeper` names the keeper executable
-   * inside the copied artifact: the bundled one, not cargo's, because the bundler signs it and so
-   * changes its bytes.
+   * Put the macOS shell and the signed content (the keeper and the host, with a signed manifest)
+   * into the copied bundle (docs/plans/thin-shell.md §4, §10.2; `scripts/bundle-stage.mts`). The
+   * content is made from what the bundle carries: its `Contents/MacOS/centralu-keeper` (the bundled
+   * one, not cargo's, because the bundler signs it and so changes its bytes) and its host.
    */
-  contentManifest?: { keeper: (dest: string) => string }
+  stagesShell?: true
   /** the name the artifact takes inside the npm package — fixed, so the launcher can find it */
   artifact: string
   /** locate what the build just produced */
@@ -264,7 +264,7 @@ const TARGETS: Record<string, Target | undefined> = {
      * The `.dmg` is still built in CI, where a break in it should be visible.
      */
     bundles: 'app',
-    contentManifest: { keeper: (dest) => join(dest, 'Contents/MacOS', KEEPER_EXE) },
+    stagesShell: true,
     artifact: `${APP_NAME}.app`,
     locate: () => join(BUNDLE_ROOT, 'macos', `${APP_NAME}.app`),
     install: (src, dest) => {
@@ -564,7 +564,7 @@ if (target && ARCH_PKG) {
   step('Verifying the bundle')
   target.check(dest)
 
-  if (target.contentManifest) signContent(target.id, target.contentManifest.keeper(dest))
+  if (target.stagesShell) await stageShellAndContent(target.id, dest)
 
   // If `files` does not actually point at what was packed, the tarball ships **empty inside**
   // — invisible until someone reads the pack log by eye. Since the name is read from one place
@@ -601,25 +601,23 @@ for (const pkgDir of ARCH_PKG ? [ARCH_PKG, MAIN_PKG] : [MAIN_PKG]) {
 }
 
 /**
- * Stage what the keeper and the host need into `target/release/content/` and sign a manifest over
- * it. Which folder becomes "the content" the shell copies is decided in a later step (#440); for
- * now this proves, on every release, that the release environment's key signs and that what it
- * signs verifies against the public keys a shell would carry.
+ * Signs the content and puts it, with the shell, into the bundle in the package (`bundle-stage.mts`):
+ * `Contents/Resources/content/` and `Contents/Resources/shell/Centralu.app`. The content is signed in
+ * `target/release/content/` first (the release workflow keeps that manifest as an artifact) and
+ * verified there, then copied in; the bundle is signed again and what it now carries is verified once
+ * more, so what was signed is exactly what is packed.
  *
- * Before publishing, on purpose: a key that does not match keys.json stops the release while
- * nothing is on the registry, instead of failing the job after the platform package went out and
- * leaving the shim job waiting on it.
+ * The shell: a publish takes the asset shell.lock pins for the source's shell version (sha256 and
+ * cdhash checked); without an entry, and in a rehearsal, it is built here and marked unpinned, which
+ * the window neither installs nor opens.
+ *
+ * Before publishing, on purpose: a key that does not match keys.json, or a pinned shell that would
+ * refuse the content, stops the release while nothing is on the registry, instead of failing the job
+ * after the platform package went out and leaving the shim job waiting on it.
  */
-function signContent(platform: string, keeper: string): void {
-  step('Signing the content manifest')
+async function stageShellAndContent(platform: string, bundle: string): Promise<void> {
+  step('Signing the content and staging it with the shell')
   const release = join(ROOT, 'apps/desktop/src-tauri/target/release')
-  const dir = join(release, 'content')
-  rmSync(dir, { recursive: true, force: true })
-  mkdirSync(dir, { recursive: true })
-  cpSync(join(ROOT, 'apps/desktop/src-tauri/resources/host'), join(dir, 'host'), { recursive: true, dereference: true })
-  // `check` has already proved this file is there, executable and the right machine.
-  cpSync(keeper, join(dir, KEEPER_EXE))
-
   let key: SigningKey
   try {
     key = resolveSigningKey({ dryRun: !publish, pem: contentSigningPem })
@@ -629,12 +627,11 @@ function signContent(platform: string, keeper: string): void {
   if (publish && requireContentKey && key.throwaway) {
     fail('--require-content-key: CONTENT_SIGNING_KEY is not set. Is this job running in the npm-publish environment?')
   }
-  const { manifest } = writeContentManifest(dir, { appVersion: APP_VERSION, platform }, key)
+  const contentDir = join(release, 'content')
+  const manifest = stageContent(contentDir, { bundle, key, platform })
+  const keys = key.throwaway ? [{ name: 'throwaway', keyId: key.keyId, publicKey: key.publicKey }] : trustedKeys()
   try {
-    verifyContent(dir, {
-      platform,
-      keys: key.throwaway ? [{ name: 'throwaway', keyId: key.keyId, publicKey: key.publicKey }] : trustedKeys(),
-    })
+    verifyContent(contentDir, { platform, keys })
   } catch (e) {
     fail(
       `the content manifest does not verify: ${(e as Error).message}. ` +
@@ -643,8 +640,30 @@ function signContent(platform: string, keeper: string): void {
   }
   const files = (JSON.parse(manifest.toString('utf8')) as { files: unknown[] }).files.length
   console.log(`  ${files} files, key ${key.keyId}${key.throwaway ? ' (throwaway: this run signs nothing a shell will accept)' : ''}`)
+
+  let shell: CarriedShell
+  try {
+    shell = await shellToCarry({ usePinned: publish, out: join(release, 'carried-shell'), targetDir: join(ROOT, 'apps/desktop/src-tauri/target') })
+  } catch (e) {
+    fail(`the shell to carry: ${(e as Error).message}`)
+  }
+  if (shell.pinned && key.throwaway) {
+    fail('the pinned shell refuses content signed with a throwaway key, so every window would start without it. Publish from the release workflow.')
+  }
+  stageBundle(bundle, { shell, contentDir })
+  try {
+    checkStaged(bundle, { keys, platform, manifest, lock: shell.lock })
+  } catch (e) {
+    fail(`the staged bundle does not carry what was signed: ${(e as Error).message}`)
+  }
+  console.log(`  shell ${shell.version} (${shell.pinned ? 'pinned in shell.lock' : 'built here, unpinned'}) and the content are in the bundle; signature valid`)
+  if (publish && !shell.pinned) {
+    console.log(
+      `\n\x1b[33m  warning: shell.lock has no entry for shell ${shell.version}, so this release carries a shell built here, which the window neither installs nor opens: the keeper starts directly, as before.\x1b[0m`,
+    )
+  }
   if (publish && key.throwaway) {
-    console.log('\n\x1b[33m  warning: published with a throwaway content key. Harmless while no shell reads the manifest.\x1b[0m')
+    console.log('\n\x1b[33m  warning: published with a throwaway content key. Harmless only because the shell it carries is unpinned and never opened.\x1b[0m')
   }
 }
 

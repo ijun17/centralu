@@ -271,6 +271,24 @@ export type BuildBar =
    * build running there is newer than this window's, so a switch goes back, and only by hand.
    */
   | { kind: 'other'; who: 'host' | 'keeper'; older?: true }
+  /**
+   * A macOS release started its keeper without the permission shell (docs/plans/thin-shell.md §6):
+   * agents work, permissions follow this build. `detail` is the shell's or the window's own reason.
+   */
+  | { kind: 'shell'; text: string; detail: string }
+
+/**
+ * How the window's last keeper start went through the macOS shell (`HostBuild.shell`). Absent when
+ * none was tried. `notify`: a release says so on screen; a local build only writes keeper.log.
+ */
+export type ShellStart = {
+  started: boolean
+  /** The shell's refusal (`content`, `downgrade`, …) or the window's (`install`, `open`, `no-report`, …) */
+  reason?: string
+  message?: string
+  notify: boolean
+  shellVersion?: number
+}
 
 export type BuildBarInput = {
   build: {
@@ -281,9 +299,12 @@ export type BuildBarInput = {
     sameBuild?: boolean
     keeperSameBuild?: boolean
     swap?: SwapView
+    shell?: ShellStart
   }
   /** "Not now" or "Dismiss" was pressed, for as long as the window stays behind */
   dismissed: boolean
+  /** The shell note was dismissed (it stays dismissed for the window's life) */
+  dismissedShell?: boolean
   /** The swap (`startedAt`) whose failure or note was dismissed */
   dismissedSwap: number | null
 }
@@ -312,6 +333,7 @@ export const RESTART_COMPLETELY_LOSES =
  *    builds"), with "Try again" while the window is still behind.
  * 4. A host or keeper of another build: the builds and "Switch to this build", or, when the build
  *    running there is newer than this window's, that this window is an older build (#352).
+ * 5. The keeper started without the permission shell, in a release (`shellBarText`), until dismissed.
  */
 export function buildBar(i: BuildBarInput): BuildBar {
   const b = i.build
@@ -331,7 +353,33 @@ export function buildBar(i: BuildBarInput): BuildBar {
     const older = isNewerBuild(who === 'host' ? b.host : b.keeper, b.app)
     return { kind: 'other', who, ...(older ? { older: true as const } : {}) }
   }
+  const sh = b.shell
+  if (sh && !sh.started && sh.notify && !i.dismissedShell) {
+    return { kind: 'shell', text: shellBarText(sh.reason), detail: sh.message ?? '' }
+  }
   return { kind: 'none' }
+}
+
+/**
+ * The bar's line when the keeper started without the permission shell. What it costs comes first:
+ * agents run either way, but macOS permissions belong to this build and may be asked for again
+ * after an update. The reason in a few words follows; the full one is on hover.
+ */
+export function shellBarText(reason: string | undefined): string {
+  const why: Record<string, string> = {
+    content: "this build's signed content did not verify",
+    'shell-too-old': 'the permission shell is older than this version needs',
+    downgrade: 'this version is older than one that already ran here',
+    copy: 'the content could not be copied into the data folder',
+    'keeper-start': 'the shell could not start the background keeper',
+    'keeper-exited': 'the shell could not start the background keeper',
+    'keeper-timeout': 'the shell could not start the background keeper',
+    install: 'the permission shell could not be installed',
+    open: 'macOS did not open the permission shell',
+    'no-report': 'the permission shell did not answer',
+  }
+  const words = (reason && why[reason]) || 'the permission shell did not start it'
+  return `Agents started without the permission shell (${words}). They work, but macOS may ask for permissions again after an update.`
 }
 
 /** A build in a few words: its version and commit (`0.1.0-beta.10, 2ffcaec5`), or just the commit */

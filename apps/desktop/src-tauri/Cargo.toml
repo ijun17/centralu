@@ -90,6 +90,10 @@ trash = { version = "5", default-features = false, features = ["chrono", "coinit
 # platform crates; this declares that we call it directly.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# Hashing the shell bundle the window installs into `<data>/shell/` (src/shell/install.rs, thin-shell
+# plan §6.1). **Not a new dependency**: the same sha2 0.10 the verifier (content-verify) uses, already
+# in Cargo.lock.
+sha2 = "0.10"
 
 # Used only to position the traffic light buttons (macOS only).
 # **Not a new dependency** — the objc2 family is already pulled in by tauri, tao and wry

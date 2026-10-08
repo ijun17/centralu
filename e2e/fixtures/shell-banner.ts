@@ -208,6 +208,21 @@ export function shellBannerTests(): void {
       await expect(page.getByTestId('host-restart-keeper')).toHaveCount(0)
     })
 
+    test('a release that started its keeper without the shell says so, why on hover, and nothing to switch', async ({ page }) => {
+      await open(page, 'demo=focus&state=shell')
+      await expectBelowTopBar(page)
+      const line = page.getByTestId('host-shell-fallback')
+      await expect(line).toHaveText(
+        "Agents started without the permission shell (this build's signed content did not verify). They work, but macOS may ask for permissions again after an update.",
+      )
+      await expect(line).toHaveAttribute('title', /is not what the project signed: bad signature$/)
+      await expect(page.getByTestId('host-other-build')).toHaveAttribute('role', 'status')
+      await expect(page.getByTestId('host-switch-build')).toHaveCount(0)
+      await expect(page.getByTestId('host-restart-keeper')).toHaveCount(0)
+      await page.getByTestId('host-bar-dismiss').click()
+      await expect(page.getByTestId('host-other-build')).toHaveCount(0)
+    })
+
     test('in the grid, every panel starts below the banner', async ({ page }) => {
       await open(page, 'demo=grid&state=other')
       const banner = await expectBelowTopBar(page)

@@ -8,8 +8,9 @@
  *   - `.github/workflows/shell-release.yml`, once per shell version, to make the bytes every
  *     release then ships (`build`);
  *   - `scripts/shell-integration.mts`, for debug builds, one of them trusting a test key;
- *   - later, the app's release (thin-shell plan §10, step 4), to put the pinned asset into the
- *     window's bundle: `fetchPinned` downloads it and refuses it unless its sha256 is the lock's.
+ *   - the app's release, through `scripts/bundle-stage.mts` (thin-shell plan §10.2), to put the pinned
+ *     asset into the window's bundle: `fetchPinned` downloads it and refuses it unless its sha256 is
+ *     the lock's; without a lock entry (and for `pnpm app`) `build` makes an unpinned one.
  *
  * **Why pinned, and why a zip.** macOS identifies an ad-hoc signed app by its cdhash, so a rebuilt
  * shell is a new app and every grant is gone; a rebuild of the same source is not promised to give

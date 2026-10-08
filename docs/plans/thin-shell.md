@@ -1,6 +1,6 @@
 # A fixed shell that holds macOS permissions: plan
 
-> **Status: decided by the owner on 2026-10-07 (§9). Steps 1–3 built (§10).** Replaces the shape first proposed on #440
+> **Status: decided by the owner on 2026-10-07 (§9). Steps 1–4 built (§10).** Replaces the shape first proposed on #440
 > (shell = window + keeper). The measurements behind every choice here are in
 > [spikes/2026-10-thin-shell-tcc.md](../spikes/2026-10-thin-shell-tcc.md).
 
@@ -60,7 +60,8 @@ never appears).
 
 **How it gets there.** The window carries the shell's bytes in `Contents/Resources/shell/` (only as a source for
 copying; it is never run from there). On start the window compares the installed shell's version with the one it
-carries and copies the shell out when it is missing or older. A newer installed shell is left alone.
+carries and copies the shell out when it is missing or older. A newer installed shell is left alone. At the same
+version, pinned bytes replace different ones (a local build's shell, a damaged copy); §10.2 has the whole table.
 
 **Bytes that do not change.** A rebuild of the same source does not promise the same bytes, and different bytes
 are a new app to macOS. So the shell is built **once per shell version**, published as a release asset, and recorded
@@ -154,9 +155,9 @@ The shell is pinned, not frozen. Replacing it is part of the design from the sta
   `Contents/Resources/shell/` together with that version, and the manifest names the minimum shell version the
   content needs.
 - The window installs a carried shell when none is installed or the carried version is higher: it copies to
-  `<data>/shell/.Centralu.app.new`, verifies the copy against `shell.lock`, renames the old one aside, renames the
-  new one in, and removes the old one once the new shell has started a keeper. A failed step leaves the old shell
-  in place.
+  `<data>/shell/.Centralu.app.new`, verifies the copy against the hash the release recorded after checking the
+  bytes against `shell.lock` (§10.2), renames the old one aside, renames the new one in, and removes the old one
+  once the new shell has started a keeper. A failed step leaves the old shell in place.
 - The running keeper is not disturbed: the new shell only matters the next time a keeper has to be started, or at
   once if the content requires it (then the keeper hands off through the new shell).
 - `shell.lock` keeps one entry per shell version (version, sha256, cdhash, release asset URL), so the release
@@ -216,7 +217,7 @@ Every step lands behind the current behaviour until step 4 switches release buil
 shipping in between.
 
 Status: steps 1 and 2 are merged (#444, #445; the host copies have not moved under the content folder yet, §5).
-Step 3 is §10.1 (#448). Steps 4 to 6 are open.
+Step 3 is §10.1 (#448), step 4 is §10.2. Steps 5 and 6 are open.
 
 ### 10.1 Step 3 as built (2026-10-08)
 
@@ -242,4 +243,30 @@ not a default member, so app builds never build it. What the plan left open, and
 Left for later steps: the window opening the shell and reading `shell-status.json` (step 4), removing old
 `<data>/content/<version>/` folders and leftover `.partial-*` folders (the keeper, step 5), and moving the
 keeper's host copies (`<data>/hosts/`) under the content folder (§5). `fetchPinned` (`scripts/shell-bundle.mts`)
-checks a downloaded shell against `shell.lock`; the release starts using it when the window carries the shell.
+checks a downloaded shell against `shell.lock`; the release uses it since step 4 (§10.2).
+
+### 10.2 Step 4 as built (2026-10-08)
+
+A macOS release window installs or upgrades the shell and starts its keeper through it (`src/shell/` in the window,
+`scripts/bundle-stage.mts` for the bundle). Debug builds, Linux and Windows are unchanged. What the plan left open:
+
+| Question | Choice | Why |
+|---|---|---|
+| What the bundle carries | `Contents/Resources/shell/Centralu.app`, `Contents/Resources/shell/shell.json` (`{ format 1, version, tree, pinned }`) and `Contents/Resources/content/` (`centralu-keeper`, `host/`, the manifest and its `.sig`) | The window reads the version and the hash it checks its copy against without parsing a code signature; the content is the folder `--content` names |
+| Making the content | From the bundle's own `Contents/MacOS/centralu-keeper` and `Contents/Resources/resources/host`, signed in `target/release/content/`, verified, copied in, then the bundle signed again ad hoc with `--preserve-metadata=identifier,entitlements,requirements,flags,runtime` and no `--deep`, and the copy inside verified once more | What is signed is exactly what ships: the bundler had already signed the keeper (new bytes), and re-signing the outer bundle seals the new resources without touching the shell's or the keeper's bytes (measured: `codesign --verify --deep --strict` passes, hardened runtime kept). The host is in the bundle twice (11 MB); the window's own copy stays for the direct start |
+| Which shell | A publish with a `shell.lock` entry for the source's shell version: the asset, its zip's sha256 and the bundle's cdhash checked, `pinned: true`. Otherwise (no entry yet, a rehearsal, `pnpm app`) built on the spot, `pinned: false`. A publish with a pinned shell and a throwaway content key stops | The pinned bytes are the only ones people's permissions should attach to; a rehearsal should not need the network |
+| `tree` | SHA-256 over `<x\|-> <sha256> <path>\n` per regular file, sorted by path bytes; symlinks refused (`tree_hash`, `treeHash`; one fixed tree tested on both sides) | The window checks its copy without `codesign`; a shell bundle has no symlinks |
+| Install or keep | None installed, unreadable, or a lower version: install. A higher version: keep (never downgrade). Same version: install only when the carried bytes are pinned and the installed bytes differ; otherwise keep | A local build's shell or a damaged copy of the same version must not stand in for the pinned bytes, and an unpinned shell must never replace a pinned one |
+| How it is copied | Files and folders with their mode bits, no extended attributes, no symlinks; `.Centralu.app.new`, hashed, old renamed to `.Centralu.app.old`, new renamed in, old renamed back if that fails. The old one is removed after any start through the installed shell succeeds; a missing install with an old one aside is put back first | A quarantine flag on the window must not follow the shell; a window that stops between the renames must not leave none |
+| How the shell is opened | `/usr/bin/open -n -g -a <shell> --args --content … --data-dir … --bundle-path … --nonce <32 hex>` | Exactly how the spike launched it, and the case the spike measured: `open` asks LaunchServices and returns, launchd starts the shell, so the shell is its own responsible process (a child of the window would be judged as the window). `-n` a new instance, `-g` the window stays in front; the shell is `LSUIElement` and never activates. Arguments after `--args` reach its `argv` unchanged; its environment is launchd's, which is why every path is an argument. NSWorkspace through objc2 would do the same with more code and a completion handler to wait on |
+| Waiting | Up to 45 s for `shell-status.json` carrying the nonce; a keeper that answers without a report counts as started after 3 s; `open` itself is bounded at 15 s | The shell waits up to 25 s for its keeper after verifying and copying; an old status file never answers for this start |
+| On a refusal or no report | The window starts the keeper directly from its bundle, as before, and does so for the rest of its life; the reason is `HostBuild.shell` (`started`, `reason`, `message`, `notify`, `shellVersion`) and a `[window]` line in `keeper.log` | Agents must keep working (§6). Not retrying the shell on every reconnect keeps a slow failure (a timeout) from costing 45 s each time |
+| Release or local | `notify` is the carried shell's `pinned`: a release shows the fallback in the build bar (reason in words, the full message on hover, dismissible); a local build only logs it | A person running a release should know their permissions follow this build; a developer's `pnpm app` would show it on every start |
+| An unpinned shell | Neither installed nor opened: the keeper starts directly (`unpinned`, logged). `CC_SHELL_UNPINNED=1` opens it anyway, for checking the path by hand with a temporary `CC_DATA_DIR` | The production shell refuses throwaway-signed content (measured on a staged bundle: exit 10, `content`, "signed with an unknown key"), so opening it buys nothing; opening it reads the bundle where it lies, and a build under `~/Desktop` would ask for Desktop access in the shell's name; installing it would put unpinned bytes where people's permissions are meant to attach. Until shell v1 is in `shell.lock`, releases therefore start their keeper as before |
+| `downgrade` and `shell-too-old` | Shown as fallbacks with the shell's message; no rollback question yet, and a carried shell newer than the installed one is installed before opening, so `shell-too-old` means the carried shell is too old as well | The rollback question belongs with step 5's content handling |
+
+Checked by hand on the first release that carries a pinned shell (not by tests, which never call LaunchServices):
+the shell lands in `~/.centralu/shell/`, a start goes through it (`[window] the shell started the keeper`), the
+window keeps focus and the Dock shows one icon, LaunchServices picks up an upgraded bundle at the same path, the
+nested `Centralu.app` inside the window is not offered by Spotlight or Launchpad, and Screen Recording granted once
+survives the next update.

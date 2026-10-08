@@ -8,11 +8,13 @@ import {
   isNewerBuild,
   keeperStaysBehind,
   olderBuildText,
+  shellBarText,
   swapProgressText,
   swapRunning,
   switchPlan,
   type AutoSwitchInput,
   type BuildBarInput,
+  type ShellStart,
   type SwapBuild,
   type SwapView,
 } from './switch-plan.js'
@@ -342,5 +344,55 @@ describe('the build bar otherwise (#280)', () => {
     expect(buildBar(input({ ...host, mode: 'direct' }))).toEqual({ kind: 'none' })
     expect(buildBar(input({ mode: 'keeper', app, sameBuild: true, keeperSameBuild: true }))).toEqual({ kind: 'none' })
     expect(buildBar(input(host, { dismissed: true }))).toEqual({ kind: 'none' })
+  })
+})
+
+describe('a keeper started without the permission shell (docs/plans/thin-shell.md §6)', () => {
+  const app = { commit: 'new' }
+  const onThisBuild = { mode: 'keeper' as const, app, sameBuild: true, keeperSameBuild: true }
+  const refused = (over: Partial<ShellStart> = {}): ShellStart => ({
+    started: false,
+    reason: 'content',
+    message: 'the content at /Applications/Centralu.app/Contents/Resources/content is not what the project signed: bad signature',
+    notify: true,
+    shellVersion: 1,
+    ...over,
+  })
+  const input = (shell: ShellStart | undefined, over: Partial<BuildBarInput> = {}): BuildBarInput => ({
+    build: { ...onThisBuild, shell },
+    dismissed: false,
+    dismissedSwap: null,
+    ...over,
+  })
+
+  it('a release says so, what it costs, and the reason in a few words; the full reason on hover', () => {
+    expect(buildBar(input(refused()))).toEqual({
+      kind: 'shell',
+      text: "Agents started without the permission shell (this build's signed content did not verify). They work, but macOS may ask for permissions again after an update.",
+      detail: 'the content at /Applications/Centralu.app/Contents/Resources/content is not what the project signed: bad signature',
+    })
+  })
+
+  it('every reason has words, and an unknown one still reads', () => {
+    for (const reason of ['content', 'shell-too-old', 'downgrade', 'copy', 'keeper-start', 'keeper-exited', 'keeper-timeout', 'install', 'open', 'no-report']) {
+      expect(shellBarText(reason), reason).not.toContain('did not start it')
+    }
+    expect(shellBarText('something-new')).toContain('the permission shell did not start it')
+    expect(shellBarText(undefined)).toContain('the permission shell did not start it')
+  })
+
+  it('nothing for a start through the shell, a local build, or once dismissed', () => {
+    expect(buildBar(input({ started: true, notify: true, shellVersion: 1 }))).toEqual({ kind: 'none' })
+    expect(buildBar(input(refused({ reason: 'unpinned', notify: false })))).toEqual({ kind: 'none' })
+    expect(buildBar(input(refused({ notify: false })))).toEqual({ kind: 'none' })
+    expect(buildBar(input(refused(), { dismissedShell: true }))).toEqual({ kind: 'none' })
+    expect(buildBar(input(undefined))).toEqual({ kind: 'none' })
+  })
+
+  it('a switch to make or a swap running comes first', () => {
+    const behind = { ...input(refused()), build: { ...onThisBuild, sameBuild: false, shell: refused() } }
+    expect(buildBar(behind).kind).toBe('other')
+    const swapping = { ...input(refused()), build: { ...onThisBuild, shell: refused(), swap: { phase: 'draining' as const, target: app, startedAt: 1 } } }
+    expect(buildBar(swapping).kind).toBe('switching')
   })
 })

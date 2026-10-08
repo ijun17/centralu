@@ -370,6 +370,17 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc.rs`,
 키퍼와 앱의 직접 경로가 함께 쓴다). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
 
+**키퍼를 띄우는 쪽.** `<data>/keeper.sock`에서 답하는 키퍼가 없을 때 창이 띄운다. macOS 릴리스는 먼저 셸에게
+맡긴다([plans/thin-shell.md](plans/thin-shell.md) §6, §10.2, 창의 `src/shell/`): 자기가 싣고 온 셸로
+`<data>/shell/Centralu.app`을 설치하거나 올리고, LaunchServices로 연다(`/usr/bin/open -n -g -a <shell> --args
+--content <bundle>/Contents/Resources/content --data-dir <data> --bundle-path <bundle> --nonce <n>`). 그리고 그
+nonce가 적힌 `<data>/shell-status.json`을 최대 45초 기다린다. 셸은 서명된 콘텐츠를 검증해 `<data>/content/<version>/`에
+복사하고, 창이 쓸 것과 같은 명령줄(`keeper::exe::Start`)로 거기서 `centralu-keeper`를 띄운다. 그래서 키퍼와 그 아래
+모두를 macOS는 셸로 판단한다. 셸이 거절하거나 보고하지 않으면 창은 다른 모든 빌드처럼 자기 번들에서 키퍼를 직접
+띄우고(창이 살아 있는 동안 계속), 그 이유를 `host_build`(`shell`)에 남긴다. 릴리스는 빌드 바에 보여 주고, 셸이
+고정되지 않은 빌드(로컬 `pnpm app`, 리허설)는 `keeper.log`에 `[window]` 줄로만 적으며 그 셸을 설치하지도 열지도
+않는다. 디버그 빌드, `CC_KEEPER_HOST_SOURCE`, Linux와 Windows는 전처럼 키퍼(또는 호스트)를 직접 띄운다.
+
 **빌드별 사본.** 띄울 때마다 키퍼는 번들의 `resources/host` 폴더를 `<data>/hosts/<key>/`에 복사하고(임시 폴더에
 쓴 뒤 rename) 거기서 `main.mjs`를 돌린다. key는 `bundle-info.json`에 찍힌 커밋이다. `-dirty`나 `unknown`
 빌드는 빌드 시각을 덧붙여, 서로 다른 dirty 빌드가 사본을 함께 쓰지 않는다. 호스트가 준비되면 그 호스트가 돌지

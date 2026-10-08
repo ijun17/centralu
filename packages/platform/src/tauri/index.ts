@@ -6,16 +6,18 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort } from '../ports/index.js'
 import { createWebPlatform } from '../web/index.js'
-import type { SwapView } from './switch-plan.js'
+import type { ShellStart, SwapView } from './switch-plan.js'
 
 export {
   autoSwitch,
   buildBar,
   keeperStaysBehind,
+  shellBarText,
   swapProgressText,
   swapRunning,
   switchPlan,
   type BuildBar,
+  type ShellStart,
   type SwapView,
   type SwitchPlan,
 } from './switch-plan.js'
@@ -174,6 +176,8 @@ export type HostBuild = {
    * said so when the window attached. The window then switches by itself when nothing can be lost.
    */
   relaunched?: boolean
+  /** How the last keeper start went through the macOS shell (thin-shell plan §6); absent when none was tried */
+  shell?: ShellStart
 }
 
 export async function hostBuild(): Promise<HostBuild> {

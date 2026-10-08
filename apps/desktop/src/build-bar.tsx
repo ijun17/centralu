@@ -44,6 +44,11 @@ export function BuildBarView({
         >
           {olderBuildText(build.app, bar.who === 'host' ? build.host : build.keeper)}
         </span>
+      ) : bar.kind === 'shell' ? (
+        // Agents run either way; the reason in full is one hover away (thin-shell plan §6)
+        <span className="min-w-0 flex-1 truncate" title={bar.detail} data-testid="host-shell-fallback">
+          {bar.text}
+        </span>
       ) : bar.kind === 'other' ? (
         <span className="min-w-0 flex-1 truncate">
           {bar.who === 'host'

@@ -8,9 +8,12 @@
 //! Two ways to get there (#280, option C step 1):
 //!   - **Keeper** (release builds on unix): the app finds or launches the keeper — the
 //!     `centralu-keeper` executable next to its own (#440), detached into its own session — and
-//!     attaches to it over its control socket. The keeper holds the host, so quitting, crashing or replacing the app
-//!     does not end the host unless background mode is off, in which case the keeper stops it the
-//!     moment the last window detaches, as quitting always did.
+//!     attaches to it over its control socket. A macOS release first asks the shell to start it
+//!     (`crate::shell`, thin-shell plan §6): the shell holds macOS permissions across updates, and
+//!     when it does not start a keeper the window starts one itself, as before, and says why. The
+//!     keeper holds the host, so quitting, crashing or replacing the app does not end the host
+//!     unless background mode is off, in which case the keeper stops it the moment the last window
+//!     detaches, as quitting always did.
 //!   - **Direct** (`pnpm app:dev` and other debug builds, `CC_HOST_CMD`, non-unix targets): the
 //!     app is the host's parent, exactly as before. `CC_USE_KEEPER=1` opts a debug build into
 //!     the keeper path.
@@ -65,6 +68,11 @@ pub struct HostBuild {
     /// nothing can be lost.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub relaunched: bool,
+    /// How the last keeper start this window made went through the macOS shell (thin-shell plan §6):
+    /// absent when it never tried (a keeper already answered, debug builds, Linux).
+    #[cfg(unix)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<crate::shell::Report>,
 }
 
 /// Whether "Apply now" can relaunch this window into the update just installed (#352), and why
@@ -132,6 +140,20 @@ fn bundled_host_dir(app: &AppHandle) -> Option<PathBuf> {
         .filter(|p| p.join("main.mjs").exists())
 }
 
+/**
+ * The window's `Contents/Resources`, where it carries the shell and the signed content, when this
+ * build starts its keeper through the shell: a macOS release build (thin-shell plan §6, §8). Debug
+ * builds, Linux and Windows never do, and neither does a release run with `CC_KEEPER_HOST_SOURCE`
+ * (the keeper scripts' way of naming the host to run, which the shell would not use).
+ */
+#[cfg(unix)]
+fn shell_resources(app: &AppHandle) -> Option<PathBuf> {
+    if !cfg!(target_os = "macos") || cfg!(debug_assertions) || std::env::var_os("CC_KEEPER_HOST_SOURCE").is_some() {
+        return None;
+    }
+    app.path().resource_dir().ok()
+}
+
 #[cfg_attr(not(unix), allow(dead_code))] // off unix the answer is always no, and nobody asks
 fn use_keeper() -> bool {
     if std::env::var("CC_HOST_CMD").is_ok() || !cfg!(unix) {
@@ -181,7 +203,7 @@ impl Supervisor {
             if let Ok(mut c) = self.inner.lock() {
                 *c = Choice::Keeper;
             }
-            let link = Arc::new(link::KeeperLink::new(bundled));
+            let link = Arc::new(link::KeeperLink::new(bundled, shell_resources(&app)));
             if let Ok(mut k) = self.keeper.lock() {
                 *k = Some(link.clone());
             }
@@ -412,6 +434,10 @@ mod link {
         attached: Option<client::Attached>,
         running: bool,
         shutting_down: bool,
+        /// The last start through the shell, for `HostBuild.shell`.
+        shell: Option<crate::shell::Report>,
+        /// The shell did not start a keeper once: every later start in this window's life is direct.
+        shell_off: bool,
     }
 
     pub struct KeeperLink {
@@ -420,11 +446,13 @@ mod link {
         sock: PathBuf,
         host_dir: Option<PathBuf>,
         app_build: BuildSource,
+        /// Where the shell and the signed content are carried, when keepers start through the shell.
+        shell_resources: Option<PathBuf>,
         state: Mutex<LinkState>,
     }
 
     impl KeeperLink {
-        pub fn new(bundled: Option<PathBuf>) -> Self {
+        pub fn new(bundled: Option<PathBuf>, shell_resources: Option<PathBuf>) -> Self {
             // A debug build opted into the keeper runs the source host and uses the dev data
             // folder, like its direct path.
             let dev = bundled.is_none();
@@ -445,6 +473,7 @@ mod link {
                 data,
                 host_dir,
                 app_build,
+                shell_resources: shell_resources.filter(|_| !dev),
                 state: Mutex::new(LinkState::default()),
             }
         }
@@ -471,6 +500,7 @@ mod link {
                 keeps_agents: st.view.as_ref().and_then(|v| v.keeps_agents),
                 busy: st.view.as_ref().map(|v| v.busy),
                 relaunched: st.relaunched,
+                shell: st.shell.clone(),
             }
         }
 
@@ -515,8 +545,36 @@ mod link {
             // The legacy folder moves before this creates the new one (keeper::prepare_default_dir).
             let _ = crate::keeper::prepare_default_dir(&self.data, self.dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
             let _ = std::fs::create_dir_all(&self.data);
+            if self.through_shell() {
+                return Ok(());
+            }
             let start = self.keeper_start();
             client::launch_detached(&exe, &start.args(), &start.env(), &start.log_path())
+        }
+
+        /**
+         * Asks the shell to start the keeper (macOS release builds, `crate::shell`). True when it did,
+         * or a keeper answered meanwhile; false when the window should start one directly, which it
+         * then does for the rest of its life. The reason is kept for `HostBuild.shell`, shown or only
+         * logged as `Report::notify` says.
+         */
+        fn through_shell(&self) -> bool {
+            let Some(resources) = &self.shell_resources else { return false };
+            if self.state.lock().map(|s| s.shell_off).unwrap_or(true) {
+                return false;
+            }
+            let allow_unpinned = std::env::var(crate::shell::UNPINNED_ENV).as_deref() == Ok("1");
+            let world = crate::shell::Real::new(&self.data);
+            let Some(report) = crate::shell::start_keeper(resources, &self.data, self.app_build.bundle_path.clone(), allow_unpinned, &world)
+            else {
+                return true;
+            };
+            let started = report.started;
+            if let Ok(mut st) = self.state.lock() {
+                st.shell_off |= !started;
+                st.shell = Some(report);
+            }
+            started
         }
 
         /// How this window starts a keeper (and, in the same words, how the shell does: `keeper::exe::Start`).

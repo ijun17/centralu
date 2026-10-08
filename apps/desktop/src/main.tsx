@@ -186,6 +186,8 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
   const [dismissed, setDismissed] = useState(false)
   // A failed swap stays on the bar until dismissed; this remembers which one was
   const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
+  // The note that the keeper started without the permission shell, once dismissed, for this window's life
+  const [dismissedShell, setDismissedShell] = useState(false)
   useEffect(() => {
     void hostBuild()
       .then(setBuild)
@@ -199,7 +201,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       }
     })
   }, [])
-  const bar = build ? buildBar({ build, dismissed, dismissedSwap }) : ({ kind: 'none' } as const)
+  const bar = build ? buildBar({ build, dismissed, dismissedSwap, dismissedShell }) : ({ kind: 'none' } as const)
   const plan = build ? switchPlan(build) : null
   const startSwitch = () => {
     setSwitchError(null)
@@ -291,6 +293,10 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           else startSwitch()
         }}
         onDismiss={() => {
+          if (bar.kind === 'shell') {
+            setDismissedShell(true)
+            return
+          }
           if (build.swap) setDismissedSwap(build.swap.startedAt)
           setDismissed(true)
         }}

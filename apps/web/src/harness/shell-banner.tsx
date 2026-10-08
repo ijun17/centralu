@@ -32,6 +32,8 @@ import '../../../../packages/ui/src/styles/index.css'
  *   - `failed`: a swap failed before the old host was touched (a real failure)
  *   - `keeper-later`: the host is on this build and the keeper could not move (beta.10's
  *     "Message too long", the second click), `keeper-later-first`: the same on the first click
+ *   - `shell`: everything on this build, but a release started its keeper without the permission
+ *     shell (thin-shell plan §6), which refused the content
  * `?dialog=quit&background=on|off` opens the quit question instead.
  *
  * Only on the dev server: `vite build`'s only input is index.html.
@@ -95,6 +97,22 @@ function reported(): HostBuild {
           startedAt: 2,
         },
       }
+    case 'shell':
+      return {
+        ...base,
+        host: newer,
+        keeper: newer,
+        sameBuild: true,
+        keeperSameBuild: true,
+        shell: {
+          started: false,
+          reason: 'content',
+          message:
+            'the content at /Applications/Centralu.app/Contents/Resources/content is not what the project signed: bad signature',
+          notify: true,
+          shellVersion: 1,
+        },
+      }
     case 'keeper-later-first':
       return {
         ...base,
@@ -111,9 +129,10 @@ function Banner() {
   const [build] = useState(reported)
   const [dismissed, setDismissed] = useState(false)
   const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
+  const [dismissedShell, setDismissedShell] = useState(false)
   const [askRestart, setAskRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const bar = buildBar({ build, dismissed, dismissedSwap })
+  const bar = buildBar({ build, dismissed, dismissedSwap, dismissedShell })
   return (
     <>
       <BuildBarView
@@ -123,6 +142,7 @@ function Banner() {
         restarting={restarting}
         onSwitch={() => calls.push('switch_host_build')}
         onDismiss={() => {
+          if (bar.kind === 'shell') return setDismissedShell(true)
           if (build.swap) setDismissedSwap(build.swap.startedAt)
           setDismissed(true)
         }}
