@@ -108,7 +108,10 @@ pub fn recv_fds(s: &UnixStream, max: usize) -> io::Result<Vec<OwnedFd>> {
             if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
                 let data = libc::CMSG_DATA(cmsg) as *const RawFd;
                 let header = libc::CMSG_LEN(0) as usize;
-                let count = ((*cmsg).cmsg_len as usize - header) / std::mem::size_of::<RawFd>();
+                // A truncated batch can keep the length of what was sent (macOS), longer than the
+                // room made for it: never read past `max`, or numbers that are not ours would be
+                // owned and closed.
+                let count = (((*cmsg).cmsg_len as usize - header) / std::mem::size_of::<RawFd>()).min(max - out.len());
                 for i in 0..count {
                     let fd = std::ptr::read_unaligned(data.add(i));
                     out.push(OwnedFd::from_raw_fd(fd));
@@ -129,4 +132,45 @@ pub fn recv_fds(s: &UnixStream, max: usize) -> io::Result<Vec<OwnedFd>> {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "descriptors were truncated in transit"));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cloexec(fd: RawFd) -> bool {
+        // SAFETY: fcntl on a descriptor the test holds.
+        unsafe { libc::fcntl(fd, libc::F_GETFD) & libc::FD_CLOEXEC != 0 }
+    }
+
+    const ROOM: Duration = Duration::from_secs(5);
+    const PAUSE: Duration = Duration::from_millis(20);
+
+    /// HD4: a received descriptor is close-on-exec, whatever it was on the sender's side, or every
+    /// child the incoming keeper starts later would inherit every pipe, socket and pty it was handed.
+    #[test]
+    fn received_descriptors_are_close_on_exec() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let (r, _w) = UnixStream::pair().unwrap();
+        // SAFETY: fcntl on a descriptor the test holds.
+        unsafe { libc::fcntl(r.as_raw_fd(), libc::F_SETFD, 0) };
+        assert!(!cloexec(r.as_raw_fd()));
+        send_fds(&a, &[r.as_raw_fd(), r.as_raw_fd()], ROOM, PAUSE).unwrap();
+        let got = recv_fds(&b, 2).unwrap();
+        assert_eq!(got.len(), 2);
+        for fd in &got {
+            assert!(cloexec(fd.as_raw_fd()), "descriptor {} arrived inheritable", fd.as_raw_fd());
+        }
+    }
+
+    /// HD4: a batch the kernel cut short (more descriptors than the receiver made room for) is an
+    /// error, not a short batch the handoff would take for the whole.
+    #[test]
+    fn a_truncated_batch_is_an_error() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let (r, _w) = UnixStream::pair().unwrap();
+        send_fds(&a, &[r.as_raw_fd(); 8], ROOM, PAUSE).unwrap();
+        let err = recv_fds(&b, 2).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{err}");
+    }
 }

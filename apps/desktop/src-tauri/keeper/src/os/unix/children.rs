@@ -172,6 +172,33 @@ pub fn read_fd(fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
     }
 }
 
+/// What one non-blocking read of a child's output said.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Output {
+    Bytes(usize),
+    /// The stream is over: end of file, or EIO from a pty master once every slave descriptor is
+    /// closed (lessons CH3), or any other error, which ends the stream the same way.
+    End,
+    /// Nothing to read now.
+    Again,
+    /// A signal interrupted the read: try again.
+    Interrupted,
+}
+
+pub fn read_output(fd: RawFd, buf: &mut [u8]) -> Output {
+    output_of(read_fd(fd, buf))
+}
+
+fn output_of(read: io::Result<usize>) -> Output {
+    match read {
+        Ok(0) => Output::End,
+        Ok(n) => Output::Bytes(n),
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Output::Again,
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => Output::Interrupted,
+        Err(_) => Output::End,
+    }
+}
+
 pub fn write_fd(fd: RawFd, buf: &[u8]) -> io::Result<usize> {
     // SAFETY: buf is valid for buf.len() bytes.
     let n = unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len()) };
@@ -528,6 +555,66 @@ mod tests {
         write_fd(fd, b"\n").unwrap();
         read_until(&mut got, "50 132");
         wait_exit(&mut w, s.pid);
+    }
+
+    fn cloexec(fd: RawFd) -> bool {
+        // SAFETY: fcntl on a descriptor the test holds.
+        unsafe { libc::fcntl(fd, libc::F_GETFD) & libc::FD_CLOEXEC != 0 }
+    }
+
+    /// Everything a child wrote, and whether its stream ended, read until `deadline`.
+    fn read_to_end(fd: RawFd, deadline: Duration) -> (String, bool) {
+        let end = Instant::now() + deadline;
+        let mut got = Vec::new();
+        while Instant::now() < end {
+            let mut b = [0u8; 1024];
+            match read_output(fd, &mut b) {
+                Output::Bytes(n) => got.extend_from_slice(&b[..n]),
+                Output::End => return (String::from_utf8_lossy(&got).to_string(), true),
+                Output::Again | Output::Interrupted => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        (String::from_utf8_lossy(&got).to_string(), false)
+    }
+
+    /// CH3: once a pty child has exited (its slave side all closed), reading the master ends the
+    /// stream (Linux reports EIO, not 0), after everything the child wrote.
+    #[test]
+    fn a_pty_whose_child_has_gone_reads_to_its_end() {
+        let mut w = ExitWatch::new().unwrap();
+        let s = spawn_pty("/bin/sh", &["-c".into(), "printf finished".into()], "/", &env(), 80, 24).unwrap();
+        w.watch(s.pid);
+        // Read first: on macOS an exiting child waits for the terminal's output to drain.
+        let (got, ended) = read_to_end(s.out.as_raw_fd(), Duration::from_secs(5));
+        wait_exit(&mut w, s.pid);
+        assert!(got.contains("finished"), "{got:?}");
+        assert!(ended, "the stream never ended");
+    }
+
+    /// CH3, wherever the OS reports it: Linux says EIO where macOS says 0.
+    #[test]
+    fn eio_ends_the_stream() {
+        assert_eq!(output_of(Err(io::Error::from_raw_os_error(libc::EIO))), Output::End);
+        assert_eq!(output_of(Ok(0)), Output::End);
+        assert_eq!(output_of(Ok(3)), Output::Bytes(3));
+        assert_eq!(output_of(Err(io::Error::from_raw_os_error(libc::EAGAIN))), Output::Again);
+        assert_eq!(output_of(Err(io::Error::from_raw_os_error(libc::EINTR))), Output::Interrupted);
+    }
+
+    /// CH4: `openpty` does not set close-on-exec. The master stays in the keeper and the slave is
+    /// open in it while the child starts, so without the flag every later child (this one's own
+    /// descriptors past 2 included) inherits terminals it has no business with.
+    #[test]
+    fn neither_end_of_a_pty_is_inherited() {
+        let mut w = ExitWatch::new().unwrap();
+        // A terminal on any descriptor past stderr is a pty end that leaked into the child.
+        let script = "i=3; while [ $i -lt 256 ]; do [ -t $i ] && printf 'leak%s ' $i; i=$((i+1)); done; printf checked";
+        let s = spawn_pty("/bin/sh", &["-c".into(), script.into()], "/", &env(), 80, 24).unwrap();
+        w.watch(s.pid);
+        assert!(cloexec(s.out.as_raw_fd()), "the master is inheritable");
+        let (got, _) = read_to_end(s.out.as_raw_fd(), Duration::from_secs(10));
+        wait_exit(&mut w, s.pid);
+        assert!(got.contains("checked") && !got.contains("leak"), "{got:?}");
     }
 
     #[test]

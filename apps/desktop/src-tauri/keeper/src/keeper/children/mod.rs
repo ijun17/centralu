@@ -863,16 +863,13 @@ impl Reactor {
             if !c.buf(which).wants_input() {
                 break;
             }
-            match proc::read_fd(fd, &mut tmp) {
-                Ok(0) => {
-                    eof = true;
-                    break;
-                }
-                Ok(k) => c.buf(which).push(&tmp[..k]),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                // EIO: a pty master whose slave side is all closed. Anything else: the same end.
-                Err(_) => {
+            match proc::read_output(fd, &mut tmp) {
+                proc::Output::Bytes(k) => c.buf(which).push(&tmp[..k]),
+                proc::Output::Again => break,
+                proc::Output::Interrupted => continue,
+                // End of file, EIO from a pty master whose slave side is all closed, or any other
+                // error: the same end.
+                proc::Output::End => {
                     eof = true;
                     break;
                 }

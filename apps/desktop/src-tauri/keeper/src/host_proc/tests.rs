@@ -407,3 +407,76 @@ fn says_where_it_looked_when_there_is_no_node() {
     assert!(msg.contains("/opt/homebrew/bin/node"));
     assert!(msg.contains("22"));
 }
+
+/**
+ * SU3: a host is stopped by TERM to its pid alone, a real grace, then TERM to its group, with its
+ * stdin held open until the end. A group TERM first would hit codex directly (#57); EOF before
+ * TERM would race the signal into a second `shutdown()`.
+ *
+ * The "host" is a shell that writes what reaches it: its own TERM (it ignores it, like a host
+ * still shutting down), a group member's TERM, and EOF on stdin.
+ */
+#[cfg(unix)]
+#[test]
+fn a_host_is_stopped_pid_first_then_its_group_with_stdin_held() {
+    let file = std::env::temp_dir().join(format!("cc-host-stop-order-{}", std::process::id()));
+    let _ = std::fs::remove_file(&file);
+    let script = r#"
+        exec 3<&0
+        ( trap '' TERM; read x <&3; echo eof >> "$F" ) &
+        ( trap 'echo member-term >> "$F"; exit 0' TERM; while :; do sleep 0.05; done ) &
+        trap 'echo leader-term >> "$F"' TERM
+        echo ready >> "$F"
+        while :; do sleep 0.05; done
+    "#;
+    let launch = HostLaunch {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), script.into()],
+        env: vec![("F".into(), file.to_string_lossy().to_string())],
+    };
+    let mut child = spawn_host(&launch).unwrap();
+    let read = || std::fs::read_to_string(&file).unwrap_or_default();
+    let until = |what: &str| {
+        let end = Instant::now() + Duration::from_secs(10);
+        while !read().contains(what) && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    until("ready");
+    // Two seconds into the grace: only the host's pid has been asked, and stdin is still open.
+    let during = {
+        let file = file.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(STOP_GRACE - Duration::from_secs(1));
+            std::fs::read_to_string(&file).unwrap_or_default()
+        })
+    };
+    let started = Instant::now();
+    stop_child(&mut child);
+    let took = started.elapsed();
+    let during = during.join().unwrap();
+    until("member-term");
+    until("eof");
+    let lines: Vec<String> = read().lines().map(str::to_string).filter(|l| l != "ready").collect();
+    let _ = std::fs::remove_file(&file);
+    assert_eq!(lines.first().map(String::as_str), Some("leader-term"), "the host's pid first: {lines:?}");
+    assert!(lines.iter().any(|l| l == "member-term"), "the group gets TERM in the end: {lines:?}");
+    assert!(during.contains("leader-term"), "{during:?}");
+    assert!(!during.contains("member-term"), "the group was signalled within the grace: {during:?}");
+    assert!(!during.contains("eof"), "stdin was closed within the grace: {during:?}");
+    assert!(took >= STOP_GRACE, "a real grace before the group: {took:?}");
+}
+
+/// SU5: Windows has no TERM. A host is asked to stop by closing its stdin, and one that then ends
+/// is not waited out or killed (`findstr` reads stdin to its end, as a host with `--watch-parent`
+/// does).
+#[cfg(windows)]
+#[test]
+fn a_windows_host_is_asked_to_stop_by_closing_its_stdin() {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+    let launch = HostLaunch { program: format!("{root}\\System32\\findstr.exe"), args: vec!["x".into()], env: vec![] };
+    let mut child = spawn_host(&launch).unwrap();
+    let started = Instant::now();
+    stop_child(&mut child);
+    assert!(started.elapsed() < STOP_GRACE, "stopped only after the grace: {:?}", started.elapsed());
+}
