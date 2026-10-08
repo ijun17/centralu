@@ -59,6 +59,13 @@ npm 런처에서 `process.platform`(또는 `os.platform()`)을 읽거나 무엇�
 OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 검사하지 않는다. 호스트가 뜨는 방식에 대한 Rust 쪽의 짝은
 `start_plan`이다([agent-host.md](agent-host.md) §4.0).
 
+**런타임의 Rust에서도 같고, 테스트가 지킨다** (`keeper/src/platform_checks.rs`): `cfg(…)`, `cfg!(…)`, `cfg_attr`의
+조건에 OS를 묻는 것(`unix`, `windows`, `target_os`, …)과 `std::env::consts::OS`는 keeper 크레이트의 `src/`와 창의
+`src/`에서 OS 계층(`keeper/src/os/`), `start_plan.rs`(`Os::current`), 창 자신의 OS 통합(`src/ide.rs`) 밖에 있으면
+`cargo test`가 실패한다. 이 규칙보다 먼저 있던 자리는 `NOT_YET`에 개수와 함께 적혀 있다. 이 목록은 줄기만 하고,
+[plans/runtime-unification.md](plans/runtime-unification.md)의 각 단계가 제 줄을 지운다. 테스트와 macOS 전용인
+셸 크레이트는 검사하지 않는다.
+
 ## 3. 사용한 설계 패턴 — 어디에, 왜
 
 패턴은 장식이 아니라 변경 축(C1~C6)에 대한 방어 수단이다. 각 패턴이 어느 축을 막는지 명시한다.
