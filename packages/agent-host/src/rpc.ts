@@ -56,6 +56,12 @@ export type RpcServices = {
   agentVersions?: AgentVersionService
   /** Linked machines (#82, links/links.ts). Without it this host links to nothing */
   machines?: MachinesPort
+  /**
+   * Ends this host the way a signal would (`host.stop`, for `centralu serve --stop`). Called after
+   * the answer is on its way. Absent under the app's keeper, which stops a host itself and would only
+   * start it again: the call is refused there
+   */
+  stopHost?: () => void
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -76,7 +82,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, machines }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, machines, stopHost }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
@@ -721,6 +727,14 @@ export function createRpcHandler(
     // Answers once the install has started, not once it has finished — see the note on
     // `updates.apply` in the protocol. The rest arrives as `update_status` events.
     'updates.apply': async () => requireUpdates().apply(),
+    'host.stop': async () => {
+      if (!stopHost) {
+        throw Object.assign(new Error('This host runs under the Centralu app, which stops it: quit the app instead'), { code: 'internal' })
+      }
+      // After this answer has been written: the shutdown closes the socket it travels on
+      setTimeout(stopHost, 50)
+      return { ok: true as const }
+    },
   }
 
   return async (method: string, params: unknown): Promise<unknown> => {

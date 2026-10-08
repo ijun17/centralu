@@ -42,7 +42,17 @@ import {
   webview2Status,
   windowsInstall,
 } from './platform.mjs'
-import { parseServeArgs, printConnection, rotateToken, runServe, SERVE_HELP } from './serve.mjs'
+import {
+  decodeChildSpec,
+  parseServeArgs,
+  printConnection,
+  rotateToken,
+  runDetach,
+  runDetachedChild,
+  runServe,
+  runStop,
+  SERVE_HELP,
+} from './serve.mjs'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -579,9 +589,21 @@ switch (cmd) {
         process.exitCode = rotateToken({ env: process.env, home: HOME })
         break
       }
+      // A launcher `--detach` started: what it carried (the data folder, a host entry) applies before
+      // anything below reads the environment
+      const spec = args.child !== undefined ? decodeChildSpec(args.child) : null
+      if (args.child !== undefined && !spec) {
+        console.error('centralu serve: --detached-child is how --detach starts serve; this one could not be read')
+        process.exit(2)
+      }
+      if (spec) Object.assign(process.env, spec.env)
       // realpath: npm's bin is a symlink to this file, and the launcher must not depend on the link
       const opts = { env: process.env, home: HOME, entry: requireHostEntry(), version: pkg.version, cliPath: realpathSync(process.argv[1]) }
-      process.exitCode = args.mode === 'connection' ? await printConnection(opts) : await runServe({ ...opts, port: args.port })
+      if (args.mode === 'connection') process.exitCode = await printConnection(opts)
+      else if (args.mode === 'detach') process.exitCode = await runDetach({ ...opts, port: args.port })
+      else if (args.mode === 'stop') process.exitCode = await runStop(opts)
+      else if (spec) process.exitCode = await runDetachedChild({ ...opts, spec, port: args.port })
+      else process.exitCode = await runServe({ ...opts, port: args.port })
     } catch (e) {
       // A state file that cannot be read or written: one sentence, not a stack, and nothing on stdout
       console.error(`centralu serve: ${e?.message ?? e}`)

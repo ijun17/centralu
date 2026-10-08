@@ -66,9 +66,15 @@ const keeperSource = process.env.CC_HOST_SOURCE
  * port, because a running codex keeps the bridge it started and a swap must not cut it off.
  */
 const frontDoor = process.env.CC_FRONT_DOOR
+/*
+ * Started by `centralu serve` (docs/agent-host.md §4.7), the one host `host.stop` may end: it has no
+ * keeper or window to stop it, and on Windows a launcher can only be killed, which skips the shutdown.
+ */
+const startedByServe = process.env.CC_SERVE === '1'
 delete process.env.CC_KEEPER
 delete process.env.CC_HOST_SOURCE
 delete process.env.CC_FRONT_DOOR
+delete process.env.CC_SERVE
 
 const { values } = parseArgs({
   options: {
@@ -479,6 +485,17 @@ if (underKeeper) {
  * terminal there; every other call reaches the handler as before. With no machine linked it passes
  * everything through. The links start after listen (below), so a slow ssh never holds up the window.
  */
+/*
+ * `host.stop` (`centralu serve --stop`). The server listens before `shutdown` exists below, so a
+ * request in between is held and acted on once it does, like a signal during startup.
+ */
+let stopNow: (() => void) | null = null
+let stopAsked = false
+const stopFromRequest = () => {
+  console.error('[agent-host] asked to stop (centralu serve --stop)')
+  if (stopNow) stopNow()
+  else stopAsked = true
+}
 const links = new Links({
   hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },
   broadcast: (e) => server.broadcast(e),
@@ -501,6 +518,7 @@ const router = new Router({
     inlineViews,
     heldPids: held?.heldPids,
     machines: links,
+    stopHost: startedByServe && !underKeeper ? () => stopFromRequest() : undefined,
   }),
   machines: () => links.all(),
 })
@@ -734,6 +752,8 @@ process.off('SIGINT', holdSignal)
 process.off('SIGTERM', holdSignal)
 // One that came while starting: the same ending it would have had, now that there is one
 if (pendingSignal) void shutdown(onSignalMode, onSignalMode === 'detach')
+stopNow = () => void shutdown('stop', false)
+if (stopAsked) stopNow()
 // The keeper is stopping for good and asks this host to stop its children the way it always did. No next host to hand views to
 held?.children.on('stop', () => void shutdown('stop', false))
 

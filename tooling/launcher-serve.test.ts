@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +10,19 @@ import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/ins
 import { versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
 import {
   connectionLine,
+  decodeChildSpec,
   DEFAULT_SERVE_PORT,
+  detachHow,
+  encodeChildSpec,
+  installInfo,
+  managedLauncherScript,
+  parsePointer,
+  parseWmiAnswer,
+  remoteLayout,
+  runDetach,
+  SERVE_PID_FILE,
+  windowsArg,
+  wmiScript,
   ensureServeState,
   hostCommand,
   hostEnv,
@@ -264,9 +276,9 @@ function serve(dataDir: string, args: string[]) {
   return { child, out, exited, until }
 }
 
-async function connection(dataDir: string): Promise<Record<string, unknown>> {
+async function connection(dataDir: string, extra: NodeJS.ProcessEnv = {}): Promise<Record<string, unknown>> {
   const stdout = await new Promise<string>((resolve, reject) =>
-    execFile(process.execPath, [CLI, 'serve', '--connection'], { cwd: ROOT, env: cliEnv(dataDir) }, (err, out) =>
+    execFile(process.execPath, [CLI, 'serve', '--connection'], { cwd: ROOT, env: { ...cliEnv(dataDir), ...extra } }, (err, out) =>
       err ? reject(err) : resolve(out),
     ),
   )
@@ -384,5 +396,302 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       }
     },
     90_000,
+  )
+})
+
+describe('--detach and --stop arguments', () => {
+  it('takes --detach with or without a port, and --stop without one', () => {
+    expect(parseServeArgs(['--detach'])).toEqual({ mode: 'detach', port: null })
+    expect(parseServeArgs(['--detach', '--port', '9000'])).toEqual({ mode: 'detach', port: 9000 })
+    expect(parseServeArgs(['--stop'])).toEqual({ mode: 'stop', port: null })
+    expect(parseServeArgs(['--stop', '--port', '9000']).error).toMatch(/takes no --port/)
+    expect(parseServeArgs(['--detach', '--stop']).error).toMatch(/--detach and --stop are separate commands/)
+  })
+
+  it('carries only the data folder, the host entry and the managed mark to a detached launcher, never the token', () => {
+    const spec = encodeChildSpec({ env: { CC_DATA_DIR: '/d', CC_HOST_TOKEN: 'secret', PATH: '/bin', CENTRALU_MANAGED: '1' }, log: '/d/serve.log' })
+    expect(spec).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(Buffer.from(spec, 'base64url').toString('utf8')).not.toContain('secret')
+    expect(decodeChildSpec(spec)).toEqual({ log: '/d/serve.log', env: { CC_DATA_DIR: '/d', CENTRALU_MANAGED: '1' } })
+    expect(parseServeArgs([`--detached-child=${spec}`])).toEqual({ mode: 'serve', port: null, child: spec })
+    expect(decodeChildSpec('not base64 json')).toBeNull()
+  })
+
+  it('detaches with setsid on posix, through WMI on Windows, and through a WMI-created wsl.exe inside WSL', () => {
+    expect(detachHow('linux', {}, () => true)).toBe('setsid')
+    expect(detachHow('darwin', {}, () => true)).toBe('setsid')
+    expect(detachHow('win32', {}, () => false)).toBe('wmi')
+    expect(detachHow('linux', { WSL_DISTRO_NAME: 'Ubuntu' }, () => true)).toBe('wsl')
+    // A distro whose Windows interop is off cannot reach WMI; setsid is all there is
+    expect(detachHow('linux', { WSL_DISTRO_NAME: 'Ubuntu' }, () => false)).toBe('setsid')
+  })
+})
+
+describe('starting through WMI', () => {
+  it('quotes every argument for a Windows command line, and refuses what cannot be quoted', () => {
+    expect(windowsArg('C:\\Program Files\\nodejs\\node.exe')).toBe('"C:\\Program Files\\nodejs\\node.exe"')
+    // A trailing backslash would escape the closing quote
+    expect(windowsArg('C:\\')).toBe('"C:\\\\"')
+    expect(() => windowsArg('a"b')).toThrow(/cannot pass/)
+  })
+
+  it('hands WMI the command line and folder as base64, so no quote reaches PowerShell', () => {
+    const commandLine = `"C:\\it's here\\node.exe" "--x=$(rm)"`
+    const script = wmiScript({ commandLine, cwd: 'C:\\Users\\me' })
+    expect(script).not.toContain("it's here")
+    expect(script).toContain(Buffer.from(commandLine, 'utf8').toString('base64'))
+    expect(script).toContain('Invoke-CimMethod -ClassName Win32_Process -MethodName Create')
+  })
+
+  it('reads a created process, a refusal code and a thrown error from what the script printed', () => {
+    expect(parseWmiAnswer('CENTRALU-WMI 0 4242\r\n')).toEqual({ ok: true, pid: 4242 })
+    expect(parseWmiAnswer('CENTRALU-WMI 2 \r\n')).toEqual({ ok: false, message: "WMI's Win32_Process.Create returned 2 (access denied)" })
+    expect(parseWmiAnswer('CENTRALU-WMI-ERROR Access is denied.\r\n')).toEqual({ ok: false, message: 'WMI refused to create the process: Access is denied.' })
+    expect(parseWmiAnswer('').ok).toBe(false)
+  })
+
+  /** runDetach with WMI stood in for, on a port nobody serves */
+  async function detachWith(start: (...a: unknown[]) => Promise<unknown>) {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const lines: string[] = []
+    const code = await runDetach({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'win32',
+      how: 'wmi',
+      start,
+      timeoutMs: 5_000,
+      noStartMs: 300,
+      write: (l: string) => void lines.push(l),
+    })
+    return { code, line: JSON.parse(lines.join('')) as { v: number; detach: { ok: boolean; reason: string; message: string } } }
+  }
+
+  it('reports a start WMI refused as wmi_blocked', async () => {
+    const r = await detachWith(async () => ({ ok: false, blocked: true, message: 'Windows did not start Centralu through WMI (returned 2)' }))
+    expect(r.code).toBe(1)
+    expect(r.line).toMatchObject({ v: 1, detach: { ok: false, how: 'wmi', reason: 'wmi_blocked' } })
+  })
+
+  it('reports a process WMI created that never ran as wmi_blocked too, naming the rule, instead of waiting out the timeout', async () => {
+    const t0 = Date.now()
+    let ended = 0
+    // Measured on a Windows laptop: a WMI-created wsl.exe can hang without running anything
+    const r = await detachWith(async () => ({ ok: true, pid: 4242, alive: () => true, stop: async () => void ended++ }))
+    expect(r.line.detach).toMatchObject({ ok: false, reason: 'wmi_blocked' })
+    expect(r.line.detach.message).toMatch(/nothing started within 0 s.*attack surface reduction/s)
+    expect(Date.now() - t0).toBeLessThan(4_000)
+    // What it created is ended, not left waiting
+    expect(ended).toBe(1)
+  })
+})
+
+describe('the install field and the managed launcher (remote-hub.md §10.1)', () => {
+  it('reads current and previous as two plain words, and nothing that could leave the install', () => {
+    expect(parsePointer('0.1.0-beta.13 24.21.0\n')).toEqual({ version: '0.1.0-beta.13', node: '24.21.0' })
+    expect(parsePointer('0.1.0 24.21.0\r\n')).toEqual({ version: '0.1.0', node: '24.21.0' })
+    for (const bad of ['../x 24.21.0', '0.1.0', '0.1.0 24.21.0 extra', '0.1.0 /etc', '']) expect(parsePointer(bad)).toBeNull()
+  })
+
+  it('says whether the managed launcher ran it, what is current and previous, and which Node answered', () => {
+    const d = tempDir()
+    expect(installInfo(d, {}, '24.21.0')).toEqual({ managed: false, current: null, previous: null, node: '24.21.0' })
+    const l = remoteLayout(d)
+    mkdirSync(l.root, { recursive: true })
+    writeFileSync(l.current, '0.1.0-beta.14 24.21.0\n')
+    writeFileSync(l.previous, '0.1.0-beta.13 24.21.0\n')
+    expect(installInfo(d, { CENTRALU_MANAGED: '1' }, '24.21.0')).toEqual({
+      managed: true,
+      current: { version: '0.1.0-beta.14', node: '24.21.0' },
+      previous: { version: '0.1.0-beta.13', node: '24.21.0' },
+      node: '24.21.0',
+    })
+  })
+
+  /**
+   * A managed install with two versions in it, whose `centralu.mjs` prints which one ran, its
+   * arguments and the managed mark. The Node is this test's own, linked in at the pinned layout.
+   */
+  function managedInstall(platform: NodeJS.Platform) {
+    const d = tempDir()
+    const l = remoteLayout(d)
+    for (const v of ['1.0.0', '1.1.0']) {
+      const bin = join(l.versions, v, 'node_modules', 'centralu', 'bin')
+      mkdirSync(bin, { recursive: true })
+      writeFileSync(
+        join(bin, 'centralu.mjs'),
+        `console.log(JSON.stringify({ v: ${JSON.stringify(v)}, argv: process.argv.slice(2), managed: process.env.CENTRALU_MANAGED ?? null }))\n`,
+      )
+    }
+    const nodeDir = platform === 'win32' ? join(l.node, 'v24.0.0') : join(l.node, 'v24.0.0', 'bin')
+    mkdirSync(nodeDir, { recursive: true })
+    const node = join(nodeDir, platform === 'win32' ? 'node.exe' : 'node')
+    if (platform === 'win32') {
+      try {
+        linkSync(process.execPath, node)
+      } catch {
+        copyFileSync(process.execPath, node)
+      }
+    } else symlinkSync(process.execPath, node)
+    mkdirSync(l.bin, { recursive: true })
+    const launcher = join(l.bin, platform === 'win32' ? 'centralu.cmd' : 'centralu')
+    writeFileSync(launcher, managedLauncherScript(platform), { mode: 0o755 })
+    return { l, launcher }
+  }
+
+  it.skipIf(!POSIX)('runs the version current names on its Node, marked managed, and follows current when it moves', () => {
+    const { l, launcher } = managedInstall(process.platform)
+    writeFileSync(l.current, '1.0.0 24.0.0\n')
+    const run = () => spawnSync(launcher, ['serve', '--connection'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } })
+    expect(JSON.parse(run().stdout)).toEqual({ v: '1.0.0', argv: ['serve', '--connection'], managed: '1' })
+    writeFileSync(l.current, '1.1.0 24.0.0\n')
+    expect(JSON.parse(run().stdout).v).toBe('1.1.0')
+    writeFileSync(l.current, '../../.. 24.0.0\n')
+    const refused = run()
+    expect(refused.status).toBe(1)
+    expect(refused.stderr).toMatch(/no version is installed/)
+  })
+
+  it.skipIf(POSIX)('runs the version current names on its Node from a .cmd, marked managed, and refuses a path in it', () => {
+    const { l, launcher } = managedInstall('win32')
+    writeFileSync(l.current, '1.0.0 24.0.0\n')
+    const run = () => spawnSync('cmd.exe', ['/d', '/c', launcher, 'serve', '--connection'], { encoding: 'utf8' })
+    const first = run()
+    expect(first.stderr).toBe('')
+    expect(JSON.parse(first.stdout)).toEqual({ v: '1.0.0', argv: ['serve', '--connection'], managed: '1' })
+    writeFileSync(l.current, '1.1.0 24.0.0\r\n')
+    expect(JSON.parse(run().stdout).v).toBe('1.1.0')
+    writeFileSync(l.current, '..\\..\\x 24.0.0\n')
+    const refused = run()
+    expect(refused.status).toBe(1)
+    expect(refused.stderr).toMatch(/no version is installed/)
+  })
+
+  it('leaves <data>/bin/centralu alone under the managed launcher, and keeps it otherwise', async () => {
+    const managed = tempDir()
+    const info = await connection(managed, { CENTRALU_MANAGED: '1' })
+    expect(info.install).toMatchObject({ managed: true, node: process.versions.node })
+    expect(existsSync(join(managed, 'bin'))).toBe(false)
+    const npm = tempDir()
+    expect((await connection(npm)).install).toMatchObject({ managed: false })
+    expect(existsSync(join(npm, 'bin', POSIX ? 'centralu' : 'centralu.cmd'))).toBe(true)
+  })
+})
+
+/** `centralu serve <args>` to the end, its last stdout line parsed */
+async function cli(dataDir: string, args: string[]) {
+  return await new Promise<{ code: number | null; line: Record<string, any>; stderr: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI, 'serve', ...args], { cwd: ROOT, env: cliEnv(dataDir), stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout!.on('data', (b) => (stdout += String(b)))
+    child.stderr!.on('data', (b) => (stderr += String(b)))
+    child.once('error', reject)
+    child.once('close', (code) => {
+      try {
+        resolve({ code, line: JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as Record<string, any>, stderr })
+      } catch {
+        reject(new Error(`no JSON line on stdout (exit ${code}):\n${stdout}\n${stderr}`))
+      }
+    })
+  })
+}
+
+/** Whether the pid names a live process */
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+describe('centralu serve --detach and --stop, end to end (a host from source, a temporary data folder)', () => {
+  /** Ends what a failed test left running: only the processes this data folder's files name, which this test started */
+  function cleanup(d: string) {
+    for (const file of [SERVE_PID_FILE, 'host.lock']) {
+      try {
+        const pid = (JSON.parse(readFileSync(join(d, file), 'utf8')) as { pid: number }).pid
+        if (alive(pid)) process.kill(pid, 'SIGKILL')
+      } catch {
+        // not there
+      }
+    }
+  }
+
+  it(
+    'starts the host in the background and returns once it answers, then stops it in order on request',
+    async () => {
+      const d = tempDir()
+      try {
+        ensureServeState(d)
+        const port = await freePort()
+        const started = await cli(d, ['--detach', '--port', String(port)])
+        expect(started.code).toBe(0)
+        expect(started.line).toMatchObject({ v: 1, port, hostRunning: true, detach: { ok: true, how: POSIX ? 'setsid' : 'wmi', already: false } })
+        const pids = JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { pid: number; hostPid: number }
+        expect(alive(pids.pid) && alive(pids.hostPid)).toBe(true)
+
+        // A second --detach finds it and starts nothing
+        const again = await cli(d, ['--detach'])
+        expect(again.line).toMatchObject({ hostRunning: true, detach: { ok: true, already: true } })
+
+        const stopped = await cli(d, ['--stop'])
+        expect(stopped.line).toEqual({ v: 1, stop: { ok: true, wasRunning: true, how: 'asked' } })
+        const log = readFileSync(join(d, 'host.log'), 'utf8')
+        expect(log).toContain('[agent-host] asked to stop (centralu serve --stop)')
+        expect(log).toContain('[agent-host] shutting down')
+        expect(alive(pids.hostPid)).toBe(false)
+        expect(existsSync(join(d, SERVE_PID_FILE))).toBe(false)
+        expect((await connection(d)).hostRunning).toBe(false)
+        // serve.log has the launcher's start, and not the token
+        const serveLog = readFileSync(join(d, 'serve.log'), 'utf8')
+        expect(serveLog).toContain('started in the background')
+        expect(serveLog).not.toContain(String(started.line.token))
+
+        expect((await cli(d, ['--stop'])).line).toMatchObject({ v: 1, stop: { ok: true, wasRunning: false } })
+      } finally {
+        cleanup(d)
+      }
+    },
+    120_000,
+  )
+
+  it.skipIf(!POSIX)(
+    'outlives the process group of the session that started it',
+    async () => {
+      const d = tempDir()
+      try {
+        ensureServeState(d)
+        const port = await freePort()
+        // A shell standing in for the ssh session: it runs --detach, then stays, as a session would
+        const session = spawn('/bin/sh', ['-c', `"${process.execPath}" "${CLI}" serve --detach --port ${port}; sleep 60`], {
+          cwd: ROOT,
+          env: cliEnv(d),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: true,
+        })
+        started.push(session)
+        let out = ''
+        session.stdout!.on('data', (b) => (out += String(b)))
+        const deadline = Date.now() + 60_000
+        while (!out.includes('"hostRunning":true') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
+        expect(out).toContain('"detach":{"ok":true')
+        // The session ends the way sshd can end one: every process in its group, at once
+        process.kill(-session.pid!, 'SIGKILL')
+        await new Promise((r) => setTimeout(r, 1000))
+        expect((await connection(d)).hostRunning).toBe(true)
+        expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, how: 'asked' })
+      } finally {
+        cleanup(d)
+      }
+    },
+    120_000,
   )
 })
