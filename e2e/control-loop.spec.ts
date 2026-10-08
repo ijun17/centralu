@@ -1580,8 +1580,10 @@ test('Viewer copy: copying continues through lines that were never rendered (#36
   await page.keyboard.press('Meta+c')
 
   const rows = (await clipboard(page)).split('\n')
-  // Hundreds of the lines in between were never in the DOM to be copied from
-  expect(rows.length).toBeGreaterThan(300)
+  // More lines than the DOM ever holds at once: the ones in between were never there to be
+  // copied from. (A count, not a number of lines: WebKit autoscrolls slower than Chromium.)
+  const mounted = await page.locator('[data-testid="code-viewer"] [data-line]').count()
+  expect(rows.length).toBeGreaterThan(mounted)
   expect(rows[0]).toBe('const line3 = 3')
   expect(rows[1]).toBe('const line4 = 4')
   // …the run has no gaps, and no line number rode along with any of it

@@ -126,9 +126,38 @@ export function selectedText(p: {
     // An endpoint outside the rows entirely — dragged in from the header, or out into the
     // truncation notice. Fall back to the rows the selection touches, taken whole.
     const rows = [...p.root.querySelectorAll<HTMLElement>('[data-line]')].filter((r) => sel.containsNode(r, true))
-    if (rows.length === 0) return null
+    // A drag that began in the rows and left the area: the line at the edge it left by
+    if (rows.length === 0 && anchor && !focus) focus = edgeCaret(p.root, sel.focusNode)
+    if (!focus && rows.length === 0) return null
     anchor ??= { line: Number(rows[0]!.dataset.line), column: 0 }
     focus ??= { line: Number(rows.at(-1)!.dataset.line), column: LINE_END }
   }
   return buildCopyText(p.lines, anchor, focus)
+}
+
+/**
+ * Where a selection's focus stands when the pointer dragged it out of `root`: the last line
+ * showing at the bottom edge when the focus landed in the lower half of the area or below it,
+ * the first line showing at the top edge otherwise.
+ *
+ * Chromium keeps the focus of a drag inside the scroll area it began in. WebKit (the desktop
+ * app's WKWebView) puts it on whatever text is nearest the pointer: held below the window, a
+ * drag from the viewer ended on the composer's mode button laid over the viewer's bottom, which
+ * comes before the viewer in the document, so the selection touched none of the rows and ⌘C
+ * copied the app's chrome (#424). The edge is what the person sees selected.
+ */
+function edgeCaret(root: HTMLElement, node: Node | null): Caret | null {
+  if (!node || root.contains(node)) return null
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element)
+  if (!el) return null
+  const at = el.getBoundingClientRect()
+  const area = root.getBoundingClientRect()
+  const rows = [...root.querySelectorAll<HTMLElement>('[data-line]')].map((r) => ({ r, box: r.getBoundingClientRect() }))
+  const line = (r: HTMLElement | undefined) => (r ? Number(r.dataset.line) : NaN)
+  if (at.top + at.height / 2 >= area.top + area.height / 2) {
+    const last = line(rows.filter((x) => x.box.top < area.bottom).at(-1)?.r)
+    return Number.isInteger(last) ? { line: last, column: LINE_END } : null
+  }
+  const first = line(rows.find((x) => x.box.bottom > area.top)?.r)
+  return Number.isInteger(first) ? { line: first, column: 0 } : null
 }
