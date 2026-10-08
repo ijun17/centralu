@@ -11,6 +11,10 @@ use centralu_keeper_core::host_proc;
 pub use centralu_keeper_core::keeper;
 mod ide;
 mod path_safety;
+// The window's side of the macOS shell (thin-shell plan §6): only a macOS release build opens it.
+#[cfg(unix)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod shell;
 mod sidecar;
 
 use path_safety::assert_safe_native_path;
