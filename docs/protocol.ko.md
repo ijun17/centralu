@@ -199,6 +199,7 @@ type ApprovalDetail =
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search, messages.image` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색; 답장이 적은 로컬 이미지(`![a](/path/shot.png)`). 창은 파일 경로를 직접 읽을 수 없어 세션의 호스트가 읽는다: `{ sessionId, path }`, `path`는 답장에 적힌 그대로. 답은 `{ ok: true, mime, data, file? }` 또는 `{ ok: false, reason, message, file? }`. `reason`은 `not_mentioned`(이 세션의 어느 답장에도 없다. 아무것도 건드리지 않는다), `not_found`, `not_an_image`(바이트로 판단: PNG, JPEG, GIF, WebP만), `too_large`(`IMAGE_PREVIEW_MAX_BYTES`, 10 MB), `unreadable`. `file`은 호스트 기기에서 해석한 경로로, 파일 관리자에서 보여 줄 때 쓴다. 거절은 오류가 아니라 답이다. 추가만 한 것이라 이전 호스트는 "Unknown method"로 답하고, 창은 그것을 이미지 자리에 보인다([security-boundaries.md](security-boundaries.md), "Images a reply names") |
 | machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: 허브가 다른 기기에 거는 링크 (§6). 언제나 허브 자신의 것이고 전달되지 않는다 |
+| host | `host.stop` | #82: 이 호스트를 시그널처럼 끝낸다. 먼저 답한다. `centralu serve --stop`용([agent-host.md](agent-host.md) §4.7)이고, 앱이 돌리는 호스트는 거절한다. 전달되지 않는다. 추가만 |
 | grid | `grid.get, grid.set` | 그리드의 패널들, 순서대로, 통째로 쓴다 (product spec §5.4). 하나하나가 `GridPanel`이다: `{ kind: 'session', sessionId }` 또는 `{ kind: 'app', projectId: string \| null, appId, span? }` (`null`은 사용자 폴더의 앱) — #288. `span`(#306)은 사람이 그 앱 패널의 머리글에서 고른 `{ cols, rows }`이고, 각 1에서 4, 고르지 않았으면 없다; 그 이전의 host는 이것을 걷어 내고 패널은 기본값으로 돌아간다. 바꾸지 않고 넓혔으므로 (§4) `PROTOCOL_VERSION`은 1 그대로다: `grid.get { tagged: true }`와 `grid.set { panels }`는 패널로 말하고, 그것이 없으면 둘 다 #288 이전의 모양, 세션 id만의 목록으로 말한다 (이전 UI의 `grid.set { sessionIds }`는 목록을 그 세션들로 바꾼다). UI는 `panels` 옆에 `sessionIds`도 보내고 id만의 목록을 세션 패널로 읽으므로, 한 빌드 차이의 UI와 host는 어느 쪽으로든 계속 함께 돈다; 이전 필드는 한 릴리스 뒤에 빠진다. `grid.set`은 최대 256개를 받고 저장한 것을 돌려준다: 중복, 모르는 세션, 등록되지 않은 프로젝트의 앱은 빠진다. 앱이 있는지는 확인하지 않는다 — 앱 목록은 폴더보다 늦을 수 있고, 찾지 못한 앱은 화면이 빼고 그린다. 모양은 패널의 정체성뿐이라 그대로 클라이언트로 옮겨 갈 수 있다 (#82) |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
@@ -331,9 +332,12 @@ type ProtocolError = {
   세션에 대해서만 재연결 복구를 돌린다: live로 알던 세션이 새 목록에서 아니면(원격 호스트가 keeper
   없이 재시작했다) 깨운다.
 - **`MachineInfo`.** `{ id, name, sshTarget, shell, wslDistro, command, status, error, versions,
-  lastConnectedAt, localPort, sameLocalPort }`. `shell`은 `posix`, `powershell`, `wsl`. `status`는
-  `connecting`, `connected`, `unreachable`, `not_running`(Centralu는 답하지만 `centralu serve`가 돌지
-  않는다), `versions_differ`, `refused`. `versions`는 `{ hub, remote, older, compatible, sameChannel,
+  lastConnectedAt, localPort, sameLocalPort, hostStarted }`. `shell`은 `posix`, `powershell`, `wsl`.
+  `status`는 `connecting`, `connected`, `unreachable`, `not_running`(Centralu는 답하지만 `centralu serve`가
+  돌지 않고 허브가 띄우지도 못했다. `error`가 까닭), `starting`(허브가 띄우는 중. 추가만 했고, 이전 창은
+  `unreachable`로 읽는다), `versions_differ`, `refused`. `hostStarted`는 null, 또는 허브가 그 호스트를 띄웠을 때
+  `{ how, at, note }`: `detached`는 링크보다 오래 살고, `link_bound`는 그 기기가 WMI로 프로세스 만들기를 막아 링크의
+  ssh 세션에서 돌며 링크와 함께 끝난다. 추가만. `versions`는 `{ hub, remote, older, compatible, sameChannel,
   accepted }`이고 양쪽은 각각 `{ version, protocolVersion, dev }`다. 두 쪽 버전이 다르면 맞추거나
   사람이 거절할 때까지(`machines.acceptVersions`, 프로토콜이 다르면 거절된다) 링크는 이어지지 않는다.
   질문은 `older`를 가리킨다. dev 빌드에는 더 오래된 쪽이 없고, 프로토콜이 같으면 이어진다.

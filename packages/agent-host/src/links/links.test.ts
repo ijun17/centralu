@@ -9,7 +9,7 @@ import { createRpcHandler } from '../rpc.js'
 import { HostServer } from '../transport/server.js'
 import { Links } from './links.js'
 import { Router } from './router.js'
-import { DirectTunnel, type ConnectionLine, type Tunnel } from './tunnel.js'
+import { DirectTunnel, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 
@@ -388,5 +388,73 @@ describe('a hub linked to another host (#82)', () => {
     // The forward an ssh tunnel brought up after the removal would otherwise run until the host exits
     await until(() => seen.at(-1) === 'close' && seen.includes('opened'))
     expect(seen).toEqual(['open', 'close', 'opened', 'close'])
+  })
+
+  describe('a remote host the link finds not running (remote-hub.md §10.9, decision 7)', () => {
+    /** Links over a tunnel whose remote host runs once `startHost` has run, with every status and log line kept */
+    async function linkTo(start: () => Promise<HostStart>) {
+      const remote = await remoteHost()
+      let running = false
+      let starts = 0
+      const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running })), {
+        startHost: async () => {
+          starts++
+          const r = await start()
+          running = true
+          return r
+        },
+      })
+      const store = new Store()
+      const registry = storeRegistry(store)
+      registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+      const statuses: string[] = []
+      const logs: string[] = []
+      const links = new Links({
+        hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+        broadcast: (e) => {
+          if (e.type === 'machine_status') statuses.push(e.machine.status)
+        },
+        terminal: () => {},
+        mirror: storeMirror(store),
+        registry,
+        tunnelFor: () => tunnel,
+        log: (l) => void logs.push(l),
+        retryMs: [50, 200],
+        client: { maxBackoffMs: 100 },
+      })
+      cleanups.push(() => links.stop())
+      links.start()
+      return { links, statuses, logs, starts: () => starts }
+    }
+
+    it('starts it without asking, says so in the row and the log, and connects', async () => {
+      const l = await linkTo(async () => ({ how: 'detached', note: null }))
+      await until(() => l.links.list()[0]!.status === 'connected')
+      expect(l.starts()).toBe(1)
+      expect(l.statuses).toContain('starting')
+      expect(l.statuses).not.toContain('not_running')
+      expect(l.links.list()[0]!.hostStarted).toMatchObject({ how: 'detached', note: null, at: expect.any(Number) })
+      expect(l.logs.join('\n')).toMatch(/Remote box: no Centralu host is running there; starting one \(centralu serve --detach\)[\s\S]*Remote box: started its host; it keeps running after this link ends/)
+    })
+
+    it('says when the host runs only while the link is up, and why', async () => {
+      const l = await linkTo(async () => ({ how: 'link_bound', note: 'Windows did not start Centralu through WMI (returned 2).' }))
+      await until(() => l.links.list()[0]!.status === 'connected')
+      expect(l.links.list()[0]!.hostStarted).toMatchObject({ how: 'link_bound', note: /through WMI/ })
+      expect(l.logs.join('\n')).toMatch(/its host runs only while this link is up: Windows did not start Centralu through WMI/)
+    })
+
+    it('reports a start that failed as not running, with the reason, and tries again later', async () => {
+      let fail = true
+      const l = await linkTo(async () => {
+        if (fail) throw new Error('centralu serve exited (1) before its host answered')
+        return { how: 'detached', note: null }
+      })
+      await until(() => l.links.list()[0]!.status === 'not_running')
+      expect(l.links.list()[0]!.error).toBe('Centralu could not be started on Remote box: centralu serve exited (1) before its host answered')
+      fail = false
+      await until(() => l.links.list()[0]!.status === 'connected')
+      expect(l.starts()).toBeGreaterThanOrEqual(2)
+    })
   })
 })

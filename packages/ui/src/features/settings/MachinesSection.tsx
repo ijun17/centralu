@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { MachineInfo, RemoteShell } from '@cc/protocol'
-import { machineProblem, versionPrompt } from '@cc/core'
+import { hostStartNote, machineProblem, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 
@@ -59,6 +59,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
   const setToast = useStore((s) => s.setToast)
   const [confirming, setConfirming] = useState(false)
   const problem = machineProblem(m)
+  const started = hostStartNote(m)
   const where = [m.sshTarget, SHELL_LABEL[m.shell], m.shell === 'wsl' ? m.wslDistro : null, m.command ? `runs ${m.command}` : null]
     .filter(Boolean)
     .join(' · ')
@@ -114,6 +115,11 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
       <p className="mt-0.5 truncate font-mono text-2xs text-ink-faint" title={where}>
         {where}
       </p>
+      {started && (
+        <p className="mt-1 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
+          {started}
+        </p>
+      )}
       {confirming && (
         <p className="mt-1 text-xs leading-body text-ink-muted">
           Its sessions and projects leave this computer&apos;s lists. Nothing on {m.name} changes, and linking it again brings

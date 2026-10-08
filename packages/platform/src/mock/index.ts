@@ -1460,6 +1460,7 @@ export class MockPlatform implements Platform {
         lastConnectedAt: Date.now(),
         localPort: null,
         sameLocalPort: false,
+        hostStarted: null,
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })

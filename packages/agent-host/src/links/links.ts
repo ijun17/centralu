@@ -3,7 +3,7 @@ import { newMachineId, splitQualified } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import type { Endpoint, RemoteSpec, Tunnel } from './tunnel.js'
+import type { Endpoint, HostStart, RemoteSpec, Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 
 /**
@@ -76,6 +76,8 @@ export class LinkedMachine implements RoutedMachine {
   private error: string | null = null
   private versions: MachineVersions | null = null
   private lastConnectedAt: number | null = null
+  /** The host this link started there, if it did (owner decision 7, plan §10.9) */
+  private hostStarted: (HostStart & { at: number }) | null = null
   private endpoint: Endpoint | null = null
   private client: RemoteClient | null = null
   /** Sessions of the remote the hub shows / hides, by the remote's id. Events of any other session are not passed on */
@@ -122,6 +124,7 @@ export class LinkedMachine implements RoutedMachine {
       lastConnectedAt: this.lastConnectedAt,
       localPort: this.endpoint && this.endpoint.localPort > 0 ? this.endpoint.localPort : null,
       sameLocalPort: this.endpoint ? this.endpoint.localPort === this.endpoint.line.port : false,
+      hostStarted: this.hostStarted,
     }
   }
 
@@ -195,18 +198,34 @@ export class LinkedMachine implements RoutedMachine {
     this.client?.close()
     this.client = null
     this.setStatus('connecting', null)
-    let endpoint: Endpoint
-    try {
-      endpoint = await this.tunnel.open()
-    } catch (err) {
+    let endpoint = await this.openTunnel()
+    if (!endpoint) return
+    /*
+     * No host there: start one, then open again (owner decision 7, plan §10.9). Adding the machine was
+     * the consent (§3.2), so nobody is asked; the row and host.log say it happened. Once per opening:
+     * a start that did not take is reported and retried with the backoff, not in a loop.
+     */
+    if (!endpoint.line.hostRunning && this.tunnel.startHost) {
+      this.setStatus('starting', null)
+      this.deps.log?.(`[links] ${this.name}: no Centralu host is running there; starting one (centralu serve --detach)`)
+      let started: HostStart
+      try {
+        started = await this.tunnel.startHost()
+      } catch (err) {
+        if (this.stopped) return
+        this.setStatus('not_running', `Centralu could not be started on ${this.name}: ${(err as Error).message}`)
+        return this.retryLater()
+      }
       if (this.stopped) return
-      this.setStatus('unreachable', (err as Error).message)
-      return this.retryLater()
-    }
-    if (this.stopped) {
-      // Removed (or the hub stopping) while the tunnel opened: what it opened ends now, not with the host
-      await this.tunnel.close()
-      return
+      this.hostStarted = { ...started, at: Date.now() }
+      this.deps.log?.(
+        started.how === 'detached'
+          ? `[links] ${this.name}: started its host; it keeps running after this link ends`
+          : `[links] ${this.name}: its host runs only while this link is up: ${started.note ?? 'it cannot be started in the background there'}`,
+      )
+      this.setStatus('starting', null)
+      endpoint = await this.openTunnel()
+      if (!endpoint) return
     }
     this.endpoint = endpoint
     if (!endpoint.line.hostRunning) {
@@ -217,6 +236,25 @@ export class LinkedMachine implements RoutedMachine {
     const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: false })
     if (!mayConnect(versions)) return
     this.connectClient(endpoint)
+  }
+
+  /** The tunnel's `open`, or null after reporting why not (and when the link was stopped meanwhile) */
+  private async openTunnel(): Promise<Endpoint | null> {
+    let endpoint: Endpoint
+    try {
+      endpoint = await this.tunnel.open()
+    } catch (err) {
+      if (this.stopped) return null
+      this.setStatus('unreachable', (err as Error).message)
+      this.retryLater()
+      return null
+    }
+    if (this.stopped) {
+      // Removed (or the hub stopping) while the tunnel opened: what it opened ends now, not with the host
+      await this.tunnel.close()
+      return null
+    }
+    return endpoint
   }
 
   /** Records the versions, and holds the link at `versions_differ` when they do not allow connecting */

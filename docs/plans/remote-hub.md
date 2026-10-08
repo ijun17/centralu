@@ -375,7 +375,7 @@ What was measured about processes started over ssh:
 | Windows: `Start-Process` inside the session | **Dead.** Windows' OpenSSH ends the session's processes with it |
 | Windows: `Win32_Process.Create` through WMI (`Invoke-CimMethod`) | **Alive**: it served through all of probe 4 (three runs, 13 hub swaps), about 15 minutes |
 | WSL: `setsid nohup` inside the distro | Alive while the distro runs, but WSL stops the distro about 15 s after its last `wsl.exe` client (phase 1), and empties `/tmp` with it (a probe install there was gone by the next session) |
-| WSL: `wsl.exe -d <distro> --exec <launcher> serve`, itself created through WMI | **Alive**, and it holds the distro: still serving 88 s after every other client had gone; ending that `wsl.exe` ended the host |
+| WSL: `wsl.exe -d <distro> --exec <launcher> serve`, itself created through WMI | **Alive**, and it holds the distro: still serving 88 s after every other client had gone; ending that `wsl.exe` ended the host. **Not reproduced later the same day** (building step 2): on the same laptop, every WMI-created `wsl.exe` hung without running anything in the distro (it started a second `wsl.exe` and waited), with and without `CurrentDirectory`, `-u`, `--cd` or the Store's full path, with the distro running or stopped, while a WMI-created `wsl.exe --list` and `powershell.exe` worked. Why is not known. `serve --detach` reports it as `wmi_blocked`, ends what it created, and the hub falls back to the link-bound host |
 | Linux: `setsid nohup` | Alive (systemd-logind's `KillUserProcesses` is off by default on Ubuntu and Debian); not measured on a real server, the Ubuntu one no longer exists |
 
 From that, **one primitive: `centralu serve --detach`** starts the host outside the session and returns once it
@@ -538,7 +538,7 @@ The owner took every recommendation of the design. Each line keeps the question,
 | Step | What | Estimate (agent work) |
 |---|---|---|
 | 1 | The release records the pinned Node (version and SHA-256 per platform, from a signature-checked `SHASUMS256.txt`) as `remote-runtime.json` in the host bundle; CI runs the host's tests on that Node too. **Done** | 0.5–1 day |
-| 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running | 1.5–2 days |
+| 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running. **Done**: `host.stop`, `MachineStatus` `starting` and `MachineInfo.hostStarted` (additive), the link-bound fallback when WMI is blocked ([agent-host.md](../agent-host.md) §4.7, §4.8) | 1.5–2 days |
 | 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL | 2–3 days |
 | 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows | 2–3 days |
 | 5 | (Owner decision 2) Host-only packages in the release | 1 day |
