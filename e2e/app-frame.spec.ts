@@ -253,7 +253,7 @@ test('teardown is sent before taking a view down, and its answer is awaited — 
  * frame (Playwright's evaluate runs as that frame's script — network requests are subject to that
  * frame's CSP as-is).
  */
-test('S-2 (browser part): an app frame cannot reach the parent, the top window, storage, popups, or the host network', async ({ page, context }) => {
+test('S-2 (browser part): an app frame cannot reach the parent, the top window, storage, popups, or the host network', async ({ page, context, browserName }) => {
   const leaked: string[] = []
   await context.route('https://example.test/**', (r) => {
     leaked.push(r.request().url())
@@ -290,7 +290,8 @@ test('S-2 (browser part): an app frame cannot reach the parent, the top window, 
     out['own tauri/ipc globals'] = Object.getOwnPropertyNames(window).filter((k) => /tauri|ipc|invoke/i.test(k)).join(',') || 'none'
     sync('localStorage', () => localStorage.setItem('k', '1'))
     sync('sessionStorage', () => sessionStorage.setItem('k', '1'))
-    sync('document.cookie', () => ((document.cookie = 'k=1'), document.cookie))
+    // What counts is that nothing is kept: an empty read comes back as null
+    sync('document.cookie', () => ((document.cookie = 'k=1'), document.cookie || null))
     await later('indexedDB.open', () => new Promise((res, rej) => {
       const r = indexedDB.open('k')
       r.onsuccess = () => res('ok')
@@ -316,6 +317,13 @@ test('S-2 (browser part): an app frame cannot reach the parent, the top window, 
     return out
   }, fx.port)
 
+  /*
+   * Two engines refuse two of these in their own way (#424). WebKit, the desktop app's
+   * WKWebView, lets an opaque origin write `document.cookie` and keeps nothing (an empty read),
+   * where Chromium throws; and it refuses a WebSocket the policy forbids by throwing from the
+   * constructor, where Chromium opens nothing and fires `error`. Either way nothing gets through.
+   */
+  const webkit = browserName === 'webkit'
   expect(probes).toEqual({
     'parent.document': 'SecurityError',
     'top.document': 'SecurityError',
@@ -324,14 +332,14 @@ test('S-2 (browser part): an app frame cannot reach the parent, the top window, 
     'own tauri/ipc globals': 'none',
     localStorage: 'SecurityError',
     sessionStorage: 'SecurityError',
-    'document.cookie': 'SecurityError',
+    'document.cookie': webkit ? 'ok:null' : 'SecurityError',
     'indexedDB.open': 'SecurityError',
     // A popup is blocked by the sandbox (returns null)
     'window.open': 'ok:null',
     'top.location': 'SecurityError',
     'fetch host port': 'TypeError',
     'fetch example.test': 'TypeError',
-    'WebSocket host': 'WebSocketError',
+    'WebSocket host': webkit ? 'SecurityError' : 'WebSocketError',
     'image from host port': 'ImageError',
   })
   expect(page.url()).toBe(topUrl)
