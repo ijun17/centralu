@@ -26,6 +26,26 @@ const SKILLS_KEY = 'orchestrator_skills'
 const SKILL_MAX_COUNT = 10
 const SKILL_MAX_CHARS = 2_000
 
+const isText = (v: unknown): v is string => typeof v === 'string'
+const isTextList = (v: unknown): v is string[] => Array.isArray(v) && v.every(isText)
+
+/**
+ * A list kept in one app_settings row, read the way another build may have left it (#384): a row that is not JSON or
+ * not a list reads as empty, and an element without the fields this build needs is skipped. An element keeps every
+ * field it has, so writing the list back after a change does not drop what a newer build added to it.
+ */
+function storedList<T>(raw: string | null, has: (x: Record<string, unknown>) => boolean): T[] {
+  if (!raw) return []
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is T => typeof x === 'object' && x !== null && !Array.isArray(x) && has(x as Record<string, unknown>))
+}
+
 export interface ProposalResult {
   ok: boolean
   error?: string
@@ -51,12 +71,7 @@ export class OrchestratorProposals {
 
   /** MCP server proposals waiting on the person's approval */
   mcpProposals(): { name: string; command: string; args: string[]; why?: string }[] {
-    try {
-      const raw = this.store.appSetting(MCP_PROPOSALS_KEY)
-      return raw ? (JSON.parse(raw) as ReturnType<OrchestratorProposals['mcpProposals']>) : []
-    } catch {
-      return []
-    }
+    return storedList(this.store.appSetting(MCP_PROPOSALS_KEY), (x) => isText(x.name) && isText(x.command) && isTextList(x.args))
   }
 
   /** Saves an MCP server proposal (propose_mcp_server) — validation and persistence only */
@@ -175,22 +190,12 @@ export class OrchestratorProposals {
 
   /** Skill proposals waiting on the person's approval (#71) */
   skillProposals(): { name: string; content: string; why?: string }[] {
-    try {
-      const raw = this.store.appSetting(SKILL_PROPOSALS_KEY)
-      return raw ? (JSON.parse(raw) as ReturnType<OrchestratorProposals['skillProposals']>) : []
-    } catch {
-      return []
-    }
+    return storedList(this.store.appSetting(SKILL_PROPOSALS_KEY), (x) => isText(x.name) && isText(x.content))
   }
 
   /** Skills that have been approved and loaded into the orchestrator's role prompt (#71) */
   orchestratorSkills(): { name: string; content: string }[] {
-    try {
-      const raw = this.store.appSetting(SKILLS_KEY)
-      return raw ? (JSON.parse(raw) as ReturnType<OrchestratorProposals['orchestratorSkills']>) : []
-    } catch {
-      return []
-    }
+    return storedList(this.store.appSetting(SKILLS_KEY), (x) => isText(x.name) && isText(x.content))
   }
 
   /**

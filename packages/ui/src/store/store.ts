@@ -31,6 +31,7 @@ import {
   notificationFor,
   suggestMatcher,
   DEFAULT_NOTIFY_POLICY,
+  readNotifyPolicy,
   type NotifyPolicy,
   bumpSeq,
   initialSession,
@@ -2870,8 +2871,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
-        const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
-        if (savedPolicy) set({ notifyPolicy: savedPolicy })
+        const savedPolicy = (snap as { notifyPolicy?: unknown }).notifyPolicy
+        if (savedPolicy != null) set({ notifyPolicy: readNotifyPolicy(savedPolicy) })
         // Whether the tree shows ignored files is a way of looking, so it comes back with
         // the rest of the panel's layout rather than being re-chosen every launch (#17).
         //

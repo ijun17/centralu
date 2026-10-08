@@ -3521,6 +3521,15 @@ describe('restoring the workspace saves nothing until it is done', () => {
     expect(useStore.getState()).toMatchObject(lateFields)
   })
 
+  // #384: a snapshot an older build saved has no `done` switch; it was not a choice to turn it off
+  it('a notification policy from an older snapshot takes the switches it lacks from the defaults', async () => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { notifyPolicy: { approval: false, error: true, allDone: true, whenFocused: false, sound: 'loud' } } as never
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState().notifyPolicy).toEqual({ approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: true })
+  })
+
   /*
    * The control rail is gone (#97), and a snapshot written by an older build still carries its width
    * (`railWidth`). It must load like any other snapshot: the fields around it come back, and the next
