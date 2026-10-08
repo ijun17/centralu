@@ -59,7 +59,8 @@ script rehearses by default and why nothing publishes automatically.
   machine without it. Neither is signed, so SmartScreen asks before the first start. The
   Windows job also runs the Rust unit tests, and a separate `windows tests` job runs the
   four parts of `pnpm verify`, each blocking as on the other platforms. (The unit-test step
-  did not block until the W2 failures listed in #307 were fixed.) The npm
+  did not block until the W2 failures listed in #307 were fixed.) The host's own tests also
+  run on the Node remotes are pinned to ([below](#the-node-remotes-run-82)). The npm
   package `@centralu/win32-x64` ships the same folder, built again by `release.yml`'s own
   Windows job (see [Windows](#windows-14-w3) below).
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
@@ -198,6 +199,28 @@ verifies and starts the keeper from ([plans/thin-shell.md](plans/thin-shell.md) 
 - The manifest and its signature are kept as the run's `content-manifest-darwin-arm64` artifact. That
   upload cannot fail the job.
 - To check one by hand: `pnpm exec tsx scripts/content-manifest.mts verify <folder>`.
+
+## The Node remotes run (#82)
+
+A host the hub installs on another machine runs on a Node the hub downloads there, not on that
+machine's own ([plans/remote-hub.md](plans/remote-hub.md) §10.2; Node 24 LTS, owner decision of
+2026-10-08). `packaging/remote-runtime.json` is the one place it is named: the exact version, the
+SHA-256 of the archive for each platform the installer serves (`linux-x64`, `linux-arm64`,
+`win32-x64`), the releaser whose key signed that release's `SHASUMS256.txt`, and the
+`nodejs/release-keys` commit that key is read from.
+
+| Who | What it does with the pin |
+|---|---|
+| `release.yml`, `guard` job | `node scripts/node-pin.mjs`: fetches that version's `SHASUMS256.txt` and its `.sig` from nodejs.org, checks the signature with `gpgv` against the pinned releaser's key, and fails the release before anything is built if a pinned hash differs |
+| `bundle:host` | Copies it beside `main.mjs` as `remote-runtime.json`, where the hub's installer reads it |
+| `release-npm.mts` | Fails a package whose host carries no copy, or a copy that differs from the pin |
+| `build.yml`, `host-tests-remote-node` | Runs the host, protocol and launcher tests on that version, on Linux and Windows, beside the jobs on Node 22 |
+
+**Moving it** (a Node 24 security release, say): `node scripts/node-pin.mjs --set 24.x.y`. It reads
+the current key list of `nodejs/release-keys`, checks the new `SHASUMS256.txt` against it, and writes
+the pin with the signer and the commit it used. Review the diff (the signer should be a name in that
+repository's README), and let CI run the host's tests on the new version in the same pull request.
+Another major is a decision, not a bump: `NODE_MAJOR` in the script refuses it.
 
 ## The macOS shell (#440)
 

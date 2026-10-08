@@ -11,6 +11,7 @@
  *   schema.sql                   — the store looks for this next to the bundle
  *   codex-orchestrator-bridge.mjs — codex launches this directly with node (bundled with `ws` inside)
  *   node_modules/better-sqlite3  — the native addon (only the files needed)
+ *   remote-runtime.json          — the Node a remote this host installs runs, pinned (scripts/node-pin.mjs)
  */
 import { build } from 'esbuild'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -261,6 +262,15 @@ writeFileSync(
     2,
   ) + '\n',
 )
+
+/*
+ * The Node a remote runs (docs/plans/remote-hub.md §10.3): the version and the SHA-256 of each
+ * platform's archive, from the pin `scripts/node-pin.mjs` checks against Node's signed
+ * SHASUMS256.txt. A hub installing another machine sends that machine the hash for its platform, so
+ * the value travels inside the hub's own host, never beside the archive it vouches for. Copied as it
+ * is: `scripts/release-npm.mts` compares the bundle's copy with the pin byte for byte.
+ */
+cpSync(join(ROOT, 'packaging/remote-runtime.json'), join(OUT, 'remote-runtime.json'))
 
 const size = readFileSync(join(OUT, 'main.mjs')).length
 console.log(
