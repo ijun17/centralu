@@ -74,6 +74,29 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 - **Restore order**: ① load the workspace + session metadata from the store → show the sidebar and inbox immediately (read-only) → ② connect to the host → ③ attempt resume per session → on success switch to active, on failure show the "view the record + new session" card. That the UI does not need the host to come up is the key to the 3-second cold start target.
 - The relationship between event reconnection (`afterSeq`) and restore is in [agent-host.md](agent-host.md) §4.
 
+## 5a. Screen history (#374)
+
+Back and forward work like a browser's. An entry is what a person calls a screen — a session, a project's screen, an
+app's page, the grid, the orchestrator, Settings — derived from `view`, `focusedSessionId`, `focusedProjectId`,
+`focusedApp` and `settingsOpen` (`screenOf`). One store subscriber (`recordScreen`) records every change of it,
+whichever action made it, so a new way of jumping somewhere gets history without doing anything. A change inside a
+screen (a keystroke, a session picked inside the grid, a panel moved) is not a new screen and adds nothing.
+
+- **Dedup and limit**: opening the screen already on adds nothing; a new visit drops the forward entries; 50 entries,
+  oldest dropped first (`store/navHistory.ts`).
+- **Gone screens**: a step skips and drops an entry whose session, project or app no longer exists, and one equal to
+  the current screen, so every step shows something new.
+- **Settings is a layer**: closing it steps back to the screen under it, so forward reopens it.
+- **Not persisted**: a restart starts a fresh history at the restored screen; the restore's own steps are not
+  recorded.
+- **Inputs**: the top bar's arrows, `⌘[`/`⌘]` and `Alt+←`/`Alt+→` (ignored in any text field — the composer, the
+  terminal, an editor — and during IME composition), the mouse's side buttons (DOM buttons 3 and 4, on release), and
+  the palette's "Go back" / "Go forward". A side button pressed over an app's frame stays in that frame's document.
+  Whether WKWebView delivers buttons 3 and 4 to the page has not been confirmed in the real app (Playwright cannot
+  press them in WebKit); if it does not, the Tauri shell has to catch the native press (an `NSEvent` monitor for
+  `otherMouseUp`, button number 3 or 4) and dispatch `new MouseEvent('mouseup', { button })` on the window, which the
+  UI already handles.
+
 ## 6. Where settings live
 
 - Shortcuts, notification policy, card collapse policy, approval banner policy and so on are **data** (the strategy table of the strategy pattern). A `settings` slice + store persistence.
