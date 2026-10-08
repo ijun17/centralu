@@ -22,11 +22,14 @@ centralu/
 │     ├─ content-verify/        # Rust, no Tauri: verifies and copies signed content (thin shell, #440)
 │     └─ src-tauri/             # Rust: supervisor, git2, rusqlite, OS integration
 │        ├─ Cargo.toml          # the workspace: this app package, keeper/ and shell/
-│        ├─ src/                # the window (Tauri); src/bin/centralu-keeper.rs is the keeper's main
+│        ├─ src/                # the window (Tauri); src/bin/centralu-keeper.rs is the keeper's main;
+│        │                      #   src/shell/ installs the shell and starts the keeper through it (macOS)
 │        ├─ keeper/             # crate centralu-keeper-core: keeper and host supervisor, no Tauri (#440)
 │        └─ shell/              # crate centralu-shell: the macOS shell that holds permissions; verifies
 │                               #   content, copies it, starts the keeper, exits. Built once per shell
-│                               #   version and pinned in packaging/shell/shell.lock (plans/thin-shell.md)
+│                               #   version and pinned in packaging/shell/shell.lock (plans/thin-shell.md).
+│                               #   A macOS release carries it in Contents/Resources/shell/ and the signed
+│                               #   content in Contents/Resources/content/ (scripts/bundle-stage.mts)
 │
 ├─ packages/
 │  ├─ protocol/                 # the shared language: event and command schemas (zod). 0 dependencies

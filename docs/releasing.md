@@ -150,8 +150,9 @@ pnpm release:npm --publish             # publishes @centralu/darwin-arm64, then 
 ```
 
 By hand, the content manifest (below) is signed with a throwaway key and the script says so: the
-signing key exists only as a GitHub secret. Harmless while no shell reads the manifest; once one
-does, a darwin release has to come from `release.yml`.
+signing key exists only as a GitHub secret. That is harmless only while the shell the release carries
+is unpinned (the window never opens one); once `shell.lock` pins a shell, a publish with a throwaway key
+stops before anything is published, so a darwin release has to come from `release.yml`.
 
 Linux and Windows have to come from CI first (`release.yml` with `dry_run` off), because the second command refuses to
 publish the shim while any pinned platform package is missing from the registry at this
@@ -184,10 +185,11 @@ to `false` at the same time as the 1.0 bump.
 
 ## The content manifest (#440)
 
-The darwin job also stages the host and the bundled `centralu-keeper` into
+The darwin job also stages the bundle's host and its `centralu-keeper` into
 `apps/desktop/src-tauri/target/release/content/` and writes a signed `content-manifest.json` there
 (`scripts/content-manifest.mts`, formats in [security-boundaries.md](security-boundaries.md) "Signed
-content"). Nothing ships it yet; the thin shell will read it ([plans/thin-shell.md](plans/thin-shell.md)).
+content"). That folder is then copied into the bundle as `Contents/Resources/content/`, which the shell
+verifies and starts the keeper from ([plans/thin-shell.md](plans/thin-shell.md) §10.2, next section).
 
 - A rehearsal signs with a key generated in memory. A publish runs with `--require-content-key`, signs
   with `CONTENT_SIGNING_KEY` from the `npm-publish` environment, and checks the result against
@@ -202,7 +204,31 @@ content"). Nothing ships it yet; the thin shell will read it ([plans/thin-shell.
 The shell (`apps/desktop/src-tauri/shell`, [plans/thin-shell.md](plans/thin-shell.md) §3) is not built
 by `release.yml` and not built per release. macOS identifies it by its cdhash, so its bytes are built
 **once per shell version** and pinned; every new shell version asks every person for their permissions
-again. Nothing ships it yet: the window starts carrying it in step 4 of the plan.
+again.
+
+**What a darwin release carries** (`scripts/bundle-stage.mts`, called by `release-npm.mts` after it
+copied and checked the bundle, before anything is packed):
+
+| In the bundle | What it is |
+|---|---|
+| `Contents/Resources/shell/Centralu.app` | the shell the window installs into `<data>/shell/` |
+| `Contents/Resources/shell/shell.json` | `{ "format": 1, "version", "tree", "pinned" }`: the shell version, the hash of the shell's files the window checks its copy against, and whether these bytes are the ones `shell.lock` pins |
+| `Contents/Resources/content/` | the signed content: `centralu-keeper`, `host/`, `content-manifest.json` and its `.sig` |
+
+- **A publish** takes the asset `shell.lock` pins for the source's shell version: downloaded, its zip's
+  sha256 and the bundle's cdhash checked against the entry, marked `pinned`. A pinned shell refuses
+  content signed with a throwaway key, so such a publish stops.
+- **Without a lock entry**, in a rehearsal, and in `pnpm app`, the shell is built on the spot
+  (`cargo build -p centralu-shell --release`) and marked unpinned. The window neither installs nor opens
+  an unpinned shell: it starts the keeper directly, as before, and writes why to `keeper.log`. A publish
+  says so in a warning. Until shell v1 is in `shell.lock`, releases therefore behave as before the shell.
+- After copying both in, the bundle is signed again ad hoc, keeping what the bundler set (identifier,
+  entitlements, flags, hardened runtime), without `--deep`, so the shell and the keeper keep their bytes;
+  then the content in the bundle is verified again and must still have the manifest that was signed, the
+  shell's files must hash to `shell.json`, and `codesign --verify --deep --strict` must pass.
+  `tooling/bundle-stage.test.ts` stages a made-up bundle the same way on every macOS test run.
+- The `.dmg` that CI builds is made by `tauri build` before any of this and carries neither; nothing ships
+  it.
 
 Publishing a shell version (shell v1 is the first):
 
@@ -220,7 +246,13 @@ Publishing a shell version (shell v1 is the first):
    reproducibly, and prints the zip's sha256, the cdhash and the `shell.lock` entry. `publish` creates the
    prerelease `shell-v<N>` (never marked latest) with the zip.
 4. Add the printed entry to `shells` in `packaging/shell/shell.lock`, in a pull request. That entry is
-   what every later release ships.
+   what every later release ships, and the first release with it is the one that switches people over:
+   their windows install the shell and start the keeper through it, and macOS asks for the permissions
+   once more, in the shell's name (plan §9 decision 5). Say so in that release's notes.
+5. On the release that first carries it, check on a real Mac what the tests cannot (plan §10.2 "Checked
+   by hand"): the shell is installed into `~/.centralu/shell/`, a fresh start goes through it
+   (`[window] the shell started the keeper` in `keeper.log`), the window keeps focus, the Dock shows one
+   icon, and Screen Recording granted once survives the next update.
 
 Never rebuild a published version. If a run fails before `publish`, run it again. If the release exists
 but its entry was never merged, nothing has shipped it: delete the `shell-v<N>` release and its tag, then

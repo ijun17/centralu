@@ -428,6 +428,19 @@ it by the rules the app used before: five consecutive failures, a 30 s stable-up
 immediate stop on a lock conflict or a store only a newer build can read (`host_proc.rs` in the
 `apps/desktop/src-tauri/keeper` crate, shared by the keeper and the app's direct path). If the keeper dies, the host sees EOF on that pipe and shuts down.
 
+**Who starts the keeper.** The window, when no keeper answers on `<data>/keeper.sock`. A macOS release first
+asks the shell ([plans/thin-shell.md](plans/thin-shell.md) §6, §10.2; `src/shell/` in the window): it installs or
+upgrades `<data>/shell/Centralu.app` from the shell it carries, opens it through LaunchServices
+(`/usr/bin/open -n -g -a <shell> --args --content <bundle>/Contents/Resources/content --data-dir <data>
+--bundle-path <bundle> --nonce <n>`), and waits up to 45 s for `<data>/shell-status.json` with that nonce. The
+shell verifies the signed content, copies it to `<data>/content/<version>/` and starts `centralu-keeper` from
+there with the same command line the window would use (`keeper::exe::Start`), so the keeper and everything under
+it are judged by macOS as the shell. If the shell refuses or does not report, the window starts the keeper itself
+from its own bundle, as every other build does, for the rest of its life, and keeps the reason for `host_build`
+(`shell`): a release shows it in the build bar, a build whose shell is unpinned (a local `pnpm app`, a
+rehearsal) only writes it to `keeper.log` as a `[window]` line, and never installs or opens that shell.
+Debug builds, `CC_KEEPER_HOST_SOURCE`, Linux and Windows start the keeper (or the host) directly, as before.
+
 **Per-build copies.** Before each launch the keeper copies the bundle's `resources/host` folder to
 `<data>/hosts/<key>/` (temporary folder, then rename) and runs `main.mjs` from there. The key is the commit
 stamped into `bundle-info.json`; a `-dirty` or `unknown` build gets its build time appended, so two different

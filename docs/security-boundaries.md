@@ -412,7 +412,8 @@ folder outside any signed app bundle, with the permissions the person granted to
 is **what may be started from that folder**: only files a release signed. The verifier is
 `apps/desktop/content-verify` (shared by the shell and, on a handoff, the keeper); the writer is
 `scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
-the plan); nothing opens the shell yet (step 4), so nothing in a release starts content through it.
+the plan), which a macOS release window opens since step 4 (§10.2) when the shell it carries is the one
+`shell.lock` pins; until shell v1 is pinned, no release opens it.
 
 - **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
   the app version, platform and minimum shell version. `content-manifest.json.sig` is an ed25519 signature
@@ -467,8 +468,12 @@ The shell adds:
 - **Its own bytes are pinned.** The shell is built once per shell version by
   `.github/workflows/shell-release.yml` (no cache, no feature, no secret) and recorded in
   `packaging/shell/shell.lock` (zip sha256 and cdhash); `fetchPinned` (`scripts/shell-bundle.mts`)
-  refuses a download whose sha256 differs. The window checking the cdhash before installing a shell is
-  step 4.
+  refuses a download whose sha256 differs, and the release refuses a downloaded bundle whose cdhash
+  differs, before it puts the shell into the window (`scripts/bundle-stage.mts`). The window installs a copy
+  only if its files hash to what the release recorded beside it (`shell.json`), never replaces a higher
+  installed version with a lower one, never installs or opens an unpinned shell (a local build's), and opens
+  the shell through LaunchServices with absolute paths only; an old `shell-status.json` cannot answer for a
+  start, because the window matches it by a fresh nonce.
 
 Limits:
 
