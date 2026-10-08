@@ -51,6 +51,7 @@ import {
   MOVED_UP_SLACK,
   personIsScrolling,
   shouldFollowAgain,
+  rowKeys,
   stickAfterScroll,
   writeScroll,
 } from './scroll.js'
@@ -1598,6 +1599,8 @@ function ChatStream({
     },
     [chat, sessionId, inlineFramesVersion],
   )
+  // Never two rows under one key: a shared key leaves copies of a row behind in the DOM (#64, `rowKeys`)
+  const keys = useMemo(() => rowKeys(chat), [chat])
   const virtualizer = useVirtualizer({
     count: chat.length,
     getScrollElement: () => scrollRef.current,
@@ -1613,7 +1616,7 @@ function ChatStream({
      * allowed to get buried under that noise.
      */
     useAnimationFrameWithResizeObserver: true,
-    getItemKey: (i) => chat[i]?.seq ?? i,
+    getItemKey: (i) => keys[i] ?? `row@${i}`,
     /*
      * The scroller's size-change compensation is applied to where the view is now, not to the
      * offset the scroller last saw in a scroll event — which is a frame stale right after our

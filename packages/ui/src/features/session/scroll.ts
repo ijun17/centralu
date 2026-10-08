@@ -197,3 +197,27 @@ export function anchorAt(
   const seq = hit ? items[hit.index]?.seq : undefined
   return seq === undefined ? null : { seq, offset: scrollTop - hit!.start }
 }
+
+/**
+ * The virtual list's row keys: each row's render key (`seq`), made unique (#64).
+ *
+ * React builds a row's DOM node once per key. When two rows of one list share a key, the older
+ * node is neither reused nor removed when the rows change: it stays in the list, unowned, at the
+ * spot it was last placed. In a virtual list rows mount and unmount on every scroll, so one
+ * shared key leaves a copy behind each time — measured in WebKit: one collision, scrolled through
+ * once, left the same passage five times in the DOM, and selecting and copying the region gave it
+ * back five times, as the person reported. The store is meant never to produce a shared key
+ * (`rekeyAgainst`), but a slip there must not turn into copies on screen, so the list does not
+ * trust it: the first row keeps its key and a later row with the same one gets a string key of its
+ * own, which no number equals.
+ */
+export function rowKeys(items: readonly { seq: number }[]): (number | string)[] {
+  const seen = new Set<number>()
+  return items.map((it, i) => {
+    if (!seen.has(it.seq)) {
+      seen.add(it.seq)
+      return it.seq
+    }
+    return `${it.seq}@${i}`
+  })
+}
