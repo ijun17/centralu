@@ -411,8 +411,8 @@ With the thin shell ([plans/thin-shell.md](plans/thin-shell.md)), the keeper and
 folder outside any signed app bundle, with the permissions the person granted to the shell. The boundary
 is **what may be started from that folder**: only files a release signed. The verifier is
 `apps/desktop/content-verify` (shared by the shell and, on a handoff, the keeper); the writer is
-`scripts/content-manifest.mts`. Nothing starts content through it yet; the shell that does is the next
-step.
+`scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
+the plan); nothing opens the shell yet (step 4), so nothing in a release starts content through it.
 
 - **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
   the app version, platform and minimum shell version. `content-manifest.json.sig` is an ed25519 signature
@@ -444,6 +444,31 @@ step.
 - **Other refusals:** a manifest for another platform, one that needs a newer shell, an unknown `format`,
   a manifest over 16 MiB or a signature file over 64 KiB, and a version lower than the highest this data
   folder has started unless the window asks for a rollback (`version::check_not_downgrade`).
+
+The shell adds:
+
+- **The keys it trusts are keys.json, compiled in.** A test build can trust one more key (the integration
+  test's throwaway key, given at compile time) only behind the `test-key` feature, and a build without
+  `debug_assertions` refuses to compile with it (`compile_error!` in `shell/src/keys.rs`). Nothing on the
+  way to a release turns the feature on: `tooling/shell-bundle.test.ts` and
+  `tooling/shell-release-workflow.test.ts` check the source, the shell's manifest and the shell release
+  workflow, and `scripts/shell-integration.mts` checks that a build without the feature refuses content
+  the throwaway key signed. The status file says `testBuild`, so a test build
+  cannot pass for a real one.
+- **It starts only from the copy.** The keeper is `<data>/content/<version>/centralu-keeper` and its host
+  folder `<data>/content/<version>/host`; nothing is started from the folder the window passed. A copy
+  already there for that version is used only if it verifies again where it is (`verify_in_place`: the
+  signature, the same manifest bytes as the source, every listed file's size, hash, read-only mode and
+  executable bit, no symlink and nothing unlisted at any depth); otherwise it is removed and copied again.
+  A `--content` inside `<data>/content/` is refused (as given and resolved, and arguments may not contain
+  `..`), so that removal can never reach the source.
+- **The data folder is the window's.** The shell does not create or migrate it; a missing one is refused.
+  `shell-status.json` is written `0600` with `O_NOFOLLOW` to a temporary name and renamed.
+- **Its own bytes are pinned.** The shell is built once per shell version by
+  `.github/workflows/shell-release.yml` (no cache, no feature, no secret) and recorded in
+  `packaging/shell/shell.lock` (zip sha256 and cdhash); `fetchPinned` (`scripts/shell-bundle.mts`)
+  refuses a download whose sha256 differs. The window checking the cdhash before installing a shell is
+  step 4.
 
 Limits:
 
