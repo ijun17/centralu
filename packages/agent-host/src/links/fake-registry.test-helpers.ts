@@ -24,7 +24,9 @@ export function tarGz(top: string, files: Record<string, FakeFile>): Buffer {
       writeFileSync(file, typeof f === 'string' ? f : f.text)
       if (typeof f !== 'string') chmodSync(file, f.mode)
     }
-    execFileSync('tar', ['-czf', join(dir, 'out.tgz'), '-C', dir, top])
+    // Relative paths from `dir`: the tar first on PATH may be GNU tar (the one Git for Windows brings,
+    // on a Windows runner), which reads the `C:` of an absolute Windows path as a remote host
+    execFileSync('tar', ['-czf', 'out.tgz', top], { cwd: dir })
     return readFileSync(join(dir, 'out.tgz'))
   } finally {
     rmSync(dir, { recursive: true, force: true })
