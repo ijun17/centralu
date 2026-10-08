@@ -35,8 +35,9 @@ The target is one topology, one OS layer and one start plan, everywhere.
 
 Already done towards this plan: one `StartMode` decision (`start_plan.rs`, #459); OS checks in the host confined to
 platform modules by lint (`local/platform-checks`, #460); the keeper's stop path made safe on Linux and a
-`keeper e2e (linux)` CI job (#458); the compatibility paths' removal scheduled for 0.1.0-beta.16 (#461). In progress:
-splitting `keeper/src/host_proc.rs` by OS, and remote phase 3 (installer, update, rollback; remote-hub.md §10).
+`keeper e2e (linux)` CI job (#458); the compatibility paths' removal scheduled for 0.1.0-beta.16 (#461);
+`keeper/src/host_proc.rs` split by OS (#465); OS checks in the runtime's Rust held to an allow-list that only shrinks
+(`keeper/src/platform_checks.rs`, step 1). In progress: remote phase 3 (installer, update, rollback; remote-hub.md §10).
 
 ## 3. The target
 
@@ -176,8 +177,8 @@ Estimates are agent work.
 
 | Step | Module replaced | Replaced by | Gated by (lessons; work-list rows) | Estimate |
 |---|---|---|---|---|
-| 0 | (done or in progress) | one `StartMode` (#459), platform-check lint (#460), `kill(2)` and the Linux CI job (#458), compat removal scheduled (#461), `host_proc.rs` split by OS (in progress) | ST1, SU4 | — |
-| 1 | — | this document; a Rust platform-check test (a `cfg(target_os = …)`, `cfg(unix)` or `cfg(windows)` outside `keeper/src/os/` and `start_plan` fails CI, with today's sites as an allow-list that only shrinks) | — | 0.5 day |
+| 0 | (done) | one `StartMode` (#459), platform-check lint (#460), `kill(2)` and the Linux CI job (#458), compat removal scheduled (#461), `host_proc.rs` split by OS (#465) | ST1, SU4 | — |
+| 1 | — | this document; a Rust platform-check test (a `cfg(target_os = …)`, `cfg(unix)` or `cfg(windows)` outside `keeper/src/os/` and `start_plan` fails CI, with today's sites as an allow-list that only shrinks): `keeper/src/platform_checks.rs`, done | — | 0.5 day |
 | 2 | the OS branches of `keeper/src/host_proc.rs`, `keeper/sys.rs`, `children/proc.rs`, `handoff/wire.rs` | `keeper/src/os/{mod,unix,macos,linux}.rs` (Windows: compile-only stubs); the supervisor's spawn, stop and probe call it | ST8, ST13, PA11, LK1, LK7, LK8, SU1–SU7, CH1–CH4, CH9, CH10, HD2–HD5; rows 3, 5, 10, 29–34, 42, 43, 50 | 3–4 days |
 | 3 | the host's process lifecycle: `host/main.ts` start and shutdown, `env-path.ts`, `instance-lock.ts`, `transport/server.ts`'s listen and close | `host/lifecycle/` (start sequence as data: log, PATH, lock, store, server, children; shutdown as the reverse, every close run once) | ST16, PA1–PA13, HO1–HO15, LK2–LK5, SW15; rows 6–9, 11, 12, 15–28 | 3–4 days |
 | 4 | where a Linux keeper and host run from (`source::Copies` for `hosts/`, the window's keeper start) | content on Linux: the release signs a `linux-<arch>` manifest, the window verifies and copies into `<data>/content/<v>/`, the keeper runs and hands over from there and closes the AppImage descriptors it inherited; `<data>/hosts/` retired for content keepers | FI1–FI7, FI9, ST15, HD13; rows 55, 56 | 2–3 days |

@@ -58,6 +58,14 @@ Code elsewhere asks one of those a question named for what differs, so each OS's
 OS is a change to those files. Tests and build scripts are not checked. The Rust side's equivalent for how the host
 starts is `start_plan` ([agent-host.md](agent-host.md) §4.0).
 
+**In the runtime's Rust the same holds, enforced by a test** (`keeper/src/platform_checks.rs`): an OS predicate in
+`cfg(…)`, `cfg!(…)` or a `cfg_attr` condition (`unix`, `windows`, `target_os`, …) and `std::env::consts::OS` fail
+`cargo test` in the keeper crate's `src/` and the window's `src/` outside the OS layer (`keeper/src/os/`),
+`start_plan.rs` (`Os::current`) and the window's own OS integration (`src/ide.rs`). The sites that predate the rule
+are listed in `NOT_YET` with their count; the list may only shrink, and each step of
+[plans/runtime-unification.md](plans/runtime-unification.md) removes its rows. Tests and the macOS-only shell crate
+are not checked.
+
 ## 3. The design patterns used — where, and why
 
 Patterns are not decoration, they are defences against the axes of change (C1~C6). Which axis each pattern blocks is stated.
