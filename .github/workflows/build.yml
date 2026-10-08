@@ -299,11 +299,7 @@ jobs:
   # keeper scripts that need no model and no network; the claude and codex turns stay a manual run.
   #
   # macOS, because that is where the packaged app always uses the keeper and where its exit watch is
-  # kqueue. Linux (pidfd) is a follow-up: a trial on ubuntu-24.04 (2026-10-05) was cut short when,
-  # right after the first scenario's keeper stopped, a SIGTERM reached the script itself and the
-  # runner cancelled the step. Something on the Linux stop path signals outside the keeper's own
-  # process group; until that is understood, these scripts are not run there. The same image as the
-  # darwin bundle above.
+  # kqueue. The same image as the darwin bundle above. Linux (pidfd) is the `keeper-linux` job below.
   keeper:
     name: keeper e2e
     runs-on: macos-14
@@ -377,6 +373,87 @@ jobs:
       # next build's content before it hands over. Builds a test keeper and a test shell trusting a
       # throwaway key (the keeper crate and the shell only, on top of the build above), then puts the
       # plain debug keeper back in the target folder. About a minute on top of its builds.
+      - name: keeper handing over to verified content (tampered and older content refused, cleanup)
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: pnpm exec tsx scripts/keeper-content-integration.mts --no-build
+
+  # The same keeper scripts on Linux (#350, 2026-10-08). A first trial here (2026-10-05) ended when
+  # SIGTERM reached the script itself: the keeper stopped its host's group with
+  # `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (this image's) sends to the group named by the
+  # pid's first digit, so a host pid starting with 1 signalled every process of the user. Now a
+  # direct kill(2). Measured in WSL2 Ubuntu 24.04: docs/spikes/2026-10-linux-keeper.md.
+  #
+  # The keeper crate's unit tests run here too: `kill_group_signals_the_group_the_pid_leads_and_
+  # nothing_else` only tells the two apart against Linux's `kill`, and nothing else runs them on
+  # Linux. The window is built as well, because the handoff script starts it as an old keeper
+  # would; that needs webkit2gtk's headers (the same list as the bundle job). No shell steps: the
+  # shell is macOS's, though the content script builds and runs it here like any unix program.
+  keeper-linux:
+    name: keeper e2e (linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      KEEPER_TARGET_DIR: ${{ github.workspace }}/apps/desktop/src-tauri/target
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Point CC_DATA_DIR at a temporary folder
+        run: echo "CC_DATA_DIR=$RUNNER_TEMP/centralu-data" >> "$GITHUB_ENV"
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: keeper-linux-x64
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Bundle the host
+        id: bundle
+        run: pnpm bundle:host
+
+      - name: Build the binary (debug)
+        id: build
+        run: cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: keeper crate unit tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-keeper-core --lib
+
+      - name: keeper (start, attach, background, relaunch, stop, swap, drain)
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: node scripts/keeper-integration.mjs --no-build
+
+      - name: keeper holding a terminal and a dev server across a host crash
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: node scripts/keeper-children-integration.mjs --no-build --no-claude --no-codex
+
+      - name: keeper handing itself over
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: node scripts/keeper-handoff-integration.mjs --no-build --no-claude --no-codex
+
       - name: keeper handing over to verified content (tampered and older content refused, cleanup)
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
         run: pnpm exec tsx scripts/keeper-content-integration.mts --no-build
