@@ -62,7 +62,7 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
   }
   const hits: string[] = []
   let base = ''
-  const tarPath = (name: string, version: string) => `/${name}/-/${name.split('/').at(-1)}-${version}.tgz`
+  const tarPath = (name: string, version: string) => `/${name}/-/${name.replace(/^@[^/]+\//, '')}-${version}.tgz`
   const server: Server = createServer((req, res) => {
     const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)
     hits.push(path)
