@@ -3,6 +3,7 @@ import {
   decideFollow,
   distanceFromBottom,
   INPUT_GRACE_MS,
+  rowKeys,
   isAtBottom,
   isScrollUpKey,
   personIsScrolling,
@@ -170,5 +171,17 @@ describe('one more time on the deferred frame', () => {
 
   it('does not scroll down if the person scrolled up in the meantime — using the judgment made when scheduled would override the person', () => {
     expect(shouldFollowAgain({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 })).toBe(false)
+  })
+})
+
+describe('rowKeys (#64)', () => {
+  it('keeps each row its own key when the keys are already unique', () => {
+    expect(rowKeys([{ seq: 3 }, { seq: 1 }, { seq: 2 }])).toEqual([3, 1, 2])
+  })
+
+  it('gives a later row that shares a key one of its own, and leaves the first as it was', () => {
+    const keys = rowKeys([{ seq: 1 }, { seq: 7 }, { seq: 2 }, { seq: 7 }, { seq: 7 }])
+    expect(keys.slice(0, 3)).toEqual([1, 7, 2])
+    expect(new Set(keys).size).toBe(keys.length)
   })
 })
