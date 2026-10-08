@@ -5,6 +5,7 @@ import { computeInbox } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { useFocusReturn } from '../../components/focusReturn.js'
 
 type Item =
   | { kind: 'session'; id: string; label: string; sub: string }
@@ -19,6 +20,8 @@ type Item =
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
+  // Esc gives the keyboard back to where it was, the composer included (#115)
+  useFocusReturn(open)
   const toggle = useStore((s) => s.togglePalette)
   const sessions = useStore((s) => s.sessions)
   const projects = useStore((s) => s.projects)

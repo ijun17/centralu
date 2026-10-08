@@ -154,6 +154,15 @@ views, long sessions, a large store), not only the smallest state that exercises
 The desktop app is WKWebView. If a UI bug does not reproduce in Chromium, try
 `test.use({ browserName: 'webkit' })`.
 
+**Where the keyboard goes is tested by typing the way a person does.** `locator.fill()` and
+`locator.press()` focus their target before they type, so a test written with them cannot see
+focus that went missing. That is how #115 (the composer silently stopped taking keys) passed every
+suite: tests opened and closed the inbox, the palette and the settings screen and asserted on the
+layer, never on what the next key did. For anything that opens, closes, hides or moves over
+something, type with `page.keyboard`, pass through the path, type again, and assert on what the
+person sees (`e2e/fixtures/composer-focus.ts`), in both engines. A new layer that takes focus
+gives it back: it uses `Modal` or `useOpenLayer`, or `useFocusReturn` for a layer of its own.
+
 If you touched Rust:
 
 ```bash

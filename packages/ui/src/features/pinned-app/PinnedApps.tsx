@@ -108,7 +108,25 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     if (mode !== 'slot' || !el) return
     return registerShieldHost(pv.key, el)
   }, [mode, pv.key])
-  const app = useExternalApp(pv.projectId, pv.appId)
+  /*
+   * A view put out of sight lets go of the keyboard (#115). `inert` is meant to see to that, but
+   * WebKit leaves focus inside a frame that turns inert while it holds focus (measured with
+   * Playwright's WebKit: the hidden frame went on taking every key). When the view is hidden by
+   * something other than a click in the page — a notification, the global shortcut, the store
+   * moving to a session — the person types into a view they cannot see, and the app's own
+   * shortcuts never hear a key. Taking focus off the frame hands the keys back to the page.
+   */
+  useLayoutEffect(() => {
+    const el = section.current
+    if (mode !== 'hidden' || !el) return
+    const held = document.activeElement
+    if (!(held instanceof HTMLElement) || !el.contains(held)) return
+    held.blur()
+    // In WebKit blurring the frame element leaves focus in the view's own nested frame; focusing
+    // this window takes it back into this document
+    window.focus()
+  }, [mode])
+  const app =useExternalApp(pv.projectId, pv.appId)
   const frame = useRef<AppFrameHandle>(null)
   const start = useStore((s) => s.startPinnedView)
   const release = useStore((s) => s.releasePinnedView)
