@@ -135,12 +135,21 @@ export type ScrollWriter = { scrollTop: number; scrollTo(options: ScrollToOption
  * So a compensation (`adjustments` set) is applied to where the view **is**, not to where the
  * scroller last saw it. Every other write (scrollToIndex, scrollToOffset, the initial sync)
  * carries an absolute target and goes through unchanged.
+ *
+ * And while the view sticks to the end (`sticking`), no compensation is written at all: a row
+ * above changing size leaves the view at the end. A shorter list clamps it to the new end, and
+ * the follow effect follows a longer one. Written, the compensation moved the view up and the
+ * next scroll event read that as the person scrolling up, so it stopped following. WebKit
+ * measures rows a few frames after a jump to the end, and the view came to rest 300px above it
+ * (#424).
  */
 export function writeScroll(
   el: ScrollWriter,
   offset: number,
   options: { adjustments?: number; behavior?: ScrollBehavior },
+  sticking = false,
 ): void {
+  if (options.adjustments && sticking) return
   const top = options.adjustments ? el.scrollTop + options.adjustments : offset
   el.scrollTo({ top, behavior: options.behavior })
 }
