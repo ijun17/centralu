@@ -156,6 +156,15 @@ describe('the virtual scroller’s compensation write', () => {
     expect(writes).toEqual([3210])
   })
 
+  it('while the view sticks to the end, a compensation is not written: it would read as the person scrolling up (#424)', () => {
+    const { el, writes } = writer(4596)
+    writeScroll(el, 4596, { adjustments: -304 }, true)
+    expect(writes).toEqual([])
+    // An absolute target still goes through
+    writeScroll(el, 400, {}, true)
+    expect(writes).toEqual([400])
+  })
+
   it('any other write is an absolute target and goes through as is', () => {
     const { el, writes } = writer(2350)
     writeScroll(el, 400, {})

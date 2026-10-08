@@ -182,7 +182,7 @@ export function linkedHostsUiTests(): void {
     })
   })
 
-  test('versions that differ: the prompt names the command for the older machine, and connects anyway when asked', async ({ page }) => {
+  test('versions that differ: the prompt offers to update the older machine from here, and connects anyway when asked', async ({ page }) => {
     test.setTimeout(120_000)
     // This hub claims a newer release of the same channel, so the machine (APP_VERSION) is the older side
     const newer = `99.0.0-${APP_VERSION.split('-')[1]?.split('.')[0] ?? 'beta'}.1`
@@ -201,14 +201,39 @@ export function linkedHostsUiTests(): void {
         await expect(row).toHaveCount(0)
       })
 
-      await test.step('one protocol, an older machine: the prompt, the exact command, and nothing listed yet', async () => {
+      await test.step('a machine that runs a command of its own: this computer cannot update it, so the prompt names the command', async () => {
+        await page.getByTestId('machines-add-open').click()
+        await page.getByTestId('machines-add-name').fill('Own command')
+        await page.getByTestId('machines-add-target').fill(`direct:${pair.remotePort}`)
+        await page.getByText('Command (optional)').click()
+        await page.getByTestId('machines-add-command').fill('~/bin/centralu')
+        await page.getByTestId('machines-add-confirm').click()
+        const row = page.getByTestId('machine-row-own-command')
+        await expect(row).toHaveAttribute('data-status', 'versions_differ', { timeout: 15_000 })
+        await expect(page.getByTestId('machine-versions-text-own-command')).toContainText(`older than this computer's ${newer}. Update it there`)
+        await expect(page.getByTestId('machine-update-command-own-command')).toHaveText(`npm i -g centralu@${newer}`)
+        await expect(page.getByTestId('machine-update-remote-own-command')).toHaveCount(0)
+        await page.getByTestId('machine-remove-own-command').click()
+        await page.getByTestId('machine-remove-yes-own-command').click()
+        await expect(row).toHaveCount(0)
+      })
+
+      await test.step('one protocol, an older machine: the prompt offers the update from here, and nothing listed yet', async () => {
         await page.getByTestId('machines-add-open').click()
         await page.getByTestId('machines-add-name').fill('Remote box')
         await page.getByTestId('machines-add-target').fill(`direct:${pair.remotePort}`)
         await page.getByTestId('machines-add-confirm').click()
         await expect(page.getByTestId('machine-row-remote-box')).toHaveAttribute('data-status', 'versions_differ', { timeout: 15_000 })
-        await expect(page.getByTestId('machine-versions-text-remote-box')).toContainText(`older than this computer's ${newer}`)
-        await expect(page.getByTestId('machine-update-command-remote-box')).toHaveText(`npm i -g centralu@${newer}`)
+        await expect(page.getByTestId('machine-versions-text-remote-box')).toContainText(`older than this computer's ${newer}. Update it, or`)
+        // This computer runs a release (not a dev build) and the machine no command of its own: a button, no command line
+        await expect(page.getByTestId('machine-update-command-remote-box')).toHaveCount(0)
+        await expect(page.getByTestId('machine-update-remote-remote-box')).toHaveText(`Update Remote box to ${newer}`)
+        // Before anything stops there the prompt says what stops; Cancel stops nothing
+        await page.getByTestId('machine-update-remote-remote-box').click()
+        await expect(page.getByTestId('machine-stop-text-remote-box')).toBeVisible()
+        await page.getByTestId('machine-stop-confirm-remote-box').getByRole('button', { name: 'Cancel' }).click()
+        await expect(page.getByTestId('machine-stop-confirm-remote-box')).toHaveCount(0)
+        await expect(page.getByTestId('machine-update-remote-remote-box')).toBeVisible()
         await page.keyboard.press('Escape')
         await expect(page.getByTestId('machine-status-remote-box')).toHaveAttribute('data-status', 'versions_differ')
         await expect(page.getByTestId('project-remote-project')).toHaveCount(0)

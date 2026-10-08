@@ -1620,11 +1620,11 @@ function ChatStream({
     /*
      * The scroller's size-change compensation is applied to where the view is now, not to the
      * offset the scroller last saw in a scroll event — which is a frame stale right after our
-     * own landing or following write, and put the view 54px above the end in WebKit (see
-     * `writeScroll`).
+     * own landing or following write, and put the view 54px above the end in WebKit. While the
+     * view sticks to the end there is none at all (see `writeScroll`).
      */
     scrollToFn: (offset, options, instance) => {
-      if (instance.scrollElement) writeScroll(instance.scrollElement, offset, options)
+      if (instance.scrollElement) writeScroll(instance.scrollElement, offset, options, stickToBottom.current)
     },
   })
 

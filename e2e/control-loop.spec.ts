@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import { grantClipboard } from './fixtures/clipboard.js'
 
 /**
  * Meets the M1 Phase 5 completion criteria. Drives the UI with the mock platform (?mock).
@@ -1310,7 +1311,7 @@ test('Git: the diff gets the wide area; the list, staging and commit live in the
 test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ page }) => {
   const diff =
     '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n-const old = 1\n+const next = 1\n   indented\n unchanged'
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await grantClipboard(page)
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate((d) => {
     const m = (window as any).__mock
@@ -1526,7 +1527,7 @@ test('Code viewer: opening a file, search, and large files (C-3, FR-6)', async (
  * because the payload is the whole point — the on-screen highlight is not what was broken.
  */
 async function openBigFile(page: Page, lines: number, opts: { truncated?: boolean } = {}) {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await grantClipboard(page)
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(
     ({ n, truncated }) => {
@@ -1579,8 +1580,10 @@ test('Viewer copy: copying continues through lines that were never rendered (#36
   await page.keyboard.press('Meta+c')
 
   const rows = (await clipboard(page)).split('\n')
-  // Hundreds of the lines in between were never in the DOM to be copied from
-  expect(rows.length).toBeGreaterThan(300)
+  // More lines than the DOM ever holds at once: the ones in between were never there to be
+  // copied from. (A count, not a number of lines: WebKit autoscrolls slower than Chromium.)
+  const mounted = await page.locator('[data-testid="code-viewer"] [data-line]').count()
+  expect(rows.length).toBeGreaterThan(mounted)
   expect(rows[0]).toBe('const line3 = 3')
   expect(rows[1]).toBe('const line4 = 4')
   // …the run has no gaps, and no line number rode along with any of it
@@ -1660,8 +1663,10 @@ test('Viewer: the scroll area is a named region, reachable by Tab and moved by t
   }, VIEWER_SCROLLER)
   expect(focused).toEqual({ isScroller: true, role: 'region', label: 'Code' })
 
-  await page.keyboard.press('ArrowRight')
-  await page.keyboard.press('ArrowRight')
+  // Held like a finger holds a key: WebKit scrolls by keyboard from keydown to keyup, and a press
+  // with no time between the two left the area where it was (#424)
+  await page.keyboard.press('ArrowRight', { delay: 100 })
+  await page.keyboard.press('ArrowRight', { delay: 100 })
   await expect
     .poll(() => page.evaluate((sel) => document.querySelector<HTMLElement>(sel)!.scrollLeft, VIEWER_SCROLLER))
     .toBeGreaterThan(0)
@@ -7455,6 +7460,37 @@ function distanceFromBottom(stream: Locator): Promise<number> {
 }
 
 /**
+ * Wheel up until the list has left the bottom, and return where it comes to rest (#424).
+ *
+ * Two things WebKit does that Chromium does not show. Playwright's WebKit can deliver the first
+ * wheel after the pointer arrives without scrolling anything, so one wheel is not a promise of a
+ * scroll. And the list keeps moving after the wheel: the rows it brought in measure taller than
+ * the virtualiser's guess and the offset is corrected by as much (measured: 4,863 read at once,
+ * 5,944 half a second later). The spot being read is where it rests.
+ */
+async function wheelUpToRead(page: Page, stream: Locator): Promise<number> {
+  await expect
+    .poll(async () => {
+      await page.mouse.wheel(0, -3000)
+      return distanceFromBottom(stream)
+    })
+    .toBeGreaterThan(80)
+  let last = -1
+  await expect
+    .poll(
+      async () => {
+        const now = await stream.evaluate((el) => el.scrollTop)
+        const still = now === last
+        last = now
+        return still
+      },
+      { intervals: [250] },
+    )
+    .toBe(true)
+  return last
+}
+
+/**
  * Scroll survives leaving a grid panel and coming back (issue #31).
  *
  * Fourth time this shape has bitten: draft text, expanded folders, the elapsed count, and
@@ -7538,9 +7574,7 @@ test('Returns to the spot being read — not the top (#61)', async ({ page }) =>
   // Scroll up to somewhere in the middle to read (the bug only lives in a spot that is neither
   // the bottom nor the top)
   await stream.hover()
-  await page.mouse.wheel(0, -3000)
-  await expect.poll(() => distanceFromBottom(stream)).toBeGreaterThan(80)
-  const before = await stream.evaluate((el) => el.scrollTop)
+  const before = await wheelUpToRead(page, stream)
   expect(before).toBeGreaterThan(200)
 
   // Leave the screen and come back (the grid discards the panel entirely and rebuilds it)
@@ -7573,9 +7607,7 @@ test('Switching sessions and returning keeps the spot being read (#61)', async (
   await page.getByTestId(`session-row-${a}`).click()
   const stream = page.getByTestId('chat-stream')
   await stream.hover()
-  await page.mouse.wheel(0, -3000)
-  await expect.poll(() => distanceFromBottom(stream)).toBeGreaterThan(80)
-  const before = await stream.evaluate((el) => el.scrollTop)
+  const before = await wheelUpToRead(page, stream)
 
   // Visit a neighboring session and come back — the screen type stays the same, only sessionId
   // changes
@@ -7586,6 +7618,8 @@ test('Switching sessions and returning keeps the spot being read (#61)', async (
   await page.getByTestId(`session-row-${b}`).click()
   await page.getByTestId(`session-row-${a}`).click()
   await expect(stream).toBeVisible()
+  // What the person sees is the list once it shows: it stays hidden while it settles
+  await expect(stream).not.toHaveAttribute('data-settling', 'true')
 
   const after = await stream.evaluate((el) => el.scrollTop)
   expect(Math.abs(after - before)).toBeLessThan(120)
