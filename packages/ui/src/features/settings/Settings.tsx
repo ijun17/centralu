@@ -7,6 +7,7 @@ import { useTools } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
+import { useFocusReturn } from '../../components/focusReturn.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
@@ -160,6 +161,8 @@ type Category = (typeof CATEGORIES)[number]['id']
  */
 export function Settings() {
   const open = useStore((s) => s.settingsOpen)
+  // Closing gives the keyboard back to where it was, the composer included (#115)
+  useFocusReturn(open)
   const toggle = useStore((s) => s.toggleSettings)
   const policy = useStore((s) => s.notifyPolicy)
   const setPolicy = useStore((s) => s.setNotifyPolicy)

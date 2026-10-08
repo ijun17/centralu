@@ -853,6 +853,59 @@ describe('the cursor for a session where an event arrives before history (#79)',
     expect(useStore.getState().chat['off-paging']!.map(line)).toEqual(L(190))
   })
 
+  it('a re-read in the middle of reading back keeps the pages already read, and the cursor with them', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('mid-read', sessionInfo('mid-read'))
+    mock.messages.set('mid-read', rows('mid-read', 350))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('mid-read')
+    await vi.waitFor(() => expect(useStore.getState().history['mid-read']).toBeDefined())
+    await useStore.getState().loadOlder('mid-read')
+    await useStore.getState().loadOlder('mid-read')
+    expect(useStore.getState().chat['mid-read']!.map(line)[0]).toBe('L51')
+
+    // The resumed session caught up on a line said elsewhere: the host announces it and the screen reads again
+    mock.messages.set('mid-read', rows('mid-read', 351))
+    useStore.getState().dispatchEvent({ type: 'history_synced', sessionId: 'mid-read', added: 1 } as NormalizedEvent)
+    await vi.waitFor(() => expect(useStore.getState().chat['mid-read']!.map(line).at(-1)).toBe('L351'))
+
+    // Still where the person was reading, not snapped back to the last page
+    expect(useStore.getState().chat['mid-read']!.map(line)).toEqual(L(351).slice(50))
+    expect(useStore.getState().history['mid-read']).toMatchObject({ oldestSeq: 51, more: true, loading: false })
+    expect(await readAll('mid-read')).toEqual(L(351))
+  })
+
+  it('a page of older rows that lands after a re-read moved the cursor is dropped, leaving no gap', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('raced', sessionInfo('raced'))
+    mock.messages.set('raced', rows('raced', 350))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('raced')
+    await vi.waitFor(() => expect(useStore.getState().history['raced']).toMatchObject({ oldestSeq: 251 }))
+
+    // "Earlier messages" is asked for, and its page is held on the way
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = mock.agents.loadMessages.bind(mock.agents)
+    mock.agents.loadMessages = async (...args: Parameters<typeof real>) => {
+      const page = await real(...args)
+      if (args[2] !== undefined) await gate
+      return page
+    }
+    const paging = useStore.getState().loadOlder('raced')
+
+    // Meanwhile a hundred lines were said elsewhere, and a re-read lands first: a gap the screen cannot bridge, so it shows the new page
+    mock.messages.set('raced', rows('raced', 450))
+    await useStore.getState().loadHistory('raced')
+    expect(useStore.getState().history['raced']).toMatchObject({ oldestSeq: 351 })
+
+    release()
+    await paging
+    mock.agents.loadMessages = real
+
+    expect(await readAll('raced')).toEqual(L(450))
+  })
+
   it.each(['orchestrator', 'grid'] as const)(
     'the focused session keeps everything it loaded while the %s is on screen',
     async (view) => {
@@ -3519,6 +3572,15 @@ describe('restoring the workspace saves nothing until it is done', () => {
     await useStore.getState().attach(mock)
     await tick()
     expect(useStore.getState()).toMatchObject(lateFields)
+  })
+
+  // #384: a snapshot an older build saved has no `done` switch; it was not a choice to turn it off
+  it('a notification policy from an older snapshot takes the switches it lacks from the defaults', async () => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { notifyPolicy: { approval: false, error: true, allDone: true, whenFocused: false, sound: 'loud' } } as never
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState().notifyPolicy).toEqual({ approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: true })
   })
 
   /*

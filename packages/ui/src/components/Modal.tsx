@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store/store.js'
+import { useFocusReturn } from './focusReturn.js'
 
 /**
  * Raises the store's `openLayers` while a single screen-covering layer is floating (#158).
@@ -9,8 +10,12 @@ import { useStore } from '../store/store.js'
  * shortcut (y/n/a on an approval card) had no way to know one was floating. `Modal` counts itself,
  * so a new dialog is covered automatically with no extra work. A layer that does not use `Modal`
  * (the run-command window) calls this hook directly.
+ *
+ * It also gives focus back to what held it when the layer opened, once the layer is gone (#115,
+ * focusReturn.ts) — otherwise closing a dialog leaves the keyboard typing into nothing.
  */
 export function useOpenLayer(): void {
+  useFocusReturn(true)
   useEffect(() => {
     useStore.setState((s) => ({ openLayers: s.openLayers + 1 }))
     return () => useStore.setState((s) => ({ openLayers: Math.max(0, s.openLayers - 1) }))

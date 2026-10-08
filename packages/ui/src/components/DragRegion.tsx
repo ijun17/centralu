@@ -57,6 +57,15 @@ export function DragRegion({
         if (!e.currentTarget.contains(el)) return
         // Does not drag over something interactive. Without this guard, buttons stop working
         if (el.closest('button, a, input, textarea, select, label, [role="button"], [data-no-drag]')) return
+        /*
+         * Moving the window leaves focus where it was (#115). A press on a plain `div` is, to the
+         * page, a click on nothing: it takes focus off the composer and leaves it on `<body>`. A
+         * native title bar never does that, so after dragging the window by its bar the person
+         * typed on into a composer that no longer had the keyboard, and nothing showed it.
+         * Cancelling the press's default keeps focus (and starts no text selection); the drag
+         * itself is the platform's and does not need it.
+         */
+        e.preventDefault()
         void platform.system.startWindowDrag().catch((err: Error) => {
           // Does not swallow the error. This exact thing caused the window to stop moving and
           // went unnoticed three times before — if the Tauri permission

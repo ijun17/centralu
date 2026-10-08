@@ -33,6 +33,31 @@ const waitFor = async (check: () => boolean, ms = 10_000) => {
   }
 }
 
+/** Resolves once `changes` has not moved for 300 ms (three settle windows) */
+const quiet = async () => {
+  for (let seen = -1; seen !== changes; ) {
+    seen = changes
+    await new Promise((r) => setTimeout(r, 300))
+  }
+}
+
+/*
+ * **Writes until the watcher reports it** (#368). On macOS `fs.watch` runs its FSEvents stream
+ * on another thread, and a write made before that stream is running is never reported, not
+ * even late. On a loaded machine starting the stream takes long enough to swallow a write made
+ * right after `start()`: the test then waited out its whole time limit for an event that was
+ * never coming. Writing again until one is heard waits on the watcher itself.
+ */
+const writeUntilHeard = async (file: string, text: string) => {
+  const before = changes
+  const until = Date.now() + 10_000
+  while (changes === before) {
+    if (Date.now() > until) throw new Error('the watcher never reported a write')
+    writeFileSync(file, text)
+    await waitFor(() => changes !== before, 500).catch(() => {})
+  }
+}
+
 describe('the themes folder (#312)', () => {
   it('creates the folder and writes the schema an editor completes from', () => {
     const schema = JSON.parse(readFileSync(join(dir, THEME_SCHEMA_FILE), 'utf8'))
@@ -72,12 +97,16 @@ describe('the themes folder (#312)', () => {
   })
 
   it('announces a hand edit, once per burst of writes', async () => {
-    writeFileSync(join(dir, 'mine.json'), JSON.stringify({ name: 'Mine', base: 'dark', tokens: {} }))
-    await waitFor(() => changes > 0)
-    const after = changes
-    await new Promise((r) => setTimeout(r, 300))
-    expect(changes).toBe(after)
-  })
+    const file = join(dir, 'mine.json')
+    await writeUntilHeard(file, JSON.stringify({ name: 'Mine', base: 'dark', tokens: {} }))
+    await quiet()
+    // The watcher is live now: a burst of writes is announced once
+    const before = changes
+    for (const base of ['light', 'dark', 'light']) writeFileSync(file, JSON.stringify({ name: 'Mine', base, tokens: {} }))
+    await waitFor(() => changes > before)
+    await quiet()
+    expect(changes).toBe(before + 1)
+  }, 30_000)
 
   it('imports a file from elsewhere as it is, and refuses one that is not a theme', async () => {
     const outside = join(root, 'Shared Theme.json')

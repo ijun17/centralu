@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useStore } from '../../store/store.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { useFocusReturn } from '../../components/focusReturn.js'
 import { lazyComponent } from '../../components/lazy.jsx'
 
 // Both load when the overlay first opens (components/lazy.tsx)
@@ -33,6 +34,8 @@ const GitPanel = lazyComponent(() => import('../git/GitPanel.jsx').then((m) => m
  */
 export function Overlay() {
   const overlay = useStore((s) => s.overlay)
+  // Esc gives the keyboard back to where it was, the composer included (#115)
+  useFocusReturn(overlay !== null)
   const close = useStore((s) => s.closeOverlay)
   const projectId = useStore((s) => {
     // If whatever opened it stated a project, that is the answer — the grid's cross-panel link (#182)

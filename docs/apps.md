@@ -270,7 +270,9 @@ row and catch all of these is gone (#372 follow-up): nothing stands under the or
 - Going to a session and back keeps the same document (hidden, not unloaded). Every way a view goes
   away sends teardown first. A hidden view is moved out of the window and made `inert`, never put
   in `display: none` or `visibility: hidden`: in WKWebView a frame hidden either way and shown again
-  stops drawing the native scrollbars inside the app's document, leaving an empty gutter (#309). When Centralu starts again, the app that was on screen reopens (the
+  stops drawing the native scrollbars inside the app's document, leaving an empty gutter (#309). A view that holds focus when it is hidden lets go of it:
+  WebKit keeps focus inside a frame that turns inert, and the keys went on into a view nobody could
+  see (#115). When Centralu starts again, the app that was on screen reopens (the
   host calls `home` again).
 - While the app starts, a skeleton; if it fails, the reason and Restart. Restart waits until the
   host has stopped the app before opening again.

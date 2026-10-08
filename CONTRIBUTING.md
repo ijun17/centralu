@@ -151,8 +151,31 @@ limits fail at sizes nobody picks by hand: the keeper's handoff failed on macOS 
 values right around it) and at the scale people actually reach (several agents, terminals and app
 views, long sessions, a large store), not only the smallest state that exercises the path.
 
+**A list that mounts and unmounts rows is tested by scrolling through it, and asserted on the
+DOM.** The conversation showed one passage several times while storage held it once (#64): two
+rows shared a React key, and each time the virtual list unmounted and remounted them while
+scrolling, React left the old node behind. The probes at the time looked at one moment (a row was
+missing, not repeated) and counted items in the store, so they never saw it. Drive the list from
+end to end and back, then count what the DOM holds (`e2e/fixtures/conversation-copies.ts`).
+
 The desktop app is WKWebView. If a UI bug does not reproduce in Chromium, try
 `test.use({ browserName: 'webkit' })`.
+
+**Where the keyboard goes is tested by typing the way a person does.** `locator.fill()` and
+`locator.press()` focus their target before they type, so a test written with them cannot see
+focus that went missing. That is how #115 (the composer silently stopped taking keys) passed every
+suite: tests opened and closed the inbox, the palette and the settings screen and asserted on the
+layer, never on what the next key did. For anything that opens, closes, hides or moves over
+something, type with `page.keyboard`, pass through the path, type again, and assert on what the
+person sees (`e2e/fixtures/composer-focus.ts`), in both engines. A new layer that takes focus
+gives it back: it uses `Modal` or `useOpenLayer`, or `useFocusReturn` for a layer of its own.
+
+**Two operations that write the same state are tested interleaved, not one after the other.**
+Reading back through a conversation lost rows for good when a page of older messages landed after
+a re-read had moved the cursor, and a re-read in the middle of reading threw away the pages already
+read (#79). Every test ran each read alone, so the pair was never seen. Hold one answer back (a
+gate in the mock, as the `#79` tests in `store.test.ts` do), run the other operation, then
+release it, and assert that nothing is missing or repeated.
 
 If you touched Rust:
 
