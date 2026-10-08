@@ -247,6 +247,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // Stopping a remote host is `centralu serve --stop` over ssh, never a call through the link
   'host.stop': HUB,
   'machines.acceptVersions': HUB,
+  'machines.install': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,
