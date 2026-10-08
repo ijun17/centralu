@@ -38,10 +38,10 @@ export type FakeRegistry = {
   url: string
   /** Requests served, by path */
   hits: string[]
-  /** Serves these bytes for a package's tarball in place of what its integrity names */
-  swapTarball(name: string, bytes: Buffer): void
-  /** Signs a package's metadata with a key the registry does not publish */
-  forgeSignature(name: string): void
+  /** Serves these bytes for `name@version`'s tarball in place of what its integrity names */
+  swapTarball(id: string, bytes: Buffer): void
+  /** Signs `name@version`'s metadata with a key the registry does not publish */
+  forgeSignature(id: string): void
   /** Adds a Node archive at `/dist/v<version>/<file>` */
   addNodeArchive(version: string, file: string, bytes: Buffer): void
   close(): Promise<void>
@@ -57,8 +57,8 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
   const files = new Map<string, Buffer>()
   for (const p of packages) {
     const t = tarGz('package', p.files)
-    tarballs.set(p.name, t)
-    served.set(p.name, t)
+    tarballs.set(`${p.name}@${p.version}`, t)
+    served.set(`${p.name}@${p.version}`, t)
   }
   const hits: string[] = []
   let base = ''
@@ -76,11 +76,12 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
     if (files.has(path)) return res.end(files.get(path))
     for (const p of packages) {
       if (path === `/${p.name}/${p.version}`) {
-        const integrity = sha512(tarballs.get(p.name)!)
-        const sig = sign('sha256', Buffer.from(`${p.name}@${p.version}:${integrity}`), forged.has(p.name) ? forger.privateKey : signer.privateKey).toString('base64')
+        const id = `${p.name}@${p.version}`
+        const integrity = sha512(tarballs.get(id)!)
+        const sig = sign('sha256', Buffer.from(`${p.name}@${p.version}:${integrity}`), forged.has(id) ? forger.privateKey : signer.privateKey).toString('base64')
         return json({ name: p.name, version: p.version, dist: { tarball: `${base}${tarPath(p.name, p.version)}`, integrity, signatures: [{ keyid, sig }] } })
       }
-      if (path === tarPath(p.name, p.version)) return res.end(served.get(p.name))
+      if (path === tarPath(p.name, p.version)) return res.end(served.get(`${p.name}@${p.version}`))
     }
     res.statusCode = 404
     res.end('not found')
@@ -90,8 +91,8 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
   return {
     url: base,
     hits,
-    swapTarball: (name, bytes) => void served.set(name, bytes),
-    forgeSignature: (name) => void forged.add(name),
+    swapTarball: (id, bytes) => void served.set(id, bytes),
+    forgeSignature: (id) => void forged.add(id),
     addNodeArchive: (version, file, bytes) => void files.set(`/dist/v${version}/${file}`, bytes),
     close: () => new Promise((r) => server.close(() => r())),
   }

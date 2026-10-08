@@ -25,7 +25,7 @@ describe('verifiedPackage (#82, plan §10.3)', () => {
 
   it('refuses metadata signed by a key the registry does not publish', async () => {
     reg = await fakeRegistry([{ name: '@centralu/linux-x64', version: '9.9.9', files }])
-    reg.forgeSignature('@centralu/linux-x64')
+    reg.forgeSignature('@centralu/linux-x64@9.9.9')
     await expect(verifiedPackage('@centralu/linux-x64', '9.9.9', { registry: reg.url })).rejects.toThrow(/signature on @centralu\/linux-x64@9\.9\.9 does not check out/)
   })
 
