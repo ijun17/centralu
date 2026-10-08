@@ -216,7 +216,7 @@ Every step lands behind the current behaviour until step 4 switches release buil
 shipping in between.
 
 Status: steps 1 and 2 are merged (#444, #445; the host copies have not moved under the content folder yet, §5).
-Step 3 is §10.1. Steps 4 to 6 are open.
+Step 3 is §10.1 (#448). Steps 4 to 6 are open.
 
 ### 10.1 Step 3 as built (2026-10-08)
 
