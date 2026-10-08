@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ShortcutKeys } from '@cc/platform/ports'
-import { shortcut } from './shortcut.js'
+import { navShortcut, shortcut } from './shortcut.js'
 
 /** Mac keyboard — joined directly since these are symbols */
 const MAC: ShortcutKeys = { mod: '⌘', alt: '⌥', join: '' }
@@ -45,5 +45,12 @@ describe('shortcut notation (#32)', () => {
     // Some places, like ApprovalCard's "Hold ⌥ and click…", call for just one modifier key
     expect(shortcut(MAC, 'alt')).toBe('⌥')
     expect(shortcut(PC, 'alt')).toBe('Alt')
+  })
+})
+
+describe('back and forward, as each keyboard prints it (#374)', () => {
+  it('the Mac prints ⌘[ / ⌘], other keyboards Alt+← / Alt+→', () => {
+    expect([navShortcut(MAC, -1), navShortcut(MAC, 1)]).toEqual(['⌘[', '⌘]'])
+    expect([navShortcut(PC, -1), navShortcut(PC, 1)]).toEqual(['Alt+←', 'Alt+→'])
   })
 })

@@ -43,11 +43,13 @@ export function useShortcut(): (...parts: string[]) => string {
 }
 
 /**
- * Back or forward between screens (#374), as this keyboard's browsers press it: ⌘[ / ⌘] where there is a command key,
- * Alt+← / Alt+→ elsewhere. Both work on every keyboard (`navKeyOf`), so this only picks which one to print.
+ * Back or forward between screens (#374), as this keyboard's browsers press it: mod+[ / mod+] on the keyboard whose
+ * modifiers are symbols (the Mac's, the one the port answers with no separator), alt+← / alt+→ on keyboards whose
+ * modifiers are names. Both pairs work on every keyboard (`navKeyOf`), so this only picks which one to print, and it
+ * asks the port rather than the OS like everything else here.
  */
 export function navShortcut(keys: ShortcutKeys, dir: -1 | 1): string {
-  return keys.mod === '⌘' ? shortcut(keys, 'mod', dir < 0 ? '[' : ']') : shortcut(keys, 'alt', dir < 0 ? '←' : '→')
+  return keys.join === '' ? shortcut(keys, 'mod', dir < 0 ? '[' : ']') : shortcut(keys, 'alt', dir < 0 ? '←' : '→')
 }
 
 export function useNavShortcut(): (dir: -1 | 1) => string {
