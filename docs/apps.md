@@ -733,6 +733,9 @@ a coordinator, a builder and an agent an app stood up do not.
 or the Share button in the app's header (`apps.setShared`). It is kept in the store's settings table
 (`app_shared:<project>/<app>`, absent means off) and reported in the app list (`shared: true`).
 Turning it off detaches the app from every session that attached it.
+Attachments count only while the session holds the reader set: turning "Let sessions look at their own
+project" off in Settings takes them away at once (detach_app goes with the set), and turning it on
+again brings them back (#382).
 
 **The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1):
 
