@@ -451,9 +451,13 @@ dependencies = [
 name = "centralu-keeper-core"
 version = "0.1.0-beta.11"
 dependencies = [
+ "base64 0.22.1",
+ "content-verify",
+ "ed25519-dalek",
  "libc",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

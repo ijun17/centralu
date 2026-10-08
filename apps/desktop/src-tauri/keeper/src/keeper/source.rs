@@ -7,6 +7,11 @@
 //! builds. A host started by the keeper therefore never runs from a bundle: the keeper copies
 //! the bundle's `resources/host` folder to `<data>/hosts/<key>/` first and runs it from there.
 //! Rebuilding, replacing or deleting the bundle afterwards cannot touch the running host.
+//!
+//! A keeper the macOS shell started runs its hosts from the verified content copy instead,
+//! `<data>/content/<version>/host/` (thin-shell plan §5): already a copy no bundle change can
+//! touch, read-only, and checked against the signed manifest. `<data>/hosts/` stays for a keeper
+//! started directly (debug builds, Linux, the window's fallback).
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -256,61 +261,120 @@ fn in_progress(path: &Path) -> bool {
  *   - `freeze` (a keeper handoff) waits for a copy or cleanup in progress, then refuses both, so
  *     the outgoing keeper never touches `hosts/` while the incoming one may: after the commit it
  *     only exits, and after a rollback `thaw` lets it carry on.
+ *
+ * **Verified content** (thin-shell plan §5, §10 step 5). A host whose folder is a verified copy's
+ * `<data>/content/<version>/host/` runs from there as it is: the copy is read-only and was made from
+ * signed content, which is everything a copy in `hosts/` was for. Claiming such a build holds its
+ * `content/<version>/` folder instead of copying it, and the same lock covers placing a new version
+ * there (`claim_content`, a handoff from verified content). The cleanup removes every version folder
+ * that no claim holds, that is not the keeper's own (`own`, the folder its executable runs from) and
+ * that no host in use runs from, and every `.partial-*` folder a copy that died left behind; never
+ * `highest-started`.
  */
 pub struct Copies {
     data: PathBuf,
+    /// The content folder this keeper's own executable runs from, when the shell started it there.
+    own: Option<PathBuf>,
     inner: Mutex<Held>,
 }
 
 #[derive(Default)]
 struct Held {
-    /// Folder name -> how many claims hold it
-    claims: HashMap<String, usize>,
+    /// Claimed folder (`hosts/<key>` or `content/<version>`) -> how many claims hold it
+    claims: HashMap<PathBuf, usize>,
     frozen: bool,
 }
 
-/// A copy held for a launch or a swap. Dropping it gives the copy up (it stays on disk).
+/// A copy held for a launch, a swap or a handoff. Dropping it gives the copy up (it stays on disk).
 pub struct Claim<'a> {
     copies: &'a Copies,
-    name: String,
+    /// What is held: `hosts/<key>`, or `content/<version>`.
+    folder: PathBuf,
+    /// The host folder to run: the same as `folder` in `hosts/`, its `host/` in `content/`.
     path: PathBuf,
     released: bool,
 }
 
 impl Copies {
-    pub fn new(data: &Path) -> Copies {
-        Copies { data: data.to_path_buf(), inner: Mutex::new(Held::default()) }
+    pub fn new(data: &Path, own: Option<PathBuf>) -> Copies {
+        Copies { data: data.to_path_buf(), own, inner: Mutex::new(Held::default()) }
     }
 
     fn held(&self) -> MutexGuard<'_, Held> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn hold<'a>(&'a self, held: &mut Held, folder: PathBuf, path: PathBuf) -> Claim<'a> {
+        *held.claims.entry(folder.clone()).or_default() += 1;
+        Claim { copies: self, folder, path, released: false }
+    }
+
     /// Copies the build (or reuses its complete copy) and holds it. No cleanup removes it until the
-    /// claim is dropped.
+    /// claim is dropped. A build from verified content is held where it is, never copied.
     pub fn claim(&self, src: &BuildSource) -> Result<Claim<'_>, String> {
         let mut held = self.held();
         if held.frozen {
             return Err("the keeper is handing itself over to another keeper".into());
         }
+        if let Some(dir) = src.host_dir.as_deref().map(Path::new) {
+            if let Some(folder) = super::content::version_dir_of(&self.data, dir) {
+                if !dir.join("main.mjs").is_file() {
+                    return Err(format!("no host in {} (main.mjs is missing)", dir.display()));
+                }
+                return Ok(self.hold(&mut held, folder, dir.to_path_buf()));
+            }
+        }
         let path = copy_into(&self.data, src)?;
-        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        *held.claims.entry(name.clone()).or_default() += 1;
-        Ok(Claim { copies: self, name, path, released: false })
+        Ok(self.hold(&mut held, path.clone(), path))
     }
 
-    /// Removes every copy but the running host's (`keep`, read now) and the claimed ones. Returns
+    /**
+     * Places a new version in `<data>/content/` and holds it, all under the lock no cleanup runs
+     * without (a handoff from verified content). `place` is told whether `folder` is in use: held by a
+     * claim, the keeper's own, or one of `running` (the host folders in use, read by the caller). It
+     * must not remove a folder in use.
+     */
+    pub fn claim_content<E>(
+        &self,
+        folder: &Path,
+        running: &[PathBuf],
+        frozen: impl FnOnce() -> E,
+        place: impl FnOnce(bool) -> Result<PathBuf, E>,
+    ) -> Result<Claim<'_>, E> {
+        let mut held = self.held();
+        if held.frozen {
+            return Err(frozen());
+        }
+        let in_use = held.claims.contains_key(folder)
+            || self.own.as_deref() == Some(folder)
+            || running.iter().any(|r| super::content::version_dir_of(&self.data, r).as_deref() == Some(folder));
+        let placed = place(in_use)?;
+        let path = placed.join(super::content::HOST_DIR);
+        Ok(self.hold(&mut held, placed, path))
+    }
+
+    /// Removes every copy but the ones in use (`keep`: the host folders a host runs from or the next
+    /// launch or swap will, read now), the claimed ones and the keeper's own content folder. Returns
     /// what was removed; nothing while frozen.
-    pub fn clean(&self, keep: impl FnOnce() -> Option<PathBuf>) -> Vec<String> {
+    pub fn clean<I: IntoIterator<Item = PathBuf>>(&self, keep: impl FnOnce() -> I) -> Vec<String> {
         let held = self.held();
         if held.frozen {
             return Vec::new();
         }
-        let mut names: HashSet<String> = held.claims.keys().cloned().collect();
-        if let Some(name) = keep().and_then(|k| k.file_name().map(|n| n.to_string_lossy().to_string())) {
-            names.insert(name);
+        let mut folders: Vec<PathBuf> = held.claims.keys().cloned().collect();
+        folders.extend(self.own.clone());
+        for dir in keep() {
+            folders.push(super::content::version_dir_of(&self.data, &dir).unwrap_or(dir));
         }
-        clean_copies(&self.data, &names)
+        let hosts = hosts_dir(&self.data);
+        let names: HashSet<String> = folders
+            .iter()
+            .filter(|f| f.parent() == Some(hosts.as_path()))
+            .filter_map(|f| f.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+        let mut removed = clean_copies(&self.data, &names);
+        removed.extend(super::content::clean(&self.data, &folders, &|p| !in_progress(p)));
+        removed
     }
 
     /// Stops all copying and cleaning for a keeper handoff, once what is in progress has finished.
@@ -342,8 +406,14 @@ impl Copies {
 }
 
 impl Claim<'_> {
+    /// The host folder to run.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// What is held: `hosts/<key>`, or `content/<version>`.
+    pub fn folder(&self) -> &Path {
+        &self.folder
     }
 
     fn release(&mut self, held: &mut Held) {
@@ -351,21 +421,23 @@ impl Claim<'_> {
             return;
         }
         self.released = true;
-        if let Some(n) = held.claims.get_mut(&self.name) {
+        if let Some(n) = held.claims.get_mut(&self.folder) {
             *n -= 1;
             if *n == 0 {
-                held.claims.remove(&self.name);
+                held.claims.remove(&self.folder);
             }
         }
     }
 
     /// Gives the copy up and removes it (a swap whose build did not start), unless another claim
-    /// still holds it or it is `except`, the running host's.
+    /// still holds it or it is `except`, the running host's. A verified content folder is only given
+    /// up: it may hold the keeper that runs, and the cleanup decides about it.
     pub fn discard(mut self, except: Option<&Path>) {
         let copies = self.copies;
         let mut held = copies.held();
         self.release(&mut held);
-        if !held.frozen && !held.claims.contains_key(&self.name) && except != Some(self.path.as_path()) {
+        let in_hosts = self.folder.parent() == Some(hosts_dir(&copies.data).as_path());
+        if in_hosts && !held.frozen && !held.claims.contains_key(&self.folder) && except != Some(self.path.as_path()) {
             let _ = fs::remove_dir_all(&self.path);
         }
     }
@@ -547,7 +619,7 @@ mod tests {
         }
         // A temporary copy left by a keeper that died long ago
         age(&hosts_dir(&data).join(".tmp-ghi-12"), 3600);
-        let mut removed = Copies::new(&data).clean(|| Some(hosts_dir(&data).join("def")));
+        let mut removed = Copies::new(&data, None).clean(|| Some(hosts_dir(&data).join("def")));
         removed.sort();
         assert_eq!(removed, vec![".tmp-ghi-12".to_string(), "abc".to_string()]);
         assert!(hosts_dir(&data).join("def").is_dir());
@@ -569,7 +641,7 @@ mod tests {
         let data = temp("clean-fresh");
         fs::create_dir_all(hosts_dir(&data).join(".tmp-next-7")).unwrap();
         fs::create_dir_all(hosts_dir(&data).join("old")).unwrap();
-        assert_eq!(Copies::new(&data).clean(|| None), vec!["old".to_string()]);
+        assert_eq!(Copies::new(&data, None).clean(|| None), vec!["old".to_string()]);
         assert!(hosts_dir(&data).join(".tmp-next-7").is_dir());
         let _ = fs::remove_dir_all(&data);
     }
@@ -592,7 +664,7 @@ mod tests {
     #[test]
     fn a_copy_a_swap_holds_survives_the_cleanup_a_ready_host_sets_off() {
         let (data, a_src, c_src, a, c) = two_builds("held");
-        let copies = Copies::new(&data);
+        let copies = Copies::new(&data, None);
         let running = copies.claim(&a_src).unwrap().path().to_path_buf();
 
         let swap = copies.claim(&c_src).unwrap();
@@ -614,7 +686,7 @@ mod tests {
     #[test]
     fn the_cleanup_keeps_the_copy_the_host_runs_from_when_it_runs() {
         let (data, a_src, c_src, a, c) = two_builds("late");
-        let copies = Copies::new(&data);
+        let copies = Copies::new(&data, None);
         let a_copy = copies.claim(&a_src).unwrap().path().to_path_buf();
         let running = Mutex::new(a_copy);
         // The swap adopts C's host (the keeper's state now names C's copy), then lets its claim go
@@ -633,7 +705,7 @@ mod tests {
     #[test]
     fn a_claimed_copy_is_never_taken_by_a_concurrent_cleanup() {
         let (data, a_src, c_src, a, c) = two_builds("race");
-        let copies = Copies::new(&data);
+        let copies = Copies::new(&data, None);
         let running = copies.claim(&a_src).unwrap().path().to_path_buf();
         let stop = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|s| {
@@ -664,7 +736,7 @@ mod tests {
     #[test]
     fn a_discarded_copy_goes_unless_it_is_held_or_running() {
         let (data, _a_src, c_src, a, c) = two_builds("discard");
-        let copies = Copies::new(&data);
+        let copies = Copies::new(&data, None);
         let first = copies.claim(&c_src).unwrap();
         let second = copies.claim(&c_src).unwrap();
         let path = first.path().to_path_buf();
@@ -684,7 +756,7 @@ mod tests {
     #[test]
     fn a_frozen_keeper_neither_copies_nor_cleans() {
         let (data, a_src, c_src, a, c) = two_builds("frozen");
-        let copies = Copies::new(&data);
+        let copies = Copies::new(&data, None);
         let running = copies.claim(&a_src).unwrap().path().to_path_buf();
         drop(copies.claim(&c_src).unwrap());
         copies.freeze(Duration::from_secs(1)).unwrap();
@@ -703,7 +775,7 @@ mod tests {
     #[test]
     fn the_freeze_waits_for_a_copy_in_progress() {
         let data = temp("freeze-wait");
-        let copies = Copies::new(&data);
+        let copies = Copies::new(&data, None);
         let busy = copies.inner.lock().unwrap();
         std::thread::scope(|s| {
             let err = s.spawn(|| copies.freeze(Duration::from_millis(50))).join().unwrap();

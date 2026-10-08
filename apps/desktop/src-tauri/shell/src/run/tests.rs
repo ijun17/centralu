@@ -372,3 +372,15 @@ fn a_keeper_that_cannot_start_exits_or_never_answers_is_refused() {
         }
     }
 }
+
+/// On an update the keeper this shell started verifies and copies the next content into the same
+/// `<data>/content/` itself, removes the versions nothing uses and raises the same floor (thin-shell
+/// plan §10 step 5): both must name the folder, the floor and the host alike.
+#[test]
+fn the_shell_and_the_keeper_lay_out_the_content_folder_alike() {
+    use centralu_keeper_core::keeper::content;
+    assert_eq!(CONTENT_DIR, content::CONTENT_DIR);
+    assert_eq!(FLOOR_FILE, content::FLOOR_FILE);
+    assert_eq!(HOST_DIR, content::HOST_DIR);
+    assert_eq!(floor_path(Path::new("/d")), content::floor_path(Path::new("/d")));
+}

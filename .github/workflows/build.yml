@@ -372,3 +372,11 @@ jobs:
       - name: shell (verify, copy, start the keeper from the copy, refusals)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: pnpm exec tsx scripts/shell-integration.mts
+
+      # Thin shell step 5 (docs/plans/thin-shell.md §10.3): a keeper the shell started verifies the
+      # next build's content before it hands over. Builds a test keeper and a test shell trusting a
+      # throwaway key (the keeper crate and the shell only, on top of the build above), then puts the
+      # plain debug keeper back in the target folder. About a minute on top of its builds.
+      - name: keeper handing over to verified content (tampered and older content refused, cleanup)
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: pnpm exec tsx scripts/keeper-content-integration.mts --no-build

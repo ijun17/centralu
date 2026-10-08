@@ -15,6 +15,12 @@
 //! `centralu install` both delete the old bundle and write a new one (new inodes), and a running
 //! executable whose file was unlinked keeps running.
 //!
+//! **From verified content** (thin-shell plan §10 step 5) A never starts the executable the window
+//! names: it verifies the bundle's signed content beside it, copies it into
+//! `<data>/content/<version>/`, and starts B from that copy, with `--host-source` naming the copy's
+//! host (`server::move_to_content`). B runs from verified content in turn, so its own handoffs do the
+//! same; once it serves, it raises the downgrade floor to its version.
+//!
 //! **The channel** is one end of a `socketpair` that A puts at B's descriptor 3. It has no path,
 //! so no other process can connect to it at all (stronger than a 0600 socket file, and nothing to
 //! clean up); B still checks that its peer is this user.
@@ -65,8 +71,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use content_verify::version::{record_started, Rollback};
+
 use self::pack::{Pack, Unpack};
 use super::children::{self, Children, ExitStatus};
+use super::content;
 use super::front_door::{DoorFreeze, FrontDoor};
 use super::server::{self, Keeper, Options, State};
 use super::source::{self, BuildSource};
@@ -620,8 +629,10 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
     let now = Instant::now();
     let ago = |ms: u64| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now);
     let settings = source::Settings { background: snap.background };
-    let copies = source::Copies::new(&data);
+    let origin = content::own_origin(&data);
+    let copies = source::Copies::new(&data, origin.dir().map(Path::to_path_buf));
     let keeper = Arc::new(Keeper {
+        origin,
         info: KeeperInfo {
             pid: std::process::id(),
             protocol: KEEPER_PROTOCOL,
@@ -687,6 +698,14 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         keeper.info.pid,
         keeper.door.url()
     ));
+    server::log_origin(&keeper.origin);
+    // A keeper from verified content serves now: its version is the new downgrade floor, as the shell
+    // records it once a keeper it started answers (thin-shell plan §3, §10 step 5). Only ever raised.
+    if let content::Origin::Content { version, .. } = &keeper.origin {
+        if let Err(e) = record_started(&content::floor_path(&keeper.data), version, Rollback::Refuse) {
+            server::log(&format!("could not record {version} as started: {e}"));
+        }
+    }
     match snap.then_switch {
         Some(next) => {
             let k = keeper.clone();
