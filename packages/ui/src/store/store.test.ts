@@ -3831,7 +3831,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
 describe('linked machines (#82)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, ...over,
+    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, hostStarted: null, ...over,
   })
 
   it('machine_status replaces that machine\'s row whole', async () => {

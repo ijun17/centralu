@@ -863,8 +863,9 @@ The app installing the host over SSH is phase 3, after its lifecycle contract is
    machine's sign-ins, never the client's.
 3. Run `centralu serve`. It stays in the foreground and logs to stderr (and to `~/.centralu/host.log`, as always).
    The line to look for is `[centralu serve] listening on 127.0.0.1:17175 …`.
-4. Keep it running with whatever you already use: tmux, `nohup`, or a `systemd --user` unit (below). Real
-   supervision, an update path and uninstall come with the installer in phase 3.
+4. Keep it running: `centralu serve --detach` (below), which the app also runs over ssh when it finds no host
+   there, or whatever you already use: tmux, `nohup`, a `systemd --user` unit (below), which also starts it at boot.
+   An update path and uninstall come with the installer in phase 3.
 
 ```ini
 # ~/.config/systemd/user/centralu.service
@@ -893,6 +894,8 @@ that is what writes `~/.centralu/bin/centralu`.
 |---|---|
 | `centralu serve` | Starts the host in the foreground on `127.0.0.1:<port>`. Exit code: the host's own (0 after a clean stop) |
 | `centralu serve --port <n>` | The same, on that port. The port is recorded, and the next `serve` without a flag uses it |
+| `centralu serve --detach [--port <n>]` | Starts `serve` outside this session and returns once its host answers a hello (below). Prints one JSON line. A host already running is reported, not started twice |
+| `centralu serve --stop` | Asks the running host to stop (`host.stop`), waits until it has, and prints one JSON line |
 | `centralu serve --connection` | Prints one JSON line and exits (below). Creates the token if there is none yet |
 | `centralu serve --rotate-token` | Replaces the token, keeping the port. A running serve keeps the old one until it restarts |
 | `centralu serve --help` | The above |
@@ -911,6 +914,7 @@ that is what writes `~/.centralu/bin/centralu`.
 | `version`, `protocolVersion` | The running host's when `hostRunning`, read from its `hello_ok`; otherwise the installed package's (`host/bundle-info.json`). They differ after an `npm i -g` the host was not restarted for |
 | `dataDir` | The data folder the host owns |
 | `hostRunning` | A host holding this token answered a hello on `port` just now. A TCP connect alone does not count |
+| `install` | Additive (the line stays `v: 1`): `{ managed, current, previous, node }`. `managed` is whether the managed launcher of an install the app made over ssh ran this command ([plans/remote-hub.md](plans/remote-hub.md) §10.1); `current` and `previous` are that install's pointer files as `{ version, node }` (null when absent or not two plain words); `node` is the Node that answered |
 
 stdout carries that line and nothing else; anything to explain goes to stderr. If the command is not found (exit 127),
 the SSH shell's PATH lacks npm's global folder (nvm, fnm, volta and `~/.npm-global` set it only in interactive
@@ -931,6 +935,48 @@ by absolute path. Those paths are versioned under nvm and Homebrew, so after a N
 | A second `serve`, or any other host on the same data folder, is refused | The ownership lock (`instance-lock.ts`) is the authority. `serve` first asks the port it recorded, so a serve already up is named with its port; for any other owner the host's lock message is followed by a line naming the pid |
 | No `DISPLAY` / `WAYLAND_DISPLAY` in the host's environment | Nothing it starts can open a window or a keyring dialog nobody would see; a tool that would ask falls back to its file store or fails with a message in the log |
 | Windows: no own group, no forwarding | `detached` means a new console there; the host shares the launcher's console and gets Ctrl+C itself. Not exercised yet |
+
+**Keeping it running without a session: `--detach` and `--stop`** ([plans/remote-hub.md](plans/remote-hub.md) §10.4).
+The hub runs `centralu serve --detach` over ssh when it finds no host running (§4.8), and a person can run it too.
+It starts the same `serve` as a launcher outside the session that asked, then returns once that launcher's host
+answers a hello, so the caller can connect at once:
+
+| Where | How it is started | Why (measured, plan §10.4) |
+|---|---|---|
+| Linux, macOS | A new session (`setsid`) with no terminal and no stdio; reparented to init once `--detach` exits | Nothing of the ssh session's process group or terminal reaches it (`tooling/launcher-serve.test.ts` kills the whole group and the host still answers) |
+| Windows | `Win32_Process.Create` through WMI (`Invoke-CimMethod`), from Windows PowerShell 5.1 by full path | Windows' OpenSSH ends every process of a session with it, `Start-Process` included; a process WMI creates is not in the session |
+| WSL (`WSL_DISTRO_NAME` set and interop on) | The same WMI call, from `powershell.exe` reached through the drive WSL mounts, creating `wsl.exe -d <distro> -u <user> --cd <folder> --exec <node> <centralu.mjs> serve …` | WSL stops a distro about 15 s after its last `wsl.exe` client exits; this `wsl.exe` is one for as long as the host runs. On the test laptop a WMI-created `wsl.exe` later hung without running anything (plan §10.4); that is reported as `wmi_blocked`, and the hub runs the host link-bound |
+
+A process WMI creates gets the account's default environment, not the session's, so what the launcher needs from the
+`--detach` that started it travels in one internal argument (`--detached-child=<base64 JSON>`): the log file, and
+`CC_DATA_DIR`, `CENTRALU_HOST_ENTRY` and `CENTRALU_MANAGED` when set. Never the token, which stays in `serve.json`.
+The launcher writes `<data>/serve.log` (its own lines and the host's stderr until the host is ready; `host.log` has
+the rest, so it stops growing; the previous start's is kept as `serve.log.1`) and `<data>/serve.pid`
+(`{ pid, hostPid, port }`, removed when it exits).
+
+`--detach` prints the connection line with `hostRunning: true` and `detach: { ok: true, how, already }`, or
+`{ "v": 1, "detach": { "ok": false, "how", "reason", "message" } }`. `reason` is `wmi_blocked` when WMI refused, or
+created a process that never ran (no `serve.log` within 10 s, or the process gone first); `exited` and `timeout`
+(30 s) quote the end of `serve.log`. **A blocked start is said in one sentence naming the likely cause**: Microsoft
+Defender's attack surface reduction rule "Block process creations originating from PSExec and WMI commands", off by
+default and turned on by some managed machines. The hub then runs the host bound to its link (§4.8).
+
+`--stop` asks the running host to stop over its own socket with the token (`host.stop`, [protocol.md](protocol.md)
+§3), then waits up to 30 s for the port to close and the host's pid (from `host.lock`) to end. Only the host does its
+shutdown that way on Windows: killing the WMI-started launcher ended the host 143 ms later with no "shutting down"
+line (plan §10.4), because the host sits in libuv's kill-on-close job object. Only for a host that does not go (one
+from before `host.stop`, a shutdown that hangs): SIGTERM to the launcher on posix, which passes it on, and on Windows
+ending the host, said in the answer (`how: "ended"`). It signals only the pids `serve.pid` and `host.lock` name, and
+only while the two agree and the host answered with this folder's token. It prints
+`{ "v": 1, "stop": { "ok", "wasRunning", "how"?, "message"? } }`. A host refuses `host.stop` unless `serve` started
+it (`CC_SERVE=1`): the app's host is stopped by the app.
+
+**The managed launcher** (plan §10.1, S8). An install the hub makes over ssh (phase 3's next step) has its own
+launcher at `<data>/remote/bin/centralu` (`centralu.cmd`), whose text never changes (`managedLauncherScript` in
+`serve.mjs`): it reads `<data>/remote/current` ("<centralu version> <node version>", two plain words or it refuses)
+at every start and runs that version's `centralu.mjs` on that version's pinned Node with `CENTRALU_MANAGED=1`. A
+`serve` that sees `CENTRALU_MANAGED=1` leaves `<data>/bin/centralu` to an npm install on the same machine, and drops
+the variable from the host's environment.
 
 **What phase 1 does not cover.** App views open from the host's HTTP door at `127.0.0.1:<port>`, so they work
 through a forward whose local port equals the remote port. An app whose manifest asks for its own origin gets a port of
@@ -971,6 +1017,17 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
     -o GatewayPorts=no -L 127.0.0.1:<port>:127.0.0.1:<port> -- <target>
 ```
 
+**A machine with no host running is started** (plan §10.9, decision 7). When the connection line says
+`hostRunning: false`, the link goes to `starting`, runs `centralu serve --detach` through the same lookup as the
+connection command (§4.7), writes `[links] <machine>: no Centralu host is running there; starting one` and how it
+went to `host.log`, and opens again. Nobody is asked: adding the machine was the consent (§3.2 of the plan). The row
+keeps `hostStarted: { how, at, note }`. Where the remote answers `wmi_blocked`, the link falls back to a
+**link-bound** host: from then on the forward's ssh runs `centralu serve` (found the same way) as its remote command
+instead of `-N`, and the link reads the connection line until that host answers. It lives as long as the link
+(Windows' OpenSSH ends the session's processes, and on posix the launcher takes the hangup as a stop), and the row
+says so. A start that fails (Centralu too old for `--detach`, the host exiting while it starts) is `not_running`
+with the reason, retried with the backoff.
+
 The connection command depends on the remote's shell (`MachineInfo.shell`), because `ssh <target> <command>` hands the
 command to whatever login shell the remote account has:
 
@@ -996,8 +1053,9 @@ other than `~/.centralu`. It runs as given, with no fallback.
 | The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
 
 **The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
-(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to a minute); `not_running` (Centralu
-answers there but no `centralu serve` runs; retried); `versions_differ`; `refused` (a token refused twice in a row:
+(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to a minute); `starting` (no host ran
+there; the link is starting one, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
+starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
 it restarts).
 
@@ -1046,9 +1104,9 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 | Off for another machine's project | Reveal in the file manager and the file tree's menu, Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app, app views (`appStatus` says they open in a later version) |
 
 **What phase 1 does not cover yet.** App views of another machine are phase 2 (listed, their tools work there, their
-view says so); installing and updating the remote over ssh is phase 3 ([plans/remote-hub.md](plans/remote-hub.md) §10). Usage gauges, `processes.strays/stop` and the
-quit dialog still ask this computer only. `centralu serve` on WSL needs something that starts it when the distro starts
-(the systemd unit of §4.7); the link then keeps the distro running.
+view says so); installing and updating the remote over ssh is phase 3 ([plans/remote-hub.md](plans/remote-hub.md) §10), of which the
+link starting a host it finds not running is in. Usage gauges, `processes.strays/stop` and the quit dialog still ask
+this computer only.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

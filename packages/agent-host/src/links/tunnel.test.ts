@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -18,29 +18,57 @@ const fs = require('node:fs')
 const net = require('node:net')
 const args = process.argv.slice(2)
 fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify(args) + '\n')
+// What a real remote shell would run: PowerShell's -EncodedCommand decoded, and a WSL script inside it
+function decode(cmd) {
+  const enc = 'powershell -NoProfile -NonInteractive -EncodedCommand '
+  let shell = 'posix'
+  if (cmd.startsWith(enc)) {
+    cmd = Buffer.from(cmd.slice(enc.length), 'base64').toString('utf16le')
+    shell = 'powershell'
+    const w = /wsl\.exe -d '([^']+)' -- bash -lc 'echo ([A-Za-z0-9+/=]+) \| base64 -d \| bash -l'$/.exec(cmd)
+    if (w) { shell = 'wsl:' + w[1]; cmd = Buffer.from(w[2], 'base64').toString('utf8') }
+  }
+  return { shell, cmd: cmd.replace('[Console]::OutputEncoding=[Text.Encoding]::UTF8\n', '') }
+}
+// FAKE_SSH_STATE, when set, is the remote host: running while the file exists
+const state = process.env.FAKE_SSH_STATE
+const running = () => (state ? fs.existsSync(state) : JSON.parse(process.env.FAKE_SSH_LINE).hostRunning)
 const L = args.indexOf('-L')
 if (L !== -1) {
   if (process.env.FAKE_SSH_FORWARD_FAIL) { process.stderr.write('bind [127.0.0.1]:1: Address already in use\n'); process.exit(255) }
   const [bind, lport, rhost, rport] = args[L + 1].split(':')
-  const server = net.createServer((c) => { const r = net.connect(Number(rport), rhost); c.pipe(r); r.pipe(c); c.on('error', () => r.destroy()); r.on('error', () => c.destroy()) })
+  // Remote and local are one machine here: a forward to its own port would connect to itself without
+  // end and use up the machine's ephemeral ports. A real remote has nothing listening there yet
+  const server = net.createServer((c) => { if (rport === lport) return c.destroy(); const r = net.connect(Number(rport), rhost); c.pipe(r); r.pipe(c); c.on('error', () => r.destroy()); r.on('error', () => c.destroy()) })
   server.listen(Number(lport), bind)
+  // A remote command after the target: a link-bound host runs in this session, and ends with it
+  const remote = args[args.indexOf('--') + 2]
+  if (remote && / serve($|[;} ])/.test(decode(remote).cmd)) {
+    fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ hosting: decode(remote).shell, run: decode(remote).cmd }) + '\n')
+    if (state) fs.writeFileSync(state, 'link-bound')
+    process.on('SIGTERM', () => { if (state) fs.rmSync(state, { force: true }); process.exit(0) })
+  }
   setInterval(() => {}, 1 << 30)
   return
 }
 if (process.env.FAKE_SSH_HANG) { fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ hanging: process.pid }) + '\n'); setInterval(() => {}, 1 << 30); return }
 if (process.env.FAKE_SSH_UNREACHABLE) { process.stderr.write('ssh: connect to host x port 22: Operation timed out\n'); process.exit(255) }
-let cmd = args[args.length - 1]
-const enc = 'powershell -NoProfile -NonInteractive -EncodedCommand '
-let shell = 'posix'
-if (cmd.startsWith(enc)) {
-  cmd = Buffer.from(cmd.slice(enc.length), 'base64').toString('utf16le')
-  shell = 'powershell'
-  const w = /wsl\.exe -d '([^']+)' -- bash -lc 'echo ([A-Za-z0-9+/=]+) \| base64 -d \| bash -l'$/.exec(cmd)
-  if (w) { shell = 'wsl:' + w[1]; cmd = Buffer.from(w[2], 'base64').toString('utf8') }
-}
+const { shell, cmd } = decode(args[args.length - 1])
 fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ shell, run: cmd }) + '\n')
 const has = (process.env.FAKE_SSH_HAS || '').split('|')
-const answer = () => process.stdout.write('some motd line\n' + process.env.FAKE_SSH_LINE + '\n')
+const line = (over) => JSON.stringify({ ...JSON.parse(process.env.FAKE_SSH_LINE), hostRunning: running(), ...over })
+const answer = () => {
+  // What centralu serve --detach answers, per FAKE_SSH_DETACH; anything else is --connection
+  if (/ serve --detach/.test(cmd)) {
+    const how = process.env.FAKE_SSH_DETACH
+    if (how === 'old') { process.stderr.write('unknown option for serve: --detach\n'); process.exit(2) }
+    if (how === 'blocked') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'wmi', reason: 'wmi_blocked', message: 'Windows did not start Centralu through WMI (returned 2).' } }) + '\n')
+    if (how === 'exited') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'exited', message: 'centralu serve exited (1) before its host answered' } }) + '\n')
+    if (state) fs.writeFileSync(state, 'detached')
+    return process.stdout.write(line({ hostRunning: true, detach: { ok: true, how: 'setsid', already: false } }) + '\n')
+  }
+  process.stdout.write('some motd line\n' + line({}) + '\n')
+}
 // The lookup centralu, then the launcher, then the not-found word, as connectionCommand writes it
 if (cmd.includes('CENTRALU-NOT-FOUND')) {
   const used = has.includes('centralu') ? 'centralu' : has.includes('launcher') ? 'launcher' : null
@@ -48,7 +76,7 @@ if (cmd.includes('CENTRALU-NOT-FOUND')) {
   if (used) answer()
   else { process.stdout.write('CENTRALU-NOT-FOUND\n'); process.exit(shell === 'posix' ? 127 : 1) }
 } else {
-  const program = cmd.replace('[Console]::OutputEncoding=[Text.Encoding]::UTF8\n', '').split(' serve --connection')[0]
+  const program = cmd.split(' serve --')[0]
   if (!has.includes(program)) { process.stderr.write(program + ': No such file or directory\n'); process.exit(shell === 'posix' ? 127 : 1) }
   answer()
 }
@@ -234,6 +262,60 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run)
     expect(runs).toEqual([`${cmd} serve --connection`])
     await expect(tunnel({ FAKE_SSH_HAS: cmd }, { shell: 'posix', command: cmd }).open()).resolves.toMatchObject({ token: 'tok' })
+  })
+
+  describe('starting a remote host it finds not running (remote-hub.md §10.9, decision 7)', () => {
+    const stateFile = () => join(dir, 'host-running')
+    const runs = () => (logged() as { shell?: string; run?: string }[]).filter((x) => x.run)
+
+    it('starts it with `centralu serve --detach` through the same lookup, in every shell, and then forwards to it', async () => {
+      for (const spec of [{ shell: 'posix' }, { shell: 'powershell' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }] as RemoteSpec[]) {
+        rmSync(stateFile(), { force: true })
+        const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: 'ok', FAKE_SSH_LINE: line({ port: await freePort() }) }, spec)
+        expect((await t.open()).line.hostRunning).toBe(false)
+        await expect(t.startHost()).resolves.toEqual({ how: 'detached', note: null })
+        const ep = await t.open()
+        expect(ep.line.hostRunning).toBe(true)
+        expect(ep.localPort).toBeGreaterThan(0)
+      }
+      const detaches = runs().filter((r) => r.run!.includes('serve --detach'))
+      expect(detaches.map((r) => r.shell)).toEqual(['posix', 'powershell', 'wsl:Ubuntu-24.04'])
+      expect(detaches[0]!.run).toMatch(/^sh -c .if command -v centralu .*then exec centralu serve --detach; elif .* exec "\$HOME\/.centralu\/bin\/centralu" serve --detach; else echo CENTRALU-NOT-FOUND/)
+      expect(detaches[1]!.run).toContain('{ & centralu serve --detach }')
+      // A detached host needs nothing from the forward: a plain -N (and the distro keep-alive for WSL)
+      const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
+      expect(forwards[0]).toContain('-N')
+      expect(forwards.at(-1)!.at(-1)).toBe('wsl.exe -d Ubuntu-24.04 --exec sleep infinity')
+    }, 30_000)
+
+    it('where WMI is blocked, runs the host in the forward’s own session instead, and it ends with the link', async () => {
+      const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: 'blocked', FAKE_SSH_LINE: line({ port: await freePort() }) }, { shell: 'powershell' })
+      expect((await t.open()).line.hostRunning).toBe(false)
+      const started = await t.startHost()
+      expect(started.how).toBe('link_bound')
+      expect(started.note).toMatch(/did not start Centralu through WMI/)
+      const ep = await t.open()
+      expect(ep.line.hostRunning).toBe(true)
+      const hosting = (logged() as { hosting?: string; run?: string }[]).filter((x) => x.hosting)
+      expect(hosting).toHaveLength(1)
+      expect(hosting[0]!.hosting).toBe('powershell')
+      expect(hosting[0]!.run).toContain('{ & centralu serve }')
+      const forward = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L')).at(-1)!
+      expect(forward).toContain('-T')
+      expect(forward).not.toContain('-N')
+      await t.close()
+      expect(existsSync(stateFile())).toBe(false)
+    }, 30_000)
+
+    it('says why a start failed, and that a remote too old for --detach has to be started there', async () => {
+      const at = async (how: string) => {
+        const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: how, FAKE_SSH_LINE: line({ port: await freePort() }) })
+        return t.startHost()
+      }
+      await expect(at('exited')).rejects.toThrow(/exited \(1\) before its host answered/)
+      await expect(at('old')).rejects.toThrow(/too old to be started from here: run `centralu serve` there/)
+      await expect(tunnel({ FAKE_SSH_HAS: '' }).startHost()).rejects.toThrow(/not installed on box/)
+    }, 30_000)
   })
 })
 

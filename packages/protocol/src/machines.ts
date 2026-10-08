@@ -19,12 +19,15 @@ export type MachineId = z.infer<typeof MachineId>
  *   connecting       opening the transport or waiting for the remote host's hello
  *   connected        calls and events flow
  *   unreachable      the machine or its transport cannot be reached; the hub retries on its own
- *   not_running      the machine answers, but no `centralu serve` is running there
+ *   not_running      the machine answers, but no `centralu serve` is running there, and the hub
+ *                    could not start one (`error` says why)
+ *   starting         no host was running there; the hub is starting one (`centralu serve --detach`,
+ *                    docs/plans/remote-hub.md §10.9 decision 7). An older window reads it as unreachable
  *   versions_differ  the two sides run different versions; nothing connects until they are aligned
  *                    or the person declines (`machines.acceptVersions`, plan §4)
  *   refused          the remote host turned the hub's hello away and asking again did not help
  */
-export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused'])
+export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting'])
 export type MachineStatus = z.infer<typeof MachineStatus>
 
 export const MachineSide = z.object({
@@ -84,5 +87,16 @@ export const MachineInfo = z.object({
    */
   localPort: z.number().int().nullable().default(null),
   sameLocalPort: z.boolean().default(false),
+  /**
+   * The hub started the host there, because it found none running (plan §10.9, decision 7), and how:
+   * `detached` lives on whatever happens to the link; `link_bound` runs in the link's own ssh session,
+   * because that machine blocks starting a process through WMI, and ends when the link does (`note`
+   * says why). Null when the host was already running. Additive; an older hub sends nothing
+   */
+  hostStarted: z
+    .object({ how: z.enum(['detached', 'link_bound']).catch('detached'), at: z.number(), note: z.string().nullable().default(null) })
+    .nullable()
+    .catch(null)
+    .default(null),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>

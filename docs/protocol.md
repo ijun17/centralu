@@ -202,6 +202,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 | messages | `messages.load, messages.subagent, messages.search, messages.image` | a history page; one launch card's subagent steps, read when the person opens them (#222); search over what was said; a local image a reply names (`![a](/path/shot.png)`), read by the session's host because the window cannot load a file path: `{ sessionId, path }` with `path` as the reply wrote it, answered `{ ok: true, mime, data, file? }` or `{ ok: false, reason, message, file? }`. `reason` is `not_mentioned` (no reply of this session wrote it; nothing is touched), `not_found`, `not_an_image` (by its bytes: PNG, JPEG, GIF and WebP only), `too_large` (`IMAGE_PREVIEW_MAX_BYTES`, 10 MB) or `unreadable`; `file` is the resolved path on the host's machine, for revealing it. A refusal is an answer, not an error. Additive: an older host answers "Unknown method" and the window shows that in the image's place ([security-boundaries.md](security-boundaries.md), "Images a reply names") |
 | grid | `grid.get, grid.set` | the grid's panels in order, written whole (product spec §5.4). Each is a `GridPanel`: `{ kind: 'session', sessionId }` or `{ kind: 'app', projectId: string \| null, appId, span? }` (`null` is a user-folder app) — #288. `span` (#306) is the `{ cols, rows }` the person chose for that app panel from its top bar, each 1 to 4, absent when none was chosen; a host from before it strips it and the panel falls back to its defaults. Expanded, not replaced (§4), so `PROTOCOL_VERSION` stays 1: `grid.get { tagged: true }` and `grid.set { panels }` speak panels; without them both speak the pre-#288 shape, bare session ids (an older UI's `grid.set { sessionIds }` replaces the list with its sessions). The UI sends `sessionIds` next to `panels` and reads a bare id list as session panels, so a UI and a host one build apart keep working both ways; the old fields go one release later. `grid.set` takes at most 256 and answers what it stored: duplicates, unknown sessions and an app of an unregistered project left out. Whether an app exists is not checked — the app list can lag behind its folder, and the screen leaves out an app it cannot find. The shape is the panel's identity alone, so it can move to the client unchanged (#82) |
 | machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: the hub's links to other machines (§6). Always the hub's own, never forwarded |
+| host | `host.stop` | #82: ends this host the way a signal would, answering first. For `centralu serve --stop` ([agent-host.md](agent-host.md) §4.7); a host the app runs refuses it. Never forwarded. Additive |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
@@ -341,9 +342,14 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   reconnect recovery for that machine's sessions alone: one it held as live that the fresh list
   says is not (the remote host restarted without a keeper) is woken.
 - **`MachineInfo`.** `{ id, name, sshTarget, shell, wslDistro, command, status, error, versions,
-  lastConnectedAt, localPort, sameLocalPort }`. `shell` is `posix`, `powershell` or `wsl`.
-  `status` is `connecting`, `connected`, `unreachable`, `not_running` (Centralu answers there,
-  `centralu serve` is not running), `versions_differ` or `refused`. `versions` is
+  lastConnectedAt, localPort, sameLocalPort, hostStarted }`. `shell` is `posix`, `powershell` or
+  `wsl`. `status` is `connecting`, `connected`, `unreachable`, `not_running` (Centralu answers
+  there, no `centralu serve` runs, and the hub could not start one: `error` says why), `starting`
+  (the hub is starting one, [plans/remote-hub.md](plans/remote-hub.md) §10.9 decision 7; additive,
+  an older window reads it as `unreachable`), `versions_differ` or `refused`. `hostStarted` is
+  null, or `{ how, at, note }` when the hub started that host: `detached` outlives the link,
+  `link_bound` runs in the link's own ssh session because the machine blocks starting a process
+  through WMI, and `note` says so. Additive. `versions` is
   `{ hub, remote, older, compatible, sameChannel, accepted }`, each side
   `{ version, protocolVersion, dev }`: the link does not connect while the two run different
   versions, until they are aligned or the person declines (`machines.acceptVersions`, refused

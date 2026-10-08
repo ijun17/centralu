@@ -32,6 +32,7 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   not_running: 'not running',
   versions_differ: 'version mismatch',
   refused: 'refused',
+  starting: 'starting',
 }
 
 export type MachineProblem = {
@@ -49,10 +50,14 @@ export type MachineProblem = {
 export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'>): MachineProblem | null {
   if (m.status === 'connected') return null
   const e = m.error ?? ''
-  if (m.status === 'connecting' && !e) return null
+  if ((m.status === 'connecting' || m.status === 'starting') && !e) return null
   if (m.status === 'versions_differ') return { title: e || `${m.name} runs another version of Centralu`, fix: null }
   if (m.status === 'not_running') {
-    return { title: `Centralu is installed on ${m.name}, but it is not serving`, fix: `Run \`centralu serve\` on ${m.name} (it keeps running after you log out)` }
+    // This computer tried to start it and says why; an older hub only said it was not serving
+    return {
+      title: e || `Centralu is installed on ${m.name}, but it is not serving`,
+      fix: `Run \`centralu serve --detach\` on ${m.name} (it keeps running after you log out), then reconnect`,
+    }
   }
   if (/not installed on/i.test(e)) {
     return { title: `Centralu is not installed on ${m.name}`, fix: `Install it there with \`npm i -g centralu\`, then run \`centralu serve\` once` }
@@ -86,6 +91,18 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
   }
   if (m.status === 'refused') return { title: e || `${m.name} refused the link`, fix: 'Restart `centralu serve` there, then reconnect' }
   return e ? { title: e, fix: null } : { title: `${m.name} is away`, fix: 'Centralu keeps trying' }
+}
+
+/**
+ * What the machine's row says about a host this computer started there (plan §10.9, decision 7):
+ * started in the background, or, where Windows blocks starting it that way, only while linked.
+ * Null when the host was already running.
+ */
+export function hostStartNote(m: Pick<MachineInfo, 'hostStarted' | 'status'>): string | null {
+  const s = m.hostStarted
+  if (!s) return null
+  if (s.how === 'detached') return 'This computer started Centralu there. It keeps running when this computer disconnects.'
+  return `Centralu runs there only while this computer is linked, and stops with the link.${s.note ? ` ${s.note}` : ''}`
 }
 
 /**

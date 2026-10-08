@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { isAway, machineProblem, versionPrompt } from './machines.js'
+import { hostStartNote, isAway, MACHINE_STATUS_LABEL, machineProblem, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -15,6 +15,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   lastConnectedAt: null,
   localPort: null,
   sameLocalPort: false,
+  hostStarted: null,
   ...patch,
 })
 
@@ -115,5 +116,22 @@ describe('the version prompt (#82, plan §4)', () => {
 
   it('no prompt while the link is not held on versions', () => {
     expect(versionPrompt(machine({ status: 'connected', versions: versions({ accepted: true }) }))).toBeNull()
+  })
+})
+
+describe('a remote host this computer started (remote-hub.md §10.9, decision 7)', () => {
+  it('shows no problem while it is being started, and says why when it could not be', () => {
+    expect(machineProblem(machine({ status: 'starting' }))).toBeNull()
+    expect(MACHINE_STATUS_LABEL.starting).toBe('starting')
+    const p = machineProblem(machine({ status: 'not_running', error: 'Centralu could not be started on Box: centralu serve exited (1)' }))
+    expect(p).toEqual({ title: 'Centralu could not be started on Box: centralu serve exited (1)', fix: expect.stringMatching(/centralu serve --detach/) })
+  })
+
+  it('says whether it outlives the link, and why not when it does not', () => {
+    expect(hostStartNote(machine())).toBeNull()
+    expect(hostStartNote(machine({ hostStarted: { how: 'detached', at: 1, note: null } }))).toMatch(/keeps running when this computer disconnects/)
+    expect(hostStartNote(machine({ hostStarted: { how: 'link_bound', at: 1, note: 'Windows did not start Centralu through WMI.' } }))).toBe(
+      'Centralu runs there only while this computer is linked, and stops with the link. Windows did not start Centralu through WMI.',
+    )
   })
 })

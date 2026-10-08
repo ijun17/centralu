@@ -42,7 +42,7 @@ export function MachineStatusMark({ status, testId }: { status: MachineStatus; t
       ? 'bg-ink-signal'
       : status === 'connected'
         ? 'bg-ink-muted'
-        : status === 'connecting'
+        : status === 'connecting' || status === 'starting'
           ? 'bg-ink-muted animate-pulse'
           : 'bg-ink-faint'
   return (

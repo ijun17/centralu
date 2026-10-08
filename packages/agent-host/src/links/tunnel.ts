@@ -20,7 +20,32 @@ export type ConnectionLine = {
   protocolVersion: number
   dataDir: string
   hostRunning: boolean
+  /**
+   * What runs `centralu` there (docs/plans/remote-hub.md §10.5): the install the hub manages, if any,
+   * and the Node that answered. Absent from a remote that predates it
+   */
+  install?: RemoteInstall
 }
+
+/** The `install` field of the connection line, as `serve.mjs`'s `installInfo` writes it */
+export type RemoteInstall = {
+  /** Started by the managed launcher in `<data>/remote/bin/` (not an npm install) */
+  managed: boolean
+  current: { version: string; node: string } | null
+  previous: { version: string; node: string } | null
+  /** The Node that ran `--connection` */
+  node: string | null
+}
+
+/**
+ * How the hub got a remote host running that was not (owner decision 7, plan §10.9):
+ *
+ *   detached    `centralu serve --detach`: it lives until it is stopped, the machine restarts or
+ *               it crashes, whatever happens to the link
+ *   link_bound  WMI process creation is blocked there (decision 3), so the forward's own ssh session
+ *               runs `centralu serve`; the host ends when the link does
+ */
+export type HostStart = { how: 'detached' | 'link_bound'; note: string | null }
 
 export type Endpoint = {
   /** Where the hub connects: always the hub's own loopback */
@@ -38,6 +63,12 @@ export interface Tunnel {
    * remote's host is not running (`line.hostRunning` false): there is nothing to forward to yet.
    */
   open(): Promise<Endpoint>
+  /**
+   * Starts the remote's host when `open` found none running (`line.hostRunning` false), so that the
+   * next `open` finds it. Rejects with a message for the person when it cannot. Absent where the hub
+   * cannot start anything (a direct tunnel)
+   */
+  startHost?(): Promise<HostStart>
   /** The transport went away by itself (the ssh process exited) */
   onDown(listener: (reason: string) => void): void
   close(): Promise<void>
@@ -59,6 +90,7 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
       if (typeof o.port !== 'number' || typeof o.token !== 'string' || typeof o.protocolVersion !== 'number') {
         throw new Error('The remote answered with an incomplete connection line')
       }
+      const install = parseInstall((o as { install?: unknown }).install)
       return {
         v: 1,
         port: o.port,
@@ -67,10 +99,45 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
         protocolVersion: o.protocolVersion,
         dataDir: typeof o.dataDir === 'string' ? o.dataDir : '',
         hostRunning: o.hostRunning === true,
+        ...(install ? { install } : {}),
       }
     }
   }
   throw new Error('The remote did not print a connection line; its Centralu may predate `centralu serve` (update it there: npm i -g centralu)')
+}
+
+/** The `install` field, field by field; a field of the wrong shape is read as absent, never trusted */
+function parseInstall(raw: unknown): RemoteInstall | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const pointer = (v: unknown) => {
+    const p = v as { version?: unknown; node?: unknown } | null
+    return p && typeof p.version === 'string' && typeof p.node === 'string' ? { version: p.version, node: p.node } : null
+  }
+  return { managed: o.managed === true, current: pointer(o.current), previous: pointer(o.previous), node: typeof o.node === 'string' ? o.node : null }
+}
+
+/** What `centralu serve --detach` answered (`serve.mjs`'s `runDetach`) */
+export type DetachAnswer =
+  | { ok: true; line: ConnectionLine; how: string | null }
+  | { ok: false; reason: string; message: string }
+
+/** Reads the one JSON line `--detach` prints; throws when there is none (a remote older than `--detach`) */
+export function parseDetachLine(stdout: string): DetachAnswer {
+  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let raw: unknown
+    try {
+      raw = JSON.parse(lines[i]!)
+    } catch {
+      continue
+    }
+    const d = (raw as { detach?: { ok?: unknown; how?: unknown; reason?: unknown; message?: unknown } } | null)?.detach
+    if (!d || typeof d !== 'object') continue
+    if (d.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof d.how === 'string' ? d.how : null }
+    return { ok: false, reason: typeof d.reason === 'string' ? d.reason : 'failed', message: typeof d.message === 'string' ? d.message : 'centralu serve --detach failed' }
+  }
+  throw new Error('The remote did not say whether it started')
 }
 
 /** For tests and for a host the hub can reach directly: no transport, the address is given */
@@ -156,24 +223,39 @@ export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
  * too. `command`, the person's own (`RemoteSpec.command`), runs as given, with no fallback.
  */
 export function connectionCommand(spec: RemoteSpec): string {
+  return remoteCommand(spec, 'serve --connection')
+}
+
+/** `centralu serve --detach` there, found the same way (`SshTunnel.startHost`, plan §10.4) */
+export function detachCommand(spec: RemoteSpec): string {
+  return remoteCommand(spec, 'serve --detach')
+}
+
+/** `centralu serve` in the foreground, found the same way: a host bound to the forward's own ssh session */
+export function serveCommand(spec: RemoteSpec): string {
+  return remoteCommand(spec, 'serve')
+}
+
+/** `centralu <args>` on the remote, in its shell's terms, through the lookup `connectionCommand` describes */
+function remoteCommand(spec: RemoteSpec, args: 'serve --connection' | 'serve --detach' | 'serve'): string {
   const custom = spec.command?.trim() || null
   if (spec.shell === 'powershell') {
-    if (custom) return powershell(`${custom} serve --connection`)
+    if (custom) return powershell(`${custom} ${args}`)
     return powershell(
-      "if (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu serve --connection } " +
+      `if (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu ${args} } ` +
         "else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'; " +
-        `if (Test-Path $l) { & $l serve --connection } else { '${NOT_FOUND}' } }`,
+        `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
-    'if command -v centralu >/dev/null 2>&1; then exec centralu serve --connection; ' +
-    'elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec "$HOME/.centralu/bin/centralu" serve --connection; ' +
+    `if command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
+    `elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec "$HOME/.centralu/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`
-  if (spec.shell === 'posix') return custom ? `${custom} serve --connection` : `sh -c '${lookup}'`
+  if (spec.shell === 'posix') return custom ? `${custom} ${args}` : `sh -c '${lookup}'`
   const distro = spec.wslDistro ?? ''
   if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
   const script = custom
-    ? `${custom} serve --connection`
+    ? `${custom} ${args}`
     : `PATH=$(printf %s "$PATH" | tr : '\\n' | grep -v '^/mnt/' | paste -sd: -); ${lookup}`
   const b64 = Buffer.from(script, 'utf8').toString('base64')
   return powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
@@ -191,6 +273,8 @@ export type SshTunnelOptions = {
   env?: NodeJS.ProcessEnv
   /** How long the forward may take to start accepting connections */
   forwardTimeoutMs?: number
+  /** How long a host the forward runs (link-bound) may take to answer */
+  startTimeoutMs?: number
   log?: (line: string) => void
 }
 
@@ -226,6 +310,8 @@ export class SshTunnel implements Tunnel {
   private readonly asking = new Set<ChildProcess>()
   private downListeners: ((reason: string) => void)[] = []
   private closing = false
+  /** The remote cannot start a host outside a session (WMI blocked): the forward runs it (`startHost`) */
+  private linkBound = false
 
   constructor(private readonly opts: SshTunnelOptions) {
     if (!opts.target.trim() || opts.target.startsWith('-')) throw new Error('Not an ssh target')
@@ -239,24 +325,79 @@ export class SshTunnel implements Tunnel {
       throw err
     })
     this.ifClosed()
-    if (!line.hostRunning) {
+    if (!line.hostRunning && !this.linkBound) {
       return { url: '', token: line.token, line, localPort: 0 }
     }
+    // A link-bound host is started by the forward itself (`startHost`), so it is not running yet here
+    const hosting = !line.hostRunning
     let localPort = (await portFree(line.port)) ? line.port : await freePort()
     try {
-      await this.forward(localPort, line.port)
+      await this.forward(localPort, line.port, hosting)
     } catch (err) {
       // Taken between the check and ssh's bind: once more on a port the OS picks
       if (localPort !== line.port) throw err
       this.ifClosed()
       localPort = await freePort()
-      await this.forward(localPort, line.port)
+      await this.forward(localPort, line.port, hosting)
     }
     if (this.closing) {
       await this.stopChild()
       this.ifClosed()
     }
-    return { url: `ws://127.0.0.1:${localPort}`, token: line.token, line, localPort }
+    const served = hosting ? await this.untilServing() : line
+    return { url: `ws://127.0.0.1:${localPort}`, token: served.token, line: served, localPort }
+  }
+
+  /**
+   * Starts the remote's host with `centralu serve --detach` (plan §10.4, owner decision 7): it then
+   * runs outside any ssh session and outlives this link. When the remote says WMI process creation
+   * is blocked there (decision 3), every `open` from then on runs `centralu serve` as the forward's
+   * own remote command instead, so the host lives as long as the link.
+   */
+  async startHost(): Promise<HostStart> {
+    this.ifClosed()
+    const remote = this.opts.remote ?? { shell: 'posix' }
+    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote)])
+    this.ifClosed()
+    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
+      throw new Error(`Centralu is not installed on ${this.opts.target} (run \`npm i -g centralu\` there, then \`centralu serve\` once)`)
+    }
+    let answer: DetachAnswer
+    try {
+      answer = parseDetachLine(r.stdout)
+    } catch (err) {
+      if (/unknown option for serve: --detach/.test(r.stderr)) {
+        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`centralu serve\` there, or update it (npm i -g centralu)`)
+      }
+      const why = lastLine(r.stderr)
+      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
+    }
+    if (answer.ok) {
+      this.linkBound = false
+      return { how: 'detached', note: null }
+    }
+    if (answer.reason === 'wmi_blocked') {
+      this.linkBound = true
+      return { how: 'link_bound', note: answer.message }
+    }
+    throw new Error(answer.message)
+  }
+
+  /** The connection line again until the link-bound host answers, or the forward that runs it ends */
+  private async untilServing(): Promise<ConnectionLine> {
+    const deadline = Date.now() + (this.opts.startTimeoutMs ?? 30_000)
+    for (;;) {
+      this.ifClosed()
+      if (!this.child) throw new Error(`The ssh session that runs Centralu on ${this.opts.target} ended before it served`)
+      const line = await this.connectionLine()
+      if (line.hostRunning) return line
+      if (Date.now() > deadline) {
+        await this.stopChild()
+        throw new Error(`Centralu on ${this.opts.target} did not start serving in time`)
+      }
+      await new Promise((r) => setTimeout(r, 500))
+    }
   }
 
   onDown(listener: (reason: string) => void): void {
@@ -308,12 +449,17 @@ export class SshTunnel implements Tunnel {
     }
   }
 
-  private forward(localPort: number, remotePort: number): Promise<void> {
+  private forward(localPort: number, remotePort: number, hosting = false): Promise<void> {
     this.ifClosed()
-    const keepAlive = wslKeepAlive(this.opts.remote)
+    /*
+     * A forward alone runs nothing; for WSL it runs the keep-alive instead (`wslKeepAlive`), and for a
+     * link-bound host it runs the host itself, which also holds a WSL distro for as long as it runs.
+     * When this ssh ends, the remote's sshd ends that session: Windows' OpenSSH ends its processes,
+     * and on posix the launcher takes the hangup as a stop and stops its host in order.
+     */
+    const keepAlive = hosting ? serveCommand(this.opts.remote ?? { shell: 'posix' }) : wslKeepAlive(this.opts.remote)
     const args = [
       ...this.config(),
-      // A forward alone runs nothing; for WSL it runs the keep-alive instead (`wslKeepAlive`)
       ...(keepAlive ? ['-T'] : ['-N']),
       '-o', 'BatchMode=yes',
       '-o', 'ExitOnForwardFailure=yes',
