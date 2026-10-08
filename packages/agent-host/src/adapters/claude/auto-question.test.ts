@@ -26,6 +26,9 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
       getContextUsage: async () => undefined,
     }
   },
+  // Centralu's own in-process server, for the session that is given it (#382) — only its slot matters here
+  createSdkMcpServer: (cfg: { name: string }) => ({ type: 'sdk' as const, name: cfg.name }),
+  tool: (name: string) => ({ name }),
 }))
 
 const { ClaudeAdapter } = await import('./index.js')
@@ -66,7 +69,11 @@ describe('AskUserQuestion in auto sessions (#171)', () => {
 describe("Centralu's own tools in auto sessions (#382)", () => {
   it('are allowed when an ask rule sends them to the callback, as under the other presets; anything else is still denied', async () => {
     const events: NormalizedEvent[] = []
-    const handle = await new ClaudeAdapter().createSession({ sessionId: 's3', cwd: '/x', permissionPreset: 'auto' }, (e) => events.push(e))
+    const handle = await new ClaudeAdapter().createSession(
+      // A session given the reader set; the tools themselves are never run here
+      { sessionId: 's3', cwd: '/x', permissionPreset: 'auto', orchestratorTools: {} as never, toolProfile: 'reader' },
+      (e) => events.push(e),
+    )
     expect((await sdk.options!.canUseTool!('mcp__centralu__read_session', {})).behavior).toBe('allow')
     // The exemption is the full server name, not a prefix (#93)
     expect((await sdk.options!.canUseTool!('mcp__centralu__pw__navigate', {})).behavior).toBe('deny')

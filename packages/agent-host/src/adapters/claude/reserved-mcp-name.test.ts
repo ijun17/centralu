@@ -154,6 +154,18 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
   })
 
   /*
+   * #382: the exemption is for the server this session was given. A session without it (an agent an app stood up,
+   * a session with the set turned off in Settings) can still see a `centralu` server from the person's own
+   * `~/.claude` (`settingSources: ['user']`), and that server's tools must ask like any other. Under safe an app's
+   * agent asks for everything but reads; a server merely named like ours used to skip the card.
+   */
+  it("a session that was not given Centralu's server asks about a tool named like one of ours", async () => {
+    await new ClaudeAdapter().createSession({ sessionId: 'app-agent', cwd: '/x', permissionPreset: 'safe' }, () => {})
+    expect(servers()).not.toHaveProperty('centralu')
+    expect(await decide('mcp__centralu__list_sessions')).toBe('asked-the-human')
+  })
+
+  /*
    * The test above only says "our own tools pass" for list_sessions alone. But the check counts
    * segments from `split('__')`, so **the moment a tool with two consecutive underscores in its
    * own name is added**, that one tool would silently pop an approval card — the exact symptom of

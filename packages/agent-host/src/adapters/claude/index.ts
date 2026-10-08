@@ -556,8 +556,12 @@ class ClaudeSession implements SessionHandle {
            * callback only when an `ask` rule matched, and a rule naming `mcp__centralu` (the person's, or a trusted
            * project's file) used to refuse these tools in auto while safe and normal let them through. Codex's
            * bridge is set to `approve` for the same reason (#363).
+           *
+           * Only when this session was given our server (#382). Without it (an agent an app stood up, the set turned
+           * off in Settings) a `centralu` server can still come from the person's own `~/.claude`, and its tools
+           * are not ours to vouch for.
            */
-          if (isOrchestratorTool(toolName)) {
+          if (isOrchestratorTool(toolName) && self.orchestratorServer) {
             return { behavior: 'allow' as const, updatedInput: toolInput }
           }
           if (preset === 'auto' && toolName !== 'AskUserQuestion') {
