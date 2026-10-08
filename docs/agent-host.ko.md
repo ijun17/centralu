@@ -390,6 +390,12 @@ nonce가 적힌 `<data>/shell-status.json`을 최대 45초 기다린다. 셸은 
 키퍼가 막 넘겨받은 호스트가 부른 정리가 교체가 방금 만든 사본을 지웠다("Cannot find module
 .../hosts/<key>/main.mjs", #368).
 
+셸이 띄운 키퍼(자기 실행 파일이 `<data>/content/<version>/`에 있는 키퍼)는 사본을 만들지 않는다: 호스트를 검증된
+사본의 `host/` 폴더에서 그대로 돌린다. 그 폴더는 읽기 전용이고 서명된 매니페스트와 대조를 마쳤다
+([plans/thin-shell.md](plans/thin-shell.md) §5, §10.3). 같은 잠금이 그 `content/<version>` 폴더들도 붙잡고, 정리는
+아무 붙잡기도 없고, 키퍼 자신의 것도 아니고, 호스트가 돌거나 다음에 돌 곳도 아닌 버전을 모두 지우며, 죽은 복사가 남긴
+`.partial-*` 폴더도 지운다.
+
 **어디서 왔는가.** 키퍼는 도는 호스트에 대해 `{ commit, builtAt, version, protocolVersion, bundlePath, hostDir,
 copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토큰 없음)에 쓰고, 호스트에 `CC_HOST_SOURCE`로
 넘긴다. 호스트는 이것을 모든 `hello_ok`에 `build`로 싣는다([protocol.ko.md](protocol.ko.md) §1). 커밋은 언제나
@@ -404,8 +410,8 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다. `relaunched`: 이 창이 알린 다시 띄우기로 뜬 창이다(§4.5) |
 | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — 앱이 업데이트를 적용하려고 곧 스스로를 다시 띄운다(#352): `n`초(기본 60, 최대 300) 동안은 붙은 창이 없어도 키퍼가 멈추지 않는다, 백그라운드 모드가 무엇이든. 다음 attach가 이것을 써 버린다 |
 | `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit completely", 그리고 창이 이어서 자기 빌드의 키퍼를 띄우는 "Restart completely") |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. `keeper`가 있고(앱은 자기 실행 파일을 보낸다) 키퍼가 다른 빌드면, 키퍼가 먼저 그 빌드의 키퍼에게 스스로를 넘기고([architecture.ko.md](architecture.ko.md) §4.4) 그 키퍼가 교체를 한다. 교체 중의 두 번째 `switch`는 거절한다 |
-| `{"op":"upgrade","exe":…,"source":…}` | 호스트는 그대로 두고, 키퍼를 `exe`에 있는 `source` 빌드의 키퍼에게 넘긴다(§4.4) |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. `keeper`가 있고(앱은 자기 실행 파일을 보낸다) 키퍼가 다른 빌드면, 키퍼가 먼저 그 빌드의 키퍼에게 스스로를 넘기고([architecture.ko.md](architecture.ko.md) §4.4) 그 키퍼가 교체를 한다. 검증된 콘텐츠에서 도는 키퍼는 번들에서 아무것도 띄우지 않는다: 번들의 서명된 콘텐츠를 검증해 복사하고 그 사본 안의 키퍼에게 넘긴다(§4.4). 거절되면 교체는 `refused`가 채워진 `failed`로 끝난다. 교체 중의 두 번째 `switch`는 거절한다 |
+| `{"op":"upgrade","exe":…,"source":…}` | 호스트는 그대로 두고, 키퍼를 `exe`에 있는 `source` 빌드의 키퍼에게 넘긴다(§4.4). 검증된 콘텐츠에서 돌면 `exe`가 든 번들의 콘텐츠를 검증한 사본 안의 키퍼에게 넘긴다 |
 | `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry (교체 중에는 거절) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |
 
@@ -427,7 +433,8 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 
 **CI에서.** `.github/workflows/build.yml`의 `keeper e2e` 잡(macOS)이 바이너리와 호스트를 한 번 빌드하고, 세 키퍼
 스크립트 가운데 모델도 네트워크도 필요 없는 부분을 돌린다: `keeper-integration.mjs` 전부, 그리고
-`--no-claude --no-codex`를 붙인 `keeper-children-integration.mjs`와 `keeper-handoff-integration.mjs`. 이 잡이 있는
+`--no-claude --no-codex`를 붙인 `keeper-children-integration.mjs`와 `keeper-handoff-integration.mjs`, 이어서 셸의 것
+(`shell-integration.mts`)과 검증된 콘텐츠에서의 넘겨주기(`keeper-content-integration.mts`, §4.4). 이 잡이 있는
 까닭은 이 중 어느 것도 단위 테스트나 e2e에 드러나지 않기 때문이다: 서버가 생기기 전에 넣은 #329의 `await`가 터미널을
 쥔 호스트의 재시작을 모두 크래시시켰고(#348), 알아챈 것은 손으로 돌린 children 스크립트뿐이었다. claude와 codex
 턴은 손으로 돌리는 채로 남는다. 각 스크립트는 통과하든 실패하든 자기가 띄운 프로세스와 그것들이 띄운 것까지 모두
@@ -604,6 +611,19 @@ stdout은 같은 파이프이고, `children.sock`의 제어·붙기 연결은 �
 이것을 돌린다: 각각 도구 호출 중인 턴과 세는 터미널·개발 서버를 둔 채의 넘겨주기, 커밋 전에 죽인 넘겨주기, 키퍼를 옮기고
 이어서 호스트를 교체하는 바꾸기, 그리고 그 모든 과정을 넘는 앱 뷰와 창의 연결. CI는 `--no-claude --no-codex`로
 돌린다(§4.1).
+
+**검증된 콘텐츠에서** ([plans/thin-shell.md](plans/thin-shell.md) §10.3). 셸이 띄운 키퍼는 `<data>/content/<version>/`에서
+돌고 서명된 코드만 띄워야 하므로, 넘겨줄 때 창이 건넨 키퍼 실행 파일을 그 번들의 `Contents/Resources/content`를 가리키는
+표지로만 쓴다. 그 콘텐츠를 셸의 규칙과 키로 검증하고(서명, 플랫폼, 목록에 든 키퍼와 호스트,
+`<data>/content/highest-started` 아래가 아닐 것), `<data>/content/<새 버전>/`에 복사하거나(그 자리에서 검증되는 사본은
+그대로 쓴다), 그 사본 안의 키퍼에게 `--host-source`로 사본의 `host/`를 주어 넘긴다. `switch`라면 이어서 교체하는 호스트도
+바로 그 폴더다. 넘겨받은 키퍼는 서기 시작하면 바닥을 자기 버전으로 올린다. 거절(`content`, `downgrade`, `copy`,
+`in-use`, `no-content`)이면 아무것도 움직이지 않는다: 키퍼와 호스트는 계속 서고, 창은 `refused`에 이유가, `message`에
+문장이 담긴 실패한 교체를 본다. 되돌리기는 셸로만 한다. 호스트는 이 중 아무것도 알아채지 않는다: 자기가 도는 곳은 여느
+사본과 같은 폴더다. 직접 띄운 키퍼(디버그 빌드, Linux, 창의 대체 시작)는 위처럼 받은 실행 파일에게 넘긴다.
+`scripts/keeper-content-integration.mts`가 일회용 키를 믿는 테스트 셸과 테스트 키퍼, 실제 호스트, 세는 터미널로 이것을
+돌린다: 바뀐 콘텐츠와 더 오래된 콘텐츠는 모두 계속 선 채로 거절되고, `content/0.2.1/`로 넘겨줘도 호스트·터미널·정문이
+같으며, 호스트가 새 사본으로 옮겨 가고, 아무것도 돌지 않게 된 옛 버전 폴더는 지워진다.
 
 ### 4.5 호스트에서 본 업데이트 적용 (#352)
 

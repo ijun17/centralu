@@ -1,6 +1,6 @@
 # A fixed shell that holds macOS permissions: plan
 
-> **Status: decided by the owner on 2026-10-07 (§9). Steps 1–4 built (§10).** Replaces the shape first proposed on #440
+> **Status: decided by the owner on 2026-10-07 (§9). Steps 1–5 built (§10).** Replaces the shape first proposed on #440
 > (shell = window + keeper). The measurements behind every choice here are in
 > [spikes/2026-10-thin-shell-tcc.md](../spikes/2026-10-thin-shell-tcc.md).
 
@@ -113,7 +113,7 @@ Running code from outside a signed bundle with the app's permissions needs a rea
   spawns from it. Nothing runs from the window bundle directly.
 - **Handoff.** On an update the running keeper (already verified) verifies and copies the new content itself with
   the same code and keys, then hands off as it does today. The shell is not involved, which is why its own code
-  can stay this small.
+  can stay this small. Built in step 5 (§10.3).
 
 What this protects, stated plainly: a release can only run code the project signed; a partly written or
 corrupted update is refused instead of half-running; a file dropped into Centralu's folders does not inherit the
@@ -126,7 +126,9 @@ This design does not widen that, and does not pretend to close it.
 Today the keeper is the window's binary started with `--keeper`. With the window and the shell apart, the keeper
 is a separate executable (`centralu-keeper`) in the content. The socket, the protocol with the window, the
 children service, the self-handoff and the host swap do not change. The keeper's host copies
-(`<data>/hosts/<key>`, `source::Copies`) move under the verified content folder.
+(`<data>/hosts/<key>`, `source::Copies`) move under the verified content folder: a keeper from verified content
+runs its hosts from `<data>/content/<version>/host/` itself, and `<data>/hosts/` stays for a keeper started
+directly (step 5, §10.3).
 
 Development (`pnpm app:dev`, debug builds) keeps starting the keeper directly; there is nothing to hold
 permissions for, and a dev shell would be one more thing to rebuild.
@@ -216,8 +218,8 @@ About shows both: "Centralu 0.1.0-beta.13 (shell 1)".
 Every step lands behind the current behaviour until step 4 switches release builds over, so main keeps
 shipping in between.
 
-Status: steps 1 and 2 are merged (#444, #445; the host copies have not moved under the content folder yet, §5).
-Step 3 is §10.1 (#448), step 4 is §10.2. Steps 5 and 6 are open.
+Status: steps 1 and 2 are merged (#444, #445). Step 3 is §10.1 (#448), step 4 is §10.2 (#449), step 5 is §10.3
+(with it the host copies moved under the content folder, §5). Step 6 is open.
 
 ### 10.1 Step 3 as built (2026-10-08)
 
@@ -240,9 +242,9 @@ not a default member, so app builds never build it. What the plan left open, and
 | The icon | `icons/icon.icns` as it is when the shell version is built | Shown next to "Centralu" in System Settings; a later icon change reaches it only with a new shell version |
 | Test keys | One extra key only behind the `test-key` feature, refused at compile time without `debug_assertions` | The integration test needs a shell that trusts a throwaway key; the shell people install trusts keys.json alone (security-boundaries.md "Signed content") |
 
-Left for later steps: the window opening the shell and reading `shell-status.json` (step 4), removing old
-`<data>/content/<version>/` folders and leftover `.partial-*` folders (the keeper, step 5), and moving the
-keeper's host copies (`<data>/hosts/`) under the content folder (§5). `fetchPinned` (`scripts/shell-bundle.mts`)
+Left for later steps: the window opening the shell and reading `shell-status.json` (step 4, §10.2), removing old
+`<data>/content/<version>/` folders and leftover `.partial-*` folders, and moving the keeper's host copies
+(`<data>/hosts/`) under the content folder (both the keeper's, step 5, §10.3). `fetchPinned` (`scripts/shell-bundle.mts`)
 checks a downloaded shell against `shell.lock`; the release uses it since step 4 (§10.2).
 
 ### 10.2 Step 4 as built (2026-10-08)
@@ -263,10 +265,39 @@ A macOS release window installs or upgrades the shell and starts its keeper thro
 | On a refusal or no report | The window starts the keeper directly from its bundle, as before, and does so for the rest of its life; the reason is `HostBuild.shell` (`started`, `reason`, `message`, `notify`, `shellVersion`) and a `[window]` line in `keeper.log` | Agents must keep working (§6). Not retrying the shell on every reconnect keeps a slow failure (a timeout) from costing 45 s each time |
 | Release or local | `notify` is the carried shell's `pinned`: a release shows the fallback in the build bar (reason in words, the full message on hover, dismissible); a local build only logs it | A person running a release should know their permissions follow this build; a developer's `pnpm app` would show it on every start |
 | An unpinned shell | Neither installed nor opened: the keeper starts directly (`unpinned`, logged). `CC_SHELL_UNPINNED=1` opens it anyway, for checking the path by hand with a temporary `CC_DATA_DIR` | The production shell refuses throwaway-signed content (measured on a staged bundle: exit 10, `content`, "signed with an unknown key"), so opening it buys nothing; opening it reads the bundle where it lies, and a build under `~/Desktop` would ask for Desktop access in the shell's name; installing it would put unpinned bytes where people's permissions are meant to attach. Until shell v1 is in `shell.lock`, releases therefore start their keeper as before |
-| `downgrade` and `shell-too-old` | Shown as fallbacks with the shell's message; no rollback question yet, and a carried shell newer than the installed one is installed before opening, so `shell-too-old` means the carried shell is too old as well | The rollback question belongs with step 5's content handling |
+| `downgrade` and `shell-too-old` | Shown as fallbacks with the shell's message; no rollback question yet, and a carried shell newer than the installed one is installed before opening, so `shell-too-old` means the carried shell is too old as well | The rollback question belongs with step 5's content handling, which keeps it with the shell (§10.3) |
 
 Checked by hand on the first release that carries a pinned shell (not by tests, which never call LaunchServices):
 the shell lands in `~/.centralu/shell/`, a start goes through it (`[window] the shell started the keeper`), the
 window keeps focus and the Dock shows one icon, LaunchServices picks up an upgraded bundle at the same path, the
 nested `Centralu.app` inside the window is not offered by Spotlight or Launchpad, and Screen Recording granted once
 survives the next update.
+
+### 10.3 Step 5 as built (2026-10-08)
+
+A keeper that runs from verified content verifies and copies the next build's content itself before it hands over
+(`keeper/src/keeper/content.rs`, `server::move_to_content` in the keeper crate). The window did not change: it still
+sends `switch` with the keeper executable of its bundle. What the plan left open:
+
+| Question | Choice | Why |
+|---|---|---|
+| Which keepers verify | One whose own executable is `<data>/content/<version>/centralu-keeper` (both paths resolved, so a symlinked data folder still counts): the shell started it, or a keeper from there handed over to it. Any other keeper hands over to the executable it is given, as before | Where its executable is, is the one fact that says the shell started this tree; an argument or a variable could come from anyone. Debug builds, Linux, the window's fallback start, and the handoffs of beta.11 keepers and of #444's (`centralu --keeper` turning into the keeper beside it) are untouched |
+| Where the new content comes from | The bundle around the executable the window names (`<bundle>/Contents/MacOS/<exe>` gives `<bundle>/Contents/Resources/content`), else the switch source's `bundlePath`. The source's `hostDir` is never read | Every window since #280 step 4 names an executable in `Contents/MacOS/` (`centralu-keeper` since #444, `centralu` before), so no window has to learn anything; nothing in the bundle outside its content is trusted |
+| The checks | The shell's: content-verify with the built-in keys, the platform, an executable `centralu-keeper` and `host/main.mjs` in the manifest, and the floor `<data>/content/highest-started` (an unreadable floor is logged and ignored). Not the minimum shell version (`shell_version: None`). A content inside `<data>/content/` is refused as the source | A handoff accepts exactly what a fresh start through the shell would. Whether the installed shell is new enough is the window's question (§6), and the running keeper is not a shell |
+| The copy | `<data>/content/<version>/`, read-only, as the shell makes it. A folder already there is reused when it verifies in place with the same manifest bytes, else removed and copied again, unless something runs from it or holds it: then the switch is refused (`in-use`) and nothing is touched | A restart of the same release should not copy it again, a folder anyone of this user could edit is not trusted unchecked, and a folder a keeper or host runs from must never be removed under it |
+| The handoff | To `<data>/content/<new>/centralu-keeper` with `--host-source <data>/content/<new>/host` and the window's `--bundle-path`, through the same `handoff::give`. With `switch`, the new keeper then swaps the host to that verified host. When the keeper already runs that version, only the host moves. The incoming keeper raises the floor to its version once it serves | Only a keeper that serves has started: a handoff that fails must not lock the person out of the version they had (the shell's rule) |
+| A refusal | The keeper and its host stay as they are and no partial copy is left. The switch ends as failed, the message is the refusal ("Could not switch builds: … The running build was not touched and is still serving."), and the swap view's new `refused` field carries its id (`content`, `downgrade`, `copy`, `in-use`, `no-content`). The window shows it as any failed switch, with "Try again". "Restart completely" stops the keeper and starts the next one through the shell, which refuses the same content and falls back to the direct start with the reason in the build bar (§10.2) | A switch that cuts nothing cannot run unverified code. The only way to run a refused build is the fallback the window already has, and it stops the agents, so it stays the person's choice. Offering "Restart completely" instead of "Try again" for a refusal (the window has the id now) is a follow-up |
+| Hosts | A build whose host folder is a verified copy's `host/` runs from there; `source::Copies` holds its `content/<version>` folder instead of copying it. `<data>/hosts/<key>` remains for keepers started directly (§5) | The copy in `hosts/` existed so a rebuilt bundle could not change a running host (#280); a read-only verified copy already guarantees that, and a second copy would be unverified again |
+| Cleanup | After each host is ready, every `content/<version>` folder that no claim holds, that is not the keeper's own and that no host in use runs from (the running host, the next launch's, a running switch's target) is removed, with every `.partial-*` folder older than ten minutes. Never `highest-started` or anything not named like a version. Placing a version takes the same lock, and a keeper handing over stops both at the freeze | The rule `hosts/` follows since #368, plus the keeper's own executable: the folder the keeper runs from outlives every host it starts. The target of a handoff that failed and left its host swap to run under the old keeper is kept through the switch's own record until the swap claims it |
+| Rollback | Shell only, for now. A handoff refuses a version below the floor whatever the window sends; an explicit rollback is a fresh start through the shell with `--rollback`, which lowers the floor. The window asks for neither yet (§10.2), so a downgrade today ends in the `downgrade` refusal and, after "Restart completely", the direct start | A rollback through a handoff would need a flag in `switch` and a question in the window to set it, and neither exists. When the window gets the question it can either restart through the shell with `--rollback` (cuts the agents) or send that flag, which the keeper would honour by allowing the downgrade and writing the floor with `Rollback::Allow` after the commit |
+| Test keys | The keeper crate's `test-key` feature with `CENTRALU_KEEPER_TEST_KEY` at compile time, refused without `debug_assertions`; checked by tooling/keeper-executable.test.ts | The shell's construction: the keeper people run trusts keys.json alone |
+
+Checked by the keeper crate's unit tests (where it runs from; every refusal; reuse, re-copy and `in-use`; what the
+cleanup removes and keeps; which way a switch goes) and by `scripts/keeper-content-integration.mts` in the `keeper e2e`
+job: a test shell starts keeper A from a verified copy of 0.2.0; a switch to tampered content 0.2.2 is refused
+(`content`) and to 0.1.9 (`downgrade`) with A and its host serving on; an upgrade to 0.2.1 hands over to keeper B in
+`content/0.2.1/` with the same host, terminal and front door; the 0.2.1 window's switch then moves only the host, and
+`content/0.2.0` is removed once nothing runs from it.
+
+Not checked by tests: a real release bundle's content (signed by the release key) through a real update, which needs
+a pinned shell (§10.2); the step 6 manual check covers it.

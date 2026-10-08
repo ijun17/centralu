@@ -451,6 +451,12 @@ the host runs from when it runs, and a keeper handing itself over stops both at 
 cleanup a keeper's newly adopted host set off deleted the copy a swap had just made ("Cannot find module
 .../hosts/<key>/main.mjs", #368).
 
+A keeper the shell started (its own executable in `<data>/content/<version>/`) makes no copies: its hosts run from
+the verified copy's `host/` folder, which is read-only and was checked against the signed manifest
+([plans/thin-shell.md](plans/thin-shell.md) §5, §10.3). The same lock holds those `content/<version>` folders, and
+the cleanup removes every version no claim holds, that is not the keeper's own and that no host runs from or will run
+from next, plus `.partial-*` folders a copy that died left behind.
+
 **Where it came from.** The keeper keeps, for the running host, `{ commit, builtAt, version,
 protocolVersion, bundlePath, hostDir, copyDir }`, returns it on the control socket, writes it to
 `<data>/keeper.json` (no token), and passes it to the host as `CC_HOST_SOURCE`. The host adds it to every
@@ -465,8 +471,8 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. `relaunched`: this window is the one an announced relaunch started (§4.5) |
 | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is about to relaunch itself to apply an update (#352): for `n` s (60 by default, at most 300) no window attached does not stop the keeper, whatever background mode says. The next attach spends it |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit completely", and "Restart completely", after which the window starts a keeper of its own build) |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sends its own executable, which turns into the keeper beside it) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A second `switch` during a swap is refused |
-| `{"op":"upgrade","exe":…,"source":…}` | hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4) |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sends its own executable, which turns into the keeper beside it) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
+| `{"op":"upgrade","exe":…,"source":…}` | hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
 | `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
 
@@ -488,7 +494,8 @@ real bundled host against a temporary `CC_DATA_DIR`.
 
 **In CI.** The `keeper e2e` job in `.github/workflows/build.yml` (macOS) builds the binary and the host once and runs
 the parts of the three keeper scripts that need no model and no network: all of `keeper-integration.mjs`, and
-`keeper-children-integration.mjs` and `keeper-handoff-integration.mjs` with `--no-claude --no-codex`. It exists
+`keeper-children-integration.mjs` and `keeper-handoff-integration.mjs` with `--no-claude --no-codex`, then the
+shell's (`shell-integration.mts`) and the handoff from verified content (`keeper-content-integration.mts`, §4.4). It exists
 because none of this shows in unit tests or e2e: #329's `await` before the server existed crashed every host
 restart that held a terminal (#348), and only a hand run of the children script noticed. The claude and codex
 turns stay manual. Each script ends every process it started and everything those started, pass or fail, found
@@ -681,6 +688,21 @@ buffers, so a turn in progress loses and repeats nothing.
 and codex (`gpt-5.6-luna`): a handoff with a turn of each in a tool call, a terminal and a dev server counting; a
 handoff killed before its commit; a switch that moves the keeper and then swaps the host; and an app view and the
 window's connection across all of it. CI runs it with `--no-claude --no-codex` (§4.1).
+
+**From verified content** ([plans/thin-shell.md](plans/thin-shell.md) §10.3). A keeper the shell started runs from
+`<data>/content/<version>/` and must only ever start signed code, so its handoff takes the window's keeper
+executable only as a pointer to that bundle's `Contents/Resources/content`. It verifies that content with the shell's
+rules and keys (signature, platform, a keeper and a host listed, not below `<data>/content/highest-started`), copies
+it into `<data>/content/<new version>/` (or reuses a copy that verifies in place), and hands over to the keeper in
+that copy with `--host-source` naming the copy's `host/`; the host it then swaps to, on a `switch`, is that same
+folder. The incoming keeper raises the floor once it serves. A refusal (`content`, `downgrade`, `copy`, `in-use`,
+`no-content`) moves nothing: the keeper and the host serve on, and the window sees a failed swap with the reason in
+`refused` and the words in `message`. Rollbacks go through the shell only. The host notices none of this: what it
+runs from is a folder like any other copy. A keeper started directly (debug builds, Linux, the window's fallback)
+hands over to the executable it is given, as above. `scripts/keeper-content-integration.mts` drives it with a test
+shell and a test keeper that trust a throwaway key, the real host and a counting terminal: a tampered and an older
+content refused with everything serving, a handoff into `content/0.2.1/` with the same host, terminal and front
+door, the host's switch to the new copy, and the old version's folder removed once nothing runs from it.
 
 ### 4.5 Applying an update, seen from the host (#352)
 

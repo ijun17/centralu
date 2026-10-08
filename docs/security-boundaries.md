@@ -413,7 +413,8 @@ is **what may be started from that folder**: only files a release signed. The ve
 `apps/desktop/content-verify` (shared by the shell and, on a handoff, the keeper); the writer is
 `scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
 the plan), which a macOS release window opens since step 4 (§10.2) when the shell it carries is the one
-`shell.lock` pins; until shell v1 is pinned, no release opens it.
+`shell.lock` pins; until shell v1 is pinned, no release opens it. Its second is a keeper the shell started,
+which verifies the next build's content itself before handing over to it (step 5, §10.3).
 
 - **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
   the app version, platform and minimum shell version. `content-manifest.json.sig` is an ed25519 signature
@@ -474,6 +475,31 @@ The shell adds:
   installed version with a lower one, never installs or opens an unpinned shell (a local build's), and opens
   the shell through LaunchServices with absolute paths only; an old `shell-status.json` cannot answer for a
   start, because the window matches it by a fresh nonce.
+
+The keeper adds, on a handoff (step 5, [plans/thin-shell.md](plans/thin-shell.md) §10.3):
+
+- **A keeper from verified content never starts a bundle.** A keeper whose own executable is
+  `<data>/content/<version>/centralu-keeper` (resolved, so a symlinked data folder still counts) treats the
+  keeper executable a window names only as a pointer to that bundle's `Contents/Resources/content`. It
+  verifies that content with the same verifier and the same rules as the shell (signature against
+  keys.json, platform, a listed keeper and host, the downgrade floor; not the minimum shell version, which
+  the window decides), copies it into `<data>/content/<new version>/` (or reuses a copy that verifies in
+  place with the same manifest bytes), and hands over to the keeper inside that copy, its host named in
+  that copy too. The window's `hostDir` is never read. Its hosts run from the copy's `host/`, never from a
+  copy of a bundle in `<data>/hosts/`. A content inside `<data>/content/` is refused as the source.
+- **A refusal moves nothing.** The keeper and its host stay; no partial copy is left; the window is told
+  the reason (`refused` in the swap view). A refused build only ever runs through the window's fallback,
+  the direct start under the window's own identity (§10.2), which a person reaches with Restart completely.
+- **A rollback never goes through a handoff.** A version below `<data>/content/highest-started` is refused
+  on a handoff whatever the window asks; only the shell's `--rollback` lowers the floor. The incoming keeper
+  raises the floor once it serves.
+- **What runs is never removed under it.** A version folder the keeper runs from, a host runs from or will
+  run from next, or a switch holds is never removed by the cleanup, and one that no longer verifies while
+  something runs from it is refused (`in-use`) rather than replaced.
+- **The keys are keys.json.** The keeper crate's `test-key` feature (`keeper/src/keeper/keys.rs`) is guarded
+  as the shell's is: refused without `debug_assertions`, turned on by nothing on the way to a release
+  (`tooling/keeper-executable.test.ts`). `scripts/keeper-content-integration.mts` builds the test keeper
+  and puts the plain one back in the target folder before anything else runs from it.
 
 Limits:
 
