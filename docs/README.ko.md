@@ -36,11 +36,13 @@
 | [spikes/m0-findings.md](spikes/m0-findings.md) | M0: 권한 오버라이드, 이벤트, Codex, 토폴로지 — 넷 다 성립했다 |
 | [spikes/2026-10-memory-heavy-store.md](spikes/2026-10-memory-heavy-store.md) | 주인 스토어 모양의 무거운 스토어에서 창이 쓰는 메모리 (#364): WebKit과 Chromium, 대기·그리드·전환·스트리밍, #393 전후; 최적화 대상 |
 | [spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) | Linux(WSL2 Ubuntu 24.04)에서 키퍼를 실제로 돌려 본 기록: #350의 원인(procps-ng 4.0.4의 `kill`), 키퍼 스크립트, 넘겨주기와 #387 스윕, AppImage 마운트가 사라질 때, 기본값이 되기 전에 남은 것 |
+| [runtime-lessons.md](runtime-lessons.md) | 프로세스 런타임의 시행착오 기록: 창·셸·키퍼·호스트·에이전트·터미널·원격 `serve`를 OS마다 시작·감독·넘겨주기·업데이트·종료하며 배운 규칙, 각 규칙을 지키는 테스트, 아직 테스트가 없는 규칙의 작업 목록 (영어만) |
 | [plans/m1-plan.md](plans/m1-plan.md) · [m1-result.md](plans/m1-result.md) | M1 계획과 결과: 게이트, 측정된 성능, 구현 중에 내린 결정 |
 | [plans/m1.5-plan.md](plans/m1.5-plan.md) · [m1.5-result.md](plans/m1.5-result.md) | 상시 구동 운영과 검증 프로토콜; 측정이 잡아낸 결함 5건 |
 | [plans/m2-plan.md](plans/m2-plan.md) · [m2-result.md](plans/m2-result.md) | M2 계획(독립 리뷰 후 수정)과 결과: 릴리스 빌드 통과, 추가로 측정된 결함 5건, 도그푸딩 시작 방법 |
 | [plans/beta-release-checklist.md](plans/beta-release-checklist.md) | 공개 릴리스를 막고 있는 것들. §2는 npm을 배포 채널로 만든 서명·격리 측정 |
 | [plans/remote-hub.md](plans/remote-hub.md) | 연결된 호스트로서의 원격 모드 (#82): 모양, 라우팅, 버전, 1단계가 만든 것; §10에 3단계(ssh로 원격을 설치·시작·업데이트·제거)와 probe 4(허브 교체를 건너 허브의 ssh가 어디서 사는가), [spikes/2026-10-remote-install/](spikes/2026-10-remote-install/)의 스크립트로 Windows와 WSL에서 측정 |
+| [plans/runtime-unification.md](plans/runtime-unification.md) | 프로세스 런타임을 단계별로 다시 설계 (주인, 2026-10-08): macOS·Linux·Windows·원격에서 하나의 구조(런처 → 키퍼 → 호스트), 하나의 OS 계층, 하나의 시작 계획, 어디서나 검증된 콘텐츠; 단계 순서, 원격 3–4단계와 Windows 키퍼(#14)와의 관계, 완료의 정의. [runtime-lessons.md](runtime-lessons.md)가 각 단계의 관문 |
 
 ## 문서를 쓰는 규칙
 
