@@ -137,8 +137,9 @@ Linux와 Windows는 먼저 CI에서 나와야 한다 (`dry_run`을 끈 `release.
 | 명령 | 하는 일 |
 |---|---|
 | `centralu` | 레지스트리에서 WebView2 Runtime을 확인한다. 없으면 창 없이 끝나 버릴 exe를 실행하는 대신 내려받을 링크를 출력하고 끝낸다. 있으면 `centralu.exe`를 **detached**로 실행한다 — 설치된 복사본이 있으면 그것을, 없으면 npm 패키지 안의 것을. 그리고 3초 동안 지켜본다: 그 안에 0이 아닌 코드로 끝나면 WebView2 링크와 `host.log` 경로를 담은 메시지를 출력한다 |
-| `centralu install` | 폴더를 `%LOCALAPPDATA%\Programs\Centralu`로 복사하고 시작 메뉴 바로 가기(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Centralu.lnk`)를 만든다. 새 복사본은 옛 복사본 옆에서 조립된 뒤 바꿔 끼워지므로, 복사가 실패하거나 앱이 실행 중이어도 동작하던 설치는 그대로 남는다 |
+| `centralu install` | 폴더를 `%LOCALAPPDATA%\Programs\Centralu`로 복사하고 시작 메뉴 바로 가기(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Centralu.lnk`)를 만든다. 새 복사본은 옛 복사본 옆에서 조립된 뒤 폴더 이름 바꾸기 두 번으로 바꿔 끼워지므로, 복사가 실패해도 동작하던 설치는 그대로 남는다. 바꿔 끼우기는 앱이 실행 중이어도 된다(아직 쓰이는 옛 복사본은 나중 설치가 쓸어 낼 때까지 `Centralu.old-<시각>`으로 남는다). 어떤 프로세스의 작업 디렉터리가 폴더 안에 있을 때만 거부된다 |
 | `centralu update` | `npm i -g centralu@<latest>`(`npm`이 `npm.cmd`라서 셸을 거친다), 그리고 설치된 복사본이 있으면 갱신한다 |
+| 앱 안의 업데이트 | 호스트가 같은 두 단계를 셸 없이 돌린다([agent-host.ko.md](agent-host.ko.md) §4.5). 그 뒤 "Restart Centralu to finish updating". 0.1.0-beta.12까지의 빌드는 여기서 `spawn npm ENOENT`로 실패하므로, 그 빌드에서는 터미널에서 `centralu update`를 한 번 |
 | `centralu uninstall` | 복사본과 바로 가기를 지운다. `%USERPROFILE%\.centralu`는 건드리지 않는다 |
 
 Linux처럼 패키지를 가리키는 바로 가기가 아니라 macOS처럼 복사본을 두는 이유: Windows는 실행 중인 프로그램의 파일을 바꿔치기하지 못하게 한다. 앱이 npm 패키지 안에서 실행 중이면 `npm i -g centralu@newer`는 EBUSY로 실패한다. 복사본에서 실행하면 패키지는 자유롭게 업데이트된다. 어느 쪽이든, 앱이 아직 실행 중이라서 Windows가 거부했을 때는 런처가 그렇게 말해 준다.
@@ -149,7 +150,7 @@ detached는 선택이 아니다. libuv는 detached가 아닌 모든 자식을, �
 
 **WebView2.** Windows 11에는 런타임이 들어 있고, 최신 Windows 10에도 대개 있다. NSIS 설치 파일은 그것을 설치해 주지만 npm 설치는 그럴 수 없으므로, 런처가 먼저 확인하고(Microsoft 배포 가이드의 레지스트리 위치 세 곳) Evergreen Bootstrapper를 가리킨다. `reg.exe`를 실행할 수 없으면 확인 결과는 "모름"이 되고 앱은 그대로 실행된다. 확인 장치가 고장 났다고 실행을 막아서는 안 되기 때문이다.
 
-**아직 증명되지 않은 것.** Windows에서 `npm i -g centralu`를 실행해 본 사람은 없다: 런처도, 바로 가기도, 앱이 열린 상태의 업데이트도. 릴리스 잡은 dry run으로만 돌았다. 기본 npm prefix 아래 경로 깊이는 약 180자로, 평범한 프로필 이름이라면 `MAX_PATH` 안이지만 긴 이름으로는 확인하지 않았다.
+**실행해 본 것과 아직 증명되지 않은 것.** Windows 11에서(2026-10-08, 임시 npm prefix): `npm i -g centralu`, 바로 가기를 포함한 `centralu install`, 0.1.0-beta.10에서 beta.12로의 `centralu update`, 그리고 같은 구간의 앱 안 업데이트 경로를, 설치된 폴더에 실행 중인 앱의 핸들을 쥔 대역을 두고 각각 돌렸다. 돌리지 않은 것: 실제 앱(WebView2 포함)이 열린 상태의 업데이트(대역은 exe와 호스트의 네이티브 모듈이었다), 그리고 긴 프로필 이름에서의 경로(기본 npm prefix 아래 약 180자로, 평범한 이름이라면 `MAX_PATH` 안).
 
 ## linux-arm64 (#29)
 

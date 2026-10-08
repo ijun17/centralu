@@ -636,6 +636,26 @@ automatically when idle", `updates.setAutoApply`, 저장소의 앱 설정에 `up
 끝난 설치 위에서는 하지 않는다: 그 뒤의 확인은 `restart_required`를 건드리지 않으므로 설치는 한 번이다. 실패한 설치는
 그 버전을 다시 찾는 다음 확인, 곧 여섯 시간 뒤에 다시 시도된다.
 
+두 명령 모두 셸 없이 `tool-launch.ts`를 거쳐 돈다(`updates.ts`의 `commandFor`): Windows에서 `npm`과 `centralu`는
+배치 파일이라 `execFile`이 이름으로도(ENOENT) 경로로도(EINVAL) 띄우지 못하므로, 각 파일을 읽어 그것이 띄우는 `.js`를
+호스트의 Node로 돌린다. 갱신하는 설치된 앱은 `installedCopyPath()`, 곧 플랫폼별 런처의 `installedPaths()[0]`이다(테스트가
+둘을 묶어 둔다). 실패는 어느 쪽이 실패했는지 말한다: npm 자신의 마지막 줄(로그 위치 안내 줄은 건너뛴다), 또는 npm은
+됐고 복사본만 안 됐으면 런처의 첫 줄과 복사본 경로, 그리고 손으로 마칠 `centralu install`.
+
+**Windows에서는**, 2026-10-08 Windows 11에서 임시 npm prefix와, 실행 중인 앱과 같은 핸들을 쥔 대역(폴더에서 띄운
+exe, 매핑된 호스트의 `better-sqlite3`·`node-pty` 모듈)으로 측정했다:
+
+| 단계 | 일어나는 일 |
+|---|---|
+| `npm i -g centralu@<v>` | 앱이 설치된 복사본에서 돌든 npm 패키지 안에서 돌든 성공한다 |
+| `centralu install` | `%LOCALAPPDATA%\Programs\Centralu`를 `Centralu.old-<시각>`으로 비켜 이름을 바꾸고, 조립한 `Centralu.new`를 그 자리로 옮긴다. NTFS는 exe와 네이티브 모듈이 쓰이는 중에도 이 이름 바꾸기를 허용하고, 어떤 프로세스의 작업 디렉터리가 안에 있을 때만 거부한다. 파일 탐색기는 exe를 그 폴더에서 띄우고 호스트가 그것을 물려받으므로, 앱은 시작할 때 자기 폴더에서 작업 디렉터리를 옮긴다(`src-tauri/src/lib.rs`의 `leave_app_folder`). 비켜 둔 복사본은 옛 앱이 도는 동안 지울 수 없고, 다음 설치가 지울 수 있는 `Centralu.old-*`를 모두 쓸어 낸다 |
+| 실행 중인 앱 | 열어 둔 파일은 그대로 쓴다. Windows는 exe를 원래 경로로 계속 보고하므로, 그 뒤 경로로 여는 것은 새 복사본의 것이다. 옛 창이 다시 띄운 호스트도 마찬가지다(그 경로에서 추론, 실행해 보지 않음) |
+| "Apply now" | 제공되지 않는다: 키퍼가 없어 다시 띄우면 모든 에이전트가 멈춘다(`relaunch_info`). 줄은 "Restart Centralu to finish updating to <v>"라고 하고, 종료 후 시작 메뉴나 `centralu`로 다시 열면 새 복사본이 뜬다 |
+
+0.1.0-beta.12까지의 빌드는 Windows에서 스스로 업데이트하지 못하고(호스트가 `npm`을 이름으로 돌렸다: "Update failed",
+`spawn npm ENOENT`), 이 수정은 설치된 빌드가 된 뒤에야 돈다. 그 빌드로 올리려면 터미널에서 `centralu update`를 한 번
+돌린다. 이것은 셸을 거치고 앱이 열려 있어도 된다.
+
 **규칙** (`idle.ts`). `hostBusy(snapshot)`이 "지금 멈추면 누가 무엇을 잃는가"에 대한 유일한 답이다: 일하거나 승인 또는
 질문을 기다리거나 활동으로 치는 백그라운드 작업(#290)을 돌리는 살아 있는 세션, 열린 터미널, 돌고 있는 프로젝트 명령.
 턴이 끝난 세션(`waiting_input`, `turn_complete`가 다음 메시지까지 남기는 상태)은 한가하다: 답은 저장돼 있다.

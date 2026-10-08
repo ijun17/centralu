@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { __forgetPrograms, launchFor, programPath, resolveCommand, shimTarget } from './tool-launch.js'
+import { __forgetPrograms, launchFor, nodeShimEntry, programPath, resolveCommand, shimTarget } from './tool-launch.js'
 
 /**
  * Windows (#14), simulated. Node refuses to spawn a `.cmd` without a shell, and a shell would read
@@ -45,8 +45,40 @@ const PNPM_SHIM = [
 // npm's shim for a package whose bin is an executable.
 const EXE_SHIM = '@ECHO off\r\nGOTO start\r\n:start\r\n"%dp0%\\node_modules\\tool\\bin\\tool.exe"   %*\r\n'
 
+/**
+ * The `npm.cmd` Node's Windows installer puts beside `node.exe`, as read on Windows 11 with Node
+ * 24.21 (2026-10-08). Not cmd-shim output: it starts a variable, after asking npm for the global
+ * prefix in case a newer npm was installed there. `npx.cmd` is the same with `npx-cli.js`.
+ */
+const nodeDistShim = (cli: 'npm' | 'npx') => {
+  const V = cli.toUpperCase()
+  return [
+    ":: Created by npm, please don't edit manually.",
+    '@ECHO OFF',
+    '',
+    'SETLOCAL',
+    '',
+    'SET "NODE_EXE=%~dp0\\node.exe"',
+    'IF NOT EXIST "%NODE_EXE%" (',
+    '  SET "NODE_EXE=node"',
+    ')',
+    '',
+    'SET "NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"',
+    `SET "${V}_CLI_JS=%~dp0\\node_modules\\npm\\bin\\${cli}-cli.js"`,
+    `FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (`,
+    `  SET "NPM_PREFIX_${V}_CLI_JS=%%F\\node_modules\\npm\\bin\\${cli}-cli.js"`,
+    ')',
+    `IF EXIST "%NPM_PREFIX_${V}_CLI_JS%" (`,
+    `  SET "${V}_CLI_JS=%NPM_PREFIX_${V}_CLI_JS%"`,
+    ')',
+    '',
+    `"%NODE_EXE%" "%${V}_CLI_JS%" %*`,
+    '',
+  ].join('\r\n')
+}
+
 const NODE = 'C:\\Program Files\\nodejs\\node.exe'
-const deps = (files: Record<string, string>, platform: NodeJS.Platform = 'win32') => ({
+const deps = (files: Record<string, string>, platform: NodeJS.Platform = 'win32', prefix: string | null = null) => ({
   platform,
   read: (p: string) => {
     if (!(p in files)) throw new Error(`ENOENT ${p}`)
@@ -54,6 +86,7 @@ const deps = (files: Record<string, string>, platform: NodeJS.Platform = 'win32'
   },
   exists: (p: string) => p in files,
   node: NODE,
+  runJs: (script: string) => (script.endsWith('npm-prefix.js') && prefix !== null ? `${prefix}\r\n` : null),
 })
 
 describe('reading a batch shim for the program it starts', () => {
@@ -126,12 +159,42 @@ describe('a program the host runs in a project folder', () => {
   })
 })
 
+describe("Node's own npm.cmd and npx.cmd", () => {
+  const nodeDir = 'C:\\Program Files\\nodejs'
+  const npmCli = `${nodeDir}\\node_modules\\npm\\bin\\npm-cli.js`
+  const prefix = 'C:\\Users\\Jane Doe\\AppData\\Roaming\\npm'
+  const prefixCli = `${prefix}\\node_modules\\npm\\bin\\npm-cli.js`
+  const files = { [`${nodeDir}\\npm.cmd`]: nodeDistShim('npm'), [npmCli]: '' }
+
+  it('are not cmd-shim output, so the quoted-path reading names nothing in them', () => {
+    expect(shimTarget(nodeDistShim('npm'))).toBeNull()
+  })
+
+  it('npm.cmd starts npm-cli.js beside Node when the global prefix has no npm of its own', () => {
+    expect(nodeShimEntry(nodeDistShim('npm'), nodeDir, deps(files, 'win32', prefix))).toBe(npmCli)
+    expect(launchFor(`${nodeDir}\\npm.cmd`, deps(files, 'win32', prefix))).toEqual({ command: NODE, args: [npmCli] })
+  })
+
+  it('after `npm i -g npm`, the npm in the global prefix, as the batch file itself would choose', () => {
+    const withPrefixNpm = { ...files, [prefixCli]: '' }
+    expect(launchFor(`${nodeDir}\\npm.cmd`, deps(withPrefixNpm, 'win32', prefix))).toEqual({ command: NODE, args: [prefixCli] })
+  })
+
+  it('a prefix that cannot be asked for falls back to the npm beside Node', () => {
+    const withPrefixNpm = { ...files, [prefixCli]: '' }
+    expect(launchFor(`${nodeDir}\\npm.cmd`, deps(withPrefixNpm, 'win32', null))).toEqual({ command: NODE, args: [npmCli] })
+  })
+
+  it('`npm` by name, as the updater asks for it, becomes Node and npm-cli.js', () => {
+    const env = { Path: `C:\\WINDOWS\\system32;${nodeDir}\\;${prefix}`, PATHEXT: '.COM;.EXE;.BAT;.CMD' }
+    expect(resolveCommand('npm', env, deps(files, 'win32', prefix))).toEqual({ command: NODE, args: [npmCli] })
+  })
+})
+
 describe("an app manifest's command on Windows", () => {
   const nodeDir = 'C:\\Program Files\\nodejs'
   const npxCli = `${nodeDir}\\node_modules\\npm\\bin\\npx-cli.js`
-  // The npx.cmd Node's installer ships has the npm shape.
-  const NPX_SHIM = NPM_SHIM.replace('node_modules\\@openai\\codex\\bin\\codex.js', 'node_modules\\npm\\bin\\npx-cli.js')
-  const files = { [`${nodeDir}\\node.exe`]: '', [`${nodeDir}\\npx.cmd`]: NPX_SHIM, [npxCli]: '' }
+  const files = { [`${nodeDir}\\node.exe`]: '', [`${nodeDir}\\npx.cmd`]: nodeDistShim('npx'), [npxCli]: '' }
   const env = { PATH: `C:\\Windows\\System32;${nodeDir}` }
 
   it('`npx` becomes the program its batch file starts', () => {

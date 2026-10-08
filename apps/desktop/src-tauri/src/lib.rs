@@ -641,6 +641,63 @@ fn receive_app_links<'a>(app: &AppHandle, urls: impl Iterator<Item = &'a str>) {
     }
 }
 
+/**
+ * Where this process should work from instead of `cwd`, or None to stay.
+ *
+ * Windows holds a process's working directory open, and while any process has its working
+ * directory inside the app's folder, that folder cannot be renamed. Renaming it aside is how
+ * `centralu install` replaces the copy in `%LOCALAPPDATA%\Programs\Centralu` while the app runs
+ * (an in-app update): measured on Windows 11 on 2026-10-08, the rename succeeds with the exe and
+ * the host's native modules mapped and fails only when a working directory is inside. The launcher
+ * and the Start-menu shortcut start the app in the home folder, but File Explorer starts an exe in
+ * its own folder, and the host inherits it. So the app leaves its own folder before it starts the
+ * host. A working directory anywhere else is the person's choice and is kept.
+ */
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))] // called on Windows only; tested everywhere
+fn working_dir_away_from(cwd: &std::path::Path, exe_dir: &std::path::Path, home: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    if cwd.starts_with(exe_dir) {
+        home
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn leave_app_folder() {
+    let (Ok(cwd), Ok(exe)) = (std::env::current_dir(), std::env::current_exe()) else { return };
+    let Some(exe_dir) = exe.parent() else { return };
+    let home = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    if let Some(to) = working_dir_away_from(&cwd, exe_dir, home) {
+        if let Err(e) = std::env::set_current_dir(&to) {
+            eprintln!("[startup] could not leave the app folder for {}: {e}", to.display());
+        }
+    }
+}
+
+#[cfg(test)]
+mod working_dir_tests {
+    use super::working_dir_away_from;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_working_directory_inside_the_app_folder_moves_home() {
+        let home = Some(PathBuf::from("/home/me"));
+        assert_eq!(working_dir_away_from(Path::new("/apps/Centralu"), Path::new("/apps/Centralu"), home.clone()), home);
+        assert_eq!(
+            working_dir_away_from(Path::new("/apps/Centralu/resources"), Path::new("/apps/Centralu"), home.clone()),
+            home
+        );
+    }
+
+    #[test]
+    fn any_other_working_directory_is_kept() {
+        let home = Some(PathBuf::from("/home/me"));
+        assert_eq!(working_dir_away_from(Path::new("/home/me/project"), Path::new("/apps/Centralu"), home.clone()), None);
+        // A sibling whose name starts the same is not inside
+        assert_eq!(working_dir_away_from(Path::new("/apps/Centralu.old-1"), Path::new("/apps/Centralu"), home), None);
+    }
+}
+
 #[cfg(test)]
 mod app_link_tests {
     use super::accept_app_link;
@@ -665,6 +722,9 @@ mod app_link_tests {
 mod traffic_lights;
 
 pub fn run() {
+    // Before anything is started from here: the host inherits the working directory
+    #[cfg(target_os = "windows")]
+    leave_app_folder();
     let supervisor = Supervisor::new();
     let quit_approved = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 

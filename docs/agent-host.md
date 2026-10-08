@@ -168,7 +168,7 @@ ways, each in one place:
 
 | What | macOS and Linux | Windows | Where |
 |---|---|---|---|
-| Finding a tool | PATH, augmented from the login shell | PATH with PATHEXT, absolute entries only; npm/pnpm `.cmd` shims read for the `.js` or `.exe` they start | `env-path.ts`, `tool-launch.ts` |
+| Finding a tool | PATH, augmented from the login shell | PATH with PATHEXT, absolute entries only; npm/pnpm `.cmd` shims read for the `.js` or `.exe` they start, and Node's own `npm.cmd`/`npx.cmd` (a different shape: variables, and a newer npm in the global prefix preferred) for their `npm-cli.js`/`npx-cli.js` | `env-path.ts`, `tool-launch.ts` |
 | `git`, `gh`, an app's command | by name | by absolute path: given a bare name, Windows looks in the working directory (the project) first | `tool-launch.ts` `programPath`, `resolveCommand` |
 | Ending a tree | process groups, TERM then KILL | `taskkill /T /F`, one shot; a pty's `kill()` gets no signal. What an app left running after it ended is found by parent links and creation times (one PowerShell CIM listing, ~0.5 s) and ended the same way | `dev-services/kill-tree.ts` |
 | Terminal / Run button | login shell `-l` / `-lc` | `pwsh` or Windows PowerShell, `-NoLogo` / `cmd.exe /d /s /c` | `dev-services/terminal.ts` |
@@ -715,6 +715,27 @@ default) a check that finds a newer version starts the same install by itself, a
 version already known starts it at once. Not over an install under way or one already finished: a check after it leaves
 `restart_required` alone, so it installs once. A failed install is retried by the next check that finds the version
 again, six hours later.
+
+Both commands run without a shell, through `tool-launch.ts` (`commandFor` in `updates.ts`): on Windows `npm` and
+`centralu` are batch files, which `execFile` cannot start by name (ENOENT) or by path (EINVAL), so each is read for the
+`.js` it starts and that runs under the host's Node. The installed app it refreshes is `installedCopyPath()`, the
+launcher's `installedPaths()[0]` per platform (a test holds the two together). A failure says which half failed: npm's
+own last line (not its pointer to the log), or, when npm worked and only the copy did not, the launcher's first line,
+the copy's path and `centralu install` to finish by hand.
+
+**On Windows**, measured on Windows 11 on 2026-10-08 with a temporary npm prefix and a stand-in holding the same
+handles as the running app (an exe started from the folder, the host's `better-sqlite3` and `node-pty` modules mapped):
+
+| Step | What happens |
+|---|---|
+| `npm i -g centralu@<v>` | Succeeds while the app runs, from the installed copy or from inside the npm package |
+| `centralu install` | Renames `%LOCALAPPDATA%\Programs\Centralu` aside to `Centralu.old-<time>` and the assembled `Centralu.new` into its place. NTFS allows the rename with the exe and the native modules in use; it refuses only while some process's working directory is inside. The app moves its working directory out of its own folder at start (`leave_app_folder` in `src-tauri/src/lib.rs`), since File Explorer starts an exe in its folder and the host inherits it. The aside copy cannot be deleted while the old app runs; the next install sweeps every `Centralu.old-*` it can |
+| The running app | Keeps the files it has open. Windows still reports the exe at its original path, so anything opened by path afterwards is the new copy's, a host restarted by the old window included (inferred from that path, not run) |
+| "Apply now" | Not offered: there is no keeper, so a relaunch would stop every agent (`relaunch_info`). The line says "Restart Centralu to finish updating to <v>"; quitting and opening it again from the Start menu or `centralu` starts the new copy |
+
+Builds up to 0.1.0-beta.12 cannot update themselves on Windows (their host ran `npm` by name: "Update failed", `spawn
+npm ENOENT`), and the fix only runs once it is the installed build. Updating to it takes `centralu update` in a
+terminal once; that goes through a shell and works while the app is open.
 
 **The rule** (`idle.ts`). `hostBusy(snapshot)` is the one answer to "would someone lose something if this stopped
 now": a live session working, waiting for an approval or on a question, or running background work that counts as

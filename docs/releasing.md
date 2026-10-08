@@ -314,8 +314,9 @@ every OS by `tooling/launcher-platform.test.ts`):
 | Command | What happens |
 |---|---|
 | `centralu` | Checks the registry for the WebView2 Runtime. If it is missing, prints the download link and exits instead of starting an exe that would end without a window. Otherwise starts `centralu.exe` **detached**, from the installed copy if there is one and from the npm package if not, and watches it for 3 s: an exe that exits nonzero in that time gets a message with the WebView2 link and the `host.log` path |
-| `centralu install` | Copies the folder to `%LOCALAPPDATA%\Programs\Centralu` and writes a Start-menu shortcut (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Centralu.lnk`). The new copy is assembled beside the old one and swapped in, so a failed copy or a running app leaves the working install untouched |
+| `centralu install` | Copies the folder to `%LOCALAPPDATA%\Programs\Centralu` and writes a Start-menu shortcut (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Centralu.lnk`). The new copy is assembled beside the old one and swapped in by two folder renames, so a failed copy leaves the working install untouched. The swap works while the app runs (the old copy, still in use, stays as `Centralu.old-<time>` until a later install sweeps it); it is refused only while a process's working directory is inside the folder |
 | `centralu update` | `npm i -g centralu@<latest>` (through the shell, because `npm` is `npm.cmd`), then refreshes the installed copy if there is one |
+| Update in the app | The same two steps run by the host without a shell ([agent-host.md](agent-host.md) §4.5), then "Restart Centralu to finish updating". Builds up to 0.1.0-beta.12 fail here with `spawn npm ENOENT`; on those, `centralu update` in a terminal once |
 | `centralu uninstall` | Removes the copy and the shortcut. Leaves `%USERPROFILE%\.centralu` alone |
 
 Why a copy, like macOS, rather than a shortcut into the package, like Linux: Windows will not
@@ -342,10 +343,13 @@ registry locations in Microsoft's distribution guide) and points at the Evergree
 Bootstrapper. If `reg.exe` cannot be run, the check answers "unknown" and the app starts
 anyway, because a broken check should not block a launch.
 
-**What is still unproven.** Nobody has run `npm i -g centralu` on Windows: not the launcher,
-not the shortcut, not an update while the app is open. The release job has run as a dry run
-only. Paths are about 180 characters deep under a default npm prefix, which is inside
-`MAX_PATH` for ordinary profile names but has not been checked against a long one.
+**What has been run, and what is still unproven.** On Windows 11 (2026-10-08, a temporary
+npm prefix): `npm i -g centralu`, `centralu install` with its shortcut, `centralu update` from
+0.1.0-beta.10 to beta.12, and the in-app update path from beta.10 to beta.12, each with a
+stand-in holding the running app's handles in the installed folder. Not run: an update with
+the real app open (the stand-in was an exe and the host's native modules, not the app with its
+WebView2), and paths against a long profile name (about 180 characters deep under a default
+npm prefix, inside `MAX_PATH` for ordinary names).
 
 ## linux-arm64 (#29)
 
