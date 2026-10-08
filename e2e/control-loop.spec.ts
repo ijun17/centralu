@@ -1663,8 +1663,10 @@ test('Viewer: the scroll area is a named region, reachable by Tab and moved by t
   }, VIEWER_SCROLLER)
   expect(focused).toEqual({ isScroller: true, role: 'region', label: 'Code' })
 
-  await page.keyboard.press('ArrowRight')
-  await page.keyboard.press('ArrowRight')
+  // Held like a finger holds a key: WebKit scrolls by keyboard from keydown to keyup, and a press
+  // with no time between the two left the area where it was (#424)
+  await page.keyboard.press('ArrowRight', { delay: 100 })
+  await page.keyboard.press('ArrowRight', { delay: 100 })
   await expect
     .poll(() => page.evaluate((sel) => document.querySelector<HTMLElement>(sel)!.scrollLeft, VIEWER_SCROLLER))
     .toBeGreaterThan(0)
