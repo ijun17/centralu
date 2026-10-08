@@ -2206,6 +2206,25 @@ function prependPage(have: ChatItem[], older: ChatItem[]): ChatItem[] {
   return [...rekeyAgainst(fresh, new Set(have.map((it) => it.seq))), ...have]
 }
 
+/**
+ * The rows above a re-read page that the person had already read back to (#79), or none.
+ *
+ * A re-read (`history_synced` when a resumed session catches up, a resync after a reconnect) merges
+ * the newest page with the screen, and `mergePage` drops every screen row older than the page. For
+ * a stale fragment replayed on first contact that is right, but it also dropped the pages the person
+ * had just read back through with "earlier messages": the conversation snapped back to its last page
+ * in the middle of reading, and the cursor with it. These rows are kept when they still connect to
+ * the page, which is when the screen holds a stored row inside the page's range: everything from the
+ * cursor up to that row was read as whole pages. When the screen ends before the page starts, a gap
+ * of unknown size lies between them, and the rows go as before.
+ */
+function readBack(have: ChatItem[], held: AppState['history'][string] | undefined, rows: StoredMessage[]): ChatItem[] {
+  const first = rows[0]?.seq
+  if (!held || first === undefined || held.oldestSeq >= first) return []
+  if (!have.some((it) => it.storedSeq !== undefined && it.storedSeq >= first)) return []
+  return have.filter((it) => it.storedSeq !== undefined && it.storedSeq >= held.oldestSeq && it.storedSeq < first)
+}
+
 /** The attachment size cap. Above this, the app visibly freezes both during the base64 conversion and the WS send */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
@@ -3600,28 +3619,33 @@ export const useStore = create<AppState>((set, get) => ({
       const msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE)
       const items = messagesToChat(msgs)
       bumpChatKeysAbove(items)
-      set((s) => ({
+      set((s) => {
         /*
          * Screen rows are merged with history, never discarded (#79, `mergePage`). This used to
          * discard the page whenever rows existed on screen — setting the cursor from the discarded
          * page. Re-reads (catching up on a conversation continued elsewhere, filling a gap) go
          * through the same path: within the page's range, history is the source of truth, and only
          * whatever streams after it belongs to the screen.
-         * The cursor is the stored number of the top row of the merged result, i.e. the page's first
-         * row — screen rows older than that were discarded during the merge.
+         * The cursor is the stored number of the top row of the merged result: the page's first
+         * row, or the cursor the person had already read back to when those rows are kept (`readBack`).
          */
-        chat: { ...s.chat, [sessionId]: mergePage(s.chat[sessionId] ?? [], items, msgs) },
-        // Slots for past cards' app views (M4 B-1) — a view this UI already knows about (a live one) is left as is
-        inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
-        history: {
-          ...s.history,
-          [sessionId]: {
-            oldestSeq: msgs[0]?.seq ?? 0,
-            more: msgs.length >= HISTORY_PAGE,
-            loading: false,
+        const have = s.chat[sessionId] ?? []
+        const held = s.history[sessionId]
+        const read = readBack(have, held, msgs)
+        const merged = mergePage(have, items, msgs)
+        return {
+          chat: { ...s.chat, [sessionId]: read.length ? prependPage(merged, read) : merged },
+          // Slots for past cards' app views (M4 B-1) — a view this UI already knows about (a live one) is left as is
+          inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
+          history: {
+            ...s.history,
+            [sessionId]:
+              read.length && held
+                ? { oldestSeq: held.oldestSeq, more: held.more, loading: false }
+                : { oldestSeq: msgs[0]?.seq ?? 0, more: msgs.length >= HISTORY_PAGE, loading: false },
           },
-        },
-      }))
+        }
+      })
     } catch {
       // Even if history fails to load, a new conversation is still possible, so this is silently ignored
       return
@@ -3633,9 +3657,19 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     const cur = get().history[sessionId]
     if (!platform || !cur?.more || cur.loading || cur.oldestSeq <= 1) return
-    set((s) => ({ history: { ...s.history, [sessionId]: { ...cur, loading: true } } }))
+    const asked = { ...cur, loading: true }
+    set((s) => ({ history: { ...s.history, [sessionId]: asked } }))
+    /*
+     * The page is only good for the cursor it was asked from (#79). A re-read that lands while this
+     * one is out (`loadHistory`: a catch-up, a resync) or a trim on leaving the session moves the
+     * cursor and the rows under it; prepending the page then left the rows between it and the new
+     * cursor out for good, since the cursor was set below them. Such a page is dropped: the cursor
+     * that replaced it is right, and the next scroll asks again from there.
+     */
+    const stale = () => get().history[sessionId] !== asked
     try {
       const msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE, cur.oldestSeq)
+      if (stale()) return
       const older = messagesToChat(msgs)
       bumpChatKeysAbove(older)
       set((s) => ({
@@ -3651,6 +3685,8 @@ export const useStore = create<AppState>((set, get) => ({
         },
       }))
     } catch (e) {
+      // Putting the old cursor back over one a re-read set meanwhile would undo the re-read
+      if (stale()) return
       set((s) => ({
         history: { ...s.history, [sessionId]: { ...cur, loading: false } },
         toast: `Could not load past conversation: ${(e as Error).message}`,

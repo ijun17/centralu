@@ -154,6 +154,13 @@ views, long sessions, a large store), not only the smallest state that exercises
 The desktop app is WKWebView. If a UI bug does not reproduce in Chromium, try
 `test.use({ browserName: 'webkit' })`.
 
+**Two operations that write the same state are tested interleaved, not one after the other.**
+Reading back through a conversation lost rows for good when a page of older messages landed after
+a re-read had moved the cursor, and a re-read in the middle of reading threw away the pages already
+read (#79). Every test ran each read alone, so the pair was never seen. Hold one answer back (a
+gate in the mock, as the `#79` tests in `store.test.ts` do), run the other operation, then
+release it, and assert that nothing is missing or repeated.
+
 If you touched Rust:
 
 ```bash
