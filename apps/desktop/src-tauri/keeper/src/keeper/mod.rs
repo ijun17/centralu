@@ -39,6 +39,7 @@
 //! copy, and its hosts run from the copy as well.
 
 pub mod children;
+pub mod carried;
 pub mod client;
 pub mod content;
 pub mod exe;
