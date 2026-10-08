@@ -103,6 +103,15 @@ export function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number 
   )
 }
 
+/** Back or forward between screens (#374): the same chevron as the fold's, pointing the way it goes */
+export function StepIcon({ dir, size = 14 }: { dir: -1 | 1; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" className={`shrink-0 ${dir < 0 ? 'rotate-180' : ''}`} aria-hidden>
+      <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** Send. A paper airplane is nearly a universal symbol for "send", so it reads faster than text */
 export function SendIcon({ size = 15 }: { size?: number }) {
   return (

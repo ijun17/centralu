@@ -65,3 +65,34 @@ export function confirmKeyAction(e: { key: string; isComposing: boolean; onButto
   return null
 }
 
+/**
+ * Whether a key press means back (-1) or forward (1) between screens (#374), or neither.
+ *
+ * Both platforms' browser keys work everywhere: ⌘[ / ⌘] (macOS) and Alt+← / Alt+→ (Windows, Linux). The ui does not
+ * know which keyboard it is on, and neither pair means anything else here outside a text field — on a Mac, ⌥← moves by
+ * a word only inside one. Exact modifiers only, so ⌘⇧[ or Ctrl+Alt+← stay whatever they are elsewhere.
+ *
+ * **Never inside a field that takes text** — the composer, the terminal (xterm's input is a textarea), a code editor:
+ * there Alt+← is word movement and ⌘[ is outdent, and the person is typing, not navigating. Nor in the middle of an
+ * IME composition, whose keys belong to the composition.
+ */
+export function navKeyOf(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing' | 'target'>,
+): -1 | 1 | null {
+  if (e.isComposing || e.shiftKey || e.ctrlKey || isTextEntry(e.target)) return null
+  if (e.metaKey && !e.altKey) {
+    if (e.code === 'BracketLeft' || e.key === '[') return -1
+    if (e.code === 'BracketRight' || e.key === ']') return 1
+  }
+  if (e.altKey && !e.metaKey) {
+    if (e.key === 'ArrowLeft') return -1
+    if (e.key === 'ArrowRight') return 1
+  }
+  return null
+}
+
+/** Whether a mouse button is the side button for back (-1) or forward (1) (#374). The DOM numbers them 3 and 4 */
+export function navButtonOf(button: number): -1 | 1 | null {
+  return button === 3 ? -1 : button === 4 ? 1 : null
+}
+

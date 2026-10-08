@@ -3,14 +3,15 @@ import { nextWaitingSession } from '@cc/core'
 import { parseAppLink } from '@cc/protocol'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
-import { useShortcut } from './shortcut.js'
-import { letterOf } from './keys.js'
+import { useNavShortcut, useShortcut } from './shortcut.js'
+import { letterOf, navButtonOf, navKeyOf } from './keys.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 import { applyTheme, cacheChoice, pickTheme, resolveChoice, systemPrefersDark } from './theme.js'
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
-import { projectScreenOf, usableThemeFiles, useStore } from '../store/store.js'
+import { projectScreenOf, screenExists, usableThemeFiles, useStore } from '../store/store.js'
+import { canStep } from '../store/navHistory.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
@@ -29,6 +30,8 @@ import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
+import { IconButton } from '../components/IconButton.jsx'
+import { StepIcon } from '../components/icons.jsx'
 import { isOsFileDrag, markInternalDrags } from '../features/files/dragPath.js'
 import { lazyComponent } from '../components/lazy.jsx'
 
@@ -495,6 +498,8 @@ function TopBar() {
         CENTRALU
       </span>
 
+      <NavButtons />
+
       {/*
         The list drops down directly below this button (user request, 2026-09-09). While it was a
         modal in the center of the screen, the place pressed and the place it opened were far
@@ -620,6 +625,26 @@ function Metric({
   )
 }
 
+/**
+ * Back and forward between screens (#374), beside the name as a browser has them beside its address. Disabled when
+ * there is nowhere to go, by the same rules a step follows (a screen that is gone does not count).
+ */
+function NavButtons() {
+  const canBack = useStore((s) => canStep(s.nav, -1, (x) => screenExists(s, x)))
+  const canForward = useStore((s) => canStep(s.nav, 1, (x) => screenExists(s, x)))
+  const nav = useNavShortcut()
+  return (
+    <span className="flex items-center gap-0.5">
+      <IconButton label={`Back (${nav(-1)})`} onClick={() => useStore.getState().goBack()} disabled={!canBack} testId="nav-back">
+        <StepIcon dir={-1} />
+      </IconButton>
+      <IconButton label={`Forward (${nav(1)})`} onClick={() => useStore.getState().goForward()} disabled={!canForward} testId="nav-forward">
+        <StepIcon dir={1} />
+      </IconButton>
+    </span>
+  )
+}
+
 /** The control loop must be operable without a mouse (FR-17) */
 function GlobalKeys() {
   const toggleInbox = useStore((s) => s.toggleInbox)
@@ -637,6 +662,14 @@ function GlobalKeys() {
         position otherwise.
       */
       const letter = letterOf(e)
+      // Back and forward between screens ⌘[ ⌘] / Alt+← Alt+→ (#374); never while typing (keys.ts says why)
+      const dir = e.defaultPrevented ? null : navKeyOf(e)
+      if (dir) {
+        e.preventDefault()
+        if (dir < 0) useStore.getState().goBack()
+        else useStore.getState().goForward()
+        return
+      }
       // Command palette ⌘K (FR-17)
       if ((e.metaKey || e.ctrlKey) && letter === 'k') {
         e.preventDefault()
@@ -686,10 +719,30 @@ function GlobalKeys() {
       const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
       if (next) focusSession(next)
     }
+    /*
+     * The mouse's side buttons (#374): back on 3, forward on 4, acting on release as a browser does. The press is
+     * claimed too, so a browser running the dev UI does not also leave the page for its own history. Unlike the
+     * keys these work while a text field has focus: a side button never edits text. A press inside an app's frame
+     * stays in that frame's document and does not reach here.
+     */
+    const claimSideButton = (e: MouseEvent) => {
+      if (navButtonOf(e.button)) e.preventDefault()
+    }
+    const onSideButton = (e: MouseEvent) => {
+      const dir = navButtonOf(e.button)
+      if (!dir) return
+      e.preventDefault()
+      if (dir < 0) useStore.getState().goBack()
+      else useStore.getState().goForward()
+    }
     window.addEventListener('keydown', onKey)
+    window.addEventListener('mousedown', claimSideButton)
+    window.addEventListener('mouseup', onSideButton)
     window.addEventListener('cc:next-waiting', onExternalNext)
     return () => {
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousedown', claimSideButton)
+      window.removeEventListener('mouseup', onSideButton)
       window.removeEventListener('cc:next-waiting', onExternalNext)
     }
   }, [toggleInbox, focusSession])

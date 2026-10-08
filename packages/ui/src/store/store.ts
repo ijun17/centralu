@@ -54,6 +54,7 @@ import {
 import type { AppCreated, AppToolResult, ConnectionState, NewAppSpec, Platform, WorkspaceSnapshot } from '@cc/platform/ports'
 import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
+import { closeLayer, EMPTY_NAV, sameScreen, step, visit, type NavHistory, type Screen } from './navHistory.js'
 import { reloadBudget } from './reloadBudget.js'
 import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, subagentRow, type ChatAttachment, type ChatItem } from './transcript.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
@@ -1462,6 +1463,15 @@ export type AppState = {
   gridPanels: GridPanel[]
   setView(view: 'focus' | 'grid' | 'orchestrator'): void
   /**
+   * Back and forward between screens, like a web browser (#374). Every screen change is recorded by one subscriber
+   * at the bottom of this file (`recordScreen`), whichever action made it, so a new way of jumping somewhere gets
+   * history without doing anything. Not saved: a restart begins a fresh history at the screen it restores.
+   */
+  nav: NavHistory
+  /** Shows the previous screen that still exists; nothing when there is none (`navHistory.step`) */
+  goBack(): void
+  goForward(): void
+  /**
    * Opens the orchestrator **screen**. Does not create a session (#63, deferred startup) — attaches
    * to one if it already exists, otherwise an empty conversation waits for the first question.
    * `askOrchestrator` is what creates it.
@@ -2563,6 +2573,7 @@ export const useStore = create<AppState>((set, get) => ({
   panelLayout: defaultLayout(),
   view: 'focus' as 'focus' | 'grid' | 'orchestrator' | 'app',
   focusedApp: null as { projectId: string | null; appId: string } | null,
+  nav: EMPTY_NAV,
   pinnedViews: [] as PinnedView[],
   inlineViews: {} as Record<string, Record<string, InlineView>>,
   inlineFramesVersion: 0,
@@ -2927,6 +2938,9 @@ export const useStore = create<AppState>((set, get) => ({
     } finally {
       restoringWorkspace = false
     }
+    // History starts at the screen the restore left (#374): the steps it took to get there are not the person's
+    const restored = screenOf(get())
+    set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV })
 
     /*
      * Wakes sessions parked in the grid ahead of time (dogfooding, the Mea session: reviving a large
@@ -5368,6 +5382,14 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  goBack() {
+    navigate(get, set, -1)
+  },
+
+  goForward() {
+    navigate(get, set, 1)
+  },
+
   setView(view) {
     /*
      * Picking a screen = having passed the intro (#63).
@@ -6118,3 +6140,104 @@ function goodThemes(prev: Record<string, ThemeFileEntry>, files: readonly ThemeF
 export function usableThemeFiles(s: { themeFiles: ThemeFileEntry[]; lastGoodThemes: Record<string, ThemeFileEntry> }): ThemeFileEntry[] {
   return s.themeFiles.map((f) => (f.broken ? (s.lastGoodThemes[f.id] ?? f) : f))
 }
+
+/**
+ * The screen on now, as history records it (#374), or null for one that is not a place to return to (nothing
+ * picked yet, the intro). Settings is a layer over the screen under it, and counts as a screen of its own.
+ */
+export function screenOf(
+  s: Pick<AppState, 'settingsOpen' | 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
+): Screen | null {
+  if (s.settingsOpen) return { kind: 'settings' }
+  return screenUnder(s)
+}
+
+/** The screen under any layer */
+function screenUnder(
+  s: Pick<AppState, 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
+): Screen | null {
+  switch (s.view) {
+    case 'grid':
+      return { kind: 'grid' }
+    case 'orchestrator':
+      return { kind: 'orchestrator' }
+    case 'app':
+      return s.focusedApp ? { kind: 'app', projectId: s.focusedApp.projectId, appId: s.focusedApp.appId } : null
+    case 'focus': {
+      if (s.focusedSessionId) return { kind: 'session', id: s.focusedSessionId }
+      const pid = projectScreenOf(s)
+      return pid ? { kind: 'project', id: pid } : null
+    }
+  }
+}
+
+/** Whether going back or forward to this screen would still find it (#374): the session, project or app is still here */
+export function screenExists(
+  s: Pick<AppState, 'sessions' | 'projects' | 'externalApps'>,
+  screen: Screen,
+): boolean {
+  switch (screen.kind) {
+    case 'session':
+      return !!s.sessions[screen.id]
+    case 'project':
+      return !!s.projects[screen.id]
+    case 'app':
+      return s.externalApps.some((a) => a.appId === screen.appId && a.projectId === screen.projectId)
+    default:
+      return true
+  }
+}
+
+/** True while `navigate` puts a recorded screen back, so `recordScreen` does not record it as a new visit */
+let navigating = false
+
+function navigate(get: () => AppState, set: (partial: Partial<AppState>) => void, dir: -1 | 1): void {
+  const st = get()
+  const { history, screen } = step(st.nav, dir, (x) => screenExists(st, x))
+  navigating = true
+  try {
+    if (history !== st.nav) set({ nav: history })
+    if (!screen) return
+    /*
+     * Through the same doors a click uses, so a screen comes back exactly as it opens: a session unfolds its
+     * project, an app gets its pinned view, Settings opens on the category it was left on.
+     */
+    if (screen.kind === 'settings') {
+      st.toggleSettings(true)
+      return
+    }
+    if (get().settingsOpen) st.toggleSettings(false)
+    switch (screen.kind) {
+      case 'session':
+        st.focusSession(screen.id)
+        break
+      case 'project':
+        st.focusProject(screen.id)
+        break
+      case 'app':
+        st.openApp(screen.projectId, screen.appId)
+        break
+      case 'grid':
+      case 'orchestrator':
+        st.setView(screen.kind)
+        break
+    }
+  } finally {
+    navigating = false
+  }
+}
+
+/**
+ * Records every screen change (#374), from whatever action made it — the one place history is written. A change
+ * inside a screen (a keystroke, a session picked inside the grid, a panel moved) leaves the screen the same and adds
+ * nothing (`visit` folds a repeat). Closing Settings steps back over it (`closeLayer`).
+ */
+function recordScreen(next: AppState, prev: AppState): void {
+  if (navigating || restoringWorkspace) return
+  const now = screenOf(next)
+  if (!now || sameScreen(now, screenOf(prev) ?? undefined)) return
+  const nav = prev.settingsOpen && !next.settingsOpen ? closeLayer(next.nav, now) : visit(next.nav, now)
+  if (nav !== next.nav) useStore.setState({ nav })
+}
+
+useStore.subscribe(recordScreen)

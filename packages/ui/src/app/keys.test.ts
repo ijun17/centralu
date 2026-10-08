@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { confirmKeyAction, isTextEntry, letterOf } from './keys.js'
+import { confirmKeyAction, isTextEntry, letterOf, navButtonOf, navKeyOf } from './keys.js'
 
 /** Only the two fields this function looks at, from a real KeyboardEvent */
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
@@ -72,6 +72,42 @@ describe('isTextEntry — arrow keys and Enter inside a text field belong to tha
     expect(isTextEntry(el('INPUT', { type: 'checkbox' }))).toBe(false)
     expect(isTextEntry(el('FORM'))).toBe(false)
     expect(isTextEntry(null)).toBe(false)
+  })
+})
+
+describe('navKeyOf / navButtonOf — back and forward between screens (#374)', () => {
+  const body = { tagName: 'BODY', isContentEditable: false } as unknown as EventTarget
+  const press = (key: string, code: string, over: Partial<KeyboardEvent> = {}) => ({
+    key, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, isComposing: false, target: body, ...over,
+  })
+
+  it('⌘[ / ⌘] and Alt+← / Alt+→ go back and forward', () => {
+    expect(navKeyOf(press('[', 'BracketLeft', { metaKey: true }))).toBe(-1)
+    expect(navKeyOf(press(']', 'BracketRight', { metaKey: true }))).toBe(1)
+    expect(navKeyOf(press('ArrowLeft', 'ArrowLeft', { altKey: true }))).toBe(-1)
+    expect(navKeyOf(press('ArrowRight', 'ArrowRight', { altKey: true }))).toBe(1)
+  })
+
+  it('nothing else: other modifiers, a bare arrow, an IME composition', () => {
+    expect(navKeyOf(press('[', 'BracketLeft', { metaKey: true, shiftKey: true }))).toBeNull()
+    expect(navKeyOf(press('[', 'BracketLeft', { ctrlKey: true }))).toBeNull()
+    expect(navKeyOf(press('ArrowLeft', 'ArrowLeft', { altKey: true, ctrlKey: true }))).toBeNull()
+    expect(navKeyOf(press('ArrowLeft', 'ArrowLeft', { metaKey: true }))).toBeNull()
+    expect(navKeyOf(press('ArrowLeft', 'ArrowLeft'))).toBeNull()
+    expect(navKeyOf(press('[', 'BracketLeft', { metaKey: true, isComposing: true }))).toBeNull()
+  })
+
+  it('never while typing: Alt+← moves by a word there, ⌘[ outdents', () => {
+    const textarea = { tagName: 'TEXTAREA', isContentEditable: false } as unknown as EventTarget
+    const editor = { tagName: 'DIV', isContentEditable: true } as unknown as EventTarget
+    expect(navKeyOf(press('ArrowLeft', 'ArrowLeft', { altKey: true, target: textarea }))).toBeNull()
+    expect(navKeyOf(press('[', 'BracketLeft', { metaKey: true, target: editor }))).toBeNull()
+  })
+
+  it('mouse buttons 3 and 4 are back and forward; the others are not', () => {
+    expect(navButtonOf(3)).toBe(-1)
+    expect(navButtonOf(4)).toBe(1)
+    expect([0, 1, 2].map(navButtonOf)).toEqual([null, null, null])
   })
 })
 

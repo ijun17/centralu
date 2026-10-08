@@ -3,7 +3,7 @@ import { nextWaitingSession } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { computeInbox } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { useShortcut } from '../../app/shortcut.js'
+import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 
@@ -33,6 +33,7 @@ export function CommandPalette() {
   const toggleInbox = useStore((s) => s.toggleInbox)
   const platform = usePlatform()
   const sc = useShortcut()
+  const nav = useNavShortcut()
 
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
@@ -99,6 +100,9 @@ export function CommandPalette() {
         owed, though, so they are said twice: named with their keys in Settings → Shortcuts
         (for looking up), and runnable from here (for doing without knowing the key).
       */
+      // Back and forward between screens (#374). The palette lays over the screen and is not one, so back goes to the screen before the one under it
+      { kind: 'action', id: 'nav-back', label: 'Go back', sub: `${nav(-1)} · the screen before`, run: () => useStore.getState().goBack() },
+      { kind: 'action', id: 'nav-forward', label: 'Go forward', sub: `${nav(1)} · the screen after`, run: () => useStore.getState().goForward() },
       { kind: 'action', id: 'waiting', label: 'Waiting list', sub: `${sc('mod', 'I')} · everything waiting on you`, run: () => toggleInbox(true) },
       {
         kind: 'action',
@@ -137,7 +141,7 @@ export function CommandPalette() {
         sub: sessions[h.sessionId]?.name ?? 'Chat',
       })),
     ]
-  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings, toggleInbox, focusSession, sc])
+  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings, toggleInbox, focusSession, sc, nav])
 
   const choose = useCallback(
     (item: Item) => {

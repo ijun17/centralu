@@ -403,6 +403,7 @@ The whole control loop must turn without a mouse. The v1 default shortcuts:
 | Move between sessions within a project | `j` / `k` (when the input box is not focused) |
 | Approve allow / deny / always allow | `y` / `n` / `a` (⌥a: project scope) |
 | Command palette (search projects, sessions, actions) | `⌘K` |
+| Back / forward between screens, like a browser (#374) | `⌘[` / `⌘]` (macOS), `Alt+←` / `Alt+→` (elsewhere); both pairs work everywhere, never while typing. Also the mouse's side buttons and the top bar's arrows |
 | Focus / leave the input box | `Enter` / `Esc` |
 | Switch tab (conversation/files/git/viewer) | `⌘⇧1`~`⌘⇧4` |
 

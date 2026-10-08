@@ -4,7 +4,7 @@ import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } f
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useTools } from '../../store/selectors.js'
-import { useShortcut } from '../../app/shortcut.js'
+import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
@@ -168,6 +168,7 @@ export function Settings() {
   const setPolicy = useStore((s) => s.setNotifyPolicy)
   const platform = usePlatform()
   const sc = useShortcut()
+  const nav = useNavShortcut()
   const [rules, setRules] = useState<Rule[] | null>(null)
   const [category, setCategory] = useState<Category>('notifications')
   // Another screen asked for a category (a machine's header in the sidebar opens Machines, #82)
@@ -351,6 +352,11 @@ export function Settings() {
                       <span className="truncate">{label}</span>
                     </li>
                   ))}
+                  {/* Back and forward (#374): this keyboard's browser keys, not a fixed combination (`navShortcut`) */}
+                  <li className="flex items-baseline gap-2 text-sm text-ink-muted">
+                    <Kbd>{`${nav(-1)} / ${nav(1)}`}</Kbd>
+                    <span className="truncate">Back · forward between screens</span>
+                  </li>
                 </ul>
               </section>
             )}
