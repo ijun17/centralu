@@ -1,6 +1,7 @@
 use super::node::*;
 #[cfg(unix)]
-use crate::os::{parse_probe_output, pid_alive, probe_login_shell, signal_target};
+use crate::os::{pid_alive, probe_login_shell, signal_target};
+use crate::os::parse_probe_output;
 use crate::start_plan::Os;
 use super::*;
 use std::io::BufReader;

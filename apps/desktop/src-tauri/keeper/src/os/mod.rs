@@ -38,3 +38,13 @@ use other_unix as this_unix;
 mod windows;
 #[cfg(windows)]
 pub use windows::*;
+
+/// Pulls the path out of the marked line among whatever the login shell printed (`probe_login_shell`).
+/// Plain parsing, so it is tested on every OS.
+pub fn parse_probe_output(out: &str) -> Option<String> {
+    out.lines()
+        .find_map(|l| l.trim().strip_prefix("__CC_NODE__:"))
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && std::path::Path::new(p).exists())
+        .map(str::to_string)
+}

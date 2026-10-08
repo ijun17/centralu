@@ -205,17 +205,9 @@ pub fn probe_login_shell() -> Option<String> {
     };
     let _ = child.wait();
 
-    parse_probe_output(&out)
+    super::parse_probe_output(&out)
 }
 
-/// Pulls the path out of the marked line among whatever the shell printed.
-pub fn parse_probe_output(out: &str) -> Option<String> {
-    out.lines()
-        .find_map(|l| l.trim().strip_prefix("__CC_NODE__:"))
-        .map(str::trim)
-        .filter(|p| !p.is_empty() && std::path::Path::new(p).exists())
-        .map(str::to_string)
-}
 
 #[cfg(test)]
 mod tests {
