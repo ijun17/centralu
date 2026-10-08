@@ -41,3 +41,16 @@ export function useShortcut(): (...parts: string[]) => string {
   // list, so its identity must not shift.
   return useCallback((...parts: string[]) => shortcut(keys, ...parts), [keys])
 }
+
+/**
+ * Back or forward between screens (#374), as this keyboard's browsers press it: ⌘[ / ⌘] where there is a command key,
+ * Alt+← / Alt+→ elsewhere. Both work on every keyboard (`navKeyOf`), so this only picks which one to print.
+ */
+export function navShortcut(keys: ShortcutKeys, dir: -1 | 1): string {
+  return keys.mod === '⌘' ? shortcut(keys, 'mod', dir < 0 ? '[' : ']') : shortcut(keys, 'alt', dir < 0 ? '←' : '→')
+}
+
+export function useNavShortcut(): (dir: -1 | 1) => string {
+  const keys = useCapability('shortcutKeys')
+  return useCallback((dir: -1 | 1) => navShortcut(keys, dir), [keys])
+}
