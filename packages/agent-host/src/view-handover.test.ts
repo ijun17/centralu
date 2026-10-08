@@ -52,6 +52,19 @@ describe('the view hand-over record', () => {
     expect(restoreViewHandover(s, host(), null, 1_000 + 6_000)).toEqual({ restored: 0, skipped: 0 })
   })
 
+  // #384: the record is written by the previous host, which may be another build
+  it('an element that is not a view is skipped, and the rest of the record still reopens', () => {
+    const s = settings()
+    const first = host()
+    const id = first.open(NOTES, 'ui://notes/board').instanceId
+    recordViewHandover(s, first, null, 1_000)
+    const record = JSON.parse(s.values.get(VIEW_HANDOVER_KEY)!) as { views: unknown[] }
+    s.values.set(VIEW_HANDOVER_KEY, JSON.stringify({ ...record, views: [null, 'view', ...record.views] }))
+    const next = host()
+    expect(restoreViewHandover(s, next, null, 2_000)).toEqual({ restored: 1, skipped: 2 })
+    expect(next.describe(id)).toEqual({ app: NOTES, uri: 'ui://notes/board' })
+  })
+
   it('a record older than ten minutes, or from the future, reopens nothing and is deleted all the same', () => {
     for (const age of [VIEW_HANDOVER_MAX_AGE_MS + 1, -60_000]) {
       const s = settings()
