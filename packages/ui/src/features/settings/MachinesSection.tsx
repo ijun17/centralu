@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import type { MachineInfo, RemoteShell } from '@cc/protocol'
-import { hostStartNote, machineProblem, versionPrompt } from '@cc/core'
+import { useEffect, useState } from 'react'
+import type { HostActivity, MachineInfo, RemoteShell } from '@cc/protocol'
+import { hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 
@@ -60,6 +60,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
   const [confirming, setConfirming] = useState(false)
   const problem = machineProblem(m)
   const started = hostStartNote(m)
+  const operation = operationNote(m)
   const where = [m.sshTarget, SHELL_LABEL[m.shell], m.shell === 'wsl' ? m.wslDistro : null, m.command ? `runs ${m.command}` : null]
     .filter(Boolean)
     .join(' · ')
@@ -69,7 +70,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
         <span className="truncate text-sm text-ink">{m.name}</span>
         <MachineStatusMark status={m.status} testId={`machine-row-status-${m.id}`} />
         <span className="ml-auto flex shrink-0 items-center gap-2">
-          {m.status !== 'connected' && (
+          {m.status !== 'connected' && !m.operation && (
             <button
               type="button"
               className="text-xs text-ink-faint hover:text-ink"
@@ -115,6 +116,12 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
       <p className="mt-0.5 truncate font-mono text-2xs text-ink-faint" title={where}>
         {where}
       </p>
+      {operation && (
+        <p className="mt-1 text-xs leading-body text-ink" data-testid={`machine-operation-${m.id}`} data-step={m.operation?.step}>
+          {operation}
+        </p>
+      )}
+      <InstalledRow m={m} />
       {started && (
         <p className="mt-1 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
           {started}
@@ -137,16 +144,130 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
   )
 }
 
+const linkButton = 'text-xs text-ink-faint hover:text-ink disabled:opacity-50'
+const boxButton =
+  'rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50'
+
+/**
+ * A change that stops the host there (update, rollback), asked first with what it stops (plan §10.5): the remote's
+ * own count of what is running, read when the question opens. Without a keeper on the remote its agents end; their
+ * sessions resume on the version that starts.
+ */
+function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; action: string; onCancel: () => void; onConfirm: () => void }) {
+  const machineActivity = useStore((s) => s.machineActivity)
+  const [activity, setActivity] = useState<HostActivity | null | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    void machineActivity(m.id).then((a) => live && setActivity(a))
+    return () => {
+      live = false
+    }
+  }, [machineActivity, m.id])
+  return (
+    <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid={`machine-stop-confirm-${m.id}`}>
+      <p className="text-xs leading-body text-ink" data-testid={`machine-stop-text-${m.id}`}>
+        {activity === undefined ? `Asking ${m.name} what is running…` : updateStops(m.name, activity).replace(/^Updating/, action)}
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button type="button" className={boxButton} disabled={activity === undefined} onClick={onConfirm} data-testid={`machine-stop-yes-${m.id}`}>
+          {action}
+        </button>
+        <button type="button" className={linkButton} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * What this computer installed there (plan §10.5): the version, roll back one step while an earlier one is kept, and
+ * remove it. Install when nothing is there to run. Each answers when done; its steps show as the row's operation.
+ */
+function InstalledRow({ m }: { m: MachineInfo }) {
+  const change = useStore((s) => s.changeMachineInstall)
+  const [asking, setAsking] = useState<'rollback' | 'uninstall' | null>(null)
+  const note = installNote(m)
+  const busy = !!m.operation
+  const notInstalled = !m.install?.current && !m.command && (m.status === 'not_running' || /not installed/i.test(m.error ?? ''))
+  const hubVersion = m.versions?.hub
+  if (notInstalled) {
+    if (hubVersion?.dev) return null
+    return (
+      <div className="mt-1.5">
+        <button type="button" className={boxButton} disabled={busy} onClick={() => void change(m.id, 'install')} data-testid={`machine-install-${m.id}`}>
+          Install Centralu on {m.name}
+        </button>
+      </div>
+    )
+  }
+  if (!note) return null
+  const previous = m.install?.previous
+  return (
+    <div className="mt-1" data-testid={`machine-installed-${m.id}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-xs leading-body text-ink-muted">{note}</span>
+        {previous && (
+          <button type="button" className={linkButton} disabled={busy} onClick={() => setAsking('rollback')} data-testid={`machine-rollback-${m.id}`}>
+            Roll back to {previous.version}
+          </button>
+        )}
+        <button type="button" className={linkButton} disabled={busy} onClick={() => setAsking('uninstall')} data-testid={`machine-uninstall-${m.id}`}>
+          Uninstall
+        </button>
+      </div>
+      {asking === 'rollback' && (
+        <StopConfirm
+          m={m}
+          action="Roll back"
+          onCancel={() => setAsking(null)}
+          onConfirm={() => {
+            setAsking(null)
+            void change(m.id, 'rollback')
+          }}
+        />
+      )}
+      {asking === 'uninstall' && (
+        <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid={`machine-uninstall-confirm-${m.id}`}>
+          <p className="text-xs leading-body text-ink">
+            This stops Centralu on {m.name}, and anything running there with it, and removes what this computer installed.
+            Its conversations and settings stay, and so does a Centralu installed there with npm. {m.name} stays linked.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-line px-2 py-0.5 text-xs text-danger transition-colors hover:border-line-strong"
+              onClick={() => {
+                setAsking(null)
+                void change(m.id, 'uninstall')
+              }}
+              data-testid={`machine-uninstall-yes-${m.id}`}
+            >
+              Uninstall
+            </button>
+            <button type="button" className={linkButton} onClick={() => setAsking(null)}>
+              Keep
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * The version prompt (plan §4): bring the older side up to the newer one, and connect anyway when both speak one
- * protocol. Phase 1 cannot update another machine, so for an older remote the exact command to run there is given.
+ * protocol. An older remote is updated from here (plan §10.5) after the person read what that stops there; where this
+ * computer cannot (a development build, a command of the person's own), the exact command to run there is given.
  */
 function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
   const accept = useStore((s) => s.acceptMachineVersions)
   const update = useStore((s) => s.update)
   const applyUpdate = useStore((s) => s.applyUpdate)
   const checkUpdate = useStore((s) => s.checkUpdate)
+  const change = useStore((s) => s.changeMachineInstall)
   const [copied, setCopied] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const p = versionPrompt(m)
   if (!p) return null
   return (
@@ -170,10 +291,34 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
           </button>
         </div>
       )}
-      {p.remoteCommand && (
+      {p.updateHere && !confirming && (
+        <div className="mt-2">
+          <button
+            type="button"
+            className={boxButton}
+            disabled={!!m.operation}
+            onClick={() => setConfirming(true)}
+            data-testid={`machine-update-remote-${m.id}`}
+          >
+            Update {m.name} to {p.target}
+          </button>
+        </div>
+      )}
+      {p.updateHere && confirming && (
+        <StopConfirm
+          m={m}
+          action="Update"
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false)
+            void change(m.id, 'update')
+          }}
+        />
+      )}
+      {p.remoteCommand && !p.updateHere && (
         <div className="mt-2">
           <p className="text-xs leading-body text-ink-muted">
-            This version cannot update {m.name} for you yet. On {m.name}, run this, then restart{' '}
+            This computer cannot update {m.name} from here. On {m.name}, run this, then restart{' '}
             <code className="font-mono">centralu serve</code>:
           </p>
           <div className="mt-1 flex items-center gap-2">
