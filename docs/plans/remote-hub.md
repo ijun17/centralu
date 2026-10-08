@@ -3,7 +3,7 @@
 > **Status: decided by the owner on 2026-10-05 (§9), recorded on #82.** It replaces the "multi-host client" shape decided on 2026-10-03
 > (decision 1 on #82) with linked hosts, after the owner asked on 2026-10-05 why the UI should
 > hold several hosts at all. Phase 3 (installing and updating remotes) and probe 4 are designed in §10 (2026-10-08);
-> the owner's part of that is §10.9.
+> the owner decided its open questions the same day (§10.9).
 
 ## 1. The shape
 
@@ -274,9 +274,10 @@ Restored as decided; #410 dropped this section by mistake while §2 and the stat
 
 ## 10. Phase 3: installing and updating remotes (design, 2026-10-08)
 
-> **Status: proposed.** Measured on the owner's Windows 11 laptop (Windows itself and WSL2 Ubuntu 24.04) from a
-> MacBook on the same Wi-Fi, with the published 0.1.0-beta.12 packages. What is settled here and why is §10.8; what
-> the owner decides is §10.9. The probe scripts are in [spikes/2026-10-remote-install/](../spikes/2026-10-remote-install/).
+> **Status: decided (owner, 2026-10-08), being built** (§10.10). Measured on the owner's Windows 11 laptop (Windows
+> itself and WSL2 Ubuntu 24.04) from a MacBook on the same Wi-Fi, with the published 0.1.0-beta.12 packages. What is
+> settled here and why is §10.8; what the owner decided is §10.9. The probe scripts are in
+> [spikes/2026-10-remote-install/](../spikes/2026-10-remote-install/).
 
 Phase 1 asks the person to install Node and `npm i -g centralu` on the remote, run `centralu serve` and keep it running
 themselves (agent-host.md §4.7), and the version prompt can only print the command to run there. Phase 3 lets the hub
@@ -357,7 +358,7 @@ works as before.
 | What | Checked against | Where that value comes from |
 |---|---|---|
 | The two npm tarballs | `dist.integrity` (sha512), on the remote, with the pinned Node's `crypto` (measured on both systems) | The hub reads the registry's metadata for that exact version over TLS and checks its `dist.signatures` with the registry's published keys, as `npm audit signatures` does, then sends the integrity to the remote |
-| The Node archive | A SHA-256 pinned in the Centralu release | The release workflow reads `SHASUMS256.txt` for the pinned version, checks its signature with Node's release keys, and writes the hash per platform into the host bundle (`remote-runtime.json` beside `main.mjs`); the hub sends the one for the remote's platform |
+| The Node archive | A SHA-256 pinned in the Centralu release | `packaging/remote-runtime.json` holds the version and the hash per platform, taken from that version's `SHASUMS256.txt` after its signature checked with the releaser's key (`scripts/node-pin.mjs`, key from `nodejs/release-keys` at a pinned commit). The release checks the pin against the signed list again before it builds, and the host bundle carries it as `remote-runtime.json` beside `main.mjs`; the hub sends the one for the remote's platform ([releasing.md](../releasing.md) "The Node remotes run") |
 | The host folder's own signature | Not checked yet | `content-manifest.json` is signed for macOS only (thin-shell.md §4). Owner decision 6 |
 
 What this gives: the remote runs exactly the bytes `npm i -g centralu@<v>` would have installed and the Node the
@@ -518,23 +519,25 @@ a temporary folder with a temporary `CC_DATA_DIR` and was removed afterwards. No
 | S14 | The hub's ssh stays a child of the hub host | Probe 4 (§10.6) |
 | S15 | A dev hub does not install; it shows the command for the latest release | Its build is not on npm; `MachineInfo.command` covers source checkouts |
 
-### 10.9 For the owner to decide
+### 10.9 Decided (owner, 2026-10-08)
 
-| # | Question | Options | Recommendation |
+The owner took every recommendation of the design. Each line keeps the question, what was decided, and why.
+
+| # | Question | Decided | Why |
 |---|---|---|---|
-| 1 | Which Node the remote pins | **24 LTS** (supported to April 2028; measured working with beta.12's bundles) · 22 LTS (what CI tests today; support ends April 2027) | **24**, with CI's host tests also run on 24 in the same change. 22 would force a Node change on every remote within six months |
-| 2 | Host-only npm packages | Fetch the platform package (works for every published version; Linux downloads 88 MB to keep 12) · publish `@centralu/host-<platform>` with each release (about 4 MB; not dependencies of the shim) | **Start with the platform package**, then add host-only packages in a release change; the installer uses one when it exists for that version |
-| 3 | How a Windows (and WSL) remote host outlives the link | WMI process creation when needed (`serve --detach`: no artifact, lives until reboot) · a per-user scheduled task (survives a reboot, at logon; visible in Task Scheduler) · bound to the link (ends when the hub sleeps or swaps) | **WMI when needed**, as measured; a scheduled task only as the opt-in autostart of question 4. Some managed machines block WMI process creation (Defender's attack surface reduction rule for PSExec and WMI commands, off by default); the hub then says so and falls back to the link-bound start |
-| 4 | Start the remote host at boot | Offer per machine, off by default (systemd user unit and linger on Linux; a scheduled task on Windows and for WSL) · on by default for Linux · never | **Offer, off by default.** After a reboot the next link starts the host anyway (S9); autostart matters only for agents that should run while no hub is around, and linger may need an administrator |
-| 5 | A keeper on Linux remotes, so an update does not cut agents | Next (ship `centralu-keeper` unpacked beside `host/` and give it a headless mode without the window rules, after #350) · after phase 2 · never | **Right after phase 3's first four steps**: otherwise §4's prompt says "this stops N agents" on every Linux update. Windows stays without one |
-| 6 | Sign the Linux and Windows host folders | Sign `host/` in the release with the content key, verify on the remote with keys the hub brings · rely on npm's integrity and signatures | **Rely on npm for now, and sign with question 5**, when a Linux keeper starts from verified content as the macOS one does |
-| 7 | Start a remote host the link finds not running | Automatically (adding the machine was the consent, §3.2) · ask each time | **Automatically**, and say so in the machine's row and in `host.log` |
+| 1 | Which Node the remote pins | **Node 24 LTS**, one exact version (24.21.0 at first) in `packaging/remote-runtime.json`, and CI runs the host's tests on it beside the jobs on 22 | Supported to April 2028, and measured working with beta.12's bundles (§10.2). 22 LTS ends in April 2027, so pinning it would force a Node change on every remote within six months. The app's own host keeps running on whatever Node 22 or later the person has, so CI keeps 22 too |
+| 2 | Host-only npm packages | **The existing platform packages first**; `@centralu/host-<platform>` (about 4 MB) later, in a release change, which the installer prefers for the versions that have one | The platform packages already carry the host and work for every published version; the cost is Linux downloading 88 MB to keep 12, which a host-only package removes without blocking anything now |
+| 3 | How a Windows (and WSL) remote host outlives the link | **Started detached through WMI** (`serve --detach`); when WMI process creation is blocked, the hub says so and **falls back to a link-bound host** that runs while the link is up | WMI was the only measured start that survives the ssh session on Windows, and leaves nothing behind (no task, no service). Some managed machines block it (Defender's attack surface reduction rule for PSExec and WMI commands, off by default); the link-bound start still works there, only without outliving the link. A scheduled task is the opt-in of 4 |
+| 4 | Start the remote host at boot | **Offered per machine, off by default** (a systemd user unit and linger on Linux; a per-user scheduled task on Windows and for WSL) | After a reboot the next link starts the host anyway (7); autostart matters only for agents that should run with no hub around, and linger may need an administrator |
+| 5 | A keeper on Linux remotes | **Right after phase 3's first four steps and #350** | Without it §4's prompt says "this stops N agents" on every Linux update. Windows stays without one |
+| 6 | Sign the Linux and Windows host folders | **npm's integrity and registry signatures now; signing comes with the Linux keeper (5)** | Integrity checked on the remote plus registry signatures checked by the hub is what every npm user gets today; signing pays off once a Linux keeper starts from verified content as the macOS one does |
+| 7 | Start a remote host the link finds not running | **Automatically**, and say so in the machine's row and in `host.log` | Adding the machine was the consent (§3.2); asking each time would turn every reboot of the remote into a prompt |
 
 ### 10.10 Work, in pull requests
 
 | Step | What | Estimate (agent work) |
 |---|---|---|
-| 1 | The release records the pinned Node (version and SHA-256 per platform, from a signature-checked `SHASUMS256.txt`) as `remote-runtime.json` in the host bundle; CI runs the host's tests on that Node too | 0.5–1 day |
+| 1 | The release records the pinned Node (version and SHA-256 per platform, from a signature-checked `SHASUMS256.txt`) as `remote-runtime.json` in the host bundle; CI runs the host's tests on that Node too. **Done** | 0.5–1 day |
 | 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running | 1.5–2 days |
 | 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL | 2–3 days |
 | 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows | 2–3 days |
