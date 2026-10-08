@@ -248,6 +248,12 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.stop': HUB,
   'machines.acceptVersions': HUB,
   'machines.install': HUB,
+  'machines.update': HUB,
+  'machines.rollback': HUB,
+  'machines.uninstall': HUB,
+  'machines.activity': HUB,
+  // The hub's own answer; a hub asks a remote's through `machines.activity`
+  'host.activity': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,

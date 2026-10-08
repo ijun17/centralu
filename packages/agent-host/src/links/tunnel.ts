@@ -251,13 +251,21 @@ export function detachCommand(spec: RemoteSpec): string {
   return remoteCommand(spec, 'serve --detach')
 }
 
+/**
+ * `centralu serve --stop` there, found the same way (plan §10.4, S10): the running host stops in
+ * order, asked over its own socket. The update, rollback and uninstall run it (update.ts)
+ */
+export function stopCommand(spec: RemoteSpec): string {
+  return remoteCommand(spec, 'serve --stop')
+}
+
 /** `centralu serve` in the foreground, found the same way: a host bound to the forward's own ssh session */
 export function serveCommand(spec: RemoteSpec): string {
   return remoteCommand(spec, 'serve')
 }
 
 /** `centralu <args>` on the remote, in its shell's terms, through the lookup `connectionCommand` describes */
-function remoteCommand(spec: RemoteSpec, args: 'serve --connection' | 'serve --detach' | 'serve'): string {
+function remoteCommand(spec: RemoteSpec, args: 'serve --connection' | 'serve --detach' | 'serve --stop' | 'serve'): string {
   const custom = spec.command?.trim() || null
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)

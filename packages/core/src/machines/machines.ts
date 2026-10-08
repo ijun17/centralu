@@ -33,6 +33,7 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   versions_differ: 'version mismatch',
   refused: 'refused',
   starting: 'starting',
+  updating: 'updating',
 }
 
 export type MachineProblem = {

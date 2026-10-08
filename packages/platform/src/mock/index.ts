@@ -1461,6 +1461,8 @@ export class MockPlatform implements Platform {
         localPort: null,
         sameLocalPort: false,
         hostStarted: null,
+        install: null,
+        operation: null,
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })

@@ -25,7 +25,7 @@ import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { InlineViews } from './inline-views.js'
-import type { GridPanel, MachineInfo, MachineInstallResult, RemoteShell, ToolName } from '@cc/protocol'
+import type { GridPanel, HostActivity, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell, ToolName } from '@cc/protocol'
 
 /**
  * The optional services a host has. Without one, that feature simply does not exist on this host
@@ -62,6 +62,8 @@ export type RpcServices = {
    * start it again: the call is refused there
    */
   stopHost?: () => void
+  /** What would stop if this host stopped now (`host.activity`, idle.ts `activityCounts`) */
+  activity?: () => HostActivity
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -72,6 +74,10 @@ export type MachinesPort = {
   reconnect(id: string): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
+  update(id: string): Promise<MachineInstallResult>
+  rollback(id: string): Promise<MachineInstallResult>
+  uninstall(id: string): Promise<MachineUninstallResult>
+  activity(id: string): Promise<HostActivity | null>
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -83,7 +89,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, machines, stopHost }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, machines, stopHost, activity }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
@@ -720,6 +726,14 @@ export function createRpcHandler(
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
+    'machines.update': async (p) => requireMachines().update(RpcMethods['machines.update'].params.parse(p).machineId),
+    'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
+    'machines.uninstall': async (p) => requireMachines().uninstall(RpcMethods['machines.uninstall'].params.parse(p).machineId),
+    'machines.activity': async (p) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
+    'host.activity': async () => {
+      if (!activity) throw Object.assign(new Error('This host does not report its activity'), { code: 'internal' })
+      return activity()
+    },
     'machines.acceptVersions': async (p) =>
       requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),

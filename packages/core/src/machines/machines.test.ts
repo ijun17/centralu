@@ -16,6 +16,8 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   localPort: null,
   sameLocalPort: false,
   hostStarted: null,
+  install: null,
+  operation: null,
   ...patch,
 })
 
