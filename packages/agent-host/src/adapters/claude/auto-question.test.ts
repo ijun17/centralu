@@ -56,3 +56,22 @@ describe('AskUserQuestion in auto sessions (#171)', () => {
     await handle.dispose()
   })
 })
+
+/*
+ * #382: Centralu's own tools are never asked about, under any preset (#93, and Codex's `default_tools_approval_mode:
+ * 'approve'` since #363). Under auto a request reaches the callback only when an `ask` rule matched (the person's
+ * own, or a trusted project's settings file), and the auto branch used to deny it before the exemption was reached:
+ * a rule naming `mcp__centralu` refused the orchestrator's tools in auto while normal and safe let them through.
+ */
+describe("Centralu's own tools in auto sessions (#382)", () => {
+  it('are allowed when an ask rule sends them to the callback, as under the other presets; anything else is still denied', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 's3', cwd: '/x', permissionPreset: 'auto' }, (e) => events.push(e))
+    expect((await sdk.options!.canUseTool!('mcp__centralu__read_session', {})).behavior).toBe('allow')
+    // The exemption is the full server name, not a prefix (#93)
+    expect((await sdk.options!.canUseTool!('mcp__centralu__pw__navigate', {})).behavior).toBe('deny')
+    expect((await sdk.options!.canUseTool!('mcp__app-notes__write', {})).behavior).toBe('deny')
+    expect(events.some((e) => e.type === 'approval_request')).toBe(false)
+    await handle.dispose()
+  })
+})
