@@ -4,9 +4,9 @@
  * The store keeps a tool call's `input` and a tool result's `output` (the whole record), hands them out only to a
  * reader that asks by name, and indexes what the person and the agent said — never a tool call.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { StoredMessage } from '@cc/protocol'
@@ -115,40 +115,55 @@ describe('the store keeps the whole record and reads back the card (#221)', () =
  */
 describe('v40 — tool calls leave an existing index, and the file shrinks (#221)', () => {
   let dir = ''
-  afterEach(() => {
-    vi.restoreAllMocks()
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  })
+  let template = ''
+  let copies = 0
 
   /**
-   * An old store: two sessions of conversation (one in the trash, so with no index rows), and enough tool calls
-   * that their index rows are well over the vacuum's 16MB — the titles repeat so that building the index is quick.
+   * An old store: two sessions of conversation (one in the trash, so with no index rows), and an index row for every
+   * tool call, well over the vacuum's 16MB in all.
+   *
+   * Built once and copied for each test (#368). It used to be built in every test with 50KB in each tool call's title,
+   * so the messages table held 20MB as well: each test wrote and vacuumed some 60MB, and with other tests running
+   * beside it on a windows-2022 runner one of them passed its 15s limit. The padding is now only in the index rows,
+   * which are what the vacuum frees; the titles stay short. The padding repeats so that building the index is quick.
    */
-  const oldStore = async () => {
+  beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'cc-v40-'))
-    const file = join(dir, 'store.db')
-    const s = seeded(file)
+    template = join(dir, 'template.db')
+    const s = seeded(template)
     session(s, 'gone')
     s.appendMessages([...conversation('s1'), ...conversation('gone')])
     await s.trashSession('gone', KEEP_ALL)
     const calls: StoredMessage[] = Array.from({ length: 400 }, (_, i) => ({
       sessionId: 's1', seq: 100 + i, role: 'system', kind: 'tool_call',
-      payload: { type: 'tool_call', sessionId: 's1', callId: `c${i}`, summary: { tool: 'Bash', title: `${COMMAND} ${'x'.repeat(50_000)}`, readOnly: false, paths: [] } },
+      payload: { type: 'tool_call', sessionId: 's1', callId: `c${i}`, summary: { tool: 'Bash', title: COMMAND, readOnly: false, paths: [] } },
       ts: 100 + i,
     }))
     s.appendMessages(calls)
     s.close()
 
-    // What the index held before #221: every tool call's title, keyed by its message's rowid
-    const raw = new Database(file)
+    // What the index held before #221: every tool call's title, keyed by its message's rowid (padded, see above)
+    const raw = new Database(template)
     raw.exec(`
       INSERT INTO messages_fts (rowid, body, session_id, seq)
-      SELECT rowid, json_extract(payload, '$.summary.title'), session_id, seq FROM messages
-      WHERE kind = 'tool_call' AND session_id = 's1'
+      SELECT rowid, json_extract(payload, '$.summary.title') || ' ' || replace(hex(zeroblob(12500)), '0', 'x'), session_id, seq
+      FROM messages WHERE kind = 'tool_call' AND session_id = 's1'
     `)
     raw.pragma('user_version = 39')
     raw.pragma('wal_checkpoint(TRUNCATE)')
     raw.close()
+  })
+  afterAll(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** A copy of the old store of its own for one test, since the migration changes the file it opens */
+  const oldStore = async () => {
+    const file = join(dir, `store-${++copies}.db`)
+    copyFileSync(template, file)
     return file
   }
 
