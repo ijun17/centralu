@@ -32,12 +32,19 @@
 //! sockets, the host's pipes, every child's pipes and pty, every relayed connection) with its
 //! state, and exits once the new one has rebuilt everything. Nothing is restarted and no address
 //! changes.
+//!
+//! A keeper the macOS shell started runs from verified content, `<data>/content/<version>/`
+//! (`content.rs`, thin-shell plan §10 step 5). Its handoffs never start a window's bundle: it
+//! verifies and copies the new build's signed content first and hands over to the keeper in that
+//! copy, and its hosts run from the copy as well.
 
 pub mod children;
 pub mod client;
+pub mod content;
 pub mod exe;
 pub mod front_door;
 pub mod handoff;
+pub mod keys;
 pub mod server;
 pub mod source;
 pub mod swap;

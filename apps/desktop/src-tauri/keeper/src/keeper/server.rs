@@ -42,7 +42,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use super::children::{self, Children};
-use super::handoff;
+use super::{content, handoff, keys};
 use super::client::{self, read_line};
 use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
@@ -147,6 +147,9 @@ pub(super) struct Keeper {
     pub(super) children: Children,
     /// The per-build host copies and which are in use (#368, `source::Copies`).
     pub(super) copies: source::Copies,
+    /// Where this keeper's own executable is: verified content (`<data>/content/<version>/`, the
+    /// shell started it or a keeper from there handed over to it) or anywhere else (`content.rs`).
+    pub(super) origin: content::Origin,
     pub(super) state: Mutex<State>,
     pub(super) idle: Duration,
     pub(super) started: Instant,
@@ -248,8 +251,10 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     let now = Instant::now();
-    let copies = source::Copies::new(&data);
+    let origin = content::own_origin(&data);
+    let copies = source::Copies::new(&data, origin.dir().map(Path::to_path_buf));
     let keeper = Arc::new(Keeper {
+        origin,
         info: KeeperInfo {
             pid: std::process::id(),
             protocol: KEEPER_PROTOCOL,
@@ -301,9 +306,21 @@ pub fn run(args: &[String]) -> i32 {
         keeper.state.lock().map(|s| s.settings.background).unwrap_or(false),
         keeper.idle.as_secs()
     ));
+    log_origin(&keeper.origin);
 
     keeper.sup.start(sink(&keeper), launcher(&keeper));
     serve(keeper)
+}
+
+/// Says in the log where this keeper runs from, and whether it trusts a test key.
+pub(super) fn log_origin(origin: &content::Origin) {
+    if let content::Origin::Content { dir, .. } = origin {
+        log(&format!(
+            "running from verified content {}; a switch verifies the next build's content first{}",
+            dir.display(),
+            if keys::TEST_BUILD { " (a test build, trusting a key beyond keys.json)" } else { "" }
+        ));
+    }
 }
 
 /// Runs a keeper that is fully set up: the idle rule and the control socket, until it exits.
@@ -436,9 +453,7 @@ impl StatusSink for KeeperSink {
                     log(&format!("holding {}ms before removing unused host copies (CC_KEEPER_CLEAN_HOLD_MS)", hold.as_millis()));
                     thread::sleep(hold);
                 }
-                let removed = k.copies.clean(|| {
-                    k.state.lock().ok().and_then(|st| st.source.as_ref().and_then(|s| s.copy_dir.clone())).map(PathBuf::from)
-                });
+                let removed = k.copies.clean(|| k.state.lock().map(|st| host_dirs_in_use(&st)).unwrap_or_default());
                 if !removed.is_empty() {
                     log(&format!("removed unused host copies: {}", removed.join(", ")));
                 }
@@ -870,6 +885,22 @@ fn switch(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
     let Some(asked) = asked else {
         return reply(stream, &json!({ "ok": false, "error": "switch needs a source" }));
     };
+    let keeper_exe = req.pointer("/keeper/exe").and_then(Value::as_str).map(PathBuf::from);
+    // A keeper from verified content never starts anything from the asking window's bundle: it
+    // verifies that bundle's signed content and moves to its own copy of it (thin-shell plan §10
+    // step 5). The bundle comes from the keeper executable the window names, else from its path.
+    if let Some(src) = content_route(&k.origin, keeper_exe.as_deref(), asked.bundle_path.as_deref()) {
+        if !start_switching(&k, stream) {
+            return;
+        }
+        reply(stream, &json!({ "ok": true }));
+        log(&format!(
+            "switching to the build at {}: verifying its content first",
+            asked.bundle_path.as_deref().unwrap_or("an unnamed bundle")
+        ));
+        thread::spawn(move || move_to_content(k, src, asked, true));
+        return;
+    }
     let next = match asked.host_dir.as_deref() {
         Some(dir) if Path::new(dir).join("main.mjs").is_file() => {
             BuildSource::from_host_dir(Path::new(dir), asked.bundle_path.clone(), asked.version.clone())
@@ -879,7 +910,7 @@ fn switch(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
         None => return reply(stream, &json!({ "ok": false, "error": "switch needs a host folder" })),
     };
     // The new build's keeper executable, from the window asking (step 4): hand the keeper over first
-    if let Some(exe) = req.pointer("/keeper/exe").and_then(Value::as_str).map(PathBuf::from) {
+    if let Some(exe) = keeper_exe {
         if k.info.build.as_ref().map(|b| !b.same_build(&next)).unwrap_or(true) {
             {
                 let Ok(mut st) = k.state.lock() else { return };
@@ -930,6 +961,7 @@ pub(super) fn begin_switch(k: Arc<Keeper>, next: BuildSource, keeper_message: Op
                     rolled_back: false,
                     cut: Vec::new(),
                     keeper_message: Some(m.clone()),
+                    refused: None,
                     started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
                 });
                 k.broadcast(&mut st);
@@ -958,6 +990,15 @@ fn upgrade(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
         return reply(stream, &json!({ "ok": false, "error": "upgrade needs exe" }));
     };
     let asked: Option<BuildSource> = req.get("source").cloned().and_then(|s| serde_json::from_value(s).ok());
+    // From verified content, the executable only says which bundle's content to verify (step 5)
+    if let Some(src) = content_route(&k.origin, Some(&exe), None) {
+        if !start_switching(&k, stream) {
+            return;
+        }
+        reply(stream, &json!({ "ok": true }));
+        thread::spawn(move || move_to_content(k, src, asked.unwrap_or_default(), false));
+        return;
+    }
     let target = match asked.as_ref().and_then(|a| a.host_dir.clone()) {
         Some(dir) if Path::new(&dir).join("main.mjs").is_file() => {
             let a = asked.unwrap_or_default();
@@ -1001,6 +1042,7 @@ fn move_keeper(k: Arc<Keeper>, exe: PathBuf, target: BuildSource, switch_host: b
         rolled_back: false,
         cut: Vec::new(),
         keeper_message,
+        refused: None,
         started_at,
     };
     if let Ok(mut st) = k.state.lock() {
@@ -1021,6 +1063,129 @@ fn move_keeper(k: Arc<Keeper>, exe: PathBuf, target: BuildSource, switch_host: b
     }
 }
 
+/**
+ * Which way a switch or an upgrade goes. `None`: a keeper started directly hands over to the
+ * executable the window names, as every keeper before step 5 did. `Some`: a keeper from verified
+ * content takes the new build's signed content instead (`move_to_content`), from the bundle around
+ * that executable, else from the bundle the window names; `Some(None)` when there is neither, which
+ * `move_to_content` refuses.
+ */
+pub(super) fn content_route(origin: &content::Origin, exe: Option<&Path>, bundle: Option<&str>) -> Option<Option<PathBuf>> {
+    origin.dir()?;
+    Some(exe.and_then(content::bundle_content_of_exe).or_else(|| bundle.map(|b| content::bundle_content_of_bundle(Path::new(b)))))
+}
+
+/// Marks a switch as running, or answers that one already is. True when this request may go on.
+fn start_switching(k: &Keeper, stream: &mut UnixStream) -> bool {
+    let Ok(mut st) = k.state.lock() else { return false };
+    if st.swapping {
+        drop(st);
+        reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+        return false;
+    }
+    st.swapping = true;
+    true
+}
+
+/**
+ * The host folders in use: the running host's (its copy, or its verified content), the one the next
+ * launch runs, and the target of a swap or handoff while one runs. No cleanup removes them
+ * (`source::Copies::clean`): a handoff that failed leaves its host switch to `begin_switch`, whose
+ * swap claims the target only once its thread runs, and the target is kept from here until then.
+ */
+pub(super) fn host_dirs_in_use(st: &State) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut add = |b: &BuildSource| dirs.extend(b.copy_dir.iter().chain(b.host_dir.iter()).map(PathBuf::from));
+    if let Some(s) = &st.source {
+        add(s);
+    }
+    add(&st.desired);
+    if st.swapping {
+        if let Some(sw) = &st.swap {
+            add(&sw.target);
+        }
+    }
+    dirs
+}
+
+/**
+ * A keeper running from verified content moves to the next build (thin-shell plan §10 step 5): it
+ * verifies `src`, the new bundle's signed content, with the shell's rules and the built-in keys,
+ * copies it into `<data>/content/<version>/` (or reuses the copy there if it verifies), and hands over
+ * to the keeper inside that copy with `--host-source` naming the copy's host (`move_keeper`). With
+ * `switch_host`, the new keeper then swaps the host to that same verified host. Nothing in the bundle
+ * is ever started.
+ *
+ * A refusal leaves this keeper and its host where they are, and the window is told why through the
+ * swap view, as for any failed switch (`refused` carries the id). The new copy is held from the
+ * moment it is placed until the handoff commits or fails, so no cleanup can take it in between.
+ */
+fn move_to_content(k: Arc<Keeper>, src: Option<PathBuf>, asked: BuildSource, switch_host: bool) {
+    let keys = match keys::trusted_keys() {
+        Ok(keys) => keys,
+        Err(e) => return refuse(&k, &asked, content::Refusal::new("content", format!("the built-in keys are unreadable: {e}"))),
+    };
+    let say = |m: &str| log(m);
+    let v = content::Verifier { keys: &keys, platform: content_verify::current_platform(), log: &say };
+    let checked = src
+        .ok_or_else(|| content::Refusal::new("no-content", "the new build names no bundle to take its signed content from"))
+        .and_then(|src| v.check(&k.data, &src).map(|(m, bytes)| (src, m, bytes)));
+    let (src, manifest, bytes) = match checked {
+        Ok(c) => c,
+        Err(r) => return refuse(&k, &asked, r),
+    };
+    let folder = content::version_dir(&k.data, &manifest.app_version);
+    let running = k.state.lock().map(|st| host_dirs_in_use(&st)).unwrap_or_default();
+    let claim = k.copies.claim_content(
+        &folder,
+        &running,
+        || content::Refusal::new("copy", "the keeper is handing itself over to another keeper"),
+        |in_use| v.place(&k.data, &src, &manifest, &bytes, in_use),
+    );
+    let claim = match claim {
+        Ok(c) => c,
+        Err(r) => return refuse(&k, &asked, r),
+    };
+    let target = BuildSource::from_host_dir(claim.path(), asked.bundle_path.clone(), Some(manifest.app_version.clone()));
+    if k.origin.dir() == Some(claim.folder()) {
+        // This keeper already runs that content: only the host may have to move
+        log(&format!("the keeper already runs {}", claim.folder().display()));
+        let host_differs = k.state.lock().map(|st| st.source.as_ref().map(|s| !s.same_build(&target)).unwrap_or(true)).unwrap_or(false);
+        if switch_host && host_differs {
+            begin_switch(k.clone(), target, None, None);
+        } else if let Ok(mut st) = k.state.lock() {
+            st.swapping = false;
+            k.broadcast(&mut st);
+        }
+        return;
+    }
+    let exe = claim.folder().join(super::exe::KEEPER_EXE);
+    log(&format!("verified Centralu {} into {}; handing the keeper over to it", manifest.app_version, claim.folder().display()));
+    // Returns only if the handoff failed and was rolled back; the claim is given up then
+    move_keeper(k.clone(), exe, target, switch_host);
+    drop(claim);
+}
+
+/// The new build's content was refused: nothing moves, and the window is told why.
+fn refuse(k: &Arc<Keeper>, asked: &BuildSource, r: content::Refusal) {
+    log(&format!("the keeper stays on its build: the new build's content was refused ({}): {}", r.reason, r.message));
+    let Ok(mut st) = k.state.lock() else { return };
+    let from = st.source.clone();
+    st.swapping = false;
+    st.swap = Some(SwapView {
+        phase: Phase::Failed,
+        target: asked.clone(),
+        from,
+        message: Some(r.message),
+        rolled_back: false,
+        cut: Vec::new(),
+        keeper_message: None,
+        refused: Some(r.reason.to_string()),
+        started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+    });
+    k.broadcast(&mut st);
+}
+
 /// Runs a blue-green swap (`swap.rs`) and applies its outcome to the keeper's state.
 pub(super) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_message: Option<String>) {
     let (from, current_copy) = match k.state.lock() {
@@ -1039,6 +1204,7 @@ pub(super) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_message: Option<
         rolled_back: false,
         cut: Vec::new(),
         keeper_message: keeper_message.clone(),
+        refused: None,
         started_at,
     };
     let show = |v: SwapView| {
@@ -1132,5 +1298,66 @@ mod tests {
         if std::env::var("CC_KEEPER_HOST_SOURCE").is_err() {
             assert_eq!(o.host_source, Some(PathBuf::from("/A.app/Contents/Resources/resources/host")));
         }
+    }
+
+    /// Step 5: only a keeper running from verified content takes the new build's content; one
+    /// started directly hands over to the executable it is given, exactly as before (a debug build,
+    /// Linux, the window's fallback, a keeper of beta.11 or #444).
+    #[test]
+    fn a_switch_takes_signed_content_only_from_a_keeper_in_verified_content() {
+        let content = content::Origin::Content { dir: PathBuf::from("/d/content/0.2.0"), version: "0.2.0".into() };
+        let exe = Path::new("/Applications/Centralu.app/Contents/MacOS/centralu-keeper");
+        let carried = PathBuf::from("/Applications/Centralu.app/Contents/Resources/content");
+        assert_eq!(content_route(&content::Origin::Direct, Some(exe), Some("/Applications/Centralu.app")), None);
+        assert_eq!(content_route(&content::Origin::Direct, None, None), None);
+        assert_eq!(content_route(&content, Some(exe), None), Some(Some(carried.clone())));
+        // A window from before #440 names its own executable, in the same folder
+        assert_eq!(content_route(&content, Some(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), None), Some(Some(carried.clone())));
+        // A window that names no executable: its bundle
+        assert_eq!(content_route(&content, None, Some("/Applications/Centralu.app")), Some(Some(carried)));
+        // Nothing to take content from: refused later, never a direct handoff
+        assert_eq!(content_route(&content, Some(Path::new("/tmp/build/centralu-keeper")), None), Some(None));
+        assert_eq!(content_route(&content, None, None), Some(None));
+    }
+
+    /// What the cleanup must leave: the running host's folder, the next launch's, and while a switch
+    /// runs, its target, which a failed handoff's host swap claims only once its thread runs.
+    #[test]
+    fn the_folders_in_use_are_the_running_the_next_and_a_running_switchs_target() {
+        let b = |dir: &str| BuildSource { commit: dir.into(), host_dir: Some(format!("/d/content/{dir}/host")), ..Default::default() };
+        let now = Instant::now();
+        let mut st = State {
+            status: HostStatus::Starting,
+            source: Some(BuildSource { copy_dir: Some("/d/hosts/abc".into()), ..b("0.2.0") }),
+            desired: b("0.2.0"),
+            subscribers: Vec::new(),
+            next_id: 1,
+            attached: 0,
+            ever_attached: false,
+            last_detach: now,
+            busy: false,
+            last_busy: now,
+            settings: Settings::default(),
+            stopping: false,
+            swap: Some(SwapView {
+                phase: Phase::HandingOver,
+                target: b("0.2.1"),
+                from: None,
+                message: None,
+                rolled_back: false,
+                cut: Vec::new(),
+                keeper_message: None,
+                refused: None,
+                started_at: 0,
+            }),
+            swapping: true,
+            drained: None,
+            keeps_agents: None,
+            relaunch_until: None,
+        };
+        let dirs = |st: &State| host_dirs_in_use(st).into_iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert_eq!(dirs(&st), ["/d/hosts/abc", "/d/content/0.2.0/host", "/d/content/0.2.0/host", "/d/content/0.2.1/host"]);
+        st.swapping = false;
+        assert!(!dirs(&st).contains(&"/d/content/0.2.1/host".to_string()), "a switch that ended holds nothing");
     }
 }

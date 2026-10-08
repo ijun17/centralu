@@ -17,5 +17,25 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # `flock`, `setsid`, `umask`, the peer uid of a unix socket, descriptor passing (#280).
+# `content-verify`: a keeper running from verified content verifies and copies the next build's
+# content itself before handing over to it (docs/plans/thin-shell.md §4, §10 step 5), with the same
+# code and keys as the shell. Not new to the workspace: the shell links it, and through it
+# ed25519-dalek, sha2 and base64. Unix only, like the keeper.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+content-verify = { path = "../../content-verify" }
+
+# Signing test content in the unit tests, as scripts/content-manifest.mts does in a release.
+[dev-dependencies]
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+base64 = "0.22"
+
+[features]
+# A test build of the keeper that also trusts one more public key, given at compile time in
+# CENTRALU_KEEPER_TEST_KEY (raw 32 bytes, base64), so scripts/keeper-content-integration.mts can
+# sign content with a throwaway key and watch a keeper hand over to it. A release build refuses to
+# compile with it (`compile_error!` in src/keeper/keys.rs), nothing on the way to a release turns it
+# on, and tooling/keeper-executable.test.ts checks both: the keeper people run trusts
+# packaging/shell/keys.json and nothing else, as the shell does.
+test-key = []

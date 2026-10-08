@@ -111,6 +111,11 @@ pub struct SwapView {
     /// words a person can act on. The host switch went ahead under the running keeper.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keeper_message: Option<String>,
+    /// A keeper running from verified content refused the new build's content (thin-shell plan §10
+    /// step 5): the refusal's id (`content`, `downgrade`, `copy`, `in-use`, `no-content`), with the
+    /// words in `message`. Nothing moved. Absent from every other outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
     /// Seconds since the epoch.
     pub started_at: u64,
 }
@@ -391,6 +396,7 @@ mod tests {
             rolled_back: true,
             cut: vec!["tool app-board/add_item".into()],
             keeper_message: None,
+            refused: None,
             started_at: 1,
         };
         let text = serde_json::to_string(&v).unwrap();
