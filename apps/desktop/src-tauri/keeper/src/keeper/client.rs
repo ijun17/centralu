@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use super::sys;
+use crate::os;
 
 /// The longest line either side accepts. A view is a few hundred bytes; this only bounds a peer
 /// that never sends a newline.
@@ -135,7 +135,7 @@ pub fn spawn_detached(exe: &Path, args: &[String], env: &[(String, String)], log
     for (k, v) in env {
         cmd.env(k, v);
     }
-    sys::new_session(&mut cmd);
+    os::new_session(&mut cmd);
     cmd.spawn()
 }
 

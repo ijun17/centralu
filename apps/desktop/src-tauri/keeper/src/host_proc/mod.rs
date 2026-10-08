@@ -18,15 +18,15 @@
 //! host's pipes but is not its parent, so it learns of the end from stdout closing and stops it by
 //! pid, as it already did.
 //!
-//! **Where the operating system shows.** This file is the logic every OS shares, written once. What
-//! differs lives in `unix.rs` and `windows.rs`, which provide the same small interface (`os`):
-//! signalling a host and its group (`kill_pid`, `kill_group`), how a host is started (`own_group`,
-//! `hide_console`), how it is asked to stop (`CLOSE_STDIN_TO_STOP`, `SIGNAL_GROUP_AFTER_EXIT`), how
-//! its stdout is read (`host_lines`, `Gate`), how the source host's tsx is run (`tsx_program`), and
-//! where Node is looked for first (`probe_first`, `fallback_node_paths`, the hints). `unix.rs` also
-//! holds what only the keeper does, which is unix-only: the stdout reader that can be frozen
-//! (`HostOut`) and the handoff of a running host (`freeze`, `adopt_foreign`). Finding Node is
-//! `node.rs`, its per-OS candidate lists included, so they are tested on every OS.
+//! **Where the operating system shows.** This file is the logic every OS shares, written once. The
+//! mechanism that differs is the OS layer's (`crate::os`): signalling a host and its group
+//! (`kill_pid`, `kill_group`), how a host is started (`own_group`, `hide_console`), how it is asked
+//! to stop (`CLOSE_STDIN_TO_STOP`, `SIGNAL_GROUP_AFTER_EXIT`), whether tsx's sh script runs as it
+//! is (`RUNS_SH_SCRIPTS`) and the login-shell probe. What only the keeper does, which is unix-only
+//! until the keeper has a Windows half, is `handover.rs`: the stdout reader that can be frozen
+//! (`HostOut`) and the handoff of a running host (`freeze`, `adopt_foreign`); `no_handover.rs` is
+//! its uninhabited stand-in. Finding Node is `node.rs`, its per-OS candidate lists and hints
+//! included, chosen by `start_plan::Os::current`, so they are tested on every OS.
 
 use std::io::Write;
 use std::path::Path;
@@ -39,19 +39,21 @@ use serde::{Deserialize, Serialize};
 
 mod node;
 #[cfg(unix)]
-mod unix;
+mod handover;
 #[cfg(windows)]
-mod windows;
+mod no_handover;
 
 #[cfg(unix)]
-use unix as os;
+use handover as hand;
 #[cfg(windows)]
-use windows as os;
+use no_handover as hand;
 
+pub use crate::os::{hide_console, kill_group, kill_pid};
+use crate::os;
+pub use hand::Gate;
+#[cfg(unix)]
+pub use handover::{ForeignAdopt, HostFreeze, HostOut, LineGate, NextLine};
 pub use node::resolve_node;
-pub use os::{hide_console, kill_group, kill_pid, Gate};
-#[cfg(unix)]
-pub use unix::{ForeignAdopt, HostFreeze, HostOut, LineGate, NextLine};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HostInfo {
@@ -96,7 +98,6 @@ pub enum LaunchError {
     /// backoff rounds on it.
     Fatal(String),
     /// Worth another attempt after the backoff (a copy that failed half way, say).
-    #[cfg_attr(not(unix), allow(dead_code))] // only the keeper (unix) builds a Retry
     Retry(String),
 }
 
@@ -109,7 +110,6 @@ pub type Launcher = Arc<dyn Fn() -> Result<HostLaunch, LaunchError> + Send + Syn
 pub type Lines = Box<dyn Iterator<Item = String> + Send>;
 
 /// A host that is already running and has said it is ready, handed to `Supervisor::adopt`.
-#[cfg_attr(not(unix), allow(dead_code))]
 pub struct Adopted {
     pub child: Child,
     pub lines: Lines,
@@ -219,7 +219,6 @@ pub fn backoff(attempt: u32) -> Duration {
 }
 
 impl Supervisor {
-    #[cfg_attr(not(unix), allow(dead_code))] // the keeper (unix) is its only caller
     pub fn new() -> Self {
         Self::default()
     }
@@ -233,7 +232,6 @@ impl Supervisor {
     }
 
     /// The running host's pid, if one is running.
-    #[cfg_attr(not(unix), allow(dead_code))] // the keeper (unix) is its only caller
     pub fn pid(&self) -> Option<u32> {
         self.inner.lock().ok()?.child.as_ref().map(|c| c.id())
     }
@@ -273,7 +271,6 @@ impl Supervisor {
      * launched: its ready status goes out now, its later lines reach the sink, and if it dies it is
      * restarted with `launcher` by the usual rules. Hands `host` back if a watcher is still running.
      */
-    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn adopt(&self, host: Adopted, sink: Arc<dyn StatusSink>, launcher: Launcher) -> Result<(), Adopted> {
         if !self.claim(true) {
             return Err(host);
@@ -292,7 +289,6 @@ impl Supervisor {
      * Marks the running host as draining for a swap (#280 step 3): when it exits, the watcher ends
      * quietly instead of restarting it. Returns its pid, or None when no host is running.
      */
-    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn hand_over(&self) -> Option<u32> {
         let mut inner = self.inner.lock().ok()?;
         let pid = inner.child.as_ref().map(|c| c.id())?;
@@ -301,7 +297,6 @@ impl Supervisor {
     }
 
     /// Writes one line to the running host's stdin: the keeper's control lines (#280 step 3).
-    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn send_line(&self, line: &str) -> std::io::Result<()> {
         let mut inner = self.inner.lock().map_err(|_| std::io::Error::other("supervisor lock poisoned"))?;
         let stdin = inner
@@ -315,7 +310,6 @@ impl Supervisor {
 
     /// Stops the running host the usual way (TERM, a grace period, then its group) without telling
     /// the watcher anything: for a host already handed over that did not exit on its own.
-    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn stop_current(&self) -> bool {
         let Some(pid) = self.pid() else { return false };
         let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.take_stdin()));
@@ -324,7 +318,6 @@ impl Supervisor {
     }
 
     /// Whether a watcher thread is running: a host is up, starting, or between restarts.
-    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn is_running(&self) -> bool {
         self.inner.lock().map(|i| i.running).unwrap_or(false)
     }
@@ -438,7 +431,7 @@ impl Supervisor {
         let stdout = child.stdout.take().ok_or("could not open stdout")?;
 
         // unix: a reader that can be paused for a keeper handoff (#280 step 4)
-        let (lines, gate) = os::host_lines(stdout);
+        let (lines, gate) = hand::host_lines(stdout);
         if let Ok(mut inner) = self.inner.lock() {
             inner.child = Some(HostProc::Own(child));
             inner.gate = gate;
@@ -513,7 +506,6 @@ impl Supervisor {
      * The host is stopped the same way as on shutdown — TERM, a grace period for its own
      * `shutdown()`, then the group. Returns false when no host is running.
      */
-    #[cfg_attr(not(unix), allow(dead_code))] // the keeper (unix) is its only caller
     pub fn bounce(&self) -> bool {
         let pid = match self.inner.lock() {
             Ok(mut inner) => match inner.child.as_ref().map(|c| c.id()) {
@@ -594,7 +586,6 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
 
 /// Stops a host the supervisor does not hold (a swap's standby that failed its check, #280 step 3)
 /// the same way the supervisor stops its own, and reaps it.
-#[cfg_attr(not(unix), allow(dead_code))]
 pub fn stop_child(child: &mut Child) {
     let pid = child.id();
     let stdin = child.stdin.take().map(|s| Box::new(s) as Box<dyn Send>);
@@ -646,10 +637,10 @@ fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, mut gone: impl Fn
 }
 
 /// The host process a supervisor holds: one it started, or (unix) one another keeper started and
-/// handed over, which it is not the parent of (`os::Foreign`; there is none on Windows).
+/// handed over, which it is not the parent of (`handover::Foreign`; there is none on Windows).
 pub enum HostProc {
     Own(Child),
-    Foreign(os::Foreign),
+    Foreign(hand::Foreign),
 }
 
 impl HostProc {
@@ -751,7 +742,14 @@ pub fn source_launch(extra: &[String]) -> HostLaunch {
         "--watch-parent".into(),
     ];
     args.extend(extra.iter().cloned());
-    let program = os::tsx_program(&root, &mut args);
+    let program = if os::RUNS_SH_SCRIPTS {
+        // `.bin/tsx`, a sh script, runs as it is.
+        format!("{root}/node_modules/.bin/tsx")
+    } else {
+        // Node runs tsx's own entry, the file `.bin/tsx` points at anyway.
+        args.insert(0, format!("{root}/node_modules/tsx/dist/cli.mjs"));
+        resolve_node().unwrap_or_else(|_| "node".into())
+    };
     HostLaunch { program, args, env: vec![("CC_DEV".into(), "1".into())] }
 }
 

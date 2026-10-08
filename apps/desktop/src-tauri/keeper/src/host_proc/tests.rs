@@ -1,7 +1,7 @@
 use super::node::*;
-use super::os::FIRST_LOOK;
 #[cfg(unix)]
-use super::unix::{pid_alive, probe_login_shell, signal_target};
+use crate::os::{parse_probe_output, pid_alive, probe_login_shell, signal_target};
+use crate::start_plan::Os;
 use super::*;
 use std::io::BufReader;
 
@@ -329,7 +329,7 @@ fn reports_every_place_it_looked_when_nothing_is_there() {
     // Finding nothing anywhere is the moment the person is most stuck — list every place
     // that was checked.
     let err = pick_node(None, vec!["/nope/a/node".into(), "/nope/b/node".into()]).unwrap_err();
-    assert!(err.contains(FIRST_LOOK), "{err}");
+    assert!(err.contains(first_look(Os::current())), "{err}");
     assert!(err.contains("/nope/a/node") && err.contains("/nope/b/node"), "{err}");
 }
 

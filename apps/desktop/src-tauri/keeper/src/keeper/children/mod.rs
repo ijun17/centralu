@@ -48,7 +48,6 @@
 //! never closed or moved anything, the snapshot holds duplicates.
 
 mod buffer;
-mod proc;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -65,9 +64,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use self::buffer::{BufState, OutBuf, Policy, LINES_CAP, RING_CAP, TAIL_CAP};
-pub use self::proc::ExitStatus;
 use super::handoff::pack::{Pack, Shifted};
-use super::sys;
+use crate::os;
+use crate::os::children as proc;
+pub use crate::os::children::ExitStatus;
 
 /// The child socket's protocol version. A host that speaks another one keeps its own children.
 pub const CHILDREN_PROTOCOL: u32 = 1;
@@ -132,7 +132,7 @@ impl Children {
         let sock = socket_path(data);
         // Ours to replace: the caller holds keeper.lock.
         let _ = fs::remove_file(&sock);
-        let listener = sys::with_umask(0o077, || UnixListener::bind(&sock))?;
+        let listener = os::with_umask(0o077, || UnixListener::bind(&sock))?;
         let _ = fs::set_permissions(&sock, fs::Permissions::from_mode(0o600));
         listener.set_nonblocking(true)?;
         let (wake_r, wake_w) = pipe()?;
@@ -829,12 +829,9 @@ impl Reactor {
         loop {
             match self.listener.accept() {
                 Ok((stream, _)) => {
-                    match sys::peer_uid(&stream) {
-                        Ok(uid) if uid == sys::my_uid() => {}
-                        other => {
-                            log(&format!("refused a connection from another user ({other:?})"));
-                            continue;
-                        }
+                    if let Err(who) = os::peer_is_this_user(&stream) {
+                        log(&format!("refused a connection from another user ({who})"));
+                        continue;
                     }
                     if stream.set_nonblocking(true).is_err() {
                         continue;

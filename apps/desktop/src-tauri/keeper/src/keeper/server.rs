@@ -48,10 +48,11 @@ use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
 use super::swap::{self, Phase, SwapView};
 use super::{
-    idle_decision, idle_limit, relaunch_grace, relaunch_state, socket_path, stop_on_detach, sys, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
+    idle_decision, idle_limit, relaunch_grace, relaunch_state, socket_path, stop_on_detach, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
     KEEPER_PROTOCOL,
 };
 use crate::host_proc::{self, HostInfo, HostLaunch, HostStatus, LaunchError, Launcher, StatusSink, Supervisor};
+use crate::os;
 
 /// Command-line options. The app passes all of them; a person starting a keeper by hand can
 /// leave them out (it then runs the host from source, as a debug build would).
@@ -197,7 +198,7 @@ pub fn run(args: &[String]) -> i32 {
     };
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        match sys::try_lock(&lock) {
+        match os::try_lock(&lock) {
             Ok(true) => break,
             Ok(false) => {}
             Err(e) => {
@@ -223,7 +224,7 @@ pub fn run(args: &[String]) -> i32 {
 
     // A socket left by a keeper that died is ours to replace: we hold the lock.
     let _ = fs::remove_file(&sock);
-    let listener = match sys::with_umask(0o077, || UnixListener::bind(&sock)) {
+    let listener = match os::with_umask(0o077, || UnixListener::bind(&sock)) {
         Ok(l) => l,
         Err(e) => {
             // The usual cause is a path over the 104-byte limit for unix sockets.
@@ -685,12 +686,9 @@ fn reply(stream: &mut UnixStream, v: &Value) {
 }
 
 fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
-    match sys::peer_uid(&stream) {
-        Ok(uid) if uid == sys::my_uid() => {}
-        other => {
-            log(&format!("refused a connection from another user ({other:?})"));
-            return;
-        }
+    if let Err(who) = os::peer_is_this_user(&stream) {
+        log(&format!("refused a connection from another user ({who})"));
+        return;
     }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));

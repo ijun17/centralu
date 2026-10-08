@@ -48,7 +48,6 @@ pub mod keys;
 pub mod server;
 pub mod source;
 pub mod swap;
-pub mod sys;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
