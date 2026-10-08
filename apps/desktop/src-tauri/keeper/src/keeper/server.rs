@@ -172,11 +172,17 @@ pub(super) struct Keeper {
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
     let opts = parse_args(args);
+    let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
+    // From content nothing runs from an AppImage's mount any more: let it go before anything else
+    // opens a descriptor or starts a thread (FI4, FI5, `appimage.rs`). The handoff channel stays.
+    let shed = content::own_origin(&data).dir().is_some().then(|| super::appimage::shed(opts.take_over_fd));
+    if let Some(what) = &shed {
+        log(what);
+    }
     // Started by another keeper to take its place (step 4): everything comes from that keeper.
     if let Some(fd) = opts.take_over_fd {
         return handoff::take(opts, fd);
     }
-    let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
     // Before anything creates the folder: the host leaves a legacy folder alone once the new one
     // exists, so creating it first would strand the person's data (data-dir.ts).
     if let Some((from, to)) = super::prepare_default_dir(&data, std::env::var("CC_DEV").as_deref() == Ok("1")) {

@@ -24,6 +24,9 @@ serde_json = "1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 content-verify = { path = "../../content-verify" }
+# Hashing the unsigned copy a Linux window makes of what its AppImage carries (`keeper/carried.rs`);
+# already linked through content-verify.
+sha2 = "0.10"
 
 # Signing test content in the unit tests, as scripts/content-manifest.mts does in a release.
 [dev-dependencies]
