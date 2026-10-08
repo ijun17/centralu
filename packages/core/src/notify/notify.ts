@@ -47,6 +47,23 @@ export const DEFAULT_NOTIFY_POLICY: NotifyPolicy = {
   sound: true,
 }
 
+/**
+ * Reads a policy from the workspace snapshot, field by field (#384). A snapshot an older build wrote
+ * lacks the switches added since (`done` came after `allDone`), and a missing switch must take its
+ * default rather than read as off; a value that is not a boolean is no choice either. Fields this
+ * build does not know are dropped: the screen rewrites the snapshot whole on its next change, so a
+ * newer build's extra switch falls back to its own default there.
+ */
+export function readNotifyPolicy(raw: unknown): NotifyPolicy {
+  const out = { ...DEFAULT_NOTIFY_POLICY }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
+  for (const key of Object.keys(out) as (keyof NotifyPolicy)[]) {
+    const v = (raw as Record<string, unknown>)[key]
+    if (typeof v === 'boolean') out[key] = v
+  }
+  return out
+}
+
 export type NotifyRequest = { kind: 'approval' | 'error' | 'all_done'; sessionId?: string; title: string; body: string }
 
 export type NotifyContext = {

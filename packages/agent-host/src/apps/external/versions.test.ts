@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import { ExternalApps, type AppRef } from './runtime.js'
-import { VERSIONS_KEPT, VERSIONS_REL } from './versions.js'
+import { AppVersions, VERSIONS_KEPT, VERSIONS_REL } from './versions.js'
 import { until } from './test-helpers.js'
 
 /**
@@ -209,5 +209,27 @@ describe('an imported app\'s versions', () => {
     const back = rt.restoreVersion(imp, first!.id)
     expect(back.status).toBe('unconfirmed')
     expect((await rt.call(imp, 'version', {}, { kind: 'view' })).status).toBe('rejected')
+  })
+})
+
+describe('version records another build left (#384)', () => {
+  it('a record without an id and time is skipped, a newer one with extra fields is listed, the list never throws', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cc-vermeta-'))
+    try {
+      const put = (name: string, text: string) => {
+        mkdirSync(join(root, 'app', name), { recursive: true })
+        writeFileSync(join(root, 'app', name, 'meta.json'), text)
+      }
+      const newer = { id: 'v2', at: 2, stamp: 's', files: 1, bytes: 1, reason: 'started', signedBy: 'later-build' }
+      put('v1', JSON.stringify({ id: 'v1', at: 1, stamp: 's', files: 1, bytes: 1, reason: 'started' }))
+      put('v2', JSON.stringify(newer))
+      put('v3', 'null')
+      put('v4', JSON.stringify({ stamp: 's' }))
+      put('v5', '{')
+      expect(new AppVersions(root).list('app').map((v) => v.id)).toEqual(['v2', 'v1'])
+      expect(new AppVersions(root).list('app')[0]).toEqual(newer)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

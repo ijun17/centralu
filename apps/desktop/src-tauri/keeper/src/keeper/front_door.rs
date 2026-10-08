@@ -533,7 +533,13 @@ mod tests {
         let door = FrontDoor::open(0, "t".into()).unwrap();
         door.point_at(Some(port));
         let c = connect(&door);
-        (&c).write_all(b"hi\n").unwrap();
+        // Read the host's first bytes, so the relay is known to exist and to be copying before
+        // the wait for it to go. `connect` returns before the door accepts; checking at once saw no
+        // relay yet and passed whether or not a stalled one is let go, and failed when the accept
+        // landed between that check and the assert (#368).
+        let mut first = [0u8; 1];
+        io::Read::read_exact(&mut &c, &mut first).unwrap();
+        assert_eq!(door.open_connections(), 1);
         let t0 = Instant::now();
         while door.open_connections() > 0 && t0.elapsed() < Duration::from_secs(10) {
             thread::sleep(Duration::from_millis(50));
