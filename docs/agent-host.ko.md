@@ -840,7 +840,7 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 | 비어 있으면 양 끝에 같은 포트 번호, 아니면 다른 번호 | §4.7: 앱 뷰의 주소에는 호스트 자신의 포트가 들어 있다. 기본값 17175를 쓰는 두 기기는 그 번호를 함께 가질 수 없고, 두 번째 기기의 앱 뷰는 어차피 2단계의 프록시가 필요하다 |
 | 어디서나 `BatchMode=yes` | 아무도 답할 수 없는 암호나 호스트 키 질문이 링크를 멈춰 세운다. 키는 사람이 다른 ssh 쓰임처럼 한 번 마련한다 |
 | 토큰은 저장하지 않고 링크가 시작할 때마다 ssh로 묻는다 | 그 기기의 모든 RPC 열쇠다. 시작마다 ssh 왕복 한 번(LAN에서 연결까지 2.1–4.3초 잼)은 싸다 |
-| ssh 프로세스는 허브 호스트의 자식이고 `Tunnel` 인터페이스 뒤에 있다 | 허브 교체를 건너 어디서 살지(keeper의 자식이냐 OpenSSH `ControlPersist`냐)는 계획 문서의 probe 4다. 어느 쪽이 되든 `SshTunnel`만 바뀐다 |
+| ssh 프로세스는 허브 호스트의 자식이고 `Tunnel` 인터페이스 뒤에 있다 | 계획 문서의 probe 4(§10.6, 2026-10-08)가 실제 허브 교체를 건너 대안들을 쟀다: 지금 그대로면 교체 한 번에 링크가 약 1.1초 떨어지고, OpenSSH `ControlPersist`면 0.8초(교체마다 포워드를 하나씩 남기고 "완전히 종료"보다 오래 산다), keeper의 자식이면 약 0.14초일 것이다. 원격의 에이전트는 허브 교체를 알아채지도 못하므로 여기에 둔다 |
 
 **링크의 상태**(`MachineInfo.status`, `machine_status`로 보낸다): `connecting`; `connected`; `unreachable`(ssh 실패,
 포워드나 소켓이 끊김. 2초에서 1분까지 늘려 가며 다시 시도); `not_running`(Centralu는 답하지만 `centralu serve`가 돌지
@@ -890,7 +890,7 @@ Windows에서는 beta.10의 `centralu serve`):
 | 다른 기기의 프로젝트에서 꺼지는 것 | 파일 관리자에서 보기와 파일 트리 메뉴, IDE에서 열기(`fs.resolve`가 거절된다), 삭제할 때 폴더를 이 컴퓨터의 휴지통으로 옮기기, 새 앱, 앱 뷰(`appStatus`가 나중 버전에서 열린다고 말한다) |
 
 **1단계가 아직 다루지 않는 것.** 다른 기기의 앱 뷰는 2단계다(목록에 있고, 그 도구는 거기서 돌며, 뷰는 그렇다고
-말한다). ssh로 원격을 설치하고 업데이트하는 것은 3단계다. 사용량 게이지, `processes.strays/stop`, 종료 대화상자는
+말한다). ssh로 원격을 설치하고 업데이트하는 것은 3단계다([plans/remote-hub.md](plans/remote-hub.md) §10). 사용량 게이지, `processes.strays/stop`, 종료 대화상자는
 아직 이 컴퓨터에만 묻는다. WSL의 `centralu serve`에는 배포판이 시작할 때 그것을 띄울 것(§4.7의 systemd 유닛)이
 필요하고, 그 뒤로는 링크가 배포판을 살려 둔다.
 

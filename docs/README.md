@@ -47,6 +47,7 @@ them is what later decisions rest on.
 | [plans/m1.5-plan.md](plans/m1.5-plan.md) · [m1.5-result.md](plans/m1.5-result.md) | Always-on operation and a verification protocol; the 5 defects measurement caught |
 | [plans/m2-plan.md](plans/m2-plan.md) · [m2-result.md](plans/m2-result.md) | M2 plan (revised after independent review) and result: the release build passing, 5 more measured defects, how to start dogfooding |
 | [plans/beta-release-checklist.md](plans/beta-release-checklist.md) | What blocks a public release. §2 is the signing and quarantine measurement that made npm the distribution channel |
+| [plans/remote-hub.md](plans/remote-hub.md) | Remote mode as linked hosts (#82): the shape, routing, versions, what phase 1 built; phase 3 (installing, starting, updating and removing a remote over ssh) and probe 4 (where the hub's ssh lives across a hub swap) in §10, measured on Windows and WSL with the scripts in [spikes/2026-10-remote-install/](spikes/2026-10-remote-install/) |
 | [plans/thin-shell.md](plans/thin-shell.md) | A fixed, standalone shell that holds macOS permissions and starts the keeper from signed content, so updates stop asking for permissions (#440, #220). Decided 2026-10-07 |
 
 ## Writing these
