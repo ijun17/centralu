@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import { grantClipboard } from './fixtures/clipboard.js'
 
 /**
  * Meets the M1 Phase 5 completion criteria. Drives the UI with the mock platform (?mock).
@@ -1310,7 +1311,7 @@ test('Git: the diff gets the wide area; the list, staging and commit live in the
 test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ page }) => {
   const diff =
     '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n-const old = 1\n+const next = 1\n   indented\n unchanged'
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await grantClipboard(page)
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate((d) => {
     const m = (window as any).__mock
@@ -1526,7 +1527,7 @@ test('Code viewer: opening a file, search, and large files (C-3, FR-6)', async (
  * because the payload is the whole point — the on-screen highlight is not what was broken.
  */
 async function openBigFile(page: Page, lines: number, opts: { truncated?: boolean } = {}) {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await grantClipboard(page)
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(
     ({ n, truncated }) => {

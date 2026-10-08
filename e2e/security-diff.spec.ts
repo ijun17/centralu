@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { grantClipboard } from './fixtures/clipboard.js'
 import { GIT_DIFF_MAX_CHARS } from '../packages/agent-host/src/dev-services/git.js'
 
 /**
@@ -47,7 +48,7 @@ test('hostile fixture stays within the audit-input cap the host actually applies
 })
 
 test('newline-dense working diff is virtualized without losing tail rows', async ({ page }) => {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await grantClipboard(page)
   await setup(page)
   await page.evaluate((diff) => {
     const mock = window.__mock
@@ -237,7 +238,7 @@ test('commit diff cut at the host cap says so', async ({ page }) => {
  * rows, also suppressed the default action, turning 37,236 rows into 60.
  */
 test('pressing ⌘A right after picking a file in the sidebar still copies the whole diff (#118)', async ({ page }) => {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await grantClipboard(page)
   await setup(page)
   await page.evaluate((diff) => {
     const mock = window.__mock
@@ -389,7 +390,7 @@ test('the scroll pane is a named region and is reachable by Tab', async ({ page 
 
 /** What ⌘A puts on the clipboard has to be the patch — a notice meant for a person breaks `git apply` (#122) */
 test('copying a truncated diff with ⌘A does not mix the notice into the clipboard', async ({ page }) => {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await grantClipboard(page)
   const diff = 'diff --git a/src/huge.ts b/src/huge.ts\n@@ -1 +1 @@\n-old()\n+next()'
   await setup(page)
   await page.evaluate((d) => {
