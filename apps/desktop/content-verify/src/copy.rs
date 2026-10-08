@@ -75,6 +75,81 @@ pub fn verify_and_copy(
     result.map(|()| manifest)
 }
 
+/// Read the manifest in `dir` and check its signature and what `expect` asks, without looking at
+/// any listed file. Returns the manifest and its exact bytes. The shell uses this to learn the
+/// version (and so the destination, and whether it is a downgrade) before copying anything.
+pub fn read_verified_manifest(dir: &Path, keys: &[TrustedKey], expect: &Expect) -> Result<(Manifest, Vec<u8>)> {
+    let root = open_dir(dir)?;
+    let manifest_bytes = read_small(&root, MANIFEST_NAME, MAX_MANIFEST_BYTES)?;
+    let signature_bytes = read_small(&root, SIGNATURE_NAME, MAX_SIGNATURE_BYTES)?;
+    let manifest = verify_manifest(&manifest_bytes, &signature_bytes, keys, expect)?;
+    Ok((manifest, manifest_bytes))
+}
+
+/**
+ * Verify, where it is, a copy `verify_and_copy` made earlier: the signature over its manifest,
+ * every listed file (reached without a symlink, a regular file, its size and hash, read-only, and
+ * executable exactly when listed so), and nothing in the folder the manifest does not list: no
+ * other file, folder or symlink at any depth. Returns the manifest and its exact bytes.
+ *
+ * For a start that finds the version's folder already there (the shell starting the same release
+ * again). It is as strong as copying again against a change made before it ran, and as weak after
+ * it: another process of the same user can change the folder once this returns, as it can the
+ * folder a fresh copy goes into (module docs).
+ */
+pub fn verify_in_place(dir: &Path, keys: &[TrustedKey], expect: &Expect) -> Result<(Manifest, Vec<u8>)> {
+    use std::os::unix::fs::MetadataExt;
+    let (manifest, bytes) = read_verified_manifest(dir, keys, expect)?;
+    let root = open_dir(dir)?;
+    for entry in &manifest.files {
+        let mut f = open_beneath(&root, &entry.path)?;
+        let mode = f.metadata().map_err(|e| Error::io(format!("stat {}", entry.path), e))?.mode();
+        if mode & 0o222 != 0 || ((mode & 0o111) != 0) != entry.executable {
+            return Err(Error::CopyMismatch(entry.path.clone()));
+        }
+        let (size, hash) = hash_all(&mut f, entry)?;
+        if size != entry.size {
+            return Err(Error::SizeMismatch { path: entry.path.clone(), expected: entry.size, found: size });
+        }
+        if hash != entry.sha256 {
+            return Err(Error::HashMismatch(entry.path.clone()));
+        }
+    }
+    // Everything on disk must be listed, or be a folder on the way to something listed.
+    let mut allowed: BTreeSet<String> = [MANIFEST_NAME, SIGNATURE_NAME].map(String::from).into();
+    for entry in &manifest.files {
+        let mut acc = String::new();
+        for part in entry.path.split('/') {
+            if !acc.is_empty() {
+                acc.push('/');
+            }
+            acc.push_str(part);
+            allowed.insert(acc.clone());
+        }
+    }
+    fn walk(dir: &Path, rel: &str, allowed: &BTreeSet<String>) -> Result<()> {
+        let entries = fs::read_dir(dir).map_err(|e| Error::io(format!("list {}", dir.display()), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| Error::io(format!("list {}", dir.display()), e))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+            if !allowed.contains(&path) {
+                return Err(Error::CopyMismatch(path));
+            }
+            let kind = entry.file_type().map_err(|e| Error::io(format!("stat {path}"), e))?;
+            if kind.is_symlink() {
+                return Err(Error::Symlink(path));
+            }
+            if kind.is_dir() {
+                walk(&entry.path(), &path, allowed)?;
+            }
+        }
+        Ok(())
+    }
+    walk(dir, "", &allowed)?;
+    Ok((manifest, bytes))
+}
+
 /// Remove a content folder this crate wrote. Its folders are read-only, so a plain recursive
 /// remove fails on them; this gives the owner write permission back first. Symlinks are not
 /// followed.
