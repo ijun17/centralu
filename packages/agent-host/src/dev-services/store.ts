@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
-import { GridSpan, sessionLiveDefaults } from '@cc/protocol'
+import { GridSpan, ProjectConsentKind as ProjectConsentKindSchema, sessionLiveDefaults } from '@cc/protocol'
 
 /**
  * Where the schema lives depends on how the process is running.
@@ -3403,13 +3403,19 @@ export class Store {
     )
   }
 
+  /**
+   * Only the kinds this build knows (#384). `kind` has no CHECK, so a newer build can add one without a breaking step;
+   * a row of a kind this build cannot name is left in place for that build rather than listed here, where the settings
+   * screen would show it without a label and could not revoke it (`projectConsents.revoke` takes known kinds only).
+   */
   listProjectConsents(): ProjectConsent[] {
-    return this.db
+    const rows = this.db
       .prepare(
         `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
            FROM project_consents ORDER BY decided_at DESC`,
       )
       .all() as ProjectConsent[]
+    return rows.filter((r) => ProjectConsentKindSchema.safeParse(r.kind).success)
   }
 
   // ── Linked machines (#82, v46) ─────────────────────────────────────────────────────────────

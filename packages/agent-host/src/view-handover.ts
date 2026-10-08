@@ -84,8 +84,10 @@ export function restoreViewHandover(
   if (!(age >= 0 && age <= VIEW_HANDOVER_MAX_AGE_MS)) return { restored: 0, skipped: list.length }
   const opened = new Set(views.restore(list))
   for (const v of list) {
+    // An element the previous host wrote in a shape this build does not read was not opened above (#384)
+    if (typeof v !== 'object' || v === null || !opened.has(v.id)) continue
     const o = v.inline
-    if (!opened.has(v.id) || !o || typeof o.sessionId !== 'string' || typeof o.callId !== 'string' || typeof o.tool !== 'string') continue
+    if (!o || typeof o.sessionId !== 'string' || typeof o.callId !== 'string' || typeof o.tool !== 'string') continue
     inline?.adopt({ sessionId: o.sessionId, callId: o.callId, ref: v.app, tool: o.tool, uri: v.uri, instanceId: v.id })
   }
   return { restored: opened.size, skipped: list.length - opened.size }

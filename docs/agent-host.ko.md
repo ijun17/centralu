@@ -406,8 +406,9 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 패키지된 앱에서 호스트의 부모는 앱이 아니라 키퍼다(`centralu-keeper`, 창의 실행 파일 옆에 있는 자기 실행 파일, #440;
 [architecture.ko.md](architecture.ko.md) §4.1). 키퍼는 호스트를 `--port 0 --watch-parent --db <data>/store.db`와
 `CC_DATA_DIR=<data>`로 띄우고, stdin 파이프를 쥐며, 앱이 쓰던 규칙 그대로 다시 띄운다: 연속 실패 다섯 번,
-30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc.rs`,
-키퍼와 앱의 직접 경로가 함께 쓴다). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
+30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc/`,
+키퍼와 앱의 직접 경로가 함께 쓴다: 모든 OS가 함께 쓰는 로직은 `mod.rs`, OS마다 다른 것은 같은 작은 인터페이스 뒤의
+`unix.rs`와 `windows.rs`, Node 찾기는 `node.rs`). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
 
 **키퍼를 띄우는 쪽.** `<data>/keeper.sock`에서 답하는 키퍼가 없을 때 창이 띄운다. macOS 릴리스는 먼저 셸에게
 맡긴다([plans/thin-shell.md](plans/thin-shell.md) §6, §10.2, 창의 `src/shell/`): 자기가 싣고 온 셸로
@@ -1029,6 +1030,47 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 스키마를 바꾸는 단계는 같은 PR에서 [generated/schema.md](generated/schema.md)를 다시 만든다(`pnpm docs:schema`). 새
 테이블은 [domain-model.ko.md](domain-model.ko.md)와 그 원본의 "저장되는 곳" 목록에 한 줄을 얻는다. 둘 다 하기
 전까지 `schema-doc.test.ts`가 실패한다.
+
+### 5.2 다른 빌드가 읽는 저장 모양 (#384)
+
+저장소의 테이블은 두 빌드가 나눠 쓰는 모양 하나이고, §5.1이 다룬다. 다른 모양도 많이 같은 식으로 저장되거나 오간다.
+`app_settings`의 JSON 행, 데이터 폴더의 파일, 사람이나 다른 빌드가 쓰는 파일, 프로세스 사이의 줄과 프레임이다. 호스트
+교체 중에, 사람이 이전 릴리스로 돌아간 뒤에, 서로 다른 릴리스의 두 기계 사이에서 옛 빌드와 새 빌드가 그 각각을 읽는다.
+
+모든 모양의 규칙:
+
+- **필드가 더해지면:** 옛 읽는 쪽은 무시하고, 기록을 다시 쓰는 곳이라면 그 필드를 남긴다.
+- **필드가 빠졌거나 아직 쓰이지 않았으면:** 새 읽는 쪽은 기본값을 쓴다.
+- **이 빌드가 못 읽는 값**(새 열거형의 단어): 그 값만 기본값이 되고, 기록의 나머지는 그대로 읽힌다. 못 읽는 권한은
+  거절이지 허락이 아니다.
+- **깨진 파일:** 파일이나 행 이름을 대는 분명한 말. 멈추지 않고, 말 없이 설정이 초기화되지도 않는다.
+
+| 모양 | 위치 | 읽는 곳 / 쓰는 곳 | 옛 모양 | 새 모양 | 깨짐 | 테스트 |
+|---|---|---|---|---|---|---|
+| 화면 설정 (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | 빠진 필드마다 기본값 | 못 읽는 값은 기본값으로 보이고, 이 빌드가 변경을 쓸 때 모르는 필드와 못 읽는 값은 남는다 | 기본값, 행 이름을 댄 stderr 한 줄. 다음 변경이 덮어쓴다 | `theme.test.ts`, `ui-preferences.test.ts` |
+| 작업 공간 스냅샷 | `workspace` 행 | UI 스토어의 복원(`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | 필드마다 따로 확인. 스냅샷에 없는 알림 스위치는 꺼짐이 아니라 기본값(켜짐) | 무시. 창이 스냅샷을 통째로 다시 쓰므로 옛 창은 새 창의 배치 필드를 떨군다. 의도된 것: 스냅샷은 설정이 아니라 배치다 | 호스트가 `null`을 답하고 화면은 기본값에서 시작 | `store.test.ts` (ui), `notify.test.ts` |
+| 테마·글꼴 캐시 | 페이지의 `localStorage` | `applyCachedTheme`, `applyCachedTypography` | 값마다 확인 | 무시 | 캐시 없음과 같다. 첫 프레임만이고 호스트의 답이 뒤따른다 | (캐시뿐) |
+| 키퍼 설정 | `keeper-settings.json` | `source::load_settings` (키퍼, 기본값 있는 serde) | `background` 기본값은 꺼짐 | 읽을 때 무시, **다음 저장에서 떨어진다** | **말 없이** 꺼짐으로 읽힌다 | `background_mode_is_off_unless_saved_on` (새 모양 테스트는 아직 없음) |
+| 그리드 배치 | `grid_layout` | `Store.listGridView` / `setGridView` | 스팬 없는 행은 고른 것 없음으로 읽힌다 (v43) | `kind`에 CHECK가 있어 새 패널 종류는 테이블 재구성, 곧 §5.1의 깨는 단계다. 범위 밖 스팬은 없음으로 읽힌다 | (행) | `store.test.ts` (v42, v43) |
+| 프로젝트 사이의 동의 (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (행) | 이 빌드가 모르는 종류는 저장소에 남고 목록에는 안 나온다 (#384) | (행) | `store.test.ts` |
+| 세션의 앱 동의 | `app_settings.session_apps:<id>` | `sessions/app-access.ts`의 `parse` | (목록) | 모르는 동의의 원소는 버린다 | 빈 목록 | |
+| 앱 권한 | `app_permissions` | `desk.ts` | 옛 `uses`에 대해 기록된 결정은 다시 묻는다 | `allow`가 아닌 결정은 모두 거절 | (행) | `app-capabilities.test.ts` |
+| 앱 매니페스트 | `centralu.app.json` | `parseManifest` | 선택 필드는 기본값 (`view.origin` opaque, `uses` 비어 있음) | 모르는 필드는 경고, 모르는 `uses.host` 능력은 경고하고 거절, 다른 `manifestVersion`은 두 버전을 대는 오류 | 파일 이름을 댄 오류가 앱 목록에 보인다 | `manifest.test.ts` |
+| 앱 비밀 값 | `app-secrets.json` | `AppSecrets` | (맵) | 남는 키 무시 | 앱은 비밀 값 없이 시작, stderr에 말한다 | `app-secrets.test.ts` (깨진 파일은 아님) |
+| 가져온 앱 표시 | `app-imports.json` | `ImportBook` | (맵) | 남는 키 유지 | `.unreadable-<시각>`으로 옮겨 두고 알린다. 가져온 앱은 다시 묻는다 | |
+| 앱 버전 | `app-versions/<app>/<id>/meta.json` | `AppVersions.list` | | 남는 필드 유지 | `id`와 `at`이 없는 기록은 반쯤 지워진 것처럼 건너뛴다 (#384) | `versions.test.ts` |
+| 테마 파일 | `<data>/themes/*.json` | `parseThemeFile` (protocol) | 빠진 토큰은 바탕 테마로 | 모르는 키나 토큰은 문제로 적고 무시 | 이유와 함께 깨진 것으로 목록에 | `theme.test.ts`, `themes.test.ts` |
+| 오케스트레이터 제안과 스킬 | `app_settings.orchestrator_*` | `OrchestratorProposals` | | 원소는 남는 필드를 지킨다 | 목록이 아니면 빈 목록, 이름이나 내용이 없는 원소는 건너뛴다 (#384) | `orchestrator-proposals.test.ts` |
+| 뷰 넘겨주기 | `app_settings.views.handover` | `restoreViewHandover` | | 뷰가 아닌 원소는 건너뛴다 (#384) | 아무것도 다시 열지 않고, 행은 그래도 지운다 | `view-handover.test.ts` |
+| 뷰 출처 포트, 본 에이전트 버전, 프로젝트 JSON 열 | `app_settings.apps.viewPorts`, `agents.versionsSeen`, `projects.*` | `readBook`, `readSeen`, `Store` | 값마다 확인 | 무시 | 없음으로 읽힌다 | |
+| 호스트 빌드 기록 | `CC_HOST_SOURCE` (키퍼에서 호스트로) | `hostBuild` (`keeper-link.ts`) | 빠진 키는 빠진 채로 | 무시 | 호스트 자신의 커밋만 | `keeper-link.test.ts` |
+| 시작 상태 | `shell-status.json` | 창의 `start.rs`, 필드마다, nonce로 맞춘다 | | 무시 | 아직 상태 없음으로 다룬다 | `start.rs` 테스트 |
+| 키퍼 기록 | `keeper.json` | 사람이 보라고 쓴다. 읽는 빌드는 없다 | | | | |
+| 원격 연결 줄 | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version`과 `dataDir`는 기본값 | 다른 `v`는 어느 쪽을 업데이트할지 말하는 오류, 포트나 토큰이 없으면 오류 | JSON이 아닌 줄은 건너뛴다 | `tunnel.test.ts` |
+| 호스트 ↔ UI 페이로드 | RPC 결과, 이벤트, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | 기본값 적용 | 선언 안 된 필드는 버리고, 못 읽는 값은 그 값만 온 그대로 둔다 | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
+
+아직 덮지 못한 것: `keeper-settings.json`은 저장할 때 모르는 필드를 떨구고, 못 읽는 파일은 말 없이 꺼짐으로 읽힌다(키퍼의
+Rust, 따로 바꾼다). 이전 릴리스의 호스트로 새 저장소를 여는 e2e도 아직이다. `older-host.spec.ts`는 페이로드 쪽 절반을 덮는다.
 
 ## 6. 사용량과 한도 (FR-9)
 
