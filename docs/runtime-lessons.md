@@ -33,7 +33,7 @@ rule below was learned by a failure or a measurement, and a new implementation i
 | `platform/` | `packages/platform/src/` |
 | `tooling/`, `scripts/`, `e2e/` | as in the repository |
 
-A Rust test is named by its function (`` `keeper/sys.rs` `a_second_lock_…` ``), a vitest or Playwright test by its
+A Rust test is named by its function (`` `keeper/os/unix.rs` `a_second_lock_…` ``), a vitest or Playwright test by its
 title in double quotes, and a check inside an integration script as `check "…"`. Every name below was checked with
 `grep` against the tree at the commit that adds this file.
 
@@ -125,8 +125,8 @@ Happened: the keeper's whole point is that quitting, crashing or replacing the w
 Rule: the window starts the keeper in a session of its own (`setsid`), stdin `/dev/null`, output to `keeper.log`; the
 host's life is tied to the keeper, never to the window.
 Guard: `scripts/keeper-integration.mjs` check "killing the client leaves the keeper and the host running" (the script
-starts the keeper detached itself). That the product's own start (`client::spawn_detached`, `keeper::exe::Start`)
-puts the keeper in a new session is **UNGUARDED**.
+starts the keeper detached itself); `keeper/os/unix.rs` `a_new_session_is_led_by_the_child` (`os::new_session`, which
+the product's own start, `client::spawn_detached`, calls).
 Platforms: macOS, Linux.
 
 **ST9. A keeper nobody attaches to ends by itself.**
@@ -304,7 +304,8 @@ Rule: git, gh, app manifest commands, `taskkill` and PowerShell are started by a
 for the system tools).
 Guard: `host/tool-launch.test.ts` "on Windows git is spawned by its absolute path, so a git.exe at a repository root
 is never the one run"; `host/tool-launch.test.ts` "`node` becomes the absolute node.exe on PATH, never one in the app
-folder". The System32 paths for `taskkill` and PowerShell (`kill-tree.ts`, `host_proc.rs`) are **UNGUARDED**.
+folder"; `keeper/os/windows.rs` `the_tree_is_ended_by_the_system32_taskkill` (the keeper's `taskkill`). The System32
+paths for `taskkill` and PowerShell in `kill-tree.ts` are **UNGUARDED**.
 Platforms: Windows.
 
 **PA12. The packaged host hands the Claude SDK the CLI it found.**
@@ -484,7 +485,7 @@ Platforms: all.
 **LK1. One keeper per data folder, by `flock`, not a pid file.**
 Happened: the kernel releases the lock on SIGKILL or a crash, so no stale lock is ever judged (#278).
 Rule: a held lock with a socket that answers exits 3; a held lock with a silent socket retries up to 15 s, then exits 4.
-Guard: `keeper/keeper/sys.rs` `a_second_lock_on_the_same_file_is_refused_until_the_first_is_dropped`;
+Guard: `keeper/os/unix.rs` `a_second_lock_on_the_same_file_is_refused_until_the_first_is_dropped`;
 `scripts/keeper-integration.mjs` check "a second keeper on the same folder defers to the first (exit 3)".
 Platforms: macOS, Linux.
 
@@ -540,9 +541,10 @@ Platforms: macOS (108 on Linux).
 
 **LK8. The keeper's sockets are private from birth.**
 Rule: sockets are created under umask 077 (no window before a chmod); every connection's peer uid must match.
-Guard: `keeper/keeper/children/tests.rs` `the_socket_is_private_to_this_user`; `keeper/keeper/sys.rs`
+Guard: `keeper/keeper/children/tests.rs` `the_socket_is_private_to_this_user`; `keeper/os/unix.rs`
 `the_peer_of_our_own_socket_is_us`; `scripts/keeper-integration.mjs` check "the control socket is user-only (0600)".
-Refusing a foreign uid is **UNGUARDED**.
+`keeper/os/unix.rs` `another_user_or_an_unknown_one_is_refused` (`os::peer_is_this_user`, which all three sockets
+call).
 Platforms: macOS, Linux.
 
 ## 5. Supervising the host
@@ -568,7 +570,7 @@ Happened: a 300 ms grace cut the WAL checkpoint short (1ecb7393); a group TERM f
 leaves its thread lock behind on SIGTERM (#57).
 Rule: TERM the host's pid alone, wait 3 s, then TERM its group; on unix stdin stays open until the end so EOF does not
 race TERM into a second shutdown.
-Guard: **UNGUARDED** in Rust (only the integration stop checks touch it).
+Guard: `keeper/host_proc/tests.rs` `a_host_is_stopped_pid_first_then_its_group_with_stdin_held`.
 Platforms: macOS, Linux.
 
 **SU4. Signals go through `kill(2)`, to a real pid or group only.**
@@ -586,7 +588,7 @@ Happened: Windows has no TERM; quitting stalled for the full grace, then hard-ki
 lock (#307).
 Rule: close the host's stdin, wait the grace, then `taskkill /T /F` only if the host is still running (an ended pid
 may already be someone else's).
-Guard: **UNGUARDED**.
+Guard: `keeper/host_proc/tests.rs` `a_windows_host_is_asked_to_stop_by_closing_its_stdin` (Windows CI's Rust unit tests).
 Platforms: Windows.
 
 **SU6. A host's group stop does not escalate.**
@@ -599,7 +601,8 @@ Platforms: macOS, Linux.
 **SU7. A host the keeper did not start is supervised by pid.**
 Rule: a handed-over host is not the keeper's child: it is watched and waited on by pid; EPERM from `kill(pid, 0)`
 means alive.
-Guard: **UNGUARDED** in Rust; `scripts/keeper-handoff-integration.mjs` stops a foreign host at its end.
+Guard: `keeper/os/unix.rs` `a_process_we_may_not_signal_is_alive`; `scripts/keeper-handoff-integration.mjs` stops a
+foreign host at its end.
 Platforms: macOS, Linux.
 
 **SU8. The window reaps every child it starts.**
@@ -794,8 +797,8 @@ Platforms: Windows.
 **CH1. Every child runs in a session of its own.**
 Happened: claude and codex shared the host's process group, so a host's exit or group kill reached them (#280).
 Rule: `setsid` for every child; a pty child gets `TIOCSCTTY`; pid ≤ 1 is never signalled.
-Guard: `keeper/keeper/children/proc.rs` `a_child_runs_in_a_session_of_its_own_and_its_exit_status_is_seen`;
-`keeper/keeper/children/proc.rs` `only_known_signal_names_are_accepted`; `keeper/keeper/children/proc.rs`
+Guard: `keeper/os/unix/children.rs` `a_child_runs_in_a_session_of_its_own_and_its_exit_status_is_seen`;
+`keeper/os/unix/children.rs` `only_known_signal_names_are_accepted`; `keeper/os/unix/children.rs`
 `a_pty_child_sees_a_terminal_of_the_asked_size_and_follows_a_resize`.
 Platforms: macOS, Linux.
 
@@ -810,12 +813,13 @@ Platforms: macOS, Linux.
 
 **CH3. EIO from a pty master is end of file.**
 Rule: a read returning EIO once every slave descriptor is closed ends the stream normally.
-Guard: **UNGUARDED** (only implied by the pty tests).
+Guard: `keeper/os/unix/children.rs` `eio_ends_the_stream`; `keeper/os/unix/children.rs`
+`a_pty_whose_child_has_gone_reads_to_its_end` (`os::children::read_output`).
 Platforms: macOS, Linux.
 
 **CH4. `openpty` does not set close-on-exec.**
 Rule: set `FD_CLOEXEC` on both ends, or every later child inherits every pty.
-Guard: **UNGUARDED**.
+Guard: `keeper/os/unix/children.rs` `neither_end_of_a_pty_is_inherited`.
 Platforms: macOS, Linux.
 
 **CH5. An agent's stdout is a protocol: never drop a byte.**
@@ -876,9 +880,9 @@ non-child's status on macOS, but registering on a child that is already a zombie
 Rule: macOS: kqueue, polling plus the status the outgoing keeper reaped as the fallback; Linux: a pidfd per child and
 `/proc/<pid>/stat` field 52 while the zombie lasts; elsewhere polling; `NOTE_EXIT` can fire before the zombie is
 waitable, so the reap is retried.
-Guard: `keeper/keeper/children/proc.rs` `the_exit_of_a_process_that_is_not_our_child_is_seen`;
-`keeper/keeper/children/proc.rs` `a_status_from_the_outgoing_keeper_completes_a_polled_child`;
-`keeper/keeper/children/proc.rs` `a_zombie_exit_status_is_read_from_proc_stat`.
+Guard: `keeper/os/unix/children.rs` `the_exit_of_a_process_that_is_not_our_child_is_seen`;
+`keeper/os/unix/children.rs` `a_status_from_the_outgoing_keeper_completes_a_polled_child`;
+`keeper/os/unix/children.rs` `a_zombie_exit_status_is_read_from_proc_stat`.
 Platforms: macOS, Linux.
 
 **CH11. A graceful stdin close is a request, not a socket end.**
@@ -1093,7 +1097,9 @@ Platforms: macOS.
 **HD4. Received descriptors are close-on-exec, and a truncated batch fails.**
 Rule: Linux receives with `MSG_CMSG_CLOEXEC`; elsewhere `FD_CLOEXEC` is set on each descriptor after `recvmsg`;
 `MSG_CTRUNC` is an error.
-Guard: **UNGUARDED**.
+Guard: `keeper/os/unix/handles.rs` `received_descriptors_are_close_on_exec`; `keeper/os/unix/handles.rs`
+`a_truncated_batch_is_an_error`. Writing that test found a truncated batch could own descriptor numbers past the
+room made for them (macOS keeps the sent length in `cmsg_len`) and close them; the count is now capped.
 Platforms: macOS, Linux.
 
 **HD5. The channel survives `exec`, and nothing else inherits it.**
@@ -1735,14 +1741,13 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 |---|---|---|---|---|
 | 1 | ST3: the dev flag becomes `CC_DEV` in the host's environment | `window/sidecar.rs` | all | 7 |
 | 2 | ST4: the legacy folder move runs before `create_dir_all` in the window | `window/sidecar.rs` | all | 7 |
-| 3 | ST8: the product's keeper start puts the keeper in a new session | `keeper/keeper/client.rs`, `exe.rs` | macOS, Linux | 2 |
 | 4 | ST11: `leave_app_folder()` runs before anything is started | `window/lib.rs` | Windows | 7 |
 | 5 | ST13: no console window (CREATE_NO_WINDOW, `windowsHide`, not `detached`) | `keeper/host_proc.rs`, `host/adapters/local-process.ts`, `host/apps/external/app-process.ts` | Windows | 2 |
 | 6 | ST16: `main.ts` deletes the keeper's variables before any spawn; apps get no `CENTRALU_*` | `host/main.ts`, `host/apps/external/runtime.ts` | all | 3 |
 | 7 | PA1: the login-shell probe finds a tool a bare PATH does not, in CI | `host/env-path.ts`, `keeper/host_proc.rs` | macOS, Linux | 3 |
 | 8 | PA2: a hanging or terminal-stopped probe is bounded and falls back | `host/env-path.ts`, `keeper/host_proc.rs` | macOS, Linux | 3 |
 | 9 | PA6: no probe on Windows | `host/env-path.ts` | Windows | 3 |
-| 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts`, `keeper/host_proc.rs` | Windows | 2 |
+| 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts` | Windows | 8 |
 | 11 | PA12: a shim becomes the SDK's single executable path | `host/tool-launch.ts` | Windows | 3 |
 | 12 | PA13: the dev host started directly, in its own group | `keeper/host_proc.rs` | all | 3 |
 | 13 | PA14: a keeper-started codex goes through command resolution | `host/adapters/codex/index.ts` | Windows | 9 |
@@ -1762,11 +1767,7 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 27 | LK2: the ownership handle is kept from garbage collection | `host/dev-services/instance-lock.ts` | all | 3 |
 | 28 | LK3: `LC_ALL=C` for `ps`; EPERM means alive | `host/dev-services/instance-lock.ts` | macOS, Linux | 3 |
 | 29 | LK7: the socket path length is checked before bind | `keeper/keeper/server.rs` | macOS, Linux | 2 |
-| 30 | LK8: a connection from another uid is refused | `keeper/keeper/sys.rs` | macOS, Linux | 2 |
-| 31 | SU3: host stop: pid TERM, 3 s, group; stdin held | `keeper/host_proc.rs` | macOS, Linux | 2 |
-| 32 | SU5: Windows host stop: stdin EOF, grace, checked `taskkill` | `keeper/host_proc.rs` | Windows | 2 |
 | 33 | SU6: a host group stop ends with KILL to the group | `keeper/host_proc.rs` | macOS, Linux | 2 |
-| 34 | SU7: a foreign host is watched by pid, EPERM alive | `keeper/host_proc.rs` | macOS, Linux | 2 |
 | 35 | SU8: the window reaps every child | `window/lib.rs` | all | 7 |
 | 36 | KL3: `stopGroup` never fires at our own group | `host/dev-services/kill-tree.ts` | macOS, Linux | 8 |
 | 37 | KL6: strays measured again before the kill; the `systemd --user` subreaper | `host/dev-services/strays.ts` | macOS, Linux | 8 |
@@ -1774,15 +1775,12 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 39 | KL9: the terminal's `disposeAll` kills every tree | `host/dev-services/terminal.ts` | macOS, Linux | 8 |
 | 40 | KL14: codex gets EOF before any signal | `host/adapters/codex/client.ts` | all | 8 |
 | 41 | KL19: exit reported after stdout's end for the host's own processes | `host/adapters/local-process.ts` | all | 8 |
-| 42 | CH3: EIO from a pty master is end of file | `keeper/keeper/children/mod.rs` | macOS, Linux | 2 |
-| 43 | CH4: both pty ends close-on-exec | `keeper/keeper/children/proc.rs` | macOS, Linux | 2 |
 | 44 | CH7: the SDK's exit hook cannot reach the keeper (`hostLeaving`) | `host/keeper/agent-process.ts` | macOS, Linux | 8 |
 | 45 | CH13: without a keeper the host owns its children | `host/keeper/held-children.ts` | all | 8 |
 | 46 | CH15: a signalled pty's exit shape; a lost keeper for `KeeperPty` | `host/keeper/keeper-pty.ts` | macOS, Linux | 8 |
 | 47 | SW6: a connection that read the old target is turned away | `keeper/keeper/front_door.rs` | macOS, Linux | 5 |
 | 48 | SW12: a failed store open releases the file | `host/dev-services/store.ts` | Windows | 9 |
 | 49 | SW13: migrations log on stderr | `host/dev-services/store.ts` | all | — |
-| 50 | HD4: received descriptors close-on-exec; truncation fails | `keeper/keeper/handoff/wire.rs` | macOS, Linux | 2 |
 | 51 | HD6: a handoff from an older keeper, in CI | `scripts/keeper-handoff-integration.mjs` | macOS, Linux | 5 |
 | 52 | HD9: B takes over after `ready` only if A is gone | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
 | 53 | HD11: A reaps at the commit and B completes those children | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |

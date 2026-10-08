@@ -468,7 +468,7 @@ window's, #440; [architecture.md](architecture.md) §4.1), not the app. The keep
 it by the rules the app used before: five consecutive failures, a 30 s stable-uptime reset, and an
 immediate stop on a lock conflict or a store only a newer build can read (`host_proc/` in the
 `apps/desktop/src-tauri/keeper` crate, shared by the keeper and the app's direct path: the logic every OS shares in
-`mod.rs`, what differs behind the same small interface in `unix.rs` and `windows.rs`, finding Node in `node.rs`). If the keeper dies, the host sees EOF on that pipe and shuts down.
+`mod.rs`, the process mechanism that differs by OS in the keeper crate's OS layer `src/os/`, the keeper's handover of a host in `handover.rs`, finding Node in `node.rs`). If the keeper dies, the host sees EOF on that pipe and shuts down.
 
 **Who starts the keeper.** The window, when no keeper answers on `<data>/keeper.sock`. A macOS release first
 asks the shell ([plans/thin-shell.md](plans/thin-shell.md) §6, §10.2; `src/shell/` in the window): it installs or
