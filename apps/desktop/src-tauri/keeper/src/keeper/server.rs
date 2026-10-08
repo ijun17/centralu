@@ -172,11 +172,17 @@ pub(super) struct Keeper {
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
     let opts = parse_args(args);
+    let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
+    // From content nothing runs from an AppImage's mount any more: let it go before anything else
+    // opens a descriptor or starts a thread (FI4, FI5, `appimage.rs`). The handoff channel stays.
+    let shed = content::own_origin(&data).dir().is_some().then(|| super::appimage::shed(opts.take_over_fd));
+    if let Some(what) = &shed {
+        log(what);
+    }
     // Started by another keeper to take its place (step 4): everything comes from that keeper.
     if let Some(fd) = opts.take_over_fd {
         return handoff::take(opts, fd);
     }
-    let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
     // Before anything creates the folder: the host leaves a legacy folder alone once the new one
     // exists, so creating it first would strand the person's data (data-dir.ts).
     if let Some((from, to)) = super::prepare_default_dir(&data, std::env::var("CC_DEV").as_deref() == Ok("1")) {
@@ -315,7 +321,9 @@ pub fn run(args: &[String]) -> i32 {
 
 /// Says in the log where this keeper runs from, and whether it trusts a test key.
 pub(super) fn log_origin(origin: &content::Origin) {
-    if let content::Origin::Content { dir, .. } = origin {
+    if let content::Origin::Content { dir, signed: false, .. } = origin {
+        log(&format!("running from the copy {} a window made; a switch hands over to the copy the next window names", dir.display()));
+    } else if let content::Origin::Content { dir, .. } = origin {
         log(&format!(
             "running from verified content {}; a switch verifies the next build's content first{}",
             dir.display(),
@@ -1062,14 +1070,17 @@ fn move_keeper(k: Arc<Keeper>, exe: PathBuf, target: BuildSource, switch_host: b
 }
 
 /**
- * Which way a switch or an upgrade goes. `None`: a keeper started directly hands over to the
- * executable the window names, as every keeper before step 5 did. `Some`: a keeper from verified
+ * Which way a switch or an upgrade goes. `None`: a keeper started directly, or from an unsigned
+ * copy (a Linux window's, `carried.rs`), hands over to the executable the window names, as every
+ * keeper before step 5 did. `Some`: a keeper from verified
  * content takes the new build's signed content instead (`move_to_content`), from the bundle around
  * that executable, else from the bundle the window names; `Some(None)` when there is neither, which
  * `move_to_content` refuses.
  */
 pub(super) fn content_route(origin: &content::Origin, exe: Option<&Path>, bundle: Option<&str>) -> Option<Option<PathBuf>> {
-    origin.dir()?;
+    if !origin.signed() {
+        return None;
+    }
     Some(exe.and_then(content::bundle_content_of_exe).or_else(|| bundle.map(|b| content::bundle_content_of_bundle(Path::new(b)))))
 }
 
@@ -1303,7 +1314,14 @@ mod tests {
     /// Linux, the window's fallback, a keeper of beta.11 or #444).
     #[test]
     fn a_switch_takes_signed_content_only_from_a_keeper_in_verified_content() {
-        let content = content::Origin::Content { dir: PathBuf::from("/d/content/0.2.0"), version: "0.2.0".into() };
+        let content = content::Origin::Content { dir: PathBuf::from("/d/content/0.2.0"), version: "0.2.0".into(), signed: true };
+        // A Linux window's own copy is not signed: its keeper hands over to the copy the next window
+        // made and names, never refusing for want of a signature no Linux release has (FI4).
+        let unsigned = content::Origin::Content { dir: PathBuf::from("/d/content/0.2.0"), version: "0.2.0".into(), signed: false };
+        let next = Path::new("/d/content/0.2.1/centralu-keeper");
+        assert_eq!(content_route(&unsigned, Some(next), None), None);
+        // Where the release signs content, a folder without a signature changes nothing
+        assert_eq!(content_route(&unsigned.clone().requiring_signature(true), Some(next), None), Some(None));
         let exe = Path::new("/Applications/Centralu.app/Contents/MacOS/centralu-keeper");
         let carried = PathBuf::from("/Applications/Centralu.app/Contents/Resources/content");
         assert_eq!(content_route(&content::Origin::Direct, Some(exe), Some("/Applications/Centralu.app")), None);

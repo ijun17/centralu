@@ -533,19 +533,13 @@ class ClaudeSession implements SessionHandle {
          *   Bash caught by an `ask` rule in the settings file   reaches the callback → answering allow runs it
          *   the same request, with no callback (old-style auto)   denied — "Claude requested permissions to use Bash, but you haven't granted it yet."
          *
-         * So auto's own callback only accepts question choices, and **denies everything else the
-         * way it used to.** Allowing it here would let our own callback approve an `ask` rule
+         * So auto's own callback only accepts question choices and Centralu's own tools (which every
+         * preset lets through, #382), and **denies everything else the way it used to.** Allowing it here would let our own callback approve an `ask` rule
          * written into a trusted project's own `.claude/settings.json` — the opposite direction
          * from #92, which exists so files from the repo cannot decide approvals. (The SDK leaves a
          * `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning line for this combination.)
          */
         canUseTool: async (toolName: string, toolInput: Record<string, unknown>) => {
-          if (preset === 'auto' && toolName !== 'AskUserQuestion') {
-            return {
-            behavior: 'deny' as const,
-            message: `Permission to use ${toolName} was not granted (a settings "ask" rule matched; the auto preset does not ask)`,
-          }
-          }
           /*
            * **We vouch for our own tools ourselves.**
            *
@@ -557,9 +551,24 @@ class ClaudeSession implements SessionHandle {
            *
            * Measured: without this, even a single list read popped an approval window, and the
            * orchestrator stalled on its very first tool call.
+           *
+           * Checked before auto's refusal below, so it holds under every preset (#382): in auto a call reaches this
+           * callback only when an `ask` rule matched, and a rule naming `mcp__centralu` (the person's, or a trusted
+           * project's file) used to refuse these tools in auto while safe and normal let them through. Codex's
+           * bridge is set to `approve` for the same reason (#363).
+           *
+           * Only when this session was given our server (#382). Without it (an agent an app stood up, the set turned
+           * off in Settings) a `centralu` server can still come from the person's own `~/.claude`, and its tools
+           * are not ours to vouch for.
            */
-          if (isOrchestratorTool(toolName)) {
+          if (isOrchestratorTool(toolName) && self.orchestratorServer) {
             return { behavior: 'allow' as const, updatedInput: toolInput }
+          }
+          if (preset === 'auto' && toolName !== 'AskUserQuestion') {
+            return {
+              behavior: 'deny' as const,
+              message: `Permission to use ${toolName} was not granted (a settings "ask" rule matched; the auto preset does not ask)`,
+            }
           }
 
           /*

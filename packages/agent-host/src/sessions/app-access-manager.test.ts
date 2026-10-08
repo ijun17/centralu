@@ -204,6 +204,30 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     expect((await tool(s.id, 'find_apps')).text).toContain('not trusted')
   })
 
+  /*
+   * #382: the switch "Let sessions look at their own project" stops the set at once, and detach_app is part of that
+   * set — so an app attached through it has to go with it, or the session keeps tools it can no longer detach.
+   */
+  it('turning the session tools off in Settings takes attached apps away at once; turning them on brings them back', async () => {
+    allowedBefore()
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    const s = await create(alpha, 'claude')
+    await tool(s.id, 'attach_app', { app: 'beta/board' })
+    const o = claude.last()
+    expect(servers(o)).toEqual(['app-board'])
+    let heard = 0
+    o.apps!.onChange(() => heard++)
+
+    await rpc('prefs.set', { patch: { sessionTools: false } })
+    // What the adapter hears (Claude's syncApps), and a call by the old name (a Codex thread still holding it)
+    expect(heard).toBe(1)
+    expect(servers(o)).toEqual([])
+    expect((await o.apps!.call('app-board', 'peek', {})).isError).toBe(true)
+
+    await rpc('prefs.set', { patch: { sessionTools: true } })
+    expect(servers(o)).toEqual(['app-board'])
+  })
+
   it('an attachment survives the session being restarted (resume)', async () => {
     allowedBefore()
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })

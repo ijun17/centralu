@@ -24,7 +24,10 @@
  *     the same host and the same keeper-held terminal; without an announcement, or once the grace
  *     has run out with no window back, the keeper stops as before;
  *   - stop ends everything;
- *   - a keeper killed outright takes its host with it, and a new keeper takes the folder over.
+ *   - a keeper killed outright takes its host with it, and a new keeper takes the folder over;
+ *   - a keeper started from `<data>/content/<version>/` closes the descriptors it inherited and
+ *     drops the AppImage's variables, so neither it nor its host keeps an AppImage mounted (FI4,
+ *     FI5); one started from anywhere else keeps them.
  *
  * Step 3 (the front door and the blue-green swap):
  *   - clients and the host's Codex bridge address are the front door's, not the host's own port,
@@ -140,21 +143,25 @@ function request(sock, body, timeoutMs = 5000) {
 }
 const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
 
-function startKeeper(data, { env = {}, hostSource = HOST_SRC } = {}) {
+/**
+ * `extra`: more descriptors for the keeper to inherit from 3 on, as an AppImage's window passes its
+ * runtime's keep-alive pipe and mount descriptor (`'pipe'` each; their ends here are in `stdio`).
+ */
+function startKeeper(data, { env = {}, hostSource = HOST_SRC, bin = BIN, extra = [] } = {}) {
   const logFd = openSync(join(data, 'keeper.log'), 'a')
   const child = spawn(
-    BIN,
+    bin,
     ['--keeper', '--data-dir', data, '--host-source', hostSource, '--bundle-path', FAKE_BUNDLE, '--app-version', '0.0.0-test'],
     {
       // The app starts the keeper in a session of its own; so does this.
       detached: true,
-      stdio: ['ignore', logFd, logFd],
+      stdio: ['ignore', logFd, logFd, ...extra],
       env: { ...process.env, CC_DATA_DIR: data, ...env },
     },
   )
   started.add(child.pid)
   const exited = new Promise((r) => child.on('exit', (code) => r(code)))
-  return { pid: child.pid, exited }
+  return { pid: child.pid, exited, stdio: child.stdio }
 }
 
 /**
@@ -369,6 +376,78 @@ async function scenarioStop() {
   const gone = await waitFor(() => !alive(k.pid) && !alive(view.hostPid), 10_000)
   check(gone, 'stop ends the host and the keeper even with background mode on')
   app.kill()
+}
+
+/** Resolves once every process holding the other end of `stream` has closed it */
+function released(stream) {
+  return new Promise((resolve) => {
+    stream.on('end', resolve)
+    stream.on('close', resolve)
+    stream.on('error', resolve)
+    stream.resume()
+  })
+}
+
+/** A process's environment: `/proc` on Linux, `ps -E` (own processes only) on macOS */
+function environOf(pid) {
+  if (existsSync(`/proc/${pid}/environ`)) return readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
+  return execFileSync('ps', ['-wwE', '-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).split(/\s+/)
+}
+
+/**
+ * FI4 and FI5 (docs/spikes/2026-10-linux-keeper.md §6): a keeper the window started from its copy in
+ * `<data>/content/<version>/` lets go of what the AppImage's runtime handed it, so the mount can go
+ * when the window quits, and its host and children see nothing of the AppImage's environment. A
+ * keeper started any other way keeps them: they are what keeps its code mounted.
+ */
+async function scenarioFromACopy() {
+  log('\nthe keeper from a copy lets the AppImage go (FI4, FI5)')
+  const mount = mkdtempSync('/tmp/ck-mount-')
+  tempDirs.push(mount)
+  const appEnv = {
+    APPDIR: mount,
+    APPIMAGE: `${mount}.AppImage`,
+    XDG_DATA_DIRS: `${mount}/usr/share:/usr/share`,
+    GTK_PATH: `${mount}/usr/lib/gtk-3.0`,
+  }
+  const pipes = ['pipe', 'pipe']
+
+  // Started any other way (here: from the build folder): the descriptors stay held
+  const direct = newData()
+  const dk = startKeeper(direct, { env: appEnv, extra: pipes })
+  const dHeld = [released(dk.stdio[3]), released(dk.stdio[4])]
+  const dView = await waitFor(async () => {
+    const v = await status(join(direct, 'keeper.sock'))
+    return ready(v) && v
+  }, 30_000)
+  if (!check(dView, 'a keeper started outside content brings the host up')) return
+  const dLet = await Promise.race([Promise.all(dHeld).then(() => true), sleep(2000).then(() => false)])
+  check(!dLet, 'it and its host keep what the window handed them (what keeps its own code mounted)')
+  await request(join(direct, 'keeper.sock'), { op: 'stop' }).catch(() => {})
+
+  // From the window's copy
+  const data = newData()
+  const sock = join(data, 'keeper.sock')
+  const dir = join(data, 'content', '0.0.0-test')
+  mkdirSync(dir, { recursive: true })
+  cpSync(BIN, join(dir, 'centralu-keeper'))
+  cpSync(HOST_SRC, join(dir, 'host'), { recursive: true })
+  const k = startKeeper(data, { bin: join(dir, 'centralu-keeper'), hostSource: join(dir, 'host'), env: appEnv, extra: pipes })
+  const held = Promise.all([released(k.stdio[3]), released(k.stdio[4])])
+  const view = await waitFor(async () => {
+    const v = await status(sock)
+    return ready(v) && v
+  }, 30_000)
+  if (!check(view, 'the keeper from the copy brings the host up')) return
+  const host = hostsFor(data)[0]
+  check(host?.command.includes(`${dir}/host/main.mjs`), 'the host runs from the copy as it is, not from hosts/', host?.command)
+  const let_ = await Promise.race([held.then(() => true), sleep(10_000).then(() => false)])
+  check(let_, 'neither the keeper nor its host holds what the window handed them, so the mount can go')
+  const env = environOf(view.hostPid)
+  const leaked = env.filter((e) => e.includes(mount) || /^(APPDIR|APPIMAGE)=/.test(e))
+  check(leaked.length === 0, "the host's environment names nothing of the AppImage", leaked.join(' '))
+  check(env.includes('XDG_DATA_DIRS=/usr/share'), 'and keeps the rest of a list it was in', env.filter((e) => e.startsWith('XDG')).join(' '))
+  await request(sock, { op: 'stop' }).catch(() => {})
 }
 
 /** A WebSocket client of the host that can make RPC calls */
@@ -966,6 +1045,7 @@ async function main() {
     'keeper-dies': scenarioKeeperDies,
     swap: scenarioSwap,
     drain: scenarioDrainCutsSlowCall,
+    'from-a-copy': scenarioFromACopy,
   }
   const at = process.argv.indexOf('--only')
   const only = at >= 0 ? process.argv[at + 1].split(',') : Object.keys(scenarios)

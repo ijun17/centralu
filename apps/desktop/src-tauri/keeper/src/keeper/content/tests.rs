@@ -139,7 +139,7 @@ fn a_keeper_in_a_verified_copy_runs_from_content_and_any_other_runs_directly() {
     let dir = version_dir(&data, "0.2.0");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join(KEEPER_EXE), "k").unwrap();
-    assert_eq!(origin_of(&dir.join(KEEPER_EXE), &data), Origin::Content { dir: dir.clone(), version: "0.2.0".into() });
+    assert_eq!(origin_of(&dir.join(KEEPER_EXE), &data), Origin::Content { dir: dir.clone(), version: "0.2.0".into(), signed: false });
     assert_eq!(origin_of(&dir.join(KEEPER_EXE), &data).dir(), Some(dir.as_path()));
 
     // The window's bundle, a build folder, the window's own executable in-process
@@ -171,7 +171,7 @@ fn the_origin_holds_through_a_symlinked_data_folder() {
     std::os::unix::fs::symlink(&data, &link).unwrap();
     assert_eq!(
         origin_of(&dir.join(KEEPER_EXE), &link),
-        Origin::Content { dir: version_dir(&link, "0.2.0"), version: "0.2.0".into() },
+        Origin::Content { dir: version_dir(&link, "0.2.0"), version: "0.2.0".into(), signed: false },
         "the folder is spelled from the data folder as given"
     );
     assert!(matches!(origin_of(&version_dir(&link, "0.2.0").join(KEEPER_EXE), &data), Origin::Content { .. }));
