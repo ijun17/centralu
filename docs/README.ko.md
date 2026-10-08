@@ -39,6 +39,7 @@
 | [plans/m1.5-plan.md](plans/m1.5-plan.md) · [m1.5-result.md](plans/m1.5-result.md) | 상시 구동 운영과 검증 프로토콜; 측정이 잡아낸 결함 5건 |
 | [plans/m2-plan.md](plans/m2-plan.md) · [m2-result.md](plans/m2-result.md) | M2 계획(독립 리뷰 후 수정)과 결과: 릴리스 빌드 통과, 추가로 측정된 결함 5건, 도그푸딩 시작 방법 |
 | [plans/beta-release-checklist.md](plans/beta-release-checklist.md) | 공개 릴리스를 막고 있는 것들. §2는 npm을 배포 채널로 만든 서명·격리 측정 |
+| [plans/remote-hub.md](plans/remote-hub.md) | 연결된 호스트로서의 원격 모드 (#82): 모양, 라우팅, 버전, 1단계가 만든 것; §10에 3단계(ssh로 원격을 설치·시작·업데이트·제거)와 probe 4(허브 교체를 건너 허브의 ssh가 어디서 사는가), [spikes/2026-10-remote-install/](spikes/2026-10-remote-install/)의 스크립트로 Windows와 WSL에서 측정 |
 
 ## 문서를 쓰는 규칙
 

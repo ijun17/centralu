@@ -926,7 +926,7 @@ other than `~/.centralu`. It runs as given, with no fallback.
 | The same port number on both ends when it is free here, another one otherwise | §4.7: an app view's address carries the host's own port. Two machines on the default 17175 cannot both have it; app views of the second need the proxy of phase 2 anyway |
 | `BatchMode=yes` everywhere | A password or host-key prompt nobody can answer would hang the link. The person sets the keys up once, as for any ssh use |
 | The token is not stored; it is asked over ssh at every link start | It is the key to every RPC on that machine. One ssh round trip per start (measured 2.1 to 4.3 s to connected on a LAN) is cheap |
-| The ssh processes are children of the hub host, behind the `Tunnel` interface | Where they should live across a hub swap (a keeper child, or OpenSSH `ControlPersist`) is probe 4 of the plan; whichever wins replaces only `SshTunnel` |
+| The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
 
 **The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
 (ssh failed, the forward or the socket dropped; retried with backoff from 2 s to a minute); `not_running` (Centralu
@@ -979,7 +979,7 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 | Off for another machine's project | Reveal in the file manager and the file tree's menu, Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app, app views (`appStatus` says they open in a later version) |
 
 **What phase 1 does not cover yet.** App views of another machine are phase 2 (listed, their tools work there, their
-view says so); installing and updating the remote over ssh is phase 3. Usage gauges, `processes.strays/stop` and the
+view says so); installing and updating the remote over ssh is phase 3 ([plans/remote-hub.md](plans/remote-hub.md) §10). Usage gauges, `processes.strays/stop` and the
 quit dialog still ask this computer only. `centralu serve` on WSL needs something that starts it when the distro starts
 (the systemd unit of §4.7); the link then keeps the distro running.
 
