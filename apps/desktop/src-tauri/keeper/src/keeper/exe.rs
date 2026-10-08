@@ -33,6 +33,64 @@ pub const KEEPER_EXE: &str = "centralu-keeper";
 /// `exec` the `centralu-keeper` next to it. Removed again before the keeper starts anything.
 pub const IN_PROCESS_ENV: &str = "CC_KEEPER_IN_PROCESS";
 
+/**
+ * How a keeper is started: its arguments, the environment it gets on top of the starter's, and
+ * where its output goes. The window (`sidecar.rs`, the direct start) and the shell (thin-shell plan
+ * §3, a keeper from verified content) both start keepers through this, so the two cannot drift
+ * apart: what the shell starts is what the window would have started, from another place.
+ */
+#[derive(Debug, Clone, PartialEq)]
+pub struct Start {
+    pub data_dir: PathBuf,
+    /// The host folder the keeper runs its hosts from (`--host-source`); none runs the source host.
+    pub host_source: Option<PathBuf>,
+    /// The app bundle the build came from (`--bundle-path`), for the build record.
+    pub bundle_path: Option<String>,
+    pub app_version: String,
+    /// A debug build's keeper: the dev data folder and the source host (`CC_DEV=1`).
+    pub dev: bool,
+    /// Run the keeper in the window's executable rather than `exec` the one beside it (`IN_PROCESS_ENV`).
+    pub in_process: bool,
+}
+
+impl Start {
+    /// `--keeper` comes first so the same command line works for `centralu-keeper` (which ignores it)
+    /// and for the window's executable (which turns into the keeper on seeing it).
+    pub fn args(&self) -> Vec<String> {
+        let mut args = vec![super::KEEPER_FLAG.to_string(), "--data-dir".into(), self.data_dir.to_string_lossy().to_string()];
+        if let Some(dir) = &self.host_source {
+            args.push("--host-source".into());
+            args.push(dir.to_string_lossy().to_string());
+        }
+        if let Some(b) = &self.bundle_path {
+            args.push("--bundle-path".into());
+            args.push(b.clone());
+        }
+        args.push("--app-version".into());
+        args.push(self.app_version.clone());
+        args
+    }
+
+    /// Added to the environment the keeper inherits; nothing is removed from it.
+    pub fn env(&self) -> Vec<(String, String)> {
+        let mut env: Vec<(String, String)> = if self.dev { vec![("CC_DEV".into(), "1".into())] } else { Vec::new() };
+        if self.in_process {
+            env.push((IN_PROCESS_ENV.into(), "1".into()));
+        }
+        env
+    }
+
+    /// `keeper.log` in the data folder: the keeper's stdout and stderr, and the host's stderr.
+    pub fn log_path(&self) -> PathBuf {
+        self.data_dir.join("keeper.log")
+    }
+
+    /// Starts `exe` as the keeper, detached into a session of its own (`client::spawn_detached`).
+    pub fn spawn(&self, exe: &Path) -> std::io::Result<std::process::Child> {
+        super::client::spawn_detached(exe, &self.args(), &self.env(), &self.log_path())
+    }
+}
+
 /// The keeper executable shipped next to the window's executable `window_exe`.
 pub fn beside(window_exe: &Path) -> PathBuf {
     window_exe.with_file_name(KEEPER_EXE)
@@ -120,6 +178,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// The command line every keeper start has used since #280, now written in one place for the
+    /// window and the shell. `server::parse_args` reads it back.
+    #[test]
+    fn a_keeper_start_writes_the_command_line_the_keeper_reads() {
+        let start = Start {
+            data_dir: PathBuf::from("/d ata"),
+            host_source: Some(PathBuf::from("/c/0.1.0/host")),
+            bundle_path: Some("/Applications/Centralu.app".into()),
+            app_version: "0.1.0".into(),
+            dev: false,
+            in_process: false,
+        };
+        assert_eq!(
+            start.args(),
+            ["--keeper", "--data-dir", "/d ata", "--host-source", "/c/0.1.0/host", "--bundle-path", "/Applications/Centralu.app", "--app-version", "0.1.0"]
+        );
+        assert!(start.env().is_empty(), "a release start adds nothing to the environment");
+        assert_eq!(start.log_path(), PathBuf::from("/d ata/keeper.log"));
+        let mut argv = vec!["centralu-keeper".to_string()];
+        argv.extend(start.args());
+        let o = super::super::server::parse_args(&argv);
+        assert_eq!(o.data_dir.as_deref(), Some(Path::new("/d ata")));
+        assert_eq!(o.bundle_path.as_deref(), Some("/Applications/Centralu.app"));
+        assert_eq!(o.app_version.as_deref(), Some("0.1.0"));
+
+        let dev = Start { host_source: None, bundle_path: None, dev: true, in_process: true, ..start };
+        assert_eq!(dev.args(), ["--keeper", "--data-dir", "/d ata", "--app-version", "0.1.0"]);
+        assert_eq!(dev.env(), [("CC_DEV".to_string(), "1".to_string()), (IN_PROCESS_ENV.to_string(), "1".to_string())]);
     }
 
     #[test]

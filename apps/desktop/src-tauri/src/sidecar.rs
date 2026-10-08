@@ -395,7 +395,7 @@ mod link {
 
     use super::*;
     use crate::host_proc::{backoff, MAX_RESTARTS, STABLE_UPTIME};
-    use crate::keeper::{client, exe as keeper_exe, source::BuildSource, KeeperView, KEEPER_FLAG};
+    use crate::keeper::{client, exe as keeper_exe, source::BuildSource, KeeperView};
     use serde_json::{json, Value};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -515,22 +515,20 @@ mod link {
             // The legacy folder moves before this creates the new one (keeper::prepare_default_dir).
             let _ = crate::keeper::prepare_default_dir(&self.data, self.dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
             let _ = std::fs::create_dir_all(&self.data);
-            let mut args = vec![KEEPER_FLAG.to_string(), "--data-dir".into(), self.data.to_string_lossy().to_string()];
-            if let Some(dir) = &self.host_dir {
-                args.push("--host-source".into());
-                args.push(dir.to_string_lossy().to_string());
+            let start = self.keeper_start();
+            client::launch_detached(&exe, &start.args(), &start.env(), &start.log_path())
+        }
+
+        /// How this window starts a keeper (and, in the same words, how the shell does: `keeper::exe::Start`).
+        fn keeper_start(&self) -> keeper_exe::Start {
+            keeper_exe::Start {
+                data_dir: self.data.clone(),
+                host_source: self.host_dir.clone(),
+                bundle_path: self.app_build.bundle_path.clone(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
+                dev: self.dev,
+                in_process: cfg!(debug_assertions),
             }
-            if let Some(b) = &self.app_build.bundle_path {
-                args.push("--bundle-path".into());
-                args.push(b.clone());
-            }
-            args.push("--app-version".into());
-            args.push(env!("CARGO_PKG_VERSION").into());
-            let mut env: Vec<(String, String)> = if self.dev { vec![("CC_DEV".into(), "1".into())] } else { Vec::new() };
-            if cfg!(debug_assertions) {
-                env.push((keeper_exe::IN_PROCESS_ENV.into(), "1".into()));
-            }
-            client::launch_detached(&exe, &args, &env, &self.data.join("keeper.log"))
         }
 
         pub fn start(self: &Arc<Self>, app: AppHandle) {
