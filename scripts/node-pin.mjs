@@ -141,11 +141,16 @@ export function verifyDetached({ data, sig, keys, gpgv = 'gpgv' }) {
     writeFileSync(join(dir, 'keyring.gpg'), Buffer.concat(keys.map(dearmor)))
     writeFileSync(join(dir, 'SHASUMS256.txt'), data)
     writeFileSync(join(dir, 'SHASUMS256.txt.sig'), sig)
-    const r = spawnSync(
-      gpgv,
-      ['--homedir', dir, '--keyring', join(dir, 'keyring.gpg'), '--status-fd', '1', join(dir, 'SHASUMS256.txt.sig'), join(dir, 'SHASUMS256.txt')],
-      { encoding: 'utf8' },
-    )
+    /*
+     * Every path relative to the temporary folder, as the working directory. The gpgv of Git for
+     * Windows reads `C:\…` as a URL with the scheme `C` and refuses the keyring ("invalid key resource
+     * URL", measured on windows-2022); `./keyring.gpg` has a slash, so it is a file and not a name in
+     * the home folder, and no drive letter.
+     */
+    const r = spawnSync(gpgv, ['--homedir', '.', '--keyring', './keyring.gpg', '--status-fd', '1', 'SHASUMS256.txt.sig', 'SHASUMS256.txt'], {
+      cwd: dir,
+      encoding: 'utf8',
+    })
     if (r.error) throw new Error(`could not run ${gpgv} (GnuPG's verify tool): ${r.error.message}`)
     const signer = r.status === 0 ? validSigner(r.stdout) : null
     if (!signer) throw new Error(`the signature on SHASUMS256.txt does not verify:\n${r.stderr.trim()}`)
