@@ -36,6 +36,7 @@ import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './lo
 import { hostDrain } from './drain.js'
 import { stopThenClose } from './shutdown.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
+import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
 import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
@@ -503,6 +504,7 @@ const links = new Links({
   mirror: storeMirror(store),
   registry: storeRegistry(store),
   tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, log: (line) => console.error(line) }),
+  installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))

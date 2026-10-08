@@ -7,7 +7,8 @@ import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { HostServer } from '../transport/server.js'
-import { Links } from './links.js'
+import { Links, type LinkDeps } from './links.js'
+import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -48,7 +49,7 @@ async function remoteHost(port = 0, store = new Store()) {
 
 type Hub = Awaited<ReturnType<typeof hubHost>>
 
-async function hubHost(line: () => ConnectionLine, store = new Store(), add = true) {
+async function hubHost(line: () => ConnectionLine, store = new Store(), add = true, extra: Partial<LinkDeps> = {}) {
     const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const registry = storeRegistry(store)
@@ -62,6 +63,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     tunnelFor: () => new DirectTunnel(line),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },
+    ...extra,
   })
   mgr.useLinkedSessions((id) => links.knowsSession(id))
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
@@ -456,5 +458,33 @@ describe('a hub linked to another host (#82)', () => {
       await until(() => l.links.list()[0]!.status === 'connected')
       expect(l.starts()).toBeGreaterThanOrEqual(2)
     })
+  })
+})
+
+describe('machines.install (#82, plan §10.2)', () => {
+  it('installs the hub’s version through the machine’s own shell, step by step, and refuses where it cannot', async () => {
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    cleanups.push(() => reg.close())
+    const runs: string[] = []
+    const answers = [
+      'motd\nCENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n',
+      'CENTRALU-INSTALL node ok\n',
+      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: APP_VERSION, node: '24.21.0' }, previous: { version: '0.0.1', node: '24.21.0' }, removed: ['0.0.0'], left: [] })}\n`,
+    ]
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(1)), { exec: async (cmd: string) => ({ code: 0, stderr: '', stdout: answers[runs.push(cmd) - 1] ?? '' }) })
+    const installer = { runtime: () => ({ node: { version: '24.21.0', archives: { 'linux-x64': { file: 'node-v24.21.0-linux-x64.tar.gz', sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
+    const hub = await hubHost(() => lineFor(1), new Store(), true, { tunnelFor: () => tunnel, installer })
+    const u = await ui(hub.port)
+    const r = await u.call('machines.install', { machineId: 'm1' })
+    expect(r).toMatchObject({ machine: { id: 'm1' }, current: { version: APP_VERSION }, previous: { version: '0.0.1' }, removed: ['0.0.0'] })
+    // Preflight, Node, then the installer, each a script for the machine’s shell
+    expect(runs).toHaveLength(3)
+    expect(runs.every((c) => c.startsWith('printf %s '))).toBe(true)
+    expect(Buffer.from(runs[2]!.split(' ')[2]!, 'base64').toString('utf8')).toContain('/node/v24.21.0/bin/node')
+    // Refused where it cannot: an unknown machine, and a development hub, whose version is not published
+    await expect(u.call('machines.install', { machineId: 'nope' })).rejects.toThrow(/No linked machine/)
+    const dev = await hubHost(() => lineFor(1), new Store(), true, { tunnelFor: () => tunnel, installer, hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true } })
+    await expect((await ui(dev.port)).call('machines.install', { machineId: 'm1' })).rejects.toThrow(/development build is not published/)
+    expect(runs).toHaveLength(3)
   })
 })

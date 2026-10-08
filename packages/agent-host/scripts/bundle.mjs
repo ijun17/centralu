@@ -12,6 +12,7 @@
  *   codex-orchestrator-bridge.mjs — codex launches this directly with node (bundled with `ws` inside)
  *   node_modules/better-sqlite3  — the native addon (only the files needed)
  *   remote-runtime.json          — the Node a remote this host installs runs, pinned (scripts/node-pin.mjs)
+ *   remote-install.mjs           — the installer's step a remote runs on that Node (links/install.ts)
  */
 import { build } from 'esbuild'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -271,6 +272,7 @@ writeFileSync(
  * is: `scripts/release-npm.mts` compares the bundle's copy with the pin byte for byte.
  */
 cpSync(join(ROOT, 'packaging/remote-runtime.json'), join(OUT, 'remote-runtime.json'))
+cpSync(join(ROOT, 'packages/agent-host/src/links/remote-install.mjs'), join(OUT, 'remote-install.mjs'))
 
 const size = readFileSync(join(OUT, 'main.mjs')).length
 console.log(

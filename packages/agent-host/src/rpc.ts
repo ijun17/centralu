@@ -25,7 +25,7 @@ import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { InlineViews } from './inline-views.js'
-import type { GridPanel, MachineInfo, RemoteShell, ToolName } from '@cc/protocol'
+import type { GridPanel, MachineInfo, MachineInstallResult, RemoteShell, ToolName } from '@cc/protocol'
 
 /**
  * The optional services a host has. Without one, that feature simply does not exist on this host
@@ -71,6 +71,7 @@ export type MachinesPort = {
   remove(id: string): Promise<void>
   reconnect(id: string): MachineInfo
   acceptVersions(id: string): MachineInfo
+  install(id: string): Promise<MachineInstallResult>
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -718,6 +719,7 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
+    'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
     'machines.acceptVersions': async (p) =>
       requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),

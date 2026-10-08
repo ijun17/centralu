@@ -1,4 +1,6 @@
-import type { MachineInfo, MachineSide, MachineStatus, MachineVersions, NormalizedEvent } from '@cc/protocol'
+import type { MachineInfo, MachineInstallResult, MachineSide, MachineStatus, MachineVersions, NormalizedEvent } from '@cc/protocol'
+import { installRemote, type RemoteRuntime } from './install.js'
+import type { RegistryOptions } from './registry.js'
 import { newMachineId, splitQualified } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remote-client.js'
@@ -60,6 +62,17 @@ export type LinkDeps = {
   client?: Partial<RemoteClientOptions>
   /** Backoff between attempts while a machine is away; doubles up to the second value */
   retryMs?: [number, number]
+  /** What `machines.install` sends (install.ts). Without it this hub installs nothing */
+  installer?: LinkInstaller
+}
+
+export type LinkInstaller = {
+  /** The pinned Node (`remote-runtime.json`) */
+  runtime: () => RemoteRuntime
+  /** `remote-install.mjs`'s text */
+  script: () => string
+  registry?: RegistryOptions
+  nodeDist?: string
 }
 
 type Obj = Record<string, unknown>
@@ -89,6 +102,8 @@ export class LinkedMachine implements RoutedMachine {
   private opening: Promise<void> | null = null
   /** A refusal was already answered by asking the remote again; the next one is reported and backed off */
   private refusedOnce = false
+  /** One install at a time per machine (the remote also holds `install.lock`) */
+  private installing = false
 
   constructor(
     private record: MachineRecord,
@@ -176,6 +191,45 @@ export class LinkedMachine implements RoutedMachine {
     this.record = { ...this.record, acceptedVersions: key }
     this.versions = { ...this.versions, accepted: true }
     this.reconnect()
+  }
+
+  /**
+   * Installs the hub's version there (`machines.install`, install.ts, plan §10.2). A host running
+   * there keeps running; a link that is not connected (nothing was installed, or nothing runs) opens
+   * again at once, and finds the managed launcher first
+   */
+  async install(): Promise<MachineInstallResult> {
+    const fail = (message: string) => Object.assign(new Error(message), { code: 'internal' })
+    const installer = this.deps.installer
+    const exec = this.tunnel.exec?.bind(this.tunnel)
+    if (!installer || !exec) throw fail(`This computer cannot install on ${this.name}`)
+    if (this.deps.hub.dev) {
+      throw fail(`A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (npm i -g centralu)`)
+    }
+    if (this.record.remote.command) throw fail(`${this.name} runs a command of its own in place of centralu; clear it to use an installed one`)
+    if (this.installing) throw fail(`Already installing on ${this.name}`)
+    this.installing = true
+    try {
+      const r = await installRemote({
+        exec,
+        spec: this.record.remote,
+        target: this.record.sshTarget,
+        version: this.deps.hub.version,
+        runtime: installer.runtime(),
+        script: installer.script(),
+        registry: installer.registry,
+        nodeDist: installer.nodeDist,
+        onStep: (step) => this.deps.log?.(`[links] ${this.name}: installing Centralu ${this.deps.hub.version}: ${step}`),
+      }).catch((err: unknown) => {
+        this.deps.log?.(`[links] ${this.name}: install failed: ${(err as Error).message}`)
+        throw fail((err as Error).message)
+      })
+      this.deps.log?.(`[links] ${this.name}: installed Centralu ${r.current.version} on Node ${r.current.node}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
+      if (this.status !== 'connected' && !this.stopped) this.reconnect()
+      return { machine: this.info(), ...r }
+    } finally {
+      this.installing = false
+    }
   }
 
   async stop(): Promise<void> {
@@ -454,6 +508,10 @@ export class Links {
     }
     m.acceptVersions()
     return m.info()
+  }
+
+  install(id: string): Promise<MachineInstallResult> {
+    return this.need(id).install()
   }
 
   private need(id: string): LinkedMachine {
