@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
 import { letterOf } from '../../app/keys.js'
+import { useFocusReturn } from '../../components/focusReturn.js'
 import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 
@@ -18,6 +19,8 @@ import { SessionMachineTag } from '../machines/MachineTag.jsx'
  */
 export function Inbox() {
   const open = useStore((s) => s.inboxOpen)
+  // Before any effect below that moves focus, so the composer, not this layer, is what gets it back (#115)
+  useFocusReturn(open)
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
   const projects = useStore((s) => s.projects)
