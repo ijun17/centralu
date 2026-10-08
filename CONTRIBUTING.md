@@ -151,6 +151,13 @@ limits fail at sizes nobody picks by hand: the keeper's handoff failed on macOS 
 values right around it) and at the scale people actually reach (several agents, terminals and app
 views, long sessions, a large store), not only the smallest state that exercises the path.
 
+**A list that mounts and unmounts rows is tested by scrolling through it, and asserted on the
+DOM.** The conversation showed one passage several times while storage held it once (#64): two
+rows shared a React key, and each time the virtual list unmounted and remounted them while
+scrolling, React left the old node behind. The probes at the time looked at one moment (a row was
+missing, not repeated) and counted items in the store, so they never saw it. Drive the list from
+end to end and back, then count what the DOM holds (`e2e/fixtures/conversation-copies.ts`).
+
 The desktop app is WKWebView. If a UI bug does not reproduce in Chromium, try
 `test.use({ browserName: 'webkit' })`.
 
