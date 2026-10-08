@@ -752,6 +752,19 @@ describe('migration v43 — an app panel keeps its span', () => {
   })
 })
 
+describe('remembered consents between projects across builds (#384)', () => {
+  it('a kind a newer build added stays in the store but is not listed here', () => {
+    const s = seeded()
+    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.setProjectConsent('p1', 'p2', 'delegate')
+    const db = (s as unknown as { db: Database.Database }).db
+    db.prepare(`INSERT INTO project_consents (from_project_id, to_project_id, kind, decided_at) VALUES ('p1', 'p2', 'files', 1)`).run()
+    expect(s.listProjectConsents().map((c) => c.kind)).toEqual(['delegate'])
+    expect(db.prepare(`SELECT kind FROM project_consents ORDER BY kind`).all()).toEqual([{ kind: 'delegate' }, { kind: 'files' }])
+    s.close()
+  })
+})
+
 /**
  * There is one marker, kind (#13). There used to be a separate markOrchestrator, which meant
  * "two write paths." With the project orchestrator retired (v26), the marked session is once
