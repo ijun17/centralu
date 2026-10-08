@@ -442,9 +442,9 @@ the code the plan replaced.
 | macOS debug (`pnpm app:dev`) | none | `Direct` | the window runs the source host through tsx, `CC_DEV=1` | the app is the host's parent, as before the keeper; a bundled host left in `target/debug` is ignored |
 | macOS or Linux debug | `CC_USE_KEEPER=1` | `KeeperInProcess` | the window starts itself as `centralu --keeper` with `CC_KEEPER_IN_PROCESS=1`; the keeper runs the source host | `tauri dev` builds only the window, so a `centralu-keeper` beside it may be older code ([architecture.md](architecture.md) §4.1) |
 | any | `CC_HOST_CMD` (any value) | `Direct` | that command line (a blank value: the bundled or source host) | the escape hatch for running some other host |
-| Linux release (AppImage, deb, rpm) | none | `Direct` | the window runs the bundled host through the system Node | the keeper runs from inside the AppImage: after a switch to a newer AppImage's build it runs from that AppImage's mount, which goes when that window quits, and a debug keeper then died of SIGBUS; it has to run from a copy first ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6, #295) |
+| Linux release (AppImage, deb, rpm) | none | `Direct` | the window runs the bundled host through the system Node | the real window has not yet run the keeper on a Linux desktop ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §7, runtime-unification step 4b) |
 | Linux debug | none | `Direct` | the source host through tsx | as above |
-| Linux release | `CC_USE_KEEPER=1` | `KeeperBeside` | the keeper beside the window (`usr/bin/` in the AppImage) | no shell off macOS |
+| Linux release | `CC_USE_KEEPER=1` | `Keeper` | the window copies the keeper beside it (`usr/bin/` in the AppImage) and its bundled host into `<data>/content/<version>/` (`keeper/carried.rs`: hashed, renamed into place, read-only; not signed) and starts the keeper from the copy, which runs the host from it; a copy that fails falls back to the keeper beside the window | nothing long-lived may run from the AppImage's mount, which goes when its window quits (runtime-lessons FI4); no shell off macOS |
 | Windows, release or debug | `CC_USE_KEEPER` is ignored | `Direct` | the bundled host (release) or the source host (debug), no console window (§1) | the keeper is built on unix sockets, descriptor passing and `flock` |
 | `centralu --keeper` | `CC_KEEPER_IN_PROCESS` | `KeeperInProcess` | the keeper runs in the window's executable | a debug window asked |
 | `centralu --keeper`, `centralu-keeper` beside it | none | `KeeperBeside` | `exec`s into `centralu-keeper`: same pid, arguments and descriptors | a keeper of 0.1.0-beta.11 or earlier handing over, and windows from before #440, start the window's executable this way |
@@ -745,8 +745,12 @@ that copy with `--host-source` naming the copy's `host/`; the host it then swaps
 folder. The incoming keeper raises the floor once it serves. A refusal (`content`, `downgrade`, `copy`, `in-use`,
 `no-content`) moves nothing: the keeper and the host serve on, and the window sees a failed swap with the reason in
 `refused` and the words in `message`. Rollbacks go through the shell only. The host notices none of this: what it
-runs from is a folder like any other copy. A keeper started directly (debug builds, Linux, the window's fallback)
-hands over to the executable it is given, as above. `scripts/keeper-content-integration.mts` drives it with a test
+runs from is a folder like any other copy. A keeper started directly (debug builds, the window's fallback) hands over
+to the executable it is given, as above, and so does a keeper from the unsigned copy a Linux window makes (no `.sig`
+in its folder, and an OS whose release signs no content, `start_plan::Os::signs_content`): the next Linux window
+copies its own build into `content/<new>/` first and names the keeper there. A keeper from any content folder, signed
+or not, closes the descriptors it inherited (all but a handoff's channel) and drops the AppImage's variables before
+anything else (`keeper/appimage.rs`), so no AppImage stays mounted for its life (runtime-lessons FI4, FI5). `scripts/keeper-content-integration.mts` drives it with a test
 shell and a test keeper that trust a throwaway key, the real host and a counting terminal: a tampered and an older
 content refused with everything serving, a handoff into `content/0.2.1/` with the same host, terminal and front
 door, the host's switch to the new copy, and the old version's folder removed once nothing runs from it.

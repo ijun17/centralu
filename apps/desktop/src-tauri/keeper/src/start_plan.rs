@@ -41,6 +41,13 @@ impl Os {
             Os::Windows
         }
     }
+
+    /// Whether the release signs the content a keeper runs from here (`<data>/content/<version>/`).
+    /// Only macOS's does (`scripts/release-npm.mts`): a Linux window copies the keeper and host its
+    /// AppImage carries without a signature to check (runtime-unification plan §8, decision 1).
+    pub fn signs_content(self) -> bool {
+        self == Os::MacOs
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,6 +211,11 @@ pub enum StartMode {
     /// The window starts `centralu-keeper` next to its own executable (from the `centralu --keeper`
     /// side: `exec`s into it, same pid, arguments and descriptors).
     KeeperBeside,
+    /// The window copies the `centralu-keeper` beside it and its bundled host into
+    /// `<data>/content/<version>/` and starts the keeper from the copy, so nothing long-lived runs
+    /// from the AppImage's mount (lesson FI4; Linux releases). Not verified: the release signs no
+    /// Linux content yet. A copy that fails falls back to `KeeperBeside`.
+    Keeper,
     /// The window's own executable runs the keeper (`centralu --keeper`), because no
     /// `centralu-keeper` is beside it: a bundle someone assembled by hand.
     KeeperInWindowExe,
@@ -257,12 +269,11 @@ impl Reason {
         match self {
             Reason::HostCommand => "CC_HOST_CMD is set: the window runs that host itself",
             Reason::NoKeeperHere => "the keeper is built on unix sockets, descriptor passing and flock; Windows has no keeper yet",
-            // The keeper's scripts pass on Linux (the `keeper e2e (linux)` job), but it runs from inside
-            // the AppImage: after a switch to a newer AppImage's build it runs from that AppImage's
-            // mount, which goes when that window quits, and a later page-in of its code can end it
-            // with SIGBUS (a debug keeper did, docs/spikes/2026-10-linux-keeper.md §6).
+            // The keeper's scripts pass on Linux (the `keeper e2e (linux)` job), and it runs from a copy
+            // out of the AppImage's mount (FI4), but the real window has never started it on a Linux
+            // desktop (docs/spikes/2026-10-linux-keeper.md §7 items 2 and 3; plan step 4b).
             Reason::KeeperOptIn => {
-                "on Linux the keeper only runs with CC_USE_KEEPER=1: it runs from inside the AppImage, whose mount can go before the keeper does"
+                "on Linux the keeper only runs with CC_USE_KEEPER=1 until the window has run it on a Linux desktop"
             }
             Reason::DebugDirect => "a debug build is the host's parent unless CC_USE_KEEPER=1",
             Reason::KeeperAnswers => "a keeper already answers on keeper.sock",
@@ -358,6 +369,8 @@ pub fn plan(f: &Facts) -> Plan {
     };
     if !release {
         keeper(StartMode::KeeperInProcess, Reason::DebugKeeper)
+    } else if f.keeper_beside && f.os == Os::Linux {
+        keeper(StartMode::Keeper, why)
     } else if f.keeper_beside {
         keeper(StartMode::KeeperBeside, why)
     } else {

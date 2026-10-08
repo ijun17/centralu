@@ -244,7 +244,8 @@ kept on disk.
 ## 7. What still blocks the keeper as the Linux default
 
 1. **The keeper runs from the AppImage** (§6, case 2): the copy has to come first. Until then a switch to a newer
-   build leaves a keeper that can die of SIGBUS at any later page-in.
+   build leaves a keeper that can die of SIGBUS at any later page-in. *Done by runtime-unification step 4: the window
+   copies into `<data>/content/<version>/` (unsigned) and the keeper there closes the inherited descriptors.*
 2. **The real window never ran here.** The window starting the keeper with `CC_USE_KEEPER=1`, attaching, quitting with
    background mode on and off, "Apply now" (#352) and an npm update, on a Linux desktop. No display was used on the
    owner's laptop.

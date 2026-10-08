@@ -10,8 +10,12 @@
 //! that copy, whose host runs from the copy too (`server::move_to_content`). The shell is not
 //! involved, which is why its own code can stay small.
 //!
-//! A keeper started any other way (`Origin::Direct`: a debug build, Linux, the window's fallback when
-//! the shell refused or is missing) hands over to the executable it is given, as it always did.
+//! A keeper started any other way (`Origin::Direct`: a debug build, the window's fallback when
+//! the shell refused or is missing) hands over to the executable it is given, as it always did. So
+//! does a keeper from an unsigned copy (`Origin::Content` with `signed: false`): a Linux window
+//! copies what its AppImage carries into `<data>/content/<version>/` itself (`carried.rs`), because
+//! the release signs no Linux content yet (runtime-unification plan §8, decision 1), and names the
+//! keeper in its copy on a switch.
 //!
 //! The rules are the shell's, so that a handoff accepts exactly what a fresh start through the shell
 //! would: the signature against the built-in keys (`keys.rs`), the platform, a keeper executable and a
@@ -56,8 +60,9 @@ pub fn version_dir(data: &Path, version: &str) -> PathBuf {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
     /// `<data>/content/<version>/centralu-keeper`: started by the shell, or handed to by a keeper that
-    /// was. Every handoff from here verifies the next content first.
-    Content { dir: PathBuf, version: String },
+    /// was, or started by a Linux window from the copy it made. With `signed`, every handoff from
+    /// here verifies the next content first.
+    Content { dir: PathBuf, version: String, signed: bool },
     /// Anything else: the window's bundle, a debug build, a test's build folder.
     Direct,
 }
@@ -68,6 +73,21 @@ impl Origin {
         match self {
             Origin::Content { dir, .. } => Some(dir),
             Origin::Direct => None,
+        }
+    }
+
+    /// Whether a handoff from here takes only signed content (`server::content_route`).
+    pub fn signed(&self) -> bool {
+        matches!(self, Origin::Content { signed: true, .. })
+    }
+
+    /// The same origin where every content folder must be signed: on an OS whose release signs its
+    /// content (`start_plan::Os::signs_content`), a folder without a signature is no reason to take
+    /// a window's word for the next keeper.
+    pub fn requiring_signature(self, required: bool) -> Origin {
+        match self {
+            Origin::Content { dir, version, signed } => Origin::Content { dir, version, signed: signed || required },
+            o => o,
         }
     }
 }
@@ -86,13 +106,16 @@ pub fn origin_of(exe: &Path, data: &Path) -> Origin {
     if dir.parent() != Some(content_root(&resolve(data)).as_path()) || Version::parse(version).is_err() {
         return Origin::Direct;
     }
-    Origin::Content { dir: version_dir(data, version), version: version.to_string() }
+    // Signed content is written by a verifier, which never places a folder without its signature.
+    let signed = dir.join(content_verify::SIGNATURE_NAME).is_file();
+    Origin::Content { dir: version_dir(data, version), version: version.to_string(), signed }
 }
 
 /// The running keeper's own origin.
 pub fn own_origin(data: &Path) -> Origin {
+    let required = crate::start_plan::Os::current().signs_content();
     match std::env::current_exe() {
-        Ok(exe) => origin_of(&exe, data),
+        Ok(exe) => origin_of(&exe, data).requiring_signature(required),
         Err(_) => Origin::Direct,
     }
 }

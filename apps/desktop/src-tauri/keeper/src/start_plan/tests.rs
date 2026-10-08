@@ -150,9 +150,9 @@ fn every_row_of_the_start_table() {
         ("Linux release: direct, the bundled host", packaged(LINUX), Direct, Some(Bundle), false, Reason::KeeperOptIn),
         ("Linux debug: direct, the source host", window(LINUX, DEBUG), Direct, Some(Source), true, Reason::KeeperOptIn),
         (
-            "Linux release, CC_USE_KEEPER=1: the keeper beside the window (no shell)",
+            "Linux release, CC_USE_KEEPER=1: the keeper from the window's copy of it (no shell, FI4)",
             env(packaged(LINUX), USE_KEEPER),
-            KeeperBeside,
+            Keeper,
             Some(Bundle),
             false,
             Reason::NoShellHere,
@@ -256,6 +256,10 @@ fn legacy(f: &Facts) -> (StartMode, Option<Host>, bool) {
     // KeeperLink::launch_keeper: a debug build starts itself in-process, else `exe::to_start`
     let mode = if !release {
         StartMode::KeeperInProcess
+    } else if f.keeper_beside && !macos {
+        // Changed on purpose by runtime-unification step 4: a Linux window copies the keeper out of
+        // its AppImage and starts it from the copy (FI4).
+        StartMode::Keeper
     } else if f.keeper_beside {
         StartMode::KeeperBeside
     } else {
@@ -298,4 +302,13 @@ fn the_plan_is_the_code_it_replaced() {
         }
     }
     assert_eq!(n, 2 * 3 * 2 * 3 * 3 * 128);
+}
+
+/// Only macOS's release signs content (`scripts/release-npm.mts`). A Linux keeper from a copy its
+/// window made hands over to the copy the next window names; a macOS one never does (`content.rs`).
+#[test]
+fn only_the_macos_release_signs_content() {
+    assert!(MAC.signs_content());
+    assert!(!LINUX.signs_content());
+    assert!(!WIN.signs_content());
 }

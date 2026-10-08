@@ -185,7 +185,7 @@ fn complete(dir: &Path) -> bool {
     dir.join("main.mjs").is_file() && dir.join("bundle-info.json").is_file()
 }
 
-fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
+pub(super) fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     fs::DirBuilder::new().mode(0o700).create(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;

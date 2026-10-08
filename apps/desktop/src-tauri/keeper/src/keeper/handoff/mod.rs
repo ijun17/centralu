@@ -699,7 +699,8 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
     server::log_origin(&keeper.origin);
     // A keeper from verified content serves now: its version is the new downgrade floor, as the shell
     // records it once a keeper it started answers (thin-shell plan §3, §10 step 5). Only ever raised.
-    if let content::Origin::Content { version, .. } = &keeper.origin {
+    // Not from an unsigned copy: the floor guards signed content, which a Linux copy is not (FI4).
+    if let content::Origin::Content { version, signed: true, .. } = &keeper.origin {
         if let Err(e) = record_started(&content::floor_path(&keeper.data), version, Rollback::Refuse) {
             server::log(&format!("could not record {version} as started: {e}"));
         }

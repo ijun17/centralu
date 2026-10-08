@@ -1217,15 +1217,27 @@ and a debug keeper then died of SIGBUS when asked to stop, most likely at a page
 §6). The same holds for the host and every terminal.
 Rule: the keeper and the host run from plain files under `<data>/content/<version>/`, copied out before a keeper starts
 or a switch is asked; once nothing runs from the mount, inherited descriptors that are not the handoff channel are
-closed.
-Guard: **UNGUARDED** (not fixed yet).
-Platforms: Linux.
+closed. The copy is not signed (the release signs Linux content only once plan §8 decision 1 says so): it is hashed
+after copying, checked against the keeper and build stamp read from the source, renamed into place and made
+read-only, reused only while every file matches its manifest, and never replaced while a keeper may run from it.
+Guard: `keeper/keeper/carried/tests.rs` `the_keeper_and_host_are_copied_into_content_read_only_with_their_exec_bits`;
+`keeper/keeper/carried/tests.rs` `a_damaged_copy_is_copied_again_only_when_nothing_may_run_from_it`;
+`keeper/keeper/carried/tests.rs` `another_build_of_the_same_version_replaces_the_copy_only_when_nothing_may_run_from_it`;
+`keeper/keeper/server.rs` `a_switch_takes_signed_content_only_from_a_keeper_in_verified_content` (an unsigned copy hands
+over to the next copy; on macOS a folder without a signature still verifies first); `start_plan/tests.rs` "Linux
+release, CC_USE_KEEPER=1"; `scripts/keeper-integration.mjs` `from-a-copy` (the descriptors a window hands over are
+released by a keeper from content and its host, and held by one started elsewhere; `keeper e2e (linux)` runs it).
+Not covered: the window's copy step itself runs only in the real window on Linux (plan step 4b's manual run).
+Platforms: Linux. *Changed by runtime-unification step 4.*
 
 **FI5. The AppImage's environment leaks into children.**
 Happened: the AppRun sets GDK, GTK, `XDG_DATA_DIRS` and `APPDIR`, which reach terminals and agents (#14 audit).
-Rule: a child's environment does not carry the AppImage runtime's variables.
-Guard: **UNGUARDED** (not fixed).
-Platforms: Linux.
+Rule: a child's environment does not carry the AppImage runtime's variables: a keeper from content drops `APPDIR`,
+`APPIMAGE`, `ARGV0`, `OWD` and every `:`-separated entry inside the mount before it starts anything.
+Guard: `keeper/keeper/appimage.rs` `nothing_that_points_into_the_mount_is_left`; `scripts/keeper-integration.mjs`
+`from-a-copy` (the host's environment). The direct path, Linux's default until plan step 4b, still passes them on
+(work list row 56).
+Platforms: Linux. *Changed by runtime-unification step 4.*
 
 **FI6. The Linux host ships unpacked.**
 Happened: the host inside the AppImage needs FUSE, which servers often lack (#390).
@@ -1785,8 +1797,7 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 52 | HD9: B takes over after `ready` only if A is gone | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
 | 53 | HD11: A reaps at the commit and B completes those children | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
 | 54 | HD12: a rolled-back handoff still runs the host swap | `keeper/keeper/server.rs` | macOS, Linux | 5 |
-| 55 | FI4: nothing long-lived runs from the AppImage mount | `keeper/keeper/source.rs`, the window's start | Linux | 4 |
-| 56 | FI5: the AppImage's variables do not reach children | `host/` spawn sites | Linux | 4 |
+| 56 | FI5 on the direct path: the AppImage's variables still reach the host the window starts itself | `window/sidecar.rs` | Linux | 4b |
 | 57 | TC2: the responsible process (manual probe, per shell version and major macOS) | `window/shell/` | macOS | 6 |
 | 58 | TC3: a nested shell loses Screen Recording (manual) | `window/shell/` | macOS | 6 |
 | 59 | TC4: no extended attributes copied with the shell | `window/shell/install.rs` | macOS | 6 |
