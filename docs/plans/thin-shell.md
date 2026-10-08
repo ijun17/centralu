@@ -178,6 +178,10 @@ About shows both: "Centralu 0.1.0-beta.13 (shell 1)".
 
 ## 8. Later, and going back
 
+- **The shell's icon is part of its pinned bytes.** Changing the app icon (#383) changes the window only; the
+  icon System Settings and the permission prompts show stays the shell's until a new shell version, which asks
+  everyone for their grants once more. So a new icon ships together with shell v2 and any other pending shell
+  change, before 1.0, as one reset.
 - **UI-only updates** and **smaller downloads** become possible once the window loads the UI from verified content
   rather than embedding it. Not part of this plan.
 - **With a Developer ID**, macOS identifies the window by team and bundle id, and the shell is no longer needed for
