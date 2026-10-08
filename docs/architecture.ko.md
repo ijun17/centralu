@@ -49,6 +49,16 @@
 
 핵심은 이것이다: **구현을 아는 유일한 곳은 apps 엔트리 포인트다.** 나머지 전부는 인터페이스와 스키마만 안다.
 
+**어느 OS인지는 플랫폼 모듈에서만 묻는다** (`local/platform-checks`, `tooling/eslint-platform-checks.js`). 패키지, 앱,
+npm 런처에서 `process.platform`(또는 `os.platform()`)을 읽거나 무엇이든 OS 이름과 비교하는 것(`=== 'win32'`,
+`case 'darwin':`)은 `eslint.config.js`의 `PLATFORM_MODULES` 밖에서는 린트 에러다: `os.ts`(다른 점의 이름으로 묻는
+호스트의 질문들: `hasPs`, `clonesFiles`, `locksRunningPrograms`, `pathsOf`, `installedCopyPath`), `env-path.ts`와
+`tool-launch.ts`(도구 찾기와 띄우기), `dev-services/kill-tree.ts`(프로세스 트리 끝내기, `hasProcessGroups`),
+`dev-services/terminal.ts`(셸), `adapters/claude/exe-link.ts`(Windows에서 Claude Code 띄우기, `windowsStart`), 그리고
+런처의 `platform.mjs`. 다른 곳의 코드는 그중 하나에 다른 점의 이름으로 묻는다. 그래서 OS마다의 답은 한 번만 쓰이고, 새
+OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 검사하지 않는다. 호스트가 뜨는 방식에 대한 Rust 쪽의 짝은
+`start_plan`이다([agent-host.md](agent-host.md) §4.0).
+
 ## 3. 사용한 설계 패턴 — 어디에, 왜
 
 패턴은 장식이 아니라 변경 축(C1~C6)에 대한 방어 수단이다. 각 패턴이 어느 축을 막는지 명시한다.

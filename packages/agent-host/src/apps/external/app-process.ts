@@ -4,7 +4,7 @@ import type { Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client'
 import { CLIENT_INFO } from '@cc/protocol'
-import { KILL_GRACE_MS, collectOrphansWindows, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, collectOrphansWindows, hasProcessGroups, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
 import { rotateIfLarge } from '../../log-file.js'
 import { resolveCommand } from '../../tool-launch.js'
 import { StreamTransport } from './stream-transport.js'
@@ -163,7 +163,7 @@ export class AppProcess {
        * has no groups to gain, and its tree is ended with `taskkill /T` (kill-tree.ts). Attached and
        * hidden, the app shares the host's windowless console.
        */
-      detached: process.platform !== 'win32',
+      detached: hasProcessGroups(),
       windowsHide: true,
     })
     const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs, spawnedAt)
@@ -239,7 +239,7 @@ export class AppProcess {
         this.signalOwnGroup()
       }
       this.fd3?.destroy()
-      const leftovers = process.platform === 'win32' && !this.alive ? this.collectLeftovers() : null
+      const leftovers = !hasProcessGroups() && !this.alive ? this.collectLeftovers() : null
       this.leftovers = leftovers
       if (leftovers && opts.awaitTree) await leftovers
       // The log stays open for the leftovers' note, if they are collected after this returns

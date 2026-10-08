@@ -3,6 +3,33 @@ import tseslint from 'typescript-eslint'
 import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
+import platformChecks from './tooling/eslint-platform-checks.js'
+
+/**
+ * The modules that may ask which OS this is, each owning one subject (docs/architecture.md §2). A new
+ * entry is a new subject, not a place to park a check.
+ */
+export const PLATFORM_MODULES = [
+  // The host's questions named for what differs: `ps`, clonefile, locked programs, path rules, install paths
+  'packages/agent-host/src/os.ts',
+  // Finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims, absolute paths)
+  'packages/agent-host/src/env-path.ts',
+  'packages/agent-host/src/tool-launch.ts',
+  // Ending a process tree: groups and signals, or taskkill and parent links
+  'packages/agent-host/src/dev-services/kill-tree.ts',
+  // The terminal's and the Run button's shell
+  'packages/agent-host/src/dev-services/terminal.ts',
+  // How Claude Code is started on Windows (#353)
+  'packages/agent-host/src/adapters/claude/exe-link.ts',
+  // The npm launcher's platform layer
+  'packaging/npm/centralu/bin/platform.mjs',
+  // TODO: move the launcher's own checks into platform.mjs once remote phase 3's launcher work has
+  // landed (it is changing serve.mjs and centralu.mjs now); listed so that work is not blocked.
+  'packaging/npm/centralu/bin/centralu.mjs',
+  'packaging/npm/centralu/bin/serve.mjs',
+  // TODO: remote phase 3 is changing the hub's links; revisit what platform checks they need then.
+  'packages/agent-host/src/links/**',
+]
 
 /** The layer rules originate in docs/architecture.md §2. This is the machine-enforced version. */
 export default tseslint.config(
@@ -182,4 +209,15 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   { files: ['**/*.test.ts', '**/*.test.tsx', 'e2e/**/*'], rules: { '@typescript-eslint/no-explicit-any': 'off' } },
+  /*
+   * Which OS this is gets asked only in a platform module (tooling/eslint-platform-checks.js). The
+   * shipped code is checked: the packages, the apps and the npm launcher. Tests skip cases by OS,
+   * and build and release scripts are about one platform's artifacts, so neither is.
+   */
+  {
+    files: ['packages/*/src/**/*.{ts,tsx,mts,mjs}', 'apps/*/src/**/*.{ts,tsx}', 'packaging/**/*.mjs'],
+    ignores: ['**/*.test.{ts,tsx}', ...PLATFORM_MODULES],
+    plugins: { local: platformChecks },
+    rules: { 'local/platform-checks': 'error' },
+  },
 )

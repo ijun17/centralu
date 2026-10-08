@@ -38,7 +38,7 @@ import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
 import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
-import { ClaudeLinks, ClaudePlaceholderError, type ExeFs } from './exe-link.js'
+import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
@@ -288,7 +288,8 @@ function refreshRaceText(m: RaceMsg): string | null {
  * program runs from, the spacing between starts, and the processes still closing.
  */
 type ClaudeLaunch = {
-  platform: NodeJS.Platform
+  /** Claude Code is started the Windows way (`windowsStart`) */
+  windows: boolean
   /** The `claude` found on PATH, as the SDK takes it */
   executable: () => string | null
   links: ClaudeLinks
@@ -1322,13 +1323,14 @@ export class ClaudeAdapter implements AgentAdapter {
   private readonly launch: ClaudeLaunch
 
   constructor(options: ClaudeAdapterOptions = {}) {
-    const platform = options.platform ?? process.platform
+    const platform = options.platform
+    const windows = windowsStart(platform)
     const executable = options.executable ?? (() => toolExecutable('claude'))
     this.launch = {
-      platform,
+      windows,
       executable,
       links: new ClaudeLinks({ platform, root: options.dataRoot ?? dataRoot, fs: options.fs }),
-      gate: new StartGate(options.startGapMs ?? (platform === 'win32' ? WINDOWS_START_GAP_MS : 0)),
+      gate: new StartGate(options.startGapMs ?? (windows ? WINDOWS_START_GAP_MS : 0)),
       retryDelay: options.retryDelay ?? (() => 3000 + Math.floor(Math.random() * 3000)),
       closing: new Set(),
       exitGraceMs: options.exitGraceMs ?? 1500,
@@ -1338,7 +1340,7 @@ export class ClaudeAdapter implements AgentAdapter {
      * Code would start from. Nothing runs from them any more — the processes of the previous host
      * ended with it, and removing a name never disturbs a process still running from it.
      */
-    if (platform === 'win32') {
+    if (windows) {
       this.launch.links.keep(executable())
       this.launch.links.sweep()
     }
@@ -1400,7 +1402,7 @@ export class ClaudeAdapter implements AgentAdapter {
        * link, placed here already, so the first session does not wait for it, and npm's file is never
        * the one held. npm's placeholder is named as what it is, with the fix, rather than "not found".
        */
-      const exe = this.launch.platform === 'win32' ? this.launch.executable() : null
+      const exe = this.launch.windows ? this.launch.executable() : null
       if (exe && /\.exe$/i.test(exe)) {
         try {
           launch = { command: this.launch.links.prepare(exe).path, args: [] }
@@ -1487,7 +1489,7 @@ export class ClaudeAdapter implements AgentAdapter {
    * nothing waits: the SDK sends them SIGTERM on the host's exit, which they handle.
    */
   async settle(): Promise<void> {
-    if (this.launch.platform !== 'win32' || this.launch.closing.size === 0) return
+    if (!this.launch.windows || this.launch.closing.size === 0) return
     let timer: ReturnType<typeof setTimeout> | undefined
     await Promise.race([
       Promise.allSettled([...this.launch.closing]),

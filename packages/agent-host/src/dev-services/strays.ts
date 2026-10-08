@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { userInfo } from 'node:os'
 import { wireSegments } from '@cc/protocol'
+import { hasPs } from '../os.js'
 
 const exec = promisify(execFile)
 
@@ -200,7 +201,7 @@ export async function findStrays(
   selfPid = process.pid,
   held: readonly number[] = [],
 ): Promise<StrayProcess[]> {
-  if (process.platform === 'win32' || roots.length === 0) return []
+  if (!hasPs() || roots.length === 0) return []
   const rows = await psRows()
   const candidates = rows.filter((r) => r.pid > 1 && noTty(r.tty)).map((r) => r.pid)
   const cwdOf = await cwdsOf(candidates)

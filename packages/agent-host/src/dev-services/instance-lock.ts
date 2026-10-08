@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
+import { hasPs } from '../os.js'
 
 /**
  * Only one host per data folder.
@@ -71,7 +72,7 @@ function alive(pid: number): boolean {
  * would be misread as someone else's and its lock stolen, so this is pinned to C.
  */
 export function processStartTime(pid: number): string | null {
-  if (process.platform === 'win32') return null
+  if (!hasPs()) return null
   try {
     const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
@@ -124,7 +125,7 @@ function stillHeld(holder: Holder, startOf: (pid: number) => string | null): boo
 export function acquireInstanceLock(
   dbPath: string,
   startOf: (pid: number) => string | null = processStartTime,
-  legacyFile: boolean = process.platform !== 'win32',
+  legacyFile: boolean = hasPs(),
 ): LockResult {
   // an in-memory database is never shared
   if (dbPath === ':memory:') return { ok: true, release: () => {} }

@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
-import { posix, win32 } from 'node:path'
 import { promisify } from 'node:util'
 import { parseCliVersion } from '@cc/protocol'
 import { whichTool } from './env-path.js'
+import { HOST_PLATFORM, locksRunningPrograms, pathsOf } from './os.js'
 import { launchFor, type ToolLaunch } from './tool-launch.js'
 
 const exec = promisify(execFile)
@@ -37,7 +37,7 @@ export type CliVersionDeps = {
 }
 
 const realDeps = (): CliVersionDeps => ({
-  platform: process.platform,
+  platform: HOST_PLATFORM,
   which: (name) => whichTool(name),
   launch: (path) => launchFor(path),
   realpath: (path) => realpathSync(path),
@@ -53,7 +53,7 @@ const PACKAGE_DEPTH = 3
  * or null. The name must match: a folder above a hand-installed binary can hold any package.
  */
 export function npmPackageVersion(file: string, packageName: string, deps: Pick<CliVersionDeps, 'platform' | 'realpath' | 'read'>): string | null {
-  const path = deps.platform === 'win32' ? win32 : posix
+  const path = pathsOf(deps.platform)
   let real = file
   try {
     // A symlink (`/opt/homebrew/bin/claude` → `…/@anthropic-ai/claude-code/bin/claude.exe`) is read where it points
@@ -84,7 +84,7 @@ export async function installedCliVersion(name: string, packageName: string, dep
   const file = launch.args[0] ?? launch.command
   const fromNpm = npmPackageVersion(file, packageName, deps)
   if (fromNpm) return fromNpm
-  const path = deps.platform === 'win32' ? win32 : posix
+  const path = pathsOf(deps.platform)
   let real = file
   try {
     real = deps.realpath(file)
@@ -93,7 +93,7 @@ export async function installedCliVersion(name: string, packageName: string, dep
   }
   const named = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.exec(path.basename(real).replace(/\.exe$/i, ''))
   if (named) return named[0]
-  if (deps.platform === 'win32') return null
+  if (locksRunningPrograms(deps.platform)) return null
   try {
     return parseCliVersion(await deps.run(launch.command, [...launch.args, '--version']))
   } catch {

@@ -4,6 +4,7 @@ import type { Readable, Writable } from 'node:stream'
 import {
   KILL_GRACE_MS,
   collectOrphansWindows,
+  hasProcessGroups,
   killTree,
   stopGroup,
   stopTree,
@@ -78,7 +79,6 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   }
 
   static spawn(spec: LocalSpawnSpec, os?: LocalProcessOs): LocalAgentProcess {
-    const platform = os?.platform ?? process.platform
     const child = spawn(spec.command, spec.args, {
       cwd: spec.cwd,
       env: spec.env,
@@ -87,7 +87,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
        * A group of its own, which its helpers join. Not on Windows: there `detached` means a process
        * with no console, whose every console child opens a visible window (app-process.ts).
        */
-      detached: platform !== 'win32',
+      detached: hasProcessGroups(os?.platform),
       windowsHide: true,
     })
     const p = new LocalAgentProcess(child, os)
@@ -119,8 +119,9 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     return this.child.exitCode !== null || this.child.signalCode !== null
   }
 
-  private get platform(): NodeJS.Platform {
-    return this.os?.platform ?? process.platform
+  /** Whether the CLI got a group of its own (`hasProcessGroups`) */
+  private get grouped(): boolean {
+    return hasProcessGroups(this.os?.platform)
   }
 
   private handle(): KillablePty {
@@ -134,7 +135,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
     if (this.ended || this.child.pid === undefined) return false
     this.killed = true
-    if (this.platform === 'win32' || signal === 'SIGKILL') killTree(this.handle(), 'SIGKILL', this.os)
+    if (!this.grouped || signal === 'SIGKILL') killTree(this.handle(), 'SIGKILL', this.os)
     else if (signal === 'SIGTERM') stopTree(this.handle(), KILL_GRACE_MS, () => !this.ended, this.os)
     else {
       try {
@@ -163,7 +164,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   private sweep(): void {
     const pid = this.child.pid
     if (pid === undefined) return
-    if (this.platform !== 'win32') return stopGroup(pid, KILL_GRACE_MS)
+    if (this.grouped) return stopGroup(pid, KILL_GRACE_MS)
     const root = { pid, spawnedAt: this.spawnedAt, exitedAt: Date.now() }
     void collectOrphansWindows(root, this.os?.listProcesses ? { listProcesses: this.os.listProcesses, taskkill: this.os.taskkill } : undefined)
       .then((ended) => {
