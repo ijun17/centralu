@@ -62,7 +62,7 @@ fn the_tree_hash_is_the_one_the_release_staging_writes() {
     fs::set_permissions(d.join("Contents/MacOS/centralu-shell"), fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(tree_hash(&d).unwrap(), "5c1c77146a6637356af8fb36a975dd7d4efac09faee11d08e1b4998b8b03a899");
     fs::set_permissions(d.join("Contents/MacOS/centralu-shell"), fs::Permissions::from_mode(0o644)).unwrap();
-    assert_ne!(tree_hash(&d).unwrap(), "5c1c77146a6637356af8fb36a975dd7d4efac09faee11d08e1b4998b8b03a899", "the execute bit counts");
+    assert_eq!(tree_hash(&d).unwrap(), "e020dc9eec8f3e19451a575081eef289f4f1a1095fe6b0ba66d2aeab343970e9", "the execute bit counts");
     std::os::unix::fs::symlink("Info.plist", d.join("Contents/link")).unwrap();
     assert!(tree_hash(&d).is_err(), "a symlink is refused");
 }

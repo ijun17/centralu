@@ -93,16 +93,37 @@ describe('where the bundle carries the shell and the content', () => {
 describe('the hash of the shell bundle', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cc-tree-'))
   afterAll(() => rmSync(dir, { recursive: true, force: true }))
-
-  it('is the one the window computes (the Rust test hashes the same tree to the same value)', () => {
+  const exe = join(dir, 'Contents/MacOS/centralu-shell')
+  /** The fixed tree, written here rather than checked out, so no line-ending conversion can touch it */
+  const tree = () => {
     mkdirSync(join(dir, 'Contents/MacOS'), { recursive: true })
     mkdirSync(join(dir, 'Contents/Empty'), { recursive: true })
     writeFileSync(join(dir, 'Contents/Info.plist'), 'plist\n')
-    writeFileSync(join(dir, 'Contents/MacOS/centralu-shell'), 'exe\n')
-    chmodSync(join(dir, 'Contents/MacOS/centralu-shell'), 0o755)
-    expect(treeHash(dir)).toBe('5c1c77146a6637356af8fb36a975dd7d4efac09faee11d08e1b4998b8b03a899')
-    chmodSync(join(dir, 'Contents/MacOS/centralu-shell'), 0o644)
-    expect(treeHash(dir)).not.toBe('5c1c77146a6637356af8fb36a975dd7d4efac09faee11d08e1b4998b8b03a899')
+    writeFileSync(exe, 'exe\n')
+  }
+  /** Both files without an execute bit */
+  const PLAIN = 'e020dc9eec8f3e19451a575081eef289f4f1a1095fe6b0ba66d2aeab343970e9'
+  /** The same tree with centralu-shell executable */
+  const WITH_EXEC = '5c1c77146a6637356af8fb36a975dd7d4efac09faee11d08e1b4998b8b03a899'
+
+  it('is the one the window computes, for files, paths and their order (the Rust test hashes the same trees)', () => {
+    tree()
+    chmodSync(exe, 0o644)
+    expect(treeHash(dir)).toBe(PLAIN)
+  })
+
+  /*
+   * Windows has no execute bit: Node reports a file's mode from its read-only attribute alone, and
+   * `chmod 0o755` cannot set one, so there the executable reads as plain (the failure this guards
+   * against was exactly that: PLAIN where WITH_EXEC was expected). The hash only ever runs on macOS,
+   * in the window and in the release staging, where the bit is real and part of what is pinned.
+   */
+  it.skipIf(process.platform === 'win32')('counts the execute bit, where the file system has one', () => {
+    tree()
+    chmodSync(exe, 0o755)
+    expect(treeHash(dir)).toBe(WITH_EXEC)
+    chmodSync(exe, 0o644)
+    expect(treeHash(dir)).toBe(PLAIN)
   })
 })
 
