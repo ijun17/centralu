@@ -22,16 +22,22 @@ import { useEffect, useState } from 'react'
  * Remembered through state adjusted during render, React's pattern for keeping something from a
  * previous render.
  *
+ * One layer can open another and close with it: Git chosen in the palette opens over the palette's
+ * field, which is what held focus when the overlay opened, and which is gone by the time the overlay
+ * closes. So what is kept is not one element but the recent ones, most recent last (`recent`, fed by
+ * one capture listener on the document), and focus goes to the latest of them still usable: past
+ * the palette's field, to the composer it was opened from.
+ *
  * Given back in a passive (`useEffect`) cleanup: it runs after React has removed the layer's DOM,
  * so `document.activeElement` already tells whether focus fell out. A layout cleanup runs while the
  * layer and its focused element are still in the document.
  */
 export function useFocusReturn(open: boolean): void {
   const [wasOpen, setWasOpen] = useState(false)
-  const [before, setBefore] = useState<Element | null>(null)
+  const [before, setBefore] = useState<readonly Element[]>([])
   if (open !== wasOpen) {
     setWasOpen(open)
-    setBefore(open && typeof document !== 'undefined' ? document.activeElement : null)
+    setBefore(open ? focusedSoFar() : [])
   }
   useEffect(() => {
     if (!open) return
@@ -41,13 +47,45 @@ export function useFocusReturn(open: boolean): void {
   }, [open, before])
 }
 
-/** Puts focus back on `before` if focus has fallen to the page since. Returns whether it did */
-export function returnFocus(before: Element | null): boolean {
+/**
+ * The elements that held focus lately, oldest first. Few, and the ones that left the document are
+ * dropped on every focus, so this never holds a closed screen's DOM alive for long.
+ */
+const RECENT = 16
+let recent: Element[] = []
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener(
+    'focusin',
+    () => {
+      const now = document.activeElement
+      recent = recent.filter((el) => el.isConnected && el !== now)
+      if (now) recent.push(now)
+      if (recent.length > RECENT) recent.shift()
+    },
+    true,
+  )
+}
+
+/** What held focus up to now, the element holding it last */
+function focusedSoFar(): Element[] {
+  if (typeof document === 'undefined') return []
+  const now = document.activeElement
+  return now && now !== recent.at(-1) ? [...recent, now] : [...recent]
+}
+
+/**
+ * Puts focus back on the latest of `before` still in the document, if focus has fallen to the page
+ * since. Returns whether it did.
+ */
+export function returnFocus(before: readonly Element[]): boolean {
   if (typeof document === 'undefined') return false
-  if (!(before instanceof HTMLElement) || before === document.body || !before.isConnected) return false
   const now = document.activeElement
   if (now && now !== document.body && now.isConnected) return false
-  if (before.closest('[inert]')) return false
-  before.focus({ preventScroll: true })
-  return document.activeElement === before
+  for (let i = before.length - 1; i >= 0; i--) {
+    const el = before[i]
+    if (!(el instanceof HTMLElement) || el === document.body || !el.isConnected || el.closest('[inert]')) continue
+    el.focus({ preventScroll: true })
+    if (document.activeElement === el) return true
+  }
+  return false
 }

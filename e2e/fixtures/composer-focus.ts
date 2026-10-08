@@ -53,6 +53,25 @@ export function composerFocusTests(): void {
       await expect(input).toHaveValue('ab')
     })
 
+    test('after one layer opens another: Git from the palette, then closed', async ({ page }) => {
+      const input = await typing(page)
+      await page.keyboard.press('ControlOrMeta+k')
+      await expect(page.getByTestId('palette-input')).toBeFocused()
+      await page.keyboard.type('Open Git')
+      await page.keyboard.press('Enter')
+      const overlay = page.getByTestId('overlay')
+      await expect(overlay).toBeVisible()
+      // A click inside takes focus off the composer, into the overlay or onto the page
+      await overlay.click({ position: { x: 40, y: 120 } })
+      await expect(input).not.toBeFocused()
+      await page.keyboard.press('Escape')
+      await expect(overlay).toBeHidden()
+      // The overlay opened while the palette's field held focus, and that field is gone: the
+      // keyboard goes back past it to the composer
+      await page.keyboard.type('b')
+      await expect(input).toHaveValue('ab')
+    })
+
     test('after the settings screen is opened from the composer, clicked in, and closed', async ({ page }) => {
       const input = await typing(page)
       await page.keyboard.press('Backspace')
