@@ -53,6 +53,7 @@ import {
   runStop,
   SERVE_HELP,
 } from './serve.mjs'
+import { swapInto } from './swap.mjs'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -272,13 +273,14 @@ function install() {
   const app = requireApp()
   if (PLATFORM === 'win32') return installWindows(app)
   if (PLATFORM !== 'darwin') return installDesktopEntry(app)
-  if (existsSync(INSTALLED)) {
-    console.log(`Replacing the existing ${INSTALLED} with the new version.`)
-    rmSync(INSTALLED, { recursive: true, force: true })
-  }
-  // ditto, not cp — carries over the bundle's permissions and extended attributes unchanged
-  // (so the signature does not break).
-  execFileSync('/usr/bin/ditto', [app, INSTALLED], { stdio: 'inherit' })
+  if (existsSync(INSTALLED)) console.log(`Replacing the existing ${INSTALLED} with the new version.`)
+  // Copied beside the old one and swapped in by rename (swap.mjs): a copy that fails leaves the
+  // old app in place rather than none. ditto, not cp — carries over the bundle's permissions and
+  // extended attributes unchanged (so the signature does not break).
+  const { leftAt } = swapInto(INSTALLED, (staging) => {
+    execFileSync('/usr/bin/ditto', [app, staging], { stdio: 'inherit' })
+  })
+  if (leftAt) console.log(`The previous copy could not be removed and was left at ${leftAt}. Delete it yourself.`)
   console.log(`Installed: ${INSTALLED}`)
   console.log('It can now be found in Launchpad and Spotlight too.')
 }

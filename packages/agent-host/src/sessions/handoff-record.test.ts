@@ -85,6 +85,31 @@ describe('the handoff record builder (#102)', () => {
     expect(text).toContain("earlier material stays in the app's records")
   })
 
+  it('filling the cap measures each entry once, not once per dropped entry', () => {
+    // A long text-only transcript runs the cap loop once per row it drops. Re-measuring every
+    // kept row on each pass is quadratic: 200k rows held the host's main thread for minutes.
+    // Counting the measurements keeps this off the wall clock.
+    const rows: StoredMessage[] = []
+    for (let i = 1; i <= 5_000; i++) rows.push(row(i, 'assistant', 'text', { text: `line ${i} ` + 'x'.repeat(100) }))
+    const original = Buffer.byteLength
+    let measured = 0
+    Buffer.byteLength = ((...args: Parameters<typeof Buffer.byteLength>) => {
+      if (++measured > 10 * rows.length) throw new Error(`measured ${measured} times for ${rows.length} rows`)
+      return original(...args)
+    }) as typeof Buffer.byteLength
+    let text: string
+    try {
+      text = buildHandoffRecord({ ...base, rows, cap: 20_000 })
+    } finally {
+      Buffer.byteLength = original
+    }
+
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(20_000)
+    expect(text).toContain('[assistant] line 5000 ')
+    expect(text).not.toContain('[assistant] line 1 ')
+    expect(text).toMatch(/covers seq [\d,]+–5,000 of 5,000/)
+  })
+
   it('the default cap is 2MB, and an ordinary session never touches the cap', () => {
     const rows: StoredMessage[] = []
     for (let i = 1; i <= 500; i++) rows.push(row(i, 'assistant', 'text', { text: `line ${i}` }))

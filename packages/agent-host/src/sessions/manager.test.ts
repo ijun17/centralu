@@ -4692,6 +4692,34 @@ describe("a handoff note does not race its reader (#106)", () => {
     expect(existsSync(note(dying.id))).toBe(true)
   })
 
+  it('a sweep already under way does not judge a note by who owned it when the sweep began', async () => {
+    const p = await project()
+    const handing = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
+    placeNote(handing.id)
+    const other = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
+    await mgr.trashSession(other.id)
+
+    // Purging another session sweeps the project's notes. While that sweep reads the folder, the person
+    // moves the note's session to the trash, which keeps its note (#204).
+    const claimed = store.handoffPredecessors.bind(store)
+    let trashing: Promise<void> | undefined
+    const spy = vi.spyOn(store, 'handoffPredecessors').mockImplementation(() => {
+      trashing ??= mgr.trashSession(handing.id)
+      return claimed()
+    })
+    try {
+      await mgr.purgeSession(other.id)
+      // A sweep that asks per note may never need the claims for this one (it is still live when judged);
+      // the trash then lands after the sweep, which must keep the note just the same
+      await (trashing ??= mgr.trashSession(handing.id))
+    } finally {
+      spy.mockRestore()
+    }
+
+    expect(store.trashedIds().has(handing.id)).toBe(true)
+    expect(existsSync(note(handing.id))).toBe(true)
+  })
+
   it('it is swept away once the session that inherited the note is also gone — no one is left to read it', async () => {
     const p = await project()
     const dying = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
