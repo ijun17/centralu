@@ -46,6 +46,7 @@ import { usePlatform } from '../../app/PlatformProvider.js'
 import {
   anchorAt,
   decideFollow,
+  forgetUnlistedSizes,
   isAtBottom,
   isScrollUpKey,
   MOVED_UP_SLACK,
@@ -1627,6 +1628,12 @@ function ChatStream({
       if (instance.scrollElement) writeScroll(instance.scrollElement, offset, options, stickToBottom.current)
     },
   })
+  /*
+   * The focus view's pane is one instance for every session it shows, and the scroller never
+   * forgets a measured height, so its cache would keep one for every row ever shown (#392). Pruned
+   * here, during render, so the heights the next layout reads are already the list's own.
+   */
+  forgetUnlistedSizes(virtualizer.itemSizeCache, keys)
 
   /*
    * The **most recent message I sent** that has now scrolled past the top of the screen.
@@ -2322,7 +2329,12 @@ function ChatStream({
         anchoring sees, while a transform it did not; the virtualizer already keeps the view in
         place when a row above changes size, and anchoring on top of it would move it twice.
       */}
-      <div className="relative w-full [overflow-anchor:none]" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+      {/* `data-sized-rows`: how many row heights the scroller holds, read by the #392 scenario */}
+      <div
+        className="relative w-full [overflow-anchor:none]"
+        style={{ height: `${virtualizer.getTotalSize()}px` }}
+        data-sized-rows={virtualizer.itemSizeCache.size}
+      >
         {virtualizer.getVirtualItems().map((v) => (
           <div
             key={v.key}
