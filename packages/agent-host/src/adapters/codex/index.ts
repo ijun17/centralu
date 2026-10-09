@@ -20,7 +20,7 @@ import { whichTool } from '../../env-path.js'
 import { launchFor } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
-import { CodexClient } from './client.js'
+import { CodexClient, type ServerRequest } from './client.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
@@ -230,8 +230,19 @@ class CodexSession implements SessionHandle {
    * if stop is pressed very quickly, the response can arrive before the notification.
    */
   private turnId: string | null = null
-  /** Our requestId to the Codex server's request id */
-  private approvals = new Map<string, number | string>()
+  /**
+   * Turns already reported ended (`turn/completed`/`turn/failed`), the latest few. The `turn/start` response can
+   * arrive after its own turn's `turn/completed`; taking the id from that late response would bring a finished
+   * turn back as the target of Stop, and the next Stop would send `turn/interrupt` for a dead turn and say
+   * "Could not stop". Bounded: only a response still in flight can name one of these.
+   */
+  private endedTurns: string[] = []
+  /**
+   * Our requestId to the Codex server's request, with the thread and turn it was asked in. Codex ends a request
+   * itself when its turn ends or is interrupted (and says so with `serverRequest/resolved`); the card has to close
+   * with it, or an answer goes to a request id nobody is waiting on.
+   */
+  private approvals = new Map<string, { serverId: number | string; threadId: string | null; turnId: string | null }>()
   /**
    * Cards raised for app tool approval (M4 A-5) — the answer has a different shape (elicitation's
    * `{ action }`, not `{ decision }`). Only a requestId in this set gets answered as an elicitation.
@@ -476,7 +487,7 @@ class CodexSession implements SessionHandle {
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       this.threadSettings = threadSettingsOf(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
-      if (adopted) this.turnId ??= runningTurnOf(res) ?? (await this.latestRunningTurn(res))
+      if (adopted) this.takeStartedTurn(runningTurnOf(res) ?? (await this.latestRunningTurn(res)))
       /*
        * The goal is a live field (2026-09-07) — for the badge to stay accurate after a restart,
        * we ask again on resume. Older codex has no such method: a failure lies down quietly as
@@ -642,6 +653,8 @@ class CodexSession implements SessionHandle {
      */
     // Before the thread filter: a child thread's approval requests do reach us (see above), and its card needs its changes too
     this.noteFileChange(n)
+    // Also before the filter, for the same reason: a child's approval card closes with its request
+    this.noteRequestEnded(n)
     // Also before the filter: a method nobody handles is news whichever thread it came from
     this.unmapped.note(n.method)
     const from = (n.params as { threadId?: unknown } | undefined)?.threadId
@@ -658,7 +671,11 @@ class CodexSession implements SessionHandle {
     // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
     // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
     if (n.method === 'turn/started') this.turnId = turnIdOf(n.params)
-    if (n.method === 'turn/completed' || n.method === 'turn/failed') this.turnId = null
+    if (n.method === 'turn/completed' || n.method === 'turn/failed') {
+      this.turnId = null
+      const ended = turnIdOf(n.params)
+      if (ended) this.endedTurns = [...this.endedTurns.slice(-(ENDED_TURNS_KEPT - 1)), ended]
+    }
 
     // Output flows again after a reconnect — the retrying activity gives way to what was showing before it
     if (this.retrying && n.method.startsWith('item/')) {
@@ -778,6 +795,36 @@ class CodexSession implements SessionHandle {
     }
   }
 
+  /**
+   * Closes the cards of server requests Codex ended without our answer. `serverRequest/resolved` names one request
+   * (generated `ServerRequestResolvedNotification`, codex-cli 0.160.0: `{ threadId, requestId }`); a turn that ends
+   * takes every request asked in it, whether or not that notification comes. A request we answered is already out of
+   * `approvals`, so its own `serverRequest/resolved` finds nothing and closes nothing twice.
+   */
+  private noteRequestEnded(n: { method: string; params?: unknown }): void {
+    const p = (n.params ?? {}) as { threadId?: unknown; requestId?: unknown }
+    if (n.method === 'serverRequest/resolved') {
+      if (typeof p.requestId !== 'string' && typeof p.requestId !== 'number') return
+      const serverId = String(p.requestId)
+      this.closeApprovals((a) => String(a.serverId) === serverId)
+      return
+    }
+    if (n.method !== 'turn/completed' && n.method !== 'turn/failed') return
+    const turn = turnIdOf(n.params)
+    if (typeof p.threadId !== 'string' || !turn) return
+    this.closeApprovals((a) => a.threadId === p.threadId && a.turnId === turn)
+  }
+
+  /** Closes the matching cards as denied, without answering Codex: the request is already gone on its side */
+  private closeApprovals(match: (a: { serverId: number | string; threadId: string | null; turnId: string | null }) => boolean): void {
+    for (const [requestId, a] of this.approvals) {
+      if (!match(a)) continue
+      this.approvals.delete(requestId)
+      this.elicitations.delete(requestId)
+      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
+    }
+  }
+
   /** Keeps a file-change item's changes until it completes — see `fileChanges` */
   private noteFileChange(n: { method: string; params?: unknown }): void {
     const p = (n.params ?? {}) as { item?: Record<string, unknown>; itemId?: unknown; changes?: unknown }
@@ -849,7 +896,7 @@ class CodexSession implements SessionHandle {
        */
       if (typeof p.serverName === 'string' && this.appServers.has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
         const requestId = `codex-req-${++this.reqCounter}`
-        this.approvals.set(requestId, r.id)
+        this.approvals.set(requestId, requestOrigin(r))
         this.elicitations.add(requestId)
         this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
         return
@@ -903,7 +950,7 @@ class CodexSession implements SessionHandle {
     }
 
     const requestId = `codex-req-${++this.reqCounter}`
-    this.approvals.set(requestId, r.id)
+    this.approvals.set(requestId, requestOrigin(r))
     this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail })
   }
 
@@ -1054,9 +1101,7 @@ class CodexSession implements SessionHandle {
               ...this.outputSchemaParam(),
             })
             // The turn also rides along on the response — this covers the case where it arrives before the notification (the target of stop)
-            .then((res) => {
-              this.turnId ??= turnIdOf(res)
-            })
+            .then((res) => this.takeStartedTurn(turnIdOf(res)))
         )
       })
       .catch((e: Error) => {
@@ -1082,9 +1127,7 @@ class CodexSession implements SessionHandle {
         ...(this.opts.effort ? { effort: this.opts.effort } : {}),
         ...this.outputSchemaParam(),
       })
-      .then((res) => {
-        this.turnId ??= turnIdOf(res)
-      })
+      .then((res) => this.takeStartedTurn(turnIdOf(res)))
       .catch((e: Error) => {
         this.emit({
           type: 'error',
@@ -1092,6 +1135,15 @@ class CodexSession implements SessionHandle {
           error: { code: 'internal', message: e.message, retryable: true },
         })
       })
+  }
+
+  /**
+   * Takes a running turn's id from a response, unless the notifications already named one or already ended it. The
+   * response and the notifications race: `turn/started` can come after the response (Stop pressed very quickly), and
+   * `turn/completed` can come before it (a short turn), so a late response must not bring an ended turn back.
+   */
+  private takeStartedTurn(id: string | null): void {
+    if (id && !this.endedTurns.includes(id)) this.turnId ??= id
   }
 
   /**
@@ -1113,10 +1165,11 @@ class CodexSession implements SessionHandle {
     _scope?: ApprovalScope,
     matcher?: string,
   ): boolean {
-    const serverId = this.approvals.get(requestId)
+    const open = this.approvals.get(requestId)
     // This map is empty when the thread has been started fresh — a card raised before that has no id here
-    if (serverId === undefined) return false
+    if (open === undefined) return false
     this.approvals.delete(requestId)
+    const serverId = open.serverId
 
     if (this.elicitations.delete(requestId)) {
       /*
@@ -1191,6 +1244,16 @@ class CodexSession implements SessionHandle {
       this.sendsStopped = this.sendsIssued
       this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
       return
+    }
+    /*
+     * Answers this thread's open approvals with a refusal before the interrupt, the way the Claude adapter does. The
+     * interrupt ends them on Codex's side too, but only if it lands: answering them here closes the cards either way,
+     * and a refusal sent to a request the interrupt already ended is ignored. A child's request stays open, because
+     * stopping this turn does not stop the child (see `stopBackgroundTask`).
+     */
+    for (const [requestId, a] of this.approvals) {
+      if (a.threadId !== null && a.threadId !== this.threadId) continue
+      this.respondApproval(requestId, 'deny')
     }
     // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
     if (!this.threadId || !this.turnId) return
@@ -1372,6 +1435,19 @@ function runningTurnOf(res: Record<string, unknown> | undefined): string | null 
 }
 
 /** `{turn: {id}}` — the turn/started notification and the turn/start response give it in the same shape */
+/** How many ended turns `endedTurns` keeps: more than can have a `turn/start` response still in flight */
+const ENDED_TURNS_KEPT = 8
+
+/** Where a server request was asked, for closing its card when Codex ends it (see `approvals`) */
+function requestOrigin(r: ServerRequest): { serverId: number | string; threadId: string | null; turnId: string | null } {
+  const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as { threadId?: unknown; turnId?: unknown }
+  return {
+    serverId: r.id,
+    threadId: typeof p.threadId === 'string' ? p.threadId : null,
+    turnId: typeof p.turnId === 'string' ? p.turnId : null,
+  }
+}
+
 function turnIdOf(payload: unknown): string | null {
   const turn = (payload as { turn?: { id?: unknown } } | undefined)?.turn
   return typeof turn?.id === 'string' ? turn.id : null

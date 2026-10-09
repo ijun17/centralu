@@ -539,7 +539,7 @@ class ClaudeSession implements SessionHandle {
          * from #92, which exists so files from the repo cannot decide approvals. (The SDK leaves a
          * `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning line for this combination.)
          */
-        canUseTool: async (toolName: string, toolInput: Record<string, unknown>) => {
+        canUseTool: async (toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
           /*
            * **We vouch for our own tools ourselves.**
            *
@@ -628,6 +628,7 @@ class ClaudeSession implements SessionHandle {
             self.emit({ type: 'question_request', sessionId: self.sessionId, requestId, questions })
             return new Promise((resolve) => {
               self.questions.set(requestId, { resolve: resolve as (r: unknown) => void, input: toolInput })
+              self.releaseOnCancel(requestId, options?.signal)
             })
           }
           const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
@@ -647,6 +648,7 @@ class ClaudeSession implements SessionHandle {
           self.emit({ type: 'approval_request', sessionId: self.sessionId, requestId, detail })
           return new Promise((resolve) => {
             self.pending.set(requestId, { resolve: resolve as PendingApproval['resolve'], input: toolInput })
+            self.releaseOnCancel(requestId, options?.signal)
           })
         },
       },
@@ -1243,6 +1245,33 @@ class ClaudeSession implements SessionHandle {
    */
   private releaseAgents(why: string): void {
     for (const e of this.stream.release(why)) this.emit(e)
+  }
+
+  /**
+   * Closes a card when the CLI withdraws its question. The SDK aborts the callback's `signal` when the CLI sends
+   * `control_cancel_request` for that permission request (the tool was aborted, or the turn ended without our Stop)
+   * and when the query closes. Nothing else tells us: without this the card stayed open forever, and answering it
+   * resolved a promise nobody was waiting on. A card already answered or released is no longer in its map, so this
+   * closes nothing twice.
+   */
+  private releaseOnCancel(requestId: string, signal: AbortSignal | undefined): void {
+    if (!signal) return
+    const release = () => {
+      const approval = this.pending.get(requestId)
+      if (approval) {
+        this.pending.delete(requestId)
+        approval.resolve({ behavior: 'deny', message: 'Cancelled by Claude Code' })
+        this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
+      }
+      const question = this.questions.get(requestId)
+      if (question) {
+        this.questions.delete(requestId)
+        question.resolve({ behavior: 'deny', message: 'Cancelled by Claude Code' })
+        this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
+      }
+    }
+    if (signal.aborted) release()
+    else signal.addEventListener('abort', release, { once: true })
   }
 
   /** Releases a choice that was still waiting on an answer — **never released silently**, for the same reason as approval. */

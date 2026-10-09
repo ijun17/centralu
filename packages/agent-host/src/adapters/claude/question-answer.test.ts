@@ -13,7 +13,7 @@ import type { NormalizedEvent } from '@cc/protocol'
  * The SDK is swapped for a fake, and the callback the adapter passed is called directly.
  */
 type Decision = { behavior: string; message?: string; updatedInput?: Record<string, unknown> }
-type CanUseTool = (name: string, input: Record<string, unknown>, opts?: { toolUseID?: string }) => Promise<Decision>
+type CanUseTool = (name: string, input: Record<string, unknown>, opts?: { toolUseID?: string; signal?: AbortSignal }) => Promise<Decision>
 const sdk = vi.hoisted(() => ({ options: null as null | { canUseTool?: CanUseTool } }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -72,6 +72,60 @@ describe('answering an AskUserQuestion card', () => {
     const r = await decision
     expect(r.behavior).toBe('deny')
     expect(r.updatedInput).toBeUndefined()
+    await handle.dispose()
+  })
+})
+
+/**
+ * A card the CLI withdraws closes. The SDK aborts the callback's `signal` when the CLI cancels a permission request
+ * itself (the tool was aborted, or the turn ended without our Stop). The adapter ignored it, so the card stayed open
+ * forever and an answer resolved a promise nobody was waiting on.
+ */
+describe('a card the CLI withdraws', () => {
+  it('an approval card closes as denied when its request is cancelled, and a late answer reaches nothing', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 'qa3', cwd: '/x', permissionPreset: 'normal' }, (e) => events.push(e))
+    const cancel = new AbortController()
+
+    const decision = sdk.options!.canUseTool!('Bash', { command: 'rm -rf build' }, { toolUseID: 'toolu_b1', signal: cancel.signal })
+    const asked = events.find((e) => e.type === 'approval_request') as Extract<NormalizedEvent, { type: 'approval_request' }>
+    cancel.abort()
+
+    expect((await decision).behavior).toBe('deny')
+    expect(events.filter((e) => e.type === 'approval_resolved')).toEqual([
+      { type: 'approval_resolved', sessionId: 'qa3', requestId: asked.requestId, decision: 'deny' },
+    ])
+    expect(handle.respondApproval(asked.requestId, 'allow')).toBe(false)
+    await handle.dispose()
+  })
+
+  it('a question card closes when its request is cancelled, and a late answer reaches nothing', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 'qa4', cwd: '/x', permissionPreset: 'normal' }, (e) => events.push(e))
+    const cancel = new AbortController()
+
+    const decision = sdk.options!.canUseTool!('AskUserQuestion', QUESTIONS, { toolUseID: 'toolu_q4', signal: cancel.signal })
+    const id = askedIn(events)
+    cancel.abort()
+
+    expect((await decision).behavior).toBe('deny')
+    expect(events.filter((e) => e.type === 'question_resolved')).toEqual([{ type: 'question_resolved', sessionId: 'qa4', requestId: id }])
+    expect(handle.answerQuestion!(id, [{ question: 'Pick one', answers: ['A'] }])).toBe(false)
+    await handle.dispose()
+  })
+
+  it('a card already answered stays answered when the signal fires afterwards', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 'qa5', cwd: '/x', permissionPreset: 'normal' }, (e) => events.push(e))
+    const cancel = new AbortController()
+
+    const decision = sdk.options!.canUseTool!('Bash', { command: 'ls' }, { toolUseID: 'toolu_b5', signal: cancel.signal })
+    const asked = events.find((e) => e.type === 'approval_request') as Extract<NormalizedEvent, { type: 'approval_request' }>
+    handle.respondApproval(asked.requestId, 'allow')
+    cancel.abort()
+
+    expect((await decision).behavior).toBe('allow')
+    expect(events.filter((e) => e.type === 'approval_resolved')).toHaveLength(1)
     await handle.dispose()
   })
 })
