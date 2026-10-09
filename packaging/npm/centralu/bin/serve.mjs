@@ -18,7 +18,7 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, closeSync } from 'node:fs'
-import { connect } from 'node:net'
+import { connect, createServer } from 'node:net'
 import { userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -33,6 +33,70 @@ import { createInterface } from 'node:readline'
  * either range could be taken by something transient the day the host restarts.
  */
 export const DEFAULT_SERVE_PORT = 17175
+
+/** How many ports from the recorded one `serve` tries when it is taken (#482); none at or above 20000 */
+export const SERVE_PORT_TRIES = 20
+
+/**
+ * The port `serve` starts the host on (#482): `{ port, from }`, `from` being the port it moved away
+ * from (null when it did not), or null when every candidate is taken.
+ *
+ * A port the person gave (`--port`) is used as given: they asked for that one. Otherwise the recorded
+ * port (else the default) when it is free, and when another program listens there, the next free
+ * one above it, below 20000 (the ranges `DEFAULT_SERVE_PORT` keeps out of). The host's ready line
+ * then records the port it got, so `--connection` reports it and the hub forwards to it.
+ *
+ * The usual other program is the other half of one Windows laptop: WSL2 relays a distro's
+ * 127.0.0.1 ports to Windows (`wslrelay.exe`), so a Windows install and a WSL install linked as two
+ * machines both wanted 17175, and whichever started second could not start at all.
+ * `taken(port)` answers whether something listens there.
+ */
+export async function chooseServePort({ asked, recorded, taken }) {
+  if (asked !== null && asked !== undefined) return { port: asked, from: null }
+  const first = recorded ?? DEFAULT_SERVE_PORT
+  for (let p = first; p < first + SERVE_PORT_TRIES && p <= 65535; p++) {
+    if (p !== first && p >= 20000) break
+    if (!(await taken(p))) return { port: p, from: p === first ? null : first }
+  }
+  return null
+}
+
+/** Whether something listens on 127.0.0.1:`port` here: a listen that fails with EADDRINUSE (or EACCES) */
+export function listensHere(port) {
+  return new Promise((resolve) => {
+    const srv = createServer()
+    srv.once('error', (e) => resolve(e?.code === 'EADDRINUSE' || e?.code === 'EACCES'))
+    srv.listen({ host: '127.0.0.1', port, exclusive: true }, () => srv.close(() => resolve(false)))
+  })
+}
+
+/**
+ * The TCP ports Windows listens on, from `netstat.exe -an -p TCP` output: a listening socket is the
+ * row whose foreign address is `0.0.0.0:0` (or `[::]:0`). Read that way rather than by the state
+ * column, which Windows translates (a Korean Windows does not print LISTENING everywhere).
+ */
+export function parseNetstatListening(text) {
+  const ports = new Set()
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = /^\s*TCP\s+(?:127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d+)\s+(?:0\.0\.0\.0:0|\[::\]:0)\s/i.exec(line)
+    if (m) ports.add(Number(m[1]))
+  }
+  return ports
+}
+
+/**
+ * The ports the Windows side listens on, seen from inside a WSL distro (empty elsewhere, or when
+ * Windows cannot be asked). Inside the distro a port Windows holds looks free, yet a host there
+ * would be unreachable from the hub: the hub's forward ends on Windows' 127.0.0.1, where the
+ * Windows program answers instead (#482).
+ */
+async function windowsListening(env, platform) {
+  if (detachHow(platform, env) !== 'wsl') return new Set()
+  const netstat = windowsTool('wsl', env, ['System32', 'netstat.exe'])
+  if (!netstat) return new Set()
+  const r = await runCaptured(netstat, ['-an', '-p', 'TCP'], env)
+  return r.code === 0 ? parseNetstatListening(r.stdout) : new Set()
+}
 
 /**
  * The file in the data folder that holds the token and the port, mode 0600.
@@ -669,7 +733,6 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   const dataDir = serveDataDir(env, home)
   const state = ensureServeState(dataDir, platform)
   keepLauncher(dataDir, cliPath, env)
-  const port = askedPort ?? state.port ?? DEFAULT_SERVE_PORT
   const protocolVersion = protocolVersionOf(entry)
 
   // A serve that is already up answers on the port it recorded; say so before starting a host that
@@ -680,6 +743,18 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
     const pid = lockHolderPid(dataDir)
     say(`centralu serve is already running for ${dataDir} on 127.0.0.1:${recorded}${pid ? ` (pid ${pid})` : ''}. Not starting a second one.`)
     return 1
+  }
+
+  const onWindows = await windowsListening(env, platform)
+  const chosen = await chooseServePort({ asked: askedPort, recorded: state.port, taken: async (p) => onWindows.has(p) || (await listensHere(p)) })
+  if (chosen === null) {
+    say(`another program listens on 127.0.0.1:${recorded} and on the ${SERVE_PORT_TRIES - 1} ports above it. Give a free one with --port <n>.`)
+    return 1
+  }
+  const port = chosen.port
+  if (chosen.from !== null) {
+    const who = onWindows.has(chosen.from) ? 'Windows' : 'another program'
+    say(`127.0.0.1:${chosen.from} is in use by ${who}; starting on ${port} instead (kept for the next start)`)
   }
 
   const plan = hostCommand(execPath, entry, { port, dataDir, platform })

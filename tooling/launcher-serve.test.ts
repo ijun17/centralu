@@ -36,6 +36,10 @@ import {
   rotateServeToken,
   SERVE_STATE_FILE,
   serveDataDir,
+  chooseServePort,
+  listensHere,
+  parseNetstatListening,
+  SERVE_PORT_TRIES,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -304,6 +308,61 @@ async function hello(port: number, token: string): Promise<Record<string, unknow
   }
 }
 
+describe('the port serve starts on (#482)', () => {
+  const takenOf = (...ports: number[]) => async (p: number) => ports.includes(p)
+
+  it('uses a port the person gave as given, even when it is taken', async () => {
+    expect(await chooseServePort({ asked: 17175, recorded: 18000, taken: takenOf(17175) })).toEqual({ port: 17175, from: null })
+  })
+
+  it('keeps the recorded port, else the default, while it is free', async () => {
+    expect(await chooseServePort({ asked: null, recorded: 18000, taken: takenOf() })).toEqual({ port: 18000, from: null })
+    expect(await chooseServePort({ asked: null, recorded: null, taken: takenOf() })).toEqual({ port: DEFAULT_SERVE_PORT, from: null })
+  })
+
+  it('moves to the next free port above a taken one, and says which it left', async () => {
+    const r = await chooseServePort({ asked: null, recorded: null, taken: takenOf(DEFAULT_SERVE_PORT, DEFAULT_SERVE_PORT + 1) })
+    expect(r).toEqual({ port: DEFAULT_SERVE_PORT + 2, from: DEFAULT_SERVE_PORT })
+  })
+
+  it('gives up after SERVE_PORT_TRIES ports, and never moves to 20000 or above', async () => {
+    const all = async () => true
+    expect(await chooseServePort({ asked: null, recorded: null, taken: all })).toBeNull()
+    expect(await chooseServePort({ asked: null, recorded: 19999, taken: takenOf(19999) })).toBeNull()
+    const tried: number[] = []
+    await chooseServePort({ asked: null, recorded: 17000, taken: async (p: number) => (tried.push(p), true) })
+    expect(tried).toHaveLength(SERVE_PORT_TRIES)
+  })
+
+  it('sees a port another program listens on here', async () => {
+    const srv = createServer()
+    await new Promise<void>((r) => srv.listen({ host: '127.0.0.1', port: 0 }, r))
+    const port = (srv.address() as { port: number }).port
+    try {
+      expect(await listensHere(port)).toBe(true)
+    } finally {
+      await new Promise((r) => srv.close(r))
+    }
+    expect(await listensHere(port)).toBe(false)
+  })
+
+  it('reads the listening ports from Windows netstat, in any display language', () => {
+    const text = [
+      '',
+      '활성 연결',
+      '',
+      '  프로토콜  로컬 주소              외부 주소              상태',
+      '  TCP    0.0.0.0:135            0.0.0.0:0              수신 대기',
+      '  TCP    127.0.0.1:17175        0.0.0.0:0              LISTENING',
+      '  TCP    127.0.0.1:17175        127.0.0.1:50211        ESTABLISHED',
+      '  TCP    192.168.0.24:139       0.0.0.0:0              LISTENING',
+      '  TCP    [::1]:17176            [::]:0                 LISTENING',
+      '  TCP    127.0.0.1:50211        127.0.0.1:17175        ESTABLISHED',
+    ].join('\r\n')
+    expect([...parseNetstatListening(text)].sort()).toEqual([135, 17175, 17176])
+  })
+})
+
 describe('centralu serve, end to end (a host from source, a temporary data folder)', () => {
   it.skipIf(!POSIX)(
     'serves on 127.0.0.1 with its token, reports itself in --connection, refuses a second serve, and stops on SIGTERM',
@@ -393,6 +452,36 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         expect(s.out.stderr).toContain(`belongs to another Centralu host (pid ${process.pid})`)
       } finally {
         if (held.ok) held.release()
+      }
+    },
+    90_000,
+  )
+  it.skipIf(!POSIX)(
+    'starts on the next free port when another program holds the recorded one, and reports that port (#482)',
+    async () => {
+      const d = tempDir()
+      // Two free ports in a row below 20000, the first held by a stand-in for WSL2's relay
+      let held = 0
+      for (let p = 18000 + Math.floor(Math.random() * 1500); p < 19990 && !held; p += 7) {
+        if (!(await listensHere(p)) && !(await listensHere(p + 1))) held = p
+      }
+      expect(held).toBeGreaterThan(0)
+      ensureServeState(d)
+      recordServePort(d, held)
+      // Drops what connects, so closing it below does not wait on serve's probe of that port
+      const blocker = createServer((socket) => socket.destroy())
+      await new Promise<void>((r) => blocker.listen({ host: '127.0.0.1', port: held }, r))
+      try {
+        const s = serve(d, [])
+        await s.until(/listening on 127\.0\.0\.1:\d+/)
+        expect(s.out.stderr).toContain(`127.0.0.1:${held} is in use by another program; starting on ${held + 1} instead`)
+        const info = await connection(d)
+        expect(info).toMatchObject({ port: held + 1, hostRunning: true })
+        expect(await hello(held + 1, String(info.token))).toMatchObject({ kind: 'hello_ok' })
+        s.child.kill('SIGTERM')
+        expect(await s.exited).toBe(0)
+      } finally {
+        await new Promise((r) => blocker.close(r))
       }
     },
     90_000,
