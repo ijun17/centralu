@@ -829,6 +829,12 @@ export interface AppsPort {
   /** Closes a pinned screen — releases the app it was holding. Passes quietly if it is already closed */
   closeView(instanceId: string): Promise<void>
   /**
+   * Claims the pinned screens this window shows, after a reconnect (#392). A screen opened here is
+   * leased to this window's connection, and the host closes it a few minutes after the connection
+   * ends unless a window claims it. Resolves to the ids that are no longer open, to open again.
+   */
+  holdViews(instanceIds: string[]): Promise<string[]>
+  /**
    * Sends an app screen's `ui/message` into the conversation (M4 B-1·B-4) — called **only
    * after the person confirms**. The host masks the app behind the instance. For an
    * in-conversation screen it can only go to the conversation that screen stands in (the host

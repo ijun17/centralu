@@ -245,7 +245,7 @@ export function rowKeys(items: readonly { seq: number }[]): (number | string)[] 
  * list has rows: up to that count it is already no larger than the list, and the check costs one
  * comparison per streamed event rather than a pass over the cache.
  */
-export function forgetUnlistedSizes(sizes: Map<number | string, number>, keys: readonly (number | string)[]): void {
+export function forgetUnlistedSizes(sizes: Map<unknown, number>, keys: readonly unknown[]): void {
   if (sizes.size <= keys.length) return
   const listed = new Set(keys)
   for (const key of sizes.keys()) if (!listed.has(key)) sizes.delete(key)

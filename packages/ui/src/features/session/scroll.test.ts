@@ -213,11 +213,11 @@ describe('forgetUnlistedSizes (#392)', () => {
   it('the virtual list keeps the height of a row that left it until the list prunes it', () => {
     const first = Array.from({ length: 300 }, (_, i) => i + 1)
     const v = list(first)
-    v.getMeasurements()
+    v.getTotalSize()
     for (let i = 0; i < first.length; i++) v.resizeItem(i, 100 + i)
     const next = [1000, 1001]
     v.setOptions({ ...v.options, count: next.length, getItemKey: (i) => next[i]! })
-    v.getMeasurements()
+    v.getTotalSize()
     expect(v.itemSizeCache.size).toBe(300)
     forgetUnlistedSizes(v.itemSizeCache, next)
     expect(v.itemSizeCache.size).toBe(0)

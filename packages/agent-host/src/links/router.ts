@@ -13,7 +13,8 @@ import { ROUTES, type Route } from './routes.js'
  * call goes to `local`, exactly as before) and one with several.
  */
 
-export type RpcHandler = (method: string, params: unknown) => Promise<unknown>
+/** `ctx`: which window's connection the call came in on (transport/server.ts). Only the hub's own handler reads it */
+export type RpcHandler = (method: string, params: unknown, ctx?: { client: number }) => Promise<unknown>
 
 /** One linked machine, as the router needs it (links.ts implements it) */
 export interface RoutedMachine {
@@ -65,14 +66,14 @@ export class Router {
   constructor(private readonly opts: RouterOptions) {}
 
   /** The `onRpc` the server calls */
-  readonly handle: RpcHandler = async (method, params) => {
+  readonly handle: RpcHandler = async (method, params, ctx) => {
     const route: Route | undefined = (ROUTES as Record<string, Route>)[method]
     // Unknown names go to the hub's handler, which answers "Unknown method" as it always has
-    if (!route) return this.opts.local(method, params)
+    if (!route) return this.opts.local(method, params, ctx)
     switch (route.kind) {
       case 'hub':
       case 'internal':
-        return this.opts.local(method, params)
+        return this.opts.local(method, params, ctx)
       case 'session':
         return this.byKey(method, params, 'sessionId', route)
       case 'project':
@@ -81,7 +82,7 @@ export class Router {
         return this.byKey(method, params, 'terminalId', route)
       case 'noRemote': {
         if (this.owner(isObj(params) ? params[route.key] : undefined)) throw new NotOnRemoteError(method)
-        return this.opts.local(method, params)
+        return this.opts.local(method, params, ctx)
       }
       case 'machine':
         return this.byMachine(method, params, route)

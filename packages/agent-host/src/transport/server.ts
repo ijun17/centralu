@@ -16,7 +16,14 @@ import { DrainCut, type Drain } from '../drain.js'
  * The WS server (docs/protocol.md §1). Identical in dev and prod — Tauri only spawns this process.
  * Security: loopback binding + a token handshake generated at startup.
  */
-export type RpcHandler = (method: string, params: unknown) => Promise<unknown>
+/**
+ * Which connection a call came in on. `client` is a number this server gives each socket once its
+ * hello is accepted, never reused within one host's life. Something a window holds for as long as
+ * it stays (a leased app view, #392) is tied to it, and let go when `onClientGone` names it.
+ */
+export type RpcContext = { client: number }
+
+export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
 export const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
@@ -84,6 +91,8 @@ export type HostServerOptions = {
   closeGraceMs?: number
   /** Which build this host is, sent in every `hello_ok` (#280) */
   build?: HostBuild
+  /** A connection that passed hello has ended (its `RpcContext.client`) */
+  onClientGone?: (client: number) => void
   /**
    * Tracks every RPC for a planned host swap (#280 step 3, drain.ts): once the drain begins, new
    * RPCs are refused and running ones get its bound to finish. Refused and cut calls are answered
@@ -132,6 +141,8 @@ export class HostServer {
   private wss: WebSocketServer
   private http: Server
   private clients = new Set<WebSocket>()
+  /** The last `RpcContext.client` given out */
+  private lastClient = 0
   /** Handshake deadlines of sockets that have not sent a valid hello yet */
   private handshakeTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>()
   private closing: Promise<void> | null = null
@@ -366,6 +377,7 @@ export class HostServer {
 
   private onConnection(ws: WebSocket): void {
     let authed = false
+    const client = ++this.lastClient
     // A socket that never says hello is closed, not kept forever (#82)
     this.handshakeTimers.set(
       ws,
@@ -428,7 +440,7 @@ export class HostServer {
       // RPC
       const { method, params, id } = frame.data
       try {
-        const run = () => this.opts.onRpc(method, params)
+        const run = () => this.opts.onRpc(method, params, { client })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {
@@ -447,10 +459,15 @@ export class HostServer {
       }
     })
 
+    let gone = false
     const forget = () => {
       clearTimeout(this.handshakeTimers.get(ws))
       this.handshakeTimers.delete(ws)
       this.clients.delete(ws)
+      // 'error' is followed by 'close': said once
+      if (!authed || gone) return
+      gone = true
+      this.opts.onClientGone?.(client)
     }
     ws.on('close', forget)
     ws.on('error', forget)

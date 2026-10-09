@@ -1200,7 +1200,13 @@ export const RpcMethods = {
    * screen's job.
    */
   'apps.openView': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    /**
+     * `lease` (#392): the view belongs to this window's connection. Once the connection ends, the
+     * host waits a few minutes for a window to claim it (`apps.holdViews`) and then closes it, so a
+     * reloaded or closed window does not hold its apps open for good. Without it (an older window)
+     * the view lives until `apps.closeView`.
+     */
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), lease: z.boolean().optional() }),
     result: z.object({
       instanceId: z.string(),
       tool: z.string(),
@@ -1218,6 +1224,16 @@ export const RpcMethods = {
   'apps.closeView': {
     params: z.object({ instanceId: z.string() }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * A window claims the pinned screens it shows (#392), after every reconnect: each leased instance
+   * named becomes this connection's again and stops waiting to be closed. `missing` lists the ids
+   * that are not open any more (the window was away longer than the host waited); the window opens
+   * those again. An instance opened without a lease is left as it is.
+   */
+  'apps.holdViews': {
+    params: z.object({ instanceIds: z.array(z.string()).max(1000) }),
+    result: z.object({ missing: z.array(z.string()) }),
   },
   /**
    * Reopens an inline conversation screen that had been collapsed (M4 B-1) — the "Reopen" for a

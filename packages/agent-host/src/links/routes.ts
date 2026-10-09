@@ -210,6 +210,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'apps.inlineReopen': { kind: 'noRemote', key: 'sessionId' },
   'apps.viewMessage': { kind: 'noRemote', key: 'sessionId' },
   'apps.closeView': HUB,
+  'apps.holdViews': HUB,
   'apps.questions': HUB,
   'apps.answerQuestion': HUB,
   'apps.importPrepare': HUB,

@@ -54,8 +54,18 @@ export type ViewFrame = {
   sandbox: { csp: Required<ViewCspDomains>; permissions: ViewPermissions }
 }
 
-/** An open instance as one host hands it to the next (view-handover.ts): what it takes to serve it again */
-export type OpenView = { id: string; app: AppRef; uri: string }
+/**
+ * An open instance as one host hands it to the next (view-handover.ts): what it takes to serve it
+ * again. `leased`: a window holds it under a lease (`hold`), and the next host keeps it only as
+ * long as a window claims it again.
+ */
+export type OpenView = { id: string; app: AppRef; uri: string; leased?: boolean }
+
+/**
+ * Which window holds a leased instance (#392). `holder` is the connection that opened or last
+ * claimed it; null once that connection is gone, from `orphanSince`.
+ */
+type Lease = { holder: number | null; orphanSince: number | null }
 
 type Instance = {
   id: string
@@ -64,6 +74,8 @@ type Instance = {
   doc: ViewDocument | null
   /** Releases the hold on the runtime. Called by every path where the instance disappears (close, pushed out by the cap, shutdown) */
   release: (() => void) | null
+  /** null: no window leases it (a view inside a conversation, or one an older window opened), and it lives until closed */
+  lease: Lease | null
 }
 
 export type ViewHostOptions = {
@@ -81,6 +93,8 @@ export type ViewHostOptions = {
    */
   hostPort: () => number | null
   log?: (line: string) => void
+  /** How long a leased instance may go unclaimed before it is closed (`LEASE_GRACE_MS`; tests use less) */
+  leaseGraceMs?: number
 }
 
 /**
@@ -90,6 +104,23 @@ export type ViewHostOptions = {
  * is born"), reaching this number is rare.
  */
 export const MAX_INSTANCES = 1000
+
+/**
+ * How long a leased view outlives the window that held it (#392).
+ *
+ * A fixed view is closed by the window that opened it (`apps.closeView`). A window that reloads
+ * or closes never says so: the new page starts with no views and opens its own, and the old
+ * instances held their apps open (no idle shutdown, A-3) for the rest of the host's life. Reloads
+ * repeat, so each one added a set. So a view opened with a lease belongs to the connection that
+ * opened it, and once that connection ends the view waits this long for a window to claim it again
+ * (`apps.holdViews`, sent after every reconnect) before it is closed.
+ *
+ * Five minutes covers what ends a connection without ending the window: a network blip, the host
+ * swapped behind the front door (the next host restores the view and waits the same time), a
+ * sleeping laptop whose host slept too (timers stop with it). A window that comes back later
+ * finds the view gone and opens it again, as after an app restart.
+ */
+export const LEASE_GRACE_MS = 5 * 60_000
 
 const INSTANCE_ID = /^[A-Za-z0-9_-]{16,64}$/
 
@@ -111,10 +142,13 @@ export class ViewHost {
   private readonly allowed: ReadonlySet<string>
   private readonly log: (line: string) => void
   private disposed = false
+  private readonly leaseGraceMs: number
+  private sweepTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly opts: ViewHostOptions) {
     this.allowed = new Set(opts.allowedOrigins.filter((o) => o !== '' && o !== 'null'))
     this.log = opts.log ?? ((line) => console.error(line))
+    this.leaseGraceMs = opts.leaseGraceMs ?? LEASE_GRACE_MS
   }
 
   /**
@@ -132,7 +166,7 @@ export class ViewHost {
    * because a person left a view open and untouched for a few minutes, the next click would have to
    * wait for the app to start back up.
    */
-  open(app: AppRef, uri: string): { instanceId: string } {
+  open(app: AppRef, uri: string, holder?: number): { instanceId: string } {
     const ref = { projectId: app.projectId ?? null, appId: app.appId }
     // Holding the app open comes first. If the app does not exist, this throws here, and no instance is created
     const release = this.opts.source?.retain?.(ref) ?? null
@@ -141,7 +175,8 @@ export class ViewHost {
       const oldest = this.instances.keys().next().value
       if (oldest !== undefined) this.drop(oldest)
     }
-    this.instances.set(id, { id, app: ref, uri, doc: null, release })
+    const lease = holder === undefined ? null : { holder, orphanSince: null }
+    this.instances.set(id, { id, app: ref, uri, doc: null, release, lease })
     return { instanceId: id }
   }
 
@@ -149,9 +184,60 @@ export class ViewHost {
     this.drop(instanceId)
   }
 
+  /**
+   * A window claims the leased views it shows (RPC `apps.holdViews`, #392): each becomes the
+   * calling connection's, and stops waiting to be closed. Returns the ids that are not open (closed
+   * while the window was away), which the window opens again. An instance with no lease is left as
+   * it is: a view inside a conversation is closed by its own layer (inline-views.ts).
+   */
+  hold(instanceIds: readonly string[], holder: number): string[] {
+    const missing: string[] = []
+    for (const id of instanceIds) {
+      const inst = this.instances.get(id)
+      if (!inst) missing.push(id)
+      else if (inst.lease) inst.lease = { holder, orphanSince: null }
+    }
+    return missing
+  }
+
+  /** A connection ended (#392): the views it held wait `leaseGraceMs` for a window to claim them */
+  holderGone(holder: number, now = Date.now()): void {
+    let orphaned = false
+    for (const inst of this.instances.values()) {
+      if (inst.lease?.holder !== holder) continue
+      inst.lease = { holder: null, orphanSince: now }
+      orphaned = true
+    }
+    if (orphaned) this.scheduleSweep()
+  }
+
+  /** Closes the leased views nobody claimed within the grace. Returns how many */
+  sweepUnclaimed(now = Date.now()): number {
+    let closed = 0
+    for (const inst of [...this.instances.values()]) {
+      const since = inst.lease?.orphanSince
+      if (since === null || since === undefined || now - since < this.leaseGraceMs) continue
+      this.drop(inst.id)
+      closed++
+    }
+    if (closed > 0) this.log(`[agent-host] closed ${closed} app view${closed === 1 ? '' : 's'} no window claimed`)
+    if ([...this.instances.values()].some((i) => i.lease?.orphanSince != null)) this.scheduleSweep()
+    return closed
+  }
+
+  /** One timer at a time, unref'd: a pending sweep never keeps the host alive */
+  private scheduleSweep(): void {
+    if (this.sweepTimer || this.disposed) return
+    this.sweepTimer = setTimeout(() => {
+      this.sweepTimer = null
+      this.sweepUnclaimed()
+    }, this.leaseGraceMs + 1000)
+    this.sweepTimer.unref?.()
+  }
+
   /** Every open instance, oldest first — what a planned hand-over records (view-handover.ts) */
   list(): OpenView[] {
-    return [...this.instances.values()].map((i) => ({ id: i.id, app: { ...i.app }, uri: i.uri }))
+    return [...this.instances.values()].map((i) => ({ id: i.id, app: { ...i.app }, uri: i.uri, ...(i.lease ? { leased: true } : {}) }))
   }
 
   /**
@@ -165,7 +251,7 @@ export class ViewHost {
    * id that is malformed or already open is skipped too: the record is a file, and an id must
    * never be shared by two instances. Returns the ids opened.
    */
-  restore(views: readonly OpenView[]): string[] {
+  restore(views: readonly OpenView[], now = Date.now()): string[] {
     const opened: string[] = []
     for (const v of views) {
       if (typeof v?.id !== 'string' || !INSTANCE_ID.test(v.id) || this.instances.has(v.id)) continue
@@ -179,9 +265,12 @@ export class ViewHost {
         this.log(`[agent-host] view ${v.uri} (${ViewHost.originKey(ref)}) not restored: ${(err as Error).message}`)
         continue
       }
-      this.instances.set(v.id, { id: v.id, app: ref, uri: v.uri, doc: null, release })
+      // A leased view belonged to a connection of the previous host: no one holds it until a window claims it
+      const lease = v.leased === true ? { holder: null, orphanSince: now } : null
+      this.instances.set(v.id, { id: v.id, app: ref, uri: v.uri, doc: null, release, lease })
       opened.push(v.id)
     }
+    if (opened.some((id) => this.instances.get(id)?.lease)) this.scheduleSweep()
     return opened
   }
 
@@ -251,6 +340,8 @@ export class ViewHost {
 
   async dispose(): Promise<void> {
     this.disposed = true
+    if (this.sweepTimer) clearTimeout(this.sweepTimer)
+    this.sweepTimer = null
     for (const id of [...this.instances.keys()]) this.drop(id)
     const servers = await Promise.allSettled([...this.origins.values()])
     this.origins.clear()

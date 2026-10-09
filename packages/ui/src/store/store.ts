@@ -5831,6 +5831,8 @@ export const useStore = create<AppState>((set, get) => ({
     void get().refreshAppQuestions()
     // So are the links' states (#82): a machine that went away or came back during the gap
     void get().refreshMachines()
+    // The pinned views this window shows are leased to its connection, which just ended (#392)
+    void holdPinnedViews(get, set)
 
     const wasLive = Object.values(s.sessions).filter((x) => x.live)
 
@@ -6133,6 +6135,37 @@ async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => P
     releasedOrphans.add(k.instanceId)
     void platform.apps.closeView(k.instanceId).catch(() => {})
   }
+}
+
+/**
+ * Claims this window's pinned views after a reconnect (#392).
+ *
+ * The host leases a pinned view to the connection that opened it, and closes it a few minutes after
+ * that connection ends unless a window claims it, so a reloaded or closed window does not hold its
+ * apps open for good. This window is still here, so it claims what it shows. A view the host no
+ * longer has (the window was away longer than the host waited) goes back to idle, which opens it
+ * again, as after a restart. An older host has no such call and never closes a view on its own, so
+ * a failure here leaves everything as it is.
+ */
+async function holdPinnedViews(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): Promise<void> {
+  const platform = get().platform
+  const held = get().pinnedViews.flatMap((p) => (p.phase === 'open' && p.instanceId ? [p.instanceId] : []))
+  if (!platform || held.length === 0) return
+  let missing: string[]
+  try {
+    missing = await platform.apps.holdViews(held)
+  } catch {
+    return
+  }
+  if (missing.length === 0) return
+  const gone = new Set(missing)
+  set((s) => ({
+    pinnedViews: s.pinnedViews.map((p) =>
+      p.instanceId && gone.has(p.instanceId)
+        ? { ...p, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false }
+        : p,
+    ),
+  }))
 }
 
 /** An instance left open that a reopened UI has closed (`syncInlineViews`) */

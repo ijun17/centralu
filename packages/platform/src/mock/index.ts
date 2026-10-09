@@ -809,6 +809,11 @@ export class MockPlatform implements Platform {
       this.pinnedInstances.set(v.instanceId, { appId, projectId, uri: v.resourceUri })
       return v
     },
+    /** Like the host: an id it no longer holds (closed, or dropped by a test as if its lease ran out) is missing */
+    holdViews: async (instanceIds: string[]) => {
+      this.heldViews.push([...instanceIds])
+      return instanceIds.filter((id) => !this.pinnedInstances.has(id) || this.closedViews.includes(id))
+    },
     closeView: async (instanceId: string) => {
       this.closedViews.push(instanceId)
       // If it was an in-conversation screen, that record's instance also closes — like the host, the record (input, outcome) stays
@@ -1294,6 +1299,8 @@ export class MockPlatform implements Platform {
   readonly createdApps: NewAppSpec[] = []
   /** A pinned screen's instance → its app and screen (recorded by `openView`). Same as what the host's ViewHost knows as an instance */
   readonly pinnedInstances = new Map<string, { appId: string; projectId: string | null; uri: string }>()
+  /** Every `holdViews` call, in order (#392) */
+  readonly heldViews: string[][] = []
   /** What the input line below an app screen sent to the host (M4 C-5) — tests check what was sent, from which screen, with what attached */
   readonly builderAsks: BuilderAsk[] = []
   /**

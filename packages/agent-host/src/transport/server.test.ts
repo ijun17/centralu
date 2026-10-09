@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
 import { PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
-import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions } from './server.js'
+import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions, type RpcHandler } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 
 const TOKEN = 'test-token'
@@ -14,7 +14,7 @@ afterEach(async () => {
   server = null
 })
 
-async function start(onRpc = async () => ({ ok: true }), extra: Partial<HostServerOptions> = {}) {
+async function start(onRpc: RpcHandler = async () => ({ ok: true }), extra: Partial<HostServerOptions> = {}) {
   server = new HostServer({ port: 0, token: TOKEN, onRpc, ...extra })
   const port = await server.listen()
   return { server: server!, port }
@@ -362,6 +362,43 @@ describe('handshake', () => {
 })
 
 describe('RPC round trip', () => {
+  it('names the connection a call came in on, and says once when a connection that passed hello ends (#392)', async () => {
+    const calls: { method: string; client: number | undefined }[] = []
+    const gone: number[] = []
+    const { port } = await start(
+      async (method: string, _p: unknown, ctx?: { client: number }) => {
+        calls.push({ method, client: ctx?.client })
+        return {}
+      },
+      { onClientGone: (client) => gone.push(client) },
+    )
+    const a = connect(port)
+    const b = connect(port)
+    await Promise.all([a.open(), b.open()])
+    for (const c of [a, b]) c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    a.send({ kind: 'rpc', id: 'a1', method: 'from-a', params: {} })
+    b.send({ kind: 'rpc', id: 'b1', method: 'from-b', params: {} })
+    a.send({ kind: 'rpc', id: 'a2', method: 'from-a', params: {} })
+    await a.wait(() => a.frames.filter((f) => f.kind === 'res').length === 2)
+    await b.wait(() => b.frames.some((f) => f.kind === 'res'))
+    const of = (m: string) => [...new Set(calls.filter((c) => c.method === m).map((c) => c.client))]
+    expect(of('from-a')).toHaveLength(1)
+    expect(of('from-b')).toHaveLength(1)
+    expect(of('from-a')[0]).not.toBe(of('from-b')[0])
+
+    // A socket that never said hello held nothing, so its end is not reported
+    const stranger = connect(port)
+    await stranger.open()
+    stranger.ws.close()
+    a.ws.close()
+    await a.wait(() => gone.length === 1)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(gone).toEqual(of('from-a'))
+    b.ws.terminate()
+    await b.wait(() => gone.length === 2)
+    expect(gone).toEqual([...of('from-a'), ...of('from-b')])
+  })
+
   it('returns the result', async () => {
     const { port } = await start(async () => ({ hello: 'world' }) as never)
     const c = connect(port)

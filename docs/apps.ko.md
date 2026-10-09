@@ -380,7 +380,7 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 | `apps.list` | 발견된 앱 전부, 상태와 이유 |
 | `apps.invoke` | 화면의 도구 호출(`projectId`가 없거나 null이면 사용자 폴더 앱) |
 | `apps.viewFrame`, `apps.readResource` | 화면 인스턴스의 프레임 주소, 프레임의 앱의 리소스 |
-| `apps.openView`, `apps.closeView` | 고정 화면 열기(`home`을 부른다), 화면 인스턴스 닫기 |
+| `apps.openView`, `apps.closeView`, `apps.holdViews` | 고정 화면 열기(`home`을 부른다), 화면 인스턴스 닫기, 다시 연결된 창이 자기 고정 화면을 되찾기. `lease`로 연 화면은 창의 연결에 속한다: 연결이 끝나면 호스트는 5분 동안 되찾기를 기다렸다가 닫는다. 새로 고친 창이나 닫힌 창이 앱을 영영 붙잡지 않게 하려는 것이다(#392) |
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | 대화가 아직 들고 있는 대화 안 화면, 다시 부르지 않고 다시 열기, 사람이 동의한 화면의 말 보내기(대화 안 화면은 그 대화로, 고정 화면은 고른 세션으로) |
 | `apps.runs`, `apps.errors` | 실행 기록과 그 사슬, 최근 오류 묶음 |
 | `apps.reach` | 한 세션이 지금 한 앱의 도구를 쓸 수 있는지, 아니면 왜인지(§6.7) |

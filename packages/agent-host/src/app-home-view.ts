@@ -37,11 +37,12 @@ export type HomeView = {
   runId: string
 }
 
-export async function openHomeView(apps: ExternalApps, views: ViewHost, ref: AppRef): Promise<HomeView> {
+/** `holder`: the connection that leases the view (ViewHost `LEASE_GRACE_MS`); none for a view that lives until closed */
+export async function openHomeView(apps: ExternalApps, views: ViewHost, ref: AppRef, holder?: number): Promise<HomeView> {
   const home = await apps.homeView(ref)
   const toolInput: Record<string, unknown> = {}
   const out = await apps.call(ref, home.tool, toolInput, { kind: 'view' })
   if (!out.result) throw Object.assign(new Error(out.error ?? `The home tool "${home.tool}" did not answer`), { code: 'internal' })
-  const { instanceId } = views.open(ref, home.resourceUri)
+  const { instanceId } = views.open(ref, home.resourceUri, holder)
   return { instanceId, tool: home.tool, resourceUri: home.resourceUri, toolInput, toolResult: out.result, runId: out.runId }
 }

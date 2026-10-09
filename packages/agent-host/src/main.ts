@@ -531,6 +531,8 @@ const server: HostServer = new HostServer({
   token,
   allowedOrigins,
   onRpc: router.handle,
+  // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
+  onClientGone: (client) => views.holderGone(client),
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)

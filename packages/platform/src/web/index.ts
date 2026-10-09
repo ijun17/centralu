@@ -368,12 +368,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       list: () => rpc.call('apps.list', {}),
       // The response's result is exactly the MCP result the app gave — the shape is known to the screen and the app, so this just carries it
       openView: async (appId, projectId) => {
-        const v = await rpc.call('apps.openView', { appId, projectId })
+        // Leased to this window's connection (#392): a reload or a closed window lets the host close it
+        const v = await rpc.call('apps.openView', { appId, projectId, lease: true })
         return { ...v, toolResult: v.toolResult as AppToolResult }
       },
       closeView: async (instanceId) => {
         await rpc.call('apps.closeView', { instanceId })
       },
+      holdViews: async (instanceIds) => (await rpc.call('apps.holdViews', { instanceIds })).missing,
       sendViewMessage: async (sessionId, instanceId, text) => {
         await rpc.call('apps.viewMessage', { sessionId, instanceId, text })
       },
