@@ -91,10 +91,10 @@ describe('a card the CLI withdraws', () => {
     const asked = events.find((e) => e.type === 'approval_request') as Extract<NormalizedEvent, { type: 'approval_request' }>
     cancel.abort()
 
-    expect((await decision).behavior).toBe('deny')
     expect(events.filter((e) => e.type === 'approval_resolved')).toEqual([
       { type: 'approval_resolved', sessionId: 'qa3', requestId: asked.requestId, decision: 'deny' },
     ])
+    expect((await decision).behavior).toBe('deny')
     expect(handle.respondApproval(asked.requestId, 'allow')).toBe(false)
     await handle.dispose()
   })
@@ -108,8 +108,8 @@ describe('a card the CLI withdraws', () => {
     const id = askedIn(events)
     cancel.abort()
 
-    expect((await decision).behavior).toBe('deny')
     expect(events.filter((e) => e.type === 'question_resolved')).toEqual([{ type: 'question_resolved', sessionId: 'qa4', requestId: id }])
+    expect((await decision).behavior).toBe('deny')
     expect(handle.answerQuestion!(id, [{ question: 'Pick one', answers: ['A'] }])).toBe(false)
     await handle.dispose()
   })
