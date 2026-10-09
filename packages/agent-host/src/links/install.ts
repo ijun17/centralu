@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
-import { verifiedPackage, type RegistryOptions } from './registry.js'
+import { NotPublished, verifiedPackage, type RegistryOptions, type VerifiedPackage } from './registry.js'
 import { lastLine, remoteScript, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
 /**
@@ -14,7 +14,8 @@ import { lastLine, remoteScript, type RemoteRun, type RemoteSpec } from './tunne
  *   1. Node        a script per shell downloads the pinned Node for that platform from nodejs.org,
  *                  checks it against the SHA-256 this release pinned (`remote-runtime.json`), unpacks
  *                  it with the system's tar and prunes it to the binary and its licence
- *   2. Centralu    `remote-install.mjs`, sent from here and run on that Node: both npm tarballs,
+ *   2. Centralu    `remote-install.mjs`, sent from here and run on that Node: both npm tarballs (the
+ *                  shim, and the host-only package or, for older versions, the platform package),
  *                  each checked against the integrity the hub read from signed registry metadata
  *                  (registry.ts), unpacked beside what is there, the managed launcher written once,
  *                  `current` and `previous` switched by rename, older versions removed
@@ -306,13 +307,32 @@ export type InstallOptions = {
   activate?: boolean
 }
 
+/** The package with the host alone, without the window (docs/releasing.md "Host-only packages") */
+export const hostOnlyPackage = (platform: RemotePlatform) => `@centralu/host-${platform}`
+
+/**
+ * The package that brings the host to a remote (plan §10.9, owner decision 2): the host-only one,
+ * about 4 MB, where this version has one; else the platform package, which carries the window too
+ * (an 81 MB AppImage on Linux, thrown away after unpacking) and is the only one a version published
+ * before the host-only packages has. Only "not published" falls back: metadata whose signature does
+ * not check out, or a registry that does not answer, refuses as it would for any package.
+ */
+export async function hostPackage(platform: RemotePlatform, version: string, registry?: RegistryOptions): Promise<VerifiedPackage> {
+  try {
+    return await verifiedPackage(hostOnlyPackage(platform), version, registry)
+  } catch (err) {
+    if (err instanceof NotPublished) return verifiedPackage(`@centralu/${platform}`, version, registry)
+    throw err
+  }
+}
+
 /** Steps 0 to 2 against one machine. Rejects with one sentence for the person */
 export async function installRemote(o: InstallOptions): Promise<InstallResult> {
   o.onStep?.('preflight')
   const pf = preflight(parsePreflight((await o.exec(preflightCommand(o.spec))).stdout), o.runtime)
   if (!pf.ok) throw new Error(`Cannot install on ${o.target}: ${pf.reason}`)
   o.onStep?.('registry')
-  const packages = await Promise.all([verifiedPackage('centralu', o.version, o.registry), verifiedPackage(`@centralu/${pf.platform}`, o.version, o.registry)])
+  const packages = await Promise.all([verifiedPackage('centralu', o.version, o.registry), hostPackage(pf.platform, o.version, o.registry)])
   const archive = o.runtime.node.archives[pf.platform]!
   const nodeVersion = o.runtime.node.version
   o.onStep?.('node')

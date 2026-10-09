@@ -29,7 +29,7 @@ import {
   busyMessage,
   earlyExitMessage,
   executableIn,
-  hostDirIn,
+  findHostEntry,
   installedPaths,
   isBusyError,
   launchPlan,
@@ -118,7 +118,8 @@ function explainMissing() {
 }
 
 /**
- * The bundled host's entry (`resources/host/main.mjs`) for `centralu serve`, or exit with why not.
+ * The bundled host's entry (`resources/host/main.mjs`) for `centralu serve`, or exit with why not:
+ * from the platform package, or from the host-only package where a hub installed this (`findHostEntry`).
  *
  * `CENTRALU_HOST_ENTRY` points it at another host instead: a source checkout's
  * `packages/agent-host/src/main.ts` while developing, or a freshly bundled `resources/host/main.mjs`.
@@ -130,22 +131,27 @@ function requireHostEntry() {
     console.error(explainMissing())
     process.exit(1)
   }
-  let root
-  try {
-    root = dirname(require.resolve(`${TARGET.pkg}/package.json`))
-  } catch {
-    console.error(explainMissing())
-    process.exit(1)
-  }
-  const entry = join(hostDirIn(PLATFORM, join(root, TARGET.artifact)), 'main.mjs')
-  if (!existsSync(entry)) {
+  // The platform package of an npm install, else the host-only package a hub installed (platform.mjs)
+  const found = findHostEntry(PLATFORM, process.arch, {
+    resolveRoot: (name) => {
+      try {
+        return dirname(require.resolve(`${name}/package.json`))
+      } catch {
+        return null
+      }
+    },
+    exists: existsSync,
+  })
+  if (found.entry) return found.entry
+  if (found.missingHost) {
     console.error(
-      `The host is missing from ${TARGET.pkg} (looked for ${entry}).\n` +
+      `The host is missing from ${found.missingHost.pkg} (looked for ${found.missingHost.entry}).\n` +
         'Linux packages published before `centralu serve` existed do not carry it. Update with `npm i -g centralu`.',
     )
     process.exit(1)
   }
-  return entry
+  console.error(explainMissing())
+  process.exit(1)
 }
 
 function requireApp() {

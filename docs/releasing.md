@@ -5,7 +5,7 @@ page and no update server.
 
 ## Why the packages are shaped this way
 
-Five packages go to npm:
+Eight packages go to npm:
 
 | Package | Contents | Installed on |
 |---|---|---|
@@ -14,6 +14,7 @@ Five packages go to npm:
 | `@centralu/linux-x64` | `Centralu.AppImage`, `icon.png`, `host/` | Linux, x86-64 |
 | `@centralu/linux-arm64` | `Centralu.AppImage`, `icon.png`, `host/` | Linux, arm64 |
 | `@centralu/win32-x64` | a `Centralu\` folder: `centralu.exe`, `resources\host\` | Windows, x86-64 — from 0.1.0-beta.9 |
+| `@centralu/host-linux-x64`, `@centralu/host-linux-arm64`, `@centralu/host-win32-x64` | `host/` only, about 3.7 MB packed | a remote a hub installs on, never by npm ([below](#host-only-packages)) |
 
 **The platform packages are scoped (`@centralu/…`) from 0.1.0-beta.10.** The first publish of an unscoped `centralu-win32-x64` (0.1.0-beta.8) was refused with `403 … Package name triggered spam detection`; the `@centralu` scope belongs to the owner's npm organization, so nobody can take or squat a name under it. Up to 0.1.0-beta.9, macOS and Linux shipped as `centralu-darwin-arm64`, `centralu-linux-x64` and `centralu-linux-arm64`; those stay on the registry, marked deprecated, so older shims that pin them keep installing. The shim itself stays the unscoped `centralu`, because it is the name people type; it is managed by the organization through its `developers` team. Users never type a platform package's name.
 
@@ -135,11 +136,30 @@ that cannot find its own app.
 
 ### When a job fails halfway
 
-Nothing is undone, and nothing needs to be. Re-run the failed job from the same run: a
+Nothing is undone, and nothing needs to be. **Re-run the failed jobs from the same run**: a
 platform job re-runs its own build and publish, and the shim job re-runs on its own once every
-platform is green. A package that is already on the registry at this version makes its job
-fail on re-publish (`EPUBLISHCONFLICT`) rather than doing damage — bump to the next
-prerelease if a version genuinely has to be rebuilt.
+platform is green.
+
+A re-run finishes the release rather than tripping over it. Before each publish,
+`release-npm.mts` asks the registry for that exact version (`scripts/release-registry.mts`):
+
+| On the registry at this version | What the job does |
+|---|---|
+| Nothing | Publishes |
+| A package whose `gitHead` is this commit | Skips it: an earlier attempt of this release published it. Moves the dist-tag again, which changes nothing if it was already moved |
+| A package from another commit, or one npm recorded no commit for | Stops before publishing anything more: the same version from other code. Bump to the next prerelease |
+
+npm records the commit a package was published from as `gitHead` (every package of 0.1.0-beta.14
+names the release commit). The tarball's integrity cannot stand in for it: a rebuild is not byte for
+byte the same (the macOS bundle is signed again, the AppImage carries build times), so "the same
+integrity as what was built" would never hold on a re-run. Before this, a job that published one
+package and failed after it failed again on every re-run (`EPUBLISHCONFLICT`), and the shim could
+not go out without a bump.
+
+The shim job waits for the registry: it asks for every platform and host-only package at this
+version up to ten times, 30 s apart, before it gives up. 0.1.0-beta.14's shim job failed once on
+packages its platform jobs had published moments before and the registry did not show yet. A
+rehearsal asks once and warns, since it published nothing.
 
 ### Publishing by hand
 
@@ -183,6 +203,37 @@ exists because `latest` is empty while no stable release exists, and `npm i -g c
 stable release exists, moving `latest` onto a prerelease hands betas to everyone who asked
 for stable: change `also_latest=true` in the workflow's `guard` job and the input's default
 to `false` at the same time as the 1.0 bump.
+
+## Host-only packages
+
+`@centralu/host-<platform>` is the bundled host and nothing else, for each platform a hub installs
+Centralu on over ssh ([plans/remote-hub.md](plans/remote-hub.md) §10.2, owner decision 2 of §10.9):
+the platforms `packaging/remote-runtime.json` pins a Node for, today `linux-x64`, `linux-arm64` and
+`win32-x64`. macOS has none: a hub does not install on a Mac.
+
+**Why.** The installer used to fetch the platform package and delete the window after unpacking. On
+Linux that was an 88 MB download (the 81 MB AppImage) to keep 12 MB, which cost 9 of the 16 seconds
+of an install in WSL (§10.7 of the plan). The host-only package is about 3.7 MB packed (measured
+with `npm pack` on a bundled host; 11.6 MB unpacked), so a Linux install downloads about 84 MB less
+and a Windows one about 2.5 MB less (`centralu.exe`).
+
+| Who | What it does with them |
+|---|---|
+| `release-npm.mts`, in the platform job of that platform | Copies `src-tauri/resources/host` (what the build just bundled, the same folder the platform package's host comes from) into `packaging/npm/host-<platform>/host/`, checks it (`scripts/host-package.mts`: `main.mjs`, `bundle-info.json` for this platform, both native modules, `conpty.node` on Windows, `remote-runtime.json` equal to the pin, `files` exactly `["host"]`, nothing of the window), and publishes it **before** the platform package |
+| The shim job | Will not publish the shim until every host-only package is on the registry too, though the shim does not pin them |
+| The hub's installer (`links/install.ts`) | Reads `@centralu/host-<platform>@<v>` from the registry and checks its signature; installs it beside the `centralu` package. Only when the registry answers 404 (a version published before these packages existed) does it take the platform package instead, as before. A signature that does not check out refuses, as for any package |
+| The shim, in a managed install (`findHostEntry`, `platform.mjs`) | `centralu serve` looks for the host in the platform package first (an npm install), then in `@centralu/host-<platform>/host/` |
+
+**Not pinned by the shim.** An npm install already gets the host inside its platform package, so
+pinning these too would download it twice. The exact pin the installer relies on is the version
+itself: it asks for `@centralu/host-<platform>` at exactly its own version, and the release
+publishes it from the same commit and build as the platform package. `tooling/host-package.test.ts`
+holds the package folders, the Node pin's platforms, the shim's table and the installer's name to one
+list; `tooling/release-workflow.test.ts` holds that every one of them has a platform job.
+
+**Why first in the job.** A new package name is the publish most likely to be refused (a token that
+may publish only the existing packages). Refused first, it leaves nothing of that platform published;
+the re-run rule above then finishes the job once the token is fixed.
 
 ## The content manifest (#440)
 
@@ -293,7 +344,10 @@ shell itself (unit tests and `scripts/shell-integration.mts`) run in the `keeper
    in for. (Linux has no code signature, so it checks the AppImage magic instead: the
    point of the signature check was "this file is what we think it is and is not
    truncated".)
-2. Add `packaging/npm/<id>/package.json` with matching `os`/`cpu`/`files`.
+2. Add `packaging/npm/<id>/package.json` with matching `os`/`cpu`/`files`. If a hub should install
+   on it, also pin a Node for it in `packaging/remote-runtime.json` and add
+   `packaging/npm/host-<id>/` (the host-only package, [above](#host-only-packages)), and teach the
+   installer's preflight to name it.
 3. Add it to `optionalDependencies` and `os` in `packaging/npm/centralu/package.json`.
 4. Add it to the list in `tooling/brand.test.ts` so the version pin is enforced.
 5. Teach the launcher to resolve and start it: an entry in `TARGETS` in

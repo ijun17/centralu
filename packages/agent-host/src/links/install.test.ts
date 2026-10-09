@@ -1,12 +1,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
 import { connectionCommand, SshTunnel, type RemoteSpec } from './tunnel.js'
+// @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
+import { findHostEntry } from '../../../../packaging/npm/centralu/bin/platform.mjs'
 
 /**
  * The installer of plan §10.2 (#82, phase 3 step 3). The scripts run for real: a fake `ssh` hands
@@ -81,10 +84,14 @@ describe('the install scripts per shell (plan §10.2)', () => {
 })
 
 /** The installer's own module, as the remote runs it */
+type Layout = { root: string; current: string; previous: string; versions: string; node: string; bin: string; lock: string }
 type InstallModule = {
-  remoteLayout(dataDir: string): { current: string; previous: string; versions: string; node: string }
+  remoteLayout(dataDir: string): Layout
   writeAtomic(file: string, text: string): void
   switchTo(l: unknown, next: { version: string; node: string }): unknown
+  lock(l: Layout): () => void
+  placeVersion(l: Layout, partial: string, dir: string): void
+  setPointers(p: unknown, o: { dataDir: string; platform: string }): Promise<unknown>
 }
 
 describe('remote-install.mjs: the pointer files (plan §10.1, S11)', () => {
@@ -122,6 +129,121 @@ describe('remote-install.mjs: the pointer files (plan §10.1, S11)', () => {
   })
 })
 
+describe('remote-install.mjs: one installer at a time (install.lock)', () => {
+  let dir: string
+  let mod: InstallModule
+  let l: Layout
+  beforeAll(async () => {
+    mod = (await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'remote-install.mjs')).href)) as InstallModule
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  const fresh = () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-lock-'))
+    l = mod.remoteLayout(dir)
+    mkdirSync(l.root, { recursive: true })
+  }
+  const busy = (fn: () => unknown) => {
+    try {
+      fn()
+    } catch (e) {
+      return (e as { code?: string }).code
+    }
+    return 'taken'
+  }
+
+  it('treats a lock folder with no pid in it yet as held, not as stale', () => {
+    // Another installer between making the folder and writing its pid (how an older hub's installer
+    // takes it): taking it over here would put two installers in one data folder
+    fresh()
+    mkdirSync(l.lock)
+    expect(busy(() => mod.lock(l))).toBe('busy')
+    expect(existsSync(l.lock)).toBe(true)
+    // …until it is old enough that its installer died between the two
+    const old = new Date(Date.now() - 120_000)
+    utimesSync(l.lock, old, old)
+    mod.lock(l)()
+    expect(existsSync(l.lock)).toBe(false)
+  })
+
+  it('holds its pid, and refuses a second installer while held', () => {
+    fresh()
+    const unlock = mod.lock(l)
+    expect(readFileSync(join(l.lock, 'pid'), 'utf8')).toBe(String(process.pid))
+    expect(busy(() => mod.lock(l))).toBe('busy')
+    unlock()
+    expect(existsSync(l.lock)).toBe(false)
+    expect(readdirSync(l.root)).toEqual([])
+  })
+
+  it('takes over a lock whose process is gone', () => {
+    fresh()
+    const gone = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout
+    mkdirSync(l.lock)
+    writeFileSync(join(l.lock, 'pid'), gone)
+    const unlock = mod.lock(l)
+    expect(readFileSync(join(l.lock, 'pid'), 'utf8')).toBe(String(process.pid))
+    unlock()
+    expect(readdirSync(l.root)).toEqual([])
+  })
+
+  it('unlocks only a lock that is still its own', () => {
+    fresh()
+    const unlock = mod.lock(l)
+    // Taken over meanwhile (this run judged stale by another): the other installer's lock stays
+    writeFileSync(join(l.lock, 'token'), 'someone else')
+    unlock()
+    expect(existsSync(l.lock)).toBe(true)
+  })
+})
+
+describe('remote-install.mjs: replacing a version folder and naming pointers', () => {
+  let dir: string
+  let mod: InstallModule
+  let l: Layout
+  beforeAll(async () => {
+    mod = (await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'remote-install.mjs')).href)) as InstallModule
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  const fresh = () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-place-'))
+    l = mod.remoteLayout(dir)
+    mkdirSync(join(l.versions, '1.0.0'), { recursive: true })
+    writeFileSync(join(l.versions, '1.0.0', 'install.json'), '{"old":true}')
+  }
+
+  it('keeps the version current runs when the new folder cannot be put in its place', () => {
+    fresh()
+    expect(() => mod.placeVersion(l, join(l.root, '.partial-missing'), join(l.versions, '1.0.0'))).toThrow()
+    expect(readFileSync(join(l.versions, '1.0.0', 'install.json'), 'utf8')).toBe('{"old":true}')
+    expect(readdirSync(l.root).sort()).toEqual(['versions'])
+  })
+
+  it('replaces it whole when it can, and leaves nothing aside', () => {
+    fresh()
+    const partial = join(l.root, '.partial-1.0.0-1')
+    mkdirSync(partial)
+    writeFileSync(join(partial, 'install.json'), '{"new":true}')
+    mod.placeVersion(l, partial, join(l.versions, '1.0.0'))
+    expect(readFileSync(join(l.versions, '1.0.0', 'install.json'), 'utf8')).toBe('{"new":true}')
+    expect(readdirSync(l.root).sort()).toEqual(['versions'])
+  })
+
+  it('refuses a previous that names a version that is not there, and writes neither pointer', async () => {
+    fresh()
+    mkdirSync(join(l.node, `v${NODE_V}`), { recursive: true })
+    mkdirSync(l.bin, { recursive: true })
+    writeFileSync(join(l.bin, 'centralu'), '#!/bin/sh\n')
+    writeFileSync(l.current, `0.9.0 ${NODE_V}\n`)
+    const p = { action: 'pointers', version: '1.0.0', node: NODE_V, current: { version: '1.0.0', node: NODE_V }, previous: { version: '0.5.0', node: NODE_V } }
+    await expect(mod.setPointers(p, { dataDir: dir, platform: 'linux' })).rejects.toMatchObject({ code: 'missing', detail: `0.5.0 ${NODE_V}` })
+    expect(readFileSync(l.current, 'utf8')).toBe(`0.9.0 ${NODE_V}\n`)
+    expect(existsSync(l.previous)).toBe(false)
+    // With a previous that is there, both are written
+    await mod.setPointers({ ...p, previous: null }, { dataDir: dir, platform: 'linux' })
+    expect(readFileSync(l.current, 'utf8')).toBe(`1.0.0 ${NODE_V}\n`)
+  })
+})
+
 describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh into a real sh (plan §10.2)', () => {
   let root: string
   let home: string
@@ -145,6 +267,12 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
       files: { 'package.json': JSON.stringify({ name: '@centralu/linux-x64', version }), 'host/main.mjs': 'export {}\n', 'Centralu.AppImage': 'the window, which a remote never runs' },
     },
   ]
+
+  const hostOnly = (version: string): FakePackage => ({
+    name: '@centralu/host-linux-x64',
+    version,
+    files: { 'package.json': JSON.stringify({ name: '@centralu/host-linux-x64', version }), 'host/main.mjs': 'export {}\n' },
+  })
 
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'cc-install-'))
@@ -171,7 +299,9 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
       'include/node/node.h': '/* 67 MB in the real one */',
       'lib/node_modules/npm/package.json': '{}',
     })
-    reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3')])
+    // 9.9.1 to 9.9.3 as published before the host-only packages; 9.9.4 and 9.9.5 with one, as a
+    // release publishes it now: beside the platform package, which npm installs keep using
+    reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3'), ...pkgs('9.9.4'), hostOnly('9.9.4'), ...pkgs('9.9.5'), hostOnly('9.9.5')])
     reg.addNodeArchive(NODE_V, NODE_FILE, archive)
     runtime = { node: { version: NODE_V, archives: { 'linux-x64': { file: NODE_FILE, sha256: sha256(archive) } } } }
   })
@@ -202,6 +332,51 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     // The hub's lookup now finds the managed launcher, which runs current's centralu.mjs on its Node
     const out = execFileSync('/bin/sh', ['-c', connectionCommand({ shell: 'posix' })], { env: env(), encoding: 'utf8' })
     expect(JSON.parse(out)).toEqual({ ran: '9.9.1', argv: ['serve', '--connection'], managed: '1' })
+  }, 60_000)
+
+  it('a version published before the host-only packages comes from its platform package, after asking for the host-only one', async () => {
+    const hits = reg.hits.length
+    await install('9.9.1')
+    const asked = reg.hits.slice(hits)
+    expect(asked).toContain('/@centralu/host-linux-x64/9.9.1')
+    expect(asked).toContain('/@centralu/linux-x64/-/linux-x64-9.9.1.tgz')
+    expect(JSON.parse(readFileSync(remote('versions', '9.9.1', 'install.json'), 'utf8')).packages.map((p: { name: string }) => p.name)).toEqual(['centralu', '@centralu/linux-x64'])
+  }, 60_000)
+
+  it('a version with a host-only package installs that one and never downloads the platform package (owner decision 2)', async () => {
+    const hits = reg.hits.length
+    const r = await install('9.9.4')
+    expect(r.current).toEqual({ version: '9.9.4', node: NODE_V })
+    const asked = reg.hits.slice(hits)
+    expect(asked).toContain('/@centralu/host-linux-x64/-/host-linux-x64-9.9.4.tgz')
+    expect(asked.filter((h) => h.startsWith('/@centralu/linux-x64/'))).toEqual([])
+    const v = (...p: string[]) => remote('versions', '9.9.4', ...p)
+    expect(existsSync(v('node_modules', '@centralu', 'host-linux-x64', 'host', 'main.mjs'))).toBe(true)
+    expect(existsSync(v('node_modules', '@centralu', 'linux-x64'))).toBe(false)
+    expect(JSON.parse(readFileSync(v('install.json'), 'utf8')).packages.map((p: { name: string }) => p.name)).toEqual(['centralu', '@centralu/host-linux-x64'])
+    // The shim's own lookup, resolving from where the installed centralu.mjs sits, finds that host
+    const req = createRequire(v('node_modules', 'centralu', 'bin', 'centralu.mjs'))
+    const found = findHostEntry('linux', 'x64', {
+      resolveRoot: (name: string) => {
+        try {
+          return dirname(req.resolve(`${name}/package.json`))
+        } catch {
+          return null
+        }
+      },
+      exists: existsSync,
+    })
+    expect(found).toEqual({ entry: realpathSync(v('node_modules', '@centralu', 'host-linux-x64', 'host', 'main.mjs')) })
+  }, 60_000)
+
+  it('falls back only when the host-only package is not published: a bad signature on it refuses', async () => {
+    const hits = reg.hits.length
+    reg.forgeSignature('@centralu/host-linux-x64@9.9.5')
+    await expect(install('9.9.5')).rejects.toThrow(/signature on @centralu\/host-linux-x64@9\.9\.5 does not check out/)
+    const asked = reg.hits.slice(hits)
+    expect(asked.filter((h) => h.startsWith('/@centralu/linux-x64/'))).toEqual([])
+    expect(asked.filter((h) => h.startsWith('/dist/') || h.endsWith('.tgz'))).toEqual([])
+    expect(existsSync(remote('current'))).toBe(false)
   }, 60_000)
 
   it('keeps current and previous only: a third version removes the first', async () => {

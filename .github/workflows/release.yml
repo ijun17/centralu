@@ -19,6 +19,12 @@
 # while any platform is missing — and that stays true the day linux-arm64 joins the matrix
 # without anyone remembering to update this.
 #
+# The Linux and Windows jobs publish two packages each: the host alone (`@centralu/host-<target>`,
+# what a hub installs on a remote, docs/releasing.md "Host-only packages") and then the platform
+# package. A job that fails halfway is finished by re-running it: `release-npm.mts` skips a package
+# that an earlier attempt from this same commit already published (docs/releasing.md "When a job
+# fails halfway").
+#
 # Two things are deliberate about the triggers:
 #
 #   * A tag push is a real release. That is the whole point — the version already lives in
@@ -151,7 +157,9 @@ jobs:
       - name: Check the pinned Node against its signed SHASUMS256.txt
         run: node scripts/node-pin.mjs
 
-  # One job per platform package, each building on the platform it ships to.
+  # One job per platform package, each building on the platform it ships to. A target a hub
+  # installs on (one `packaging/remote-runtime.json` pins a Node for) also publishes its host-only
+  # package, first, from the same build; tooling/release-workflow.test.ts holds the two lists together.
   #
   # `scripts/release-npm.mts` has no cross-build switch on purpose: every check it runs
   # interrogates a real artifact (code signature, exec bit, machine type per `file`), and
@@ -301,9 +309,10 @@ jobs:
   #
   # `centralu` is a launcher script and nothing else — no bundle, no native code — so this
   # is the one job with no platform requirement, and `--shim-only` is the mode that says so.
-  # The script still refuses to publish it while any pinned platform package is missing from
-  # the registry at this version; `needs` makes that check a formality rather than the last
-  # line of defence, which is the right order for the two to be in.
+  # The script still refuses to publish it while any pinned platform package (or host-only
+  # package) is missing from the registry at this version, after waiting a few minutes for
+  # packages published moments ago to show there; `needs` makes that check a formality rather
+  # than the last line of defence, which is the right order for the two to be in.
   shim:
     name: centralu (shim)
     needs: [guard, platform]

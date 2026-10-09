@@ -294,7 +294,9 @@ or `CC_DATA_DIR`):
   node/v24.21.0/                      the pinned Node, pruned (§10.2); shared by every version that pins it
   versions/0.1.0-beta.13/
     node_modules/centralu/            the npm shim package: bin/centralu.mjs, serve.mjs, platform.mjs
-    node_modules/@centralu/linux-x64/host/   the bundled host (Windows: …/win32-x64/Centralu/resources/host/)
+    node_modules/@centralu/host-linux-x64/host/   the bundled host, the host-only package (step 5);
+                                      versions published before it: @centralu/linux-x64/host/
+                                      (Windows: …/win32-x64/Centralu/resources/host/)
     install.json                      version, Node version, both integrities, when, by which hub
   current                             one line: "<centralu version> <node version>"
   previous                            the same, for the version before (the rollback target)
@@ -350,7 +352,8 @@ works as before.
   supported: the bundles carry no musl build of node-pty.
 - **Sizes and times on the laptop** (§10.7): about 12 s on Windows (a 6 MB package) and 16 s in WSL, where the Linux
   package's 81 MB AppImage costs 9 of those seconds and is thrown away. A host-only package would be 4 MB (owner
-  decision 2, §10.9).
+  decision 2, §10.9). *Built (step 5)*: `@centralu/host-<platform>`, 3.7 MB packed; the installer falls back to the
+  platform package for versions published before it.
 - **A dev hub installs nothing by itself**: its version is not on npm. It shows the command to install the latest
   release there, as phase 1 does, and `MachineInfo.command` keeps reaching a source checkout.
 
@@ -542,7 +545,7 @@ The owner took every recommendation of the design. Each line keeps the question,
 | 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running. **Done**: `host.stop`, `MachineStatus` `starting` and `MachineInfo.hostStarted` (additive), the link-bound fallback when WMI is blocked ([agent-host.md](../agent-host.md) §4.7, §4.8) | 1.5–2 days |
 | 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL. **Done** as `machines.install` (additive), [agent-host.md](../agent-host.md) §4.8; the posix scripts run for real in the tests, the Windows and WSL ones are checked as built but **not yet run on a Windows machine** (choices below) | 2–3 days |
 | 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows. **Done** as `machines.update`, `machines.rollback`, `machines.uninstall` and `machines.activity` (with the remote's `host.activity`), `MachineInfo.install`, `MachineInfo.operation` and the status `updating` (all additive), [agent-host.md](../agent-host.md) §4.8 (choices below); the posix path runs for real in the tests, the Windows and WSL paths **not yet run on a Windows machine** | 2–3 days |
-| 5 | (Owner decision 2) Host-only packages in the release | 1 day |
+| 5 | (Owner decision 2) Host-only packages in the release. **Done**: `@centralu/host-linux-x64`, `-linux-arm64` and `-win32-x64` (`host/` only, 3.7 MB packed against 88 MB for the Linux platform package), published by each platform's release job before its platform package; the installer prefers them and falls back to the platform package when the registry has none at that version; the shim's `serve` finds the host in either ([releasing.md](../releasing.md) "Host-only packages"). The release itself is **not yet rehearsed** with them (choices below) | 1 day |
 | 6 | (Owner decisions 4, 5) Boot autostart; the remote keeper after #350 | 1 day; 3–5 days |
 
 Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind phase 1's manual path, which keeps working.
@@ -569,6 +572,24 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
   now `previous`, so nothing in use is removed. Step 4 wraps this in stop, switch, start and check.
 - **On Windows the `.mjs` runs `%SystemRoot%\System32\tar.exe` by its full path**: a GNU tar earlier on PATH (Git's)
   reads `C:` in an archive path as a remote host.
+
+**Choices made building step 5** (owner decision 2):
+
+- **Names and shape**: `@centralu/host-<platform>` for the platforms the Node pin serves, `host/` at the top on every
+  platform (Windows included, where the platform package has it under `Centralu\resources\`), `os` and `cpu` as the
+  platform package's. Under the `@centralu` scope, so nobody else can publish the name.
+- **The shim does not pin them.** An npm install already has the host in its platform package; pinning both would
+  download it twice. The installer asks for its own exact version, and a release publishes both packages of a
+  platform from one build, so the host-only package and the shim of one version always come from one commit.
+- **Fallback only on "not published"**: the registry's 404 for the package or the version (`NotPublished`,
+  `registry.ts`). A bad signature, or a registry that does not answer, refuses as before rather than trying the
+  other package. So a hub keeps installing versions published before step 5, and a tampered host-only package is
+  never quietly replaced by the larger one.
+- **The shim finds either** (`findHostEntry`, `platform.mjs`): the platform package first, then the host-only one.
+  Only shims from step 5 on know the second, and only versions from step 5 on have one, so the two always meet.
+- **Published first in its job, and re-runs skip what this commit already published** (releasing.md "When a job
+  fails halfway"): a new package name is the likeliest publish to be refused, and refused first it leaves nothing of
+  that platform on the registry.
 
 **Choices made building step 4** (within §10.5):
 

@@ -9,9 +9,9 @@
 // not survive the way back from Windows; tunnel.ts). The sentences for the person are the hub's.
 import { spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
@@ -86,25 +86,77 @@ export function prune(l) {
     }
   }
   sweep(l.versions, new Set(keep.map((p) => p.version)))
+  // What `placeVersion` moved aside and could not remove then
+  try {
+    for (const name of readdirSync(l.root).filter((n) => n.startsWith('.replaced-'))) {
+      try {
+        rmSync(join(l.root, name), { recursive: true, force: true })
+      } catch {
+        left.push(name)
+      }
+    }
+  } catch {}
   sweep(l.node, new Set(keep.map((p) => `v${p.node}`)))
   return { removed, left }
 }
 
-/** One installer at a time per data folder; a lock whose process is gone is taken over */
-function lock(l) {
-  for (let i = 0; i < 2; i++) {
+/** A lock folder with no pid in it, younger than this, is held: its installer has made it and not yet written the pid */
+const LOCK_YOUNG_MS = 60_000
+
+/**
+ * One installer at a time per data folder; a lock whose process is gone is taken over.
+ *
+ * Taking it is `mkdir`, which only one installer can do; the pid follows. A lock found with no pid is
+ * held while it is young (another installer between the two, which reading it as pid 0 once took
+ * over), and stale only after `LOCK_YOUNG_MS` (an installer that died between them). A stale lock is
+ * taken over by moving it aside first, so of two installers that both found it stale only one removes
+ * it, and one that moved a lock just replaced by a live one puts it back. Unlock removes the lock only
+ * while it is still this run's own (its `token`).
+ */
+export function lock(l) {
+  const token = `${process.pid}-${randomBytes(8).toString('hex')}`
+  for (let i = 0; i < 3; i++) {
     try {
       mkdirSync(l.lock)
       writeFileSync(join(l.lock, 'pid'), String(process.pid))
-      return () => rmSync(l.lock, { recursive: true, force: true })
+      writeFileSync(join(l.lock, 'token'), token)
+      return () => {
+        if (readFileSafe(join(l.lock, 'token')) === token) rmSync(l.lock, { recursive: true, force: true })
+      }
     } catch (err) {
       if (err.code !== 'EEXIST') throw err
-      const pid = Number(readFileSafe(join(l.lock, 'pid')))
-      if (pid > 0 && alive(pid)) throw new Refusal('busy', String(pid))
-      rmSync(l.lock, { recursive: true, force: true })
     }
+    const held = readFileSafe(join(l.lock, 'pid'))
+    if (!lockIsStale(l.lock, held)) throw new Refusal('busy', held.trim())
+    const aside = `${l.lock}.${token}.stale`
+    try {
+      renameSync(l.lock, aside)
+    } catch {
+      continue // gone already, or another installer moved it first
+    }
+    const moved = readFileSafe(join(aside, 'pid'))
+    if (moved !== held) {
+      // Replaced by a live lock between reading it and moving it: not ours to remove
+      try {
+        renameSync(aside, l.lock)
+      } catch {
+        // Someone holds a newer one; this one stays aside, named, and harmless
+      }
+      throw new Refusal('busy', moved.trim())
+    }
+    rmSync(aside, { recursive: true, force: true })
   }
   throw new Refusal('busy')
+}
+
+function lockIsStale(dir, pidText) {
+  const pid = Number(pidText.trim())
+  if (pidText.trim() && pid > 0) return !alive(pid)
+  try {
+    return Date.now() - statSync(dir).mtimeMs > LOCK_YOUNG_MS
+  } catch {
+    return true // gone: the next turn takes the lock
+  }
 }
 
 function readFileSafe(file) {
@@ -144,10 +196,17 @@ export async function fetchChecked(pkg) {
   return bytes
 }
 
-/** Where the host sits in the platform package, and what of the package a remote never runs (plan S6) */
-function platformParts(platform) {
-  if (platform === 'win32-x64') return { host: join('Centralu', 'resources', 'host', 'main.mjs'), drop: [join('Centralu', 'centralu.exe')] }
-  return { host: join('host', 'main.mjs'), drop: ['Centralu.AppImage'] }
+/**
+ * Which package brings the host, where the host sits in it, and what of it a remote never runs (plan
+ * S6). The host-only package (`@centralu/host-<platform>`) is the host and nothing else; a version
+ * published before it existed comes as its platform package, whose window is thrown away
+ */
+function hostParts(platform, packages) {
+  const hostOnly = `@centralu/host-${platform}`
+  if (packages.some((pkg) => pkg.name === hostOnly)) return { pkg: hostOnly, host: join('host', 'main.mjs'), drop: [] }
+  const pkg = `@centralu/${platform}`
+  if (platform === 'win32-x64') return { pkg, host: join('Centralu', 'resources', 'host', 'main.mjs'), drop: [join('Centralu', 'centralu.exe')] }
+  return { pkg, host: join('host', 'main.mjs'), drop: ['Centralu.AppImage'] }
 }
 
 function sameInstall(dir, p) {
@@ -159,6 +218,32 @@ function sameInstall(dir, p) {
   }
 }
 
+/**
+ * Puts the unpacked `partial` folder in place as `dir`. A `dir` already there (the same version
+ * installed again with other bytes, possibly the one `current` runs) is moved aside first and removed
+ * only once the new one is in place, and put back if that fails: removing it first would leave
+ * `current` naming nothing after a failed rename, and on Windows a removal can stop halfway on the
+ * files of a host running from it (moving that folder is allowed, plan §10.5). What cannot be removed
+ * stays aside under a dot name, and the next prune tries again
+ */
+export function placeVersion(l, partial, dir) {
+  const aside = existsSync(dir) ? join(l.root, `.replaced-${basename(dir)}-${process.pid}-${randomBytes(4).toString('hex')}`) : null
+  if (aside) renameSync(dir, aside)
+  try {
+    renameSync(partial, dir)
+  } catch (err) {
+    if (aside) renameSync(aside, dir)
+    throw err
+  }
+  if (aside) {
+    try {
+      rmSync(aside, { recursive: true, force: true })
+    } catch {
+      // A Windows program still running from it; harmless where it is
+    }
+  }
+}
+
 /** Installs `p.version` beside what is there, switches `current` to it, and keeps `previous` */
 export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu'), platform = process.platform } = {}) {
   if (!WORD.test(p.version) || !WORD.test(p.node)) throw new Refusal('params', 'version')
@@ -167,7 +252,7 @@ export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(hom
   const unlock = lock(l)
   try {
     const dir = join(l.versions, p.version)
-    const parts = platformParts(p.platform)
+    const parts = hostParts(p.platform, p.packages)
     if (!sameInstall(dir, p)) {
       // Everything lands in a folder of its own first; the version's folder appears by one rename
       const partial = join(l.root, `.partial-${p.version}-${process.pid}`)
@@ -183,7 +268,7 @@ export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(hom
           if (r.status !== 0) throw new Refusal('unpack', `${pkg.name}: ${(r.stderr || r.error?.message || '').trim().split('\n').at(-1)}`)
           rmSync(file, { force: true })
         }
-        const pkgDir = join(partial, 'node_modules', '@centralu', p.platform)
+        const pkgDir = join(partial, 'node_modules', ...parts.pkg.split('/'))
         if (!existsSync(join(pkgDir, parts.host))) throw new Refusal('no_host', p.platform)
         for (const d of parts.drop) rmSync(join(pkgDir, d), { force: true })
         writeFileSync(
@@ -191,8 +276,7 @@ export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(hom
           JSON.stringify({ version: p.version, node: p.node, platform: p.platform, packages: p.packages.map(({ name, integrity }) => ({ name, integrity })), installedAt: new Date().toISOString(), by: p.hub ?? null }, null, 2) + '\n',
         )
         mkdirSync(l.versions, { recursive: true })
-        rmSync(dir, { recursive: true, force: true })
-        renameSync(partial, dir)
+        placeVersion(l, partial, dir)
       } finally {
         rmSync(partial, { recursive: true, force: true })
       }
@@ -249,8 +333,10 @@ export async function setPointers(p, { dataDir = process.env.CC_DATA_DIR || join
       return { current: null, previous: null }
     }
     const dir = join(l.versions, current.version)
-    const node = join(l.node, `v${current.node}`)
-    if (!existsSync(join(dir, 'install.json')) || !existsSync(node)) throw new Refusal('missing', `${current.version} ${current.node}`)
+    // Both must be there: a `previous` naming nothing would offer a rollback to a version that is gone
+    for (const v of [current, previous].filter(Boolean)) {
+      if (!existsSync(join(l.versions, v.version, 'install.json')) || !existsSync(join(l.node, `v${v.node}`))) throw new Refusal('missing', `${v.version} ${v.node}`)
+    }
     await ensureManagedLauncher(l, dir, current.version, platform)
     if (previous) writeAtomic(l.previous, `${previous.version} ${previous.node}\n`)
     else rmSync(l.previous, { force: true })
