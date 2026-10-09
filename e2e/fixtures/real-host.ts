@@ -1,6 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -94,6 +95,8 @@ export async function freePort(): Promise<number> {
 }
 
 export async function startHost(ws: Workspace, port: number): Promise<RealHost> {
+  const run = randomUUID()
+  const mark = `${HOST_MARK}=${run}`
   const child = spawn(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', String(port), '--db', ws.db, '--token', RECOVERY_TOKEN], {
     cwd: root,
     env: {
@@ -102,6 +105,7 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
       HOME: ws.home,
       CC_HOST_ALLOWED_ORIGINS: RECOVERY_UI_ORIGIN,
       CI: '1',
+      [HOST_MARK]: run,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -126,64 +130,72 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
     port,
     child,
     async kill(signal: NodeJS.Signals = 'SIGTERM') {
-      if (child.exitCode !== null || child.signalCode !== null) return
-      const tree = descendants(child.pid!)
-      const exited = once(child, 'exit')
-      child.kill(signal)
-      await exited
-      await gone(tree)
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit')
+        child.kill(signal)
+        await exited
+      }
+      await gone(mark)
     },
   }
 }
 
 /*
  * What the host started is waited for too, not only the host (#368). Its probes (`claude --version`,
- * `claude auth status`, which the window asks for through `agents.detect` on load) are not ended
- * with it, and with HOME in the workspace they write `home/.claude.json` and `home/.claude/backups/`
- * a moment after the host has exited. Removing the workspace then failed with ENOTEMPTY when a write
- * landed during the removal, and when it landed after, it made the folder again: a Mac that had run
- * the e2e suite for two days held 97 `centralu-e2e-recovery-*` folders with exactly those files.
- * The probes are left to finish rather than killed: the host leaves them alone in the real app as
- * well. Taken before the signal, while they are still under the host; afterwards they have been
- * handed to init. Unix only: these specs do not run on Windows.
+ * then `claude auth status`, which the window asks for through `agents.detect` on load) are not
+ * ended with it, and with HOME in the workspace they write `home/.claude.json` and
+ * `home/.claude/backups/` a moment after the host has exited. Removing the workspace then failed
+ * with ENOTEMPTY when a write landed during the removal, and when it landed after, it made the
+ * folder again: a Mac that had run the e2e suite for two days held 97 `centralu-e2e-recovery-*`
+ * folders with exactly those files. The probes are left to finish rather than killed: the host
+ * leaves them alone in the real app as well.
+ *
+ * They are found by a mark in their environment, which every process the host starts inherits,
+ * not by walking the host's children. A list of children taken when the signal is sent misses
+ * what the host starts after it: shutting down takes a moment, `agents.detect` runs its probes
+ * one after the other, and an `auth status` started when `--version` returned in that moment was
+ * on no list (a detect followed by a kill 150-450 ms later left those files behind in 2 of 27
+ * runs). Once the host has exited its probes belong to init, so no later walk finds them either.
+ * A mark has no such gap: after the host is gone only a marked process can start another one.
+ * Unix only: these specs do not run on Windows.
  */
-function descendants(root: number): number[] {
-  if (process.platform === 'win32') return []
+const HOST_MARK = 'CENTRALU_E2E_HOST_RUN'
+
+/** The running processes that have `mark` (`NAME=value`) in their environment, at any depth below the host */
+function marked(mark: string): number[] {
+  if (process.platform === 'linux') {
+    const found: number[] = []
+    for (const pid of readdirSync('/proc')) {
+      if (!/^\d+$/.test(pid)) continue
+      try {
+        if (readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(mark)) found.push(Number(pid))
+      } catch {
+        // Ended meanwhile, or not ours to read
+      }
+    }
+    return found
+  }
+  if (process.platform !== 'darwin') return []
   let out = ''
   try {
-    out = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8', timeout: 5_000 })
+    // `-E` puts each process's environment after its command, separated by spaces
+    out = execFileSync('ps', ['-A', '-E', '-ww', '-o', 'pid=,command='], { encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024 * 1024 })
   } catch {
     return []
   }
-  const kids = new Map<number, number[]>()
-  for (const line of out.split('\n')) {
-    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line)
-    if (m) kids.set(Number(m[2]), [...(kids.get(Number(m[2])) ?? []), Number(m[1])])
-  }
   const found: number[] = []
-  const queue = [root]
-  while (queue.length > 0) {
-    for (const kid of kids.get(queue.shift()!) ?? []) {
-      found.push(kid)
-      queue.push(kid)
-    }
+  for (const line of out.split('\n')) {
+    const m = /^\s*(\d+)\s(.*)$/.exec(line)
+    if (m && ` ${m[2]} `.includes(` ${mark} `)) found.push(Number(m[1]))
   }
   return found
 }
 
-/** Waits until none of `pids` is running; the probes give up on their own after 5 s, so 15 s is generous */
-async function gone(pids: number[], timeoutMs = 15_000): Promise<void> {
-  const running = (pid: number) => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch (e) {
-      return (e as NodeJS.ErrnoException).code === 'EPERM'
-    }
-  }
+/** Waits until no process carries `mark`; the probes give up on their own after 5 s, so 15 s is generous */
+async function gone(mark: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  while (pids.some(running)) {
-    if (Date.now() > deadline) throw new Error(`the host's children ${pids.filter(running).join(', ')} were still running ${timeoutMs}ms after it exited`)
+  for (let left = marked(mark); left.length > 0; left = marked(mark)) {
+    if (Date.now() > deadline) throw new Error(`what the host started (${left.join(', ')}) was still running ${timeoutMs}ms after it exited`)
     await new Promise((r) => setTimeout(r, 50))
   }
 }
