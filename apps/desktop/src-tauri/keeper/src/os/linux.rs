@@ -83,3 +83,15 @@ impl ExitBackend {
         parse_proc_exit(&stat)
     }
 }
+
+/// Whether `pid` is a zombie: ended, and not yet reaped by its parent (`/proc/<pid>/stat`'s state
+/// `Z`). `kill(pid, 0)` cannot tell, it succeeds on a zombie (`super::pid_alive`).
+pub fn is_zombie(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| proc_state(&stat) == Some('Z'))
+}
+
+/// The state letter of a `/proc/<pid>/stat` line: the first field after the command name, which is
+/// in parentheses and may itself hold spaces and parentheses.
+fn proc_state(stat: &str) -> Option<char> {
+    stat.rsplit_once(')')?.1.trim_start().chars().next()
+}

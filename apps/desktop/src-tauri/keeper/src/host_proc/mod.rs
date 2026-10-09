@@ -21,7 +21,7 @@
 //! **Where the operating system shows.** This file is the logic every OS shares, written once. The
 //! mechanism that differs is the OS layer's (`crate::os`): signalling a host and its group
 //! (`kill_pid`, `kill_group`), how a host is started (`own_group`, `hide_console`), how it is asked
-//! to stop (`CLOSE_STDIN_TO_STOP`, `SIGNAL_GROUP_AFTER_EXIT`), whether tsx's sh script runs as it
+//! to stop (`CLOSE_STDIN_TO_STOP`, `group_signal_after_exit_is_safe`), whether tsx's sh script runs as it
 //! is (`RUNS_SH_SCRIPTS`) and the login-shell probe. What only the keeper does, which is unix-only
 //! until the keeper has a Windows half, is `handover.rs`: the stdout reader that can be frozen
 //! (`HostOut`) and the handoff of a running host (`freeze`, `adopt_foreign`); `no_handover.rs` is
@@ -628,10 +628,11 @@ fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, mut gone: impl Fn
         }
         thread::sleep(Duration::from_millis(50));
     }
-    // unix: the group outlives its leader and its number is not reused while anyone is in it, so
-    // it is signalled either way. Windows: `taskkill /T` walks the tree from a pid, and a pid that
-    // has ended may already belong to someone else — so only a host still running is ended.
-    if os::SIGNAL_GROUP_AFTER_EXIT || !ended {
+    // A host still running pins its group's number, so the group is signalled. One that ended:
+    // unix signals the group (its orphans) only while the number cannot be someone else's
+    // (`os::group_signal_after_exit_is_safe`: no new process lives under the leader's pid);
+    // Windows never, since `taskkill /T` walks the tree from a pid that may already be reused.
+    if !ended || os::group_signal_after_exit_is_safe(pid) {
         kill_group(pid);
     }
 }

@@ -10,7 +10,9 @@ pub const CLOSE_STDIN_TO_STOP: bool = true;
 
 /// `taskkill /T` walks the tree from a pid, and a pid that has ended may already belong to someone
 /// else, so only a host still running is ended (`stop_pid_gracefully`).
-pub const SIGNAL_GROUP_AFTER_EXIT: bool = false;
+pub fn group_signal_after_exit_is_safe(_pid: u32) -> bool {
+    false
+}
 
 /// Windows has no process groups to join; the tree is ended with `taskkill /T` instead
 /// (`kill_group`). What it does need is no console: the release app is a GUI-subsystem program, so

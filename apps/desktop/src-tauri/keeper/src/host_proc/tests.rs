@@ -79,6 +79,61 @@ fn signals_go_only_to_a_real_pid_or_group() {
     assert_eq!(signal_target(12345), Some(12345));
 }
 
+/// A group leader and the pid of a member it started in its group, read from its first line.
+#[cfg(unix)]
+fn group_with_a_member(script: &str) -> (Child, u32) {
+    use std::io::BufRead;
+    use std::os::unix::process::CommandExt;
+    let mut leader = Command::new("/bin/sh").args(["-c", script]).stdout(Stdio::piped()).process_group(0).spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(leader.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    (leader, line.trim().parse().unwrap())
+}
+
+#[cfg(unix)]
+fn gone_within(pid: u32, limit: Duration) -> bool {
+    let end = Instant::now() + limit;
+    while pid_alive(pid) && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+    }
+    !pid_alive(pid)
+}
+
+/// Once the host has ended, its group's number may belong to someone else: when every member is
+/// gone the number is free, and a new process that got the host's pid and leads a group of its
+/// own would take our TERM. A live, non-zombie process under the ended host's pid is that someone
+/// else, so its group is left alone. Here the "host" is seen as ended (`gone` says so at once)
+/// while its pid still runs, as a reused number would.
+#[cfg(unix)]
+#[test]
+fn a_group_whose_number_now_belongs_to_a_live_process_is_not_signalled() {
+    let (mut other, member) = group_with_a_member("sleep 60 & echo $!; trap '' TERM; wait");
+    stop_pid_gracefully(other.id(), None, || true);
+    let member_survived = !gone_within(member, Duration::from_millis(300));
+    // SAFETY: plain syscalls to the test's own child and grandchild.
+    unsafe {
+        libc::kill(member as i32, libc::SIGKILL);
+        libc::kill(other.id() as i32, libc::SIGKILL);
+    }
+    let _ = other.wait();
+    assert!(member_survived, "a group whose leader's pid is someone else's now was signalled");
+}
+
+/// The other half: a host that ended (and was reaped) leaves its group's members behind, and they
+/// still get TERM. That is the orphan sweep the group signal is for.
+#[cfg(unix)]
+#[test]
+fn the_members_a_reaped_host_left_behind_still_get_term() {
+    let (mut host, member) = group_with_a_member("sleep 60 & echo $!; trap 'exit 0' TERM; wait");
+    stop_child(&mut host);
+    let member_gone = gone_within(member, Duration::from_secs(10));
+    if !member_gone {
+        // SAFETY: a plain syscall to the test's own grandchild.
+        unsafe { libc::kill(member as i32, libc::SIGKILL) };
+    }
+    assert!(member_gone, "the member of a reaped host's group was left running");
+}
+
 /// The dev host runs the source from the workspace root; moving this crate (#440) moved the
 /// root one folder further up.
 #[test]

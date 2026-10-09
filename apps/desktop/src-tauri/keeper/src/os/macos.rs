@@ -23,6 +23,20 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     }
 }
 
+/// Whether `pid` is a zombie: ended, and not yet reaped by its parent (`p_stat` `SZOMB`, read with
+/// `proc_pidinfo`). `kill(pid, 0)` cannot tell, it succeeds on a zombie (`super::pid_alive`).
+pub fn is_zombie(pid: u32) -> bool {
+    let Ok(pid) = libc::c_int::try_from(pid) else { return false };
+    // SAFETY: proc_bsdinfo is plain data, for which all zeroes is a valid value.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // A non-zero `arg` asks for zombies too: with 0 the call fails on one, and a zombie read as
+    // "not a zombie" (measured on macOS 27).
+    // SAFETY: the buffer is valid for `size` bytes for the duration of the call.
+    let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 1, &mut info as *mut _ as *mut libc::c_void, size) };
+    n == size && info.pbi_status == libc::SZOMB
+}
+
 /// kqueue `EVFILT_PROC` with `NOTE_EXIT | NOTE_EXITSTATUS`: one queue for every child, the exit
 /// status delivered with the event even to a process that is not the parent (`ExitWatch`).
 pub struct ExitBackend {
