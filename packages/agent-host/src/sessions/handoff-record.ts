@@ -225,19 +225,24 @@ export function buildHandoffRecord(opts: {
    * entirely is announced by the first line.
    */
   const fixed = bytes(instructions + touchedLine + summarySection + verbatimMark) + 200 // slack for the covers line
-  const size = () => rendered.reduce((n, e) => n + bytes(e.text) + 2, fixed)
+  // A running total and one slice at the end: re-summing (or shifting) per dropped entry is
+  // quadratic, and a long text-only transcript (hundreds of thousands of rows) would hold the
+  // host's main thread for minutes.
+  const sizes = rendered.map((e) => bytes(e.text) + 2)
+  let size = sizes.reduce((n, s) => n + s, fixed)
   let dropped = 0
-  while (size() > cap && rendered.length > 1) {
-    rendered.shift()
+  while (size > cap && rendered.length - dropped > 1) {
+    size -= sizes[dropped]!
     dropped++
   }
+  const kept = rendered.slice(dropped)
 
-  const from = rendered.length ? rendered[0]!.seq : lastSeq
+  const from = kept.length ? kept[0]!.seq : lastSeq
   const covers =
     `covers seq ${num(from)}–${num(lastSeq)} of ${num(lastSeq)}` +
     ` · ${(cap / 1_000_000).toFixed(1)} MB cap` +
     (dropped > 0 || folded ? " · earlier material stays in the app's records" : '')
   const header = `# Handoff · ${opts.name} · ${opts.tool}${opts.toTool ? ` → ${opts.toTool}` : ''}\n${covers}\n${touchedLine}\n`
 
-  return header + instructions + summarySection + verbatimMark + rendered.map((e) => e.text).join('\n\n') + '\n'
+  return header + instructions + summarySection + verbatimMark + kept.map((e) => e.text).join('\n\n') + '\n'
 }
