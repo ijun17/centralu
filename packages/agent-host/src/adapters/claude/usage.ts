@@ -76,3 +76,41 @@ export async function readUsage(q: UsageQuery | null): Promise<UsageSnapshot> {
   if (typeof fn !== 'function') throw new Error(UNSUPPORTED)
   return toSnapshot(await fn.call(q))
 }
+
+/** How long one live session gets to answer before the next is asked (#481); the manager allows 15 s in all */
+export const USAGE_ASK_MS = 4_000
+
+/**
+ * Usage from the first of `queries` that answers, newest first (#481).
+ *
+ * Any live session can answer for the account, but not every one does: one still re-attaching after
+ * an update, an app's agent session, a query that is ending but not yet removed. Asking only the
+ * newest one showed "Usage unavailable" while an older session was working fine. Each gets
+ * `timeoutMs`; every failure is logged with its session so the next report can be traced.
+ * When none answers, the newest one's reason is thrown.
+ */
+export async function readUsageFromAny(
+  queries: readonly { query: UsageQuery; sessionId: string | null }[],
+  { timeoutMs = USAGE_ASK_MS, log = (line: string) => console.error(line) }: { timeoutMs?: number; log?: (line: string) => void } = {},
+): Promise<UsageSnapshot> {
+  let first: unknown = null
+  for (const [i, { query, sessionId }] of queries.entries()) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        readUsage(query),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs)
+        }),
+      ])
+    } catch (e) {
+      first ??= e
+      const why = e instanceof Error ? e.message : String(e)
+      log(`[usage] claude: session ${sessionId ?? 'unknown'} could not read usage (${i + 1} of ${queries.length}): ${why}`)
+      if (why === UNSUPPORTED) break // the same SDK serves every session
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  throw first instanceof Error ? first : new Error('A running session is required to read usage')
+}

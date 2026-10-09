@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toSnapshot as claudeSnapshot } from './claude/usage.js'
+import { readUsageFromAny, toSnapshot as claudeSnapshot, UNSUPPORTED } from './claude/usage.js'
 import { toSnapshot as codexSnapshot } from './codex/usage.js'
 
 /**
@@ -103,5 +103,40 @@ describe('codex usage', () => {
 
   it('does not break even when the response is empty', () => {
     expect(codexSnapshot(undefined, undefined)).toEqual({ plan: null, windows: [], daily: [] })
+  })
+})
+
+describe('claude usage from several live sessions (#481)', () => {
+  const KEY = 'usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET'
+  const answers = (percent: number) => ({ [KEY]: async () => ({ rate_limits: { limits: [{ kind: 'session', percent }] } }) })
+  const fails = (msg: string) => ({ [KEY]: async () => Promise.reject(new Error(msg)) })
+  const hangs = () => ({ [KEY]: () => new Promise(() => {}) })
+
+  it('moves past a session that fails or does not answer in time', async () => {
+    const lines: string[] = []
+    const usage = await readUsageFromAny(
+      [
+        { query: hangs(), sessionId: 'a' },
+        { query: fails('ending'), sessionId: 'b' },
+        { query: answers(29), sessionId: 'c' },
+      ],
+      { timeoutMs: 20, log: (l) => lines.push(l) },
+    )
+    expect(usage.windows[0]?.percent).toBe(29)
+    expect(lines).toEqual([
+      '[usage] claude: session a could not read usage (1 of 3): no answer within 20 ms',
+      '[usage] claude: session b could not read usage (2 of 3): ending',
+    ])
+  })
+
+  it('throws the newest session\'s reason when none answers, and stops at an SDK without the call', async () => {
+    const log = () => {}
+    await expect(readUsageFromAny([{ query: fails('first'), sessionId: 'a' }, { query: fails('second'), sessionId: 'b' }], { log })).rejects.toThrow('first')
+    const later = answers(1)
+    const spy = later[KEY]
+    let asked = false
+    later[KEY] = async () => ((asked = true), spy())
+    await expect(readUsageFromAny([{ query: {}, sessionId: 'a' }, { query: later, sessionId: 'b' }], { log })).rejects.toThrow(UNSUPPORTED)
+    expect(asked).toBe(false)
   })
 })

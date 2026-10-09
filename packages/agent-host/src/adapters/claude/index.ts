@@ -41,7 +41,7 @@ import { installedCliVersion } from '../../cli-version.js'
 import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
-import { readUsage, type UsageQuery } from './usage.js'
+import { readUsageFromAny, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
 import { APP_MCP_PREFIX } from '../../apps/contract.js'
@@ -652,6 +652,7 @@ class ClaudeSession implements SessionHandle {
       },
     }))
     ClaudeAdapter.liveQueries.add(q)
+    ClaudeAdapter.querySessions.set(q, this.sessionId)
     this.releaseLostCalls(q)
 
     this.goalKnown = new Promise<void>((resolve) => (this.settleGoalKnown = resolve))
@@ -1378,6 +1379,8 @@ export class ClaudeAdapter implements AgentAdapter {
    * older session was still alive. Insertion order is the same as start order.
    */
   static readonly liveQueries = new Set<UsageQuery & ModelQuery>()
+  /** Which session each live query belongs to, for the log line when one cannot answer (#481) */
+  static readonly querySessions = new WeakMap<object, string>()
   /** The most recently started query that is still alive. */
   static get lastQuery(): (UsageQuery & ModelQuery) | null {
     let last: (UsageQuery & ModelQuery) | null = null
@@ -1465,9 +1468,9 @@ export class ClaudeAdapter implements AgentAdapter {
    * a Query. It throws when there is no session at all, and the manager degrades with a reason.
    */
   async listUsage() {
-    const q = ClaudeAdapter.lastQuery
-    if (!q) throw new Error('A running session is required to read usage')
-    return readUsage(q)
+    const live = [...ClaudeAdapter.liveQueries].reverse()
+    if (live.length === 0) throw new Error('A running session is required to read usage')
+    return readUsageFromAny(live.map((query) => ({ query, sessionId: ClaudeAdapter.querySessions.get(query) ?? null })))
   }
 
   async listModels() {

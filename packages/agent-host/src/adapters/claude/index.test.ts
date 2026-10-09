@@ -145,6 +145,27 @@ describe('when a claude stream ends without warning', () => {
     expect([...ClaudeAdapter.liveQueries]).not.toContain(qOlder)
   })
 
+  it('reads usage from an older live session when the newest cannot answer, and logs which one failed (#481)', async () => {
+    const adapter = new ClaudeAdapter()
+    const older = await adapter.createSession({ sessionId: 's481a', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
+    const qOlder = control.queries.at(-1)! as unknown as Record<string, unknown>
+    const newer = await adapter.createSession({ sessionId: 's481b', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
+    const qNewer = control.queries.at(-1)! as unknown as Record<string, unknown>
+    const KEY = 'usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET'
+    qNewer[KEY] = () => Promise.reject(new Error('still re-attaching'))
+    qOlder[KEY] = () => Promise.resolve({ subscription_type: 'max', rate_limits: { limits: [{ kind: 'weekly_all', percent: 95 }] } })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const usage = await adapter.listUsage()
+      expect(usage.windows).toMatchObject([{ id: 'weekly_all', percent: 95 }])
+      expect(logged.mock.calls.flat().join('\n')).toContain('session s481b could not read usage (1 of 2): still re-attaching')
+    } finally {
+      logged.mockRestore()
+      await newer.dispose()
+      await older.dispose()
+    }
+  })
+
   /*
    * While the SDK is not pulling input (this is what a turn in progress looks like), a message
    * left in the queue goes unread by anyone once dispose runs. Because the UI already shows it as
