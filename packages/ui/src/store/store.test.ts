@@ -462,6 +462,163 @@ describe('handling resync_required (U3)', () => {
 })
 
 /**
+ * A reconnect's recovery while the host keeps talking. The session list is read with a request, and live
+ * events keep arriving until its answer does; the hub answers only once every linked machine has, so the
+ * list can be older than them. The recovery used to apply the rows as they stood.
+ */
+/** Holds the next `sessions.list` answer (read at the moment it was asked) until `release` */
+function holdList(mock: MockPlatform): { asked: Promise<void>; release: () => void } {
+  const real = mock.agents.listSessions
+  let release!: () => void
+  let askedNow!: () => void
+  const asked = new Promise<void>((r) => (askedNow = r))
+  mock.agents.listSessions = async () => {
+    mock.agents.listSessions = real
+    const snapshot = await real()
+    const held = new Promise<void>((r) => (release = r))
+    askedNow()
+    await held
+    return snapshot
+  }
+  return { asked, release: () => release() }
+}
+
+/** Lets every pending promise and zero-delay timer run */
+const settle = () => new Promise((r) => setTimeout(r, 0))
+
+describe('reconnect recovery against live events', () => {
+  const rows = (id: string, from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => ({
+      sessionId: id, seq: from + i, role: 'user' as const, kind: 'text' as const, payload: { text: `L${from + i}` }, ts: from + i,
+    }))
+
+  it('a session created by a live event while the list is out is not treated as deleted', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rl-a', sessionInfo('rl-a'))
+    await useStore.getState().attach(mock)
+    const list = holdList(mock)
+    mock.setConnectionState('resync_required')
+    await list.asked
+
+    mock.sessions.set('rl-b', sessionInfo('rl-b'))
+    mock.emit({ type: 'session_created', sessionId: 'rl-b', session: sessionInfo('rl-b') } as NormalizedEvent)
+    expect(useStore.getState().sessions['rl-b']).toBeDefined()
+    list.release()
+    await settle()
+
+    expect(Object.keys(useStore.getState().sessions).sort()).toEqual(['rl-a', 'rl-b'])
+  })
+
+  it('an approval, a state and a read position that changed while the list is out are not overwritten by its older row', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rl-c', sessionInfo('rl-c', { name: 'before the gap', lastSeq: 4, lastReadSeq: 2 }))
+    await useStore.getState().attach(mock)
+    // Renamed during the gap: only the list knows
+    mock.sessions.set('rl-c', sessionInfo('rl-c', { name: 'renamed in the gap', lastSeq: 4, lastReadSeq: 2 }))
+    const list = holdList(mock)
+    mock.setConnectionState('resync_required')
+    await list.asked
+
+    mock.emit({ type: 'approval_request', sessionId: 'rl-c', requestId: 'rq-1', detail: { kind: 'command', command: 'make' } } as never)
+    await useStore.getState().markRead('rl-c')
+    const live = useStore.getState().sessions['rl-c']!
+    expect(live.pendingApproval).not.toBeNull()
+    expect(live.state).toBe('waiting_approval')
+    expect(live.lastReadSeq).toBe(4)
+    list.release()
+    await settle()
+
+    const after = useStore.getState().sessions['rl-c']!
+    expect(after.name).toBe('renamed in the gap')
+    expect(after.pendingApproval).toEqual(live.pendingApproval)
+    expect(after.state).toBe('waiting_approval')
+    expect(after.lastReadSeq).toBe(4)
+  })
+
+  it('a session deleted by a live event while the list is out is not brought back by its older row', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rl-d', sessionInfo('rl-d'))
+    mock.sessions.set('rl-e', sessionInfo('rl-e'))
+    await useStore.getState().attach(mock)
+    const list = holdList(mock)
+    mock.setConnectionState('resync_required')
+    await list.asked
+
+    mock.emit({ type: 'session_deleted', sessionId: 'rl-d' } as NormalizedEvent)
+    expect(useStore.getState().sessions['rl-d']).toBeUndefined()
+    list.release()
+    await settle()
+
+    expect(Object.keys(useStore.getState().sessions).sort()).toEqual(['rl-e'])
+  })
+
+  it('a session deleted during the gap, which no live event names, still leaves', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rl-f', sessionInfo('rl-f'))
+    mock.sessions.set('rl-g', sessionInfo('rl-g'))
+    await useStore.getState().attach(mock)
+    mock.sessions.delete('rl-f')
+    mock.setConnectionState('resync_required')
+    await vi.waitFor(() => expect(useStore.getState().sessions['rl-f']).toBeUndefined())
+    expect(useStore.getState().sessions['rl-g']).toBeDefined()
+  })
+
+  it('a session list that fails to arrive is read again, so the gap is still recovered', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rl-h', sessionInfo('rl-h'))
+    await useStore.getState().attach(mock)
+    mock.sessions.set('rl-i', sessionInfo('rl-i', { name: 'created during the disconnect' }))
+    vi.spyOn(mock.agents, 'listSessions').mockRejectedValueOnce(Object.assign(new Error('RPC timed out'), { code: 'timeout' }))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      mock.setConnectionState('resync_required')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(useStore.getState().sessions['rl-i']).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useStore.getState().sessions['rl-i']?.name).toBe('created during the disconnect')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a conversation page a resync fails to read is read again, so its gap is filled', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rl-j', sessionInfo('rl-j', { lastSeq: 3, lastReadSeq: 3 }))
+    mock.messages.set('rl-j', rows('rl-j', 1, 3))
+    await useStore.getState().attach(mock)
+    await useStore.getState().loadHistory('rl-j')
+    expect(useStore.getState().chat['rl-j']!.map(line)).toEqual(['L1', 'L2', 'L3'])
+
+    // Two lines were stored while disconnected, and the first re-read times out
+    mock.messages.get('rl-j')!.push(...rows('rl-j', 4, 5))
+    vi.spyOn(mock.agents, 'loadMessages').mockRejectedValueOnce(Object.assign(new Error('RPC timed out'), { code: 'timeout' }))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      mock.setConnectionState('resync_required')
+      await vi.advanceTimersByTimeAsync(0)
+      // Until it is read, nothing claims it was: opening the conversation reads it again too
+      expect(useStore.getState().history['rl-j']).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useStore.getState().chat['rl-j']!.map(line)).toEqual(['L1', 'L2', 'L3', 'L4', 'L5'])
+      expect(useStore.getState().history['rl-j']).toBeDefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a resync that is the first word after a drop still does what a reconnect does', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.setConnectionState('connected')
+    mock.setConnectionState('disconnected')
+    const versions = vi.spyOn(useStore.getState(), 'checkAgentVersions')
+    mock.setConnectionState('resync_required')
+    expect(useStore.getState().connection).toBe('connected')
+    expect(versions).toHaveBeenCalledWith(false)
+  })
+})
+
+/**
  * Reading back further (dogfooding, 2026-09-09: "older conversation does not load above").
  *
  * The conversation the screen holds and the history cursor **must move together.** If they fall out
@@ -3947,6 +4104,27 @@ describe('linked machines (#82)', () => {
     // Scoped: this computer's row is the very same object, not merged from the fresh list
     expect(s['mr-local']).toBe(localBefore)
     expect(useStore.getState().projects[remote.id]?.machine).toBe('box')
+  })
+
+  it('a resync keeps that machine\'s sessions a live event created or changed while the list was out', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    mock.sessions.set('box.ml-a', sessionInfo('box.ml-a', { projectId: remote.id, machine: 'box' }))
+    await useStore.getState().attach(mock)
+    const list = holdList(mock)
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await list.asked
+
+    const born = sessionInfo('box.ml-b', { projectId: remote.id, machine: 'box' })
+    mock.emit({ type: 'session_created', sessionId: born.id, session: born } as NormalizedEvent)
+    mock.emit({ type: 'approval_request', sessionId: 'box.ml-a', requestId: 'rq-m', detail: { kind: 'command', command: 'make' } } as never)
+    list.release()
+    await settle()
+
+    const s = useStore.getState().sessions
+    expect(s['box.ml-b']).toBeDefined()
+    expect(s['box.ml-a']!.pendingApproval).toMatchObject({ requestId: 'rq-m' })
   })
 
   it('a resync wakes only that machine\'s sessions that were live and are not now', async () => {

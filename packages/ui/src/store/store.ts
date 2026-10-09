@@ -1816,6 +1816,68 @@ function mergeListed(cur: SessionSummary | undefined, f: SessionInfo): SessionSu
 }
 
 /**
+ * The sessions live events named while a `sessions.list` was out, one set per read in flight
+ * (`watchLiveEvents`). Empty whenever no recovery is reading, so it never holds anything for long.
+ */
+const liveEventWatchers = new Set<Set<string>>()
+
+/** Starts noting which sessions live events touch; the returned set fills until `stop` */
+function watchLiveEvents(): { touched: Set<string>; stop: () => void } {
+  const touched = new Set<string>()
+  liveEventWatchers.add(touched)
+  return { touched, stop: () => liveEventWatchers.delete(touched) }
+}
+
+/**
+ * The sessions a fresh `sessions.list` describes, merged over what the store holds **now**, without undoing what
+ * changed after the list was asked for.
+ *
+ * Events keep arriving while the list is out, and the list can be older than them: the hub answers once every linked
+ * machine has, so its own rows may be read long before the answer leaves (`links/router.ts`). Applying the rows as
+ * they stand turned a session that `session_created` registered during the wait into a deleted one (it was not in
+ * the list), and wrote an answered approval, an older state or read position back over the live ones. So, against
+ * `asked` (the sessions when the list was requested):
+ *
+ * - a field the store changed since then keeps the store's value; every other field takes the list's
+ * - a session that left the store since then (`session_deleted`) is not brought back by an older row
+ * - a session the list lacks is kept if it arrived since then, or a live event named it since then (`touched`);
+ *   otherwise it was deleted during the gap and is reported in `gone`
+ *
+ * `include` limits which held sessions this list speaks for (a machine's recovery only speaks for its own).
+ */
+function mergeListedSince(
+  asked: Record<string, SessionSummary>,
+  now: Record<string, SessionSummary>,
+  fresh: Iterable<SessionInfo>,
+  touched: ReadonlySet<string>,
+  include: (s: SessionSummary) => boolean = () => true,
+): { sessions: Record<string, SessionSummary>; gone: Set<string> } {
+  const listed = new Map<string, SessionInfo>()
+  for (const f of fresh) listed.set(f.id, f)
+  const sessions: Record<string, SessionSummary> = {}
+  const gone = new Set<string>()
+  for (const [id, cur] of Object.entries(now)) {
+    if (!include(cur)) sessions[id] = cur
+    else if (listed.has(id)) sessions[id] = keepChangedSince(asked[id], cur, mergeListed(cur, listed.get(id)!))
+    else if (!asked[id] || touched.has(id)) sessions[id] = cur
+    else gone.add(id)
+  }
+  for (const [id, f] of listed) if (!sessions[id] && !gone.has(id) && !asked[id]) sessions[id] = mergeListed(undefined, f)
+  return { sessions, gone }
+}
+
+/** `merged`, with every field of `cur` that differs from `asked` put back: the store learned those after the list was asked for */
+function keepChangedSince(asked: SessionSummary | undefined, cur: SessionSummary, merged: SessionSummary): SessionSummary {
+  if (cur === asked) return merged
+  // Arrived since: everything the store holds is newer than the request
+  if (!asked) return cur
+  const out = { ...merged } as Record<string, unknown>
+  const was = asked as Record<string, unknown>
+  for (const [k, v] of Object.entries(cur)) if (v !== was[k]) out[k] = v
+  return out as SessionSummary
+}
+
+/**
  * Keep `workingSince` in step with who is actually working (issue #23).
  *
  * A session that starts a turn gets the current instant; one that stops working loses its
@@ -2448,6 +2510,16 @@ export function usageTools(s: AppState): ToolName[] {
 let restoringWorkspace = false
 
 /**
+ * The waits before reading again what a reconnect has to re-read (the session list, a conversation page) when the
+ * read fails. Same steps as a failed workspace save: a host that fails every read is not helped by being asked
+ * forever, and the next reconnect or opening the conversation reads again.
+ */
+const RECOVERY_RETRY_MS = [1_000, 5_000, 30_000] as const
+
+/** Bumped by every reconnect recovery, so the retries of an older one stop once a newer one runs */
+let recoveryGeneration = 0
+
+/**
  * The latest workspace snapshot the host has not confirmed storing, and the one writer that sends it.
  *
  * A save used to be sent once and a failure swallowed (`.catch(() => {})`). On 2026-09-30 the machine
@@ -2647,21 +2719,24 @@ export const useStore = create<AppState>((set, get) => ({
          * and the gap is filled by a full resync (merging the session list and re-reading the
          * conversation being viewed).
          */
-        if (connection === 'resync_required') {
-          set({ connection: 'connected', hostResyncs: get().hostResyncs + 1 })
-          void get().recoverAfterReconnect(true)
-          return
-        }
-        set({ connection })
-        // Disconnected and came back — revive sessions that were running
-        if (connection === 'connected' && was !== 'connected') {
+        const resync = connection === 'resync_required'
+        if (resync) set({ connection: 'connected', hostResyncs: get().hostResyncs + 1 })
+        else set({ connection })
+        /*
+         * Disconnected and came back. The web client says `connected` before `resync_required`, but the port does
+         * not promise that order: a resync that is the first word after a drop is a reconnect too, and must not
+         * skip what a reconnect does.
+         */
+        if ((connection === 'connected' || resync) && was !== 'connected') {
           // A save that failed while the host was away goes out now, with a fresh set of retries
           workspaceSave.attempt = 0
           flushWorkspace(get)
-          void get().recoverAfterReconnect()
           // A new host (a restart, a switched build) read the installed CLIs before this window was back (#297)
           void get().checkAgentVersions(false)
+          // Revive sessions that were running; a resync's own recovery below does that and more
+          if (!resync) void get().recoverAfterReconnect()
         }
+        if (resync) void get().recoverAfterReconnect(true)
       }),
       /*
        * A command run's outcome (#60) — `runId` rides in the `terminalId` slot. A shell terminal's
@@ -3137,6 +3212,8 @@ export const useStore = create<AppState>((set, get) => ({
 
     const sessionId = e.sessionId
     if (!sessionId) return
+    // A recovery reading the session list keeps what this event says over an older row (`mergeListedSince`)
+    for (const touched of liveEventWatchers) touched.add(sessionId)
 
     /*
      * The host caught up on a conversation continued from outside (through the tool's own
@@ -3639,8 +3716,33 @@ export const useStore = create<AppState>((set, get) => ({
   async loadHistory(sessionId) {
     const platform = get().platform
     if (!platform) return
+    /*
+     * A page that fails to arrive is asked for again (`RECOVERY_RETRY_MS`), and meanwhile the cursor is dropped.
+     * Swallowing the failure left a re-read's gap for good: a resync re-reads sessions that already hold a cursor,
+     * and a cursor is what tells the screen and `focusSession` the conversation was read, so nothing read it again
+     * until the app was reopened. Without the cursor, opening the conversation reads it again too.
+     */
+    let msgs: StoredMessage[]
+    for (let attempt = 0; ; attempt++) {
+      const held = get().history[sessionId]
+      try {
+        msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE)
+        break
+      } catch {
+        // A cursor some other read set meanwhile is a successful read, and stays
+        set((s) => {
+          if (!held || s.history[sessionId] !== held) return {}
+          const { [sessionId]: _dropped, ...history } = s.history
+          return { history }
+        })
+        const wait = RECOVERY_RETRY_MS[attempt]
+        // Even if history fails to load, a new conversation is still possible, so the last failure is not shown
+        if (wait === undefined) return
+        await new Promise((r) => setTimeout(r, wait))
+        if (get().platform !== platform || !get().sessions[sessionId]) return
+      }
+    }
     try {
-      const msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE)
       const items = messagesToChat(msgs)
       bumpChatKeysAbove(items)
       set((s) => {
@@ -3671,7 +3773,7 @@ export const useStore = create<AppState>((set, get) => ({
         }
       })
     } catch {
-      // Even if history fails to load, a new conversation is still possible, so this is silently ignored
+      // A page that cannot be turned into rows is not worth taking the screen down for; the conversation goes on
       return
     }
     await syncInlineViews(get, set, sessionId)
@@ -3985,26 +4087,22 @@ export const useStore = create<AppState>((set, get) => ({
     const ofMachine = (x: { machine?: string | null }) => (x.machine ?? null) === machineId
     // Held live before: the candidates to wake, once the fresh list says they are not
     const wasLive = Object.values(s.sessions).filter((x) => ofMachine(x) && x.live)
+    const asked = s.sessions
+    const watch = watchLiveEvents()
     const [fresh, projects] = await Promise.all([
       s.platform.agents.listSessions().catch(() => null),
       s.platform.projects.list().catch(() => null),
-    ])
+    ]).finally(watch.stop)
     if (!fresh) return
-    const mine = new Map(fresh.filter(ofMachine).map((f) => [f.id, f]))
     set((st) => {
       /*
        * Only this machine's rows move. Every other row keeps its object, so nothing about this computer's sessions or
        * another machine's re-renders or loses what the reducer derived. A row of this machine the fresh list no
-       * longer has (deleted there, or the machine was unlinked) leaves; a new one joins at the end.
+       * longer has (deleted there, or the machine was unlinked) leaves; a new one joins at the end. What changed
+       * while the list was out is kept over its older rows, as in the reconnect recovery (`mergeListedSince`).
+       * What a session that left kept is cleared as `session_deleted` clears it (#163).
        */
-      const sessions: Record<string, SessionSummary> = {}
-      for (const [id, cur] of Object.entries(st.sessions)) {
-        if (!ofMachine(cur)) sessions[id] = cur
-        else if (mine.has(id)) sessions[id] = mergeListed(cur, mine.get(id)!)
-      }
-      for (const [id, f] of mine) if (!sessions[id]) sessions[id] = mergeListed(undefined, f)
-      // What a session that left kept is cleared as `session_deleted` clears it (#163)
-      const gone = new Set(Object.keys(st.sessions).filter((id) => !sessions[id]))
+      const { sessions, gone } = mergeListedSince(asked, st.sessions, fresh.filter(ofMachine), watch.touched, ofMachine)
       let nextProjects = st.projects
       if (projects) {
         const theirs = new Map(projects.filter(ofMachine).map((p) => [p.id, p]))
@@ -5809,9 +5907,32 @@ export const useStore = create<AppState>((set, get) => ({
     void get().refreshMachines()
 
     const wasLive = Object.values(s.sessions).filter((x) => x.live)
+    const platform = s.platform
+    const generation = ++recoveryGeneration
 
-    const fresh = await s.platform.agents.listSessions().catch(() => null)
-    if (!fresh) return
+    /*
+     * A failed read is tried again while this connection lasts (`RECOVERY_RETRY_MS`). Giving up at once left the
+     * gap unrecovered until the next reconnect: no session created or deleted meanwhile, no conversation re-read.
+     * A newer recovery, a drop (the reconnect recovers again) or a new platform ends the retries.
+     */
+    let fresh: SessionInfo[] | null = null
+    let asked: Record<string, SessionSummary> = {}
+    const watch = watchLiveEvents()
+    try {
+      for (let attempt = 0; ; attempt++) {
+        asked = get().sessions
+        watch.touched.clear()
+        fresh = await platform.agents.listSessions().catch(() => null)
+        if (fresh) break
+        const wait = RECOVERY_RETRY_MS[attempt]
+        if (wait === undefined) return
+        await new Promise((r) => setTimeout(r, wait))
+        if (generation !== recoveryGeneration || get().platform !== platform || get().connection !== 'connected') return
+      }
+    } finally {
+      watch.stop()
+    }
+    const listed = fresh
 
     /*
      * **The new host's list is merged in, never discarded.**
@@ -5826,13 +5947,12 @@ export const useStore = create<AppState>((set, get) => ({
      * card for a dead `requestId`.
      */
     set((st) => {
-      const sessions: Record<string, SessionSummary> = {}
-      for (const f of fresh) sessions[f.id] = mergeListed(st.sessions[f.id], f)
       /*
        * The remains of a session deleted while disconnected are cleared the way `session_deleted` clears them: that
-       * event fell into the gap and is never replayed, so this is the only place they can go (#163).
+       * event fell into the gap and is never replayed, so this is the only place they can go (#163). What changed
+       * while the list was out is kept over the list's older rows (`mergeListedSince`).
        */
-      const gone = new Set(Object.keys(st.sessions).filter((id) => !sessions[id]))
+      const { sessions, gone } = mergeListedSince(asked, st.sessions, listed, watch.touched)
       return {
         sessions,
         ...forgetSessions(st, gone),
@@ -5862,7 +5982,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     // Only revives a process that was running right before the disconnect but that the new host does not know about
-    const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
+    const alive = new Set(listed.filter((x) => x.live).map((x) => x.id))
     /*
      * Never one on a machine that is away (#82): the hub listed it from its mirror, and waking it would only fail there.
      * That machine's own `machine_resync` wakes what has to be woken once it is back (`recoverMachine`).

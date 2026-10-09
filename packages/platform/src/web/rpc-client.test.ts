@@ -4,6 +4,24 @@ import { SessionInfo, liveBackgroundTasks } from '@cc/protocol'
 import { currentSession, missingDefaults, withoutDefaultedFields } from '../../../protocol/src/test-helpers.js'
 
 /**
+ * Lets one test make reading a result throw. Every other read goes to the real `parseRpcResult`, so
+ * the rest of this file runs against the real schemas.
+ */
+const resultFault = vi.hoisted(() => ({ next: null as Error | null }))
+vi.mock('@cc/protocol', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@cc/protocol')>()
+  return {
+    ...real,
+    parseRpcResult: ((method, raw) => {
+      const fault = resultFault.next
+      resultFault.next = null
+      if (fault) throw fault
+      return real.parseRpcResult(method, raw)
+    }) as typeof real.parseRpcResult,
+  }
+})
+
+/**
  * A fake WebSocket for reproducing connect, disconnect and responses by hand, with no real
  * socket. Used together with a fake timer, since reconnection (the backoff setTimeout) also
  * has to be verified.
@@ -601,5 +619,95 @@ describe('RpcClient — deterministic close (#82)', () => {
     rpc.close()
     await expect(rpc.call('sessions.list', {})).rejects.toMatchObject({ code: 'connection_closed' })
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+/**
+ * One subscriber that throws must not cost anyone else anything. The client has already moved past
+ * what it was handing on (the event's seq is the cursor, the connection change has happened), so a
+ * throw that stopped the loop, or escaped the socket callback, lost that for good.
+ */
+describe('RpcClient — a subscriber that throws', () => {
+  const ev = (seq: number) => ({ kind: 'event', seq, event: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: `e${seq}` } })
+
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('every other event subscriber still gets the event, and later events keep coming', () => {
+    const rpc = makeClient()
+    const got: string[] = []
+    rpc.onEvent(() => {
+      throw new Error('a broken screen')
+    })
+    rpc.onEvent((e) => got.push((e as { text: string }).text))
+    rpc.connect()
+    FakeWebSocket.last.ready()
+    FakeWebSocket.last.receive(ev(1))
+    FakeWebSocket.last.receive(ev(2))
+    expect(got).toEqual(['e1', 'e2'])
+    rpc.close()
+  })
+
+  it('every other terminal subscriber still gets the output', () => {
+    const rpc = makeClient()
+    const out: string[] = []
+    rpc.onTerminalOutput(() => {
+      throw new Error('a broken terminal view')
+    })
+    rpc.onTerminalOutput((e) => out.push(e.data))
+    rpc.connect()
+    FakeWebSocket.last.ready()
+    FakeWebSocket.last.receive({ kind: 'term', terminalId: 't1', data: 'ls' })
+    expect(out).toEqual(['ls'])
+    rpc.close()
+  })
+
+  it('a connection listener that throws on the drop does not stop the reconnect', async () => {
+    const rpc = makeClient()
+    rpc.onConnectionChange((s) => {
+      if (s === 'disconnected') throw new Error('a broken banner')
+    })
+    rpc.connect()
+    FakeWebSocket.last.ready()
+    FakeWebSocket.last.drop()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    FakeWebSocket.last.ready()
+    expect(rpc.connectionState).toBe('connected')
+    rpc.close()
+  })
+
+  it('a connection listener that throws on connecting does not stop the socket from opening', async () => {
+    const rpc = makeClient()
+    const heard: string[] = []
+    rpc.onConnectionChange((s) => {
+      if (s === 'connecting') throw new Error('a broken banner')
+    })
+    rpc.onConnectionChange((s) => heard.push(s))
+    rpc.connect()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    FakeWebSocket.last.ready()
+    expect(heard).toEqual(['connecting', 'connected'])
+    rpc.close()
+  })
+})
+
+describe('RpcClient — an answer that cannot be read', () => {
+  it('rejects the call instead of leaving it waiting forever', async () => {
+    const rpc = makeClient()
+    rpc.connect()
+    const ws = FakeWebSocket.last
+    ws.ready()
+    const call = rpc.call('sessions.list', {})
+    resultFault.next = new RangeError('Maximum call stack size exceeded')
+    // The throw used to escape the socket callback, after the call had already left `pending`
+    expect(() => ws.receive({ kind: 'res', id: lastRpcId(ws), ok: true, result: [] })).not.toThrow()
+    await expect(call).rejects.toMatchObject({ code: 'internal', message: expect.stringContaining('sessions.list') })
+    expect(vi.getTimerCount()).toBe(0)
+    rpc.close()
   })
 })

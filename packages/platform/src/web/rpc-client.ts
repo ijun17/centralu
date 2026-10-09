@@ -266,9 +266,10 @@ export class RpcClient {
      * reconnecting is the existing contract.
      */
     this.failInFlight('Connection lost')
-    this.emitConn('disconnected')
+    // The retry is armed before anyone hears about the drop: what a listener does can never cost the reconnect
     const delay = Math.min(this.opts.maxBackoffMs ?? 5000, 200 * 2 ** this.attempt++)
     this.reconnectTimer = setTimeout(() => this.connect(), delay)
+    this.emitConn('disconnected')
   }
 
   private onFrame(raw: string): void {
@@ -331,17 +332,18 @@ export class RpcClient {
     if (!this.ready) return
     if (frame.kind === 'event') {
       if (frame.seq <= this.lastSeq) return // A repeat (#82), or a first-met host's old news (#173)
+      // The cursor moves before the handlers run, so an event is handed on once: every handler has to get it now
       this.lastSeq = frame.seq
-      for (const h of this.eventHandlers) h(frame.event)
+      deliver(this.eventHandlers, frame.event)
       return
     }
     // Terminal output carries no seq (it does not ride the resend buffer — see envelope)
     if (frame.kind === 'term') {
-      for (const h of this.termHandlers) h({ terminalId: frame.terminalId, data: frame.data })
+      deliver(this.termHandlers, { terminalId: frame.terminalId, data: frame.data })
       return
     }
     if (frame.kind === 'term_exit') {
-      for (const h of this.termExitHandlers) h({ terminalId: frame.terminalId, exitCode: frame.exitCode })
+      deliver(this.termExitHandlers, { terminalId: frame.terminalId, exitCode: frame.exitCode })
       return
     }
     if (frame.kind === 'res') {
@@ -354,8 +356,19 @@ export class RpcClient {
        * list without `backgroundTasks` (#305) and crashed on `undefined.filter`: the field's
        * `.default([])` was never applied, because nothing parsed the payload.
        */
-      if (frame.ok) p.resolve(parseRpcResult(p.method, frame.result))
-      else p.reject(toError(frame.error))
+      if (!frame.ok) return p.reject(toError(frame.error))
+      /*
+       * The call is already out of `pending`, its timer cleared: if reading the result threw here,
+       * nothing would ever settle it and its caller would wait forever. A result that cannot be read
+       * ends the call as a failure, the way `salvage` ends an unreadable failure.
+       */
+      let result: unknown
+      try {
+        result = parseRpcResult(p.method, frame.result)
+      } catch (e) {
+        return p.reject(rpcError(`Could not read the host's answer to ${p.method}: ${(e as Error).message}`, 'internal', false))
+      }
+      p.resolve(result)
     }
   }
 
@@ -502,7 +515,7 @@ export class RpcClient {
   }
 
   private emitConn(s: ConnectionState): void {
-    for (const h of this.connHandlers) h(s)
+    deliver(this.connHandlers, s)
   }
 
   /**
@@ -520,6 +533,22 @@ export class RpcClient {
     for (const [id] of [...this.pending]) {
       // take() clears the timer — if it is not cleared, a closed client keeps the process alive
       this.take(id)?.reject(rpcError('Connection closed', 'connection_closed', false))
+    }
+  }
+}
+
+/**
+ * Hands one value to every subscriber, each on its own. A subscriber that throws is reported and the
+ * rest still get the value: the client has already moved past it (an event's seq is the cursor, a
+ * connection change has already happened), so nothing would ever hand it to them again, and a throw
+ * from inside a socket callback would also leave the client half-way through what it was doing.
+ */
+function deliver<T>(handlers: Iterable<(v: T) => void>, value: T): void {
+  for (const h of handlers) {
+    try {
+      h(value)
+    } catch (e) {
+      console.error('A subscriber of the host connection threw', e)
     }
   }
 }

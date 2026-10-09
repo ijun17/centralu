@@ -73,6 +73,12 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 - **Writing**: write-through after applying an event. Messages are appended in batches (500ms debounce); session metadata and workspace on every change. There is no such concept as "save on exit" — crash safety comes for free.
 - **Restore order**: ① load the workspace + session metadata from the store → show the sidebar and inbox immediately (read-only) → ② connect to the host → ③ attempt resume per session → on success switch to active, on failure show the "view the record + new session" card. That the UI does not need the host to come up is the key to the 3-second cold start target.
 - The relationship between event reconnection (`afterSeq`) and restore is in [agent-host.md](agent-host.md) §4.
+- **A reconnect's recovery reads the session list while live events keep arriving.** The list can be older than
+  them (the hub answers once every linked machine has), so it is merged against the sessions as they were when it
+  was asked for (`mergeListedSince`): a field the store changed since then keeps the store's value, a session that
+  arrived or that a live event named since then is not taken for deleted, and one deleted since then is not brought
+  back. A list or a conversation page that fails to arrive is read again after 1, 5 and 30 seconds; a page that
+  fails also drops the history cursor, so opening the conversation reads it again.
 
 ## 5a. Screen history (#374)
 
