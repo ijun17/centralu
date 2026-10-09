@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { delimiter } from 'node:path'
-import { ensureToolPath, fallbackDirs, whichTool } from './env-path.js'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
+import { __resetToolPathCache, ensureToolPath, fallbackDirs, probeLoginShell, whichTool } from './env-path.js'
 
 /**
  * Regression test for the packaged app not being able to find the CLI.
@@ -94,6 +96,65 @@ describe('CLI search path augmentation', () => {
 
   it('a nonexistent tool is null (so the caller can decide the guidance text)', () => {
     expect(whichTool('this-tool-does-not-exist')).toBeNull()
+  })
+})
+
+/**
+ * The login-shell probe against shells the test writes (docs/runtime-lessons.md PA1, PA2, PA6), so
+ * it asserts something on every machine, CI included, where the real shell knows no tool.
+ */
+describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cc-probe-'))
+  function shell(name: string, body: string): string {
+    const path = join(dir, name)
+    writeFileSync(path, `#!/bin/sh\n${body}\n`)
+    chmodSync(path, 0o755)
+    return path
+  }
+
+  it('a tool only the login shell knows is found from a bare PATH (PA1)', () => {
+    const tools = join(dir, 'only-the-shell-knows')
+    mkdirSync(tools, { recursive: true })
+    const tool = join(tools, 'cc-probe-tool')
+    writeFileSync(tool, '#!/bin/sh\n')
+    chmodSync(tool, 0o755)
+    const saved = { PATH: process.env.PATH, SHELL: process.env.SHELL }
+    try {
+      process.env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
+      process.env.SHELL = shell('knows-a-tool', `echo "noise from a .zshrc"\necho "__CC_PATH__:/usr/bin:${tools}"`)
+      __resetToolPathCache()
+      expect(whichTool('cc-probe-tool')).toBeNull()
+      expect(ensureToolPath().source).toBe('shell')
+      expect(whichTool('cc-probe-tool')).toBe(tool)
+    } finally {
+      process.env.PATH = saved.PATH
+      process.env.SHELL = saved.SHELL
+      __resetToolPathCache()
+    }
+  })
+
+  it('a shell that never answers is cut off at the bound and the fallback is used (PA2)', () => {
+    const hangs = shell('hangs', 'exec sleep 30')
+    const began = Date.now()
+    expect(probeLoginShell('darwin', { SHELL: hangs }, 300)).toEqual([])
+    expect(Date.now() - began).toBeLessThan(3000)
+  })
+
+  it('a shell stopped by its terminal (SIGTTOU, SIGSTOP) is cut off too: SIGKILL ends a stopped process (PA2)', () => {
+    const stops = shell('stops', 'kill -STOP $$\necho "__CC_PATH__:/never"')
+    const began = Date.now()
+    expect(probeLoginShell('linux', { SHELL: stops }, 300)).toEqual([])
+    expect(Date.now() - began).toBeLessThan(3000)
+  })
+
+  it('Windows runs no probe at all, even with a SHELL that could run (PA6)', () => {
+    const marker = join(dir, 'probe-ran')
+    const records = shell('records', `touch "${marker}"\necho "__CC_PATH__:/somewhere"`)
+    expect(probeLoginShell('win32', { SHELL: records })).toEqual([])
+    expect(existsSync(marker)).toBe(false)
+    // The same shell is run off Windows, so the marker means what it says
+    expect(probeLoginShell('linux', { SHELL: records })).toEqual(['/somewhere'])
+    expect(existsSync(marker)).toBe(true)
   })
 })
 

@@ -1,9 +1,11 @@
+import { takeLaunchEnv } from './lifecycle/launch-env.js'
+import { StartSequence, refuse } from './lifecycle/start.js'
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, PROTOCOL_VERSION, RESERVED_APP_IDS } from '@cc/protocol'
+import { mkdirSync, writeSync } from 'node:fs'
+import { APP_VERSION, DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, PROTOCOL_VERSION, RESERVED_APP_IDS, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -32,9 +34,11 @@ import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
 import { AgentVersionService } from './agent-versions.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
-import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
+import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
-import { stopThenClose } from './shutdown.js'
+import { Gate } from './lifecycle/gate.js'
+import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
+import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
@@ -44,8 +48,21 @@ import { storeMirror, storeRegistry } from './links/stored.js'
 
 /**
  * Agent Host entry point.
- * dev: run directly with `pnpm host`. prod: spawned by Tauri as a sidecar (docs/architecture.md §4)
+ * dev: run directly with `pnpm host`. prod: started by the keeper or the window (docs/architecture.md §4)
+ *
+ * The start follows `START_ORDER` (lifecycle/start.ts), and each step below is marked with
+ * `start.at(…)`: taking one out of turn throws. The shutdown is `stopPlan` (lifecycle/shutdown.ts),
+ * run once by `Shutdown`; every way of ending is wired in `wireEndings` (lifecycle/endings.ts).
  */
+const start = new StartSequence()
+
+/*
+ * What the launcher hands over (#280, keeper-link.ts), read once and taken out of the environment
+ * before anything is spawned (lessons ST16): everything this host spawns (agents, terminals,
+ * commands) inherits it otherwise, and none of them has any use for it.
+ */
+start.at('launch variables')
+const launch = takeLaunchEnv()
 
 /**
  * The build identifier. The bundler swaps `__CC_BUILD__` for the actual commit
@@ -54,35 +71,12 @@ import { storeMirror, storeRegistry } from './links/stored.js'
 declare const __CC_BUILD__: string | undefined
 const BUILD = typeof __CC_BUILD__ === 'string' ? __CC_BUILD__ : 'dev'
 
-/*
- * What the keeper hands over (#280, keeper-link.ts), read once and then taken out of the
- * environment: everything this host spawns (agents, terminals, commands) inherits it otherwise,
- * and none of them has any use for it.
- */
-const underKeeper = process.env.CC_KEEPER === '1'
-const keeperSource = process.env.CC_HOST_SOURCE
-/*
- * The keeper's front door (#280 step 3): the stable address every client reaches this host
- * through, whichever host is current. The Codex bridge is given this rather than the host's own
- * port, because a running codex keeps the bridge it started and a swap must not cut it off.
- */
-const frontDoor = process.env.CC_FRONT_DOOR
-/*
- * Started by `centralu serve` (docs/agent-host.md §4.7), the one host `host.stop` may end: it has no
- * keeper or window to stop it, and on Windows a launcher can only be killed, which skips the shutdown.
- */
-const startedByServe = process.env.CC_SERVE === '1'
-delete process.env.CC_KEEPER
-delete process.env.CC_HOST_SOURCE
-delete process.env.CC_FRONT_DOOR
-delete process.env.CC_SERVE
-
 const { values } = parseArgs({
   options: {
     port: { type: 'string', default: '5175' },
     token: { type: 'string' },
     db: { type: 'string' },
-    /** Exits together if the parent dies (turned on by the Tauri supervisor) */
+    /** Exits together if the parent dies (turned on by the supervisor) */
     'watch-parent': { type: 'boolean' },
     memory: { type: 'boolean', default: false },
     /** Started by the keeper next to a running host, for a swap (#280 step 3, swap-control.ts) */
@@ -94,20 +88,11 @@ const { values } = parseArgs({
  * Control lines from the keeper on stdin (#280 step 3). Only under a keeper: anyone else's stdin is
  * not ours to read.
  */
-const control = underKeeper ? new ControlChannel(process.stdin) : null
+const control = launch.underKeeper ? new ControlChannel(process.stdin) : null
 
-/** The fact that the data folder was moved, if it was. Recorded once logging is on (see below) */
-let movedNote: string | null = null
-
-const token = values.token || process.env.CC_HOST_TOKEN || randomBytes(16).toString('hex')
+const token = values.token || launch.token || randomBytes(16).toString('hex')
 /* The token is the keeper's only when the keeper started this host and handed it over (#280 step 4, below) */
-const keeperToken = underKeeper && !values.token && process.env.CC_HOST_TOKEN ? token : null
-/*
- * Out of the environment once read: every terminal, agent and command this host starts inherits
- * it otherwise, and a shell in a project has no business holding the key to every RPC. Under a
- * keeper this is the keeper's token, the same for every host it runs (#280 step 3).
- */
-delete process.env.CC_HOST_TOKEN
+const keeperToken = launch.underKeeper && !values.token && launch.token ? token : null
 /*
  * The secret for the HTTP door (M4 P-2). A **different value** from the WebSocket token. Since
  * this value ends up as a path segment in an iframe's address and travels around in a URL, even if
@@ -119,9 +104,6 @@ delete process.env.CC_HOST_TOKEN
  * why that keeps the two doors apart: `deriveHttpSecret`).
  */
 const httpSecret = keeperToken ? deriveHttpSecret(keeperToken) : randomBytes(32).toString('base64url')
-const dbPath = values.memory
-  ? ':memory:'
-  : (values.db ?? defaultDbPath())
 
 /**
  * The data folder.
@@ -130,43 +112,44 @@ const dbPath = values.memory
  * would leave two hosts holding the same store.db, each keeping a different session list.
  * Since starting dev with the packaged app still running is natural during development, they are
  * kept entirely separate.
+ *
+ * The move of a legacy folder happens here, but **announcing it is deferred** until the log is on:
+ * said earlier, the line went to the parent's stderr instead of the file, and on the very first move
+ * `host.log` had nothing in it, though this is the one line that explains why the folder disappeared.
  */
+start.at('data folder')
+let movedNote: string | null = null
 function defaultDbPath(): string {
   // Packaged when run from the bundled output, dev when run from source (the supervisor tells this)
   const isDev = process.env.CC_DEV === '1'
   const dir = join(homedir(), isDev ? DATA_DIR_DEV : DATA_DIR)
   const legacy = join(homedir(), isDev ? DATA_DIR_LEGACY.dev : DATA_DIR_LEGACY.prod)
-  /*
-   * The move happens here, but **announcing it is deferred.**
-   *
-   * The log file is only opened after this function decides the path. Calling console.error here
-   * would send that line into thin air (the parent process's stderr) instead of the file — on the
-   * very first move, `host.log` genuinely ended up with nothing in it, even though this is the one
-   * line that explains why the folder disappeared.
-   */
   movedNote = migrateLegacyDataDir(legacy, dir) ? `[agent-host] data folder moved: ${legacy} -> ${dir}` : null
   mkdirSync(dir, { recursive: true })
   // Pins attachments, the orchestrator home, and worktrees to all live under here (dev and prod diverge)
   process.env.CC_DATA_DIR = dir
   return join(dir, 'store.db')
 }
-
+const dbPath = values.memory ? ':memory:' : (values.db ?? defaultDbPath())
 
 /**
- * **Logging is turned on before anything else.**
+ * **Logging is turned on before anything else** (lessons HO3).
  *
  * Everything said below this line (PATH augmentation, instance-lock conflicts, codex's stderr,
- * unhandled rejections) ends up in the file. Turning it on late misses exactly the cases that go
- * wrong at startup — that was exactly the gap that went unseen before.
+ * unhandled rejections) ends up in the file. A Finder-launched app has stderr on /dev/null, so
+ * turning it on late misses exactly the cases that go wrong at startup.
  */
+start.at('log')
 const stopLog = dbPath === ':memory:' ? () => {} : teeStderrToFile(hostLogPath(dirname(dbPath)))
 if (dbPath !== ':memory:') console.error(startupBanner({ build: BUILD, db: dbPath, pid: process.pid }))
-// Right after the banner — which startup did the move has to be readable in the same spot
+// Right after the banner: which start did the move has to be readable in the same spot
 if (movedNote) console.error(movedNote)
 
-// A GUI app does not inherit the login shell's PATH — it has to be augmented first to find the CLI
-// (measured). Since it asks the user's own login shell directly, nvm, mise, and manual installs are
-// all caught too.
+/*
+ * A GUI app does not inherit the login shell's PATH: it is augmented first, to find the CLIs
+ * (measured). It asks the person's own login shell, so nvm, mise and manual installs are caught too.
+ */
+start.at('path')
 const pathResult = ensureToolPath()
 if (pathResult.source !== 'unchanged') {
   console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
@@ -176,6 +159,7 @@ if (pathResult.source !== 'unchanged') {
  * A swap's standby (#280 step 3): checks the store without writing to it, reports, and waits here,
  * before the ownership lock, until the keeper says the running host has let go.
  */
+start.at('standby')
 const swapping = values.standby === true && control !== null
 if (values.standby && !control) {
   console.error('[agent-host] --standby is only meaningful under a keeper; starting normally')
@@ -191,90 +175,45 @@ if (swapping) {
 }
 
 /**
- * Two hosts on the same data folder desync the session list and contend over SQLite.
+ * Two hosts on the same data folder desync the session list and contend over SQLite (lessons LK2).
  * Failing to start with a stated reason is better than going quietly wrong.
  */
+start.at('lock')
 let lock: ReturnType<typeof acquireInstanceLock>
 try {
   lock = acquireInstanceLock(dbPath)
 } catch (err) {
-  // Ownership could not be checked at all (an unreadable ownership file) — not starting is the safe answer (#82)
-  const message = `[agent-host] ${(err as Error).message}`
-  console.error(message)
-  try {
-    writeSync(1, `${message}\n`)
-  } catch {
-    // stderr (host.log) has it
-  }
-  process.exit(1)
+  // Ownership could not be checked at all (an unreadable ownership file): not starting is the safe answer (#82)
+  refuse(`[agent-host] ${(err as Error).message}`)
+  throw err
 }
 if (!lock.ok) {
-  const message = lockConflictMessage(lock.heldByPid, lock.lockPath)
-  console.error(message)
-  /*
-   * Also written to stdout (#184). The desktop supervisor only reads the host's stdout (the same
-   * spot as the ready line). Speaking only on stderr left this sentence stuck in host.log, so the
-   * supervisor's branch meant to immediately report a lock conflict ("already using this data")
-   * never once fired, and after six backoff attempts the screen just showed "exited (code 1)."
-   * Written synchronously — process.exit follows right after, and on macOS stdout to a pipe is
-   * asynchronous, so a plain write could end the process before the sentence actually got through.
-   */
-  try {
-    writeSync(1, `${message}\n`)
-  } catch {
-    // Even if stdout is closed, it still made it into stderr (host.log)
-  }
+  refuse(lockConflictMessage(lock.heldByPid, lock.lockPath))
   process.exit(1)
 }
 /*
- * A signal handler that ends the process must never be attached here (the one below only holds
- * the signal for later).
- *
- * This used to register lock.release() + process.exit(0) on SIGINT/SIGTERM first. Since handlers
- * run in registration order, the real shutdown() registered afterward **never ran at all** — every
- * time it exited, the child processes (claude, codex) were left orphaned and the WAL checkpoint was
- * skipped. Releasing the lock through a single exit hook is enough (it runs last no matter which
- * path led to exit).
+ * The lock is released by one exit hook, which runs last whichever path led to the exit (HO5). A
+ * signal handler that ends the process must never be attached here: handlers run in the order they
+ * were added, and one that released the lock and exited first meant the real shutdown never ran.
  */
-process.on('exit', lock.release)
+const ownership = lock
+process.on('exit', ownership.release)
+
+start.at('hold signals')
+const signals = holdSignals(process, (line) => console.error(line))
 
 /*
- * A signal that arrives before shutdown() exists is held, not obeyed (#82). Until a process has a
- * listener for SIGINT or SIGTERM the kernel's default applies, which ends it on the spot: no
- * shutdown, no WAL checkpoint, and whatever it had started already left behind. The ready line
- * goes out well before the real handlers below are attached (the services start in between), and
- * `centralu serve` measured the gap: a Ctrl+C passed on as soon as the ready line was read killed
- * the host by SIGINT every time, while the same signal 3 s later shut it down cleanly. These only
- * record the signal; the real handlers replace them and act on it (see `pendingSignal` below). A second
- * signal before then exits at once, so a start that hangs can still be stopped from the terminal.
+ * A store a newer Centralu wrote, past what this host can read (#292), is refused like a lock
+ * conflict (HO2). Any other failure to open still throws.
  */
-let pendingSignal: NodeJS.Signals | null = null
-const holdSignal = (sig: NodeJS.Signals) => {
-  // A second one while still starting is someone insisting on a start that hangs: obey it
-  if (pendingSignal) process.exit(1)
-  pendingSignal = sig
-  console.error(`[agent-host] ${sig} while starting; shutting down once started (send it again to stop now)`)
-}
-process.on('SIGINT', holdSignal)
-process.on('SIGTERM', holdSignal)
-
-/*
- * A store a newer Centralu wrote, past what this host can read (#292), is refused here, in the same way as a lock
- * conflict: one plain sentence on stderr (host.log) and stdout (the supervisor), then exit 1. The supervisor shows it
- * at once rather than retrying, since a retry gets the same answer. Any other failure to open still throws as before.
- */
+start.at('store')
 let store: Store
 try {
   // Taking over in a swap: only what the previous build can still read runs now (store.ts, "During a swap")
   store = new Store(dbPath, { swap: swapping })
 } catch (err) {
   if (!(err instanceof StoreTooNewError)) throw err
-  console.error(err.message)
-  try {
-    writeSync(1, `${err.message}\n`)
-  } catch {
-    // stderr (host.log) has it
-  }
+  refuse(err.message)
   process.exit(1)
 }
 const adapters = createAdapters()
@@ -282,29 +221,38 @@ const adapters = createAdapters()
 /*
  * Under the keeper, agents, terminals and project commands are spawned by the keeper, not by this
  * host, and a restart leaves them running (#280 step 2, keeper/held-children.ts). What a previous
- * host left there is taken over below. Without a keeper — `pnpm dev`, e2e, a debug app, Windows —
- * this is null and everything is spawned here, exactly as before.
+ * host left there is taken over below. Without a keeper (`pnpm dev`, e2e, a debug app, Windows)
+ * this is null and everything is spawned here.
  */
-const held = underKeeper ? await connectHeldChildren(dirname(dbPath)) : null
+start.at('keeper children')
+const held = launch.underKeeper ? await connectHeldChildren(dirname(dbPath)) : null
 
+start.at('services')
 /*
- * Tells the manager the host's own address — the bridge of an adapter that cannot attach a tool
- * in-process connects back through this address. Since the port is only decided after listen(),
- * this is given as a function rather than a value.
+ * What services send to screens goes through these until the server exists (HO11, lifecycle/gate.ts):
+ * before then nobody is connected, and a frame or an event is not sent.
  */
+const screens = new Gate<Parameters<HostServer['pushTerminal']>[0]>()
+const events = new Gate<NormalizedEvent>()
+
 /*
  * Moving sessions to a newly installed agent CLI (#297) hears every session event: a session that just said something
  * is not quiet yet. Declared ahead of the manager, whose events can start before the service below exists.
  */
 const versionsRef: { current?: AgentVersionService } = {}
+/*
+ * The manager is told the host's own address as a function: the bridge of an adapter that cannot
+ * attach a tool in-process connects back through it, and the port is only known after listen().
+ */
+let port: number | undefined
 const mgr = new SessionManager(
   store,
   adapters,
   (e) => {
-    server.broadcast(e)
+    events.push(e)
     versionsRef.current?.observe(e)
   },
-  () => bridgeAddress(frontDoor, port, token),
+  () => bridgeAddress(launch.frontDoor, port, token),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
   held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {},
@@ -316,9 +264,9 @@ const mgr = new SessionManager(
  * diverge here.
  */
 // An app's "changed" broadcast is collected per app — even if an open view's re-read becomes a loop, it never exceeds 4 per second per app (app-change-events.ts)
-const appChanges = broadcastAppChanges((e) => server.broadcast(e))
+const appChanges = broadcastAppChanges(events.push)
 // The run panel's signal is collected separately — a chain started by a read-only tool is reported too, but never wakes a view (app-change-events.ts)
-const appRunChanges = broadcastAppRuns((e) => server.broadcast(e))
+const appRunChanges = broadcastAppRuns(events.push)
 const externalApps = new ExternalApps({
   projects: () => store.projectRoots(),
   dataRoot: dataRoot(),
@@ -338,26 +286,16 @@ const externalApps = new ExternalApps({
 })
 externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
-onExternalAppListChanged(externalApps, () => server.broadcast({ type: 'external_apps_changed' }))
+onExternalAppListChanged(externalApps, () => events.push({ type: 'external_apps_changed' }))
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
 mgr.useExternalApps(externalApps)
 /*
- * Terminal and command output can arrive before `server` below exists. Under the keeper, an
- * adopted pty replays its buffered output as soon as it is attached, and any `await` between here
- * and `new HostServer` lets that output in (the themes folder's start, #329, is one). Reaching
- * `server` then touched it before its declaration ran: every host restart that held a terminal or
- * a dev server crashed with "Cannot read properties of undefined (reading 'pushTerminal')", five
- * times, until the keeper gave up (found 2026-10-05 by scripts/keeper-children-integration.mjs).
- * Until the server is up nobody is connected, so a frame is simply not sent; the services keep
- * their own scrollback, which a screen reads when it attaches.
+ * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
+ * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
  */
-let serverUp = false
-const toScreens = (f: Parameters<HostServer['pushTerminal']>[0]) => {
-  if (serverUp) server.pushTerminal(f)
-}
-const terminals = new TerminalService(toScreens, held?.ptys)
+const terminals = new TerminalService(screens.push, held?.ptys)
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
-const commandRuns = new CommandRunner(toScreens, held?.ptys)
+const commandRuns = new CommandRunner(screens.push, held?.ptys)
 if (held) {
   terminals.adopt(held.kept.terminals)
   commandRuns.adopt(held.kept.runs)
@@ -378,17 +316,10 @@ if (held) {
 const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
 const AUTO_APPLY_UPDATES_KEY = 'updates.autoApply'
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
-// (The watcher can fire before `server` below exists; a change that early has no screen to tell yet.)
-const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => {
-  try {
-    server.broadcast({ type: 'themes_changed' })
-  } catch {
-    /* not listening yet */
-  }
-})
+const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ type: 'themes_changed' }))
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
 
-const updates = new UpdateService((status) => server.broadcast({ type: 'update_status', status }), {
+const updates = new UpdateService((status) => events.push({ type: 'update_status', status }), {
   // On by default when nothing has been saved yet. Since the check is read-only and every failure
   // is swallowed, leaving it on costs nothing, while leaving it off traps **someone who never once
   // opens settings** on an old version forever — that person is exactly the one most likely to stay
@@ -409,13 +340,8 @@ const AGENT_VERSIONS_SEEN_KEY = 'agents.versionsSeen'
 const agentVersions = new AgentVersionService({
   tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
   sessions: mgr,
-  publish: (status) => {
-    try {
-      server.broadcast({ type: 'agent_versions', status })
-    } catch {
-      /* not listening yet: the first window asks */
-    }
-  },
+  // Not listening yet: the first window asks
+  publish: (status) => events.push({ type: 'agent_versions', status }),
   readAutoApply: () => store.appSetting(AUTO_APPLY_AGENT_VERSIONS_KEY) !== 'false',
   writeAutoApply: (enabled) => store.setAppSetting(AUTO_APPLY_AGENT_VERSIONS_KEY, String(enabled)),
   readSeen: () => {
@@ -459,7 +385,7 @@ const views = new ViewHost({
     save: (book) => store.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
   }),
   // Under the keeper, the front door's port: the address outlives this host (swap-control.ts)
-  hostPort: () => viewPort(frontDoor, port),
+  hostPort: () => viewPort(launch.frontDoor, port),
 })
 /*
  * An app view inside a conversation (M4 B-1). When a session's agent calls an app tool with a view,
@@ -471,7 +397,7 @@ const inlineViews = attachInlineViews(mgr, externalApps, views)
  * The views the previous host had open, if it handed them over in a planned ending (#280 step 4,
  * view-handover.ts). Before listen(), so the first client to reconnect already finds them.
  */
-if (underKeeper) {
+if (launch.underKeeper) {
   try {
     const { restored, skipped } = restoreViewHandover(store, views, inlineViews)
     if (restored + skipped > 0) console.error(`[agent-host] app views handed over: ${restored} restored, ${skipped} not`)
@@ -480,15 +406,8 @@ if (underKeeper) {
   }
 }
 /*
- * Linked machines (#82, docs/plans/remote-hub.md): this host is the hub for its own UI, and reaches
- * the hosts of other machines the person linked, each over the person's own ssh. The router stands
- * in front of the RPC handler and sends a call that names another machine's session, project or
- * terminal there; every other call reaches the handler as before. With no machine linked it passes
- * everything through. The links start after listen (below), so a slow ssh never holds up the window.
- */
-/*
- * `host.stop` (`centralu serve --stop`). The server listens before `shutdown` exists below, so a
- * request in between is held and acted on once it does, like a signal during startup.
+ * `host.stop` (`centralu serve --stop`). The server listens before the endings are wired below, so
+ * a request in between is held and acted on once they are, like a signal during startup.
  */
 let stopNow: (() => void) | null = null
 let stopAsked = false
@@ -497,10 +416,17 @@ const stopFromRequest = () => {
   if (stopNow) stopNow()
   else stopAsked = true
 }
+/*
+ * Linked machines (#82, docs/plans/remote-hub.md): this host is the hub for its own UI, and reaches
+ * the hosts of other machines the person linked, each over the person's own ssh. The router stands
+ * in front of the RPC handler and sends a call that names another machine's session, project or
+ * terminal there; every other call reaches the handler as before. With no machine linked it passes
+ * everything through. The links start after listen (below), so a slow ssh never holds up the window.
+ */
 const links = new Links({
   hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },
-  broadcast: (e) => server.broadcast(e),
-  terminal: (f) => toScreens(f),
+  broadcast: events.push,
+  terminal: screens.push,
   mirror: storeMirror(store),
   registry: storeRegistry(store),
   tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, log: (line) => console.error(line) }),
@@ -508,6 +434,18 @@ const links = new Links({
   log: (line) => console.error(line),
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
+/**
+ * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
+ * the switch's question and applying an update when idle (#352) all read it through the activity
+ * report. The session list carries what the rule reads besides the state: pending approvals and
+ * questions, and background tasks (#290). Moving one session to a new agent CLI (#297) uses the
+ * per-session rule instead (`sessionIdle`, through the manager).
+ */
+const activity = (): ActivitySnapshot => ({
+  sessions: mgr.listSessions(),
+  terminals: terminals.liveCount(),
+  commandRuns: commandRuns.liveCount(),
+})
 const router = new Router({
   local: createRpcHandler(mgr, adapters, {
     themes,
@@ -520,37 +458,80 @@ const router = new Router({
     inlineViews,
     heldPids: held?.heldPids,
     machines: links,
-    stopHost: startedByServe && !underKeeper ? () => stopFromRequest() : undefined,
+    stopHost: launch.startedByServe && !launch.underKeeper ? () => stopFromRequest() : undefined,
     activity: () => activityCounts(activity()),
   }),
   machines: () => links.all(),
 })
-const server: HostServer = new HostServer({
+const server = new HostServer({
   port: Number(values.port),
-  ...(startedByServe ? { servedBy: 'serve' as const } : {}),
+  ...(launch.startedByServe ? { servedBy: 'serve' as const } : {}),
   token,
   allowedOrigins,
   onRpc: router.handle,
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)
-  build: hostBuild(BUILD, keeperSource),
+  build: hostBuild(BUILD, launch.keeperSource),
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })
-serverUp = true
+// From here on what services send reaches the server: its replay buffer, then whoever connects
+screens.open((f) => server.pushTerminal(f))
+events.open((e) => server.broadcast(e))
 
-let port: number
+/*
+ * The shutdown, as data (lifecycle/shutdown.ts): run at most once, whatever asks first; every step
+ * runs even after one fails. Its steps refer to the services above, so it exists before listen and
+ * any ending wired below can use it.
+ */
+let stopActivity: () => void = () => {}
+const shutdown = new Shutdown({
+  plan: (mode, handOver) =>
+    stopPlan(mode, handOver, {
+      handOverViews: () => {
+        try {
+          const n = recordViewHandover(store, views, inlineViews)
+          if (n > 0) console.error(`[agent-host] ${n} open app views handed over to the next host`)
+        } catch (err) {
+          console.error(`[agent-host] could not hand the open app views over: ${(err as Error).stack ?? err}`)
+        }
+      },
+      terminals,
+      commands: commandRuns,
+      updates,
+      agentVersions,
+      stopActivity: () => stopActivity(),
+      links,
+      apps: externalApps,
+      sessions: mgr,
+      appChanges,
+      themes,
+      inlineViews,
+      views,
+      server,
+      store,
+      children: held?.children ?? null,
+    }),
+  log: (line) => console.error(line),
+  stopLog,
+  exit: (code) => process.exit(code),
+  pid: process.pid,
+})
+
+start.at('listen')
 try {
   port = await server.listen()
 } catch (err) {
   console.error(`\n[agent-host] failed to start\n${(err as Error).message}\n`)
   process.exit(1)
 }
-// This line is parsed by the Tauri supervisor (the path through which port and token are handed off)
+
+start.at('ready')
+// This line is parsed by the supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
 // What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts)
-if (underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null } }))
+if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null } }))
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a
  * stopped host left owed (#396). By the time this timer fires the ready line has gone out and the
@@ -568,12 +549,10 @@ if (swapping && (store.deferredSteps.length > 0 || store.vacuumOwed)) {
 }
 
 /*
- * Once right after startup, and then every 6 hours (issue #43).
- *
- * **Called after listen.** The check result goes out as a broadcast, and there is no socket to send
- * it to before that. Right after startup is chosen as the first check because that is exactly the
- * moment a new version is most likely to have shipped while the app was closed. Since people leave
- * this app open for days at a time, the recurring check afterward is still needed.
+ * Once right after startup, and then every 6 hours (issue #43). **After listen**: the result goes
+ * out as a broadcast, and right after startup is exactly when a new version is most likely to have
+ * shipped while the app was closed. People leave this app open for days, so the recurring check
+ * is still needed.
  */
 updates.start()
 // The linked machines (#82): each opens its ssh link in the background and reports through `machine_status`
@@ -588,178 +567,34 @@ if (held) void mgr.adoptKept(held.kept.agents)
  * The activity report the keeper's idle rule reads (#280, keeper-link.ts). Only under a keeper:
  * stdout is otherwise the ready line's alone.
  */
-/**
- * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
- * the switch's question and applying an update when idle (#352) all read it through the activity
- * report. The session list carries what the rule reads besides the state: pending approvals and
- * questions, and background tasks (#290). Moving one session to a new agent CLI (#297) uses the
- * per-session rule instead (`sessionIdle`, through the manager).
- */
-const activity = (): ActivitySnapshot => ({
-  sessions: mgr.listSessions(),
-  terminals: terminals.liveCount(),
-  commandRuns: commandRuns.liveCount(),
-})
-const stopActivity =
-  underKeeper
-    ? startActivityReport(
-        activity,
-        // The same stream as the ready line, so the two keep their order
-        (line) => void process.stdout.write(`${line}\n`),
-      )
-    : () => {}
-
-/**
- * A single rejection does not kill this process.
- *
- * Node **terminates the process** the moment an unhandled rejection surfaces. Since this host is
- * the parent of every session, one rejection leaking from anywhere **cuts off every live
- * session** — this actually happened once, where adding a project cut off unrelated sessions along
- * with it. On top of that, stderr goes nowhere at all in the packaged app, so there was not even a
- * way to know why it died.
- *
- * So two things are done here:
- *   1. A rejection is **logged loudly, never swallowed,** but the process is kept alive. It is
- *      usually the problem of one request, not a situation where the whole process has become
- *      unusable. Cutting off every session is a far bigger cost.
- *   2. Exceptions and rejections are **recorded to a file.** The next time this happens, nobody has
- *      to guess.
- *
- * uncaughtException is different, because state may have broken — it is recorded, and then this
- * shuts down through the normal path.
- */
-const crashLog = join(dirname(dbPath), 'host-errors.log')
-
-function record(kind: string, err: unknown): void {
-  const e = err as Error
-  const line = `[${new Date().toISOString()}] ${kind}: ${e?.stack ?? String(err)}\n`
-  console.error(`[agent-host] ${kind}`, e?.stack ?? err)
-  try {
-    // Keeps only one generation, the same rule as host.log — on a day when rejections repeat,
-    // this file would otherwise silently eat up the user's folder (appending with no rollover has
-    // no cap)
-    rotateIfLarge(crashLog)
-    appendFileSync(crashLog, line)
-  } catch {
-    // If even the log cannot be written, stderr is the last resort — nothing is thrown again here
-  }
-}
-
-/**
- * How this host leaves (#280 step 2).
- *
- *   stop    today's ending: agents, terminals and commands are stopped with it. Always the answer
- *           without a keeper, and under one when the keeper itself is stopping ("Quit
- *           completely", "Restart completely", the last window closing with background mode off,
- *           idle exit) — it says so with
- *           `stop` on the child service.
- *   detach  under a keeper that keeps the children: a restart, a build switch, a crash, the keeper's
- *           pipe closing. Nothing is stopped; the next host re-attaches to all of it.
- */
-type LeaveMode = 'stop' | 'detach'
-const onSignalMode: LeaveMode = held ? 'detach' : 'stop'
-
-process.on('unhandledRejection', (reason) => record('Unhandled rejection', reason))
-process.on('uncaughtException', (err) => {
-  record('Uncaught exception', err)
-  // A crash: nothing is handed over, the state that threw is not one to carry forward (view-handover.ts)
-  void shutdown(onSignalMode, false)
-})
-
-/**
- * Stops or hands off everything this host holds, without exiting (see LeaveMode). `detach` is also
- * the swap's hook (#280 step 3, onDrain below): the draining host lets go of keeper-held agents,
- * terminals and commands, and the next host re-attaches to them.
- *
- * `handOver` marks a planned ending under the keeper, after which the keeper starts the next host:
- * the open app views are written down for it (view-handover.ts). First, before anything below
- * closes them.
- */
-async function stopServices(mode: LeaveMode, handOver: boolean): Promise<void> {
-  /*
-   * The store closes however the rest goes (#396). It used to close only if every step before it succeeded: one that
-   * threw left the store open and its WAL unfolded, and on the signal path the host never reached its exit and waited
-   * to be killed. Each close runs whatever the other does, and neither hides the error that came first (shutdown.ts).
-   */
-  await stopThenClose(
-    () => stopServicesBeforeStore(mode, handOver),
-    [() => store.close(), () => held?.children.close()],
-    (line) => console.error(line),
+if (launch.underKeeper) {
+  stopActivity = startActivityReport(
+    activity,
+    // The same stream as the ready line, so the two keep their order
+    (line) => void process.stdout.write(`${line}\n`),
   )
 }
 
-async function stopServicesBeforeStore(mode: LeaveMode, handOver: boolean): Promise<void> {
-  if (handOver) {
-    try {
-      const n = recordViewHandover(store, views, inlineViews)
-      if (n > 0) console.error(`[agent-host] ${n} open app views handed over to the next host`)
-    } catch (err) {
-      console.error(`[agent-host] could not hand the open app views over: ${(err as Error).stack ?? err}`)
-    }
-  }
-  updates.stop()
-  versionsRef.current?.stop()
-  // The ssh links are this host's children: they end with it, and the next host opens its own
-  await links.stop()
-  stopActivity()
-  if (mode === 'detach') {
-    // Released, not killed: the keeper keeps draining them for the next host
-    await Promise.all([terminals.detachAll(), commandRuns.detachAll()])
-  } else {
-    /*
-     * **The PTY is cut off first.** This used to come after awaiting mgr.disposeAll(), but the
-     * supervisor's budget is 3 seconds, and if this does not finish within that, the host gets
-     * SIGKILLed — meaning these two lines never run at all, and a dev server is left orphaned.
-     * Cleaning up sessions late still leaves no process behind, but a PTY does. Whichever one
-     * lingers is the one that has to go first.
-     *
-     * (A PTY child has its own session via setsid(), so even the supervisor's group kill cannot
-     *  reach it — if this does not kill it, nothing else will. Under the keeper, the keeper's own
-     *  stop is the backstop.)
-     */
-    terminals.disposeAll()
-    commandRuns.disposeAll()
-  }
-  // App processes are shut down **in parallel** with session cleanup — the grace period (1 second) overlaps with the session cleanup time.
-  // They stay with the host in both modes (#280 decision 2): a new host starts them again on demand
-  const appsDown = externalApps.dispose()
-  await (mode === 'detach' ? mgr.detachAll() : mgr.disposeAll())
-  await appsDown
-  appChanges.dispose()
-  themes.close()
-  inlineViews.dispose()
-  await views.dispose()
-  await server.close()
-}
-
-let leaving: LeaveMode | null = null
-const shutdown = async (mode: LeaveMode, handOver: boolean) => {
-  // A second signal while leaving changes nothing: the first decided what happens to the children
-  if (leaving) return
-  leaving = mode
-  await stopServices(mode, handOver).catch((err) => {
-    console.error(`[agent-host] a step of shutting down failed; leaving anyway: ${(err as Error).stack ?? err}`)
-  })
-  // Why it ended becomes the first line of the next investigation — it never disappears silently
-  console.error(`[agent-host] shutting down (pid ${process.pid}, ${mode === 'detach' ? 'agents, terminals and commands left running in the keeper' : 'stopped'})`)
-  stopLog()
-  process.exit(0)
-}
 /*
- * With the keeper's child service, a signal is a restart: stopping for good comes as `stop` below,
- * first, so a signal after it changes nothing. The next host takes the open views over. Without the
- * service the two cannot be told apart, and nothing is handed over.
+ * Every way of ending, wired to the one shutdown (lifecycle/endings.ts): signals (and one held
+ * while starting), a crash, the parent's pipe with `--watch-parent`, `host.stop`, the keeper's
+ * `stop` on the child service, and its drain for a swap.
  */
-process.on('SIGINT', () => void shutdown(onSignalMode, onSignalMode === 'detach'))
-process.on('SIGTERM', () => void shutdown(onSignalMode, onSignalMode === 'detach'))
-process.off('SIGINT', holdSignal)
-process.off('SIGTERM', holdSignal)
-// One that came while starting: the same ending it would have had, now that there is one
-if (pendingSignal) void shutdown(onSignalMode, onSignalMode === 'detach')
-stopNow = () => void shutdown('stop', false)
+start.at('endings')
+const endings = wireEndings({
+  proc: process,
+  signals,
+  heldChildren: held !== null,
+  leave: (mode, handOver) => void shutdown.leave(mode, handOver),
+  record: crashRecorder(join(dirname(dbPath), 'host-errors.log'), (line) => console.error(line)),
+  stdin: process.stdin,
+  watchParent: values['watch-parent'] === true,
+  log: (line) => console.error(line),
+})
+stopNow = endings.stopAsked
 if (stopAsked) stopNow()
-// The keeper is stopping for good and asks this host to stop its children the way it always did. No next host to hand views to
-held?.children.on('stop', () => void shutdown('stop', false))
+// The keeper is stopping for good and asks this host to stop its children the way it always did
+held?.children.on('stop', endings.keeperStop)
 
 /*
  * The keeper's drain (#280 step 3, swap-control.ts): finish or cut what the host serves itself,
@@ -768,15 +603,12 @@ held?.children.on('stop', () => void shutdown('stop', false))
 if (control) {
   onDrain(control, {
     drain: hostDrain,
-    // With the keeper's child service, a detach really hands agents, terminals and commands over (step 2)
-    detach: async () => {
-      // A signal arriving mid-drain must not run a second, different ending
-      leaving = held ? 'detach' : 'stop'
-      // A swap: the next host is already waiting, and it takes the open views over whether or not it takes the agents
-      await stopServices(leaving, true)
-    },
+    // A swap: the next host is already waiting, and it takes the open views over whether or not it
+    // takes the agents. With the keeper's child service a detach really hands agents, terminals and
+    // commands over (step 2); a signal arriving mid-drain runs no second, different ending.
+    detach: () => shutdown.stopServices(signalMode(held !== null), true),
     keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
-    release: lock.release,
+    release: ownership.release,
     write: (line) => void writeSync(1, `${line}\n`),
     log: (line) => console.error(line),
     exit: (code) => {
@@ -785,25 +617,4 @@ if (control) {
     },
   })
 }
-
-/**
- * Shuts itself down when the parent (the Tauri supervisor) disappears.
- *
- * Since the supervisor keeps stdin open as a pipe, whatever reason the app dies for — a normal
- * exit, a crash, SIGKILL — this pipe closes and EOF arrives. Relying only on an exit hook would
- * leave the host orphaned and still holding its port when force-killed (confirmed by measurement).
- * **Only turned on by an explicit flag** — when stdin is /dev/null (when some other script launches
- * it), EOF also arrives immediately, so deciding this by whether it is a TTY would make it kill
- * itself for the wrong reason (confirmed by measurement).
- */
-if (values['watch-parent']) {
-  process.stdin.resume()
-  const onParentGone = () => {
-    console.error('[agent-host] parent process exited; shutting down')
-    // The keeper (or the supervisor) is gone: nothing is known to start a next host
-    void shutdown(onSignalMode, false)
-  }
-  process.stdin.on('end', onParentGone)
-  process.stdin.on('close', onParentGone)
-  process.stdin.on('error', onParentGone)
-}
+start.done()
