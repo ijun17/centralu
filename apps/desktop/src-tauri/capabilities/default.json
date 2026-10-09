@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window, local pages only: our own commands, dragging, notifications, global shortcuts, dialogs, opening files",
+  "description": "Main window, local pages only: our own commands, dragging, notifications, global shortcuts, dialogs, opening files and VS Code Remote-SSH links",
   "windows": [
     "main"
   ],
@@ -20,6 +20,14 @@
     "global-shortcut:allow-is-registered",
     "dialog:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "vscode://vscode-remote/ssh-remote+*"
+        }
+      ]
+    },
     "allow-host-info",
     "allow-host-error",
     "allow-restart-host",

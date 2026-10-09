@@ -222,8 +222,24 @@ describe('plugin permissions (#186)', () => {
         'global-shortcut:allow-is-registered',
         'dialog:default',
         'opener:default',
+        // Widened by one scoped entry, checked below
+        'opener:allow-open-url',
       ].sort(),
     )
+  })
+
+  /*
+   * `opener:default` opens http(s), mailto and tel links. The one scheme added beside them is VS Code's Remote-SSH
+   * link, for a project on a linked machine (#82, docs/plans/remote-hub.md §6): `vscode://vscode-remote/ssh-remote+`
+   * and nothing else of VS Code's (not `vscode://file/`, which opens a local path, nor an extension's handler).
+   */
+  it('the only URLs opened beyond the default ones are VS Code Remote-SSH links', () => {
+    const scoped = capabilities().flatMap(([, c]) =>
+      c.permissions.filter((p): p is { identifier: string; allow?: { url?: string }[]; deny?: unknown } => typeof p !== 'string'),
+    )
+    expect(scoped.map((p) => p.identifier)).toEqual(['opener:allow-open-url'])
+    expect(scoped[0]!.allow).toEqual([{ url: 'vscode://vscode-remote/ssh-remote+*' }])
+    expect(scoped[0]!.deny).toBeUndefined()
   })
 })
 

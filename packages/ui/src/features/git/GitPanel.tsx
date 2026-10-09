@@ -4,6 +4,7 @@ import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
+import { useRemoteIde } from '../machines/remoteIde.js'
 import { caretAt, selectedText, type Caret } from '../viewer/copy.js'
 import { diffFileLabel, diffPlaceAt, renderableDiffRows, type DiffPlace } from './diff.js'
 
@@ -82,6 +83,8 @@ function Changes({
   const setToast = useStore((s) => s.setToast)
   const openFile = useStore((s) => s.openFile)
   const remote = useProjectMachine(projectId) !== null
+  // A project on a linked machine opens in VS Code over Remote-SSH instead (#82); null where that cannot work
+  const remoteIde = useRemoteIde(projectId)
   const [selected, setSelected] = useState<GitFileStatus | null>(null)
   const [diff, setDiff] = useState<{ diff: string; truncated: boolean; binary: boolean } | null>(null)
 
@@ -145,7 +148,9 @@ function Changes({
          * was clicked into, not from a `diff --git` inside the diff itself. That is why only
          * `line` is used and `file` is not.
          */
-        onOpenInIde={remote ? undefined : async ({ line }) => {
+        onOpenInIde={remote ? remoteIde ? async ({ line }) => {
+          if (selected) await remoteIde.open(selected.path, { line })
+        } : undefined : async ({ line }) => {
           if (selected) {
             try {
               const { path } = await platform.fs.resolve(projectId, selected.path)
@@ -156,6 +161,7 @@ function Changes({
           }
         }}
         onOpenViewer={selected ? () => openFile(selected.path) : undefined}
+        ide={remoteIde ?? undefined}
       />
     </div>
   )
@@ -183,6 +189,7 @@ function DiffView({
   emptyHint,
   onOpenInIde,
   onOpenViewer,
+  ide,
 }: {
   path?: string
   data: { diff: string; truncated: boolean; binary: boolean } | null
@@ -190,10 +197,12 @@ function DiffView({
   emptyHint?: string
   /**
    * Where the top of the screen currently points — which file, and which line of it, to open. Absent for a project on
-   * a linked machine (#82): an IDE on this computer cannot open that machine's file
+   * a linked machine (#82) VS Code's Remote-SSH cannot reach: an IDE on this computer cannot open that machine's file
    */
   onOpenInIde?: (target: { file: string | null; line?: number }) => Promise<void>
   onOpenViewer?: () => void
+  /** The button's words when it is not this computer's IDE: VS Code over Remote-SSH, for a linked machine (#82) */
+  ide?: { label: string; title: string }
 }) {
   const diffText = data?.diff ?? ''
   const rows = useMemo(() => renderableDiffRows(diffText), [diffText])
@@ -344,8 +353,9 @@ function DiffView({
               className="text-xs text-ink-faint hover:text-ink"
               onClick={() => void onOpenInIde({ file: place.file, line: place.line })}
               data-testid="open-in-ide"
+              title={ide?.title}
             >
-              Open in IDE
+              {ide?.label ?? 'Open in IDE'}
             </button>
           )}
         </span>
@@ -496,6 +506,7 @@ function History({
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const remote = useProjectMachine(projectId) !== null
+  const remoteIde = useRemoteIde(projectId)
   const [detail, setDetail] = useState<{
     sha: string
     files: string[]
@@ -529,7 +540,10 @@ function History({
          * based on the commit's new side, so it can drift if there have been edits since, but
          * it lands closer than dropping the person on line 1.
          */
-        onOpenInIde={remote ? undefined : async ({ file, line }) => {
+        onOpenInIde={remote ? remoteIde ? async ({ file, line }) => {
+          if (!file) return setToast('Could not tell which file this line belongs to')
+          await remoteIde.open(file, { line })
+        } : undefined : async ({ file, line }) => {
           if (!file) {
             setToast('Could not tell which file this line belongs to')
             return
@@ -541,6 +555,7 @@ function History({
             setToast(`Could not open in IDE: ${(e as Error).message}`)
           }
         }}
+        ide={remoteIde ?? undefined}
       />
     </div>
   )

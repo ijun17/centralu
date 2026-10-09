@@ -356,12 +356,14 @@ export interface SystemPort {
   openInIde(path: string, line?: number): Promise<void>
   /**
    * Opens an http(s) address in the OS's default browser (#159). Used by terminal links and
-   * links in app screens.
+   * links in app screens. Also VS Code's Remote-SSH links (`vscode://vscode-remote/ssh-remote+…`), which open a
+   * linked machine's project in VS Code (#82); the desktop app allows that one scheme besides http(s), mailto and tel
+   * (capabilities/default.json).
    *
    * Why this is not just `window.open` at every call site: in the desktop webview
    * (WKWebView), that opens nothing. Without a new-window handler, wry drops the request, and
    * no error is raised either. The address check (http(s) only) has already been done by the
-   * caller. Throws if it cannot open.
+   * caller. Throws if it cannot open, or if the desktop app refuses the scheme.
    */
   openUrl(url: string): Promise<void>
   /** Directory picker. Desktop uses the native picker; web dev falls back to a path input (FR-19) */

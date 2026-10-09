@@ -75,6 +75,7 @@ import type {
   FsFile,
   InlineViewKept,
   InlineViewReopened,
+  MachineRef,
   NewAppSpec,
   Platform,
   RelaunchCheck,
@@ -727,6 +728,12 @@ export class MockPlatform implements Platform {
     supported: true,
     usage: { plan: 'max', windows: [], daily: [] },
   }
+  /** For tests: a linked machine's usage, by machine id (#82); a machine with none answers `usageState` */
+  machineUsage: Record<string, { supported: boolean; reason?: string; usage: UsageSnapshot | null }> = {}
+  /** For tests: the tools a linked machine has, by machine id (#82) */
+  machineDetected: Record<string, ToolStatus[]> = {}
+  /** For tests: every usage question, and which machine it went to (null: this computer) */
+  usageCalls: { tool: ToolName; machine: string | null }[] = []
 
   /** For tests: the slash command list (ready=false also reproduces "the tool is not ready yet") */
   commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } =
@@ -2112,7 +2119,10 @@ export class MockPlatform implements Platform {
       }
     },
     commands: async (_sessionId: string) => ({ ...this.commandState }),
-    usage: async (_tool: ToolName) => ({ ...this.usageState }),
+    usage: async (tool: ToolName, machine?: MachineRef) => {
+      this.usageCalls.push({ tool, machine: machine ?? null })
+      return { ...((machine && this.machineUsage[machine]) || this.usageState) }
+    },
     capabilities: async (tool: ToolName): Promise<AdapterCapabilities> => ({
       approvals: true,
       contextUsage: 'exact',
@@ -2125,7 +2135,8 @@ export class MockPlatform implements Platform {
       exclusiveWriter: tool === 'codex',
       backgroundTasks: true,
     }),
-    detect: async () => this.detected,
+    /** A linked machine answers `machineDetected[machine]` when a test set one (#82), else what this computer has */
+    detect: async (machine?: MachineRef) => (machine && this.machineDetected[machine]) || this.detected,
     // Like the host (#297): the reading is the host's; this mock never reads a real CLI
     versions: async () => ({ ...this.agentVersions, installed: { ...this.agentVersions.installed } }),
     setAutoApplyVersions: async (enabled: boolean) => {

@@ -134,11 +134,11 @@ wakes sessions that were live. So the hub must:
 | Sessions, approvals, questions, inbox | Routed | |
 | Terminals and command runs | Routed (frames relayed; every keystroke is one RPC, latency to be measured) | |
 | Grid panels holding remote sessions | Needs a table or column: `grid_layout.session_id` references the local `sessions` table | |
-| Reveal in Finder, open in IDE | Off for remote projects | VS Code Remote-SSH links |
+| Reveal in Finder, open in IDE | Off for remote projects | Done (phase 2): "Open in VS Code" opens the file, folder or project on that machine through a `vscode://vscode-remote/ssh-remote+<target><path>` link, the path being the project root the remote reported (`ProjectInfo.path`) joined with the project-relative one. A Windows (PowerShell) machine gets `/C:/...`; a WSL machine gets nothing, as Remote-SSH reaches the Windows side and not the distro. Reveal and trash stay off |
 | File tree, diff, search | Off for remote projects | Routed (paths are project-relative already) |
 | App views | Off for remote projects | View URLs carry the host's own port and per-app origin ports; needs a proxy through the hub |
 | Attachments | Work: saved and read on the same machine as the session | Upload through the hub |
-| Usage gauges | Hub machine only | Per machine (decision 5) |
+| Usage gauges | Hub machine only | Done (phase 2): the top bar shows this computer's donuts, then each linked machine's behind its name (`agents.usage {machine}`, `agents.detect {machine}`). A machine that is not connected shows its state and is not asked; it is asked when its link comes back, and every connected machine on the 5-minute refresh |
 | Orchestrator and Centralu tools (`list_sessions`, `read_session`, `recall`, `ask_project`) | Local only, documented | Through the router; `ask_project` across machines also has to handle the paths it hands back |
 | Attaching a hub app to a remote session | No | The app process and the session are on different machines |
 

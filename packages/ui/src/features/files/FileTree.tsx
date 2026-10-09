@@ -4,6 +4,7 @@ import type { FsEntry } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
+import { useRemoteIde, type RemoteIde } from '../machines/remoteIde.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { iconForFile } from './fileIcon.js'
 import { hasDragFiles, hasDragPath, readDragPath, setDragPath } from './dragPath.js'
@@ -104,18 +105,21 @@ export function FileTree({ projectId }: { projectId: string }) {
   const ops = useFileOps(projectId, refresh)
   /*
    * The row menu's two verbs act on this computer's files through the desktop shell (reveal in the file manager, move
-   * to the OS trash), so a project on a linked machine has no menu in phase 1 (#82): its paths are the other machine's.
+   * to the OS trash), so a project on a linked machine never gets them (#82): its paths are the other machine's. What
+   * it gets instead is VS Code over Remote-SSH, the one editor that can open that machine's path from here; with no
+   * way to reach it (a WSL machine), there is no menu at all.
    */
   const remote = useProjectMachine(projectId) !== null
+  const remoteIde = useRemoteIde(projectId)
   const openMenu = useCallback(
     (target: MenuTarget, x: number, y: number) => {
-      if (!remote) setMenu({ target, x, y })
+      if (!remote || remoteIde) setMenu({ target, x, y })
     },
-    [remote],
+    [remote, remoteIde],
   )
   const ctx = useMemo(
-    () => ({ projectId, version, ops, openMenu, hover, setHover }),
-    [projectId, version, ops, openMenu, hover],
+    () => ({ projectId, version, ops, openMenu, hover, setHover, remoteIde }),
+    [projectId, version, ops, openMenu, hover, remoteIde],
   )
 
   return (
@@ -127,6 +131,21 @@ export function FileTree({ projectId }: { projectId: string }) {
           directly under the 'Files' tab.
         */}
         <TabActions>
+          {/*
+            The project itself, for a project on a linked machine (#82): its folder in VS Code over Remote-SSH. A row's
+            menu opens one file or folder; this is the door to the whole project, which has no row of its own.
+          */}
+          {remoteIde && (
+            <button
+              type="button"
+              className="shrink-0 text-xs text-ink-faint transition-colors hover:text-ink"
+              onClick={() => void remoteIde.open('')}
+              title={remoteIde.title}
+              data-testid="file-tree-open-vscode"
+            >
+              {remoteIde.label}
+            </button>
+          )}
           {/* 'Ignored' alone read as a state, not an action — it is the showing that is optional */}
           <label
             className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint"
@@ -181,6 +200,8 @@ type TreeContext = {
   /** The folder currently targeted (`''` is the root). Only one spot on screen is ever lit at a time */
   hover: string | null
   setHover: (dir: string | null) => void
+  /** For a project on a linked machine VS Code can reach (#82): the row menu's one verb. Null for this computer's */
+  remoteIde: RemoteIde | null
 }
 
 const TreeCtx = createContext<TreeContext | null>(null)
@@ -493,7 +514,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
  * being clicked through reflexively anyway, so an undoable delete is always the better choice.
  */
 function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
-  const { ops } = useTree()
+  const { ops, remoteIde } = useTree()
   const fileManager = usePlatform().capabilities.fileManagerName
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -530,6 +551,38 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
    * of the click at zoom 1.25, and near the right edge of the window it ran off the window entirely.
    */
   const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
+  /*
+   * A project on a linked machine (#82): neither this computer's file manager nor its trash holds that machine's file,
+   * so the menu has the one verb that reaches it. A folder opens as a VS Code folder, a file as a file.
+   */
+  if (remoteIde) {
+    return (
+      <div
+        ref={rootRef}
+        role="menu"
+        data-testid="file-menu"
+        className="fixed z-40 w-56 overflow-hidden rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)"
+        style={{
+          left: Math.min(state.x / zoom, window.innerWidth / zoom - 232),
+          top: Math.min(state.y / zoom, window.innerHeight / zoom - 40),
+        }}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="file-menu-vscode"
+          title={remoteIde.title}
+          className="block w-full truncate px-2.5 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
+          onClick={() => {
+            close()
+            void remoteIde.open(target.path, target.isDir ? undefined : {})
+          }}
+        >
+          {remoteIde.label}
+        </button>
+      </div>
+    )
+  }
   return (
     <div
       ref={rootRef}

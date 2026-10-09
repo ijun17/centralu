@@ -955,10 +955,12 @@ Windows에서는 beta.10의 `centralu serve`):
 | 새 세션 대화상자, 세션 메뉴 | `agents.detect`, `agents.models`, `agents.capabilities`에 프로젝트의 `machine`을 넘긴다 |
 | 세션 머리줄 | 기기를 밝힌다(그리드 패널의 머리줄이기도 하고, 승인과 질문에 답하는 곳이기도 하다). "older CLI"는 `agents.versions {machine}`과 비교한다 |
 | 인박스, 알림 카드, OS 알림 | 원격 세션의 기기를 밝힌다 |
-| 다른 기기의 프로젝트에서 꺼지는 것 | 파일 관리자에서 보기와 파일 트리 메뉴, IDE에서 열기(`fs.resolve`가 거절된다), 삭제할 때 폴더를 이 컴퓨터의 휴지통으로 옮기기, 새 앱, 앱 뷰(`appStatus`가 나중 버전에서 열린다고 말한다) |
+| 사용량 게이지(2단계) | 이 컴퓨터의 도넛이 먼저, 그다음 연결된 기기마다 그 이름 뒤에 그 기기의 도넛: `agents.detect`와 `agents.usage`에 그 `machine`을 넘긴다. 연결된 기기에만 묻는다(5분마다, 호스트 연결이 돌아올 때, 그 기기의 링크가 돌아올 때). 연결되지 않은 기기는 상태만 보인다 |
+| VS Code에서 열기(2단계) | 다른 기기의 프로젝트에서 diff, 뷰어, 파일 트리가 "Open in VS Code"를 내놓는다: `system.openUrl`로 여는 `vscode://vscode-remote/ssh-remote+<sshTarget><경로>` 링크(`@cc/core`의 `remoteIdeUrl`). WSL 기기와, 링크에 실을 수 없는 ssh 대상에는 내놓지 않는다 |
+| 다른 기기의 프로젝트에서 꺼지는 것 | 파일 관리자에서 보기와 파일 트리의 다른 동작, 이 컴퓨터의 IDE에서 열기(`fs.resolve`가 거절된다), 삭제할 때 폴더를 이 컴퓨터의 휴지통으로 옮기기, 새 앱, 앱 뷰(`appStatus`가 나중 버전에서 열린다고 말한다) |
 
 **1단계가 아직 다루지 않는 것.** 다른 기기의 앱 뷰는 2단계다(목록에 있고, 그 도구는 거기서 돌며, 뷰는 그렇다고
-말한다). ssh로 원격을 설치하고 업데이트하는 것은 3단계다([plans/remote-hub.md](plans/remote-hub.md) §10). 사용량 게이지, `processes.strays/stop`, 종료 대화상자는
+말한다). ssh로 원격을 설치하고 업데이트하는 것은 3단계다([plans/remote-hub.md](plans/remote-hub.md) §10). `processes.strays/stop`과 종료 대화상자는
 아직 이 컴퓨터에만 묻는다. WSL의 `centralu serve`에는 배포판이 시작할 때 그것을 띄울 것(§4.7의 systemd 유닛)이
 필요하고, 그 뒤로는 링크가 배포판을 살려 둔다.
 

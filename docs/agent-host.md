@@ -1153,12 +1153,14 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 | New-session dialog, session menu | `agents.detect`, `agents.models`, `agents.capabilities` with the project's `machine` |
 | Session header | Names the machine (also every grid panel's header, and where approvals and questions are answered); "older CLI" compares with `agents.versions {machine}` |
 | Inbox, notice cards, OS notifications | Name the machine of a remote session |
-| Off for another machine's project | Reveal in the file manager and the file tree's menu, Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app, app views (`appStatus` says they open in a later version) |
+| Usage gauges (phase 2) | This computer's donuts first, then each linked machine's behind its name: `agents.detect` and `agents.usage` with its `machine`. Only connected machines are asked (on the 5-minute refresh, on the host connection coming back, and when that machine's link comes back); one that is not connected shows its state |
+| Open in VS Code (phase 2) | For another machine's project, the diff, viewer and file tree offer "Open in VS Code": a `vscode://vscode-remote/ssh-remote+<sshTarget><path>` link through `system.openUrl` (`remoteIdeUrl` in `@cc/core`). Not offered for a WSL machine, nor for an ssh target a link cannot carry |
+| Off for another machine's project | Reveal in the file manager and the file tree's other verbs, this computer's Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app, app views (`appStatus` says they open in a later version) |
 
 **What phase 1 does not cover yet.** App views of another machine are phase 2 (listed, their tools work there, their
 view says so); installing and updating the remote over ssh is phase 3 ([plans/remote-hub.md](plans/remote-hub.md) §10), of which the
-link starting a host it finds not running is in. Usage gauges, `processes.strays/stop` and the quit dialog still ask
-this computer only.
+link starting a host it finds not running is in. `processes.strays/stop` and the quit dialog still ask this computer
+only.
 
 ## 5. dev-services (despite the name, this is the prod path — corrected 2026-08-15)
 

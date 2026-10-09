@@ -274,7 +274,7 @@ export class TauriSystemPort implements SystemPort {
   /**
    * Calls the opener plugin's command directly — the exact command
    * `@tauri-apps/plugin-opener`'s `openUrl` calls, using the `opener:default` permission
-   * (http/https addresses) already granted. Called by name to avoid pulling the plugin's JS
+   * (http/https addresses) and the one scoped entry beside it (VS Code Remote-SSH links, #82) already granted. Called by name to avoid pulling the plugin's JS
    * package into this package.
    */
   async openUrl(url: string): Promise<void> {

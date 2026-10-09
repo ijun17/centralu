@@ -4,6 +4,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import type { FsFile } from '@cc/platform/ports'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
+import { useRemoteIde } from '../machines/remoteIde.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { TRUNCATED_NOTICE, caretAt, selectedText, wholeFileText, type Caret } from './copy.js'
@@ -21,8 +22,9 @@ import { suffixMatches } from './resolve.js'
  *   - If precise highlighting is needed, "Open in IDE" is one click away.
  */
 export function CodeViewer({ projectId }: { projectId: string }) {
-  // An IDE on this computer cannot open another machine's file (#82); Remote-SSH links are phase 2
+  // An IDE on this computer cannot open another machine's file (#82); VS Code over Remote-SSH can, where it reaches
   const remote = useProjectMachine(projectId) !== null
+  const remoteIde = useRemoteIde(projectId)
   const platform = usePlatform()
   const path = useStore((s) => s.viewerPath)
   const setToast = useStore((s) => s.setToast)
@@ -372,6 +374,16 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             data-testid="viewer-open-ide"
           >
             Open in IDE
+          </button>
+        )}
+        {remoteIde && (
+          <button
+            className="ml-auto shrink-0 text-xs text-ink-faint hover:text-ink"
+            onClick={() => void remoteIde.open(path, {})}
+            title={remoteIde.title}
+            data-testid="viewer-open-ide"
+          >
+            {remoteIde.label}
           </button>
         )}
       </header>
