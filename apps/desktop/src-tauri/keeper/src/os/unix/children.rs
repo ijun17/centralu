@@ -449,6 +449,12 @@ impl ExitWatch {
                 None => self.polled.push(pid),
             }
         }
+        // A status the outgoing keeper handed over is for one exit only. Only two paths above read
+        // and remove it; a child reported another way (reaped here, or with the status kqueue
+        // delivered) left it behind for the keeper's life, and for whatever later took the pid (#392).
+        for (pid, _) in &out {
+            self.known.remove(pid);
+        }
         out
     }
 }
@@ -518,6 +524,17 @@ mod tests {
         let s = spawn_pipes("/bin/sh", &["-c".into(), "exit 7".into()], "/", &env()).unwrap();
         w.watch(s.pid);
         assert_eq!(wait_exit(&mut w, s.pid), ExitStatus { code: Some(7), signal: None });
+    }
+
+    #[test]
+    fn a_handed_over_exit_status_is_forgotten_once_the_child_is_reported() {
+        let mut w = ExitWatch::new().unwrap();
+        let s = spawn_pipes("/bin/sh", &["-c".into(), "exit 3".into()], "/", &env()).unwrap();
+        // Reaped here (ours), so the status the outgoing keeper sent is never read
+        w.know(s.pid, ExitStatus { code: Some(3), signal: None });
+        w.watch(s.pid);
+        assert_eq!(wait_exit(&mut w, s.pid), ExitStatus { code: Some(3), signal: None });
+        assert!(w.known.is_empty(), "kept {} handed-over statuses after the exit was reported", w.known.len());
     }
 
     #[test]
