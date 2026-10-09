@@ -1,7 +1,5 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -37,8 +35,11 @@ export default defineConfig({
      * real `~/.centralu`. This actually happened: a single `pnpm verify` run created an empty
      * folder there, and that folder then blocked the data migration
      * (see `packages/agent-host/src/data-dir.ts`).
+     *
+     * The setup file gives each test file a temporary folder of its own: a shared one let one
+     * file's managers sweep away what another file had just written there (#368).
      */
-    env: { CC_DATA_DIR: join(tmpdir(), 'centralu-test-data') },
+    setupFiles: [r('./tooling/vitest-data-dir.ts')],
     testTimeout: 5_000 * SLOW,
     hookTimeout: 10_000 * SLOW,
     exclude: EXCLUDE,
