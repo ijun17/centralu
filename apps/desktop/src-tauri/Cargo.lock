@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "centralu"
-version = "0.1.0-beta.13"
+version = "0.1.0-beta.14"
 dependencies = [
  "centralu-keeper-core",
  "libc",
@@ -449,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "centralu-keeper-core"
-version = "0.1.0-beta.13"
+version = "0.1.0-beta.14"
 dependencies = [
  "base64 0.22.1",
  "content-verify",
