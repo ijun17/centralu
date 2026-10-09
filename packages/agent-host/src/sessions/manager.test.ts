@@ -3065,6 +3065,28 @@ describe('worktree sessions', () => {
     expect(enoentCalls).toBe(1)
   })
 
+  it('forgets when it last asked about a branch once the session is deleted or merged (#392)', async () => {
+    const checked = () => [...(wtMgr as unknown as { prCheckedAt: Map<string, number> }).prCheckedAt.keys()]
+    const gone = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pr-gone',
+    })) as SessionInfo
+    const landed = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pr-landed',
+    })) as SessionInfo
+    wtMgr.prPollMs = 0
+    wtMgr.prLookup = async () => ({ number: 9, state: 'open', url: 'https://github.com/x/y/pull/9' })
+    await wtMgr.refreshMergedWorktrees(project.id)
+    expect(checked()).toEqual(expect.arrayContaining([gone.id, landed.id]))
+
+    await wtRpc('agents.deleteSession', { sessionId: gone.id })
+    expect(checked()).not.toContain(gone.id)
+
+    wtMgr.prLookup = async () => ({ number: 9, state: 'merged', url: 'https://github.com/x/y/pull/9' })
+    await wtMgr.refreshMergedWorktrees(project.id)
+    expect(wtMgr.listSessions().find((x) => x.id === landed.id)?.worktreeMerged).toBe(true)
+    expect(checked()).not.toContain(landed.id)
+  })
+
   /*
    * #76 hard gate: the manager's delete_worktree_session runs only when it is **provably
    * lossless**. The base adapter mock has no deleteExternalConversation — if the gate mistakenly
