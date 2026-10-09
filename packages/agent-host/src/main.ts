@@ -38,6 +38,7 @@ import { stopThenClose } from './shutdown.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
+import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
 import { storeMirror, storeRegistry } from './links/stored.js'
@@ -442,7 +443,7 @@ const allowedOrigins = parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS) 
  * a different app would let that app read someone else's browser storage.
  */
 const VIEW_PORTS_KEY = 'apps.viewPorts'
-const views = new ViewHost({
+const views: ViewHost = new ViewHost({
   secret: httpSecret,
   allowedOrigins,
   source: runtimeViewSource(externalApps),
@@ -460,6 +461,8 @@ const views = new ViewHost({
   }),
   // Under the keeper, the front door's port: the address outlives this host (swap-control.ts)
   hostPort: () => viewPort(frontDoor, port),
+  // A linked machine's views are served here too, their documents asked of that machine through the router (#82)
+  remote: linkedViews((method, params) => router.handle(method, params)),
 })
 /*
  * An app view inside a conversation (M4 B-1). When a session's agent calls an app tool with a view,
@@ -508,7 +511,7 @@ const links = new Links({
   log: (line) => console.error(line),
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
-const router = new Router({
+const router: Router = new Router({
   local: createRpcHandler(mgr, adapters, {
     themes,
     terminals,

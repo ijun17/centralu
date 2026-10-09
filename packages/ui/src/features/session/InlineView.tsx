@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { registerInlineFrame, useStore, type InlineView as InlineViewState } from '../../store/store.js'
-import { useExternalApp } from '../../store/app-catalog.js'
+import { useExternalApp, useMachineApps } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { messageText } from '../pinned-app/MessageAsk.jsx'
 import { UpdatedCue } from '../pinned-app/UpdatedCue.jsx'
@@ -50,7 +50,16 @@ export function InlineViewSlot({ sessionId, callId, leaving = false }: { session
 type Ask = { text: string; dropped: number; resolve: (sent: boolean) => void }
 
 function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view: InlineViewState; leaving: boolean }) {
-  const app = useExternalApp(view.projectId, view.appId)
+  /*
+   * A user-folder app's view in a linked machine's conversation is that machine's app (#82), never this computer's of
+   * the same id: it shows under that machine's title, and offers no Pin, since its pinned view does not open here yet
+   * (`isRemoteUserApp`). A project app's id already names its machine.
+   */
+  const machine = useStore((s) => (view.projectId === null ? (s.sessions[sessionId]?.machine ?? null) : null))
+  const own = useExternalApp(view.projectId, view.appId)
+  const theirs = useMachineApps(machine ?? '').find((a) => a.appId === view.appId)
+  const app = machine ? theirs : own
+  const pinnable = !!app?.info.home && !machine
   const title = app?.title ?? view.appId
   const frame = useRef<AppFrameHandle>(null)
   const close = useStore((s) => s.closeInlineView)
@@ -157,7 +166,7 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
             Changed · Reload
           </button>
         )}
-        {app?.info.home && !view.rejected && (
+        {pinnable && !view.rejected && (
           <button
             type="button"
             className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
@@ -187,7 +196,7 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
           <Placeholder
             view={view}
             title={title}
-            canOpen={!!app?.info.home}
+            canOpen={pinnable}
             onOpen={() => openApp(view.projectId, view.appId)}
             onReopen={() => void reopen(sessionId, callId)}
           />

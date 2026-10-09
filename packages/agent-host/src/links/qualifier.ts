@@ -133,6 +133,8 @@ export class Qualifier {
     if (typeof p.fromSessionId === 'string') out.fromSessionId = this.id(p.fromSessionId)
     if (isObj(p.fromApp)) out.fromApp = { ...p.fromApp, projectId: this.maybeId(p.fromApp.projectId) }
     if ('projectId' in p) out.projectId = this.maybeId(p.projectId)
+    // A stored `app_view` open: the window reads only that a view stood there, but the id stays in the hub's terms
+    if (typeof p.instanceId === 'string') out.instanceId = this.id(p.instanceId)
     if (isObj(p.detail)) out.detail = this.approvalDetail(p.detail)
     return out
   }
@@ -186,9 +188,22 @@ export class Qualifier {
     return Array.isArray(list) ? list.map((h) => (isObj(h) ? { ...h, sessionId: this.maybeId(h.sessionId) } : h)) : list
   }
 
-  /** `apps.inlineViews` rows and the `apps.inlineReopen` answer */
+  /**
+   * `apps.inlineViews` rows and the `apps.inlineReopen` answer. The view instance is qualified like any id: the window
+   * hands it back to open, call and close the view, and the hub routes those by it (plan §11)
+   */
   inlineView(v: unknown): unknown {
-    return isObj(v) ? { ...v, projectId: this.maybeId(v.projectId) } : v
+    return isObj(v) ? { ...v, projectId: this.maybeId(v.projectId), instanceId: this.maybeId(v.instanceId) } : v
+  }
+
+  /** The `apps.openView` answer: the pinned view's instance */
+  openedView(v: unknown): unknown {
+    return isObj(v) ? { ...v, instanceId: this.maybeId(v.instanceId) } : v
+  }
+
+  /** The `apps.viewDocument` answer: the app it names (a user-folder app's null project stays null) */
+  viewDocument(d: unknown): unknown {
+    return isObj(d) ? { ...d, projectId: this.maybeId(d.projectId) } : d
   }
 
   // ── Events ──────────────────────────────────────────────────────────────────────────────
@@ -227,8 +242,16 @@ export class Qualifier {
         return { ...base, fromSessionId: this.maybeId(e.fromSessionId) }
       case 'approval_request':
         return { ...base, detail: this.approvalDetail(e.detail) }
+      // The view's instance, which the window opens, calls and closes it by (plan §11)
       case 'app_view':
+        return { ...base, projectId: this.maybeId(e.projectId), instanceId: this.maybeId(e.instanceId) }
+      // The view whose own call caused it, so that view does not re-read what it already has (B-5)
       case 'external_app_state_changed':
+        return {
+          ...base,
+          projectId: this.maybeId(e.projectId),
+          ...(isObj(e.cause) ? { cause: { ...e.cause, instanceId: this.maybeId(e.cause.instanceId) } } : {}),
+        }
       case 'external_app_runs_changed':
       case 'fs_changed':
         return { ...base, projectId: this.maybeId(e.projectId) }

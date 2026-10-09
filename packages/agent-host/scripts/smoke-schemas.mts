@@ -178,6 +178,7 @@ const SKIP: Record<string, string> = {
   'apps.remove': 'destructive — moves a user-folder app away (covered by sessions/mcp-apps.test.ts)',
   'apps.openView': 'needs an external app with a home view in a trusted project (covered by app-home-view.test.ts with a real app)',
   'apps.closeView': 'needs an instance opened by apps.openView — covered by the same test',
+  'apps.viewDocument': 'needs an open view instance — a hub asks it of a linked machine (covered by app-home-view.test.ts with a real app, and links/router.test.ts)',
   'apps.create': 'creates an app folder and its builder session (a real agent) (covered by sessions/create-app.test.ts and app-builder.test.ts)',
   'apps.createBuilder': 'launches a builder session (a real agent) — same reason as apps.create',
   'apps.check': 'actually launches the app — needs a template app (covered by apps/external/check.test.ts)',

@@ -20,7 +20,7 @@ import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
-import { REMOTE_APP_REASON, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { isRemoteUserApp, REMOTE_APP_REASON, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { isAway } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
@@ -1038,8 +1038,11 @@ function UserAppSessions({ appId, machine }: { appId: string; machine: string | 
 function AppRow({ app }: { app: ExternalCatalogApp }) {
   const openApp = useStore((s) => s.openApp)
   const setToast = useStore((s) => s.setToast)
-  // An app on a linked machine (#82): listed, its tools work there, its view opens in a later version
-  const remote = !!app.info.machine
+  /*
+   * A user-folder app on a linked machine (#82): listed, its tools work there, its pinned view opens in a later
+   * version. A project app on a linked machine opens like this computer's, through the hub (remote-hub.md §11)
+   */
+  const remote = isRemoteUserApp(app.info)
   // Same rule as a session row: lit only while **currently looking at** that screen (useSelectedSessionId in selectors)
   const active = useStore(
     (s) => s.view === 'app' && s.focusedApp?.appId === app.appId && (s.focusedApp?.projectId ?? null) === app.projectId,
@@ -1059,9 +1062,10 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         An app row is dragged like a session row: onto the grid, any app (#288), or onto its
         project screen, a project's app (#203), where a hidden one comes back where it is dropped.
         A user-folder app carries no project type, so every project screen refuses it while it is
-        still being dragged.
+        still being dragged. Another machine's app is not dragged yet (#82): the hub keeps a grid
+        panel of an app only while it knows the app's project, which a linked machine's it does not.
       */
-      draggable={!remote}
+      draggable={!app.info.machine}
       onDragStart={(e) => {
         e.dataTransfer.setData(APP_MIME, app.key)
         if (projectId) e.dataTransfer.setData(projectItemMime(projectId), projectId)

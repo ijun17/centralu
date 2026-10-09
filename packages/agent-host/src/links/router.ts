@@ -61,6 +61,14 @@ export class NotOnRemoteError extends Error {
   }
 }
 
+export class AcrossMachinesError extends Error {
+  readonly code = 'internal'
+  readonly retryable = false
+  constructor(method: string) {
+    super(`An app view reaches only the machine it is open on; ${method} named another machine too`)
+  }
+}
+
 export class Router {
   constructor(private readonly opts: RouterOptions) {}
 
@@ -79,6 +87,8 @@ export class Router {
         return this.byKey(method, params, route.key ?? 'projectId', route)
       case 'terminal':
         return this.byKey(method, params, 'terminalId', route)
+      case 'view':
+        return this.byView(method, params, route)
       case 'noRemote': {
         if (this.owner(isObj(params) ? params[route.key] : undefined)) throw new NotOnRemoteError(method)
         return this.opts.local(method, params)
@@ -122,6 +132,30 @@ export class Router {
     if (route.params) p = route.params(p, m.q)
     const r = await this.forward(m, method, p)
     return route.result ? route.result(r, m.q) : r
+  }
+
+  /**
+   * An app view's call, which can name its machine by any of several ids (plan §11): a view of a linked machine's
+   * user-folder app has no project to say so, only its instance, and a view's message names its conversation as well.
+   * Every id it names must point at one machine. An unprefixed id names the hub, so a view of this computer sending
+   * to a remote conversation is refused just as the reverse is: the instance and the conversation live on two hosts,
+   * and neither could check the other.
+   */
+  private async byView(method: string, params: unknown, route: { keys: readonly string[]; result?: (r: unknown, q: Qualifier) => unknown }) {
+    if (!isObj(params)) return this.opts.local(method, params)
+    let target: RoutedMachine | null | undefined
+    for (const key of route.keys) {
+      const value = params[key]
+      if (typeof value !== 'string') continue
+      const m = this.owner(value)
+      if (target === undefined) target = m
+      else if (target !== m) throw new AcrossMachinesError(method)
+    }
+    if (!target) return this.opts.local(method, params)
+    const p: Obj = { ...params }
+    for (const key of route.keys) if (typeof p[key] === 'string') p[key] = target.q.strip(p[key], 'The id')
+    const r = await this.forward(target, method, p)
+    return route.result ? route.result(r, target.q) : r
   }
 
   private async byMachine(method: string, params: unknown, route: { result?: (r: unknown, q: Qualifier) => unknown }): Promise<unknown> {

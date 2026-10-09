@@ -17,9 +17,12 @@ import type { Qualifier } from './qualifier.js'
  *   terminal   The same by `terminalId`
  *   machine    The machine named by the optional `machine` parameter; the hub when absent
  *   merge      Every reachable machine, answers combined by the router (`router.ts`)
- *   noRemote   Routed like `session`/`project`, but refused for a remote one in phase 1: the
- *              answer is a path for this computer's OS (reveal in Finder) or an app view, whose
- *              addresses carry the remote host's own ports and need the hub's proxy (phase 2)
+ *   view       An app view's call, named by several ids at once (`keys`: its project, its instance,
+ *              the conversation it sends to). Goes to the machine any of them names, all of them
+ *              stripped; ids of two different machines (or of a machine and the hub) are refused,
+ *              since a view is open on one machine and reaches only what is there (plan §11)
+ *   noRemote   Routed like `session`/`project`, but refused for a remote one: the answer is a path
+ *              for this computer's OS (reveal in Finder)
  *
  * `params` turns the hub's parameters into the remote's (the routing key is always stripped);
  * `result` turns the remote's answer into the hub's terms.
@@ -36,10 +39,12 @@ export type Route =
   | { kind: 'project'; key?: string; params?: ParamsFix; result?: ResultFix }
   | { kind: 'terminal'; result?: ResultFix }
   | { kind: 'machine'; result?: ResultFix }
+  | { kind: 'view'; keys: readonly string[]; result?: ResultFix }
   | { kind: 'noRemote'; key: 'sessionId' | 'projectId' }
 
 const session = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'session', result, params })
 const project = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'project', result, params })
+const view = (keys: readonly string[], result?: ResultFix): Route => ({ kind: 'view', keys, result })
 const HUB: Route = { kind: 'hub' }
 const INTERNAL: Route = { kind: 'internal' }
 const MERGE: Route = { kind: 'merge' }
@@ -202,14 +207,19 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'apps.restoreVersion': project((r, q) => q.app(r)),
   'apps.reach': session(undefined, (p, q) => ({ ...p, projectId: q.stripMaybe(p.projectId, 'The app') })),
   'apps.inlineViews': session((r, q) => (Array.isArray(r) ? r.map((v) => q.inlineView(v)) : r)),
-  // App views on a remote machine open through the hub's proxy, in phase 2
-  'apps.viewFrame': { kind: 'noRemote', key: 'projectId' },
-  'apps.openView': { kind: 'noRemote', key: 'projectId' },
-  'apps.readResource': { kind: 'noRemote', key: 'projectId' },
-  'apps.invoke': { kind: 'noRemote', key: 'projectId' },
-  'apps.inlineReopen': { kind: 'noRemote', key: 'sessionId' },
-  'apps.viewMessage': { kind: 'noRemote', key: 'sessionId' },
-  'apps.closeView': HUB,
+  /*
+   * App views of another machine (plan §11): the instance stays open there and holds its app, and its id reaches the
+   * window qualified. The hub serves every view's address itself (`apps.viewFrame`, views/view-host.ts), asking the
+   * machine for the document (`apps.viewDocument`); what the view then calls goes to the machine it is open on.
+   */
+  'apps.viewFrame': HUB,
+  'apps.viewDocument': view(['instanceId'], (r, q) => q.viewDocument(r)),
+  'apps.openView': project((r, q) => q.openedView(r)),
+  'apps.readResource': view(['projectId', 'instanceId']),
+  'apps.invoke': view(['projectId', 'instanceId']),
+  'apps.inlineReopen': session((r, q) => q.inlineView(r)),
+  'apps.viewMessage': view(['sessionId', 'instanceId']),
+  'apps.closeView': view(['instanceId']),
   'apps.questions': HUB,
   'apps.answerQuestion': HUB,
   'apps.importPrepare': HUB,

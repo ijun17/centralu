@@ -54,15 +54,22 @@ export type AppCatalog = {
 export const UNTRUSTED_REASON = "This project isn't trusted, so its apps don't run."
 
 /**
- * An app on a linked machine (#82): listed, and its tools work for that machine's sessions, but its view needs the
- * proxy through the hub of phase 2 (docs/plans/remote-hub.md §3.4, §6). Said where the view would stand.
+ * A user-folder app on a linked machine (#82): listed, and its tools work for that machine's sessions, but its pinned
+ * view cannot open here yet: everything that opens one names an app by project and id, and a user-folder app has no
+ * project to say which machine (docs/plans/remote-hub.md §11). Its views inside that machine's conversations do open.
+ * A project app on a linked machine opens like this computer's (§11). Said where the view would stand.
  */
 export const REMOTE_APP_REASON =
-  'Apps on another machine open here in a later version of Centralu. Their tools already work for the sessions on that machine.'
+  "Another machine's own apps open here in a later version of Centralu. Their tools already work for the sessions on that machine, and their views show in those conversations."
+
+/** A user-folder app of a linked machine: listed, its pinned view not openable here yet */
+export function isRemoteUserApp(info: ExternalAppInfo): boolean {
+  return !!info.machine && info.projectId === null
+}
 
 export function appStatus(info: ExternalAppInfo): AppStatusView {
-  // Before its own status: whatever state it is in there, its view cannot open here yet
-  if (info.machine) return { label: 'Later version', reason: REMOTE_APP_REASON, runnable: false, tone: 'quiet' }
+  // Before its own status: whatever state it is in there, its pinned view cannot open here yet
+  if (isRemoteUserApp(info)) return { label: 'Later version', reason: REMOTE_APP_REASON, runnable: false, tone: 'quiet' }
   switch (info.status) {
     case 'running':
       return { label: 'Running', reason: null, runnable: true, tone: 'quiet' }

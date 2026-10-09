@@ -322,6 +322,12 @@ export function createRpcHandler(
       const { appId, projectId, instanceId, hostOrigin } = RpcMethods['apps.viewFrame'].params.parse(p)
       return requireViews().frame({ app: { appId, projectId }, instanceId, hostOrigin })
     },
+    // A hub asks this of the machine a view is open on, and serves the view in its own window (remote-hub.md §11)
+    'apps.viewDocument': async (p) => {
+      const { instanceId } = RpcMethods['apps.viewDocument'].params.parse(p)
+      const d = await requireViews().document(instanceId)
+      return { appId: d.app.appId, projectId: d.app.projectId, uri: d.uri, origin: d.origin, resource: d.resource as { contents: unknown[] } }
+    },
     'apps.openView': async (p) => {
       const { appId, projectId } = RpcMethods['apps.openView'].params.parse(p)
       return openHomeView(requireExternalApps(), requireViews(), { appId, projectId })
