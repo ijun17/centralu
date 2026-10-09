@@ -47,6 +47,7 @@ import {
   parseServeArgs,
   printConnection,
   rotateToken,
+  runAutostart,
   runDetach,
   runDetachedChild,
   runServe,
@@ -602,6 +603,7 @@ switch (cmd) {
       if (args.mode === 'connection') process.exitCode = await printConnection(opts)
       else if (args.mode === 'detach') process.exitCode = await runDetach({ ...opts, port: args.port })
       else if (args.mode === 'stop') process.exitCode = await runStop(opts)
+      else if (args.mode === 'autostart') process.exitCode = await runAutostart({ ...opts, action: args.autostart })
       else if (spec) process.exitCode = await runDetachedChild({ ...opts, spec, port: args.port })
       else process.exitCode = await runServe({ ...opts, port: args.port })
     } catch (e) {

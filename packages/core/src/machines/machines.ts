@@ -189,6 +189,7 @@ const STEP_TEXT: Record<string, string> = {
   check: 'waiting for it to answer',
   prune: 'removing old versions',
   roll_back: 'did not answer; putting the old version back',
+  autostart: 'removing its start at boot',
   remove: 'removing it',
 }
 
@@ -212,4 +213,35 @@ export function installNote(m: Pick<MachineInfo, 'install'>): string | null {
   const i = m.install
   if (!i?.current) return null
   return `Installed from this computer: Centralu ${i.current.version}${i.previous ? ` (${i.previous.version} kept to roll back to)` : ''}`
+}
+
+/** The row's start-at-boot switch: what it says, whether it is on, and what it does not do there yet */
+export type AutostartRow = { label: string; on: boolean; note: string | null }
+
+/**
+ * The start-at-boot switch of a machine's row (docs/plans/remote-hub.md §10.4, owner decision 4: per machine, off by
+ * default), from what the machine said it would use. Null where it offers nothing (macOS, a Linux without systemd, WSL
+ * without interop) or has not said (a machine that predates it, or never answered).
+ *
+ * The note says where the switch falls short of "at boot": a systemd user manager that starts only at login because
+ * enabling lingering there needs an administrator, and a Windows task, which runs at sign-in.
+ */
+export function autostartRow(m: Pick<MachineInfo, 'autostart' | 'name'>): AutostartRow | null {
+  const a = m.autostart
+  if (!a?.how) return null
+  if (a.how === 'systemd') {
+    return {
+      label: `Start Centralu when ${m.name} starts`,
+      on: a.on,
+      note:
+        a.on && a.linger === false
+          ? `Until an administrator there runs \`sudo loginctl enable-linger $USER\` for your account, it starts when you log in to ${m.name}, not at boot.`
+          : null,
+    }
+  }
+  return {
+    label: `Start Centralu when you sign in to ${m.name}`,
+    on: a.on,
+    note: a.on ? 'Windows starts it at sign-in; with automatic sign-in, that is at boot.' : null,
+  }
 }

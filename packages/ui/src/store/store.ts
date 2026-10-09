@@ -973,6 +973,8 @@ export type AppState = {
    * host's words (an update that did not take says which version runs there now)
    */
   changeMachineInstall(machineId: string, kind: 'install' | 'update' | 'rollback' | 'uninstall'): Promise<boolean>
+  /** Starts a machine's host at boot, or stops doing that (plan §10.4); false (with a toast) when it was refused */
+  setMachineAutostart(machineId: string, on: boolean): Promise<boolean>
   /** What would stop on a machine if its host stopped now, for the update prompt; null when unknown */
   machineActivity(machineId: string): Promise<HostActivity | null>
   checkMachineAgentVersions(machineId: string, force?: boolean): Promise<void>
@@ -3958,6 +3960,17 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       const what = { install: 'Install', update: 'Update', rollback: 'Rollback', uninstall: 'Uninstall' }[kind]
       set({ toast: `${what} failed: ${(e as Error).message}` })
+      return false
+    }
+  },
+
+  async setMachineAutostart(machineId, on) {
+    try {
+      const r = await get().platform!.machines.autostart(machineId, on)
+      set((s) => ({ machines: withAnswered(s.machines, r.machine) }))
+      return true
+    } catch (e) {
+      set({ toast: `Could not turn ${on ? 'on' : 'off'} starting at boot: ${(e as Error).message}` })
       return false
     }
   },

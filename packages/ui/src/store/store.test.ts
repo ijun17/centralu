@@ -3893,7 +3893,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
 describe('linked machines (#82)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, ...over,
+    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, ...over,
   })
 
   it('machine_status replaces that machine\'s row whole', async () => {
@@ -3918,6 +3918,20 @@ describe('linked machines (#82)', () => {
     }
     expect(await useStore.getState().changeMachineInstall('box', 'update')).toBe(false)
     expect(useStore.getState().toast).toBe('Update failed: Centralu 2.0.0 did not start on box (it did not answer within 30 s); it runs Centralu 1.0.0 again.')
+  })
+
+  it('start at boot: the row follows what the machine answered, and a refusal is said and changes nothing', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box({ autostart: { on: false, how: 'systemd', linger: null } })]
+    await useStore.getState().attach(mock)
+    expect(await useStore.getState().setMachineAutostart('box', true)).toBe(true)
+    expect(useStore.getState().machines['box']!.autostart).toEqual({ on: true, how: 'systemd', linger: true })
+    mock.machines.autostart = async () => {
+      throw new Error('Centralu on box could not stop starting at boot: Failed to connect to bus')
+    }
+    expect(await useStore.getState().setMachineAutostart('box', false)).toBe(false)
+    expect(useStore.getState().toast).toBe('Could not turn off starting at boot: Centralu on box could not stop starting at boot: Failed to connect to bus')
+    expect(useStore.getState().machines['box']!.autostart?.on).toBe(true)
   })
 
   it('a resync re-reads that machine\'s sessions and projects and leaves every other row as it was', async () => {

@@ -600,3 +600,62 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     expect(hub.links.list()[0]!.versions?.remote.version).toBe('0.0.1')
   })
 })
+
+describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
+  /** A machine whose `serve --autostart` keeps its state here, answering as serve.mjs does */
+  async function setup(o: { how?: 'systemd' | 'task' | null; refuse?: string } = {}) {
+    const remote = await remoteHost()
+    const how = o.how === undefined ? 'systemd' : o.how
+    let on = false
+    const runs: string[] = []
+    const exec = async (cmd: string) => {
+      const action = /serve --autostart (on|off|status)/.exec(cmd)?.[1]
+      runs.push(action ?? cmd)
+      if (o.refuse && action === 'on') return { code: 1, stderr: '', stdout: `${JSON.stringify({ v: 1, autostart: { ok: false, on, how, linger: null, message: o.refuse } })}\n` }
+      if (action === 'on' || action === 'off') on = action === 'on' && how !== null
+      return { code: 0, stderr: '', stdout: `${JSON.stringify({ v: 1, autostart: { ok: true, on, how, linger: on ? false : null } })}\n` }
+    }
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { autostart: { on, how, linger: on ? false : null } })), { exec })
+    const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel })
+    await until(() => status(hub) === 'connected')
+    return { hub, u: await ui(hub.port), runs, isOn: () => on }
+  }
+
+  it('reads it from the connection line at link start, off by default', async () => {
+    const { hub, runs } = await setup()
+    expect(hub.links.list()[0]!.autostart).toEqual({ on: false, how: 'systemd', linger: null })
+    // Nothing was asked over ssh to know it
+    expect(runs).toEqual([])
+  })
+
+  it('turns it on and off through the Centralu there, and the row follows what the machine answered', async () => {
+    const { hub, u, runs, isOn } = await setup()
+    const r = await u.call('machines.autostart', { machineId: 'm1', on: true })
+    expect(r).toMatchObject({ autostart: { on: true, how: 'systemd', linger: false }, machine: { id: 'm1', autostart: { on: true, linger: false } } })
+    expect(isOn()).toBe(true)
+    await until(() => u.events().some((e) => e.type === 'machine_status' && e.machine.autostart?.on === true))
+    // Reading asks the machine, changing nothing
+    expect((await u.call('machines.autostart', { machineId: 'm1' })).autostart).toEqual({ on: true, how: 'systemd', linger: false })
+    expect((await u.call('machines.autostart', { machineId: 'm1', on: false })).autostart).toEqual({ on: false, how: 'systemd', linger: null })
+    expect(runs).toEqual(['on', 'status', 'off'])
+    expect(hub.links.list()[0]!.autostart?.on).toBe(false)
+    // The link was never dropped for it: nothing starts or stops there
+    expect(status(hub)).toBe('connected')
+  })
+
+  it('passes on the machine’s refusal in one sentence, and keeps the row as the machine has it', async () => {
+    const { hub, u } = await setup({ how: 'task', refuse: 'Task Scheduler did not take the task: Access is denied.' })
+    await expect(u.call('machines.autostart', { machineId: 'm1', on: true })).rejects.toThrow(
+      'Centralu on box could not be set to start at boot: Task Scheduler did not take the task: Access is denied.',
+    )
+    expect(hub.links.list()[0]!.autostart).toEqual({ on: false, how: 'task', linger: null })
+    await expect(u.call('machines.autostart', { machineId: 'nope', on: true })).rejects.toThrow(/No linked machine/)
+  })
+
+  it('is refused where the hub has no shell on the machine', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port))
+    await until(() => status(hub) === 'connected')
+    await expect((await ui(hub.port)).call('machines.autostart', { machineId: 'm1', on: true })).rejects.toThrow(/no shell on Remote box/)
+  })
+})

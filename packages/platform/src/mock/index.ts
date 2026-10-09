@@ -1483,6 +1483,7 @@ export class MockPlatform implements Platform {
         hostStarted: null,
         install: null,
         operation: null,
+        autostart: { on: false, how: spec.shell === 'posix' ? 'systemd' : 'task', linger: null },
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })
@@ -1507,7 +1508,18 @@ export class MockPlatform implements Platform {
       const machine = this.machineRow(machineId, { status: 'versions_differ', install: { managed: true, current: prev, previous: null } })
       return { machine, current: prev, previous: null, removed: [], left: [] }
     },
-    uninstall: async (machineId: string) => ({ machine: this.machineRow(machineId, { status: 'not_running', install: { managed: false, current: null, previous: null } }), stopped: true }),
+    uninstall: async (machineId: string) => {
+      const was = this.machinesList.find((m) => m.id === machineId)?.autostart ?? null
+      const machine = this.machineRow(machineId, { status: 'not_running', install: { managed: false, current: null, previous: null }, autostart: was && { ...was, on: false, linger: null } })
+      return { machine, stopped: true }
+    },
+    /** A mock machine takes the change at once; a systemd one lingers, as most would after `loginctl enable-linger` */
+    autostart: async (machineId: string, on?: boolean) => {
+      const was = this.machinesList.find((m) => m.id === machineId)?.autostart
+      if (!was?.how) throw Object.assign(new Error('Starting Centralu at boot is offered on Linux and Windows'), { code: 'internal' })
+      const autostart = on === undefined ? was : { ...was, on, linger: on && was.how === 'systemd' ? true : null }
+      return { machine: this.machineRow(machineId, { autostart }), autostart }
+    },
     activity: async () => ({ working: 1, approvals: 0, questions: 0, background: 0, terminals: 1, commandRuns: 0 }),
   }
 

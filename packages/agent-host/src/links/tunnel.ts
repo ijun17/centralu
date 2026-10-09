@@ -25,7 +25,19 @@ export type ConnectionLine = {
    * and the Node that answered. Absent from a remote that predates it
    */
   install?: RemoteInstall
+  /**
+   * Whether that machine starts its host at boot, and how it would (docs/plans/remote-hub.md §10.4,
+   * owner decision 4). Absent from a remote that predates it
+   */
+  autostart?: RemoteAutostart
 }
+
+/**
+ * The `autostart` field of the connection line, as `serve.mjs`'s `autostartInfo` writes it, and the
+ * answer of `centralu serve --autostart`: `how` is what the machine uses (`systemd`, a scheduled `task`),
+ * null where it offers nothing; `linger` whether systemd starts the user's manager at boot (else at login)
+ */
+export type RemoteAutostart = { on: boolean; how: 'systemd' | 'task' | null; linger: boolean | null }
 
 /** The `install` field of the connection line, as `serve.mjs`'s `installInfo` writes it */
 export type RemoteInstall = {
@@ -99,6 +111,7 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
         throw new Error('The remote answered with an incomplete connection line')
       }
       const install = parseInstall((o as { install?: unknown }).install)
+      const autostart = parseAutostart((o as { autostart?: unknown }).autostart)
       return {
         v: 1,
         port: o.port,
@@ -108,6 +121,7 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
         dataDir: typeof o.dataDir === 'string' ? o.dataDir : '',
         hostRunning: o.hostRunning === true,
         ...(install ? { install } : {}),
+        ...(autostart ? { autostart } : {}),
       }
     }
   }
@@ -123,6 +137,15 @@ function parseInstall(raw: unknown): RemoteInstall | null {
     return p && typeof p.version === 'string' && typeof p.node === 'string' ? { version: p.version, node: p.node } : null
   }
   return { managed: o.managed === true, current: pointer(o.current), previous: pointer(o.previous), node: typeof o.node === 'string' ? o.node : null }
+}
+
+/** The `autostart` field, field by field; null when it is not one */
+export function parseAutostart(raw: unknown): RemoteAutostart | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.on !== 'boolean') return null
+  const how = o.how === 'systemd' || o.how === 'task' ? o.how : null
+  return { on: o.on && how !== null, how, linger: typeof o.linger === 'boolean' ? o.linger : null }
 }
 
 /** What `centralu serve --detach` answered (`serve.mjs`'s `runDetach`) */
@@ -264,8 +287,20 @@ export function serveCommand(spec: RemoteSpec): string {
   return remoteCommand(spec, 'serve')
 }
 
+/**
+ * `centralu serve --autostart on|off|status` there, found the same way (plan §10.4, owner decision 4):
+ * the boot entry of the Centralu the lookup finds, written, removed or read by that Centralu itself
+ * (links/autostart.ts)
+ */
+export function autostartCommand(spec: RemoteSpec, action: 'on' | 'off' | 'status'): string {
+  return remoteCommand(spec, `serve --autostart ${action}`)
+}
+
 /** `centralu <args>` on the remote, in its shell's terms, through the lookup `connectionCommand` describes */
-function remoteCommand(spec: RemoteSpec, args: 'serve --connection' | 'serve --detach' | 'serve --stop' | 'serve'): string {
+function remoteCommand(
+  spec: RemoteSpec,
+  args: 'serve --connection' | 'serve --detach' | 'serve --stop' | 'serve' | 'serve --autostart on' | 'serve --autostart off' | 'serve --autostart status',
+): string {
   const custom = spec.command?.trim() || null
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)

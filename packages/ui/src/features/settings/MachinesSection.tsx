@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { HostActivity, MachineInfo, RemoteShell } from '@cc/protocol'
-import { hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
+import { autostartRow, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 
@@ -122,6 +122,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
         </p>
       )}
       <InstalledRow m={m} />
+      <AutostartSwitch m={m} />
       {started && (
         <p className="mt-1 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
           {started}
@@ -230,8 +231,9 @@ function InstalledRow({ m }: { m: MachineInfo }) {
       {asking === 'uninstall' && (
         <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid={`machine-uninstall-confirm-${m.id}`}>
           <p className="text-xs leading-body text-ink">
-            This stops Centralu on {m.name}, and anything running there with it, and removes what this computer installed.
-            Its conversations and settings stay, and so does a Centralu installed there with npm. {m.name} stays linked.
+            This stops Centralu on {m.name}, and anything running there with it, and removes what this computer installed
+            {m.autostart?.on ? ', and its start at boot' : ''}. Its conversations and settings stay, and so does a Centralu
+            installed there with npm. {m.name} stays linked.
           </p>
           <div className="mt-2 flex items-center gap-2">
             <button
@@ -250,6 +252,42 @@ function InstalledRow({ m }: { m: MachineInfo }) {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Start at boot (plan §10.4, owner decision 4): per machine, off by default. The Centralu there writes its own entry (a
+ * systemd user unit, a Windows scheduled task at sign-in); nothing starts or stops now, so nothing is asked first. The
+ * switch shows what the machine answered: it moves when the row does, not when it is clicked.
+ */
+function AutostartSwitch({ m }: { m: MachineInfo }) {
+  const setAutostart = useStore((s) => s.setMachineAutostart)
+  const [pending, setPending] = useState(false)
+  const row = autostartRow(m)
+  if (!row) return null
+  return (
+    <div className="mt-1.5">
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
+        <input
+          type="checkbox"
+          className="accent-ink-muted"
+          checked={row.on}
+          disabled={pending || !!m.operation}
+          onChange={(e) => {
+            const on = e.target.checked
+            setPending(true)
+            void setAutostart(m.id, on).finally(() => setPending(false))
+          }}
+          data-testid={`machine-autostart-${m.id}`}
+        />
+        <span>{row.label}</span>
+      </label>
+      {row.note && (
+        <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-autostart-note-${m.id}`}>
+          {withCode(row.note)}
+        </p>
       )}
     </div>
   )

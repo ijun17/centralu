@@ -25,7 +25,7 @@ import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { InlineViews } from './inline-views.js'
-import type { GridPanel, HostActivity, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell, ToolName } from '@cc/protocol'
+import type { GridPanel, HostActivity, MachineAutostartResult, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell, ToolName } from '@cc/protocol'
 
 /**
  * The optional services a host has. Without one, that feature simply does not exist on this host
@@ -77,6 +77,7 @@ export type MachinesPort = {
   update(id: string): Promise<MachineInstallResult>
   rollback(id: string): Promise<MachineInstallResult>
   uninstall(id: string): Promise<MachineUninstallResult>
+  autostart(id: string, on?: boolean): Promise<MachineAutostartResult>
   activity(id: string): Promise<HostActivity | null>
 }
 
@@ -729,6 +730,10 @@ export function createRpcHandler(
     'machines.update': async (p) => requireMachines().update(RpcMethods['machines.update'].params.parse(p).machineId),
     'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
     'machines.uninstall': async (p) => requireMachines().uninstall(RpcMethods['machines.uninstall'].params.parse(p).machineId),
+    'machines.autostart': async (p) => {
+      const { machineId, on } = RpcMethods['machines.autostart'].params.parse(p)
+      return requireMachines().autostart(machineId, on)
+    },
     'machines.activity': async (p) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
     'host.activity': async () => {
       if (!activity) throw Object.assign(new Error('This host does not report its activity'), { code: 'internal' })

@@ -1,5 +1,6 @@
 import { HostActivity } from '@cc/protocol'
-import type { MachineInfo, MachineInstallResult, MachineOperation, MachineSide, MachineStatus, MachineUninstallResult, MachineVersions, NormalizedEvent } from '@cc/protocol'
+import type { MachineAutostartResult, MachineInfo, MachineInstallResult, MachineOperation, MachineSide, MachineStatus, MachineUninstallResult, MachineVersions, NormalizedEvent } from '@cc/protocol'
+import { autostartRemote } from './autostart.js'
 import { installRemote, type InstallResult, type RemoteRuntime } from './install.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import type { RegistryOptions } from './registry.js'
@@ -7,7 +8,7 @@ import { newMachineId, splitQualified } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import type { Endpoint, HostStart, RemoteInstall, RemoteRun, RemoteSpec, Tunnel } from './tunnel.js'
+import type { Endpoint, HostStart, RemoteAutostart, RemoteInstall, RemoteRun, RemoteSpec, Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 
 /**
@@ -89,6 +90,11 @@ function installOf(i: RemoteInstall | undefined): MachineInfo['install'] {
   return i ? { managed: i.managed, current: i.current, previous: i.previous } : null
 }
 
+/** The connection line's `autostart`, as the row shows it; null when the remote did not say */
+function autostartOf(a: RemoteAutostart | undefined): MachineInfo['autostart'] {
+  return a ? { on: a.on, how: a.how, linger: a.linger } : null
+}
+
 /** A session the hub does not show: the remote's orchestrator and its coordinators (§3.4) */
 function hiddenKind(s: unknown): boolean {
   return isObj(s) && (s.kind === 'orchestrator' || s.kind === 'coordinator')
@@ -126,6 +132,8 @@ export class LinkedMachine implements RoutedMachine {
   private helloWaiters = new Set<(version: string | null) => void>()
   /** What the hub installed there, from the last connection line (plan §10.5, S12) */
   private installed: MachineInfo['install'] = null
+  /** Whether it starts its host at boot, from the last connection line or `machines.autostart` (plan §10.4) */
+  private bootStart: MachineInfo['autostart'] = null
 
   constructor(
     private record: MachineRecord,
@@ -164,6 +172,7 @@ export class LinkedMachine implements RoutedMachine {
       hostStarted: this.hostStarted,
       install: this.installed,
       operation: this.operation,
+      autostart: this.bootStart,
     }
   }
 
@@ -272,9 +281,38 @@ export class LinkedMachine implements RoutedMachine {
     return this.operate('uninstall', null, async (c) => {
       const r = await uninstallRemote(c)
       this.installed = { managed: false, current: null, previous: null }
+      if (this.bootStart) this.bootStart = { ...this.bootStart, on: false, linger: null }
       this.deps.log?.(`[links] ${this.name}: removed the Centralu this computer installed; its data stays`)
       return { machine: this.info(), stopped: r.stopped }
     })
+  }
+
+  /**
+   * `machines.autostart` (plan §10.4, owner decision 4): the machine's host started at boot, or not, or
+   * (without `on`) whether it is. The Centralu there writes its own entry; nothing starts or stops now.
+   * Not while an install, update, rollback or uninstall runs there: the entry names a launcher that one
+   * may be removing
+   */
+  async autostart(on?: boolean): Promise<MachineAutostartResult> {
+    const exec = this.tunnel.exec?.bind(this.tunnel)
+    if (!exec) throw linkError(`This computer has no shell on ${this.name} to change how it starts`)
+    if (this.busy) throw linkError(`${this.name} is busy with ${this.operation?.kind ?? 'another change'}; wait until it is done`)
+    this.busy = true
+    try {
+      const a = await autostartRemote({ exec, spec: this.record.remote, target: this.record.sshTarget }, on === undefined ? 'status' : on ? 'on' : 'off')
+      const state = { on: a.on, how: a.how, linger: a.linger }
+      this.bootStart = state
+      if (on !== undefined) {
+        this.deps.log?.(`[links] ${this.name}: ${a.on ? `starts Centralu at boot (${a.how}${a.how === 'systemd' && a.linger === false ? ', at login until lingering is enabled' : ''})` : 'no longer starts Centralu at boot'}`)
+      }
+      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      return { machine: this.info(), autostart: state }
+    } catch (err) {
+      this.deps.log?.(`[links] ${this.name}: autostart ${on === undefined ? 'status' : on ? 'on' : 'off'} failed: ${(err as Error).message}`)
+      throw linkError((err as Error).message)
+    } finally {
+      this.busy = false
+    }
   }
 
   /**
@@ -425,6 +463,7 @@ export class LinkedMachine implements RoutedMachine {
      * a start that did not take is reported and retried with the backoff, not in a loop.
      */
     this.installed = installOf(endpoint.line.install)
+    this.bootStart = autostartOf(endpoint.line.autostart)
     if (!endpoint.line.hostRunning && this.tunnel.startHost) {
       if (this.held) return
       this.setStatus('starting', null)
@@ -448,6 +487,7 @@ export class LinkedMachine implements RoutedMachine {
       endpoint = await this.openTunnel()
       if (!endpoint) return
       this.installed = installOf(endpoint.line.install)
+      this.bootStart = autostartOf(endpoint.line.autostart)
     }
     if (this.held) return
     this.endpoint = endpoint
@@ -696,6 +736,10 @@ export class Links {
 
   uninstall(id: string): Promise<MachineUninstallResult> {
     return this.need(id).uninstall()
+  }
+
+  autostart(id: string, on?: boolean): Promise<MachineAutostartResult> {
+    return this.need(id).autostart(on)
   }
 
   activity(id: string): Promise<HostActivity | null> {

@@ -1,3 +1,4 @@
+import { removeAutostart } from './autostart.js'
 import { DATA_PS, DATA_SH, STEP, installCommand, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
 import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
@@ -13,7 +14,8 @@ import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteRun, type Re
  *                start the old version, and fail with the end of the new host's `host.log`
  *   rollback   the same stop, switch, start and check, towards `previous`; `previous` is cleared,
  *              so it is one step back only
- *   uninstall  stop, then remove `<data>/remote/`; the data (store, `serve.json`, logs) stays
+ *   uninstall  stop, then the boot entry removed (`serve --autostart off`, autostart.ts), then
+ *              `<data>/remote/` removed; the data (store, `serve.json`, logs) stays
  *
  * Nothing is switched before the running host is gone and nothing is removed before the new one
  * answered: on Windows a running `node.exe` cannot be deleted (plan §10.5), and one step back is safe
@@ -26,7 +28,7 @@ import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteRun, type Re
 /** How long the new version has to answer after it was started (plan §10.5 step 4) */
 export const CHECK_MS = 30_000
 
-export type UpdateStep = 'preflight' | 'registry' | 'node' | 'centralu' | 'stop' | 'switch' | 'start' | 'check' | 'prune' | 'roll_back' | 'remove'
+export type UpdateStep = 'preflight' | 'registry' | 'node' | 'centralu' | 'stop' | 'switch' | 'start' | 'check' | 'prune' | 'roll_back' | 'autostart' | 'remove'
 
 export type HostControl = {
   /** One command on the remote, in its shell's terms (`Tunnel.exec`) */
@@ -194,14 +196,18 @@ export function uninstallCommand(spec: RemoteSpec): string {
 }
 
 /**
- * `machines.uninstall`: the host stopped, then what the hub installed removed. Refused when the host
- * would not stop: on Windows its files cannot be removed while it runs, and half an install is worse
- * than a whole one
+ * `machines.uninstall`: the host stopped, its boot entry removed, then what the hub installed removed.
+ * Refused when the host would not stop: on Windows its files cannot be removed while it runs, and half
+ * an install is worse than a whole one. Refused too when the boot entry would not go: left behind, it
+ * would run a launcher that is no longer there at every boot. The entry goes after the stop, so a
+ * host that would not stop leaves the machine as it was, boot entry included
  */
 export async function uninstallRemote(c: HostControl): Promise<{ stopped: boolean }> {
   await c.hold()
   c.step('stop')
   const { wasRunning } = await stopRemoteHost(c)
+  c.step('autostart')
+  await removeAutostart(c)
   c.step('remove')
   readStep(await c.exec(uninstallCommand(c.spec)), 'uninstalled', c.target)
   return { stopped: wasRunning }

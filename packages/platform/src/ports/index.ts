@@ -45,6 +45,7 @@ import type {
   ThemeFileEntry,
   UpdateStatus,
   AgentVersions,
+  MachineAutostartResult,
   MachineInfo,
   MachineInstallResult,
   MachineUninstallResult,
@@ -1049,6 +1050,11 @@ export interface MachinesPort {
   update(machineId: string): Promise<MachineInstallResult>
   rollback(machineId: string): Promise<MachineInstallResult>
   uninstall(machineId: string): Promise<MachineUninstallResult>
+  /**
+   * Starts the machine's host at boot, or stops doing that, or (without `on`) reads whether it does
+   * (docs/plans/remote-hub.md §10.4). Nothing starts or stops now; the row's `autostart` follows
+   */
+  autostart(machineId: string, on?: boolean): Promise<MachineAutostartResult>
   /** What would stop there if its host stopped now; null when the machine cannot say */
   activity(machineId: string): Promise<HostActivity | null>
 }
