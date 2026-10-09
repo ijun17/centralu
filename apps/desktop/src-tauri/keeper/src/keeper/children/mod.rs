@@ -123,6 +123,10 @@ enum Cmd {
     /// Reap every child that has exited since the freeze and report it (the outgoing keeper is
     /// still their parent; the next one cannot reap them).
     Reap(mpsc::Sender<Vec<(i32, ExitStatus)>>),
+    /// Tests only: before its next `poll`, the reactor waits until a command is queued and every
+    /// child's stdout has bytes waiting, so both are ready in the same pass (#368).
+    #[cfg(test)]
+    HoldNextPoll(mpsc::Sender<()>),
 }
 
 impl Children {
@@ -185,6 +189,16 @@ impl Children {
             return Ok(None);
         }
         rx.recv_timeout(wait).map_err(|_| "the child service did not freeze in time".to_string())?.map(Some)
+    }
+
+    /// Tests only: see `Cmd::HoldNextPoll`. Returns once the reactor has taken the hold; the next
+    /// command sent is then handled in a pass that also has child output to read.
+    #[cfg(test)]
+    pub(crate) fn hold_next_poll(&self) {
+        let (tx, rx) = mpsc::channel();
+        if self.send(Cmd::HoldNextPoll(tx)) {
+            rx.recv_timeout(Duration::from_secs(15)).expect("the reactor took the hold");
+        }
     }
 
     /// Resumes a frozen reactor (the handoff was rolled back).
@@ -430,6 +444,8 @@ struct Reactor {
     sweeps: Vec<Sweep>,
     /// Frozen for a handoff: no I/O at all until thawed (step 4).
     frozen: bool,
+    #[cfg(test)]
+    hold_next_poll: bool,
 }
 
 /// The child table as one keeper hands it to the next (#280 step 4). Descriptors and buffers are
@@ -513,11 +529,14 @@ impl Reactor {
             stopping: None,
             sweeps: Vec::new(),
             frozen: false,
+            #[cfg(test)]
+            hold_next_poll: false,
         })
     }
 
-    /// Describes the whole table and stops all I/O (step 4). Called on the reactor thread, between
-    /// two passes, so no request is half handled and no buffer half updated.
+    /// Describes the whole table and stops all I/O (step 4). Called on the reactor thread, from the
+    /// command queue, so no request is half handled and no buffer half updated; `run` then ends the
+    /// pass without touching anything more (#368).
     fn freeze(&mut self) -> Result<(Value, Pack), String> {
         if self.stopping.is_some() || !self.host_stop_waiters.is_empty() {
             return Err("the child service is stopping".into());
@@ -663,6 +682,10 @@ impl Reactor {
                 self.take_commands();
                 continue;
             }
+            #[cfg(test)]
+            if std::mem::take(&mut self.hold_next_poll) {
+                self.until_command_and_output();
+            }
             let (mut fds, toks) = self.poll_set();
             let quick = self.stopping.is_some()
                 || !self.host_stop_waiters.is_empty()
@@ -692,10 +715,50 @@ impl Reactor {
                     Tok::In(n) => self.write_child(n),
                     Tok::Conn(c) => self.read_conn(c),
                 }
+                /*
+                 * A freeze taken from the queue just now ends the pass here (#368). The wake pipe
+                 * comes before the children and connections in the poll set, so without this the
+                 * rest of the pass went on after the snapshot: a child's stdout ready in the same
+                 * poll was read into a buffer the snapshot no longer covered, stranded in a keeper
+                 * about to exit (the next keeper reads the pipe from after it: lines lost), and
+                 * `pump` could send a reader or a control connection bytes the snapshot still held
+                 * as unsent (the next keeper sends them again: lines or exit events doubled).
+                 * Measured under load on macOS: 3 of 200 runs of
+                 * `output_held_for_no_reader_reaches_the_next_keepers_reader` lost one line.
+                 * What is left of the pass is level-triggered: it is still ready for the next
+                 * keeper, or for this one after a thaw.
+                 */
+                if self.frozen {
+                    break;
+                }
+            }
+            if self.frozen {
+                continue;
             }
             self.collect_exits();
             self.pump();
             self.housekeeping();
+        }
+    }
+
+    /// Tests only (`Cmd::HoldNextPoll`): waits until the wake pipe and every open child stdout are
+    /// readable, without reading any of them.
+    #[cfg(test)]
+    fn until_command_and_output(&self) {
+        let mut fds = vec![self.wake.as_raw_fd()];
+        fds.extend(self.children.values().filter_map(|c| c.out_fd.as_ref().map(|f| f.as_raw_fd())));
+        let end = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < end {
+            let ready = fds.iter().all(|&fd| {
+                let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+                // SAFETY: one valid pollfd.
+                let n = unsafe { libc::poll(&mut p, 1, 0) };
+                n == 1
+            });
+            if ready {
+                return;
+            }
+            thread::sleep(Duration::from_millis(2));
         }
     }
 
@@ -787,6 +850,11 @@ impl Reactor {
                         self.frozen = false;
                         log("thawed: the handoff was rolled back");
                     }
+                }
+                #[cfg(test)]
+                Cmd::HoldNextPoll(done) => {
+                    self.hold_next_poll = true;
+                    let _ = done.send(());
                 }
                 Cmd::Reap(reply) => {
                     let mut reaped = Vec::new();

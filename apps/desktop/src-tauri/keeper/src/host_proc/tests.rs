@@ -246,19 +246,38 @@ fn compares_versions_as_numbers_not_text() {
 }
 
 /// Sets up a script that pretends to be node and prints the given version.
+/**
+ * A stand-in `node` that prints `version`, named per test process so two `cargo test` runs on one
+ * machine never rewrite each other's while one is running it.
+ *
+ * On unix the script is written by a `sh` child, never through a descriptor of this process (#368).
+ * Tests run on threads of one process, and a thread that forks while another holds a script open
+ * for writing hands that descriptor to its child until the child execs. Linux then refuses to run
+ * the script (`ETXTBSY`, "Text file busy"). `check_node_version` passes a node it cannot run, so
+ * the test saw `Ok` where it expected the too-old error: `keeper e2e (linux)`, job 113426245878,
+ * `explains_the_old_version_when_there_is_nothing_newer`, "called `unwrap_err()` on an `Ok` value".
+ * Here the only process that ever has the file open for writing has exited before the test runs it.
+ */
 fn fake_node(version: &str, name: &str) -> String {
+    let name = format!("{name}-{}", std::process::id());
     // Windows cannot run a sh script; a batch file is what Rust's Command can start there.
     #[cfg(windows)]
-    let (path, body) = (std::env::temp_dir().join(format!("{name}.cmd")), format!("@echo {version}\r\n"));
-    #[cfg(not(windows))]
-    let (path, body) = (std::env::temp_dir().join(name), format!("#!/bin/sh\necho {version}\n"));
-    std::fs::write(&path, body).unwrap();
-    #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::temp_dir().join(format!("{name}.cmd"));
+        std::fs::write(&path, format!("@echo {version}\r\n")).unwrap();
+        path.to_string_lossy().to_string()
     }
-    path.to_string_lossy().to_string()
+    #[cfg(not(windows))]
+    {
+        let path = std::env::temp_dir().join(name).to_string_lossy().to_string();
+        let body = format!("#!/bin/sh\necho {version}\n");
+        let written = Command::new("/bin/sh")
+            .args(["-c", "rm -f \"$2\" && printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"", "sh", &body, &path])
+            .status()
+            .unwrap();
+        assert!(written.success(), "could not write {path}");
+        path
+    }
 }
 
 #[test]

@@ -150,6 +150,34 @@ fn output_held_for_no_reader_reaches_the_next_keepers_reader() {
     b.stop_all(Duration::from_millis(200));
 }
 
+/// A freeze that arrives in the same poll as a child's output (#368). The outgoing keeper must read
+/// none of it after its snapshot: with no host reading, what it read then would be lost with it.
+/// The hold makes the coincidence certain; under load it happened by itself (3 of 200 runs of the
+/// test above, each one line short).
+#[test]
+fn a_freeze_that_arrives_with_output_waiting_reads_none_of_it() {
+    let d = temp_dir("race");
+    let a = Children::start(&d.0).unwrap();
+    let (_ctl, mut out) = counting_child(&d.0, 100);
+    let mut got = Vec::new();
+    read_until(&mut out, &mut got, "line10\n");
+    out.shutdown(std::net::Shutdown::Write).unwrap();
+    out.read_to_end(&mut got).unwrap();
+
+    a.hold_next_poll();
+    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
+    let mut u = Unpack::new(pack.fds, pack.blobs);
+    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[]).unwrap();
+
+    let id = state["children"][0]["n"].as_u64().map(|n| format!("c{n}")).unwrap();
+    let mut again = connect(&d.0);
+    send(&mut again, &json!({ "op": "attach", "protocol": 1, "id": id, "stream": "out" }));
+    assert_eq!(read_line(&mut again)["ok"], true);
+    read_until(&mut again, &mut got, "line99\n");
+    exactly_once(&got, 100);
+    b.stop_all(Duration::from_millis(200));
+}
+
 /// A rolled-back handoff: the frozen reactor carries on where it stopped, nothing lost.
 #[test]
 fn a_thawed_child_table_carries_on_as_if_nothing_happened() {
