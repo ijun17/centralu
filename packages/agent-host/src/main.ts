@@ -527,6 +527,7 @@ const router = new Router({
 })
 const server: HostServer = new HostServer({
   port: Number(values.port),
+  ...(startedByServe ? { servedBy: 'serve' as const } : {}),
   token,
   allowedOrigins,
   onRpc: router.handle,

@@ -393,6 +393,17 @@ export class SshTunnel implements Tunnel {
   }
 
   /**
+   * Where Centralu runs, for a sentence: "on <target>", or "in WSL (<distro>) on <target>" (#482).
+   * A Windows laptop can be linked twice, as Windows and as a distro, and both rows used to say
+   * "on <target>" alike.
+   */
+  private get where(): string {
+    const remote = this.opts.remote
+    if (remote?.shell !== 'wsl') return `on ${this.opts.target}`
+    return `in WSL (${remote.wslDistro || 'its default distro'}) on ${this.opts.target}`
+  }
+
+  /**
    * Starts the remote's host with `centralu serve --detach` (plan §10.4, owner decision 7): it then
    * runs outside any ssh session and outlives this link. When the remote says WMI process creation
    * is blocked there (decision 3), every `open` from then on runs `centralu serve` as the forward's
@@ -405,7 +416,7 @@ export class SshTunnel implements Tunnel {
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      throw new Error(`Centralu is not installed on ${this.opts.target} (run \`npm i -g centralu\` there, then \`centralu serve\` once)`)
+      throw new Error(`Centralu is not installed ${this.where} (run \`npm i -g centralu\` there, then \`centralu serve\` once)`)
     }
     let answer: DetachAnswer
     try {
@@ -494,7 +505,7 @@ export class SshTunnel implements Tunnel {
     const r = await this.run([...base, connectionCommand(remote)])
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      throw new Error(`Centralu is not installed on ${this.opts.target} (run \`npm i -g centralu\` there, then \`centralu serve\` once)`)
+      throw new Error(`Centralu is not installed ${this.where} (run \`npm i -g centralu\` there, then \`centralu serve\` once)`)
     }
     try {
       return parseConnectionLine(r.stdout)

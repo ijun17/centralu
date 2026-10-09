@@ -486,6 +486,25 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     },
     90_000,
   )
+  it.skipIf(!POSIX)(
+    'gives serve\'s advice, not a developer\'s, when the port given with --port is taken (#482)',
+    async () => {
+      const d = tempDir()
+      const blocker = createServer((socket) => socket.destroy())
+      await new Promise<void>((r) => blocker.listen({ host: '127.0.0.1', port: 0 }, r))
+      const port = (blocker.address() as { port: number }).port
+      try {
+        const s = serve(d, ['--port', String(port)])
+        expect(await s.exited).not.toBe(0)
+        expect(s.out.stderr).toContain(`Port ${port} is already in use.`)
+        expect(s.out.stderr).toContain('centralu serve --port <n>')
+        expect(s.out.stderr).not.toContain('pnpm host')
+      } finally {
+        await new Promise((r) => blocker.close(r))
+      }
+    },
+    90_000,
+  )
 })
 
 describe('--detach and --stop arguments', () => {

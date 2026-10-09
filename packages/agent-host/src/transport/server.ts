@@ -53,6 +53,8 @@ export function parseAllowedOrigins(raw: string | undefined): string[] | undefin
 
 export type HostServerOptions = {
   port: number
+  /** Started by `centralu serve`: a taken port gets serve's advice, not a developer's (#482) */
+  servedBy?: 'serve'
   token: string
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
@@ -238,12 +240,7 @@ export class HostServer {
         this.listenError = null
         if (err.code === 'EADDRINUSE') {
           reject(
-            new Error(
-              `Port ${this.opts.port} is already in use.\n` +
-                `  · If a host is already running, just use it (start only the UI)\n` +
-                `  · To clean up a leftover process: lsof -ti:${this.opts.port} | xargs kill\n` +
-                `  · To use another port: pnpm host --port ${this.opts.port + 1}`,
-            ),
+            new Error(portInUseMessage(this.opts.port, this.opts.servedBy)),
           )
           return
         }
@@ -534,4 +531,25 @@ export function versionMismatchMessage(server: number, client: number, hostVersi
 function errorCode(raw: unknown): ProtocolError['code'] {
   const known = ProtocolErrorCode.safeParse(raw)
   return known.success ? known.data : 'internal'
+}
+
+/**
+ * What to do about a taken port. Under `centralu serve` (#482) the developer's advice (`lsof`, `pnpm
+ * host`) means nothing, and on a Windows laptop the holder is often WSL2's relay for a host inside
+ * a distro: say so, and how to pick another port
+ */
+export function portInUseMessage(port: number, servedBy?: 'serve'): string {
+  if (servedBy === 'serve') {
+    return (
+      `Port ${port} is already in use.\n` +
+      `  · Another program listens on 127.0.0.1:${port}; on Windows this is often WSL (wslrelay.exe) relaying a Centralu inside a distro\n` +
+      `  · To use another port: centralu serve --port <n> (it is kept for the next start)`
+    )
+  }
+  return (
+    `Port ${port} is already in use.\n` +
+    `  · If a host is already running, just use it (start only the UI)\n` +
+    `  · To clean up a leftover process: lsof -ti:${port} | xargs kill\n` +
+    `  · To use another port: pnpm host --port ${port + 1}`
+  )
 }

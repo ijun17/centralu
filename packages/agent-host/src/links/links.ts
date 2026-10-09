@@ -334,8 +334,9 @@ export class LinkedMachine implements RoutedMachine {
       this.operation = { kind, step: s, target, at }
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     }
+    let result: T
     try {
-      return await fn(this.control(tunnelExec, installer.script(), step), installer)
+      result = await fn(this.control(tunnelExec, installer.script(), step), installer)
     } catch (err) {
       this.deps.log?.(`[links] ${this.name}: ${kind} failed: ${(err as Error).message}`)
       throw linkError((err as Error).message)
@@ -347,6 +348,8 @@ export class LinkedMachine implements RoutedMachine {
       if (!this.stopped && (wasHeld || this.status !== 'connected')) this.reconnect()
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     }
+    // The row as it is now, not as it was mid-operation: it said `updating` after an uninstall (#482)
+    return result && typeof result === 'object' && 'machine' in result ? { ...result, machine: this.info() } : result
   }
 
   /** What update.ts runs things there with */

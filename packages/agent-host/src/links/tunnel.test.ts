@@ -193,7 +193,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     await expect(tunnel({ FAKE_SSH_HAS: '' }).open()).rejects.toThrow(/not installed on box/)
     // PowerShell turns the 127 into 1 (measured); the word on stdout still says it
     await expect(tunnel({ FAKE_SSH_HAS: '' }, { shell: 'powershell' }).open()).rejects.toThrow(/not installed on box/)
-    await expect(tunnel({ FAKE_SSH_HAS: '' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()).rejects.toThrow(/not installed on box/)
+    await expect(tunnel({ FAKE_SSH_HAS: '' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()).rejects.toThrow('not installed in WSL (Ubuntu-24.04) on box')
     await expect(tunnel({ FAKE_SSH_UNREACHABLE: '1' }).open()).rejects.toThrow(/ssh could not reach box: .*timed out/)
   })
 
