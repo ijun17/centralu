@@ -25,6 +25,15 @@ describe('matching "always allow" rules', () => {
     expect(matchesRule('npm install', 'npm test*')).toBe(false)
   })
 
+  it('* spans line breaks, as the host prefix match does — a heredoc commit matches git commit*', () => {
+    const heredoc = "git commit -m \"$(cat <<'EOF'\nfix: a thing\n\nbody\nEOF\n)\""
+    expect(matchesRule(heredoc, 'git commit*')).toBe(true)
+    expect(matchesRule('git commit -m "one\ntwo"', 'git commit*')).toBe(true)
+    expect(previewMatches('git commit*', [heredoc])).toEqual([heredoc])
+    // Still anchored: a line break does not let the prefix match somewhere in the middle
+    expect(matchesRule('echo hi\ngit commit -m x', 'git commit*')).toBe(false)
+  })
+
   it('regex metacharacters are escaped (so a rule does not apply where it should not)', () => {
     expect(matchesRule('rm -rf /', 'rm -rf .')).toBe(false)
     expect(matchesRule('a.b', 'a.b')).toBe(true)

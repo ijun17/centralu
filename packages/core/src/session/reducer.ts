@@ -169,7 +169,14 @@ const truncate = (s: string) => (s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX
  * `now` is taken as an argument because recording when a wait started has to be testable.
  */
 export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: number): SessionSummary {
-  const { state, illegal } = transition(s.state, event)
+  /*
+   * Answering one card while another is still open (an approval and a question, or two questions) leaves the agent
+   * blocked on the other: the session stays waiting_approval and keeps that card. Taken as a transition to working,
+   * the recovery rule below cleared every card, so an unanswered question vanished when an approval next to it was
+   * answered, and the agent sat waiting on a question nobody could see. The host does the same (manager.ts
+   * `respondApproval`: working again only when no card is left).
+   */
+  const { state, illegal } = otherCardOpen(s, event) ? { state: s.state, illegal: false } : transition(s.state, event)
   const stateChanged = state !== s.state
 
   // Record when the wait began (what the inbox order and the elapsed time are based on)
@@ -302,6 +309,18 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     default:
       return next
   }
+}
+
+/** Whether a resolve leaves some other approval or question card of a waiting session still open */
+function otherCardOpen(s: SessionSummary, event: NormalizedEvent): boolean {
+  if (s.state !== 'waiting_approval') return false
+  if (event.type === 'approval_resolved') {
+    return (s.pendingApproval !== null && s.pendingApproval.requestId !== event.requestId) || s.pendingQuestions.length > 0
+  }
+  if (event.type === 'question_resolved') {
+    return s.pendingApproval !== null || s.pendingQuestions.some((q) => q.requestId !== event.requestId)
+  }
+  return false
 }
 
 /** Advances seq when a message is stored (what read/unread is based on) */

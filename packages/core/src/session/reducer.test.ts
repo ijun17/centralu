@@ -107,6 +107,76 @@ describe('an interrupt while waiting for approval (no dead-end states)', () => {
   })
 })
 
+const Q = [{ question: 'Which one?', header: '', options: [], multiSelect: false }]
+
+describe('answering one card while another is still open (the agent is still blocked on the other)', () => {
+  const both = () => applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'question_request', requestId: 'q1', questions: Q }), NOW)
+
+  it('resolving the approval keeps the unanswered question card, and the session stays waiting', () => {
+    const s = applyEvent(both(), ev({ type: 'approval_resolved', requestId: 'r1', decision: 'allow' }), NOW + 1)
+    expect(s.pendingQuestions.map((q) => q.requestId)).toEqual(['q1'])
+    expect(s.pendingApproval).toBeNull()
+    expect(s.state).toBe('waiting_approval')
+    expect(s.waitingSince).toBe(NOW)
+  })
+
+  it('answering the question keeps the approval card', () => {
+    const s = applyEvent(both(), ev({ type: 'question_resolved', requestId: 'q1' }), NOW + 1)
+    expect(s.pendingApproval?.requestId).toBe('r1')
+    expect(s.pendingQuestions).toEqual([])
+    expect(s.state).toBe('waiting_approval')
+  })
+
+  it('answering one of two questions keeps the other', () => {
+    const two = applyEvent(
+      applyEvent(s0(), ev({ type: 'question_request', requestId: 'q1', questions: Q }), NOW),
+      ev({ type: 'question_request', requestId: 'q2', questions: Q }),
+      NOW,
+    )
+    const s = applyEvent(two, ev({ type: 'question_resolved', requestId: 'q1' }), NOW + 1)
+    expect(s.pendingQuestions.map((q) => q.requestId)).toEqual(['q2'])
+    expect(s.state).toBe('waiting_approval')
+  })
+
+  it('once the last card is answered, the session is working again', () => {
+    let s = applyEvent(both(), ev({ type: 'approval_resolved', requestId: 'r1', decision: 'allow' }), NOW + 1)
+    s = applyEvent(s, ev({ type: 'question_resolved', requestId: 'q1' }), NOW + 2)
+    expect(s.state).toBe('working')
+    expect(s.pendingApproval).toBeNull()
+    expect(s.pendingQuestions).toEqual([])
+    expect(s.waitingSince).toBeNull()
+  })
+})
+
+/*
+ * The host releases requests late: disposing a handle (a swap, a crash) resolves every request still in its map, and
+ * the manager lets those through even from a set-aside handle. After the turn has ended such a resolve is not news.
+ */
+describe('a resolve arriving after the turn ended does not restart the session', () => {
+  it('in waiting_input it stays waiting_input', () => {
+    const s = applyEvent(replay(TURN), ev({ type: 'approval_resolved', requestId: 'r1', decision: 'deny' }), NOW + 1)
+    expect(s.state).toBe('waiting_input')
+    expect(s.waitingSince).toBe(NOW)
+    const q = applyEvent(replay(TURN), ev({ type: 'question_resolved', requestId: 'q1' }), NOW + 1)
+    expect(q.state).toBe('waiting_input')
+  })
+
+  it('in error it stays error, and the error banner stays up', () => {
+    const failed = applyEvent(
+      replay(TURN.slice(0, 3)),
+      ev({ type: 'error', error: { code: 'adapter_crashed', message: 'gone', retryable: true } }),
+      NOW,
+    )
+    const s = applyEvent(failed, ev({ type: 'approval_resolved', requestId: 'r1', decision: 'deny' }), NOW + 1)
+    expect(s.state).toBe('error')
+    expect(s.lastError?.code).toBe('adapter_crashed')
+  })
+
+  it('in idle it stays idle', () => {
+    expect(applyEvent(s0(), ev({ type: 'question_resolved', requestId: 'q1' }), NOW).state).toBe('idle')
+  })
+})
+
 /*
  * A card lives only while it can be answered — error is not the only way a requestId dies.
  * A resume (back to idle) and working resuming finish that request off too, so the cards are cleared with it.

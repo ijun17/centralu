@@ -68,7 +68,15 @@ export function copyDiffers(pkgVersion, copyVersion) {
   return typeof copyVersion === 'string' && copyVersion !== '' && copyVersion !== pkgVersion
 }
 
-function split(v) {
+/*
+ * Build metadata (`+sha`) is dropped first: semver ignores it for precedence, and left in, it turned `3+build5`
+ * into NaN (and the `-` in `+build-5` into a prerelease). A leading `v` (`v1.2.3`, as a tag is written) is dropped
+ * too, or the first slot is NaN. Either NaN ends the comparison as "not newer", the #42 failure again.
+ */
+function split(raw) {
+  let v = raw.trim().replace(/^v/i, '')
+  const plus = v.indexOf('+')
+  if (plus !== -1) v = v.slice(0, plus)
   const dash = v.indexOf('-')
   const core = (dash === -1 ? v : v.slice(0, dash)).split('.').map(Number)
   const pre = dash === -1 ? null : v.slice(dash + 1)

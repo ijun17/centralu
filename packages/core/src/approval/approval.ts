@@ -37,9 +37,14 @@ export type ApprovalRule = {
   matcher: string
 }
 
+/*
+ * `*` is `[\s\S]*`, not `.*`: `.` stops at a line break, so `git commit*` never matched a commit whose message
+ * comes in a heredoc or a multi-line `-m`, while the host's matcher (`AlwaysAllowRules.allows`, a prefix test)
+ * auto-allows exactly those. A preview built on `.*` would leave out commands the rule really lets through.
+ */
 export function matchesRule(command: string, matcher: string): boolean {
   if (!matcher.includes('*')) return command === matcher
-  const escaped = matcher.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  const escaped = matcher.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')
   return new RegExp(`^${escaped}$`).test(command)
 }
 

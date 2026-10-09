@@ -87,6 +87,17 @@ export function transition(from: SessionState, event: NormalizedEvent): Transiti
    * as state_change.
    */
   if (event.type === 'approval_request' || event.type === 'question_request') return { state: to, illegal: false }
+  /*
+   * A resolve only means "back to work" for a session that was blocked on a card. The host sends resolves late:
+   * a handle being disposed (a swap, a crash) releases every request still in its map, and the manager passes
+   * those through even from a set-aside handle so the card comes down; a request the CLI itself cancelled stays
+   * in that map until then. Arriving after the turn ended (waiting_input), an error or a return to idle, it used
+   * to flip the session to working with nothing left to ever end it, and in error it also cleared the banner.
+   * Outside waiting_approval it is not a state change, and not illegal either: the reducer still removes the card.
+   */
+  if ((event.type === 'approval_resolved' || event.type === 'question_resolved') && from !== 'waiting_approval') {
+    return { state: from, illegal: false }
+  }
   if (!canTransition(from, to)) return { state: from, illegal: true }
   return { state: to, illegal: false }
 }
