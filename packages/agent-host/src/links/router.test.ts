@@ -225,6 +225,30 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(r.map((p) => p.id)).toEqual(['h1', 'h2', 'm1.b', 'm1.a'])
     })
 
+    it('saves the project order on the machines that can take it while another is away, and gives the away one’s projects back as they were, marked', async () => {
+      const { local, localAnswers, m1, m2 } = rig()
+      localAnswers['projects.reorder'] = [{ id: 'h1' }]
+      m1.reachable = false
+      m1.mirror.projects = [{ id: 'a', path: '/srv/a', name: 'a' }, { id: 'b', path: '/srv/b', name: 'b' }]
+      m2.answers['projects.reorder'] = [{ id: 'd' }, { id: 'c' }]
+      // One that drops mid-call counts as away too
+      const m3 = new FakeMachine('m3', 3)
+      m3.answers['projects.reorder'] = new Error('dropped')
+      m3.mirror.projects = [{ id: 'e', path: '/srv/e', name: 'e' }]
+      const routed = new Router({ local: async (method, params) => (local.push({ method, params }), localAnswers[method]), machines: () => [m1, m2, m3] })
+      const r = (await routed.handle('projects.reorder', { orderedIds: ['m1.b', 'm2.d', 'h1', 'm1.a', 'm2.c', 'm3.e'] })) as { id: string; unreachable?: boolean }[]
+      expect(local.at(-1)!.params).toEqual({ orderedIds: ['h1'] })
+      expect(m2.calls).toEqual([{ method: 'projects.reorder', params: { orderedIds: ['d', 'c'] } }])
+      expect(r.map((p) => [p.id, p.unreachable === true])).toEqual([
+        ['h1', false],
+        ['m1.a', true],
+        ['m1.b', true],
+        ['m2.d', false],
+        ['m2.c', false],
+        ['m3.e', true],
+      ])
+    })
+
     it('adds up the trash, and leaves out a machine that fails', async () => {
       const { router, localAnswers, m1, m2 } = rig()
       localAnswers['trash.list'] = { sessions: [{ id: 'h1', project: null }], bytes: 10 }

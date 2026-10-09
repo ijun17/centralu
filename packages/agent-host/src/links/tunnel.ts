@@ -354,6 +354,12 @@ export class SshTunnel implements Tunnel {
   private readonly asking = new Set<ChildProcess>()
   private downListeners: ((reason: string) => void)[] = []
   private closing = false
+  /**
+   * Forwards this tunnel ended on purpose (a reopen, a forward that did not come up in time): their
+   * exit is not the link going down. Reported as down, a reopen of a live link made the link retry,
+   * and that retry's reopen ended the new forward again, every few seconds without end
+   */
+  private readonly ended = new WeakSet<ChildProcess>()
   /** The remote cannot start a host outside a session (WMI blocked): the forward runs it (`startHost`) */
   private linkBound = false
 
@@ -362,8 +368,10 @@ export class SshTunnel implements Tunnel {
   }
 
   async open(): Promise<Endpoint> {
-    await this.stopChild()
+    // Before the wait, not after it: a `close()` while the old forward ends has to stay closed
     this.closing = false
+    await this.stopChild()
+    this.ifClosed()
     const line = await this.connectionLine().catch((err: unknown) => {
       this.ifClosed()
       throw err
@@ -490,7 +498,11 @@ export class SshTunnel implements Tunnel {
       let stderr = ''
       child.stdout!.on('data', (d: Buffer) => (stdout += String(d)))
       child.stderr!.on('data', (d: Buffer) => (stderr += String(d)))
-      child.once('error', reject)
+      // An ssh that could not start (ENOENT) emits no 'exit', only 'error' and 'close'
+      child.once('error', (e) => {
+        this.asking.delete(child)
+        reject(e)
+      })
       child.once('close', (code) => resolve({ code, stdout, stderr }))
     })
   }
@@ -553,7 +565,7 @@ export class SshTunnel implements Tunnel {
       child.once('exit', (code, signal) => {
         if (this.child === child) this.child = null
         if (!settled) return fail(`The ssh forward to ${this.opts.target} ended (${signal ?? code}): ${lastLine(stderr) || 'no reason given'}`)
-        if (!this.closing) for (const l of this.downListeners) l(`ssh exited (${signal ?? code})${stderr ? `: ${lastLine(stderr)}` : ''}`)
+        if (!this.closing && !this.ended.has(child)) for (const l of this.downListeners) l(`ssh exited (${signal ?? code})${stderr ? `: ${lastLine(stderr)}` : ''}`)
       })
       const poll = async () => {
         while (!settled) {
@@ -563,6 +575,7 @@ export class SshTunnel implements Tunnel {
             return resolve()
           }
           if (Date.now() > deadline) {
+            this.ended.add(child)
             child.kill('SIGTERM')
             return fail(`The ssh forward to ${this.opts.target} did not come up in time`)
           }
@@ -577,6 +590,7 @@ export class SshTunnel implements Tunnel {
     const child = this.child
     this.child = null
     if (!child || child.exitCode !== null || child.signalCode !== null) return
+    this.ended.add(child)
     await new Promise<void>((resolve) => {
       child.once('exit', () => resolve())
       child.kill('SIGTERM')
