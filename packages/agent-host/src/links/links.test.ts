@@ -572,6 +572,9 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     expect(hub.links.list()[0]!.install).toBeNull()
     const r = await u.call('machines.update', { machineId: 'm1' })
     expect(r).toMatchObject({ current: { version: APP_VERSION }, previous: { version: '0.0.1' }, machine: { install: { managed: true, current: { version: APP_VERSION } } } })
+    // The row as it is after the operation, not mid-way: it said `updating` with the last step (#482)
+    expect(r.machine.status).not.toBe('updating')
+    expect(r.machine.operation).toBeNull()
     // Nothing opened the link between stopping the old host and starting the new one, though Reconnect was pressed
     const between = runs.slice(runs.indexOf('stop'), runs.indexOf('start'))
     expect(between).toEqual(['stop', 'pointers'])
