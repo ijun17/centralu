@@ -2294,6 +2294,8 @@ export class SessionManager {
     if (m.projectId) project = this.store.listProjects().find((p) => p.id === m.projectId)
     this.running.delete(sessionId)
     this.restartAfterTurn.delete(sessionId)
+    // A deleted session's branch is never asked about again (#392: one entry per worktree session ever made)
+    this.prCheckedAt.delete(sessionId)
     this.meta.delete(sessionId)
     await this.store.trashSession(sessionId, {
       projectId: m.projectId,
@@ -5839,7 +5841,8 @@ export class SessionManager {
        */
       if (!merged && this.ghAvailable) {
         const now = Date.now()
-        if (now - (this.prCheckedAt.get(m.id) ?? 0) >= this.prPollMs) {
+        // Not for a session deleted during the git check above: its entry would outlive it (#392)
+        if (this.meta.get(m.id) === m && now - (this.prCheckedAt.get(m.id) ?? 0) >= this.prPollMs) {
           this.prCheckedAt.set(m.id, now)
           const pr = await this.prLookup(cwd, m.worktree.branch).catch(() => null)
           if (pr === 'unavailable') {
@@ -5867,6 +5870,8 @@ export class SessionManager {
        * the same session (a wake) writing and saving onto the stale one.
        */
       if (!merged || this.meta.get(m.id) !== m) continue
+      // A merged branch is never asked about again (the sweep skips it), so its TTL entry has no reader
+      this.prCheckedAt.delete(m.id)
       m.worktreeMerged = true
       this.emit({ type: 'worktree_merged', sessionId: m.id })
       console.error(`[worktree] branch merged into trunk: ${m.worktree.branch} (${m.id.slice(0, 8)})`)
