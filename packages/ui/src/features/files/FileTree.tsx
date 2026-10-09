@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { isPlainEscape } from '../../app/keys.js'
 import type { DragEvent as ReactDragEvent } from 'react'
 import type { FsEntry } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -508,7 +509,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
       if (!rootRef.current?.contains(e.target as Node)) close()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       // Only the innermost open thing closes — the inbox or a modal must not close along with it
       e.stopPropagation()
       close()

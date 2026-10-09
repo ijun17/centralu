@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
-import { composingKey, isComposerSendKey } from '../session/composerKeys.js'
+import { composingKey } from '../../app/keys.js'
+import { isComposerSendKey } from '../session/composerKeys.js'
 
 /**
  * The orchestrator screen — **control by talking**.
@@ -272,7 +273,7 @@ function OrchestratorEmpty() {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             // The same rule as the session composer (#180) — for someone who turned on ⌘Enter to send, plain Enter is a newline, and Enter mid-composition never sends
-            const composing = composingKey({ key: e.key, isComposing: e.nativeEvent.isComposing })
+            const composing = composingKey(e.nativeEvent)
             const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
             if (isComposerSendKey(key, sendWithModifierEnter)) {
               e.preventDefault()

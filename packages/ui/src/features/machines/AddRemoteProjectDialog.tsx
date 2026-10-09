@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
+import { isPlainEscape } from '../../app/keys.js'
 
 /**
  * Adds a folder on a linked machine as a project (#82). The folder picker is this computer's, and cannot see another
@@ -44,7 +45,7 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
           onChange={(e) => setPath(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation()
-            if (e.key === 'Escape') onClose()
+            if (isPlainEscape(e.nativeEvent)) onClose()
           }}
           placeholder="/home/me/project"
           spellCheck={false}

@@ -6,6 +6,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
+import { composingKey } from '../../app/keys.js'
 
 type Item =
   | { kind: 'session'; id: string; label: string; sub: string }
@@ -161,6 +162,13 @@ export function CommandPalette() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
+      /*
+       * While a word is being composed (Korean, Japanese, Chinese), these keys are the input
+       * method's: Enter finishes the syllable, the arrows walk its candidates, Esc cancels it
+       * (#181). Taking that Enter ran the highlighted command the moment the person finished
+       * typing "설정", and closed the palette under the input method.
+       */
+      if (composingKey(e)) return
       if (e.key === 'ArrowDown') setCursor((c) => Math.min(c + 1, items.length - 1))
       else if (e.key === 'ArrowUp') setCursor((c) => Math.max(c - 1, 0))
       else if (e.key === 'Enter') {

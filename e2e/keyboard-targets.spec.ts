@@ -122,3 +122,95 @@ test('even with the overlay open, Esc in the terminal beside it goes to the term
   await expect(page.getByTestId('settings')).toHaveCount(0)
   await expect(page.getByTestId('overlay')).toBeVisible()
 })
+
+/**
+ * A keydown an input method sends, in the two shapes engines give it (#181):
+ *  - `composing`: Chromium's, with `isComposing` set while the syllable is still open;
+ *  - `webkit`: Safari's and the desktop app's WKWebView, dispatched after `compositionend`, so
+ *    `isComposing` is already false and only `keyCode` 229 marks it as the input method's.
+ * `keyCode` cannot be set through the constructor in every engine, so it is defined on the event.
+ */
+async function imeKey(page: Page, testId: string, key: string, shape: 'composing' | 'webkit') {
+  await page.getByTestId(testId).evaluate(
+    (el, { key, shape }) => {
+      const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: shape === 'composing' })
+      Object.defineProperty(e, 'keyCode', { value: 229 })
+      el.dispatchEvent(e)
+    },
+    { key, shape },
+  )
+  // Whatever the key would wrongly do (close, run, save) is done within the same task; a frame is plenty
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => setTimeout(done))))
+}
+
+const shapes = ['composing', 'webkit'] as const
+
+test('the Enter, arrows and Esc an input method uses in the command palette neither run nor close it (#181)', async ({ page }) => {
+  await freshSession(page)
+  await page.evaluate(() => (window as any).__store.getState().togglePalette())
+  await page.getByTestId('palette-input').fill('settings')
+  await expect(page.getByTestId('palette-item-action')).toBeVisible()
+
+  for (const shape of shapes) {
+    await imeKey(page, 'palette-input', 'ArrowDown', shape)
+    await imeKey(page, 'palette-input', 'Enter', shape)
+    await imeKey(page, 'palette-input', 'Escape', shape)
+    await expect(page.getByTestId('command-palette')).toBeVisible()
+    await expect(page.getByTestId('settings')).toHaveCount(0)
+  }
+
+  // The person's own Enter still runs the highlighted command
+  await page.getByTestId('palette-input').press('Enter')
+  await expect(page.getByTestId('settings')).toBeVisible()
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+})
+
+test('the Enter and Esc an input method uses while renaming a session neither save nor revert the name (#181)', async ({ page }) => {
+  const id = await freshSession(page)
+  await page.getByTestId(`session-row-${id}`).dblclick()
+  const input = `session-name-input-${id}`
+  await page.getByTestId(input).fill('새 이')
+
+  for (const shape of shapes) {
+    await imeKey(page, input, 'Enter', shape)
+    await imeKey(page, input, 'Escape', shape)
+    await expect(page.getByTestId(input)).toBeVisible()
+  }
+
+  await page.getByTestId(input).fill('새 이름')
+  await page.getByTestId(input).press('Enter')
+  await expect(page.getByTestId(input)).toHaveCount(0)
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('새 이름')
+})
+
+test('the Esc that cancels a composition in a dialog, the file viewer or settings does not close them (#181)', async ({ page }) => {
+  await freshSession(page)
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').click()
+  await page.getByTestId('worktree-branch-input').fill('기능')
+  for (const shape of shapes) {
+    await imeKey(page, 'worktree-branch-input', 'Escape', shape)
+    await expect(page.getByTestId('new-session-dialog')).toBeVisible()
+  }
+  await page.getByTestId('worktree-branch-input').press('Escape')
+  await expect(page.getByTestId('new-session-dialog')).toHaveCount(0)
+
+  await page.evaluate(() => (window as any).__store.getState().openFile('README.md'))
+  await page.getByTestId('viewer-search').fill('검색')
+  for (const shape of shapes) {
+    await imeKey(page, 'viewer-search', 'Escape', shape)
+    await expect(page.getByTestId('overlay')).toBeVisible()
+  }
+  await page.getByTestId('viewer-search').press('Escape')
+  await expect(page.getByTestId('overlay')).toHaveCount(0)
+
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  await expect(page.getByTestId('settings')).toBeVisible()
+  for (const shape of shapes) {
+    await imeKey(page, 'settings', 'Escape', shape)
+    await expect(page.getByTestId('settings')).toBeVisible()
+  }
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings')).toHaveCount(0)
+})

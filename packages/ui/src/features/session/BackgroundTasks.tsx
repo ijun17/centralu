@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { isPlainEscape } from '../../app/keys.js'
 import { createPortal } from 'react-dom'
 import { backgroundCount } from '@cc/core'
 import type { BackgroundTask } from '@cc/protocol'
@@ -65,7 +66,7 @@ export function BackgroundTasksBadge({
       if (!buttonRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       e.stopPropagation()
       setOpen(false)
     }

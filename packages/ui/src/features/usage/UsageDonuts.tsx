@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { isPlainEscape } from '../../app/keys.js'
 import type { ToolName, UsageSnapshot } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
@@ -104,7 +105,7 @@ export function UsageDonuts() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       e.stopPropagation()
       show(null)
     }

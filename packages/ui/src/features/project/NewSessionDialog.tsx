@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ExternalSession, GitBranch, ToolName, ToolStatus } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { isTextEntry } from '../../app/keys.js'
+import { isPlainEscape, isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 import { MachineTag } from '../machines/MachineTag.jsx'
@@ -280,7 +280,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
       <form
         className="flex max-h-[calc(82vh/var(--text-zoom))] w-[480px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
         onKeyDown={(e) => {
-          if (e.key === 'Escape') return onClose()
+          // Not the Esc that cancels a composition in the Branch or Setup field (#181)
+          if (isPlainEscape(e.nativeEvent)) return onClose()
           /*
            * The list is this dialog's body, so the arrow keys pick within it — resuming has to be
            * completable without a mouse, as ⌘N → ↓↓ → ↵. An already-open conversation is skipped

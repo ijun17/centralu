@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { isPlainEscape } from '../../app/keys.js'
 import type { GitCommit, GitFileStatus } from '@cc/protocol'
 import { laneCount, layoutCommits } from '@cc/core'
 import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
@@ -474,7 +475,7 @@ function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPi
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       e.stopPropagation()
       setOpen(false)
     }

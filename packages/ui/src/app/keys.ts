@@ -1,4 +1,46 @@
 /**
+ * The three fields of a key event that say whether an input method took it. A DOM
+ * `KeyboardEvent` has all three, so a window listener passes the event itself and a React handler
+ * passes `e.nativeEvent`.
+ */
+export type ImeKey = { key: string; isComposing: boolean; keyCode: number }
+
+/**
+ * Does this key belong to an IME composition (#181)? Engines signal it three ways, and each one
+ * alone misses a case:
+ *
+ *  - `isComposing`: the standard flag, set when the key arrives inside the composition.
+ *  - `key: 'Process'`: Chromium on Windows names the key after the input method instead.
+ *  - `keyCode: 229`: WebKit (Safari, and the desktop app's WKWebView) can end the composition
+ *    **before** it dispatches the Enter that ended it. That keydown arrives with `isComposing`
+ *    already false and `key: 'Enter'`; only its `keyCode`, 229 ("the input method processed this
+ *    key"), says it was the input method's. An Enter the person presses afterwards arrives as 13.
+ *
+ * Reading the Enter that ends a composition as a submit either saves the text with the last
+ * syllable missing or leaves the syllable being composed sitting in the field. Escape and the
+ * arrows during a composition belong to the input method too (cancel it, walk its candidates).
+ * Every handler that acts on Enter, Escape or the arrows where text can be typed goes through this
+ * check: for a while only the session composer knew it, and the command palette, the session
+ * rename field and every Esc-to-close layer each had their own (missing) rule.
+ */
+export function composingKey(e: ImeKey): boolean {
+  return e.isComposing || e.key === 'Process' || e.keyCode === 229
+}
+
+/**
+ * Is this a plain Enter, not part of a composition (#181) — "save what was typed" for a
+ * single-line field
+ */
+export function isPlainEnter(e: ImeKey): boolean {
+  return e.key === 'Enter' && !composingKey(e)
+}
+
+/** Is this an Esc the person meant for the app, not the one that cancels a composition (#181) */
+export function isPlainEscape(e: ImeKey): boolean {
+  return e.key === 'Escape' && !composingKey(e)
+}
+
+/**
  * The Latin letter a key press points to. null if there is none.
  *
  * Letter shortcuts (y/n/a, j/k/d) used to look only at `e.key`. That value is the character the
@@ -58,8 +100,8 @@ export function isTextEntry(target: EventTarget | null): boolean {
  *    become quit (the button presses itself).
  *  - Any other Enter confirms, Esc cancels.
  */
-export function confirmKeyAction(e: { key: string; isComposing: boolean; onButton: boolean }): 'confirm' | 'cancel' | null {
-  if (e.isComposing || e.key === 'Process') return null
+export function confirmKeyAction(e: ImeKey & { onButton: boolean }): 'confirm' | 'cancel' | null {
+  if (composingKey(e)) return null
   if (e.key === 'Escape') return 'cancel'
   if (e.key === 'Enter' && !e.onButton) return 'confirm'
   return null

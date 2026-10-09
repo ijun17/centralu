@@ -44,24 +44,3 @@ export function isComposerSendKey(e: ComposerKey, sendWithModifierEnter: boolean
   if (sendWithModifierEnter) return e.metaKey || e.ctrlKey
   return !e.shiftKey
 }
-
-/**
- * Does this key belong to an IME composition (#181)? Depending on the engine, this is signaled
- * either through `isComposing` or only through `key: 'Process'`. Reading the Enter that ends a
- * composition as a submit either saves the text with the last syllable missing or leaves the
- * syllable being composed sitting in the field. Every input field that receives Enter goes
- * through this check — for a while only the session composer knew this and the command palette
- * did not, so the same app had two different rules.
- */
-export function composingKey(e: { key: string; isComposing: boolean }): boolean {
-  return e.isComposing || e.key === 'Process'
-}
-
-/**
- * Is this a plain Enter, not part of a composition (#181) — "save what was typed" for a
- * single-line field
- */
-export function isPlainEnter(e: { key: string; isComposing: boolean }): boolean {
-  return e.key === 'Enter' && !composingKey(e)
-}
-

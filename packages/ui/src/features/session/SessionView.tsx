@@ -36,7 +36,8 @@ import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomple
 import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
-import { composingKey, isComposerSendKey } from './composerKeys.js'
+import { isComposerSendKey } from './composerKeys.js'
+import { composingKey } from '../../app/keys.js'
 import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dragPath.js'
 import { APP_LINK_DROP_EVENT, type AppLinkDrop } from '../app-frame/dragRelay.js'
 import { droppedPiece, droppedText, insertAtCaret, isOutsideLink, isTextDrag, type DroppedText } from './dragLink.js'
@@ -1285,8 +1286,10 @@ const Composer = memo(function Composer({
             setCaret(e.target.selectionStart)
           }}
           onKeyDown={(e) => {
-            // While autocomplete is open, the arrow keys, Enter and Tab belong to the list
-            if (ac.open) {
+            const composing = composingKey(e.nativeEvent)
+            // While autocomplete is open, the arrow keys, Enter and Tab belong to the list — unless
+            // the input method is using them (#181): an `@파일` still being composed
+            if (ac.open && !composing) {
               if (e.key === 'ArrowDown') return (e.preventDefault(), ac.move(1))
               if (e.key === 'ArrowUp') return (e.preventDefault(), ac.move(-1))
               if (e.key === 'Escape') return (e.preventDefault(), setCaret(-1))
@@ -1312,10 +1315,9 @@ const Composer = memo(function Composer({
                 autocomplete and the wrong one for a keystroke: it is set from an event that in
                 principle might not arrive, and a stuck `true` there would mean a message that
                 cannot be sent at all. These flags are scoped to this one key and cannot go stale.
-                Both are read because `isComposing` is the standard signal and some browsers
-                report the key itself as `Process` instead.
+                `composingKey` (app/keys.ts) reads all three signals engines use, including
+                WebKit's keyCode 229 on the Enter it dispatches after `compositionend`.
               */
-            const composing = composingKey({ key: e.key, isComposing: e.nativeEvent.isComposing })
             if (!composing && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
               if (recallHistory(e.currentTarget, e.key === 'ArrowUp' ? -1 : 1)) {
                 e.preventDefault()

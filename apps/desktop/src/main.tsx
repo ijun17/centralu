@@ -263,7 +263,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
        * regardless of focus, pressing Enter after tabbing to Cancel also quit the app.
        */
       const onButton = (e.target as HTMLElement | null)?.tagName === 'BUTTON'
-      const action = confirmKeyAction({ key: e.key, isComposing: e.isComposing, onButton })
+      const action = confirmKeyAction({ key: e.key, isComposing: e.isComposing, keyCode: e.keyCode, onButton })
       if (e.key === 'Enter' || e.key === 'Escape') e.stopPropagation()
       if (action === 'cancel') setAskQuit(false)
       else if (action === 'confirm') void quit()

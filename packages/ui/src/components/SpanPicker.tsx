@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
+import { isPlainEscape } from '../app/keys.js'
 import { createPortal } from 'react-dom'
 import { GRID_SPAN_MAX, type GridSpan } from '@cc/protocol'
 import { useAnchoredPlacement } from './anchored.js'
@@ -62,7 +63,7 @@ export function SpanButton({
       if (!buttonRef.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       e.stopPropagation()
       setOpen(false)
       buttonRef.current?.focus()
