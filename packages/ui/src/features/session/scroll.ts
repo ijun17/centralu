@@ -230,3 +230,23 @@ export function rowKeys(items: readonly { seq: number }[]): (number | string)[] 
     return `${it.seq}@${i}`
   })
 }
+
+/**
+ * Forgets the measured heights of rows the list no longer holds (#392).
+ *
+ * The virtual list keeps a height per row key it has ever measured, and nothing in it removes
+ * one: a key that leaves the list (an off-screen session cut back to its window, the rows of the
+ * session the focus view showed before) stays in its cache for as long as the pane is mounted. The
+ * focus view's pane is one instance for every session it shows, so over days it held a height for
+ * every row it had ever shown. Only keys still in the list are kept, so the cache is never larger
+ * than the list itself. A row that comes back is measured again, as on its first showing.
+ *
+ * Runs on every change of the list, so it does nothing until the cache holds more keys than the
+ * list has rows: up to that count it is already no larger than the list, and the check costs one
+ * comparison per streamed event rather than a pass over the cache.
+ */
+export function forgetUnlistedSizes(sizes: Map<number | string, number>, keys: readonly (number | string)[]): void {
+  if (sizes.size <= keys.length) return
+  const listed = new Set(keys)
+  for (const key of sizes.keys()) if (!listed.has(key)) sizes.delete(key)
+}

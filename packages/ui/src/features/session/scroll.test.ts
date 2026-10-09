@@ -1,6 +1,8 @@
+import { Virtualizer } from '@tanstack/react-virtual'
 import { describe, expect, it } from 'vitest'
 import {
   decideFollow,
+  forgetUnlistedSizes,
   distanceFromBottom,
   INPUT_GRACE_MS,
   rowKeys,
@@ -192,5 +194,60 @@ describe('rowKeys (#64)', () => {
     const keys = rowKeys([{ seq: 1 }, { seq: 7 }, { seq: 2 }, { seq: 7 }, { seq: 7 }])
     expect(keys.slice(0, 3)).toEqual([1, 7, 2])
     expect(new Set(keys).size).toBe(keys.length)
+  })
+})
+
+describe('forgetUnlistedSizes (#392)', () => {
+  /** A virtual list as ChatStream builds one, outside React: the cache under test is the library's own */
+  const list = (keys: readonly (number | string)[]) =>
+    new Virtualizer<HTMLDivElement, HTMLDivElement>({
+      count: keys.length,
+      getScrollElement: () => null,
+      estimateSize: () => 64,
+      getItemKey: (i) => keys[i]!,
+      scrollToFn: () => {},
+      observeElementRect: () => {},
+      observeElementOffset: () => {},
+    })
+
+  it('the virtual list keeps the height of a row that left it until the list prunes it', () => {
+    const first = Array.from({ length: 300 }, (_, i) => i + 1)
+    const v = list(first)
+    v.getMeasurements()
+    for (let i = 0; i < first.length; i++) v.resizeItem(i, 100 + i)
+    const next = [1000, 1001]
+    v.setOptions({ ...v.options, count: next.length, getItemKey: (i) => next[i]! })
+    v.getMeasurements()
+    expect(v.itemSizeCache.size).toBe(300)
+    forgetUnlistedSizes(v.itemSizeCache, next)
+    expect(v.itemSizeCache.size).toBe(0)
+  })
+
+  it('never keeps more heights than the list has rows, nor one the list lacks, at every size around the cache', () => {
+    for (let shown = 0; shown <= 120; shown++) {
+      for (const next of new Set([0, 1, Math.max(shown - 1, 0), shown, shown + 1, 2 * shown])) {
+        const sizes = new Map<number | string, number>(Array.from({ length: shown }, (_, i) => [i, 10 + i]))
+        // The next list keeps the first half of the old rows and adds rows of its own
+        const keys = Array.from({ length: next }, (_, i) => (i < shown / 2 ? i : `new@${i}`))
+        forgetUnlistedSizes(sizes, keys)
+        expect(sizes.size).toBeLessThanOrEqual(next)
+        // Once it has pruned, what is left is only the list's own rows
+        if (shown > next) expect([...sizes.keys()].filter((k) => !keys.includes(k))).toEqual([])
+      }
+    }
+  })
+
+  it('keeps the height of every row still in the list', () => {
+    const sizes = new Map<number | string, number>([
+      [1, 40],
+      [2, 50],
+      [3, 60],
+      ['3@4', 70],
+    ])
+    forgetUnlistedSizes(sizes, [2, '3@4'])
+    expect([...sizes]).toEqual([
+      [2, 50],
+      ['3@4', 70],
+    ])
   })
 })
