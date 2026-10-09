@@ -212,6 +212,50 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     expect(await down).toMatch(/ssh exited/)
   })
 
+  it('reopening a live link ends the old forward without reporting the link down, so the link does not reconnect without end', async () => {
+    const t = tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) })
+    /*
+     * What a link does on down (links.ts `transportDown`): opens again a little later. Reopening
+     * ends the forward it holds, so a reopen reported as down came back as another reopen, which
+     * ended the new forward, and so on: the reconnect churn of a refused token's quick retry, a
+     * `machines.reconnect` or the versions poll.
+     */
+    const downs: string[] = []
+    // One open at a time, as a link runs them
+    let opening = Promise.resolve()
+    const reopen = () => (opening = opening.then(() => t.open()).then(() => undefined, () => undefined))
+    t.onDown((reason) => {
+      downs.push(reason)
+      setTimeout(reopen, 50)
+    })
+    const forwards = () => (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L')).length
+    await reopen()
+    await reopen()
+    // Long enough for several rounds of the churn (each about 50 ms plus one ssh round trip)
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(downs).toEqual([])
+    expect(forwards()).toBe(2)
+  })
+
+  it('a close while open() ends the old forward stays closed: nothing is started after it', async () => {
+    const t = tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) })
+    await t.open()
+    const asked = logged().length
+    const reopening = t.open()
+    reopening.catch(() => {})
+    // open() is now waiting for the old forward to exit
+    await t.close()
+    await expect(reopening).rejects.toThrow(/was closed/)
+    expect(logged().length).toBe(asked)
+  })
+
+  it('forgets an ssh that could not be started', async () => {
+    const t = new SshTunnel({ target: 'box', ssh: join(dir, 'no-such-ssh'), env: process.env })
+    tunnels.push(t)
+    await expect(t.exec('true')).rejects.toThrow(/ENOENT/)
+    expect((t as unknown as { asking: Set<unknown> }).asking.size).toBe(0)
+  })
+
   it('closing while the remote is still being asked ends that ssh, and starts no forward after it', async () => {
     const t = tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }), FAKE_SSH_HANG: '1' })
     const opening = t.open()

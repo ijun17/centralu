@@ -185,7 +185,11 @@ export class Router {
     return list.filter((s) => !m.hides(s)).map((s) => mark(m.q.session(s)))
   }
 
-  /** The person's project order, split per machine: each machine keeps the order of its own */
+  /**
+   * The person's project order, split per machine: each machine keeps the order of its own. A
+   * machine that cannot take it does not fail the rest, which has already been saved: its projects
+   * come back from the mirror as they were, marked `unreachable`, the way `projects.list` gives them
+   */
   private async reorderProjects(machines: RoutedMachine[], params: unknown): Promise<unknown> {
     const ids = isObj(params) && Array.isArray(params.orderedIds) ? (params.orderedIds as unknown[]) : []
     const perMachine = new Map<RoutedMachine, string[]>()
@@ -197,7 +201,13 @@ export class Router {
     }
     const [mine, ...theirs] = await Promise.all([
       this.opts.local('projects.reorder', { ...(isObj(params) ? params : {}), orderedIds: local }) as Promise<unknown[]>,
-      ...[...perMachine].map(async ([m, orderedIds]) => m.q.projects(await this.forward(m, 'projects.reorder', { orderedIds })) as unknown[]),
+      ...[...perMachine].map(async ([m, orderedIds]) => {
+        try {
+          return m.q.projects(await this.forward(m, 'projects.reorder', { orderedIds })) as unknown[]
+        } catch {
+          return this.present(m, 'projects', m.lastKnown('projects') ?? [], true)
+        }
+      }),
     ])
     return [...mine, ...theirs.flat()]
   }
