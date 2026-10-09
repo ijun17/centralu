@@ -110,10 +110,6 @@ fn same_user(peer: io::Result<u32>, me: u32) -> Result<(), String> {
 /// `shutdown()` (`host_proc::stop_pid_gracefully`).
 pub const CLOSE_STDIN_TO_STOP: bool = false;
 
-/// The group outlives its leader and its number is not reused while anyone is in it, so it is
-/// signalled whether or not the host has ended (`host_proc::stop_pid_gracefully`).
-pub const SIGNAL_GROUP_AFTER_EXIT: bool = true;
-
 /// Whether a `.bin/` sh script can be started as a program (it can: the kernel reads its `#!`).
 pub const RUNS_SH_SCRIPTS: bool = true;
 
@@ -128,10 +124,28 @@ pub fn hide_console(cmd: &mut Command) {
 }
 
 /// Whether a process exists and is not a zombie waiting for someone else to reap it.
+///
+/// `kill(pid, 0)` alone succeeds on a zombie. A host handed over by the previous keeper is that
+/// keeper's child, not ours: when it died before that keeper reaped it, signal 0 kept saying it
+/// ran, so it was never seen as exited (no restart) and `Foreign::wait` sat out its 10 s.
 pub fn pid_alive(pid: u32) -> bool {
+    let Some(target) = i32::try_from(pid).ok().filter(|&p| p > 0) else { return false };
     // SAFETY: signal 0 only checks.
-    let rc = unsafe { libc::kill(pid as i32, 0) };
-    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    let rc = unsafe { libc::kill(target, 0) };
+    let exists = rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+    exists && !super::this_unix::is_zombie(pid)
+}
+
+/// Whether the group a host led may still be signalled once the host itself has ended.
+///
+/// The number is safe while it is pinned: by a member still in the group, or by the leader's own
+/// zombie. Once every member is gone it may be handed out again, and the new owner of that pid,
+/// leading a group of its own, would get our TERM. The original leader has ended, so a live,
+/// non-zombie process under that pid is someone else: the group is then left alone. (A group of
+/// members only, with no process under the leader's pid, cannot be told from a free number
+/// without asking each process, and is still signalled: that is the orphan sweep this is for.)
+pub fn group_signal_after_exit_is_safe(pid: u32) -> bool {
+    !pid_alive(pid)
 }
 
 /// SIGTERM to the single host process only — children (codex, etc.) are cleaned up by the
@@ -275,6 +289,28 @@ mod tests {
         let pid = gone.id();
         gone.wait().unwrap();
         assert!(!pid_alive(pid), "a reaped child is gone");
+    }
+
+    /// A process that ended but is not reaped yet is not alive. `kill(pid, 0)` succeeds on a
+    /// zombie, so a handed-over host that died before the keeper that started it reaped it was
+    /// never seen as exited (`host_proc::handover::Foreign`). Here the test itself is the parent
+    /// that has not reaped.
+    #[test]
+    fn a_zombie_is_not_alive() {
+        let mut child = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let pid = child.id();
+        // Ended, not reaped: wait for the zombie without collecting it.
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: info is a valid out-pointer; WNOWAIT leaves the child to be reaped below.
+        let rc = unsafe { libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOWAIT) };
+        assert_eq!(rc, 0, "waitid: {}", io::Error::last_os_error());
+        assert!(std::time::Instant::now() < end);
+        // SAFETY: signal 0 only checks; the zombie is still there to answer it.
+        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, 0, "the zombie is still there");
+        let alive = pid_alive(pid);
+        child.wait().unwrap();
+        assert!(!alive, "a zombie counted as a running process");
     }
 
     /// ST8: what `new_session` starts leads a session of its own, so quitting the window (its

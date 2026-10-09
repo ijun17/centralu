@@ -10,6 +10,11 @@ use super::children::{ExitStatus, Seen, Watch};
 
 pub const RECV_FLAGS: libc::c_int = 0;
 
+/// No portable way to ask: a zombie counts as alive here, as it always did.
+pub fn is_zombie(_pid: u32) -> bool {
+    false
+}
+
 pub fn peer_uid(_stream: &UnixStream) -> io::Result<u32> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "peer credentials are not implemented here"))
 }
