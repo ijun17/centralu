@@ -14,6 +14,8 @@ import {
   handoffPrompt,
   inlineViewsFromHistory,
   messagesToChat,
+  PENDING_EVENTS_MAX,
+  PENDING_EVENTS_MAX_AGE_MS,
   projectScreenSessions,
   registerPinnedFrame,
   useStore,
@@ -4106,5 +4108,49 @@ describe('back and forward between screens (#374)', () => {
     mock.workspaceSnapshot = { focusedSessionId: 'nav-a', view: 'grid' } as never
     await st().attach(mock)
     expect(st().nav).toEqual({ entries: [{ kind: 'grid' }], index: 0 })
+  })
+})
+
+/*
+ * Last in the file: it replays thousands of events, and the render keys they take are module state that the
+ * #79 cursor tests above measure from.
+ */
+describe('the pen for events before registration is bounded (#392)', () => {
+  const call = (sessionId: string, i: number) =>
+    ({ sessionId, type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `read ${i}`, readOnly: true } }) as NormalizedEvent
+
+  it('holds at most PENDING_EVENTS_MAX events for one session, the newest, at every count around the cap', async () => {
+    for (const n of [1, PENDING_EVENTS_MAX - 1, PENDING_EVENTS_MAX, PENDING_EVENTS_MAX + 1, 2 * PENDING_EVENTS_MAX + 1]) {
+      const id = `pen-cap-${n}`
+      for (let i = 1; i <= n; i++) useStore.getState().dispatchEvent(call(id, i))
+      const mock = new MockPlatform()
+      mock.sessions.set(id, sessionInfo(id))
+      await useStore.getState().attach(mock)
+      const rows = useStore.getState().chat[id]!.map(line)
+      expect(rows.length).toBeLessThanOrEqual(PENDING_EVENTS_MAX)
+      // Under the cap nothing is lost
+      if (n <= PENDING_EVENTS_MAX) expect(rows.length).toBe(n)
+      expect(rows.at(-1)).toBe(`read ${n}`)
+    }
+  })
+
+  it('lets go of the events of a session that has not registered after ten minutes', async () => {
+    const now = vi.spyOn(Date, 'now')
+    try {
+      now.mockReturnValue(1_000_000)
+      // A late event for a session already deleted, or one the list never carries
+      useStore.getState().dispatchEvent(call('pen-never', 1))
+      now.mockReturnValue(1_000_000 + PENDING_EVENTS_MAX_AGE_MS + 1)
+      useStore.getState().dispatchEvent(call('pen-later', 1))
+    } finally {
+      now.mockRestore()
+    }
+    const mock = new MockPlatform()
+    mock.sessions.set('pen-never', sessionInfo('pen-never'))
+    mock.sessions.set('pen-later', sessionInfo('pen-later'))
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().chat['pen-never']).toBeUndefined()
+    // A pen still inside the window is replayed as before
+    expect(useStore.getState().chat['pen-later']!.map(line)).toEqual(['read 1'])
   })
 })

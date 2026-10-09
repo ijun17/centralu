@@ -2314,7 +2314,31 @@ function trimWindow(items: ChatItem[]): { items: ChatItem[]; oldestSeq: number }
 const OFFSCREEN_TRIM_AT = WINDOW_SIZE * 2
 
 /** A holding pen for events belonging to a session not yet registered in the store (replayed right after registration) */
-const pendingEvents = new Map<string, NormalizedEvent[]>()
+const pendingEvents = new Map<string, { since: number; events: NormalizedEvent[] }>()
+
+/**
+ * How many events the pen holds for one session, and for how long (#392).
+ *
+ * A session registers within moments of its first event: `createSession` answers, or `attach` and a
+ * reconnect read the list. An event for a session that never registers stayed in the pen for the
+ * life of the window: a late event for a session already deleted (its `session_deleted` cleared the
+ * pen before it arrived), or one for a session the list does not carry. Ten minutes is far past any
+ * registration; a pen older than that is for a session that is not coming. Past the count, the
+ * oldest half goes: the host has already written that output to its store, and opening the
+ * session reads it from there.
+ */
+export const PENDING_EVENTS_MAX = 2000
+export const PENDING_EVENTS_MAX_AGE_MS = 10 * 60_000
+
+/** Holds an event for a session not yet registered, and lets go of pens no session is coming for */
+function penEvent(sessionId: string, e: NormalizedEvent, now: number): void {
+  for (const [id, pen] of pendingEvents) if (now - pen.since > PENDING_EVENTS_MAX_AGE_MS) pendingEvents.delete(id)
+  let pen = pendingEvents.get(sessionId)
+  if (!pen) pendingEvents.set(sessionId, (pen = { since: now, events: [] }))
+  // Pushed in place: copying the pen for every event made a burst of n events cost n² (#392)
+  pen.events.push(e)
+  if (pen.events.length > PENDING_EVENTS_MAX) pen.events.splice(0, PENDING_EVENTS_MAX / 2)
+}
 
 /**
  * A queue for re-reading the external app list (M4 A-8). If another "changed" arrives while a read
@@ -2374,7 +2398,7 @@ function replayPendingEvents(get: () => AppState): void {
     if (!get().sessions[id]) continue
     const buffered = pendingEvents.get(id)!
     pendingEvents.delete(id)
-    for (const e of buffered) get().dispatchEvent(e)
+    for (const e of buffered.events) get().dispatchEvent(e)
   }
 }
 
@@ -3354,7 +3378,7 @@ export const useStore = create<AppState>((set, get) => ({
       // An event that arrived before the session was registered (the initial prompt streaming right
       // away is one such case). Discarding it would lose the whole first turn, so it is held and
       // replayed right after registration.
-      pendingEvents.set(sessionId, [...(pendingEvents.get(sessionId) ?? []), e])
+      penEvent(sessionId, e, Date.now())
       return
     }
 
