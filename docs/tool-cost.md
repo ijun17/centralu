@@ -218,8 +218,10 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
    for `find_apps` and reached for the loaded `ask_project` instead (0 of 3); #371's own measurement, with a
    prompt that said "use it", found it 5 of 5. Deferral is not free for selection.
 5. **A free-string argument fails first try.** `app_guide`'s topic: 0 of 4 first calls worked.
-6. **Codex: a model set before a session's first turn breaks it.** The change restarts the thread
-   through resume, Codex has no rollout to resume before a first turn, and the next send fails with
-   "Could not resume the conversation". The script measures such seats on their default model.
+6. **Codex: a model set before a session's first turn broke it.** The change restarts the thread
+   through resume, Codex has no rollout to resume before a first turn, and the next send failed with
+   "Could not resume the conversation". The baseline measured such seats on their default model. Fixed in
+   #524: a started Codex thread names itself to the host only at its first turn (`CodexSession.externalId`), so
+   a restart before then starts a thread again. The script now sets the model on every seat.
 7. **Codex: a model change showed no rebuild** (gpt-6.1-sol → gpt-6-astra read 21,248 tokens from cache).
    Either the change did not reach the thread or Codex's cache crosses those models; not settled here.

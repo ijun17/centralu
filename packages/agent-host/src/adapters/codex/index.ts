@@ -229,6 +229,14 @@ const BACKGROUND_RESUME_CAP_MS = 150_000
 
 class CodexSession implements SessionHandle {
   readonly sessionId: string
+  /**
+   * The thread id, once there is a conversation to resume (#524). A thread Codex started has no rollout until its
+   * first turn, and resuming it before then is refused (measured, codex-cli 0.160.0, 2026-10-12:
+   * `thread/resume` -32600 "no rollout found for thread id …", and `thread/list` leaves it out). So a started thread
+   * names itself at its first turn (`threadWritten`), as Claude's conversation names itself at its first message:
+   * a session restarted before then (a model set before the first message) starts a thread again instead of
+   * failing to resume one. A resumed thread has a rollout, and names itself at once.
+   */
   externalId: string | null = null
   private closed = false
 
@@ -560,8 +568,15 @@ class CodexSession implements SessionHandle {
       this.threadId = threadIdOf(res)
       this.threadSettings = threadSettingsOf(res)
       this.checkAppMode(res)
+      // No rollout yet: the thread is named at its first turn (see externalId)
+      return
     }
     this.externalId = this.threadId
+  }
+
+  /** A turn started on this thread, so Codex has written its rollout and the thread can be resumed (see externalId) */
+  private threadWritten(): void {
+    if (this.externalId === null && this.threadId !== null) this.externalId = this.threadId
   }
 
   /**
@@ -739,7 +754,11 @@ class CodexSession implements SessionHandle {
     }
     // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
     // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
-    if (n.method === 'turn/started') this.turnId = turnIdOf(n.params)
+    if (n.method === 'turn/started') {
+      this.turnId = turnIdOf(n.params)
+      // Before the event below goes out: the manager records a handle's external id as its events arrive
+      this.threadWritten()
+    }
     if (n.method === 'turn/completed' || n.method === 'turn/failed') {
       this.turnId = null
       const ended = turnIdOf(n.params)
@@ -1212,6 +1231,7 @@ class CodexSession implements SessionHandle {
    * `turn/completed` can come before it (a short turn), so a late response must not bring an ended turn back.
    */
   private takeStartedTurn(id: string | null): void {
+    this.threadWritten()
     if (id && !this.endedTurns.includes(id)) this.turnId ??= id
   }
 

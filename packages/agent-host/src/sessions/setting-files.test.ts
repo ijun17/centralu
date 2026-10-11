@@ -66,9 +66,22 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
 
 vi.mock('../adapters/codex/client.js', () => ({
   CodexClient: class {
+    constructor(private handlers: { onNotification: (n: { method: string; params?: unknown }) => void }) {}
     request(method: string, params?: Record<string, unknown>): Promise<unknown> {
       state.codex.push({ method, params: params ?? {} })
-      if (method === 'thread/start') return Promise.resolve({ thread: { id: `codex-${++state.n}` } })
+      if (method === 'thread/start') {
+        const threadId = `codex-${++state.n}`
+        /*
+         * A thread is only resumable after its first turn (#524), and the manager records its id from the events
+         * that turn sends — a first turn stands in for that, as the Claude mock's init does above
+         */
+        setTimeout(() => {
+          const turn = { id: `${threadId}-turn`, items: [], status: 'completed' }
+          this.handlers.onNotification({ method: 'turn/started', params: { threadId, turn: { ...turn, status: 'inProgress' } } })
+          this.handlers.onNotification({ method: 'turn/completed', params: { threadId, turn } })
+        }, 0)
+        return Promise.resolve({ thread: { id: threadId } })
+      }
       if (method === 'thread/resume') return Promise.resolve({ thread: { id: params?.threadId } })
       return Promise.resolve({})
     }

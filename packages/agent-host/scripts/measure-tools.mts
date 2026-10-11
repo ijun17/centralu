@@ -161,8 +161,6 @@ class Driver {
   private lastCodex = new Map<string, Usage>()
   model: string | undefined
   changeModel: string | undefined
-  /** Seats measured on their default model, because the model could not be set before a first turn */
-  readonly defaultModelKinds = new Set<string>()
 
   constructor(
     readonly cli: Cli,
@@ -188,16 +186,12 @@ class Driver {
       s = await host.rpc('agents.createSession', { projectId: pHere.id, cwd: here, tool: this.cli, ...(this.model ? { model: this.model } : {}), permissionPreset: 'normal' })
     }
     if (s.tool !== this.cli) s = await host.rpc('agents.switchTool', { sessionId: s.id, tool: this.cli })
-    if (this.model && s.model !== this.model) {
-      /*
-       * A seat created by its own RPC takes no model. On Codex, setting one before the session's first
-       * turn breaks it: the change restarts the thread through resume, Codex has no rollout to resume
-       * until a first turn, and the next send fails with "Could not resume the conversation"
-       * (measured, codex-cli 0.160.0, 2026-10-12). Such a seat is measured on its default model.
-       */
-      if (this.cli === 'codex') this.defaultModelKinds.add(kind)
-      else await host.rpc('agents.updateSettings', { sessionId: s.id, model: this.model })
-    }
+    /*
+     * A seat created by its own RPC takes no model, so it is set before the first turn. On Codex that once broke the
+     * seat (#524: the restart resumed a thread with nothing written yet); the first baseline measured those seats on
+     * their default model instead.
+     */
+    if (this.model && s.model !== this.model) await host.rpc('agents.updateSettings', { sessionId: s.id, model: this.model })
     return s
   }
 
@@ -468,7 +462,6 @@ async function measure(cli: Cli): Promise<void> {
     if (PHASES.has('cache')) await cachePhase(d)
     if (PHASES.has('results')) await resultsPhase(d, seed)
     if (PHASES.has('selection') && LIVE) await selectionPhase(d, seed)
-    raw.models[cli] = { ...m, measuredOnDefault: [...d.defaultModelKinds] }
     raw.approvals.push(...w.host.answered.map((a) => ({ cli, ...a })))
   } finally {
     await w.host.stop()
