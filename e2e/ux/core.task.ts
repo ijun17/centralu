@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test'
 import type { Recorder } from './recorder.js'
+import { seedSshConfig } from '../fixtures/ssh-hosts.js'
 import { uxPending, uxTask } from './task.js'
 
 /**
@@ -343,7 +344,7 @@ uxTask({
   id: 'add-machine.mouse-manual',
   task: 'Link another machine by typing its name and ssh target',
   path: 'mouse',
-  notes: ['The form as it is before #514; the ssh-config path replaces most of the typing'],
+  notes: ['The typed form, as the dialog opens when ~/.ssh/config has no hosts'],
   start: demo,
   run: async (u, page) => {
     await u.click(page.getByTestId('open-settings'))
@@ -355,15 +356,29 @@ uxTask({
     await u.click(page.getByTestId('machines-add-confirm'))
   },
   goal: async (page) => expect(page.getByTestId('machine-row-build-box')).toHaveAttribute('data-status', 'connected'),
-  budget: { operators: 46, M: 3, H: 5, seconds: 19.2 },
+  budget: { operators: 46, M: 3, H: 5, seconds: 19.3 },
 })
 
-uxPending({
+uxTask({
   id: 'add-machine.ssh-config',
   task: 'Link another machine picked from the ssh config',
   path: 'mouse',
-  waitingOn: '#514',
-  reason: 'picking a host from ~/.ssh/config is not merged yet (pull request #517)',
+  notes: ['Picking the host probes it and fills the shell and the name (#514)'],
+  start: async (page) => {
+    await demo(page)
+    await seedSshConfig(page)
+  },
+  run: async (u, page) => {
+    await u.click(page.getByTestId('open-settings'))
+    await u.until('settings', () => expect(page.getByTestId('settings')).toBeVisible())
+    await u.click(page.getByTestId('settings-tab-machines'))
+    await u.until('the hosts', () => expect(page.getByTestId('machines-add-hosts')).toBeVisible())
+    await u.click(page.getByTestId('machines-add-host-build-box'), { among: page.locator('[data-testid^="machines-add-host-"]:not([data-testid^="machines-add-host-linked-"])') })
+    await u.until('the probe', () => expect(page.getByTestId('machines-add-choice-posix')).toHaveAttribute('aria-checked', 'true'))
+    await u.click(page.getByTestId('machines-add-confirm'))
+  },
+  goal: async (page) => expect(page.getByTestId('machine-row-build-box')).toContainText('build-box · Linux or macOS'),
+  budget: { operators: 17, M: 4, H: 1, seconds: 11.4 },
 })
 
 // ---------------------------------------------------------------------------------------------

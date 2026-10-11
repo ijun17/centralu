@@ -189,7 +189,8 @@ counterpart are listed under "Pending".
 | | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.44 | 1175 |
 | Find a past conversation | keyboard | `M 6K M K` | 7 | 0 | 0 | 0 | 2 | 9 | 4.66 | 0 |
 | Open an app on another machine | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.98 | 534 |
-| Link another machine (the form before #514) | mouse | `H M P B B M P B B P B B H 10K H P B B H 13K H M P B B` | 23 | 5 | 10 | 5 | 3 | 46 | 18.73 | 2204 |
+| Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2242 |
+| | mouse (typed by hand) | `H M P B B M P B B P B B H 10K H P B B H 13K H M P B B` | 23 | 5 | 10 | 5 | 3 | 46 | 18.79 | 2206 |
 | Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 521 |
 
 Pending:
@@ -199,7 +200,6 @@ Pending:
 | Start a new session | keyboard | No keyboard path: the palette has no "New session" action and no shortcut opens the dialog |
 | Find a past conversation | mouse | No mouse path: the palette is the only search, opened only by ⌘K / Ctrl+K |
 | Open an app on another machine | keyboard | No keyboard path: the palette does not list apps |
-| Link a machine picked from the ssh config | mouse | #514 (pull request #517) |
 | Create a new project (an empty folder) | mouse | #515 |
 
 What the first baseline shows:
@@ -212,8 +212,9 @@ What the first baseline shows:
   (the Windows app). So the keyboard path of "send a message" takes the mouse for one click
   (`H P B B H`, 2.2 s) and costs more than the mouse path: 42 operators and 15.8 s against 36 and
   13.4. With the composer taking the keyboard it would be 37 and 13.6.
-- **The add-machine form does not focus its first field**, and the mouse path moves between
-  the hand and the mouse five times (2 s of H alone).
+- **Picking a machine from the ssh config (#514) is 7.7 s cheaper than typing it**: 17 operators
+  against 46. The typed form does not focus its first field, and moves the hand between the
+  keyboard and the mouse five times (2 s of H alone).
 - **Answering an approval by keyboard is the cheapest core task after going back** (`⌘⇧A`, `y`:
   3.8 s); the waiting list, the way the app points to an approval out of sight, costs 8.4 s by
   mouse.
