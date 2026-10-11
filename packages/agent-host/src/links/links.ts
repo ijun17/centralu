@@ -7,7 +7,7 @@ import { newMachineId, splitQualified } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import type { Endpoint, HostStart, RemoteInstall, RemoteRun, RemoteSpec, Tunnel } from './tunnel.js'
+import type { Endpoint, HostStart, RemoteCommand, RemoteInstall, RemoteRun, RemoteSpec, Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 
 /**
@@ -353,7 +353,7 @@ export class LinkedMachine implements RoutedMachine {
   }
 
   /** What update.ts runs things there with */
-  private control(exec: (command: string) => Promise<RemoteRun>, script: string, step: (s: UpdateStep) => void): HostControl {
+  private control(exec: (command: RemoteCommand) => Promise<RemoteRun>, script: string, step: (s: UpdateStep) => void): HostControl {
     const hold = async () => {
       this.held = true
       clearTimeout(this.retryTimer)
@@ -455,6 +455,13 @@ export class LinkedMachine implements RoutedMachine {
       this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`centralu serve\` is running there`)
       return this.retryLater()
     }
+    /*
+     * A check after a switch (`answers`) is met here, by the version the running host gave the
+     * connection line (`serve --connection` says hello to it). A rollback leaves a host older than
+     * this hub, so the link below does not open to it (plan §4) and no hello of the link's own would
+     * ever come: on a real Windows PC every rollback timed out and put the newer version back (2026-10-11)
+     */
+    for (const w of [...this.helloWaiters]) w(endpoint.line.version)
     // The versions are checked before the link is opened (plan §4)
     const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: false })
     if (!mayConnect(versions)) return

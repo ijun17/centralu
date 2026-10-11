@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { verifiedPackage, type RegistryOptions } from './registry.js'
-import { lastLine, remoteScript, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { lastLine, remoteScript, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
 /**
  * The hub's installer for a linked machine (docs/plans/remote-hub.md §10.2, phase 3 step 3): over the
@@ -76,7 +76,7 @@ $fetch = if (Test-Path (Join-Path $env:SystemRoot 'System32\\curl.exe')) { 'curl
 `
 
 /** Step 0 in the remote's shell */
-export function preflightCommand(spec: RemoteSpec): string {
+export function preflightCommand(spec: RemoteSpec): RemoteCommand {
   return remoteScript(spec, { sh: PREFLIGHT_SH, ps: PREFLIGHT_PS })
 }
 
@@ -136,7 +136,7 @@ const PLAIN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 const SAFE_URL = /^https?:\/\/[0-9A-Za-z.:-]+(\/[0-9A-Za-z._~%/-]*)?$/
 
 /** Step 1 in the remote's shell: the pinned Node, checked against its SHA-256 and pruned */
-export function nodeCommand(spec: RemoteSpec, n: { version: string; url: string; sha256: string }): string {
+export function nodeCommand(spec: RemoteSpec, n: { version: string; url: string; sha256: string }): RemoteCommand {
   if (!PLAIN.test(n.version) || !SAFE_URL.test(n.url) || !/^[0-9a-f]{64}$/.test(n.sha256)) throw new Error('Not a Node archive to install')
   const sh = `${DATA_SH}; V="${n.version}"; n="$r/node/v$V"
 say() { echo "${STEP} $*"; }
@@ -213,7 +213,7 @@ export type InstalledVersion = { version: string; node: string }
  * PowerShell command line) beside the install and runs it on the pinned Node with `params` as one
  * base64 word.
  */
-export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | PointerParams | PruneParams): string {
+export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | PointerParams | PruneParams): RemoteCommand {
   if (!PLAIN.test(params.version) || !PLAIN.test(params.node)) throw new Error('Not a version to install')
   const gz = gzipSync(Buffer.from(script, 'utf8'), { level: 9 }).toString('base64')
   const arg = Buffer.from(JSON.stringify(params), 'utf8').toString('base64')
@@ -288,7 +288,7 @@ export function readStep(run: RemoteRun, ok: string, target: string): string {
 
 export type InstallOptions = {
   /** Runs one command on the remote (`Tunnel.exec`) */
-  exec: (command: string) => Promise<RemoteRun>
+  exec: (command: RemoteCommand) => Promise<RemoteRun>
   spec: RemoteSpec
   /** For the sentences: the ssh target */
   target: string

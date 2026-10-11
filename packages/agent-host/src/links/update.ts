@@ -1,5 +1,5 @@
 import { DATA_PS, DATA_SH, STEP, installCommand, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
-import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
 /**
  * Update, rollback and uninstall of the Centralu the hub installs on a linked machine
@@ -30,7 +30,7 @@ export type UpdateStep = 'preflight' | 'registry' | 'node' | 'centralu' | 'stop'
 
 export type HostControl = {
   /** One command on the remote, in its shell's terms (`Tunnel.exec`) */
-  exec: (command: string) => Promise<RemoteRun>
+  exec: (command: RemoteCommand) => Promise<RemoteRun>
   spec: RemoteSpec
   /** The ssh target, for the sentences */
   target: string
@@ -189,7 +189,7 @@ try {
 `
 
 /** `<data>/remote/` removed there, in its shell's terms; the data folder's other files stay */
-export function uninstallCommand(spec: RemoteSpec): string {
+export function uninstallCommand(spec: RemoteSpec): RemoteCommand {
   return remoteScript(spec, { sh: UNINSTALL_SH, ps: UNINSTALL_PS })
 }
 

@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
-import { connectionCommand, SshTunnel, type RemoteSpec } from './tunnel.js'
+import { connectionCommand, SshTunnel, WINDOWS_INLINE_MAX, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 
 /**
  * The installer of plan §10.2 (#82, phase 3 step 3). The scripts run for real: a fake `ssh` hands
@@ -54,17 +54,32 @@ describe('preflight (plan S7)', () => {
 })
 
 describe('the install scripts per shell (plan §10.2)', () => {
-  const decode = (cmd: string) => Buffer.from(cmd.split('-EncodedCommand ')[1]!, 'base64').toString('utf16le')
+  const decode = (cmd: RemoteCommand) =>
+    typeof cmd === 'string' ? Buffer.from(cmd.split('-EncodedCommand ')[1]!, 'base64').toString('utf16le') : Buffer.from(cmd.stdin, 'base64').toString('utf8')
   const params = { version: '0.1.0-beta.14', node: NODE_V, platform: 'win32-x64' as const, hub: 'h', packages: [{ name: 'centralu', tarball: 'https://registry.npmjs.org/centralu/-/centralu-0.1.0-beta.14.tgz', integrity: `sha512-${'A'.repeat(86)}==` }] }
 
-  it('fits one Windows command line in every shell, the installer itself included', () => {
-    // CreateProcess takes 32,767 characters; sshd and PowerShell add their own words around it
-    for (const spec of [{ shell: 'powershell' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }, { shell: 'posix' }] as RemoteSpec[]) {
-      for (const cmd of [preflightCommand(spec), nodeCommand(spec, { version: NODE_V, url: 'https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip', sha256: 'a'.repeat(64) }), installCommand(spec, installScript(), params)]) {
-        expect(cmd.length).toBeLessThan(30_000)
-        if (spec.shell !== 'posix') expect(cmd).toMatch(/^powershell -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/)
+  it('fits cmd.exe\'s command line on Windows, sending a long step\'s script on stdin (#482 follow-up)', () => {
+    // Windows OpenSSH's default shell is cmd.exe, which takes 8,191 characters; the installer's step is
+    // several times that as one -EncodedCommand ("The command line is too long.", measured 2026-10-11)
+    const steps = (spec: RemoteSpec) => [
+      preflightCommand(spec),
+      nodeCommand(spec, { version: NODE_V, url: 'https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip', sha256: 'a'.repeat(64) }),
+      installCommand(spec, installScript(), params),
+    ]
+    for (const spec of [{ shell: 'powershell' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }] as RemoteSpec[]) {
+      for (const cmd of steps(spec)) {
+        const line = typeof cmd === 'string' ? cmd : cmd.command
+        expect(line.length).toBeLessThanOrEqual(WINDOWS_INLINE_MAX)
+        expect(line).toMatch(/^powershell -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/)
+        if (typeof cmd !== 'string') expect(cmd.stdin).toMatch(/^[A-Za-z0-9+/=]+$/)
       }
+      // The installer step is the one that does not fit: it goes on stdin, whole
+      const install = steps(spec)[2]!
+      expect(typeof install).toBe('object')
+      const script = Buffer.from((install as { stdin: string }).stdin, 'base64').toString('utf8')
+      expect(script).toContain('.install-')
     }
+    for (const cmd of steps({ shell: 'posix' })) expect(typeof cmd).toBe('string')
   })
 
   it('a Windows remote checks the Node zip with Get-FileHash and unpacks it with System32 tar.exe', () => {

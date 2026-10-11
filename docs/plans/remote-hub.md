@@ -534,6 +534,16 @@ The owner took every recommendation of the design. Each line keeps the question,
 | 6 | Sign the Linux and Windows host folders | **npm's integrity and registry signatures now; signing comes with the Linux keeper (5)** | Integrity checked on the remote plus registry signatures checked by the hub is what every npm user gets today; signing pays off once a Linux keeper starts from verified content as the macOS one does |
 | 7 | Start a remote host the link finds not running | **Automatically**, and say so in the machine's row and in `host.log` | Adding the machine was the consent (§3.2); asking each time would turn every reboot of the remote into a prompt |
 
+### 10.9a Real run on a Windows 11 PC (2026-10-11)
+
+Hub built from main on a temporary data folder, the PC over ssh (cmd.exe default shell, WSL Ubuntu): install on WSL
+(beta.13, 6 s), update WSL to beta.14 (25 s), install on Windows beside it (beta.14, 5 s; the two hosts on 17175 and
+17176, #482), rollback WSL to beta.13 (19 s), uninstall both (host stopped, `<data>/remote/` removed, data kept). Two
+defects found and fixed in the same pull request: the cmd.exe line above, and every rollback timing out, because the
+check waited for a hello on the link and the link does not open to a host older than the hub (§4); the check is now
+met by the version the connection line read from the running host. WSL still does not start through WMI there
+either (the link-bound fallback ran).
+
 ### 10.10 Work, in pull requests
 
 | Step | What | Estimate (agent work) |
@@ -557,8 +567,11 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
   two, so a refused machine or a bad signature downloads nothing. Each answers a `CENTRALU-INSTALL` word; the hub
   writes the sentences (exit codes do not survive Windows, §4.8 of agent-host.md).
 - **The `.mjs` travels gzipped in base64 inside its step's script**, written to `<data>/remote/.install-<pid>.mjs` and
-  removed after. Gzip keeps every step under Windows' 32,767-character command line in all three shells, WSL's double
-  encoding included (a test holds it under 30,000).
+  removed after. A Windows step that does not fit cmd.exe's 8,191-character line (Windows OpenSSH's default shell, when
+  no `DefaultShell` is set) goes as a short reader on the command line and the script on ssh's stdin (`RemoteCommand`
+  in `tunnel.ts`); a test holds every inline command to 7,900. Found on the first run against a Windows 11 PC with the
+  default shell (2026-10-11): the installer's step, about 18,700 characters as one `-EncodedCommand`, was refused with
+  "The command line is too long." (the laptop used before had PowerShell as its `DefaultShell`).
 - **Registry signatures**: the version document `/<name>/<version>` and the keys at `/-/npm/v1/keys`, over TLS; a
   signature counts only from a published key that has not expired, over `<name>@<version>:<integrity>`. Checked
   against the live registry for 0.1.0-beta.13 while building. The tarball must come from the registry's own origin.

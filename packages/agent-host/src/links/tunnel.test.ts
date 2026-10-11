@@ -249,6 +249,18 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     expect(logged().length).toBe(asked)
   })
 
+  it('feeds a command\'s stdin to ssh and closes it, for scripts too long for one Windows command line', async () => {
+    // A stand-in ssh that echoes back what reached its stdin, and the command it was given
+    const echo = join(dir, 'echo-ssh')
+    writeFileSync(echo, `#!/usr/bin/env node\nlet b='';process.stdin.on('data',(d)=>b+=d);process.stdin.on('end',()=>{process.stdout.write(JSON.stringify({cmd:process.argv.at(-1),stdin:b}))})\n`)
+    chmodSync(echo, 0o755)
+    const t = new SshTunnel({ target: 'box', ssh: echo, env: process.env })
+    tunnels.push(t)
+    const big = 'A'.repeat(50_000)
+    const r = await t.exec({ command: 'run-it', stdin: big })
+    expect(JSON.parse(r.stdout)).toEqual({ cmd: 'run-it', stdin: big })
+  })
+
   it('forgets an ssh that could not be started', async () => {
     const t = new SshTunnel({ target: 'box', ssh: join(dir, 'no-such-ssh'), env: process.env })
     tunnels.push(t)

@@ -536,7 +536,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
           return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
         }
         case 'pointers':
-          return out(done({ current: next, previous: old }))
+          return out(done(starts === '0.0.1' ? { current: old, previous: null } : { current: next, previous: old }))
         case 'prune':
           return out(done({ current: next, previous: old, removed: [], left: [] }))
         case 'tail':
@@ -545,10 +545,14 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
           return out('')
       }
     }
+    let starts = o.startsVersion
     const startHost = async (): Promise<HostStart> => {
       runs.push('start')
-      running = await remoteHost(0, new Store(), { version: runs.includes('tail') ? '0.0.1' : o.startsVersion })
-      line = lineFor(running.port, { version: running === null ? '' : runs.includes('tail') ? '0.0.1' : o.startsVersion })
+      running = await remoteHost(0, new Store(), { version: runs.includes('tail') ? '0.0.1' : starts })
+      line = lineFor(running.port, { version: running === null ? '' : runs.includes('tail') ? '0.0.1' : starts })
+      // What the pointers say once that host runs: after an update the old one is kept to go back to
+      if (starts === APP_VERSION && !runs.includes('tail')) line = { ...line, install: { managed: true, current: next, previous: old, node: NODE } }
+      else if (starts === '0.0.1') line = { ...line, install: { managed: true, current: old, previous: null, node: NODE } }
       return { how: 'detached', note: null }
     }
     const tunnel = Object.assign(
@@ -562,8 +566,21 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500 })
     const u = await ui(hub.port)
     await until(() => status(hub!) === 'versions_differ')
-    return { hub, u, runs, activity }
+    return { hub, u, runs, activity, setStarts: (v: string) => (starts = v) }
   }
+
+  it('rolls back to the version before, which is older than this hub, and checks it by its connection line (measured 2026-10-11)', async () => {
+    // A rolled-back host is older than the hub, so the link does not open to it (plan §4) and no hello
+    // comes: on a real Windows PC every rollback timed out and put the newer version back
+    const { hub, u, setStarts } = await setup({ startsVersion: APP_VERSION })
+    await u.call('machines.update', { machineId: 'm1' })
+    await until(() => status(hub) === 'connected')
+    setStarts('0.0.1')
+    const r = await u.call('machines.rollback', { machineId: 'm1' })
+    expect(r).toMatchObject({ current: { version: '0.0.1' } })
+    await until(() => status(hub) === 'versions_differ')
+    expect(hub.links.list()[0]!.versions?.remote.version).toBe('0.0.1')
+  })
 
   it('says what would stop, holds the link while the host is down, reports each step, and answers once the new version said hello', async () => {
     const { hub, u, runs, activity } = await setup({ startsVersion: APP_VERSION })

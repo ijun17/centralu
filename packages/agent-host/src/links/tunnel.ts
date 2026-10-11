@@ -76,7 +76,7 @@ export interface Tunnel {
    * Runs one command on the remote, in its shell's terms, and answers what it printed (the installer,
    * install.ts). Rejects when the machine cannot be reached. Absent where there is no shell (a direct tunnel)
    */
-  exec?(command: string): Promise<RemoteRun>
+  exec?(command: RemoteCommand): Promise<RemoteRun>
   /** The transport went away by itself (the ssh process exited) */
   onDown(listener: (reason: string) => void): void
   close(): Promise<void>
@@ -195,6 +195,36 @@ function powershell(script: string): string {
 }
 
 /**
+ * One command for the other end of ssh, and, when it is too long for one command line, what to feed
+ * its stdin. `exec` sends `stdin` and closes it.
+ */
+export type RemoteCommand = string | { command: string; stdin: string }
+
+/**
+ * The longest command sent inline to a Windows remote. Windows OpenSSH runs a command through the
+ * account's default shell, which is cmd.exe unless `DefaultShell` says otherwise, and cmd.exe takes
+ * 8,191 characters ("The command line is too long."). sshd wraps the command in `cmd.exe /c "…"`.
+ * Measured on a Windows 11 PC with no DefaultShell (2026-10-11): the installer's step, about 20,000
+ * characters as one `-EncodedCommand`, was refused there before PowerShell started.
+ */
+export const WINDOWS_INLINE_MAX = 7_900
+
+/** What reads a script from stdin on Windows: base64 of the script's UTF-8, characters outside base64 dropped (CRLF) */
+const PS_FROM_STDIN =
+  "$s=[Console]::In.ReadToEnd(); $c=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($s -replace '[^A-Za-z0-9+/=]',''))); & ([ScriptBlock]::Create($c))"
+
+/**
+ * A PowerShell script for a Windows remote: inline as `-EncodedCommand` when it fits cmd.exe's line,
+ * else a short reader inline and the script on stdin (measured with a 40 KB script, 2026-10-11)
+ */
+function powershellScript(script: string): RemoteCommand {
+  const inline = powershell(script)
+  if (inline.length <= WINDOWS_INLINE_MAX) return inline
+  const full = `[Console]::OutputEncoding=[Text.Encoding]::UTF8\n${script}`
+  return { command: powershell(PS_FROM_STDIN), stdin: Buffer.from(full, 'utf8').toString('base64') }
+}
+
+/**
  * What the forward's ssh session runs on a WSL remote: a process inside the distro for as long as
  * the link is up. Measured on a Windows laptop (2026-10-05): WSL stops a distro about 15 s after its
  * last `wsl.exe` client exits, and stopping it stops every service in it, `centralu serve` under
@@ -296,13 +326,16 @@ function remoteCommand(spec: RemoteSpec, args: 'serve --connection' | 'serve --d
  * sends its lookup: base64 piped to `sh` on POSIX (so a login shell like fish runs it too), and to
  * `bash -l` inside a WSL distro; PowerShell's own `-EncodedCommand` on Windows.
  */
-export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string }): string {
-  if (spec.shell === 'powershell') return powershell(script.ps)
+export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string }): RemoteCommand {
+  if (spec.shell === 'powershell') return powershellScript(script.ps)
   const b64 = Buffer.from(script.sh, 'utf8').toString('base64')
   if (spec.shell === 'posix') return `printf %s ${b64} | base64 -d | sh`
   const distro = spec.wslDistro ?? ''
   if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
-  return powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
+  const inline = powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
+  if (inline.length <= WINDOWS_INLINE_MAX) return inline
+  // Too long for cmd.exe's line: the script on stdin, passed through to the distro (`-i`: PowerShell adds CRLF)
+  return { command: powershell(`$s=[Console]::In.ReadToEnd(); $s | wsl.exe -d '${distro}' -- bash -lc 'base64 -di | bash -l'`), stdin: b64 }
 }
 
 export type SshTunnelOptions = {
@@ -452,9 +485,10 @@ export class SshTunnel implements Tunnel {
    * target), and answers what it printed. For the installer (install.ts): the command is already in
    * the remote shell's terms. `close()` ends it like any asking ssh
    */
-  async exec(command: string): Promise<RemoteRun> {
+  async exec(command: RemoteCommand): Promise<RemoteRun> {
     this.ifClosed()
-    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, command])
+    const [line, stdin] = typeof command === 'string' ? [command, undefined] : [command.command, command.stdin]
+    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, line], stdin)
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     return r
   }
@@ -489,9 +523,14 @@ export class SshTunnel implements Tunnel {
     if (this.closing) throw new Error(`The link to ${this.opts.target} was closed`)
   }
 
-  private run(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  private run(args: string[], stdin?: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
+      if (stdin !== undefined) {
+        // A remote that exits before reading it all closes the pipe: that is its answer, not ours to throw
+        child.stdin!.on('error', () => {})
+        child.stdin!.end(stdin)
+      }
       this.asking.add(child)
       child.once('exit', () => this.asking.delete(child))
       let stdout = ''
