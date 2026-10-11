@@ -300,15 +300,15 @@ jobs:
   # runs a slice of the tests with its own dev servers and hosts; every shard keeps a blob report,
   # and when one fails the `e2e report` job below merges them into one HTML report with traces.
   e2e:
-    name: e2e (${{ matrix.browser }} ${{ matrix.shard }}/${{ matrix.shards }})
+    name: e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }} w${{ matrix.workers }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        browser: [webkit, chromium]
-        shards: [4]
-        shard: [1, 2, 3, 4]
+        workers: [2, 3]
+        shards: [5]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -325,22 +325,22 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # The browser at the version this lockfile's Playwright expects, and the system libraries it needs
-      - name: Install ${{ matrix.browser }}
-        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      # WebKit at the build this lockfile's Playwright expects, with the system libraries it needs
+      - name: Install WebKit
+        run: pnpm exec playwright install --with-deps webkit
 
       - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
         env:
-          E2E_BROWSER: ${{ matrix.browser }}
+          E2E_BROWSER: webkit
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
           # One name per shard, so the merge below does not overwrite one shard's report with another's
-          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.browser }}-${{ matrix.shard }}.zip
-        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob --trace=retain-on-failure
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.workers }}-${{ matrix.shard }}.zip
+        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --workers=${{ matrix.workers }} --reporter=list,blob --trace=retain-on-failure
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
-          name: e2e-blob-${{ matrix.browser }}-${{ matrix.shard }}
+          name: e2e-blob-${{ matrix.workers }}-${{ matrix.shard }}
           path: blob-report
           retention-days: 7
           if-no-files-found: error
