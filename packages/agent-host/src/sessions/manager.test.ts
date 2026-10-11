@@ -547,6 +547,33 @@ describe('approvals, read state, and messages', () => {
     }
   })
 
+  it('keeps nothing per session for a turn that ended or a session deleted mid-turn (#392)', async () => {
+    const internals = mgr as unknown as {
+      pendingCommits: Map<string, string>
+      awaitingReport: Map<string, string>
+      appsRestartAfterTurn: Set<string>
+    }
+    const p = await addProject()
+    const ended = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await rpc('agents.send', { sessionId: ended.id, text: 'commit it' })
+    // A commit call interrupted before it answered: its result never comes
+    adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
+    expect([...internals.pendingCommits.values()]).toEqual([ended.id])
+    adapter.last!.finishTurn()
+    expect(internals.pendingCommits.size).toBe(0)
+
+    const gone = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await rpc('agents.send', { sessionId: gone.id, text: 'commit it' })
+    adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
+    // What its turn's end would have consumed: an orchestrator's report, a restart for an app change
+    internals.awaitingReport.set(gone.id, 'orchestrator')
+    internals.appsRestartAfterTurn.add(gone.id)
+    await rpc('agents.deleteSession', { sessionId: gone.id })
+    expect(internals.pendingCommits.size).toBe(0)
+    expect(internals.awaitingReport.has(gone.id)).toBe(false)
+    expect(internals.appsRestartAfterTurn.has(gone.id)).toBe(false)
+  })
+
   it('messages are persisted and reloaded', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

@@ -176,6 +176,40 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       await expect(router.handle('apps.openView', { appId: 'notes', projectId: null, machine: 'm9' })).rejects.toThrow(/No linked machine m9/)
     })
 
+    it('opens a linked machine’s view without the window’s lease, which only the hub’s own views carry (#392)', async () => {
+      const { router, local, m1, m2 } = rig()
+      m1.answers['apps.openView'] = { instanceId: 'inst-aaaaaaaaaaaaaaaa', tool: 'show', resourceUri: 'ui://board/main', toolInput: {}, toolResult: { content: [] }, runId: 'r1' }
+      m2.answers['apps.openView'] = { instanceId: 'inst-u', tool: 'show', resourceUri: 'ui://notes/main', toolInput: {}, toolResult: { content: [] }, runId: 'r1' }
+      // That machine sees the hub's link, not the window, so a lease there would be tied to the wrong connection
+      await router.handle('apps.openView', { appId: 'board', projectId: 'm1.p1', lease: true })
+      await router.handle('apps.openView', { appId: 'notes', projectId: null, machine: 'm2', lease: true })
+      await router.handle('apps.openView', { appId: 'notes', projectId: null, lease: true })
+      expect(m1.calls).toEqual([{ method: 'apps.openView', params: { appId: 'board', projectId: 'p1' } }])
+      expect(m2.calls).toEqual([{ method: 'apps.openView', params: { appId: 'notes', projectId: null } }])
+      expect(local).toEqual([{ method: 'apps.openView', params: { appId: 'notes', projectId: null, lease: true } }])
+    })
+
+    it('hands the hub’s own handler the window’s connection whatever the route, and never a linked machine (#392)', async () => {
+      const seen: { method: string; client: number | undefined }[] = []
+      const m1 = new FakeMachine('m1', 1)
+      const router = new Router({
+        local: async (method, _p, ctx) => {
+          seen.push({ method, client: ctx?.client })
+          return { instanceId: 'own-instance-0000', tool: 'show', resourceUri: 'ui://x/main', toolInput: {}, toolResult: { content: [] }, runId: 'r' }
+        },
+        machines: () => [m1],
+      })
+      const ctx = { client: 7 }
+      await router.handle('apps.openView', { appId: 'board', projectId: 'p1', lease: true }, ctx)
+      await router.handle('apps.openView', { appId: 'notes', projectId: null, lease: true }, ctx)
+      await router.handle('apps.holdViews', { instanceIds: ['own-instance-0000'] }, ctx)
+      await router.handle('apps.closeView', { instanceId: 'own-instance-0000' }, ctx)
+      await router.handle('agents.send', { sessionId: 's1', text: 'x' }, ctx)
+      expect(seen).toEqual(['apps.openView', 'apps.openView', 'apps.holdViews', 'apps.closeView', 'agents.send'].map((method) => ({ method, client: 7 })))
+      await router.handle('apps.openView', { appId: 'board', projectId: 'm1.p1', lease: true }, ctx)
+      expect(m1.calls).toEqual([{ method: 'apps.openView', params: { appId: 'board', projectId: 'p1' } }])
+    })
+
     it('keeps every view address on the hub, which serves a remote one itself', async () => {
       const { router, local, m1 } = rig()
       await router.handle('apps.viewFrame', { appId: 'board', projectId: 'm1.p1', instanceId: 'm1.inst', hostOrigin: 'tauri://localhost' })

@@ -2327,6 +2327,10 @@ export class SessionManager {
     this.restartAfterTurn.delete(sessionId)
     // A deleted session's branch is never asked about again (#392: one entry per worktree session ever made)
     this.prCheckedAt.delete(sessionId)
+    // Kept until its turn ends, which a deleted session's never does (#392)
+    this.appsRestartAfterTurn.delete(sessionId)
+    this.awaitingReport.delete(sessionId)
+    this.forgetCommits(sessionId)
     this.meta.delete(sessionId)
     await this.store.trashSession(sessionId, {
       projectId: m.projectId,
@@ -2820,6 +2824,8 @@ export class SessionManager {
     if (e.type === 'approval_resolved' && e.sessionId) this.raiseHostAsks(e.sessionId)
     // Applies a setting that changed mid-turn now (#164) — if it was reverted in between there is no drift,
     // so nothing happens
+    // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
+    if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
     if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId)) {
       // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
       const apps = this.appsRestartAfterTurn.delete(e.sessionId)
@@ -3211,6 +3217,10 @@ export class SessionManager {
 
   /** A tool_call's callId -> the session that call's `git commit` belonged to (#50) */
   private pendingCommits = new Map<string, string>()
+
+  private forgetCommits(sessionId: string): void {
+    for (const [callId, sid] of this.pendingCommits) if (sid === sessionId) this.pendingCommits.delete(callId)
+  }
 
   /**
    * Commit attribution with no hooks involved (#50). An agent's commit happens through a tool call,

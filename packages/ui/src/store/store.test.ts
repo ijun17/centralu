@@ -1796,6 +1796,49 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
     mock.emit(said(s, 'Past an unread page.'))
     expect(steps(s)).toEqual(['Grep: boundaries', 'Found it.'])
   })
+
+  it('a closed card lets go of its steps when its conversation is cut back to the window, and reads them again when opened (#392)', async () => {
+    const s = 'sub-trim'
+    const mock = await setup(s)
+    mock.sessions.set('sub-other', sessionInfo('sub-other'))
+    await useStore.getState().attach(mock)
+    mock.emit(grep(s))
+    useStore.getState().focusSession(s)
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Grep: boundaries']))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    const OPEN = 'toolu_still_open'
+    useStore.setState((st) => ({
+      // A conversation longer than the window, so leaving it cuts it back; and a second card the person left open
+      chat: { ...st.chat, [s]: Array.from({ length: 120 }, (_, i) => ({ kind: 'assistant', seq: i + 1, storedSeq: i + 1, text: `L${i + 1}` }) as ChatItem) },
+      subagentSteps: { ...st.subagentSteps, [s]: { ...st.subagentSteps[s], [OPEN]: { open: true, rows: [], more: false, loading: false, error: null } } },
+    }))
+
+    useStore.getState().focusSession('sub-other')
+    expect(useStore.getState().chat[s]!.length).toBeLessThan(120)
+    expect(Object.keys(useStore.getState().subagentSteps[s] ?? {})).toEqual([OPEN])
+
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Grep: boundaries']))
+    expect(mock.subagentReads).toBe(2)
+  })
+
+  it('so does a closed card of a session that is not on screen, when the off-screen trim cuts it (#392)', async () => {
+    const s = 'sub-offscreen'
+    const mock = await setup(s)
+    mock.sessions.set('sub-seen', sessionInfo('sub-seen'))
+    await useStore.getState().attach(mock)
+    mock.emit(grep(s))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Grep: boundaries']))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    useStore.getState().focusSession('sub-seen')
+    for (let i = 1; i <= 300; i++) {
+      mock.emit({ sessionId: s, type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
+    }
+    expect(useStore.getState().chat[s]!.length).toBeLessThanOrEqual(100)
+    expect(useStore.getState().subagentSteps[s]?.[AGENT]).toBeUndefined()
+  })
 })
 
 /**
@@ -4361,5 +4404,56 @@ describe('the pen for events before registration is bounded (#392)', () => {
     expect(useStore.getState().chat['pen-never']).toBeUndefined()
     // A pen still inside the window is replayed as before
     expect(useStore.getState().chat['pen-later']!.map(line)).toEqual(['read 1'])
+  })
+})
+
+describe('pinned views claimed back after a reconnect (#392)', () => {
+  it('claims the views it shows, keeps the ones the host still has, and opens again the ones it closed', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    useStore.getState().ensurePinnedView('p1', 'kept')
+    useStore.getState().ensurePinnedView('p1', 'lost')
+    useStore.getState().ensurePinnedView('p1', 'never')
+    await useStore.getState().startPinnedView(externalAppKey('p1', 'kept'))
+    await useStore.getState().startPinnedView(externalAppKey('p1', 'lost'))
+    const of = (appId: string) => useStore.getState().pinnedViews.find((p) => p.key === externalAppKey('p1', appId))!
+    const kept = of('kept').instanceId!
+    const lost = of('lost').instanceId!
+    // The window was away longer than the host waited: it closed the view it no longer saw claimed
+    mock.pinnedInstances.delete(lost)
+
+    mock.setConnectionState('disconnected')
+    mock.setConnectionState('connected')
+
+    await vi.waitFor(() => expect(of('lost').phase).toBe('idle'))
+    // Only open views are claimed; one that never opened has nothing to claim
+    expect(mock.heldViews).toEqual([[kept, lost]])
+    expect(of('lost').instanceId).toBeNull()
+    expect(of('kept')).toMatchObject({ phase: 'open', instanceId: kept })
+    expect(of('never').phase).toBe('idle')
+  })
+})
+
+describe('a parked in-conversation view lets go of its call (#392)', () => {
+  it('a placeholder keeps neither the input nor the result, and reopening brings both back from the host', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('iv392', sessionInfo('iv392'))
+    await useStore.getState().attach(mock)
+    const big = 'x'.repeat(200_000)
+    const base = { type: 'app_view', sessionId: 'iv392', callId: 'c1', appId: 'viewer', projectId: 'p1', tool: 'show' } as const
+    mock.emit({ ...base, phase: 'open', instanceId: 'inst-iv392', toolInput: { text: big } } as NormalizedEvent)
+    mock.emit({ ...base, phase: 'result', toolResult: { content: [{ type: 'text', text: big }] }, kept: true } as NormalizedEvent)
+    const view = () => useStore.getState().inlineViews['iv392']!['c1']!
+    expect(view().toolResult).toBeDefined()
+
+    await useStore.getState().closeInlineView('iv392', 'c1', 'Scrolled away')
+    expect(view()).toMatchObject({ state: 'parked', instanceId: null, kept: true })
+    expect(view().toolInput).toBeUndefined()
+    expect(view().toolResult).toBeUndefined()
+
+    await useStore.getState().reopenInlineView('iv392', 'c1')
+    expect(view().state).toBe('live')
+    expect(view().toolInput).toEqual({ text: big })
+    expect(view().toolResult).toEqual({ content: [{ type: 'text', text: big }] })
   })
 })

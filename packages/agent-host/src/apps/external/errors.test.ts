@@ -252,3 +252,38 @@ describe('a call stopped by a denied capability is not an app bug', () => {
     expect(r.errors(ref('board')).latest).toMatchObject({ tool: 'save', runId: bug.runId, denied: null })
   })
 })
+
+describe('an app that is gone takes its errors with it (#392)', () => {
+  const kept = (r: ExternalApps) => {
+    const i = r as unknown as { errorLog: Map<string, unknown>; errorsSent: Map<string, number> }
+    return { bundles: i.errorLog.size, marks: i.errorsSent.size }
+  }
+
+  it('when its folder is removed, and when its project is', async () => {
+    app('gone', `serveStdio(() => { throw new Error('broken on purpose') })`)
+    app('left', `serveStdio(() => { throw new Error('broken on purpose') })`)
+    let projects = [{ id: 'p1', path: projRoot, trusted: true }]
+    rt = new ExternalApps({
+      projects: () => projects,
+      dataRoot,
+      reservedIds: [],
+      timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, maxFailures: 5, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+    })
+    rt.refresh()
+    for (const id of ['gone', 'left']) {
+      await expect(rt.tools(ref(id))).rejects.toThrow()
+      expect(rt.markErrorSent(ref(id), rt.errors(ref(id)).latest!.at)).not.toBeNull()
+    }
+    expect(kept(rt)).toEqual({ bundles: 2, marks: 2 })
+
+    rmSync(join(projRoot, '.centralu', 'apps', 'gone'), { recursive: true, force: true })
+    rt.refresh()
+    expect(rt.errors(ref('gone')).recent).toEqual([])
+    expect(kept(rt)).toEqual({ bundles: 1, marks: 1 })
+
+    projects = []
+    rt.refresh()
+    expect(kept(rt)).toEqual({ bundles: 0, marks: 0 })
+  })
+})
+

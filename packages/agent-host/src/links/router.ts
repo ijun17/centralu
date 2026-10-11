@@ -13,7 +13,9 @@ import { ROUTES, type Route } from './routes.js'
  * call goes to `local`, exactly as before) and one with several.
  */
 
-export type RpcHandler = (method: string, params: unknown) => Promise<unknown>
+/** Which window's connection a call came in on (transport/server.ts). Passed to the hub's own handler, never forwarded */
+type RpcContext = { client: number }
+export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
 /** One linked machine, as the router needs it (links.ts implements it) */
 export interface RoutedMachine {
@@ -73,28 +75,28 @@ export class Router {
   constructor(private readonly opts: RouterOptions) {}
 
   /** The `onRpc` the server calls */
-  readonly handle: RpcHandler = async (method, params) => {
+  readonly handle: RpcHandler = async (method, params, ctx) => {
     const route: Route | undefined = (ROUTES as Record<string, Route>)[method]
     // Unknown names go to the hub's handler, which answers "Unknown method" as it always has
-    if (!route) return this.opts.local(method, params)
+    if (!route) return this.opts.local(method, params, ctx)
     switch (route.kind) {
       case 'hub':
       case 'internal':
-        return this.opts.local(method, params)
+        return this.opts.local(method, params, ctx)
       case 'session':
-        return this.byKey(method, params, 'sessionId', route)
+        return this.byKey(method, params, 'sessionId', route, ctx)
       case 'project':
-        return this.byKey(method, params, route.key ?? 'projectId', route)
+        return this.byKey(method, params, route.key ?? 'projectId', route, ctx)
       case 'terminal':
-        return this.byKey(method, params, 'terminalId', route)
+        return this.byKey(method, params, 'terminalId', route, ctx)
       case 'view':
-        return this.byView(method, params, route)
+        return this.byView(method, params, route, ctx)
       case 'noRemote': {
         if (this.owner(isObj(params) ? params[route.key] : undefined)) throw new NotOnRemoteError(method)
-        return this.opts.local(method, params)
+        return this.opts.local(method, params, ctx)
       }
       case 'machine':
-        return this.byMachine(method, params, route)
+        return this.byMachine(method, params, route, ctx)
       case 'merge':
         return this.merge(method as RpcMethodName, params)
     }
@@ -125,18 +127,19 @@ export class Router {
     params: unknown,
     key: string,
     route: { params?: (p: Obj, q: Qualifier) => Obj; result?: (r: unknown, q: Qualifier) => unknown; orMachine?: boolean },
+    ctx?: RpcContext,
   ): Promise<unknown> {
-    if (!isObj(params)) return this.opts.local(method, params)
+    if (!isObj(params)) return this.opts.local(method, params, ctx)
     if (route.orMachine && (params[key] === null || params[key] === undefined) && typeof params.machine === 'string') {
       // A linked machine's user-folder app, named by `machine` since it has no project (plan §11)
       const m = this.machineById(params.machine)
       if (!m) throw Object.assign(new Error(`No linked machine ${params.machine}`), { code: 'internal' })
       const { machine: _machine, ...rest } = params
-      const r = await this.forward(m, method, rest)
+      const r = await this.forward(m, method, route.params ? route.params(rest, m.q) : rest)
       return route.result ? route.result(r, m.q) : r
     }
     const m = this.owner(params[key])
-    if (!m) return this.opts.local(method, params)
+    if (!m) return this.opts.local(method, params, ctx)
     const { machine: _machine, ...own } = params
     let p: Obj = { ...(route.orMachine ? own : params), [key]: m.q.strip(params[key], 'The id') }
     if (route.params) p = route.params(p, m.q)
@@ -151,8 +154,13 @@ export class Router {
    * to a remote conversation is refused just as the reverse is: the instance and the conversation live on two hosts,
    * and neither could check the other.
    */
-  private async byView(method: string, params: unknown, route: { keys: readonly string[]; result?: (r: unknown, q: Qualifier) => unknown }) {
-    if (!isObj(params)) return this.opts.local(method, params)
+  private async byView(
+    method: string,
+    params: unknown,
+    route: { keys: readonly string[]; result?: (r: unknown, q: Qualifier) => unknown },
+    ctx?: RpcContext,
+  ) {
+    if (!isObj(params)) return this.opts.local(method, params, ctx)
     let target: RoutedMachine | null | undefined
     for (const key of route.keys) {
       const value = params[key]
@@ -161,15 +169,20 @@ export class Router {
       if (target === undefined) target = m
       else if (target !== m) throw new AcrossMachinesError(method)
     }
-    if (!target) return this.opts.local(method, params)
+    if (!target) return this.opts.local(method, params, ctx)
     const p: Obj = { ...params }
     for (const key of route.keys) if (typeof p[key] === 'string') p[key] = target.q.strip(p[key], 'The id')
     const r = await this.forward(target, method, p)
     return route.result ? route.result(r, target.q) : r
   }
 
-  private async byMachine(method: string, params: unknown, route: { result?: (r: unknown, q: Qualifier) => unknown }): Promise<unknown> {
-    if (!isObj(params) || params.machine === undefined || params.machine === null) return this.opts.local(method, params)
+  private async byMachine(
+    method: string,
+    params: unknown,
+    route: { result?: (r: unknown, q: Qualifier) => unknown },
+    ctx?: RpcContext,
+  ): Promise<unknown> {
+    if (!isObj(params) || params.machine === undefined || params.machine === null) return this.opts.local(method, params, ctx)
     const m = this.machineById(params.machine)
     if (!m) throw Object.assign(new Error(`No linked machine ${String(params.machine)}`), { code: 'internal' })
     const { machine: _machine, ...rest } = params

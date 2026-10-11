@@ -216,12 +216,18 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'apps.viewFrame': HUB,
   'apps.viewDocument': view(['instanceId'], (r, q) => q.viewDocument(r)),
   // A linked machine's user-folder app has no project to name its machine: `machine` does (plan §11)
-  'apps.openView': { kind: 'project', orMachine: true, result: (r, q) => q.openedView(r) },
+  /*
+   * A lease (#392) ties a view to the window's connection on the host it is open on. A linked machine sees the hub's
+   * link, not the window, so its views are opened without one and live until closed, as before
+   */
+  'apps.openView': { kind: 'project', orMachine: true, result: (r, q) => q.openedView(r), params: ({ lease: _lease, ...p }) => p },
   'apps.readResource': view(['projectId', 'instanceId']),
   'apps.invoke': view(['projectId', 'instanceId']),
   'apps.inlineReopen': session((r, q) => q.inlineView(r)),
   'apps.viewMessage': view(['sessionId', 'instanceId']),
   'apps.closeView': view(['instanceId']),
+  // The hub's own leases; another machine's ids are passed over (views/view-host.ts `hold`)
+  'apps.holdViews': HUB,
   'apps.questions': HUB,
   'apps.answerQuestion': HUB,
   'apps.importPrepare': HUB,

@@ -126,7 +126,7 @@ export function createRpcHandler(
     return updates
   }
 
-  const handlers: { [M in RpcMethodName]: (p: unknown) => Promise<unknown> } = {
+  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number }) => Promise<unknown> } = {
     'agents.createSession': async (p) => mgr.createSession(RpcMethods['agents.createSession'].params.parse(p)),
     'agents.send': async (p) => {
       const { sessionId, text, attachments } = RpcMethods['agents.send'].params.parse(p)
@@ -329,9 +329,15 @@ export function createRpcHandler(
       const d = await requireViews().document(instanceId)
       return { appId: d.app.appId, projectId: d.app.projectId, uri: d.uri, origin: d.origin, resource: d.resource as { contents: unknown[] } }
     },
-    'apps.openView': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.openView'].params.parse(p)
-      return openHomeView(requireExternalApps(), requireViews(), { appId, projectId })
+    'apps.openView': async (p, ctx) => {
+      const { appId, projectId, lease } = RpcMethods['apps.openView'].params.parse(p)
+      // A window that asks for a lease holds the view through its connection (#392); an older window's view lives until closed
+      return openHomeView(requireExternalApps(), requireViews(), { appId, projectId }, lease && ctx ? ctx.client : undefined)
+    },
+    'apps.holdViews': async (p, ctx) => {
+      const { instanceIds } = RpcMethods['apps.holdViews'].params.parse(p)
+      if (!ctx) throw Object.assign(new Error('App views are held through a window connection'), { code: 'internal' })
+      return { missing: requireViews().hold(instanceIds, ctx.client) }
     },
     'apps.closeView': async (p) => {
       const { instanceId } = RpcMethods['apps.closeView'].params.parse(p)
@@ -764,7 +770,7 @@ export function createRpcHandler(
     },
   }
 
-  return async (method: string, params: unknown): Promise<unknown> => {
+  return async (method: string, params: unknown, ctx?: { client: number }): Promise<unknown> => {
     const name = method as RpcMethodName
     const h = handlers[name]
     /*
@@ -778,7 +784,7 @@ export function createRpcHandler(
         { code: 'internal' },
       )
     }
-    const result = await h(params)
+    const result = await h(params, ctx)
 
     /*
      * Checks here whether what is being sent out **matches its declared shape.**

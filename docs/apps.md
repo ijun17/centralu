@@ -871,7 +871,7 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.invoke` | A view's tool call (`projectId` absent or null means a user-folder app) |
 | `apps.viewFrame`, `apps.readResource` | The frame address of a view instance; a resource of the frame's own app |
 | `apps.viewDocument` | An open instance's app, origin method and raw document, for a hub that serves this host's view in its own window (#82, [plans/remote-hub.md](plans/remote-hub.md) §11) |
-| `apps.openView`, `apps.closeView` | Open a pinned view (calls `home`; `machine` names a linked machine's user-folder app); close any view instance |
+| `apps.openView`, `apps.closeView`, `apps.holdViews` | Open a pinned view (calls `home`; `machine` names a linked machine's user-folder app); close any view instance; claim a window's pinned views after a reconnect. A view of this host opened with `lease` belongs to the window's connection: once that ends, the host waits five minutes for a claim and then closes it, so a reloaded or closed window does not hold its apps open for good (#392). A linked machine's view is opened without one |
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver a view's message once the person agreed (an inline view's to its conversation, a pinned view's to the session picked) |
 | `apps.runs`, `apps.errors` | Run records with their chains; the latest error bundles |
 | `apps.reach` | Whether a session can use one app's tools now, and if not why (§6.7) |

@@ -3572,6 +3572,7 @@ export const useStore = create<AppState>((set, get) => ({
                 ...st.history,
                 [sessionId]: { oldestSeq: trimmed.oldestSeq, more: trimmed.oldestSeq > 1, loading: false },
               },
+              subagentSteps: withoutClosedSteps(st.subagentSteps, sessionId),
             }
           : {}),
         chat: chat === undefined ? st.chat : { ...st.chat, [sessionId]: trimmed ? trimmed.items : chat },
@@ -3729,6 +3730,7 @@ export const useStore = create<AppState>((set, get) => ({
             ...s.history,
             [prev]: { oldestSeq: trimmed.oldestSeq, more: trimmed.oldestSeq > 1, loading: false },
           },
+          subagentSteps: withoutClosedSteps(s.subagentSteps, prev),
         }))
       }
     }
@@ -5566,7 +5568,12 @@ export const useStore = create<AppState>((set, get) => ({
     await inlineFrames.get(inlineFrameKey(sessionId, callId))?.teardown().catch(() => {})
     // The session was deleted in the meantime (gone along with the whole screen), or another path already closed it
     if (get().inlineViews[sessionId]?.[callId]?.state !== 'closing') return
-    patch({ state: 'parked', instanceId: null })
+    /*
+     * A placeholder draws neither the input nor the result, and reopening takes both from the host (#392). Kept
+     * here, each parked card held its call's whole input and outcome (up to 256 KB each) for the life of the
+     * window, and a long conversation parks one card per app call.
+     */
+    patch({ state: 'parked', instanceId: null, toolInput: undefined, toolResult: undefined })
     if (v.instanceId) void get().platform?.apps.closeView(v.instanceId).catch(() => {})
   },
 
@@ -5962,6 +5969,8 @@ export const useStore = create<AppState>((set, get) => ({
     void get().refreshAppQuestions()
     // So are the links' states (#82): a machine that went away or came back during the gap
     void get().refreshMachines()
+    // The pinned views this window shows are leased to its connection, which just ended (#392)
+    void holdPinnedViews(get, set)
 
     const wasLive = Object.values(s.sessions).filter((x) => x.live)
     const platform = s.platform
@@ -6288,8 +6297,53 @@ async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => P
   }
 }
 
+/**
+ * Claims this window's pinned views after a reconnect (#392).
+ *
+ * The host leases a pinned view to the connection that opened it, and closes it a few minutes after
+ * that connection ends unless a window claims it, so a reloaded or closed window does not hold its
+ * apps open for good. This window is still here, so it claims what it shows. A view the host no
+ * longer has (the window was away longer than the host waited) goes back to idle, which opens it
+ * again, as after a restart. An older host has no such call and never closes a view on its own, so
+ * a failure here leaves everything as it is.
+ */
+async function holdPinnedViews(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): Promise<void> {
+  const platform = get().platform
+  const held = get().pinnedViews.flatMap((p) => (p.phase === 'open' && p.instanceId ? [p.instanceId] : []))
+  if (!platform || held.length === 0) return
+  let missing: string[]
+  try {
+    missing = await platform.apps.holdViews(held)
+  } catch {
+    return
+  }
+  if (missing.length === 0) return
+  const gone = new Set(missing)
+  set((s) => ({
+    pinnedViews: s.pinnedViews.map((p) =>
+      p.instanceId && gone.has(p.instanceId)
+        ? { ...p, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false }
+        : p,
+    ),
+  }))
+}
+
 /** An instance left open that a reopened UI has closed (`syncInlineViews`) */
 const releasedOrphans = new Set<string>()
+
+/**
+ * A session's launch cards without the steps of the closed ones (#392), for when its conversation is cut back to the
+ * window. A closed card kept every step it had read, and a live session kept appending to it, for the life of the
+ * window. Opening it again reads them from the store, as the first opening did. An open card keeps its steps: it is
+ * still showing them, or will be when the person comes back.
+ */
+function withoutClosedSteps(all: AppState['subagentSteps'], sessionId: string): AppState['subagentSteps'] {
+  const mine = all[sessionId]
+  if (!mine || Object.values(mine).every((c) => c.open)) return all
+  const kept: Record<string, SubagentSteps> = {}
+  for (const [callId, c] of Object.entries(mine)) if (c.open) kept[callId] = c
+  return { ...all, [sessionId]: kept }
+}
 
 /** A launch card's steps before the first read (#222) */
 const SUBAGENT_STEPS_UNREAD: SubagentSteps = { open: false, rows: [], more: false, loading: false, error: null }

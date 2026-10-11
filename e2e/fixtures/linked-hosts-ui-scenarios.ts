@@ -112,16 +112,17 @@ export function linkedHostsUiTests(): void {
         await page.getByTestId(`app-row-${MACHINE}:_user/notes`).click()
         await expect(page.getByTestId(`pinned-app-${MACHINE}:_user/notes`).getByTestId('pinned-title')).toHaveText('Remote notes')
         await expect(appView(page, `${MACHINE}:_user/notes`).locator('#count')).toHaveText('0', { timeout: 30_000 })
+        // The window asks for a lease on every pinned view (#392); the hub drops it before the machine (links/routes.ts)
         expect(calls.filter((c) => c.method === 'apps.openView' && c.params.appId === 'notes').map((c) => c.params)).toEqual([
-          { appId: 'notes', projectId: null, machine: MACHINE },
+          { appId: 'notes', projectId: null, machine: MACHINE, lease: true },
         ])
 
         await page.getByTestId('app-row-_user/notes').click()
         await expect(page.getByTestId('pinned-app-_user/notes').getByTestId('pinned-title')).toHaveText('Hub notes')
         await expect(appView(page, '_user/notes').locator('#count')).toHaveText('0', { timeout: 30_000 })
         expect(calls.filter((c) => c.method === 'apps.openView' && c.params.appId === 'notes').map((c) => c.params)).toEqual([
-          { appId: 'notes', projectId: null, machine: MACHINE },
-          { appId: 'notes', projectId: null },
+          { appId: 'notes', projectId: null, machine: MACHINE, lease: true },
+          { appId: 'notes', projectId: null, lease: true },
         ])
       })
     })

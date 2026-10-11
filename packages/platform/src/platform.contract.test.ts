@@ -900,6 +900,9 @@ describe('Platform contract: pinned screen (web + real host + real app)', () => 
       expect(v).toMatchObject({ tool: 'home', resourceUri: 'ui://fixture/main', toolInput: {}, toolResult: { structuredContent: { interval: 5 } } })
       const frame = await platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })
       expect(frame.url).toContain(`/${secret}/views/${v.instanceId}/`)
+      // Leased to this window's connection, and claimable through it (#392)
+      expect(views.list().find((o) => o.id === v.instanceId)?.leased).toBe(true)
+      expect(await platform.apps.holdViews([v.instanceId])).toEqual([])
       // What the run-history panel (B-7) reads — the host's history has "the screen called home"
       expect((await platform.apps.runs('slider', project.id)).map((r) => [r.id, r.tool, r.callerKind, r.status])).toEqual([[v.runId, 'home', 'view', 'ok']])
 
@@ -907,6 +910,7 @@ describe('Platform contract: pinned screen (web + real host + real app)', () => 
 
       await platform.apps.closeView(v.instanceId)
       await expect(platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })).rejects.toThrow(/not open/)
+      expect(await platform.apps.holdViews([v.instanceId])).toEqual([v.instanceId])
 
       // Restart (B-6) goes to the host's apps.restart — an app that was up comes down, and a nonexistent app is rejected with its name
       expect(rt.list().find((a) => a.appId === 'slider')?.status).toBe('running')

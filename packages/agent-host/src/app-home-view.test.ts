@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AppRun, ToolName } from '@cc/protocol'
+import { PROTOCOL_VERSION, type AppRun, type ToolName } from '@cc/protocol'
+import { WebSocket } from 'ws'
 import type { AgentAdapter } from './adapters/contract.js'
 import { storeRunLedger } from './app-run-ledger.js'
 import { runtimeViewSource } from './app-view-source.js'
@@ -62,7 +63,7 @@ const alive = (pid: number) => {
   }
 }
 
-async function start(timing: Partial<RuntimeTiming> = {}) {
+async function start(timing: Partial<RuntimeTiming> = {}, leaseGraceMs?: number) {
   store = new Store()
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: projRoot, trusted }],
@@ -80,11 +81,41 @@ async function start(timing: Partial<RuntimeTiming> = {}) {
     ports: new OriginPorts({ load: () => null, save: () => {} }, { log: () => {} }),
     hostPort: () => port,
     log: () => {},
+    ...(leaseGraceMs === undefined ? {} : { leaseGraceMs }),
   })
   const adapters = new Map<ToolName, AgentAdapter>()
   rpc = createRpcHandler(new SessionManager(store, adapters, () => {}), adapters, { externalApps: rt, views })
-  server = new HostServer({ port: 0, token: 'tok', onRpc: rpc, http: { secret: SECRET, routes: views.routes } })
+  // Wired as main.ts wires it: a window's connection ending lets go of the views it leased (#392)
+  server = new HostServer({
+    port: 0,
+    token: 'tok',
+    onRpc: rpc,
+    onClientGone: (client) => views.holderGone(client),
+    http: { secret: SECRET, routes: views.routes },
+  })
   port = await server.listen()
+  return port
+}
+
+/** A window: a real WebSocket that said hello, making calls the way the web platform does */
+async function window(port: number) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  const answers = new Map<string, (f: { ok: boolean; result?: unknown; error?: { message: string } }) => void>()
+  ws.on('message', (d) => {
+    const f = JSON.parse(String(d)) as { kind: string; id?: string; ok: boolean }
+    if (f.kind === 'res' && f.id) answers.get(f.id)?.(f as never)
+  })
+  await new Promise<void>((r) => ws.on('open', () => r()))
+  ws.send(JSON.stringify({ kind: 'hello', token: 'tok', protocolVersion: PROTOCOL_VERSION }))
+  let n = 0
+  const call = <T,>(method: string, params: unknown) =>
+    new Promise<T>((resolve, reject) => {
+      const id = `w${++n}`
+      answers.set(id, (f) => (f.ok ? resolve(f.result as T) : reject(new Error(f.error?.message))))
+      ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
+    })
+  const gone = () => new Promise<void>((r) => (ws.readyState === WebSocket.CLOSED ? r() : ws.on('close', () => r())))
+  return { ws, call, gone }
 }
 
 const openView = (appId: string) =>
@@ -235,5 +266,58 @@ describe('apps.viewDocument (a hub asking for a view it serves, #82)', () => {
     await expect(rpc('apps.viewDocument', { instanceId: v.instanceId })).rejects.toThrow(/not open/)
     // An id of the shape a hub shows its window is never one of this host's own
     await expect(rpc('apps.viewDocument', { instanceId: `m1.${v.instanceId}` })).rejects.toThrow(/not open/)
+  })
+})
+
+describe('a pinned view leased to the window (#392)', () => {
+  type Opened = { instanceId: string; toolResult: { _meta?: Record<string, number> } }
+
+  it('a window that reloads lets go of its views: once the grace passes the app is no longer held and stops as idle', async () => {
+    plant('slider', { home: 'home' })
+    const port = await start({ idleMs: 250 }, 300)
+    const before = await window(port)
+    const v = await before.call<Opened>('apps.openView', { appId: 'slider', projectId: 'p1', lease: true })
+    const pid = v.toolResult._meta!['fixture/served-by']!
+    await new Promise((r) => setTimeout(r, 600))
+    expect(alive(pid)).toBe(true)
+
+    // A reload: the page's socket closes, and the new page opens a socket of its own and none of the old views
+    before.ws.close()
+    await before.gone()
+    const after = await window(port)
+    await until(() => alive(pid), (a) => a === false, 8000)
+    expect(views.describe(v.instanceId)).toBeNull()
+    expect(await after.call<{ missing: string[] }>('apps.holdViews', { instanceIds: [v.instanceId] })).toEqual({ missing: [v.instanceId] })
+    after.ws.close()
+  })
+
+  it('a window that reconnects and claims its view keeps it, and the app stays up', async () => {
+    plant('slider', { home: 'home' })
+    const port = await start({ idleMs: 250 }, 300)
+    const first = await window(port)
+    const v = await first.call<Opened>('apps.openView', { appId: 'slider', projectId: 'p1', lease: true })
+    const pid = v.toolResult._meta!['fixture/served-by']!
+    first.ws.close()
+    await first.gone()
+    const back = await window(port)
+    // Another machine's view, qualified by the hub, is not this host's to report missing
+    expect(await back.call<{ missing: string[] }>('apps.holdViews', { instanceIds: [v.instanceId, 'm1.other-machine-view-id'] })).toEqual({ missing: [] })
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(alive(pid)).toBe(true)
+    expect(views.describe(v.instanceId)).not.toBeNull()
+    back.ws.close()
+  })
+
+  it('a view opened without a lease (an older window) outlives the window as before', async () => {
+    plant('slider', { home: 'home' })
+    const port = await start({ idleMs: 250 }, 300)
+    const old = await window(port)
+    const v = await old.call<Opened>('apps.openView', { appId: 'slider', projectId: 'p1' })
+    const pid = v.toolResult._meta!['fixture/served-by']!
+    old.ws.close()
+    await old.gone()
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(alive(pid)).toBe(true)
+    expect(views.describe(v.instanceId)).not.toBeNull()
   })
 })

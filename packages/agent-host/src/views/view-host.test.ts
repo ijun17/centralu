@@ -12,7 +12,7 @@ import { HostServer } from '../transport/server.js'
 import { OriginPorts, type PortBook } from './origin-ports.js'
 import { DRAG_RELAY_SCRIPT, withDragRelay } from './drag-relay.js'
 import { PROXY_SCRIPT, PROXY_SCRIPT_HASH } from './proxy-page.js'
-import { MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, type ViewSource } from './view-host.js'
+import { LEASE_GRACE_MS, MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, type ViewSource } from './view-host.js'
 import { VIEW_MIME_TYPE } from './view-document.js'
 import { createHash } from 'node:crypto'
 import { connect, createServer, type Server as NetServer } from 'node:net'
@@ -393,6 +393,110 @@ describe('ViewHost — a planned hand-over (#280 step 4)', () => {
     expect(v.describe(open)?.app).toEqual(OTHER)
     expect(v.describe('b'.repeat(22))).toBeNull()
     v.close('a'.repeat(22))
+    expect(held.get('notes')).toBe(0)
+  })
+})
+
+describe('ViewHost — a view leased to a window (#392)', () => {
+  /** A ViewHost with no server, counting holds per app: what is under test is only which instances live */
+  function leasing(leaseGraceMs?: number) {
+    const held = new Map<string, number>()
+    const source: ViewSource = {
+      readResource: async (_a, uri) => ({ contents: [{ uri, mimeType: VIEW_MIME_TYPE, text: 'x' }] }),
+      retain(app) {
+        held.set(app.appId, (held.get(app.appId) ?? 0) + 1)
+        return () => void held.set(app.appId, (held.get(app.appId) ?? 0) - 1)
+      },
+    }
+    const v = new ViewHost({
+      secret: SECRET,
+      allowedOrigins: [HOST_ORIGIN],
+      source,
+      ports: new OriginPorts({ load: () => null, save: () => {} }, { log: () => {} }),
+      hostPort: () => null,
+      log: () => {},
+      ...(leaseGraceMs === undefined ? {} : { leaseGraceMs }),
+    })
+    made.push(v)
+    return { v, held }
+  }
+  const made: ViewHost[] = []
+  afterEach(async () => {
+    for (const v of made.splice(0)) await v.dispose()
+  })
+  const T = 1_000_000
+
+  it('a window that reloads leaves views no one claims, and they close once the grace has passed, letting their app go', () => {
+    const { v, held } = leasing()
+    // The window on connection 1 opens two pinned views, then reloads: the new page is connection 2 and opens its own
+    const old = [v.open(NOTES, 'ui://notes/board', 1).instanceId, v.open(NOTES, 'ui://notes/board', 1).instanceId]
+    v.holderGone(1, T)
+    const fresh = v.open(NOTES, 'ui://notes/board', 2).instanceId
+    expect(held.get('notes')).toBe(3)
+
+    expect(v.sweepUnclaimed(T + LEASE_GRACE_MS - 1)).toBe(0)
+    expect(v.sweepUnclaimed(T + LEASE_GRACE_MS)).toBe(2)
+    expect(old.map((id) => v.describe(id))).toEqual([null, null])
+    expect(v.describe(fresh)).not.toBeNull()
+    expect(held.get('notes')).toBe(1)
+  })
+
+  it('a window that reconnects and claims its views keeps them, and is told which are gone', () => {
+    const { v } = leasing()
+    const kept = v.open(NOTES, 'ui://notes/board', 1).instanceId
+    const closed = v.open(NOTES, 'ui://notes/board', 1).instanceId
+    v.close(closed)
+    v.holderGone(1, T)
+    expect(v.hold([kept, closed], 2)).toEqual([closed])
+    expect(v.sweepUnclaimed(T + 10 * LEASE_GRACE_MS)).toBe(0)
+    // It is connection 2's now: that one ending starts the wait again
+    v.holderGone(2, T + 20 * LEASE_GRACE_MS)
+    expect(v.sweepUnclaimed(T + 21 * LEASE_GRACE_MS)).toBe(1)
+    expect(v.describe(kept)).toBeNull()
+  })
+
+  it("one window's connection ending leaves another window's views alone", () => {
+    const { v } = leasing()
+    const mine = v.open(NOTES, 'ui://notes/board', 1).instanceId
+    const theirs = v.open(NOTES, 'ui://notes/board', 2).instanceId
+    v.holderGone(1, T)
+    expect(v.sweepUnclaimed(T + LEASE_GRACE_MS)).toBe(1)
+    expect(v.describe(mine)).toBeNull()
+    expect(v.describe(theirs)).not.toBeNull()
+  })
+
+  it('a view with no lease (in a conversation, or opened by an older window) is never closed by a sweep, nor taken by a claim', () => {
+    const { v } = leasing()
+    const inline = v.open(NOTES, 'ui://notes/board').instanceId
+    expect(v.hold([inline], 1)).toEqual([])
+    v.holderGone(1, T)
+    expect(v.sweepUnclaimed(T + 100 * LEASE_GRACE_MS)).toBe(0)
+    expect(v.describe(inline)).not.toBeNull()
+    expect(v.list().map((o) => o.leased)).toEqual([undefined])
+  })
+
+  it('a leased view handed to the next host waits there for a claim; one no window claims closes after the grace', () => {
+    const { v: before } = leasing()
+    const claimed = before.open(NOTES, 'ui://notes/board', 1).instanceId
+    const abandoned = before.open(NOTES, 'ui://notes/board', 1).instanceId
+    const inline = before.open(NOTES, 'ui://notes/board').instanceId
+    const record = before.list()
+    expect(record.map((o) => o.leased)).toEqual([true, true, undefined])
+
+    const { v: after } = leasing()
+    expect(after.restore(record, T)).toHaveLength(3)
+    expect(after.hold([claimed], 7)).toEqual([])
+    expect(after.sweepUnclaimed(T + LEASE_GRACE_MS)).toBe(1)
+    expect(after.describe(abandoned)).toBeNull()
+    expect(after.describe(claimed)).not.toBeNull()
+    expect(after.describe(inline)).not.toBeNull()
+  })
+
+  it('closes unclaimed views on its own, without anyone asking for a sweep', async () => {
+    const { v, held } = leasing(50)
+    const id = v.open(NOTES, 'ui://notes/board', 1).instanceId
+    v.holderGone(1)
+    await expect.poll(() => v.describe(id), { timeout: 10_000 }).toBeNull()
     expect(held.get('notes')).toBe(0)
   })
 })

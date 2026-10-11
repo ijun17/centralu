@@ -1816,6 +1816,17 @@ export class ExternalApps {
     return `${ref.projectId ?? USER_SCOPE}/${ref.appId}`
   }
 
+  /**
+   * An app that is gone (its folder or its project removed) takes its error bundles with it (#392). They are kept
+   * across a manifest change, not across removal: each removed app that had failed left up to ten bundles of stderr
+   * behind for the host's life. A folder put back starts with none, as a new app does.
+   */
+  private forgetErrors(ref: AppRef): void {
+    const key = this.holdKey(ref)
+    this.errorLog.delete(key)
+    for (const k of [...this.errorsSent.keys()]) if (k.startsWith(`${key}\n`)) this.errorsSent.delete(k)
+  }
+
   private clearIdle(e: AppEntry): void {
     if (e.life.idle) clearTimeout(e.life.idle)
     e.life.idle = null
@@ -2033,6 +2044,7 @@ export class ExternalApps {
       if (seen.has(id)) continue
       held.apps.delete(id)
       void this.halt(e, 'app folder removed')
+      this.forgetErrors(e.ref)
       changed = true
     }
     this.watchers.setWatched(key, scope.root, result.watch)
@@ -2080,7 +2092,10 @@ export class ExternalApps {
     const held = this.scopes.get(key)
     this.watchers.setWatched(key, held?.scope.root ?? join(this.deps.dataRoot, USER_APPS_REL), [])
     this.scopes.delete(key)
-    for (const e of held?.apps.values() ?? []) void this.halt(e, 'project removed')
+    for (const e of held?.apps.values() ?? []) {
+      void this.halt(e, 'project removed')
+      this.forgetErrors(e.ref)
+    }
     if (held?.apps.size) this.appsChanged()
   }
 }
