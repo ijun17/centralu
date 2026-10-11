@@ -190,6 +190,12 @@ function ProjectAccessCard({
           : `The app's tools attach to this session while it uses them.`}{' '}
         Always is remembered for {detail.from.name} → {detail.to.name}; revoke it in Settings.
       </p>
+      {detail.to.trusted === false && (
+        <p className="mt-1 px-3 text-xs leading-body text-ink-signal" data-testid="approval-untrusted">
+          You have not trusted {detail.to.name}. The session there reads none of its settings or instruction files and
+          runs none of its apps, but it works on that project&apos;s files under your own permission settings.
+        </p>
+      )}
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k="y" label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
         <ActionKey k="a" label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />

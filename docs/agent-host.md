@@ -102,13 +102,17 @@ What one call does (`SessionManager.askProject`):
 1. **The target.** Another registered project, by name or id. Its own project is refused ("do the
    work here"); an unknown name is refused with the other projects' names. A session that was itself
    asked (`askedBy` set) cannot ask a third project: depth one, so two projects that consented to each
-   other cannot bounce a task between them without a person.
+   other cannot bounce a task between them without a person. A session in a project the person has not
+   trusted cannot ask at all, the rule `attach_app` follows (#382): text in that repository could be
+   what is asking. An untrusted project can be asked; the card says it is not trusted.
 2. **Consent** (`ensureProjectAccess`, kind `delegate`). The first time a session of project X asks
    project Y, a card stands in the caller's session, in the approval slot (detail `project_access`):
    allow once, always for this pair, deny. Only "always" is stored (store v44, `project_consents`,
    one row per from, to and kind; both ids cascade with their project). Settings → Permissions lists
    the pairs and revokes them. Deny and a withdrawn card return a refusal the model reads as "do not
-   ask again unless told". The same gate serves part A's app tools (kind `apps`).
+   ask again unless told". The same gate serves part A's app tools (kind `apps`). The detail carries
+   the target's trust (`to.trusted`), and the question names an untrusted target "(not trusted)"
+   wherever it stands: on the card, in the conversation and in a notification (#382).
 3. **The delegated session.** The idle (or finished) session this caller asked in that project
    before, so a second ask builds on the first; otherwise a new one with that project's folder, its
    instructions (its trust, as for any session), its default tool and that tool's remembered model and

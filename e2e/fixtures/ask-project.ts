@@ -54,6 +54,34 @@ export function askProjectTests(): void {
       await expect(page.getByText('Always allowed: consumer → toolkit. Revoke it in Settings.')).toBeVisible()
     })
 
+    // #382: asking into a project the person has not trusted is allowed, and the card says so before they answer
+    test('a card for an untrusted target says it is not trusted; a trusted one says nothing more', async ({ page }) => {
+      const { caller, consumer, toolkit } = await start(page)
+      await emit(page, caller, { type: 'state_change', state: 'working' })
+      const ask = (requestId: string, trusted: boolean) =>
+        emit(page, caller, {
+          type: 'approval_request',
+          requestId,
+          detail: {
+            kind: 'project_access',
+            access: 'delegate',
+            from: { id: consumer, name: 'consumer' },
+            to: { id: toolkit, name: 'toolkit', trusted },
+            text: 'export the sprites',
+          },
+        })
+      await ask('xp-u', false)
+      const card = page.locator('[data-testid="approval-card"][data-kind="project_access"]')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask toolkit (not trusted) to export the sprites?')
+      await expect(card.getByTestId('approval-untrusted')).toContainText('You have not trusted toolkit.')
+      await page.keyboard.press('n')
+      await expect(card).toHaveCount(0)
+
+      await ask('xp-t', true)
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask toolkit to export the sprites?')
+      await expect(card.getByTestId('approval-untrusted')).toHaveCount(0)
+    })
+
     test('the caller\'s card links to the session doing the work, and that session links back', async ({ page }) => {
       const { caller, toolkit } = await start(page)
       await emit(page, caller, { type: 'state_change', state: 'working' })

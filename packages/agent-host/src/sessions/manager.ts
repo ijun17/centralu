@@ -4163,6 +4163,8 @@ export class SessionManager {
     this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), ...patch }))
     // The session tools switch also decides the apps a session attached through them (#382): recount every live one
     if (patch.sessionTools !== undefined && patch.sessionTools !== current.sessionTools) {
+      // Off ends what was allowed "once"; "always" and the person's own folder come back with the switch (#382)
+      if (!patch.sessionTools) this.appAccess?.dropOnce(this.meta.keys())
       for (const id of this.meta.keys()) this.appsHub?.sessionAppsChanged(id)
     }
     return { ...current, ...patch }
@@ -4956,7 +4958,8 @@ export class SessionManager {
           kind: 'project_access',
           access,
           from: { id: from.id, name: from.name },
-          to: { id: to.id, name: to.name },
+          // Said on the card (#382): a session opened there follows its trust, so the person should know before allowing
+          to: { id: to.id, name: to.name, trusted: to.trusted },
           text: what.text,
           ...(what.app ? { app: what.app } : {}),
         },
@@ -5034,6 +5037,14 @@ export class SessionManager {
       return { ok: false, error: 'This session was itself asked by another project, so it cannot ask a third — say in your answer what is needed instead.' }
     }
     const projects = this.store.listProjects()
+    /*
+     * Not from an untrusted project (owner decision 2026-10-11, #382), the rule attach_app already follows
+     * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
+     * alone would then be the only thing between a planted instruction and another project's session.
+     */
+    if (projects.find((p) => p.id === caller.projectId)?.trusted !== true) {
+      return { ok: false, error: "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu." }
+    }
     const wanted = opts.project.trim()
     const target =
       projects.find((p) => p.id === wanted) ??

@@ -739,8 +739,9 @@ or the Share button in the app's header (`apps.setShared`). It is kept in the st
 (`app_shared:<project>/<app>`, absent means off) and reported in the app list (`shared: true`).
 Turning it off detaches the app from every session that attached it.
 Attachments count only while the session holds the reader set: turning "Let sessions look at their own
-project" off in Settings takes them away at once (detach_app goes with the set), and turning it on
-again brings them back (#382).
+project" off in Settings takes them away at once (detach_app goes with the set). Turning it off also
+forgets the ones allowed with "Allow once", and turning it on again brings back the rest: those under
+an "always" the person still keeps, and user-folder apps (owner decision, #382).
 
 **The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1):
 

@@ -87,6 +87,8 @@ export function suggestMatcher(command: string): string {
  * stands in the caller's session, and what is being allowed is what that project may do to the other one.
  */
 export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'project_access' }>): string {
-  if (d.access === 'apps') return `Let ${d.from.name} use ${d.app ? `the app ${d.app.name} from ` : 'apps from '}${d.to.name}?`
-  return `Let ${d.from.name} ask ${d.to.name} to ${d.text}?`
+  // An untrusted target is named as such wherever the question stands (#382): what runs there follows that trust
+  const to = d.to.trusted === false ? `${d.to.name} (not trusted)` : d.to.name
+  if (d.access === 'apps') return `Let ${d.from.name} use ${d.app ? `the app ${d.app.name} from ` : 'apps from '}${to}?`
+  return `Let ${d.from.name} ask ${to} to ${d.text}?`
 }

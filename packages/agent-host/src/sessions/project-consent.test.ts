@@ -26,7 +26,7 @@ describe('consent from one project to another', () => {
       kind: 'project_access',
       access: 'delegate',
       from: { id: w.caller.id, name: w.caller.name },
-      to: { id: w.target.id, name: w.target.name },
+      to: { id: w.target.id, name: w.target.name, trusted: false },
       text: 'export the sprites',
     })
     expect(w.mgr.listSessions().find((x) => x.id === s)?.state).toBe('waiting_approval')

@@ -10,6 +10,12 @@ describe('the cross-project consent question (#371)', () => {
       'Let Consumer use the app Extractor from Toolkit?',
     )
   })
+
+  it('names a target the person has not trusted as such, and says nothing when it is trusted or not said (#382)', () => {
+    const untrusted = { ...base, to: { ...base.to, trusted: false } }
+    expect(projectAccessQuestion({ ...untrusted, access: 'delegate', text: 'extract the assets' })).toBe('Let Consumer ask Toolkit (not trusted) to extract the assets?')
+    expect(projectAccessQuestion({ ...base, to: { ...base.to, trusted: true }, access: 'delegate', text: 'x' })).toBe('Let Consumer ask Toolkit to x?')
+  })
 })
 
 const cmd = (command: string): ApprovalDetail => ({ kind: 'command', command, cwd: '/p' })

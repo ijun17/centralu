@@ -32,6 +32,13 @@ capability with its own controls ([agent-host.md](agent-host.md) §1.2):
   project. The task arrives framed as sent by another session, never as the person.
 - **Depth one.** A session that was itself asked cannot ask a third project, so two projects that
   consented to each other cannot pass a task back and forth without a person.
+- **Trust** (owner decision 2026-10-11, #382). A session in a project the person has not trusted cannot
+  ask at all, the rule `attach_app` follows: text in that repository could be the one asking, and the
+  card would then be the only thing between a planted instruction and another project. An untrusted
+  project *can* be asked, and the card says so ("Let X ask Y (not trusted) to …", and a line on what
+  that means): the session opened there reads none of its settings or instruction files and runs none
+  of its apps, but works on its files under the person's own permission settings. A remembered
+  "always" for the pair still skips the card, also after the target loses trust.
 - **The answer is someone else's words**, JSON-quoted for the caller like a worker's preview.
 - **Files come back by name, and only from inside the target project.** A named path is granted
   to the caller only if it exists inside the target project's folder after resolving symlinks, and
@@ -122,6 +129,8 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 | A Centralu tool the profile does not have | refused | refused | refused | refused | refused | refused | refused | refused | `profileAllows` (exposure and execution) |
 | `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
 | `ask_project` from a session that was itself asked | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (depth one) |
+| `ask_project` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (the caller's project trust, #382) |
+| `ask_project` into an untrusted project, first time for the pair | asks (the card says it is not trusted) | asks | asks | asks | asks | asks | asks | asks | `ensureProjectAccess` (`to.trusted`), `projectAccessQuestion` |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card: the person's own folder) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `AppAccess.gate` |
@@ -145,8 +154,12 @@ Rows that differ by session:
   trust (`askProject`), like a session the person opens there; under the person's bypass it runs
   freely. It holds the reader set, so it can attach apps (with its own consent card) but cannot ask a
   third project.
-- **A builder's `check`** starts its app and runs the app's code without a card, like any Centralu
-  tool. Builders exist only in trusted projects and the user folder.
+- **A builder's `check`** starts its app and runs the app's code without a card, under every preset,
+  like any Centralu tool. This is intended (owner decision 2026-10-11, #382): the builder is the
+  session writing that code, so a card for running it would ask the person about the builder's own
+  last edit, and every edit already went through the builder's own approvals. Builders exist only in
+  trusted projects and the user folder, whose apps run anyway once trusted, and `check` reaches its
+  own app only (`builder` profile), never another.
 
 The **Codex `normal` + bypass** cell follows the person's policy, as Claude's does (owner decision
 2026-10-11, #382). With `writes`, the person's `approval_policy = "never"` turned "needs approval"
@@ -166,9 +179,9 @@ Codex source, and no logged-in app call was run.
 
 | Change | orchestrator | manager | scoped | builder | reader |
 |---|---|---|---|---|---|
-| "Let sessions look at their own project" off | — | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once and come back if it is turned on again (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`); the schemas leave Claude at the next start |
-| Its project loses trust | No change (reads no project files) | Settings files at the next start | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` still runs (with the card) |
-| The other project loses trust | — | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, and the session it opens there follows its trust |
+| "Let sessions look at their own project" off | — | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
+| Its project loses trust | No change (reads no project files) | Settings files at the next start | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` refused (#382) |
+| The other project loses trust | — | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the session it opens there follows its trust |
 | The person revokes a pair in Settings | — | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again |
 | Sharing of an app turned off | — | — | — | — | Leaves every session that attached it |
 

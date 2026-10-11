@@ -228,6 +228,35 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     expect(servers(o)).toEqual(['app-board'])
   })
 
+  /*
+   * Owner decision 2026-10-11 (#382, question 6): turning the switch off ends what "Allow once" allowed. An "always"
+   * is still the person's standing answer (listed in Settings), so it comes back with the switch; a "once" does not.
+   */
+  it('turning the session tools off drops what "Allow once" attached; turning them on brings back only the rest', async () => {
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    const once = await create(alpha, 'claude')
+    const pending = tool(once.id, 'attach_app', { app: 'beta/board' })
+    await waitFor(() => !!card(once.id))
+    mgr.respondApproval(once.id, card(once.id)!.requestId, 'allow')
+    expect((await pending).text).toContain('Attached: beta/board')
+    const onceOpts = claude.last()
+    // The person says "always" for the pair afterwards, in another session of the same project
+    const always = await create(alpha, 'claude')
+    const asked = tool(always.id, 'attach_app', { app: 'beta/board' })
+    await waitFor(() => !!card(always.id))
+    mgr.respondApproval(always.id, card(always.id)!.requestId, 'always')
+    await asked
+    const alwaysOpts = claude.last()
+    expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([['app-board'], ['app-board']])
+
+    await rpc('prefs.set', { patch: { sessionTools: false } })
+    expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([[], []])
+    await rpc('prefs.set', { patch: { sessionTools: true } })
+    // The "once" record is gone, even though the pair now has an "always" that would have counted it
+    expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([[], ['app-board']])
+    expect((await tool(once.id, 'detach_app', { app: 'beta/board' })).text).toContain('Attached: none')
+  })
+
   it('an attachment survives the session being restarted (resume)', async () => {
     allowedBefore()
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })

@@ -216,6 +216,36 @@ describe('asking another project', () => {
     expect(handleOf(d)!.sent).toHaveLength(1)
   })
 
+  /*
+   * Owner decision 2026-10-11 (#382, questions 2 and 3): an untrusted project cannot ask (attach_app's rule), and an
+   * untrusted one can be asked, with the card saying so — the session opened there follows that trust.
+   */
+  it('a session in an untrusted project cannot ask another project: no card, nothing started', async () => {
+    w.mgr.setProjectTrusted(w.caller.id, false)
+    const s = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const r = await w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
+    expect(!r.ok && r.error).toContain("This session's project is not trusted, so it cannot ask another project")
+    expect(w.card(s)).toBeUndefined()
+    expect(w.mgr.listSessions().filter((x) => x.projectId === w.target.id)).toEqual([])
+  })
+
+  it('asking into an untrusted project raises a card that says the target is not trusted; a trusted target is said to be', async () => {
+    const s = await w.callerSession()
+    const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
+    await w.until(() => !!w.card(s))
+    expect(w.card(s)!.detail).toMatchObject({ access: 'delegate', to: { id: w.target.id, trusted: false } })
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
+    await p
+
+    w.mgr.setProjectTrusted(w.target.id, true)
+    const q = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
+    await w.until(() => !!w.card(s))
+    expect(w.card(s)!.detail).toMatchObject({ to: { id: w.target.id, trusted: true } })
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
+    await q
+  })
+
   it('refuses its own project, an unknown one (naming the others), and an ask from a session that was itself asked', async () => {
     const s = await w.callerSession()
     const own = await w.mgr.askProject(s, { project: w.caller.name, task: 'x' })

@@ -92,6 +92,11 @@ export async function crossWorld(): Promise<CrossWorld> {
   const mgr = new SessionManager(store, adapters as unknown as Map<ToolName, AgentAdapter>, (e) => events.push(e))
   const caller = await mgr.addProject(callerPath)
   const target = await mgr.addProject(targetPath)
+  /*
+   * The caller is trusted: ask_project refuses an untrusted caller (#382). The target is left as a project is when it
+   * is registered, untrusted, which ask_project allows (the card says so); a test that needs it trusted says so.
+   */
+  mgr.setProjectTrusted(caller.id, true)
   const until = async (ok: () => boolean, ms = 2000) => {
     const end = Date.now() + ms
     while (!ok()) {

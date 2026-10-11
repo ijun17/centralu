@@ -611,7 +611,15 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     kind: z.literal('project_access'),
     access: ProjectConsentKind,
     from: z.object({ id: z.string(), name: z.string() }),
-    to: z.object({ id: z.string(), name: z.string() }),
+    to: z.object({
+      id: z.string(),
+      name: z.string(),
+      /**
+       * Whether the person trusts the target project (#382). `false` is said on the card: a session ask_project opens
+       * there follows that trust. Absent from a host that predates it, read as not saying.
+       */
+      trusted: z.boolean().optional(),
+    }),
     /** One line for a person to read: what the caller wants done there (the task, cut short; or the app's use) */
     text: z.string(),
     app: z.object({ appId: z.string(), name: z.string() }).optional(),

@@ -211,6 +211,20 @@ export class AppAccess implements OnDemandApps {
     return { ok: true, server: r.server, when: this.deps.attachedChanged(sessionId) }
   }
 
+  /**
+   * Forgets the attachments allowed with "Allow once" (owner decision 2026-10-11, #382). Turning the session tools off
+   * takes every attachment away; when they come back, an "always" (still listed in Settings), a user-folder app (no
+   * card) and nothing else return. "Once" was an answer for that moment, so it does not outlive the person switching
+   * the set off.
+   */
+  dropOnce(sessionIds: Iterable<string>): void {
+    for (const id of sessionIds) {
+      const mine = this.records(id)
+      const kept = mine.filter((r) => r.consent !== 'once')
+      if (kept.length !== mine.length) this.save(id, kept)
+    }
+  }
+
   /** The apps this session attached itself, as `find_apps` names them — for the tool texts */
   attachedRefs(sessionId: string): string[] {
     return this.records(sessionId).map((r) => this.refOf(r))
