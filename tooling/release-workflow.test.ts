@@ -74,6 +74,29 @@ describe('the release workflow publishes exactly what the shim pins', () => {
     expect(published.sort()).toEqual(shimPins.sort())
   })
 
+  it('builds every host-only package in a platform job, which the shim waits for', () => {
+    // The host-only packages (docs/releasing.md) are published by the job of their platform, from
+    // the same build. A platform a hub installs on with no job would never get one, and every
+    // install there would fall back to the platform package without a word
+    const matrix = job('platform')
+      .map((l) => /^\s*- target: (\S+)$/.exec(l)?.[1])
+      .filter((t): t is string => t !== undefined)
+    const pin = JSON.parse(readFileSync(new URL('../packaging/remote-runtime.json', import.meta.url), 'utf8')) as { node: { archives: Record<string, unknown> } }
+    for (const platform of Object.keys(pin.node.archives)) expect(matrix, platform).toContain(platform)
+  })
+
+  it('release-npm.mts publishes a host-only package first and asks the registry before every publish', () => {
+    // The script runs a release when imported, so its wiring is read, not run; what it calls is
+    // tested in host-package.test.ts and release-registry.test.ts
+    const script = readFileSync(new URL('../scripts/release-npm.mts', import.meta.url), 'utf8')
+    expect(script).toMatch(/for \(const pkgDir of \[\.\.\.\(HOST_PKG \? \[HOST_PKG\] : \[\]\), \.\.\.\(ARCH_PKG \? \[ARCH_PKG\] : \[\]\), \.\.\.\(platformOnly \? \[\] : \[MAIN_PKG\]\)\]\)/)
+    const loop = script.slice(script.indexOf('for (const pkgDir of [...(HOST_PKG'))
+    expect(loop.indexOf('publishStep(')).toBeGreaterThan(-1)
+    expect(loop.indexOf('publishStep(')).toBeLessThan(loop.indexOf("'publish', '--access'"))
+    expect(script).toContain('hostPackageProblems(HOST_PKG, target.id)')
+    expect(script).toContain('await stillMissing(')
+  })
+
   it('the shim job waits for every platform job', () => {
     // `needs` on a matrix job means *every* entry succeeded. That is what makes the
     // ordering hold for a platform added later without anyone editing this line.

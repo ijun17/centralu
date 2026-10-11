@@ -45,6 +45,7 @@ packaging/npm/linux-arm64/*.AppImage
 packaging/npm/linux-arm64/icon.png
 packaging/npm/linux-arm64/host/
 packaging/npm/win32-x64/Centralu/
+packaging/npm/host-*/host/
 
 # 아이콘 후보 비교용 산출물 (pnpm icon --preview)
 icon-preview.png

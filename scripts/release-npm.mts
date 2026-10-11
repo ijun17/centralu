@@ -37,6 +37,8 @@ import { fileURLToPath } from 'node:url'
 import { APP_NAME, APP_VERSION } from '../packages/protocol/src/brand.js'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
+import { hostPackageDir, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+import { publishStep, stillMissing, viewPublished } from './release-registry.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE_ROOT = join(ROOT, 'apps/desktop/src-tauri/target/release/bundle')
@@ -534,6 +536,13 @@ if (!shimOnly && !target) {
 
 const ARCH_PKG = target && join(ROOT, 'packaging/npm', target.id)
 if (ARCH_PKG && !existsSync(join(ARCH_PKG, 'package.json'))) fail(`platform package is missing: ${ARCH_PKG}/package.json`)
+/**
+ * The host alone (`@centralu/host-<id>`, `host-package.mts`), for every platform a hub installs on:
+ * the ones `packaging/remote-runtime.json` pins a Node for. Built in the same job as the platform
+ * package because it is the same host, bundled on the same machine.
+ */
+const HOST_PKG = target && remotePlatforms().includes(target.id) ? hostPackageDir(target.id) : undefined
+if (HOST_PKG && !existsSync(join(HOST_PKG, 'package.json'))) fail(`host-only package is missing: ${HOST_PKG}/package.json`)
 
 if (out('git', ['status', '--porcelain'])) {
   // If uncommitted changes slip out with the release, "what was published" and "what is in the
@@ -588,6 +597,16 @@ if (target && ARCH_PKG) {
 
   if (target.stagesShell) await stageShellAndContent(target.id, dest)
 
+  if (HOST_PKG) {
+    // From `src-tauri/resources/host`, which the build's `beforeBuildCommand` has just written: the
+    // same folder the platform package's host was copied from, for the reason given at `win32-x64`
+    step('Staging the host-only package')
+    stageHostPackage(join(ROOT, 'apps/desktop/src-tauri/resources/host'), HOST_PKG)
+    const problems = hostPackageProblems(HOST_PKG, target.id)
+    if (problems.length) fail(`the host-only package would not run on a remote:\n  ${problems.join('\n  ')}`)
+    console.log(`  host/ staged and checked: @centralu/host-${target.id}`)
+  }
+
   // If `files` does not actually point at what was packed, the tarball ships **empty inside**
   // — invisible until someone reads the pack log by eye. Since the name is read from one place
   // (APP_NAME), it is checked here too.
@@ -606,7 +625,7 @@ if (target && ARCH_PKG) {
 
 // ── 5. Read the version from one place (brand.ts) and write it everywhere ──────────────
 step('Aligning package versions')
-for (const pkgDir of ARCH_PKG ? [ARCH_PKG, MAIN_PKG] : [MAIN_PKG]) {
+for (const pkgDir of [...(HOST_PKG ? [HOST_PKG] : []), ...(ARCH_PKG ? [ARCH_PKG] : []), MAIN_PKG]) {
   const file = join(pkgDir, 'package.json')
   const json = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
   json.version = APP_VERSION
@@ -698,24 +717,30 @@ async function stageShellAndContent(platform: string, bundle: string): Promise<v
  * reads as "your install is broken", not as "your platform isn't out yet". The
  * single-platform script could not reach this state, so the check did not exist.
  */
-function assertPinnedPlatformsPublished() {
+/** `name@<this version>` is visible on the registry (`release-registry.mts`) */
+function onRegistry(name: string): boolean {
+  return viewPublished(name, APP_VERSION, viaShell('npm')).state === 'present'
+}
+
+/** How long the shim waits for packages published moments ago to show on the registry */
+const VISIBLE_TRIES = 10
+const VISIBLE_DELAY_MS = 30_000
+
+async function assertPinnedPlatformsPublished() {
   const main = JSON.parse(readFileSync(join(MAIN_PKG, 'package.json'), 'utf8')) as {
     optionalDependencies?: Record<string, string>
   }
-  const missing = Object.keys(main.optionalDependencies ?? {}).filter((name) => {
-    try {
-      // Silence npm's own stderr: "not published yet" is the expected answer half the time,
-      // and a raw E404 dump in the middle of a clean rehearsal reads as a crash. The
-      // verdict is the message printed below, not npm's.
-      execFileSync('npm', ['view', `${name}@${APP_VERSION}`, 'version'], {
-        cwd: ROOT,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-      return false
-    } catch {
-      return true
-    }
+  // The host-only packages too, though the shim does not pin them: a hub on this version asks for
+  // its own version of one, and falls back to the 88 MB platform package on Linux without it
+  const hostOnly = remotePlatforms().map(
+    (id) => (JSON.parse(readFileSync(join(hostPackageDir(id), 'package.json'), 'utf8')) as { name: string }).name,
+  )
+  // A publish waits for the registry (0.1.0-beta.14's shim job failed on packages published a minute
+  // before); a rehearsal published none, so it says so at once
+  const missing = await stillMissing([...Object.keys(main.optionalDependencies ?? {}), ...hostOnly], onRegistry, {
+    tries: publish ? VISIBLE_TRIES : 1,
+    delayMs: VISIBLE_DELAY_MS,
+    onWait: (m) => console.log(`  not visible on the registry yet: ${m.join(', ')}; asking again in ${VISIBLE_DELAY_MS / 1000} s`),
   })
   if (missing.length === 0) return
   const note =
@@ -731,14 +756,30 @@ function assertPinnedPlatformsPublished() {
 // someone who installed the main package is looking at a missing optional dependency.
 // `--platform-only` publishes only the first, `--shim-only` only the second — this order holds
 // even when the work is split across several machines.
-for (const pkgDir of [...(ARCH_PKG ? [ARCH_PKG] : []), ...(platformOnly ? [] : [MAIN_PKG])]) {
+//
+// The host-only package goes before its platform package: it is new to the registry, so its first
+// publish is the likelier one to be refused (a token that cannot create a package), and refused first
+// it leaves nothing of this platform published.
+//
+// A package already on the registry at this version from this commit is skipped (an earlier attempt
+// of this release published it), so re-running a job that failed halfway finishes the release; one
+// from another commit stops the job (`release-registry.mts`).
+const HEAD = out('git', ['rev-parse', 'HEAD'])
+for (const pkgDir of [...(HOST_PKG ? [HOST_PKG] : []), ...(ARCH_PKG ? [ARCH_PKG] : []), ...(platformOnly ? [] : [MAIN_PKG])]) {
   const name = (JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name: string }).name
-  if (pkgDir === MAIN_PKG) assertPinnedPlatformsPublished()
+  if (pkgDir === MAIN_PKG) await assertPinnedPlatformsPublished()
   if (publish) {
-    step(`Publishing: ${name}`)
-    sh('npm', ['publish', '--access', 'public', '--tag', tag, ...(otp ? ['--otp', otp] : [])], pkgDir)
+    const next = publishStep(viewPublished(name, APP_VERSION, viaShell('npm')), HEAD, `${name}@${APP_VERSION}`)
+    if (next.do === 'stop') fail(next.why)
+    if (next.do === 'skip') {
+      step(`Already published from this commit: ${name}@${APP_VERSION} (an earlier attempt of this release); not publishing it again`)
+    } else {
+      step(`Publishing: ${name}`)
+      sh('npm', ['publish', '--access', 'public', '--tag', tag, ...(otp ? ['--otp', otp] : [])], pkgDir)
+    }
     if (alsoLatest && tag !== 'latest') {
-      // Moving a tag, unlike publishing, **can be undone** (a dist-tag can always be repointed).
+      // Moving a tag, unlike publishing, **can be undone** (a dist-tag can always be repointed),
+      // and adding one that is already there changes nothing, so a re-run does it again.
       sh('npm', ['dist-tag', 'add', `${name}@${APP_VERSION}`, 'latest', ...(otp ? ['--otp', otp] : [])], pkgDir)
     }
   } else {
