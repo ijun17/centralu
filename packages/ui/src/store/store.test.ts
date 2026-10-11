@@ -4485,3 +4485,25 @@ describe('a parked in-conversation view lets go of its call (#392)', () => {
     expect(view().toolResult).toEqual({ content: [{ type: 'text', text: big }] })
   })
 })
+
+/**
+ * A composer asked to take the keyboard (#528) belongs to the session asked for: showing another
+ * session withdraws the request, so it never lands later in a session the person has left.
+ */
+describe('composerFocusFor (#528)', () => {
+  it('is kept while the session asked for is shown, and withdrawn when another one is', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('cf-a', sessionInfo('cf-a'))
+    mock.sessions.set('cf-b', sessionInfo('cf-b'))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('cf-a')
+    useStore.getState().askComposerFocus('cf-a')
+    useStore.getState().focusSession('cf-a')
+    expect(useStore.getState().composerFocusFor).toBe('cf-a')
+    useStore.getState().focusSession('cf-b')
+    expect(useStore.getState().composerFocusFor).toBeNull()
+    useStore.getState().askComposerFocus('cf-b')
+    useStore.getState().focusSession(null)
+    expect(useStore.getState().composerFocusFor).toBeNull()
+  })
+})

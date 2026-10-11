@@ -20,6 +20,8 @@ const projectId = (page: Page, name: string) =>
 async function start(page: Page): Promise<{ caller: string; consumer: string; toolkit: string }> {
   await setup(page, ['/tmp/consumer', '/tmp/toolkit'])
   const caller = await newSession(page, 'consumer')
+  // A new session's composer has the keyboard (#528); the card's letter keys answer from outside a field
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   return { caller, consumer: await projectId(page, 'consumer'), toolkit: await projectId(page, 'toolkit') }
 }
 

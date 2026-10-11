@@ -112,6 +112,8 @@ export function appAccessTests(): void {
     const pid = await addProject(page, '/tmp/website')
     await page.getByTestId('trust-ask-yes-website').click()
     const sessionId = await newSession(page, 'website')
+    // A new session's composer has the keyboard (#528); the card's letter keys answer from outside a field
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     await page.evaluate(
       ([sid, from]) =>
         (window as any).__mock.requestApproval(

@@ -73,6 +73,8 @@ test('chain started from a session: the question shows as that session\'s approv
   await page.goto('/?mock=1')
   await trustedProject(page, '/tmp/alpha')
   const sessionId = await newSession(page, 'alpha')
+  // A new session's composer has the keyboard (#528); the card's letter keys answer from outside a field
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
   // The card the host raises — the app this session's agent called is trying to use an agent for the first time
   await page.evaluate(

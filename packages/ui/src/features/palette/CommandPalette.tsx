@@ -28,6 +28,7 @@ export function CommandPalette() {
   const projects = useStore((s) => s.projects)
   const focusSession = useStore((s) => s.focusSession)
   const focusProject = useStore((s) => s.focusProject)
+  const askComposerFocus = useStore((s) => s.askComposerFocus)
   const openGit = useStore((s) => s.openGit)
   const togglePanel = useStore((s) => s.togglePanel)
   const toggleSettings = useStore((s) => s.toggleSettings)
@@ -146,17 +147,26 @@ export function CommandPalette() {
 
   const choose = useCallback(
     (item: Item) => {
+      /*
+       * A session picked here is one the person is going to type to (#528): its composer takes the
+       * keyboard once the palette is gone. The palette's own field leaves with it and drops focus on
+       * the page, where no key reaches the composer (a Tab did in WebKit on macOS only).
+       */
+      const go = (id: string) => {
+        focusSession(id)
+        askComposerFocus(id)
+      }
       if (item.kind === 'session' || item.kind === 'message') {
-        focusSession(item.kind === 'session' ? item.id : item.sessionId)
+        go(item.kind === 'session' ? item.id : item.sessionId)
       } else if (item.kind === 'project') {
         const first = Object.values(sessions).find((s) => s.projectId === item.id)
         // A project with no session still has to be selectable (#183) — it used to just close the palette and leave the screen unchanged
-        if (first) focusSession(first.id)
+        if (first) go(first.id)
         else focusProject(item.id)
       } else item.run()
       toggle(false)
     },
-    [focusSession, focusProject, sessions, toggle],
+    [focusSession, focusProject, askComposerFocus, sessions, toggle],
   )
 
   useEffect(() => {

@@ -950,6 +950,14 @@ export type AppState = {
    * opens it each time.
    */
   settingsMenuRequest: { sessionId: string; at: number } | null
+  /**
+   * The session whose composer takes the keyboard next (#528): set where the next thing the person
+   * does is type to that session (a session picked in the palette, one just created), and spent by
+   * that composer once nothing covers it (`composerFocusAnswer`). Like `settingsMenuRequest`, a
+   * signal, not a state of the screen. Showing another session withdraws it (`focusSession`), so a
+   * request never lands later in a session the person has left.
+   */
+  composerFocusFor: string | null
   notifyPolicy: NotifyPolicy
   /**
    * Where this install stands relative to the registry (issue #43).
@@ -1086,6 +1094,8 @@ export type AppState = {
   closeOverlay(): void
   toggleInbox(open?: boolean): void
   togglePalette(open?: boolean): void
+  /** Asks the session's composer to take the keyboard (#528, `composerFocusFor`); `null` withdraws the request */
+  askComposerFocus(sessionId: string | null): void
   toggleUsage(open?: boolean): void
   toggleSettings(open?: boolean): void
   /**
@@ -2728,6 +2738,7 @@ export const useStore = create<AppState>((set, get) => ({
   approvalsInFlight: {} as Record<string, true>,
   uploading: {} as Record<string, number>,
   settingsMenuRequest: null as { sessionId: string; at: number } | null,
+  composerFocusFor: null as string | null,
   usageOpen: false,
   settingsOpen: false,
   notifyPolicy: DEFAULT_NOTIFY_POLICY,
@@ -3710,6 +3721,8 @@ export const useStore = create<AppState>((set, get) => ({
     set({
       focusedSessionId: id,
       overlay: null,
+      // A composer asked to take the keyboard belongs to the session asked for, not the one shown now (#528)
+      ...(get().composerFocusFor !== null && get().composerFocusFor !== id ? { composerFocusFor: null } : {}),
       ...(reveal ? { foldedProjects: get().foldedProjects.filter((p) => p !== projectId) } : {}),
       ...(id
         ? {
@@ -3989,6 +4002,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
   togglePalette(open) {
     set((s) => ({ paletteOpen: open ?? !s.paletteOpen }))
+  },
+  askComposerFocus(sessionId) {
+    set({ composerFocusFor: sessionId })
   },
   toggleUsage(open) {
     set((s) => ({ usageOpen: open ?? !s.usageOpen }))

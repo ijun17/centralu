@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MachineProbe, RemoteShell, SshHost, SshHostList } from '@cc/protocol'
 import { firstChoice, probeChoices, probeProblem, sshHostDetail, type MachineChoice } from '@cc/core'
 import { useStore } from '../../store/store.js'
+import { offerFocus } from '../../components/offerFocus.js'
 
 export const SHELL_LABEL: Record<RemoteShell, string> = {
   posix: 'Linux or macOS',
@@ -350,6 +351,15 @@ type ManualProps = {
 
 /** The target typed by hand, and what it runs chosen by hand: for a host not in the config, or one the probe could not tell */
 function ManualFields({ name, setName, target, setTarget, shell, setShell, distro, setDistro, note }: ManualProps) {
+  /*
+   * The fields appear to be typed in, so the first takes the keyboard (#528): when the dialog opens
+   * with no hosts to pick, and after "Enter a target by hand". Not from a field the person is
+   * already typing in (`offerFocus`).
+   */
+  const nameRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    offerFocus(nameRef.current)
+  }, [])
   return (
     <>
       {note && (
@@ -363,6 +373,7 @@ function ManualFields({ name, setName, target, setTarget, shell, setShell, distr
           className={`mt-1 ${fieldClass}`}
           value={name}
           onChange={(e) => setName(e.target.value)}
+          ref={nameRef}
           placeholder="Ubuntu server"
           spellCheck={false}
           data-testid="machines-add-name"

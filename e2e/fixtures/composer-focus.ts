@@ -163,4 +163,63 @@ export function composerFocusTests(): void {
       })
     })
   })
+
+  /*
+   * The field that takes the next keystroke has the keyboard (#528), found by the task measurements
+   * (docs/ux-metrics.md): each path below cost a click into the field before typing. Every test types
+   * without clicking and reads the field. In Chromium as well as WebKit: before this, one Tab after
+   * the palette reached the composer in WebKit on macOS only.
+   */
+  test.describe('the keyboard is where the next keystroke goes (#528)', () => {
+    /** The `?demo` scene, the keyboard on the page */
+    async function demo(page: Page): Promise<void> {
+      await page.goto('/?demo')
+      await expect(page.getByTestId('session-name')).toHaveText('Finish the collapsed composer')
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    }
+
+    async function pick(page: Page, query: string, name: string): Promise<void> {
+      await page.keyboard.press('ControlOrMeta+k')
+      await expect(page.getByTestId('palette-input')).toBeFocused()
+      await page.keyboard.type(query)
+      await expect(page.locator('[data-testid^="palette-item-"]').first()).toContainText(name)
+      await page.keyboard.press('Enter')
+      await expect(page.getByTestId('command-palette')).toBeHidden()
+      await expect(page.getByTestId('session-name')).toHaveText(name)
+    }
+
+    test('a session just created: its composer', async ({ page }) => {
+      await setup(page, ['/tmp/alpha'])
+      await newSession(page, 'alpha')
+      await page.keyboard.type('first')
+      await expect(box(page)).toHaveValue('first')
+    })
+
+    test('a session picked in the command palette: its composer', async ({ page }) => {
+      await demo(page)
+      await pick(page, 'optim', 'Optimize images')
+      await page.keyboard.type('x')
+      await expect(box(page)).toHaveValue('x')
+    })
+
+    test('a session picked in the palette while waiting on an approval: the card keeps its keys', async ({ page }) => {
+      await demo(page)
+      await pick(page, 'leftover', 'Clean up leftover processes')
+      await expect(page.getByTestId('approval-card')).toBeVisible()
+      await expect(box(page)).not.toBeFocused()
+      await page.keyboard.press('y')
+      await expect(page.getByTestId('approval-card')).toBeHidden()
+      await expect(box(page)).toHaveValue('')
+    })
+
+    test('the typed Add machine form: its first field', async ({ page }) => {
+      await demo(page)
+      await page.getByTestId('open-settings').click()
+      await page.getByTestId('settings-tab-machines').click()
+      const name = page.getByTestId('machines-add-name')
+      await expect(name).toBeVisible()
+      await page.keyboard.type('Build box')
+      await expect(name).toHaveValue('Build box')
+    })
+  })
 }

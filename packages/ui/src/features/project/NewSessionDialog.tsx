@@ -178,6 +178,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const [resume, setResume] = useState<ExternalSession | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const focusSession = useStore((s) => s.focusSession)
+  const askComposerFocus = useStore((s) => s.askComposerFocus)
   const [past, setPast] = useState<PastState>({ status: 'loading' })
 
   /**
@@ -323,7 +324,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               if (changed)
                 await saveWorktreeSetup(projectId, next.command || next.copyFiles.length ? next : null)
             }
-            await createSession(projectId, {
+            const created = await createSession(projectId, {
               tool,
               // If a past session was picked, the tool is asked to resume that conversation (resume),
               // and the past conversation is also restored on screen (importHistory).
@@ -334,6 +335,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               // Sent exactly as written on screen — only when empty is it left to the host's own order (trunk → HEAD)
               worktreeBase: (worktree && baseValue.trim()) || undefined,
             })
+            // What comes next is the first instruction: the new session's composer takes the keyboard once this closes (#528)
+            askComposerFocus(created.id)
             onClose()
           } catch (err) {
             // A toast disappears after 2.5 seconds and would look like "nothing happened when pressed" — kept inside the modal instead
@@ -431,6 +434,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                     // Marking it visually without blocking the click used to let the same conversation end up twice in the list (measured).
                     if (s.importedAs) {
                       focusSession(s.importedAs)
+                      askComposerFocus(s.importedAs)
                       onClose()
                       return
                     }

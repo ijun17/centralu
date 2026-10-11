@@ -9,8 +9,9 @@ import { uxPending, uxTask } from './task.js'
  * two projects, four sessions, one waiting for approval, one long conversation, and the
  * "Finish the collapsed composer" session open.
  *
- * The budgets are the first baseline's numbers (docs/ux-metrics.md, "Baseline"): the operator
- * counts exactly, the KLM time with 2% and 0.05 s of headroom, rounded up to a tenth, because the
+ * The budgets are the baseline's numbers (docs/ux-metrics.md, "Baseline"), lowered with each change
+ * that makes a task cheaper so the gain is kept (#528: the composer and the typed Add machine form
+ * take the keyboard): the operator counts exactly, the KLM time with 2% and 0.05 s of headroom, rounded up to a tenth, because the
  * pointing times follow the boxes on screen and fonts differ a little between machines. A change
  * that makes a task cost more fails here; raising a budget is a decision the pull request states.
  */
@@ -69,7 +70,7 @@ uxTask({
     await expect(page.getByTestId('session-name')).toHaveText('Fix the login bug')
     await expect(lastSaid(page)).toHaveText('Fix the login bug')
   },
-  budget: { operators: 37, M: 4, H: 2, seconds: 17.3 },
+  budget: { operators: 34, M: 4, H: 2, seconds: 15.9 },
 })
 
 uxPending({
@@ -209,9 +210,6 @@ uxTask({
   id: 'send-to-session.keyboard',
   task: 'Send a message to another session',
   path: 'keyboard',
-  notes: [
-    'The palette leaves the keyboard on the page, not in the composer, and no key reliably reaches it: one Tab does in WebKit on macOS, not in WebKit on Linux or in Chromium. So this keyboard path takes the mouse for one click',
-  ],
   start: demo,
   run: async (u, page) => {
     await u.press('ControlOrMeta+k')
@@ -223,7 +221,7 @@ uxTask({
     await u.press('Enter')
   },
   goal: sentThere,
-  budget: { operators: 42, M: 3, H: 2, seconds: 16.2 },
+  budget: { operators: 37, M: 3, H: 0, seconds: 13.9 },
 })
 
 uxTask({
@@ -356,7 +354,7 @@ uxTask({
     await u.click(page.getByTestId('machines-add-confirm'))
   },
   goal: async (page) => expect(page.getByTestId('machine-row-build-box')).toHaveAttribute('data-status', 'connected'),
-  budget: { operators: 46, M: 3, H: 5, seconds: 19.3 },
+  budget: { operators: 43, M: 3, H: 5, seconds: 18.2 },
 })
 
 uxTask({

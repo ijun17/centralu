@@ -15,7 +15,7 @@ import {
 } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
-import { ApprovalCard } from '../approval/ApprovalCard.jsx'
+import { ApprovalCard, approvalCardCovered } from '../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../approval/QuestionCard.jsx'
 import { ChevronIcon, CloseIcon, CrownIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -37,6 +37,7 @@ import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
 import { isComposerSendKey } from './composerKeys.js'
+import { composerFocusAnswer } from './composerFocus.js'
 import { composingKey } from '../../app/keys.js'
 import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dragPath.js'
 import { APP_LINK_DROP_EVENT, type AppLinkDrop } from '../app-frame/dragRelay.js'
@@ -898,6 +899,31 @@ const Composer = memo(function Composer({
   const [composing, setComposing] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  /*
+   * Takes the keyboard when asked to (#528): the session was just picked in the palette or created,
+   * and what the person does next is type to it. Without this the palette's field and the dialog's
+   * button left the keyboard on the page, and the first key went nowhere until a click in the box;
+   * a Tab reached it only in WebKit on macOS. Asked through the store, since the palette and the
+   * dialog never hold this element, and taken here once nothing covers the session: the dialog asks
+   * while it is still closing. The rules (an approval card's keys, a field being typed in) are
+   * `composerFocusAnswer`'s.
+   */
+  const focusAsked = useStore((s) => s.composerFocusFor === sessionId)
+  const focusCovered = useStore((s) => s.composerFocusFor === sessionId && approvalCardCovered(s, sessionId))
+  const focusApproval = useStore((s) => s.composerFocusFor === sessionId && !!s.sessions[sessionId]?.pendingApproval)
+  useEffect(() => {
+    const input = inputRef.current
+    const answer = composerFocusAnswer({
+      asked: focusAsked,
+      covered: focusCovered,
+      approval: focusApproval,
+      holder: document.activeElement,
+      input,
+    })
+    if (answer === 'wait') return
+    if (answer === 'take') input?.focus({ preventScroll: true })
+    if (useStore.getState().composerFocusFor === sessionId) useStore.getState().askComposerFocus(null)
+  }, [sessionId, focusAsked, focusCovered, focusApproval])
   const attachFile = useStore((s) => s.attachFile)
   /*
    * Attachments still uploading (#180). A chip only enters the draft once the host has finished

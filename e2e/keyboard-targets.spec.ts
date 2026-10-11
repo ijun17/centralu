@@ -20,6 +20,8 @@ async function sessionWithApproval(page: Page): Promise<string> {
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('session-view')).toBeVisible()
   const sessionId = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+  // A new session's composer has the keyboard (#528); the card's letter keys answer from outside a field
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.evaluate(
     (sid) => (window as any).__mock.requestApproval(sid, { kind: 'command', command: 'rm -rf build', cwd: '/tmp/alpha' }, 'r-hidden'),
     sessionId,
@@ -43,6 +45,12 @@ test('while the delete-confirmation dialog is open, y/n/a do not reach the appro
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
   await expect(page.getByTestId('approval-card')).toBeVisible()
+  /*
+   * In WebKit a click on a button does not take focus, so the dialog gives the keyboard back to the
+   * last field that held it (#115): the new session's composer (#528). The card's letter keys answer
+   * from outside a field, so the y is pressed from there.
+   */
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.keyboard.press('y')
   await expect.poll(() => answers(page)).toEqual([{ sessionId, requestId: 'r-hidden', decision: 'allow' }])
 })
