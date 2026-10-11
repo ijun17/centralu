@@ -12,18 +12,24 @@ import { columnsThrough } from './fixtures/columns.js'
 
 /**
  * The position after movement has settled. A rising card or a dropping menu, if measured mid
- * transition, would record a **position in transit** as fact — this waits until the same value
- * appears twice in a row.
+ * transition, would record a **position in transit** as fact — this waits until every transition
+ * and animation running on the element has finished, then measures.
+ *
+ * It used to wait for the same box twice in a row, 50ms apart. That reads the clock, not the
+ * transition: a transition only moves when a frame is drawn, and on a busy CI runner two reads
+ * with no frame between them saw the same box, still where the card started. Chromium in CI then
+ * measured the card 688 to 707px down a panel whose strip starts at 658 (1 run in 4). Slowing
+ * animations to 1/50 through DevTools reproduced it every time; waiting for the transitions does
+ * not care how fast frames come. A transition cancelled by another (the card turned back) ends its
+ * `finished` with an AbortError, so this asks again until nothing is running.
  */
 async function settled(loc: ReturnType<Page['getByTestId']>): Promise<{ x: number; y: number; width: number; height: number }> {
-  let last: { x: number; y: number; width: number; height: number } | null = null
-  for (let i = 0; i < 40; i++) {
-    const box = (await loc.boundingBox())!
-    if (last && Math.round(last.y) === Math.round(box.y) && Math.round(last.height) === Math.round(box.height)) return box
-    last = box
-    await new Promise((r) => setTimeout(r, 50))
-  }
-  return last!
+  await loc.evaluate(async (el) => {
+    for (let running = el.getAnimations(); running.length > 0; running = el.getAnimations()) {
+      await Promise.allSettled(running.map((a) => a.finished))
+    }
+  })
+  return (await loc.boundingBox())!
 }
 
 /** The height of the strip that raises a collapsed composer (the same value as SessionView's COMPOSER_REACH) */
