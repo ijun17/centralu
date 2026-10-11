@@ -55,6 +55,13 @@ describe('the app-side mirror and the launcher agree', () => {
     '1.2.9',
     '1.2.10',
     '10.0.0',
+    // Build metadata and a leading v (finding: both read as NaN before split() dropped them)
+    '1.2.3+build5',
+    '1.2.3+build-5',
+    '1.2.4+sha.abc',
+    '0.1.0-beta.2+exp.sha.5114f85',
+    'v1.2.3',
+    'v1.2.4',
   ]
 
   it('answers identically for every ordered pair', () => {
@@ -72,6 +79,25 @@ describe('the app-side mirror and the launcher agree', () => {
    * Stated separately from the pairwise sweep because this one is the reason both exist:
    * a sweep that starts agreeing on two identically broken implementations still passes.
    */
+  /**
+   * Semver ignores build metadata for precedence, and a leading `v` is how a tag is written. Before split() dropped
+   * them, `3+build5` and `v1` were NaN, and a NaN ends the comparison as "not newer" (the #42 shape).
+   */
+  it('both copies ignore build metadata and a leading v', () => {
+    for (const compare of [isNewerVersion, isNewer] as ((a: string, b: string) => boolean)[]) {
+      expect(compare('1.2.4', '1.2.3+build5')).toBe(true)
+      expect(compare('1.2.4+sha.abc', '1.2.3')).toBe(true)
+      expect(compare('1.2.3', '1.2.3+build5')).toBe(false)
+      expect(compare('1.2.3+build5', '1.2.3')).toBe(false)
+      // A hyphen inside build metadata is not a prerelease: the release still outranks its beta
+      expect(compare('1.2.3+build-5', '1.2.3-beta.1')).toBe(true)
+      expect(compare('0.1.0-beta.3', '0.1.0-beta.2+exp.sha.5114f85')).toBe(true)
+      expect(compare('v1.2.4', '1.2.3')).toBe(true)
+      expect(compare('1.2.4', 'v1.2.3')).toBe(true)
+      expect(compare('v1.2.3', '1.2.3')).toBe(false)
+    }
+  })
+
   it('the app-side copy sees the next prerelease', () => {
     expect(isNewerVersion('0.1.0-beta.2', '0.1.0-beta.1')).toBe(true)
     expect(isNewerVersion('0.1.0-beta.1', '0.1.0-beta.2')).toBe(false)

@@ -71,6 +71,17 @@ describe('blocking illegal transitions', () => {
     }
   })
 
+  it('a resolve moves to working only from waiting_approval — a late one changes nothing, and is not illegal', () => {
+    for (const type of ['approval_resolved', 'question_resolved'] as const) {
+      expect(transition('waiting_approval', ev({ type } as never)).state).toBe('working')
+      for (const from of ['waiting_input', 'error', 'idle', 'limited', 'working'] as SessionState[]) {
+        const r = transition(from, ev({ type } as never))
+        expect(r.state, `${type} in ${from}`).toBe(from)
+        expect(r.illegal).toBe(false)
+      }
+    }
+  })
+
   it('turn_complete in idle is illegal (there was no turn)', () => {
     expect(transition('idle', ev({ type: 'turn_complete' })).illegal).toBe(true)
   })

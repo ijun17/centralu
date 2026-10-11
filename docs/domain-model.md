@@ -408,6 +408,10 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
 - An `approval_request` or `question_request` is applied in **any** state: it is a fact the host received, not an
   inference, and a table that swallowed one would leave the agent blocked unseen. Only inferred moves are checked
   against the table; an illegal one is ignored and logged.
+- An `approval_resolved` or `question_resolved` means "answered" only in `waiting_approval`, and only when it closes
+  the last open card: with another approval or question still open the session stays `waiting_approval` and keeps
+  that card (the reducer). In any other state it moves nothing (`transition`), because the host releases requests
+  late: a disposed handle resolves every request it still held, after the turn may already have ended.
 - The last state is stored on the session row (`sessions.state`); whether a process is alive (`live`) is not.
 
 ## 4. Process topology
