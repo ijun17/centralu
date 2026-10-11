@@ -52,6 +52,14 @@ the Codex bridge.
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
 | `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
 
+The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
+server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
+`scripts/probe-codex-mcp-instructions.mts`), so the Codex bridge sends none and the same text rides in the
+thread's developer instructions, after the seat's role, under a one-line header. Codex reads those at
+`thread/start` only and ignores them on `thread/resume`, so a Codex thread keeps the instructions it was started
+with: one that changes profile while its thread lives on (a session promoted to worktree manager when a child is
+linked to it) has its new tools without their instructions until it starts a new thread.
+
 The `reader` set is read-only: its tools object refuses sending, creating and settings outright,
 not only by name. It is never given to an agent session an app stood up (M4 D-1), whose answer goes
 back to the app. Settings → Orchestrator turns it off (`sessionTools`, on by default): a new session

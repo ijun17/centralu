@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { bridgePath } from './bridge-path.js'
 /** Name of our MCP server attached via the bridge — elicitation acceptance judges by this name (defined in one place, #93) */
-import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
+import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor } from '../../sessions/orchestrator-tools.js'
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -538,14 +538,14 @@ class CodexSession implements SessionHandle {
          * The role is given directly through developerInstructions — the same slot as Claude's
          * systemPrompt append. The reason we avoid a file (AGENTS.md) is the same: if a
          * lower-privilege session could edit that file, it would become able to instruct every
-         * session.
+         * session. The instructions of the Centralu tools ride there too (#525, developerInstructions()).
          *
          * Tools are attached through the stdio bridge. What we confirmed by measurement:
          *   per-thread config.mcp_servers  works (our command actually runs)
          *   the url (HTTP) approach        does not — not a single request ever arrives
          * So one extra process ends up running — a cost that does not exist on the Claude path.
          */
-        ...(this.opts.systemPromptAppend ? { developerInstructions: this.opts.systemPromptAppend } : {}),
+        ...this.developerInstructions(),
         /*
          * config is **assembled in this one place only.** There used to be a trap where the
          * verbosity spread and the orchestrator spread each built their own config keys, and one
@@ -572,6 +572,22 @@ class CodexSession implements SessionHandle {
       return
     }
     this.externalId = this.threadId
+  }
+
+  /**
+   * The thread's developer instructions: the session's role, then the instructions of the Centralu tools it gets
+   * (#525), which Claude receives from the in-process server and Codex would never show from the bridge's
+   * `initialize` (measured: sessions/orchestrator-tools.ts, codexToolInstructionsFor). Sent at thread/start only.
+   * `thread/resume` takes the same field and ignores it: resumed with other developer instructions, the model still
+   * named the phrase from the first ones and the rollout gained no developer message (codex-cli 0.160.0,
+   * `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12). So a thread keeps what it was started with; a session
+   * that changes profile while its thread lives on (one becoming a worktree manager when a child is linked to it)
+   * keeps its tools' new rules from the tool descriptions alone until it starts a new thread.
+   */
+  private developerInstructions(): { developerInstructions?: string } {
+    const tools = this.opts.orchestratorTools && this.opts.orchestratorBridge ? codexToolInstructionsFor(this.opts.toolProfile ?? 'orchestrator') : undefined
+    const text = [this.opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
+    return text ? { developerInstructions: text } : {}
   }
 
   /** A turn started on this thread, so Codex has written its rollout and the thread can be resumed (see externalId) */

@@ -128,6 +128,12 @@ async function handle(msg) {
   const { id, method, params } = msg
 
   if (method === 'initialize') {
+    /*
+     * No `instructions`: codex-cli 0.160.0 shows a server's instructions to no model (measured, #525). The role
+     * instructions Claude gets from its in-process server reach a Codex thread through its developer instructions
+     * instead (CodexSession.developerInstructions); sending them here as well would say them twice to a Codex that
+     * starts showing them.
+     */
     return ok(id, {
       protocolVersion: params?.protocolVersion ?? '2025-06-18',
       capabilities: { tools: {} },

@@ -128,7 +128,8 @@ sessions read them, so the absolute sizes are this machine's; the differences ar
 | builder | 1 | 610 | 0 | 822 | 610 |
 | reader | 7 | 968 | 1,153 | 0 | 2,121 |
 
-Codex is sent no server instructions: the bridge answers `initialize` without them.
+At this baseline Codex was sent no server instructions: the bridge answers `initialize` without them. Since #525
+the same text rides in a Codex thread's developer instructions, 52 characters longer for its header (§7).
 
 ### Resident tokens per session kind (first request, live)
 
@@ -221,7 +222,57 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
 6. **Codex: a model set before a session's first turn broke it.** The change restarts the thread
    through resume, Codex has no rollout to resume before a first turn, and the next send failed with
    "Could not resume the conversation". The baseline measured such seats on their default model. Fixed in
-   #524: a started Codex thread names itself to the host only at its first turn (`CodexSession.externalId`), so
-   a restart before then starts a thread again. The script now sets the model on every seat.
+   #524 (§7).
 7. **Codex: a model change showed no rebuild** (gpt-6.1-sol → gpt-6-astra read 21,248 tokens from cache).
    Either the change did not reach the thread or Codex's cache crosses those models; not settled here.
+
+## 7. Codex: role instructions and a model set before the first turn (2026-10-12)
+
+Two of the baseline's findings, fixed and measured again: Codex seats got none of their tools' instructions
+(#525), and a model set before a Codex session's first turn broke the session (#524, §6.6). codex-cli 0.160.0,
+gpt-6.1-sol, macOS.
+
+**Where Codex shows instructions.** `scripts/probe-codex-mcp-instructions.mts` starts a thread with a stdio MCP
+server whose `initialize` answers with marked `instructions`, and marked `developerInstructions` next to them, and
+asks the model for a phrase from each. In four runs (in two of them the model first found the server's tool in its
+`exec` listing and called it) the model named the developer phrase and never the server's, and the thread's
+rollout held the developer text as a developer message and the server's nowhere. So the bridge still sends none,
+and the adapter appends `instructionsFor(profile)`, the text Claude's in-process server sends, to the thread's
+developer instructions, after the seat's role, under the header `# How to use the centralu tools
+(mcp__centralu__*)` (`codexToolInstructionsFor`).
+
+The same probe resumed the thread with other developer instructions, then the same again, then none, a turn after
+each: the model kept naming the first phrase and the rollout gained no developer message. Codex reads developer
+instructions at `thread/start` only, so a thread keeps the instructions it started with (agent-host.md §1.1), and
+the adapter sends them on a start alone. (Cache read of the four turns: 12,288 of 18,712, 12,288 of 19,419,
+19,200 of 19,485, 19,328 of 19,551; one run, so the first resume's shortfall is not attributed here.)
+
+**Dry** (`pnpm measure:tools`, compared with the dry baseline): every Claude number and prefix is unchanged. Codex's
+resident characters (definitions plus instructions) grow by the instructions and their header: orchestrator
+9,954 → 11,850, manager 3,479 → 6,316, scoped 1,888 → 2,319, builder 610 → 1,484; the reader, which has no
+instructions, stays at 2,121.
+
+**What they cost** (`pnpm measure:tools --live --cli codex --phases resident --codex-model gpt-6.1-sol --reps 1`,
+the first request's input tokens; the baseline's Codex repetitions agreed to the token; kept as
+`baselines/2026-10-12-codex-instructions-live.json`, base commit b66c9777 with this change):
+
+| Kind | Instruction characters added | Before (§4) | After | Added |
+|---|---|---|---|---|
+| none | 0 | 17,872 | 17,868 | (−4) |
+| ordinary (reader) | 0 | 17,872 | 17,868 | (−4) |
+| orchestrator | 1,898 | 18,146 | 18,551 | **+405** |
+| worktree manager | 2,837 | 18,652 | 18,485 | **+617** against `none` of the same run |
+| builder | 876 | 18,486 | 18,678 | **+192** |
+
+About 4.6 characters a token, as for the definitions. The manager's "before" is not comparable: Codex puts the
+person's skill list in the same developer message, and its remote plugins' entries arrive in some threads and not
+others (3,279 characters more in the baseline's manager thread, which is all of that row's +780 in §4; every
+thread of this run had the shorter list). Against `none` of the same run its instructions cost 617 tokens.
+
+**A model set before the first turn.** The measurement now sets the model on every seat before its first turn, as
+it does on Claude; the orchestrator and the builder, which are running when the change arrives, restart, and every
+seat's first turn ran. A started Codex thread names itself to the host only at its first turn, so a restart before
+then starts a thread again rather than resuming one Codex has nothing written for (`CodexSession.externalId`;
+`sessions/codex-seats.test.ts`). Sessions an older build started and never messaged keep the id they were given
+then, and still fail to wake with "has no record of this conversation"; a new session is the way out for them.
+

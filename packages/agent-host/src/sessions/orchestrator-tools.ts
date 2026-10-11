@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
 import type { AskProjectResult, OrchestratorTools } from '../adapters/contract.js'
-import type { ToolCaller, ToolOutput, ToolProfile } from '../apps/contract.js'
+import { ORCHESTRATOR_MCP_NAME, type ToolCaller, type ToolOutput, type ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
 function trustedJsonText(value: string): string {
@@ -369,17 +369,18 @@ export const READER_BUDGET_CHARS = 1000
 
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
- * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts; the
- * Claude side, the larger, since Codex is sent no instructions). Measured 2026-10-12: orchestrator
- * 11,798 (9,954 + 1,844), manager 6,264 (3,479 + 2,785), scoped 2,267, builder 1,432; the tokens they
- * cost are in docs/tool-cost.md. The reader is the sum of its three sets' ceilings, since Codex loads
- * all of them. Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request.
+ * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts). Measured
+ * 2026-10-12 on Claude: orchestrator 11,798 (9,954 + 1,844), manager 6,264 (3,479 + 2,785), scoped 2,267,
+ * builder 1,432; the tokens they cost are in docs/tool-cost.md. Codex carries the same plus the 52-character
+ * header its developer instructions put over them (#525, codexToolInstructionsFor), which is what moved scoped
+ * from 2,300 and builder from 1,450. The reader is the sum of its three sets' ceilings, since Codex loads all of
+ * them. Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   orchestrator: 12_000,
   manager: 6_400,
-  scoped: 2_300,
-  builder: 1_450,
+  scoped: 2_350,
+  builder: 1_500,
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS,
 }
 
@@ -871,6 +872,22 @@ export function instructionsFor(profile: ToolProfile): string | undefined {
     case 'reader': return READER_INSTRUCTIONS || undefined
     default: return ORCHESTRATOR_INSTRUCTIONS
   }
+}
+
+/**
+ * The same instructions as a Codex thread's developer instructions carry them (#525).
+ *
+ * Claude Code shows a server's `instructions` to the model; codex-cli 0.160.0 does not. Measured
+ * (`scripts/probe-codex-mcp-instructions.mts`, 2026-10-12): a stdio server whose `initialize` answered with
+ * `instructions` started, its tool was listed and reached, yet the model could not name a phrase from them, and the
+ * thread's rollout had no trace of them, in four runs; the phrase in `developerInstructions` was named every time,
+ * and the rollout holds it as a developer message. So the bridge sends none, and the adapter appends this to the
+ * thread's developer instructions. The header says whose they are: Codex shows these tools to the model as
+ * `mcp__centralu__<tool>`, and the text names them bare, as Claude Code's section heading (the server's name) does.
+ */
+export function codexToolInstructionsFor(profile: ToolProfile): string | undefined {
+  const text = instructionsFor(profile)
+  return text ? `# How to use the ${ORCHESTRATOR_MCP_NAME} tools (mcp__${ORCHESTRATOR_MCP_NAME}__*)\n\n${text}` : undefined
 }
 
 /**

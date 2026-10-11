@@ -1,0 +1,234 @@
+{
+ "meta": {
+  "mode": "live",
+  "at": "2026-10-11T17:54:27.391Z",
+  "commit": "b66c9777",
+  "versions": {
+   "claude": "2.1.289 (Claude Code)",
+   "codex": "codex-cli 0.160.0",
+   "node": "v26.9.0"
+  },
+  "reps": 1,
+  "clis": [
+   "codex"
+  ],
+  "prompts": {
+   "comment": "The fixed prompt set of scripts/measure-tools.mts (#513). Placeholders: {project} this project's name, {other} the other project's name, {seed} the seeded session's name. A run's JSON keeps the prompts it used; change this file and the two runs no longer compare.",
+   "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+   "selection": [
+    {
+     "id": "other-sessions",
+     "profile": "reader",
+     "prompt": "What are the other sessions in this project working on right now?",
+     "expect": [
+      "read_session"
+     ]
+    },
+    {
+     "id": "earlier-decision",
+     "profile": "reader",
+     "prompt": "In an earlier conversation we decided how to back up the database. What did we choose?",
+     "expect": [
+      "recall",
+      "read_session"
+     ]
+    },
+    {
+     "id": "centralu-howto",
+     "profile": "reader",
+     "prompt": "How do I let my other Centralu projects use an app from this project?",
+     "expect": [
+      "app_guide"
+     ]
+    },
+    {
+     "id": "ask-project",
+     "profile": "reader",
+     "prompt": "Have the {other} project list the files in its top folder, then tell me what it found.",
+     "expect": [
+      "ask_project"
+     ]
+    },
+    {
+     "id": "open-app",
+     "profile": "reader",
+     "prompt": "One of my other Centralu projects shares a counter app. What number is it showing now?",
+     "expect": [
+      "find_apps",
+      "attach_app"
+     ]
+    },
+    {
+     "id": "no-tool",
+     "profile": "reader",
+     "prompt": "What is 17 times 23? Answer with the number only.",
+     "expect": []
+    },
+    {
+     "id": "orch-overview",
+     "profile": "orchestrator",
+     "prompt": "Which sessions are there in {project}, and what is each one doing?",
+     "expect": [
+      "list_sessions",
+      "read_session"
+     ]
+    },
+    {
+     "id": "orch-delegate",
+     "profile": "orchestrator",
+     "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
+     "expect": [
+      "send_to_session"
+     ]
+    }
+   ]
+  }
+ },
+ "summary": {
+  "definitions": {
+   "claude": {
+    "orchestrator": {
+     "profile": "orchestrator",
+     "cli": "claude",
+     "tools": 12,
+     "residentTools": 12,
+     "residentChars": 9954,
+     "deferredChars": 0,
+     "instructionsChars": 1844,
+     "prefixHash": "ef6a0ca714ab"
+    },
+    "manager": {
+     "profile": "manager",
+     "cli": "claude",
+     "tools": 5,
+     "residentTools": 5,
+     "residentChars": 3479,
+     "deferredChars": 0,
+     "instructionsChars": 2785,
+     "prefixHash": "bb1e5719f144"
+    },
+    "scoped": {
+     "profile": "scoped",
+     "cli": "claude",
+     "tools": 3,
+     "residentTools": 3,
+     "residentChars": 1888,
+     "deferredChars": 0,
+     "instructionsChars": 379,
+     "prefixHash": "50fe63f80274"
+    },
+    "builder": {
+     "profile": "builder",
+     "cli": "claude",
+     "tools": 1,
+     "residentTools": 1,
+     "residentChars": 610,
+     "deferredChars": 0,
+     "instructionsChars": 822,
+     "prefixHash": "c220d1208e2a"
+    },
+    "reader": {
+     "profile": "reader",
+     "cli": "claude",
+     "tools": 7,
+     "residentTools": 3,
+     "residentChars": 968,
+     "deferredChars": 1153,
+     "instructionsChars": 0,
+     "prefixHash": "640b4efe1e2c"
+    }
+   },
+   "codex": {
+    "orchestrator": {
+     "profile": "orchestrator",
+     "cli": "codex",
+     "tools": 12,
+     "residentTools": 12,
+     "residentChars": 9954,
+     "deferredChars": 0,
+     "instructionsChars": 1896,
+     "prefixHash": "49fe6d511c4b"
+    },
+    "manager": {
+     "profile": "manager",
+     "cli": "codex",
+     "tools": 5,
+     "residentTools": 5,
+     "residentChars": 3479,
+     "deferredChars": 0,
+     "instructionsChars": 2837,
+     "prefixHash": "02be7c2bf6e8"
+    },
+    "scoped": {
+     "profile": "scoped",
+     "cli": "codex",
+     "tools": 3,
+     "residentTools": 3,
+     "residentChars": 1888,
+     "deferredChars": 0,
+     "instructionsChars": 431,
+     "prefixHash": "29080fec4519"
+    },
+    "builder": {
+     "profile": "builder",
+     "cli": "codex",
+     "tools": 1,
+     "residentTools": 1,
+     "residentChars": 610,
+     "deferredChars": 0,
+     "instructionsChars": 874,
+     "prefixHash": "8c533c2c0dbc"
+    },
+    "reader": {
+     "profile": "reader",
+     "cli": "codex",
+     "tools": 7,
+     "residentTools": 7,
+     "residentChars": 2121,
+     "deferredChars": 0,
+     "instructionsChars": 0,
+     "prefixHash": "9db439260fe1"
+    }
+   }
+  },
+  "resident": {
+   "codex": {
+    "none": {
+     "runs": [
+      17868
+     ],
+     "median": 17868,
+     "delta": 0
+    },
+    "reader": {
+     "runs": [
+      17868
+     ],
+     "median": 17868,
+     "delta": 0
+    },
+    "orchestrator": {
+     "runs": [
+      18551
+     ],
+     "median": 18551,
+     "delta": 683
+    },
+    "manager": {
+     "runs": [
+      18485
+     ],
+     "median": 18485,
+     "delta": 617
+    },
+    "builder": {
+     "runs": [
+      18678
+     ],
+     "median": 18678,
+     "delta": 810
+    }
+   }
+  }
+ }
+}

@@ -10,12 +10,16 @@ import { ExternalApps } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
+import { ORCHESTRATOR_ROLE } from './orchestrator-home.js'
+import { instructionsFor } from './orchestrator-tools.js'
 
 /**
  * A Codex session through the real manager and the real adapter, with only the app-server faked, and faked the way
  * codex-cli 0.160.0 behaves where it matters here (measured, `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12):
- * `thread/start` names a thread, but nothing is written to resume until the thread's first turn, and `thread/resume`
- * before then is refused with "no rollout found for thread id …" (#524).
+ *
+ *   - `thread/start` names a thread, but nothing is written to resume until the thread's first turn: `thread/resume`
+ *     before then is refused with "no rollout found for thread id …" (#524)
+ *   - a server's `instructions` reach no model; the thread's `developerInstructions` do (#525)
  */
 
 const state = vi.hoisted(() => ({
@@ -129,5 +133,36 @@ describe('a Codex session whose settings change before its first message (#524)'
     expect(sent('thread/start')).toHaveLength(1)
     expect(sent('thread/resume').map((t) => t.params.threadId)).toEqual(['thread-1'])
     expect(sent('turn/start').map((t) => t.params.threadId)).toEqual(['thread-1', 'thread-1'])
+  })
+})
+
+describe('a Codex seat gets its tools\' instructions in the thread\'s developer instructions (#525)', () => {
+  const developerInstructions = () => String(sent('thread/start').at(-1)!.params.developerInstructions ?? '')
+
+  it('the orchestrator: its role, then the same instructions Claude gets from the server', async () => {
+    mgr.configureOrchestrator('codex')
+    const o = await mgr.orchestrator()
+    await mgr.resumeSession(o.id)
+    const text = developerInstructions()
+    expect(text.startsWith(ORCHESTRATOR_ROLE)).toBe(true)
+    expect(text).toContain(instructionsFor('orchestrator')!)
+  })
+
+  it('the worktree manager', async () => {
+    const seat = (await rpc('worktrees.createManager', { projectId, baseBranch: 'main' })) as SessionInfo
+    await mgr.resumeSession(seat.id)
+    expect(developerInstructions()).toContain(instructionsFor('manager')!)
+  })
+
+  it("an app's building session, after the role it was made with", async () => {
+    await rpc('apps.create', { projectId: null, id: 'timer', name: 'Timer', tool: 'codex' })
+    const text = developerInstructions()
+    expect(text).toContain(instructionsFor('builder')!)
+    expect(text.indexOf(instructionsFor('builder')!)).toBeGreaterThan(0)
+  })
+
+  it('an ordinary session: the reader set has no instructions, so none are added', async () => {
+    await rpc('agents.createSession', { projectId, cwd: repo, tool: 'codex' })
+    expect(sent('thread/start').at(-1)!.params.developerInstructions).toBeUndefined()
   })
 })

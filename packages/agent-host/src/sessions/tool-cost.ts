@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import type { ToolProfile } from '../apps/contract.js'
-import { ORCHESTRATOR_MCP_NAME, instructionsFor, toolDefsFor } from './orchestrator-tools.js'
+import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor, instructionsFor, toolDefsFor } from './orchestrator-tools.js'
 
 /**
  * What a session's Centralu tools cost before a word is said (#513): the definitions as each CLI
@@ -50,12 +50,12 @@ export function servedDefinitions(profile: ToolProfile, cli: AgentCli): ServedDe
 /**
  * The server instructions that reach the model. Claude Code puts an MCP server's instructions in a
  * `<system-reminder>` of the first user message (measured, CLI 2.1.289: "# MCP Server Instructions"),
- * so they ride in every request like the definitions. The Codex bridge answers `initialize` with no
- * `instructions` (adapters/codex/orchestrator-bridge.mjs), so a Codex session gets none of them; its
- * role, where it has one, comes through `developerInstructions` instead.
+ * so they ride in every request like the definitions. Codex shows a server's instructions to no model
+ * (#525), so a Codex thread gets the same text in its developer instructions, under a header
+ * (`codexToolInstructionsFor`), next to its role where it has one; they ride in every request too.
  */
 export function servedInstructions(profile: ToolProfile, cli: AgentCli): string {
-  return cli === 'claude' ? (instructionsFor(profile) ?? '') : ''
+  return (cli === 'claude' ? instructionsFor(profile) : codexToolInstructionsFor(profile)) ?? ''
 }
 
 export type ResidentCost = {

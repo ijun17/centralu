@@ -47,6 +47,13 @@ claude는 인프로세스, codex는 stdio 다리.
 | `builder` | 앱을 만드는 세션 (M4 C-3) | 자기 앱 | `check` | 만들고 검사하기 |
 | `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320) | 자기 프로젝트, 호출할 때 읽음 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 없음 |
 
+지침은 두 CLI 모두에서 모델에 닿지만, 들어가는 문이 다르다. Claude는 프로세스 안 서버의 `instructions`로
+받는다. codex-cli 0.160.0은 서버의 지침을 어떤 모델에게도 보여 주지 않으므로(#525,
+`scripts/probe-codex-mcp-instructions.mts`로 잼), Codex 다리는 지침을 보내지 않고 같은 글이 스레드의 개발자
+지침에 자리의 역할 뒤, 한 줄 머리말 아래로 실린다. Codex는 그것을 `thread/start`에서만 읽고 `thread/resume`에서는
+무시하므로, Codex 스레드는 시작할 때 받은 지침을 그대로 지닌다. 스레드가 살아 있는 채로 프로필이 바뀐 세션(자식이
+연결되어 워크트리 매니저가 된 세션)은 새 스레드를 시작할 때까지 새 도구를 지침 없이 가진다.
+
 `reader` 묶음은 읽기 전용이다. 그 도구 객체는 보내기·만들기·설정 변경을 이름으로만이 아니라
 그 자체로 거절한다. 앱이 세운 에이전트 세션(M4 D-1)은 답을 앱에 돌려주므로 이 묶음을 받지
 않는다. 설정 → 오케스트레이터에서 끌 수 있다(`sessionTools`, 기본 켜짐). 끄면 새 세션은 묶음을
