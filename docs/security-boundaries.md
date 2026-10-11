@@ -931,7 +931,9 @@ window `main` on local origins**: no `remote`, no wildcard window. The granted s
 the frontend calls. `tooling/desktop-permissions.test.ts` holds the manifest, the `invoke_handler`,
 the grants and the call sites to each other, and fails on `remote` or a wildcard. Plugin
 permissions have no call site to hold them to, so the test names every one that is granted: adding
-a plugin, or widening one, is a change to that list. It also holds the app-link setup (M4 E-4) to
+a plugin, or widening one, is a change to that list. The one widening so far is a scoped `opener:allow-open-url` for
+`vscode://vscode-remote/ssh-remote+*` (VS Code's Remote-SSH links for a linked machine's project, #82); the test holds
+it to that one pattern. It also holds the app-link setup (M4 E-4) to
 one URL scheme, `centralu`, and no deep-link plugin.
 
 Measured on a real Tauri instance (#186, when there were 12; `take_app_links` came with app links,
@@ -957,7 +959,9 @@ resolving inside that root are supported; outside targets and dangling links are
 Text/image reads require a regular-file descriptor, bound allocation/read size, and compare
 opened-file identity. Native reveal/trash checks are additional absolute/no-symlink checks;
 they are **not** independent proof of project containment. Opening in an IDE does not fall
-back to a generic OS opener that could execute repository-authored content.
+back to a generic OS opener that could execute repository-authored content. A linked machine's project is opened
+with a VS Code Remote-SSH link instead (#82): VS Code connects over the person's ssh and, by default, asks before opening a remote file
+or folder from a link (`security.promptForRemoteFileProtocolHandling`); the hub hands it a path and never reads or runs the file itself.
 
 Limits:
 

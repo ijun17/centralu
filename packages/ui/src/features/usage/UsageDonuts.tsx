@@ -1,14 +1,39 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { ToolName, UsageSnapshot } from '@cc/protocol'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { MachineInfo, ToolName, UsageSnapshot } from '@cc/protocol'
+import { MACHINE_STATUS_LABEL } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
-import { useToolMeta, useTools } from '../../store/selectors.js'
+import { useMachineName, useToolMeta, useTools } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { UsagePanel } from './UsagePanel.jsx'
 import { usageTone, weeklyWindow } from './weekly.js'
 
+type Snap = { usage: UsageSnapshot | null; reason?: string }
+
 /**
- * Usage in the top bar — **one weekly donut per tool** (user request, 2026-09-09).
+ * What one machine said about its limits. `live` is null until it has answered which tools are usable there; `snap`
+ * holds each tool's last answer.
+ */
+type Group = { live: ToolName[] | null; snap: Partial<Record<ToolName, Snap>> }
+
+/** The key of this computer's group. Machine ids start with a letter, so it never collides with one */
+const HERE = ''
+
+/** Which donut's detail is open: a tool, on this computer (`machine` null) or on a linked machine */
+type Open = { machine: string | null; tool: ToolName }
+
+const EMPTY: Group = { live: null, snap: {} }
+
+/** The ids of the linked machines that are connected now, as one string so a selector can compare it */
+function connectedIds(machines: Record<string, MachineInfo>): string[] {
+  return Object.values(machines)
+    .filter((m) => m.status === 'connected')
+    .map((m) => m.id)
+}
+
+/**
+ * Usage in the top bar — **one weekly donut per tool** (user request, 2026-09-09), **per machine** (#82, owner
+ * decision on docs/plans/remote-hub.md §6).
  *
  * It used to be a single text button labeled 'Usage', which opened a modal in the middle of the
  * screen on click. Two things about that fell short: (1) with no number on the dashboard, the
@@ -23,6 +48,12 @@ import { usageTone, weeklyWindow } from './weekly.js'
  * Why only the weekly window is put forward: the dashboard is a glance-read surface, and the
  * 5-hour window recovers quickly and does not say "is this urgent right now." Every other window
  * lives in the detail view.
+ *
+ * Linked machines: each machine signs its tools in on its own, possibly to another account, so each has limits of its
+ * own. This computer's donuts come first and carry no name (the person reads the absence as "here", as `MachineTag`
+ * does); each linked machine follows behind a hairline, named by the same chip the session header uses. A machine that
+ * is not connected is named with its state and is **not asked**: the hub would only queue the call behind a link that
+ * is down. It is asked again the moment its link comes back.
  */
 export function UsageDonuts() {
   const platform = usePlatform()
@@ -39,11 +70,16 @@ export function UsageDonuts() {
    */
   const connection = useStore((s) => s.connection)
   const offline = connection !== 'connected'
-  const [snap, setSnap] = useState<Partial<Record<ToolName, { usage: UsageSnapshot | null; reason?: string }>>>({})
-  const [open, setOpen] = useState<ToolName | null>(null)
+  /** The linked machines, in the order the host lists them (the sidebar's group order) */
+  const machineOrder = useStore((s) => Object.keys(s.machines).join(','))
+  const machineIds = machineOrder ? machineOrder.split(',') : []
+  const connectedKey = useStore((s) => connectedIds(s.machines).join(','))
+  const [groups, setGroups] = useState<Record<string, Group>>({})
+  const [open, setOpen] = useState<Open | null>(null)
   const tools = useTools()
   // A hook cannot be called conditionally — the value is unused anyway while closed
-  const openMeta = useToolMeta(open ?? '')
+  const openMeta = useToolMeta(open?.tool ?? '')
+  const openMachineName = useMachineName(open?.machine)
   /**
    * The tools a donut gets put up for (user request, 2026-09-09: "only connected agents should
    * get a donut").
@@ -51,27 +87,49 @@ export function UsageDonuts() {
    * **A limit for a tool that is not there has no place on the dashboard** — an empty ring for
    * an unused tool says nothing while still taking up eye space. The check is
    * installed-and-logged-in (detect), the same check the new-session window uses: two screens
-   * must never answer "can this tool be used" differently.
+   * must never answer "can this tool be used" differently. On a linked machine it is that
+   * machine's answer, as the new-session window asks it for a project there.
    *
    * null means "not asked yet" — nothing is drawn in the meantime. Putting up a donut and then
    * removing it before the first answer arrives would make the bar flicker.
    */
-  const [live, setLive] = useState<ToolName[] | null>(null)
+  const live = groups[HERE]?.live ?? null
 
-  const load = useCallback(() => {
-    // Does not ask while disconnected — it would just queue up and fail 30 seconds later (rpc-client's wait rule)
-    if (useStore.getState().connection !== 'connected') return
-    void platform.agents
-      .detect()
-      .then((found) => setLive(found.filter((t) => t.installed && t.loggedIn).map((t) => t.name)))
-      .catch(() => setLive([]))
-    for (const { name: tool } of tools) {
+  /** Asks one machine (null: this computer) which tools are usable and what each one's limits are */
+  const loadOne = useCallback(
+    (machine: string | null) => {
+      // Does not ask while disconnected — it would just queue up and fail 30 seconds later (rpc-client's wait rule)
+      if (useStore.getState().connection !== 'connected') return
+      const key = machine ?? HERE
+      const on = machine ?? undefined
+      const patch = (p: Partial<Group> | ((g: Group) => Partial<Group>)) =>
+        setGroups((all) => {
+          const g = all[key] ?? EMPTY
+          return { ...all, [key]: { ...g, ...(typeof p === 'function' ? p(g) : p) } }
+        })
       void platform.agents
-        .usage(tool)
-        .then((r) => setSnap((s) => ({ ...s, [tool]: { usage: r.usage, reason: r.supported ? undefined : r.reason } })))
-        .catch((e: Error) => setSnap((s) => ({ ...s, [tool]: { usage: null, reason: e.message } })))
-    }
-  }, [platform, tools])
+        .detect(on)
+        .then((found) => patch({ live: found.filter((t) => t.installed && t.loggedIn).map((t) => t.name) }))
+        .catch(() => patch({ live: [] }))
+      for (const { name: tool } of tools) {
+        const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
+        void platform.agents
+          .usage(tool, on)
+          .then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason }))
+          .catch((e: Error) => put({ usage: null, reason: e.message }))
+      }
+    },
+    [platform, tools],
+  )
+
+  /** The connected machines last asked, so a machine whose link comes back is asked once, and the others are not */
+  const asked = useRef<Set<string>>(new Set())
+  const loadAll = useCallback(() => {
+    loadOne(null)
+    const ids = connectedIds(useStore.getState().machines)
+    for (const id of ids) loadOne(id)
+    asked.current = new Set(ids)
+  }, [loadOne])
 
   /*
    * Once on mount, then every 5 minutes after that. A limit is a value that moves on the order
@@ -79,27 +137,50 @@ export function UsageDonuts() {
    * the answer (claude asks a live session).
    */
   useEffect(() => {
-    load()
-    const t = setInterval(load, 5 * 60_000)
+    loadAll()
+    const t = setInterval(loadAll, 5 * 60_000)
     return () => clearInterval(t)
     // connection: the moment it comes back is when to ask again (a login could have happened meanwhile)
-  }, [load, connection])
+  }, [loadAll, connection])
+
+  /*
+   * A linked machine whose link comes back (or that was just added) is asked then, rather than at the next 5-minute
+   * tick: its group would otherwise stand empty for up to five minutes after it says "connected". Only that machine is
+   * asked; the rest keep their answers.
+   */
+  useEffect(() => {
+    const now = new Set(connectedKey ? connectedKey.split(',') : [])
+    for (const id of now) if (!asked.current.has(id)) loadOne(id)
+    asked.current = now
+  }, [connectedKey, loadOne])
 
   /*
    * Opening via the palette or /usage opens the detail for **whichever tool is currently being
-   * looked at** (usageTools) — or the first donut if that tool is not on screen. Two doors, one
-   * destination.
+   * looked at** (usageTools), on the machine that session runs on when that machine is connected —
+   * or this computer's first donut if that tool is not on screen. Two doors, one destination.
    */
   useEffect(() => {
-    if (usageOpen) setOpen((cur) => cur ?? usageTools(useStore.getState())[0] ?? (live ?? [])[0] ?? null)
-    else setOpen(null)
+    if (!usageOpen) {
+      setOpen(null)
+      return
+    }
+    setOpen((cur) => {
+      if (cur) return cur
+      const s = useStore.getState()
+      const tool = usageTools(s)[0]
+      const machine = s.focusedSessionId ? (s.sessions[s.focusedSessionId]?.machine ?? null) : null
+      if (tool) return { machine: machine && s.machines[machine]?.status === 'connected' ? machine : null, tool }
+      const first = (live ?? [])[0]
+      return first ? { machine: null, tool: first } : null
+    })
   }, [usageOpen, live])
 
-  const show = (tool: ToolName | null) => {
-    setOpen(tool)
-    toggleUsage(tool !== null)
-    if (tool) load()
+  const show = (next: Open | null) => {
+    setOpen(next)
+    toggleUsage(next !== null)
+    if (next) loadOne(next.machine)
   }
+  const isOpen = (machine: string | null, tool: ToolName) => open?.machine === machine && open.tool === tool
 
   useEffect(() => {
     if (!open) return
@@ -132,8 +213,8 @@ export function UsageDonuts() {
    * The fact is written using the same rule as disconnection. While it has not been asked yet
    * (null), nothing is said — silence before the first answer would not be true.
    */
-  if (live !== null && live.length === 0) {
-    return (
+  const noAgent =
+    live !== null && live.length === 0 ? (
       <Tooltip
         testId="usage-no-agent-tip"
         content={
@@ -147,19 +228,26 @@ export function UsageDonuts() {
           No agent
         </span>
       </Tooltip>
-    )
-  }
+    ) : null
+
+  // With no linked machine, a computer with no usable tool says only that, as it always did
+  if (noAgent && machineIds.length === 0) return noAgent
 
   return (
     <span className="relative flex items-center gap-0.5" data-testid="usage-donuts">
+      {noAgent}
       {(live ?? []).map((tool) => (
         <Donut
           key={tool}
           tool={tool}
-          snap={snap[tool]}
-          active={open === tool}
-          onClick={() => show(open === tool ? null : tool)}
+          machine={null}
+          snap={groups[HERE]?.snap[tool]}
+          active={isOpen(null, tool)}
+          onClick={() => show(isOpen(null, tool) ? null : { machine: null, tool })}
         />
+      ))}
+      {machineIds.map((id) => (
+        <MachineGroup key={id} machineId={id} group={groups[id] ?? EMPTY} isOpen={isOpen} show={show} />
       ))}
 
       {open && (
@@ -175,16 +263,90 @@ export function UsageDonuts() {
             data-no-drag
             className="cc-drop absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
             data-testid="usage-drop"
+            data-machine={open.machine ?? undefined}
           >
             <header className="flex items-center gap-2 border-b border-line px-4 py-2">
               <h2 className="text-md font-medium text-ink">Usage</h2>
               <span className="readout text-xs text-ink-faint">{openMeta.label}</span>
+              {openMachineName && (
+                <span className="truncate text-xs text-ink-faint" data-testid="usage-drop-machine">
+                  on {openMachineName}
+                </span>
+              )}
             </header>
             <div className="max-h-[calc(60vh/var(--text-zoom))] overflow-y-auto">
-              <UsagePanel tool={open} />
+              <UsagePanel tool={open.tool} machine={open.machine} />
             </div>
           </div>
         </>
+      )}
+    </span>
+  )
+}
+
+/**
+ * One linked machine's donuts, behind a hairline and its name (#82).
+ *
+ * The name is the same hairline chip in the faint ink as `MachineTag`, so the bar does not gain a new kind of mark.
+ * A machine that is not connected shows its state in place of donuts (the sidebar's words for it), and is not asked.
+ * One that is connected but has no usable tool says so in the same faint words as this computer would, so a missing
+ * group never reads as "this machine has no limits".
+ */
+function MachineGroup({
+  machineId,
+  group,
+  isOpen,
+  show,
+}: {
+  machineId: string
+  group: Group
+  isOpen: (machine: string | null, tool: ToolName) => boolean
+  show: (next: Open | null) => void
+}) {
+  const info = useStore((s) => s.machines[machineId])
+  if (!info) return null
+  const connected = info.status === 'connected'
+  return (
+    <span
+      className="ml-1 flex items-center gap-0.5 border-l border-line pl-1.5"
+      data-testid={`usage-machine-${machineId}`}
+      data-status={info.status}
+    >
+      <Tooltip
+        testId={`usage-machine-tip-${machineId}`}
+        align="right"
+        content={
+          <span className="block">
+            <span className="block text-ink">{info.name}</span>
+            <span className="mt-1 block text-ink-faint">
+              {connected ? 'Usage on this machine' : `${MACHINE_STATUS_LABEL[info.status]}: not asked until it is back`}
+            </span>
+          </span>
+        }
+      >
+        <span className="block max-w-[96px] truncate rounded-md border border-line px-1 text-2xs leading-body text-ink-faint">
+          {info.name}
+        </span>
+      </Tooltip>
+      {!connected ? (
+        <span className="ml-0.5 text-2xs text-ink-faint" data-testid={`usage-machine-state-${machineId}`}>
+          {MACHINE_STATUS_LABEL[info.status]}
+        </span>
+      ) : group.live !== null && group.live.length === 0 ? (
+        <span className="ml-0.5 text-2xs text-ink-faint" data-testid={`usage-machine-no-agent-${machineId}`}>
+          No agent
+        </span>
+      ) : (
+        (group.live ?? []).map((tool) => (
+          <Donut
+            key={tool}
+            tool={tool}
+            machine={machineId}
+            snap={group.snap[tool]}
+            active={isOpen(machineId, tool)}
+            onClick={() => show(isOpen(machineId, tool) ? null : { machine: machineId, tool })}
+          />
+        ))
       )}
     </span>
   )
@@ -199,16 +361,23 @@ export function UsageDonuts() {
  */
 function Donut({
   tool,
+  machine,
   snap,
   active,
   onClick,
 }: {
   tool: ToolName
-  snap?: { usage: UsageSnapshot | null; reason?: string }
+  /** The linked machine it is for; null for this computer */
+  machine: string | null
+  snap?: Snap
   active: boolean
   onClick: () => void
 }) {
   const meta = useToolMeta(tool)
+  const machineName = useMachineName(machine)
+  // A machine's donut is named `<machine>.<tool>`, the way the hub names a machine's ids (#82); this computer's keep their names
+  const id = machine ? `${machine}.${tool}` : tool
+  const label = machineName ? `${meta.label} on ${machineName}` : meta.label
   const w = snap?.usage ? weeklyWindow(snap.usage.windows) : null
   const known = w !== null
   const percent = w?.percent ?? 0
@@ -219,10 +388,10 @@ function Donut({
 
   return (
     <Tooltip
-      testId={`usage-donut-tip-${tool}`}
+      testId={`usage-donut-tip-${id}`}
       content={
         <span className="block">
-          <span className="block text-ink">{meta.label}</span>
+          <span className="block text-ink">{label}</span>
           <span className="readout mt-1 block">
             {known ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used` : 'Weekly usage unknown'}
           </span>
@@ -232,8 +401,8 @@ function Donut({
       <button
         type="button"
         onClick={onClick}
-        aria-label={`${meta.label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
-        data-testid={`usage-donut-${tool}`}
+        aria-label={`${label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
+        data-testid={`usage-donut-${id}`}
         data-percent={known ? percent : ''}
         /*
          * Even while open, **another donut has to be clickable right away** — if the outside

@@ -12,7 +12,7 @@ import { Tooltip } from '../../components/primitives.jsx'
  * weekly window). So the UI draws the array without knowing how many windows there are — a new
  * window appearing does not require a change here.
  */
-export function UsagePanel({ tool }: { tool: ToolName }) {
+export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A linked machine's limits (#82); null for this computer */ machine?: string | null }) {
   const platform = usePlatform()
   const [state, setState] = useState<{
     loading: boolean
@@ -24,13 +24,13 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
     let alive = true
     setState({ loading: true, usage: null })
     void platform.agents
-      .usage(tool)
+      .usage(tool, machine ?? undefined)
       .then((r) => alive && setState({ loading: false, usage: r.usage, reason: r.supported ? undefined : r.reason }))
       .catch((e: Error) => alive && setState({ loading: false, usage: null, reason: e.message }))
     return () => {
       alive = false
     }
-  }, [platform, tool])
+  }, [platform, tool, machine])
 
   if (state.loading) {
     return (

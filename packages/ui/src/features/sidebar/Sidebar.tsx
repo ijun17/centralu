@@ -24,6 +24,7 @@ import { REMOTE_APP_REASON, useMachineApps, useProjectApps, useUserApps, type Ex
 import { isAway } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
+import { useRemoteIde } from '../machines/remoteIde.js'
 import type { ExternalAppStatus } from '@cc/protocol'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
@@ -482,6 +483,8 @@ function orderAsTree(
 
 function ProjectBlock({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects[projectId])
+  // A project on a linked machine opens in VS Code over Remote-SSH (#82); null for this computer's, and where that cannot work
+  const remoteIde = useRemoteIde(projectId)
   const focusedSessionId = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
   const sessions = useSessionsOf(projectId)
@@ -696,6 +699,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             onStartManager={() => setManagerDialog(true)}
             onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
             onFoldOthers={manyProjects ? () => foldOthers(projectId) : undefined}
+            onOpenInVsCode={remoteIde ? () => void remoteIde.open('') : undefined}
             onDelete={() => setDeleting(true)}
           />
         )}
@@ -1663,6 +1667,7 @@ function ProjectMenu({
   onStartManager,
   onToggleTrust,
   onFoldOthers,
+  onOpenInVsCode,
   onDelete,
 }: {
   project: ProjectInfo
@@ -1674,6 +1679,8 @@ function ProjectMenu({
   onToggleTrust: () => void
   /** Only when there are two or more projects — with just one, there is no "other" to fold */
   onFoldOthers?: () => void
+  /** A project on a linked machine VS Code can reach over Remote-SSH (#82): its folder there */
+  onOpenInVsCode?: () => void
   onDelete: () => void
 }) {
   const pick = (fn: () => void) => () => {
@@ -1690,6 +1697,13 @@ function ProjectMenu({
         instead, there would be nowhere to ask why it is missing).
       */}
       {onNewApp && <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />}
+      {/*
+        The whole project in VS Code, on its own machine (#82). It lives here and not in the file tree's tab strip:
+        there it took the width the strip counts tabs by, and pushed the terminal tab into "more" in a narrow panel.
+      */}
+      {onOpenInVsCode && (
+        <ActionRow label="Open in VS Code" onClick={pick(onOpenInVsCode)} testId={`open-vscode-${project.name}`} />
+      )}
       {/*
         The door to **first** create the manager slot (#76). Shown only when it is a git repo and
         that slot does not exist yet — once created, that slot stands as a row in the session list,
