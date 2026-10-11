@@ -5,6 +5,7 @@ import {
   busyMessage,
   earlyExitMessage,
   executableIn,
+  findHostEntry,
   installedPaths,
   isBusyError,
   launchPlan,
@@ -62,6 +63,37 @@ describe('which package the launcher looks for', () => {
     }
     const pkgs = Object.values(TARGETS as Record<string, { pkg: string }>).map((t) => t.pkg)
     expect(pkgs.sort()).toEqual(Object.keys(shim.optionalDependencies).sort())
+  })
+})
+
+describe('where `centralu serve` finds the host (#82)', () => {
+  const NM = 'C:\\Users\\Jane Doe\\.centralu\\remote\\versions\\0.1.0\\node_modules'
+  const lookup = (platform: string, arch: string, installed: Record<string, string>, files: string[]) =>
+    findHostEntry(platform, arch, { resolveRoot: (name: string) => installed[name] ?? null, exists: (f: string) => files.includes(f) })
+
+  it('takes the host-only package a hub installed, on Windows inside its host folder', () => {
+    const root = `${NM}\\@centralu\\host-win32-x64`
+    expect(lookup('win32', 'x64', { '@centralu/host-win32-x64': root }, [`${root}\\host\\main.mjs`])).toEqual({ entry: `${root}\\host\\main.mjs` })
+    expect(lookup('linux', 'arm64', { '@centralu/host-linux-arm64': '/r/@centralu/host-linux-arm64' }, ['/r/@centralu/host-linux-arm64/host/main.mjs'])).toEqual({
+      entry: '/r/@centralu/host-linux-arm64/host/main.mjs',
+    })
+  })
+
+  it('prefers the platform package of an npm install when both are there', () => {
+    const installed = { '@centralu/linux-x64': '/n/@centralu/linux-x64', '@centralu/host-linux-x64': '/r/@centralu/host-linux-x64' }
+    const files = ['/n/@centralu/linux-x64/host/main.mjs', '/r/@centralu/host-linux-x64/host/main.mjs']
+    expect(lookup('linux', 'x64', installed, files)).toEqual({ entry: '/n/@centralu/linux-x64/host/main.mjs' })
+    // A platform package without its host (Linux before `serve`) does not hide a host-only one
+    expect(lookup('linux', 'x64', installed, files.slice(1))).toEqual({ entry: '/r/@centralu/host-linux-x64/host/main.mjs' })
+  })
+
+  it('says which package lacks its host, and that nothing is installed when nothing is', () => {
+    expect(lookup('linux', 'x64', { '@centralu/linux-x64': '/n/@centralu/linux-x64' }, [])).toEqual({
+      missingHost: { pkg: '@centralu/linux-x64', entry: '/n/@centralu/linux-x64/host/main.mjs' },
+    })
+    expect(lookup('linux', 'x64', {}, [])).toEqual({ missingPackage: true })
+    // macOS has no host-only package: a hub never installs on one
+    expect(lookup('darwin', 'arm64', { '@centralu/host-darwin-arm64': '/x' }, ['/x/host/main.mjs'])).toEqual({ missingPackage: true })
   })
 })
 

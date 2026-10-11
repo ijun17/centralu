@@ -71,6 +71,46 @@ export function hostDirIn(platform, app) {
 }
 
 /**
+ * The host alone, without the window, for the machines a hub installs on (docs/plans/remote-hub.md
+ * §10.2, owner decision 2 of §10.9): `host/` at the top of the package on every platform. The shim
+ * never pins these (an npm install gets the host inside its platform package already); a hub's
+ * installer fetches one beside this package instead of the platform package, so a Linux remote does
+ * not download an 81 MB AppImage to throw away. Published from the same release jobs as the platform
+ * packages (`scripts/host-package.mts`); `tooling/host-package.test.ts` holds this table to them.
+ */
+export const HOST_PACKAGES = {
+  'linux-arm64': '@centralu/host-linux-arm64',
+  'linux-x64': '@centralu/host-linux-x64',
+  'win32-x64': '@centralu/host-win32-x64',
+}
+
+/**
+ * Where `centralu serve` finds the host's `main.mjs`: in the platform package (an npm install), else
+ * in the host-only package (what a hub installed, `<data>/remote/versions/<v>/node_modules/`).
+ *
+ * `resolveRoot(name)` is the package's folder or null when it is not installed; `exists(file)` says
+ * whether a file is there. Answers `{ entry }`, or `{ missingHost: { pkg, entry } }` when a package
+ * is installed without its host, or `{ missingPackage: true }` when neither is installed.
+ */
+export function findHostEntry(platform, arch, { resolveRoot, exists }) {
+  const join = platform === 'win32' ? win32.join : posix.join
+  const target = targetFor(platform, arch)
+  const hostOnly = HOST_PACKAGES[`${platform}-${arch}`]
+  const places = []
+  if (target) places.push({ pkg: target.pkg, dir: (root) => hostDirIn(platform, join(root, target.artifact)) })
+  if (hostOnly) places.push({ pkg: hostOnly, dir: (root) => join(root, 'host') })
+  let missingHost = null
+  for (const place of places) {
+    const root = resolveRoot(place.pkg)
+    if (!root) continue
+    const entry = join(place.dir(root), 'main.mjs')
+    if (exists(entry)) return { entry }
+    missingHost ??= { pkg: place.pkg, entry }
+  }
+  return missingHost ? { missingHost } : { missingPackage: true }
+}
+
+/**
  * How to start the app: the command, its arguments, the spawn options, and whether the
  * launcher stays attached until it exits.
  *

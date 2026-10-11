@@ -25,8 +25,20 @@ type RegistryKey = { keyid: string; key: string; expires: string | null }
 const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 
-async function getJson(url: string, f: typeof globalThis.fetch): Promise<unknown> {
+/**
+ * The registry has no such package, or no such version of it (it answers 404 for both). Its own
+ * class because the installer acts on it: a version published before the host-only packages
+ * existed is installed from its platform package instead (install.ts)
+ */
+export class NotPublished extends Error {
+  constructor(readonly id: string) {
+    super(`${id} is not on the npm registry`)
+  }
+}
+
+async function getJson(url: string, f: typeof globalThis.fetch, id?: string): Promise<unknown> {
   const res = await f(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) })
+  if (res.status === 404 && id) throw new NotPublished(id)
   if (!res.ok) throw new Error(`The npm registry answered ${res.status} for ${url}`)
   return res.json()
 }
@@ -41,7 +53,7 @@ export async function verifiedPackage(name: string, version: string, opts: Regis
   const registry = (opts.registry ?? NPM_REGISTRY).replace(/\/+$/, '')
   const f = opts.fetch ?? globalThis.fetch
   const now = opts.now?.() ?? Date.now()
-  const [meta, keys] = await Promise.all([getJson(`${registry}/${name}/${version}`, f), getJson(`${registry}/-/npm/v1/keys`, f)])
+  const [meta, keys] = await Promise.all([getJson(`${registry}/${name}/${version}`, f, `${name}@${version}`), getJson(`${registry}/-/npm/v1/keys`, f)])
   const m = meta as { name?: unknown; version?: unknown; dist?: { tarball?: unknown; integrity?: unknown; signatures?: unknown } }
   if (m?.name !== name || m.version !== version) throw new Error(`The npm registry answered for another package than ${name}@${version}`)
   const tarball = m.dist?.tarball
