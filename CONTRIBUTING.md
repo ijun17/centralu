@@ -144,8 +144,8 @@ CI runs the whole Playwright suite **in both engines the desktop app is**: WebKi
 macOS, WebKitGTK on Linux) and Chromium (WebView2 on Windows), each split across parallel shards
 (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). Locally `pnpm e2e` runs in Chromium, plus
 the `-webkit.spec.ts` twins in WebKit; `E2E_BROWSER=webkit pnpm e2e` or `E2E_BROWSER=chromium pnpm
-e2e` runs it the way one CI engine does. When a shard fails, the `e2e report (<engine>)` jobs upload
-one HTML report per engine, with traces of the failed tests (`pnpm exec playwright show-report
+e2e` runs it the way one CI engine does. When a shard fails, the `e2e report` job uploads
+one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed tests (`pnpm exec playwright show-report
 <folder>` after unzipping it). A twin repeats its base spec in WebKit and adds nothing, since CI
 leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
 something in WebKit goes in the shared fixture and skips itself in other engines.

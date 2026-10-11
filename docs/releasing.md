@@ -67,8 +67,8 @@ script rehearses by default and why nothing publishes automatically.
 - The same workflow runs the Playwright suite (`e2e/`) on ubuntu-24.04 in WebKit and in
   Chromium, the two engines the desktop app renders in, each split into shards that run side by
   side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). When a shard fails,
-  `e2e report (<engine>)` merges that engine's shard reports into one HTML report with traces and
-  uploads it as the `e2e-report-<engine>` artifact.
+  `e2e report` merges each engine's shard reports into one HTML report with traces and uploads
+  them as the `e2e-report` artifact, a folder per engine.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
   tag (`dry_run`, default on). See below.

@@ -401,16 +401,14 @@ jobs:
   # One HTML report per engine out of its shards' blob reports, with the traces of the tests that
   # failed. Per engine, because both runs have the same projects and test ids: merged together, one
   # engine's result for a test would stand in for the other's. Only when a shard failed: a green run
-  # has nothing in it worth downloading.
+  # has nothing in it worth downloading. One job with a step per engine, not a matrix: a skipped
+  # matrix job reports its name unexpanded (`e2e report (${{ matrix.engine }})`), which is not the
+  # name a required check would wait for.
   e2e-report:
-    name: e2e report (${{ matrix.engine }})
+    name: e2e report
     needs: [e2e, e2e-chromium]
     if: ${{ !cancelled() && (needs.e2e.result == 'failure' || needs.e2e-chromium.result == 'failure') }}
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        engine: [webkit, chromium]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -425,17 +423,27 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: e2e-blob-${{ matrix.engine }}-*
-          path: all-blob-reports
-          merge-multiple: true
+          pattern: e2e-blob-*
+          path: blobs
 
-      - name: Merge the shard reports
-        run: pnpm exec playwright merge-reports --reporter html ./all-blob-reports
+      # download-artifact puts each artifact in a folder of its own name: e2e-blob-<engine>-<shard>
+      - name: Merge the shard reports, per engine
+        run: |
+          set -euo pipefail
+          for engine in webkit chromium; do
+            mkdir -p "merge/$engine"
+            for dir in blobs/e2e-blob-"$engine"-*; do
+              if [ -d "$dir" ]; then cp "$dir"/*.zip "merge/$engine/"; fi
+            done
+            if ls "merge/$engine"/*.zip >/dev/null 2>&1; then
+              PLAYWRIGHT_HTML_OUTPUT_DIR="e2e-report/$engine" pnpm exec playwright merge-reports --reporter html "./merge/$engine"
+            fi
+          done
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: e2e-report-${{ matrix.engine }}
-          path: playwright-report
+          name: e2e-report
+          path: e2e-report
           retention-days: 14
           if-no-files-found: error
 
