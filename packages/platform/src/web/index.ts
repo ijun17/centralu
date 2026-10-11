@@ -385,34 +385,34 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         const { toolResult, ...v } = await rpc.call('apps.inlineReopen', { sessionId, callId })
         return { ...v, ...(toolResult ? { toolResult: toolResult as AppToolResult } : {}) }
       },
-      restart: async (appId, projectId) => {
-        await rpc.call('apps.restart', { appId, projectId })
+      restart: async (appId, projectId, machine) => {
+        await rpc.call('apps.restart', { appId, projectId, ...on(machine) })
       },
-      runs: (appId, projectId, limit) => rpc.call('apps.runs', { appId, projectId, limit }),
+      runs: (appId, projectId, limit, machine) => rpc.call('apps.runs', { appId, projectId, limit, ...on(machine) }),
       remove: async (appId, projectId) => {
         await rpc.call('apps.remove', { appId, projectId })
       },
       create: (spec) => rpc.call('apps.create', spec),
-      builder: (appId, projectId) => rpc.call('apps.builder', { appId, projectId }),
-      createBuilder: (appId, projectId, tool) => rpc.call('apps.createBuilder', { appId, projectId, ...(tool ? { tool } : {}) }),
+      builder: (appId, projectId, machine) => rpc.call('apps.builder', { appId, projectId, ...on(machine) }),
+      createBuilder: (appId, projectId, tool, machine) => rpc.call('apps.createBuilder', { appId, projectId, ...(tool ? { tool } : {}), ...on(machine) }),
       askBuilder: (req) => rpc.call('apps.askBuilder', req),
-      errors: (appId, projectId) => rpc.call('apps.errors', { appId, projectId }),
+      errors: (appId, projectId, machine) => rpc.call('apps.errors', { appId, projectId, ...on(machine) }),
       reach: (sessionId, appId, projectId) => rpc.call('apps.reach', { sessionId, appId, projectId }),
-      sendError: (appId, projectId, at) => rpc.call('apps.sendError', { appId, projectId, at }),
+      sendError: (appId, projectId, at, machine) => rpc.call('apps.sendError', { appId, projectId, at, ...on(machine) }),
       questions: () => rpc.call('apps.questions', {}),
       answerQuestion: async (questionId, decision) => {
         await rpc.call('apps.answerQuestion', { questionId, decision })
       },
-      permissions: (appId, projectId) => rpc.call('apps.permissions', { appId, projectId }),
-      forgetPermission: async (appId, projectId, capability) => {
-        await rpc.call('apps.forgetPermission', { appId, projectId, capability })
+      permissions: (appId, projectId, machine) => rpc.call('apps.permissions', { appId, projectId, ...on(machine) }),
+      forgetPermission: async (appId, projectId, capability, machine) => {
+        await rpc.call('apps.forgetPermission', { appId, projectId, capability, ...on(machine) })
       },
-      usage: (appId, projectId) => rpc.call('apps.usage', { appId, projectId }),
+      usage: (appId, projectId, machine) => rpc.call('apps.usage', { appId, projectId, ...on(machine) }),
       setShared: async (appId, projectId, shared) => {
         await rpc.call('apps.setShared', { appId, projectId, shared })
       },
-      setSecret: async (appId, projectId, name, value) => {
-        await rpc.call('apps.setSecret', { appId, projectId, name, value })
+      setSecret: async (appId, projectId, name, value, machine) => {
+        await rpc.call('apps.setSecret', { appId, projectId, name, value, ...on(machine) })
       },
       importPrepare: (source) => rpc.call('apps.importPrepare', { source }),
       importCommit: (token, { enable, reviewKey }) =>
@@ -422,8 +422,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       },
       review: (appId, projectId) => rpc.call('apps.review', { appId, projectId }),
       enable: (appId, projectId, reviewKey) => rpc.call('apps.enable', { appId, projectId, reviewKey }),
-      versions: (appId, projectId) => rpc.call('apps.versions', { appId, projectId }),
-      restoreVersion: (appId, projectId, id) => rpc.call('apps.restoreVersion', { appId, projectId, id }),
+      versions: (appId, projectId, machine) => rpc.call('apps.versions', { appId, projectId, ...on(machine) }),
+      restoreVersion: (appId, projectId, id, machine) => rpc.call('apps.restoreVersion', { appId, projectId, id, ...on(machine) }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

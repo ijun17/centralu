@@ -127,12 +127,6 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     window.focus()
   }, [mode])
   const app = useExternalApp(pv.projectId, pv.appId, pv.machine)
-  /*
-   * A linked machine's user-folder app (#82): its view opens and works, but the calls behind the side panels (runs,
-   * secrets, versions, the builder) name an app by project and id and would answer for this computer's app of the same
-   * id, so they are left out until they can name the machine too
-   */
-  const elsewhere = !!pv.machine
   const frame = useRef<AppFrameHandle>(null)
   const start = useStore((s) => s.startPinnedView)
   const release = useStore((s) => s.releasePinnedView)
@@ -368,22 +362,19 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               Builder
             </button>
           )}
-          {!elsewhere && (
-            <button
-              type="button"
-              className={`${builder.id ? '' : 'ml-auto '}rounded-md px-2 py-0.5 text-xs transition-colors ${
-                runsOpen ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
-              }`}
-              aria-pressed={runsOpen}
-              onClick={() => setRunsOpen((v) => !v)}
-              data-testid="pinned-runs-toggle"
-              title="Recent runs of this app — who called which tool, and how it ended"
-            >
-              Runs
-            </button>
-          )}
-          {elsewhere && <span className="ml-auto" />}
-          {!elsewhere && !!app?.info.secrets?.length && (
+          <button
+            type="button"
+            className={`${builder.id ? '' : 'ml-auto '}rounded-md px-2 py-0.5 text-xs transition-colors ${
+              runsOpen ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
+            }`}
+            aria-pressed={runsOpen}
+            onClick={() => setRunsOpen((v) => !v)}
+            data-testid="pinned-runs-toggle"
+            title="Recent runs of this app — who called which tool, and how it ended"
+          >
+            Runs
+          </button>
+          {!!app?.info.secrets?.length && (
             <button
               type="button"
               className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
@@ -416,7 +407,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               {app.info.shared ? 'Shared' : 'Share'}
             </button>
           )}
-          {app && !elsewhere && (
+          {app && (
             <button
               type="button"
               className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
@@ -456,7 +447,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
         </div>
         {/* Drawn only while visible — if the focus view drew the same session while this is hidden, one conversation would stand in two panels */}
         {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}
-        {visible && runsOpen && !elsewhere && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
+        {visible && runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} machine={pv.machine} />}
         {visible && secretsOpen && app && <SecretsPanel app={app} />}
         {visible && versionsOpen && app && <VersionsPanel app={app} />}
       </div>

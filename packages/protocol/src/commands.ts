@@ -1379,11 +1379,11 @@ export const RpcMethods = {
    */
   /** The run history of one external app, most recent first (M4 A-6 — read by the run history screen B-7) */
   'apps.runs': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), limit: z.number().int().min(1).max(500).default(100) }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, limit: z.number().int().min(1).max(500).default(100) }),
     result: z.array(AppRun),
   },
   'apps.restart': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -1428,7 +1428,7 @@ export const RpcMethods = {
    * project root; a user-folder app's has it at the app's own folder.
    */
   'apps.builder': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: SessionInfo.nullable(),
   },
   /**
@@ -1443,7 +1443,7 @@ export const RpcMethods = {
    * that needs to persist longer is the run history's job (`apps.runs`).
    */
   'apps.errors': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: z.object({ latest: AppErrorBundle.nullable(), recent: z.array(AppErrorBundle) }),
   },
   /**
@@ -1487,12 +1487,12 @@ export const RpcMethods = {
   },
   /** The remembered capability answers for one app (M4 D-4) — shown next to the run history panel (B-7) and can be forgotten there */
   'apps.permissions': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: z.array(AppPermission),
   },
   /** Forgets one remembered answer (M4 D-4) — the next attempt to use that capability asks again */
   'apps.forgetPermission': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), capability: z.string() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, capability: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -1501,11 +1501,11 @@ export const RpcMethods = {
    * readable as long as the record remains.
    */
   'apps.usage': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: AppUsage,
   },
   'apps.createBuilder': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), tool: ToolName.optional() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, tool: ToolName.optional() }),
     result: SessionInfo,
   },
   /**
@@ -1526,13 +1526,14 @@ export const RpcMethods = {
    * (protocol's `builderErrorFrame`).
    */
   'apps.sendError': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), at: z.number() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, at: z.number() }),
     result: z.object({ sessionId: SessionId }),
   },
   'apps.askBuilder': {
     params: z.object({
       appId: AppId,
       projectId: ProjectId.nullable(),
+      ...machineParam,
       text: z.string().max(64_000),
       attachments: z.array(Attachment).optional(),
       instanceId: z.string().optional(),
@@ -1577,6 +1578,7 @@ export const RpcMethods = {
     params: z.object({
       appId: AppId,
       projectId: ProjectId.nullable(),
+      ...machineParam,
       name: z.string(),
       value: z.string().max(16 * 1024).nullable(),
     }),
@@ -1639,7 +1641,7 @@ export const RpcMethods = {
    * repository, this returns `repo: false` with an empty list.
    */
   'apps.versions': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: AppVersions,
   },
   /**
@@ -1651,7 +1653,7 @@ export const RpcMethods = {
    * app is rejected — git is where restoring happens for those.
    */
   'apps.restoreVersion': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), id: z.string() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, id: z.string() }),
     result: ExternalAppInfo,
   },
   'orchestrator.tools': {

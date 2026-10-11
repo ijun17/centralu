@@ -29,7 +29,8 @@ import { externalAppKey, useStore } from '../../store/store.js'
  * under the row that caused it. A row where an agent was asked for lets a person jump to that session
  * (Open session).
  */
-export function RunsPanel({ appId, projectId }: { appId: string; projectId: string | null }) {
+/** `machine`: a linked machine's user-folder app (#82), whose runs, answers and agent use are that machine's */
+export function RunsPanel({ appId, projectId, machine }: { appId: string; projectId: string | null; machine?: string | null }) {
   const platform = usePlatform()
   const changed = useStore((s) => s.externalAppRunChanges[externalAppKey(projectId, appId)] ?? 0)
   const sessions = useStore((s) => s.sessions)
@@ -41,7 +42,7 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
   const load = useCallback(() => {
     let alive = true
     platform.apps
-      .runs(appId, projectId, 100)
+      .runs(appId, projectId, 100, machine)
       .then((r) => {
         if (!alive) return
         setRuns(r)
@@ -51,7 +52,7 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
     return () => {
       alive = false
     }
-  }, [platform, appId, projectId])
+  }, [platform, appId, projectId, machine])
   // Every time `changed` changes — a row visible in this panel was created or ended
   useEffect(() => load(), [load, changed])
   const nameOf = (r: AppRun) => apps.find((a) => a.appId === r.appId && a.projectId === r.projectId)?.name ?? r.appId
@@ -70,8 +71,8 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Permissions appId={appId} projectId={projectId} changed={changed} />
-        <AgentUseSection appId={appId} projectId={projectId} runs={runs} />
+        <Permissions appId={appId} projectId={projectId} machine={machine} changed={changed} />
+        <AgentUseSection appId={appId} projectId={projectId} machine={machine} runs={runs} />
         {error && (
           <p className="px-3 py-2 text-xs text-ink-muted" role="alert">
             Could not read runs: {error}
@@ -107,7 +108,7 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
  * row soon either continues into a session or ends as a decline), when the view's question changes,
  * and after forgetting one.
  */
-function Permissions({ appId, projectId, changed }: { appId: string; projectId: string | null; changed: number }) {
+function Permissions({ appId, projectId, machine, changed }: { appId: string; projectId: string | null; machine?: string | null; changed: number }) {
   const platform = usePlatform()
   const asked = useStore((s) => s.appQuestionsVersion)
   const setToast = useStore((s) => s.setToast)
@@ -116,16 +117,16 @@ function Permissions({ appId, projectId, changed }: { appId: string; projectId: 
   useEffect(() => {
     let alive = true
     platform.apps
-      .permissions(appId, projectId)
+      .permissions(appId, projectId, machine)
       .then((l) => alive && setList(l))
       .catch(() => alive && setList([]))
     return () => {
       alive = false
     }
-  }, [platform, appId, projectId, changed, asked, again])
+  }, [platform, appId, projectId, machine, changed, asked, again])
   const forget = async (p: AppPermission) => {
     try {
-      await platform.apps.forgetPermission(appId, projectId, p.capability)
+      await platform.apps.forgetPermission(appId, projectId, p.capability, machine)
     } catch (e) {
       setToast(`Could not forget: ${(e as Error).message}`)
     }
@@ -168,19 +169,19 @@ function Permissions({ appId, projectId, changed }: { appId: string; projectId: 
  * When it re-reads: every time the history is re-read (`runs` changes) — usage changes as soon as an
  * agent's row ends.
  */
-function AgentUseSection({ appId, projectId, runs }: { appId: string; projectId: string | null; runs: AppRun[] | null }) {
+function AgentUseSection({ appId, projectId, machine, runs }: { appId: string; projectId: string | null; machine?: string | null; runs: AppRun[] | null }) {
   const platform = usePlatform()
   const [use, setUse] = useState<AppUsage | null>(null)
   useEffect(() => {
     let alive = true
     platform.apps
-      .usage(appId, projectId)
+      .usage(appId, projectId, machine)
       .then((u) => alive && setUse(u))
       .catch(() => alive && setUse(null))
     return () => {
       alive = false
     }
-  }, [platform, appId, projectId, runs])
+  }, [platform, appId, projectId, machine, runs])
   if (!use || use.month.runs === 0) return null
   return (
     <section className="border-b border-line px-3 py-2" data-testid="runs-agent-use">

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AppSnapshot, AppVersions } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
-import type { ExternalCatalogApp } from '../../store/app-catalog.js'
+import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 
 /**
  * An app's versions (M4 E-1) — an expandable panel next to the pinned view (the same spot and
@@ -25,11 +25,13 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   const [error, setError] = useState<string | null>(null)
   const [asking, setAsking] = useState<AppSnapshot | null>(null)
   const [busy, setBusy] = useState(false)
+  // A linked machine's user-folder app (#82): its versions are that machine's
+  const machine = userAppMachine(app.info)
 
   const load = useCallback(() => {
     let alive = true
     platform.apps
-      .versions(app.appId, app.projectId)
+      .versions(app.appId, app.projectId, machine)
       .then((v) => {
         if (!alive) return
         setVersions(v)
@@ -39,7 +41,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
     return () => {
       alive = false
     }
-  }, [platform, app.appId, app.projectId])
+  }, [platform, app.appId, app.projectId, machine])
   // A new version appears when the app restarts on new code — reads again whenever the list's codeStamp changes
   useEffect(() => load(), [load, app.info.codeStamp])
 
@@ -47,7 +49,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
     setBusy(true)
     setError(null)
     try {
-      await platform.apps.restoreVersion(app.appId, app.projectId, snap.id)
+      await platform.apps.restoreVersion(app.appId, app.projectId, snap.id, userAppMachine(app.info))
       setAsking(null)
       setToast(`Restored ${app.title} to the version from ${when(snap.at)}`)
       void refresh()

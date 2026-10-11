@@ -40,12 +40,14 @@ export type Route =
   | { kind: 'project'; key?: string; params?: ParamsFix; result?: ResultFix; orMachine?: boolean }
   | { kind: 'terminal'; result?: ResultFix }
   | { kind: 'machine'; result?: ResultFix }
-  | { kind: 'view'; keys: readonly string[]; result?: ResultFix }
+  | { kind: 'view'; keys: readonly string[]; result?: ResultFix; orMachine?: boolean }
   | { kind: 'noRemote'; key: 'sessionId' | 'projectId' }
 
 const session = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'session', result, params })
 const project = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'project', result, params })
 const view = (keys: readonly string[], result?: ResultFix): Route => ({ kind: 'view', keys, result })
+/** An app's own call: by its project, or for a linked machine's user-folder app by the optional `machine` (plan §11.9) */
+const app = (result?: ResultFix): Route => ({ kind: 'project', orMachine: true, result })
 const HUB: Route = { kind: 'hub' }
 const INTERNAL: Route = { kind: 'internal' }
 const MERGE: Route = { kind: 'merge' }
@@ -182,30 +184,31 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'trash.list': MERGE,
   'trash.empty': MERGE,
 
-  // ── Apps: a project app routes with its project; a user-folder app is the hub's in phase 1 ──
-  'apps.runs': project(),
-  'apps.restart': project(),
+  // ── Apps: a project app routes with its project; a user-folder app by `machine` where the call takes it ──
+  'apps.runs': app((r, q) => (Array.isArray(r) ? r.map((x) => q.appRun(x)) : r)),
+  'apps.restart': app(),
   'apps.remove': project(),
   'apps.create': project((r, q) =>
     r && typeof r === 'object'
       ? { ...(r as object), app: q.app((r as { app?: unknown }).app), builder: q.session((r as { builder?: unknown }).builder) }
       : r,
   ),
-  'apps.builder': project(sessionInfo),
-  'apps.createBuilder': project(sessionInfo),
-  'apps.errors': project(),
-  'apps.permissions': project(),
-  'apps.forgetPermission': project(),
-  'apps.usage': project(),
-  'apps.sendError': project(builderSession),
-  'apps.askBuilder': project(builderSession),
+  'apps.builder': app(sessionInfo),
+  'apps.createBuilder': app(sessionInfo),
+  'apps.errors': app(),
+  'apps.permissions': app(),
+  'apps.forgetPermission': app(),
+  'apps.usage': app(),
+  'apps.sendError': app(builderSession),
+  // It may name the view it came from, whose instance is qualified like any view's (plan §11)
+  'apps.askBuilder': { kind: 'view', keys: ['projectId', 'instanceId'], orMachine: true, result: builderSession },
   'apps.check': project(),
   'apps.setShared': project(),
-  'apps.setSecret': project(),
+  'apps.setSecret': app(),
   'apps.review': project(),
   'apps.enable': project((r, q) => q.app(r)),
-  'apps.versions': project(),
-  'apps.restoreVersion': project((r, q) => q.app(r)),
+  'apps.versions': app(),
+  'apps.restoreVersion': app((r, q) => q.app(r)),
   'apps.reach': session(undefined, (p, q) => ({ ...p, projectId: q.stripMaybe(p.projectId, 'The app') })),
   'apps.inlineViews': session((r, q) => (Array.isArray(r) ? r.map((v) => q.inlineView(v)) : r)),
   /*

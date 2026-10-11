@@ -157,7 +157,7 @@ export class Router {
   private async byView(
     method: string,
     params: unknown,
-    route: { keys: readonly string[]; result?: (r: unknown, q: Qualifier) => unknown },
+    route: { keys: readonly string[]; result?: (r: unknown, q: Qualifier) => unknown; orMachine?: boolean },
     ctx?: RpcContext,
   ) {
     if (!isObj(params)) return this.opts.local(method, params, ctx)
@@ -169,8 +169,16 @@ export class Router {
       if (target === undefined) target = m
       else if (target !== m) throw new AcrossMachinesError(method)
     }
+    // A linked machine's user-folder app, named by `machine` since it has no project (plan §11.9); it must agree with the ids
+    if (route.orMachine && typeof params.machine === 'string') {
+      const named = this.machineById(params.machine)
+      if (!named) throw Object.assign(new Error(`No linked machine ${params.machine}`), { code: 'internal' })
+      if (target === undefined) target = named
+      else if (target !== named) throw new AcrossMachinesError(method)
+    }
     if (!target) return this.opts.local(method, params, ctx)
-    const p: Obj = { ...params }
+    const { machine: _machine, ...own } = params
+    const p: Obj = route.orMachine ? own : { ...params }
     for (const key of route.keys) if (typeof p[key] === 'string') p[key] = target.q.strip(p[key], 'The id')
     const r = await this.forward(target, method, p)
     return route.result ? route.result(r, target.q) : r

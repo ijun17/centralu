@@ -2466,6 +2466,22 @@ describe('a pinned view (M4 B-2)', () => {
     expect(pinned().map((p) => p.key)).toEqual(['_user/slider'])
   })
 
+  it('Restart of a linked machine’s user-folder app restarts it on that machine, not this computer’s app of the same id (#82)', async () => {
+    const mock = await live()
+    const restarts: unknown[][] = []
+    vi.spyOn(mock.apps, 'restart').mockImplementation(async (...args: unknown[]) => void restarts.push(args))
+    useStore.getState().openApp(null, 'slider', { machine: 'm1' })
+    await useStore.getState().startPinnedView('m1:_user/slider')
+    await useStore.getState().restartApp('m1:_user/slider')
+    useStore.getState().openApp(null, 'slider')
+    await useStore.getState().startPinnedView('_user/slider')
+    await useStore.getState().restartApp('_user/slider')
+    expect(restarts).toEqual([
+      ['slider', null, 'm1'],
+      ['slider', null, undefined],
+    ])
+  })
+
   it('closing it while it is opening also releases the just-opened instance', async () => {
     const mock = await live()
     let release!: () => void

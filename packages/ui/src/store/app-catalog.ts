@@ -62,6 +62,11 @@ export function isRemoteUserApp(info: ExternalAppInfo): boolean {
   return !!info.machine && info.projectId === null
 }
 
+/** The `machine` an app's own calls name (runs, secrets, versions, the builder, Restart): only a linked machine's user-folder app has one */
+export function userAppMachine(info: ExternalAppInfo): string | undefined {
+  return isRemoteUserApp(info) ? (info.machine ?? undefined) : undefined
+}
+
 /** An app of a linked machine reads its status like this computer's: its view opens here through the hub (§11) */
 export function appStatus(info: ExternalAppInfo): AppStatusView {
   switch (info.status) {

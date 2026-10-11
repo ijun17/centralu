@@ -3,7 +3,7 @@ import type { AppErrorBundle } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
-import type { ExternalCatalogApp } from '../../store/app-catalog.js'
+import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import type { AppBuilder } from './useAppBuilder.js'
 
 /** The number of stderr lines shown — just the tail. The full bundle goes to the builder session */
@@ -79,9 +79,9 @@ export function ErrorTail({
     setBusy(true)
     setError(null)
     try {
-      await platform.apps.sendError(app.appId, app.projectId, bundle.at)
+      await platform.apps.sendError(app.appId, app.projectId, bundle.at, userAppMachine(app.info))
       // The fact that it was sent is recorded by the host — re-reading draws it from that answer (sentAt)
-      const r = await platform.apps.errors(app.appId, app.projectId)
+      const r = await platform.apps.errors(app.appId, app.projectId, userAppMachine(app.info))
       setBundle(r.latest)
     } catch (e) {
       setError((e as Error).message)

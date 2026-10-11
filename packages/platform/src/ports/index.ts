@@ -796,6 +796,8 @@ export type BuilderAsk = {
   text: string
   attachments?: Attachment[]
   instanceId?: string
+  /** A linked machine's user-folder app (#82): which machine. A project app's id already names its machine */
+  machine?: string
 }
 
 /**
@@ -866,13 +868,13 @@ export interface AppsPort {
    * reason, and brings it down if it is up.
    * **Does not start it up**: whoever calls next (the screen that reopens it) starts it.
    */
-  restart(appId: AppId, projectId: string | null): Promise<void>
+  restart(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<void>
   /**
    * One app's run history, most recent first (M4 B-7) — who (screen, session, app) called
    * which tool and how it ended. Arguments arrive only as a summary. The history is readable
    * even for an app whose folder is gone.
    */
-  runs(appId: AppId, projectId: string | null, limit?: number): Promise<AppRun[]>
+  runs(appId: AppId, projectId: string | null, limit?: number, machine?: MachineRef): Promise<AppRun[]>
   /**
    * Deletes a user-folder app (M4 A-7) — its folder is moved to `app-trash/` in the data
    * folder, and the run history stays. The host rejects this for a project app (it is a file
@@ -887,9 +889,9 @@ export interface AppsPort {
    */
   create(spec: NewAppSpec): Promise<AppCreated>
   /** That app's builder session (M4 C-2) — null if there is none (never created, or deleted) */
-  builder(appId: AppId, projectId: string | null): Promise<SessionInfo | null>
+  builder(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<SessionInfo | null>
   /** Creates that app's builder session (M4 C-2) — returns the existing one if there already is one */
-  createBuilder(appId: AppId, projectId: string | null, tool?: ToolName): Promise<SessionInfo>
+  createBuilder(appId: AppId, projectId: string | null, tool?: ToolName, machine?: MachineRef): Promise<SessionInfo>
   /**
    * "Fix this" (M4 C-5) — sends the message from the input line below an app screen to that
    * app's builder session. The host attaches a header noting which app and screen it came
@@ -903,7 +905,7 @@ export interface AppsPort {
    * tool failed. `latest` is what the screen displays. A bundle that has been sent to the
    * builder session carries `sentAt`.
    */
-  errors(appId: AppId, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }>
+  errors(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }>
   /**
    * Whether a session can use one app's tools right now, and if not, why (#308). Asked when an item
    * dragged out of that app's view lands in the session's composer: the link goes in either way, and
@@ -914,7 +916,7 @@ export interface AppsPort {
    * Sends one error bundle (`at`) to that app's builder session (M4 C-6) — **only when the
    * person clicks it.** Each bundle goes only once (the host rejects a second attempt).
    */
-  sendError(appId: AppId, projectId: string | null, at: number): Promise<{ sessionId: string }>
+  sendError(appId: AppId, projectId: string | null, at: number, machine?: MachineRef): Promise<{ sessionId: string }>
   /**
    * The capability questions still waiting for an answer, among the chains that started from
    * a screen (M4 D-4). The pinned screen draws that app's questions, and the app row in the
@@ -926,11 +928,11 @@ export interface AppsPort {
   /** Answers a capability question (M4 D-4) — the answer is remembered for that app and that capability. The host rejects it if the question is already closed */
   answerQuestion(questionId: string, decision: 'allow' | 'deny'): Promise<void>
   /** The remembered capability answers for one app (M4 D-4) */
-  permissions(appId: AppId, projectId: string | null): Promise<AppPermission[]>
+  permissions(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<AppPermission[]>
   /** Forgets one remembered answer (M4 D-4) — asks again the next time that capability is needed */
-  forgetPermission(appId: AppId, projectId: string | null, capability: string): Promise<void>
+  forgetPermission(appId: AppId, projectId: string | null, capability: string, machine?: MachineRef): Promise<void>
   /** The agent usage one app has requested (M4 D-5) — the last day and the last 30 days */
-  usage(appId: AppId, projectId: string | null): Promise<AppUsage>
+  usage(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<AppUsage>
   /**
    * Sets or changes (`value`) or deletes (`null`) one of the app's secrets (M4 E). The value
    * lives only in a 0600 file on the host — it never comes back in this response or in any
@@ -938,7 +940,7 @@ export interface AppsPort {
    * Only names the manifest declares can be set, and a running app picks up the new value the
    * next time it needs it.
    */
-  setSecret(appId: AppId, projectId: string | null, name: string, value: string | null): Promise<void>
+  setSecret(appId: AppId, projectId: string | null, name: string, value: string | null, machine?: MachineRef): Promise<void>
   /**
    * Shares a project app with the person's other projects, or stops (#371 part A). Off by default;
    * a session in another project can then find and attach it, once the person allows that pair of
@@ -967,13 +969,13 @@ export interface AppsPort {
    * the recent commits that touched that app's folder (git is the version history here,
    * read-only).
    */
-  versions(appId: AppId, projectId: string | null): Promise<AppVersions>
+  versions(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<AppVersions>
   /**
    * Restores a user-folder app to a kept version (M4 E-1) — the host keeps a snapshot of the
    * current code as a version, then overwrites it and restarts with that code. The host
    * rejects this for a project app (git is where restoring happens there).
    */
-  restoreVersion(appId: AppId, projectId: string | null, id: string): Promise<ExternalAppInfo>
+  restoreVersion(appId: AppId, projectId: string | null, id: string, machine?: MachineRef): Promise<ExternalAppInfo>
 }
 
 /**

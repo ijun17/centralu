@@ -128,6 +128,46 @@ export function linkedHostsUiTests(): void {
     })
   })
 
+  test('another machine’s user-folder app has its own panels: its runs and versions are that machine’s, not this computer’s', async ({ page }) => {
+    test.setTimeout(150_000)
+    await withPair({ apps: true }, async (pair) => {
+      await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
+      const calls = watchCalls(page)
+      await page.goto('/')
+      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      const theirs = `${MACHINE}:_user/notes`
+      const tools = (key: string) => page.getByTestId(`pinned-app-${key}`).getByTestId('runs-panel').getByTestId('run-tool')
+
+      await test.step('their notes: two calls from the view, and the Runs panel lists them from that machine', async () => {
+        await page.getByTestId(`app-row-${theirs}`).click()
+        const view = appView(page, theirs)
+        await expect(view.locator('#count')).toHaveText('0', { timeout: 30_000 })
+        await view.locator('#increment').click()
+        await expect(view.locator('#count')).toHaveText('1')
+        await view.locator('#increment').click()
+        await expect(view.locator('#count')).toHaveText('2')
+        await page.getByTestId(`pinned-app-${theirs}`).getByTestId('pinned-runs-toggle').click()
+        await expect.poll(async () => (await tools(theirs).allTextContents()).filter((t) => t === 'increment').length).toBe(2)
+        expect(calls.find((c) => c.method === 'apps.runs')?.params).toMatchObject({ appId: 'notes', projectId: null, machine: MACHINE })
+      })
+
+      await test.step('their Versions panel asks that machine', async () => {
+        await page.getByTestId(`pinned-app-${theirs}`).getByTestId('pinned-versions-toggle').click()
+        await expect(page.getByTestId(`pinned-app-${theirs}`).getByTestId('versions-panel')).toBeVisible()
+        await expect(page.getByTestId('versions-error')).toHaveCount(0)
+        await expect.poll(() => calls.find((c) => c.method === 'apps.versions')?.params).toMatchObject({ appId: 'notes', projectId: null, machine: MACHINE })
+      })
+
+      await test.step('this computer’s notes keeps its own runs: none of their calls', async () => {
+        await page.getByTestId('app-row-_user/notes').click()
+        await expect(appView(page, '_user/notes').locator('#count')).toHaveText('0', { timeout: 30_000 })
+        await page.getByTestId('pinned-app-_user/notes').getByTestId('pinned-runs-toggle').click()
+        await expect.poll(async () => (await tools('_user/notes').allTextContents()).length).toBeGreaterThan(0)
+        expect((await tools('_user/notes').allTextContents()).filter((t) => t === 'increment')).toEqual([])
+      })
+    })
+  })
+
   test('another machine’s apps stand on the grid: dragged there, each with its own view, kept by the hub across a reload', async ({ page }) => {
     test.setTimeout(150_000)
     await withPair({ apps: true }, async (pair) => {

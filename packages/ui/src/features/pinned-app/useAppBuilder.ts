@@ -25,10 +25,7 @@ export type AppBuilder = {
   error: string | null
 }
 
-/**
- * `machine`: a linked machine's user-folder app (#82). Its builder lives on that machine, and the calls that find and
- * start one name no machine yet, so this says there is none rather than answering with this computer's app of the same id.
- */
+/** `machine`: a linked machine's user-folder app (#82), whose builder is found and started on that machine */
 export function useAppBuilder(projectId: string | null, appId: string, machine?: string | null): AppBuilder {
   const platform = usePlatform()
   const sessionCount = useStore((s) => Object.keys(s.sessions).length)
@@ -37,10 +34,9 @@ export function useAppBuilder(projectId: string | null, appId: string, machine?:
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (machine) return
     let alive = true
     platform.apps
-      .builder(appId, projectId)
+      .builder(appId, projectId, machine ?? undefined)
       .then((b) => alive && setId(b?.id ?? null))
       // If asking fails, it is treated as none existing — pressing start, the host returns the existing one if there already is one (one per app)
       .catch(() => alive && setId(null))
@@ -50,14 +46,10 @@ export function useAppBuilder(projectId: string | null, appId: string, machine?:
   }, [platform, appId, projectId, machine, sessionCount])
 
   const start = useCallback(async () => {
-    if (machine) {
-      setError("Another machine's own apps are built from a session on that machine for now.")
-      return
-    }
     setStarting(true)
     setError(null)
     try {
-      const b = await platform.apps.createBuilder(appId, projectId)
+      const b = await platform.apps.createBuilder(appId, projectId, undefined, machine ?? undefined)
       // Registered through the same path as the host's session_created — arriving twice still counts once
       useStore.getState().dispatchEvent({ type: 'session_created', sessionId: b.id, session: b })
       setId(b.id)
@@ -68,5 +60,5 @@ export function useAppBuilder(projectId: string | null, appId: string, machine?:
     }
   }, [platform, appId, projectId, machine])
 
-  return { id: machine ? null : id, start, starting, error }
+  return { id, start, starting, error }
 }

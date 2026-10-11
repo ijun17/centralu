@@ -5755,8 +5755,8 @@ export const useStore = create<AppState>((set, get) => ({
     // "Updated" is a message for a view that reopened with new code — it is never re-attached to a view the person just restarted themselves
     patch((p) => ({ ...p, phase: 'restarting', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false, updatedAt: null }))
     try {
-      // A linked machine's user-folder app (#82) is only opened again: `apps.restart` names no machine yet, and would restart this computer's app of the same id
-      if (!pv.machine) await platform.apps.restart(pv.appId, pv.projectId)
+      // A linked machine's user-folder app (#82) is restarted on that machine
+      await platform.apps.restart(pv.appId, pv.projectId, pv.machine ?? undefined)
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'idle' } : p))
     } catch (e) {
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${(e as Error).message}` } : p))

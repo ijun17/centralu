@@ -196,6 +196,13 @@ export class Qualifier {
     return isObj(v) ? { ...v, projectId: this.maybeId(v.projectId), instanceId: this.maybeId(v.instanceId) } : v
   }
 
+  /** An `apps.runs` row: its app's project, the session that called it, and the agent session it stood up (the panel links to it) */
+  appRun(r: unknown): unknown {
+    return isObj(r)
+      ? { ...r, projectId: this.maybeId(r.projectId), callerSessionId: this.maybeId(r.callerSessionId), sessionId: this.maybeId(r.sessionId) }
+      : r
+  }
+
   /** The `apps.openView` answer: the pinned view's instance */
   openedView(v: unknown): unknown {
     return isObj(v) ? { ...v, instanceId: this.maybeId(v.instanceId) } : v

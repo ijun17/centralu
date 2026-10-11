@@ -335,7 +335,11 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   `apps.invoke`, `apps.readResource`, `apps.viewMessage` and `apps.closeView` go to the machine
   their instance, project or conversation names; one naming two machines, or a machine and the
   hub, is refused. A user-folder app has no project to name its machine, so `apps.openView` takes
-  the optional `machine` (additive).
+  the optional `machine` (additive), and so do the calls of its panels and Restart: `apps.runs`,
+  `apps.permissions`, `apps.forgetPermission`, `apps.usage`, `apps.setSecret`, `apps.versions`,
+  `apps.restoreVersion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.errors`,
+  `apps.sendError`, `apps.restart` (additive; [plans/remote-hub.md](plans/remote-hub.md) §11.9).
+  `apps.runs` rows come back with their session ids qualified.
   `messages.image` is read on the session's own machine, and the hub drops `file` from its answer: that path is on the
   other machine, so the window offers no reveal for it.
 - **When a machine is away.** `sessions.list` and `projects.list` answer for it from the hub's

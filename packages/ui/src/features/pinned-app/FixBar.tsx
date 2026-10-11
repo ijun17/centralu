@@ -110,6 +110,8 @@ export function FixBar({
         text,
         ...(files.length ? { attachments: files } : {}),
         ...(pv.instanceId ? { instanceId: pv.instanceId } : {}),
+        // A linked machine's user-folder app (#82): its builder is on that machine
+        ...(pv.machine ? { machine: pv.machine } : {}),
       })
       setText('')
       setAttachments([])

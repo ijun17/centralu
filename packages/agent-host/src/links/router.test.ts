@@ -210,6 +210,52 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(m1.calls).toEqual([{ method: 'apps.openView', params: { appId: 'board', projectId: 'p1' } }])
     })
 
+    it('a remote user-folder app’s own calls go to the machine `machine` names: runs, secrets, versions, the builder, Restart (plan §11.9)', async () => {
+      const { router, local, m2 } = rig()
+      const named = { appId: 'notes', projectId: null, machine: 'm2' }
+      const calls: [string, Record<string, unknown>][] = [
+        ['apps.runs', { ...named, limit: 100 }],
+        ['apps.restart', named],
+        ['apps.errors', named],
+        ['apps.permissions', named],
+        ['apps.forgetPermission', { ...named, capability: 'agent:claude' }],
+        ['apps.usage', named],
+        ['apps.sendError', { ...named, at: 5 }],
+        ['apps.builder', named],
+        ['apps.createBuilder', named],
+        ['apps.setSecret', { ...named, name: 'TOKEN', value: 'x' }],
+        ['apps.versions', named],
+        ['apps.restoreVersion', { ...named, id: 'v1' }],
+        ['apps.askBuilder', { ...named, text: 'fix it' }],
+      ]
+      for (const [method, params] of calls) await router.handle(method, params)
+      // On that machine it is its own user-folder app: the parameter does not travel
+      expect(m2.calls).toEqual(calls.map(([method, params]) => ({ method, params: (({ machine: _m, ...rest }) => rest)(params) })))
+      expect(local).toEqual([])
+      // Without `machine`, the hub's own app of that id, as before
+      for (const [method, params] of calls) await router.handle(method, (({ machine: _m, ...rest }) => rest)(params))
+      expect(local.map((c) => c.method)).toEqual(calls.map(([m]) => m))
+      expect(m2.calls).toHaveLength(calls.length)
+    })
+
+    it('qualifies a remote app’s runs, so the panel’s link reaches the agent session on that machine', async () => {
+      const { router, m1 } = rig()
+      m1.answers['apps.runs'] = [{ id: 'r1', projectId: null, appId: 'notes', callerSessionId: 's1', sessionId: 's9', parentRunId: null }]
+      expect(await router.handle('apps.runs', { appId: 'notes', projectId: null, machine: 'm1', limit: 10 })).toEqual([
+        { id: 'r1', projectId: null, appId: 'notes', callerSessionId: 'm1.s1', sessionId: 'm1.s9', parentRunId: null },
+      ])
+    })
+
+    it('asking a builder from a view names one machine: its instance and `machine` must agree', async () => {
+      const { router, m1, m2 } = rig()
+      await router.handle('apps.askBuilder', { appId: 'notes', projectId: null, machine: 'm1', text: 'x', instanceId: 'm1.inst' })
+      expect(m1.calls).toEqual([{ method: 'apps.askBuilder', params: { appId: 'notes', projectId: null, text: 'x', instanceId: 'inst' } }])
+      await expect(
+        router.handle('apps.askBuilder', { appId: 'notes', projectId: null, machine: 'm2', text: 'x', instanceId: 'm1.inst' }),
+      ).rejects.toThrow(/only the machine it is open on/)
+      expect(m2.calls).toEqual([])
+    })
+
     it('keeps every view address on the hub, which serves a remote one itself', async () => {
       const { router, local, m1 } = rig()
       await router.handle('apps.viewFrame', { appId: 'board', projectId: 'm1.p1', instanceId: 'm1.inst', hostOrigin: 'tauri://localhost' })

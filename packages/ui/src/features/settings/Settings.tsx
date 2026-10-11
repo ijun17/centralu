@@ -496,7 +496,9 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       <SecretsLine app={app} />
       <ShareLine app={app} />
       <GridSpanLine app={app} />
+      {/* Another machine's user-folder app (#82) is not removed from here: `apps.remove` names no machine, and would remove this computer's app of the same id */}
       {app.projectId === null &&
+        !app.info.machine &&
         (confirming ? (
           <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid="external-app-remove-confirm">
             <p className="text-xs leading-body text-ink-muted">

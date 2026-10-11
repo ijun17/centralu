@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
-import type { ExternalCatalogApp } from '../../store/app-catalog.js'
+import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 
 /**
  * An app's secrets (M4 E) — for each name the manifest declares, whether it has a value, and a field
@@ -48,7 +48,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
     setBusy(true)
     setError(null)
     try {
-      await platform.apps.setSecret(app.appId, app.projectId, name, value)
+      await platform.apps.setSecret(app.appId, app.projectId, name, value, userAppMachine(app.info))
       // Once sent, it is forgotten — this field has no more reason to hold the value
       setDraft('')
       setEditing(false)

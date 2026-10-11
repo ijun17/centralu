@@ -721,9 +721,9 @@ per-machine questions of §5). In the window, a pinned view and `focusedApp` car
 `<machine>:_user/<app>`, the sidebar row's key since phase 1. After that, its calls are named by the qualified instance.
 A view in a machine's conversation needs nothing new: the instance names the machine.
 
-The pinned view's side panels (runs, secrets, versions, builder) and Restart are left out for such an app: their calls
-still name an app by project and id alone, and would answer for this computer's app of the same id. Restart reopens
-the view instead.
+The pinned view's side panels (runs, secrets, versions, builder) and Restart were left out for such an app at first:
+their calls named an app by project and id alone, and would have answered for this computer's app of the same id.
+§11.9 gives them the same `machine`.
 
 ### 11.5 Lifecycle
 
@@ -754,7 +754,7 @@ machines), `links/router.test.ts` (each view call and the `machine` parameter), 
 
 | # | Question | Decided | Why |
 |---|---|---|---|
-| 1 | Another machine's user-folder apps: open their pinned views now? | **Yes, with an optional `machine` on the opening call and in the window's pinned-app identity** (§11.4) | The rest follows from the qualified instance; the side panels wait until their calls can name the machine |
+| 1 | Another machine's user-folder apps: open their pinned views now? | **Yes, with an optional `machine` on the opening call and in the window's pinned-app identity** (§11.4) | The rest follows from the qualified instance; the side panels waited until their calls could name the machine (§11.9) |
 | 2 | Grid panels of another machine's apps | **Next, in a separate pull request** (built: §11.8) | The hub keeps an app panel only while it knows the app's project (`setGridView`), which a linked machine's it does not; a remote session's panel already has its own column (v46) |
 | 3 | A machine removed and another linked under the same name | **Keeps the old origins, and with them the old browser storage: accepted** | The key is `<machine id>.<app key>`, and a machine id comes from its name (`newMachineId`). This is the same trade-off already made for a local app deleted and made again under the same id: same key, same origin. The ports never go to a different key, so no other app ever reads it |
 
@@ -777,9 +777,30 @@ a linked machine's project never is. Its view is already the hub's (§11.2), so 
   left NULL, as v46 did for sessions with `remote_session_id`. A host from before v47 reads app rows only where `app_id`
   is set, so it never takes a machine's `notes` for its own; rewriting the layout, it drops those rows, which loses a
   panel, not the layout.
-- **Not changed:** the side panels of a machine's user-folder app (§11.4) still wait on the owner's answer.
+- **Not changed here:** the side panels of a machine's user-folder app (§11.4), then waiting on the owner's answer (§11.9).
 
 Tested: `links/stored.test.ts` (kept and dropped by machine and mirror, and the query of a v46 host), `links/links.test.ts`
 (through `grid.set` and `grid.get` on a real link, and removing the machine), `core/grid/panels.test.ts`,
 `ui/features/grid/drop.test.ts`, and the linked-hosts e2e in Chromium and WebKit (a project app and both `notes`
 dragged onto the grid, each with its own view, back in place after a reload).
+
+### 11.9 A machine's user-folder app gets its panels and Restart (owner, 2026-10-12)
+
+The owner's answer to the question §11.4 left open: yes. The calls behind the pinned view's panels take the same
+optional `machine` as `apps.openView` (additive): `apps.runs`, `apps.permissions`, `apps.forgetPermission`, `apps.usage`
+(the Runs panel), `apps.setSecret` (Secrets), `apps.versions`, `apps.restoreVersion` (Versions), `apps.builder`,
+`apps.createBuilder`, `apps.askBuilder`, `apps.errors`, `apps.sendError` (the builder and the error tail) and
+`apps.restart`. With no project and a `machine`, the hub sends the call to that machine without the parameter, where it
+is its own user-folder app; without `machine` it stays the hub's, as before; with a project, the project names the
+machine (route `app` in `links/routes.ts`). `apps.askBuilder` may also name the view it came from: it routes as a view
+call, and an instance of one machine with a `machine` of another is refused. The rows of `apps.runs` come back
+qualified (`projectId`, `callerSessionId`, `sessionId`), so the panel's link reaches the agent session on that machine.
+
+In the window, every one of those calls passes the machine of a machine's user-folder app (`userAppMachine`), the
+pinned view shows all its panels, and Restart restarts it there. Settings → Apps does not offer Remove for such an app:
+`apps.remove` names no machine, and would remove this computer's app of the same id.
+
+Tested: `links/router.test.ts` (each call sent by `machine`, the hub's own without it, the runs qualified, a builder
+asked from a view naming one machine), `store.test.ts` (Restart passes the machine), and the linked-hosts e2e in
+Chromium and WebKit (the machine's `notes` lists its own runs and asks that machine for its versions; this computer's
+`notes` lists none of them).
