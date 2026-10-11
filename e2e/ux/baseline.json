@@ -1,0 +1,986 @@
+{
+  "version": 1,
+  "engine": "webkit",
+  "constants": {
+    "seconds": {
+      "K": 0.28,
+      "B": 0.1,
+      "H": 0.4,
+      "M": 1.35
+    },
+    "fitts": {
+      "a": 0.8,
+      "b": 0.1
+    },
+    "hickSecondsPerBit": 0.15
+  },
+  "tasks": [
+    {
+      "id": "add-machine.mouse-manual",
+      "task": "Link another machine by typing its name and ssh target",
+      "path": "mouse",
+      "operators": "H M P B B M P B B P B B H 10K H P B B H 13K H M P B B",
+      "counts": {
+        "K": 23,
+        "P": 5,
+        "B": 10,
+        "H": 5,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 18.79,
+      "waitMs": 328,
+      "travelPx": 2204,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "open-settings",
+          "operators": "H M P B B",
+          "seconds": 3.16,
+          "pointer": {
+            "D": 717,
+            "W": 44,
+            "ID": 4.12
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "settings",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 304
+        },
+        {
+          "kind": "click",
+          "label": "settings-tab-machines",
+          "operators": "M P B B",
+          "seconds": 2.68,
+          "pointer": {
+            "D": 877,
+            "W": 101,
+            "ID": 3.28
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the form",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 13
+        },
+        {
+          "kind": "click",
+          "label": "machines-add-name (focus)",
+          "operators": "P B B",
+          "seconds": 1.14,
+          "pointer": {
+            "D": 322,
+            "W": 203,
+            "ID": 1.37
+          }
+        },
+        {
+          "kind": "type",
+          "label": "\"Build box\"",
+          "operators": "H 10K",
+          "seconds": 3.2
+        },
+        {
+          "kind": "click",
+          "label": "machines-add-target (focus)",
+          "operators": "H P B B",
+          "seconds": 1.56,
+          "pointer": {
+            "D": 55,
+            "W": 27,
+            "ID": 1.62
+          }
+        },
+        {
+          "kind": "type",
+          "label": "\"me@build-box\"",
+          "operators": "H 13K",
+          "seconds": 4.04
+        },
+        {
+          "kind": "click",
+          "label": "machines-add-confirm",
+          "operators": "H M P B B",
+          "seconds": 3.01,
+          "pointer": {
+            "D": 233,
+            "W": 47,
+            "ID": 2.58
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 11
+        }
+      ],
+      "notes": [
+        "The typed form, as the dialog opens when ~/.ssh/config has no hosts"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "add-machine.ssh-config",
+      "task": "Link another machine picked from the ssh config",
+      "path": "mouse",
+      "operators": "H M P B B M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 4,
+        "B": 8,
+        "H": 1,
+        "M": 4,
+        "R": 4
+      },
+      "seconds": 11.05,
+      "waitMs": 492,
+      "travelPx": 2240,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "open-settings",
+          "operators": "H M P B B",
+          "seconds": 3.16,
+          "pointer": {
+            "D": 717,
+            "W": 44,
+            "ID": 4.12
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "settings",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 436
+        },
+        {
+          "kind": "click",
+          "label": "settings-tab-machines",
+          "operators": "M P B B",
+          "seconds": 2.68,
+          "pointer": {
+            "D": 877,
+            "W": 101,
+            "ID": 3.28
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the hosts",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 12
+        },
+        {
+          "kind": "click",
+          "label": "machines-add-host-build-box",
+          "operators": "M P B B",
+          "seconds": 2.5,
+          "pointer": {
+            "D": 323,
+            "W": 178,
+            "ID": 1.49
+          },
+          "choice": {
+            "n": 3,
+            "bits": 2,
+            "seconds": 0.3
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the probe",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 24
+        },
+        {
+          "kind": "click",
+          "label": "machines-add-confirm",
+          "operators": "M P B B",
+          "seconds": 2.71,
+          "pointer": {
+            "D": 323,
+            "W": 29,
+            "ID": 3.6
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 21
+        }
+      ],
+      "notes": [
+        "Picking the host probes it and fills the shell and the name (#514)",
+        "machines-add-host-build-box: a choice among 3 (Hick–Hyman 0.3 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "add-project.mouse",
+      "task": "Add an existing folder as a project",
+      "path": "mouse",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 2.92,
+      "waitMs": 4,
+      "travelPx": 521,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "add-project",
+          "operators": "H M P B B",
+          "seconds": 2.92,
+          "pointer": {
+            "D": 521,
+            "W": 223,
+            "ID": 1.74
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        }
+      ],
+      "notes": [
+        "The folder picker is the system's: what the person does in it is not counted"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "approve.keyboard",
+      "task": "Answer an approval waiting in another session",
+      "path": "keyboard",
+      "operators": "M 3K M K",
+      "counts": {
+        "K": 4,
+        "P": 0,
+        "B": 0,
+        "H": 0,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 3.82,
+      "waitMs": 1941,
+      "travelPx": 0,
+      "steps": [
+        {
+          "kind": "press",
+          "label": "Mod+Shift+a",
+          "operators": "M 3K",
+          "seconds": 2.19
+        },
+        {
+          "kind": "wait",
+          "label": "the approval card",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 1924
+        },
+        {
+          "kind": "press",
+          "label": "y",
+          "operators": "M K",
+          "seconds": 1.63
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 17
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "approve.mouse",
+      "task": "Answer an approval waiting in another session",
+      "path": "mouse",
+      "operators": "H M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 2,
+        "B": 4,
+        "H": 1,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 5.6,
+      "waitMs": 26,
+      "travelPx": 767,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "session row \"Clean up leftover processes\"",
+          "operators": "H M P B B",
+          "seconds": 3.05,
+          "pointer": {
+            "D": 565,
+            "W": 81,
+            "ID": 2.99
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the approval card",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 6
+        },
+        {
+          "kind": "click",
+          "label": "approve-allow",
+          "operators": "M P B B",
+          "seconds": 2.55,
+          "pointer": {
+            "D": 202,
+            "W": 69,
+            "ID": 1.98
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 20
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "approve.mouse-inbox",
+      "task": "Answer an approval waiting in another session",
+      "path": "mouse",
+      "operators": "H M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 6,
+        "H": 1,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 8.35,
+      "waitMs": 49,
+      "travelPx": 1049,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "counter",
+          "operators": "H M P B B",
+          "seconds": 3.2,
+          "pointer": {
+            "D": 578,
+            "W": 27,
+            "ID": 4.47
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the waiting list",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 19
+        },
+        {
+          "kind": "click",
+          "label": "waiting-list row \"Clean up leftover processes\"",
+          "operators": "M P B B",
+          "seconds": 2.5,
+          "pointer": {
+            "D": 230,
+            "W": 119,
+            "ID": 1.55
+          },
+          "choice": {
+            "n": 3,
+            "bits": 2,
+            "seconds": 0.3
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the approval card",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 9
+        },
+        {
+          "kind": "click",
+          "label": "approve-allow",
+          "operators": "M P B B",
+          "seconds": 2.65,
+          "pointer": {
+            "D": 242,
+            "W": 34,
+            "ID": 3.01
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 21
+        }
+      ],
+      "notes": [
+        "Through the waiting list (the top-bar count), the way the app points to it when the session is not in sight",
+        "waiting-list row \"Clean up leftover processes\": a choice among 3 (Hick–Hyman 0.3 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "find-conversation.keyboard",
+      "task": "Find a past conversation by something said in it",
+      "path": "keyboard",
+      "operators": "M 6K M K",
+      "counts": {
+        "K": 7,
+        "P": 0,
+        "B": 0,
+        "H": 0,
+        "M": 2,
+        "R": 3
+      },
+      "seconds": 4.66,
+      "waitMs": 273,
+      "travelPx": 0,
+      "steps": [
+        {
+          "kind": "press",
+          "label": "Mod+k",
+          "operators": "M K K",
+          "seconds": 1.91
+        },
+        {
+          "kind": "wait",
+          "label": "the palette",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        },
+        {
+          "kind": "type",
+          "label": "\"ring\"",
+          "operators": "4K",
+          "seconds": 1.12
+        },
+        {
+          "kind": "wait",
+          "label": "the conversation hits",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 254
+        },
+        {
+          "kind": "press",
+          "label": "Enter",
+          "operators": "M K",
+          "seconds": 1.63,
+          "choice": {
+            "n": 1,
+            "bits": 1,
+            "seconds": 0.15
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 14
+        }
+      ],
+      "notes": [
+        "Enter: a choice among 1 (Hick–Hyman 0.15 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "new-session.mouse",
+      "task": "Start a new session in a project and give it its first instruction",
+      "path": "mouse",
+      "operators": "H M P B B M P B B M P B B P B B H 18K M K",
+      "counts": {
+        "K": 19,
+        "P": 4,
+        "B": 8,
+        "H": 2,
+        "M": 4,
+        "R": 3
+      },
+      "seconds": 16.87,
+      "waitMs": 26,
+      "travelPx": 1823,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "project-menu-centralu",
+          "operators": "H M P B B",
+          "seconds": 3.18,
+          "pointer": {
+            "D": 511,
+            "W": 27,
+            "ID": 4.34
+          }
+        },
+        {
+          "kind": "click",
+          "label": "new-session-centralu",
+          "operators": "M P B B",
+          "seconds": 2.46,
+          "pointer": {
+            "D": 92,
+            "W": 79,
+            "ID": 1.12
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the new-session dialog",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 5
+        },
+        {
+          "kind": "click",
+          "label": "create-session-confirm",
+          "operators": "M P B B",
+          "seconds": 2.73,
+          "pointer": {
+            "D": 735,
+            "W": 58,
+            "ID": 3.78
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the new session",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        },
+        {
+          "kind": "click",
+          "label": "prompt-input (focus)",
+          "operators": "P B B",
+          "seconds": 1.43,
+          "pointer": {
+            "D": 485,
+            "W": 27,
+            "ID": 4.26
+          }
+        },
+        {
+          "kind": "type",
+          "label": "\"Fix the login bug\"",
+          "operators": "H 18K",
+          "seconds": 5.44
+        },
+        {
+          "kind": "press",
+          "label": "Enter",
+          "operators": "M K",
+          "seconds": 1.63
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 16
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "open-remote-app.mouse",
+      "task": "Open an app that lives on another machine",
+      "path": "mouse",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 2.98,
+      "waitMs": 51,
+      "travelPx": 534,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "app-row-box:_user/notes",
+          "operators": "H M P B B",
+          "seconds": 2.98,
+          "pointer": {
+            "D": 534,
+            "W": 140,
+            "ID": 2.26
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 51
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "send-to-session.keyboard",
+      "task": "Send a message to another session",
+      "path": "keyboard",
+      "operators": "M 7K M K H P B B H 25K M K",
+      "counts": {
+        "K": 34,
+        "P": 1,
+        "B": 2,
+        "H": 2,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 15.78,
+      "waitMs": 22,
+      "travelPx": 369,
+      "steps": [
+        {
+          "kind": "press",
+          "label": "Mod+k",
+          "operators": "M K K",
+          "seconds": 1.91
+        },
+        {
+          "kind": "wait",
+          "label": "the palette",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 9
+        },
+        {
+          "kind": "type",
+          "label": "\"optim\"",
+          "operators": "5K",
+          "seconds": 1.4
+        },
+        {
+          "kind": "press",
+          "label": "Enter",
+          "operators": "M K",
+          "seconds": 1.63,
+          "choice": {
+            "n": 1,
+            "bits": 1,
+            "seconds": 0.15
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the session",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 5
+        },
+        {
+          "kind": "click",
+          "label": "prompt-input (focus)",
+          "operators": "H P B B",
+          "seconds": 1.81,
+          "pointer": {
+            "D": 369,
+            "W": 23,
+            "ID": 4.12
+          }
+        },
+        {
+          "kind": "type",
+          "label": "\"Also convert the SVGs\"",
+          "operators": "H 25K",
+          "seconds": 7.4
+        },
+        {
+          "kind": "press",
+          "label": "Enter",
+          "operators": "M K",
+          "seconds": 1.63
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        }
+      ],
+      "notes": [
+        "The palette leaves the keyboard on the page, not in the composer, and no key reliably reaches it: one Tab does in WebKit on macOS, not in WebKit on Linux or in Chromium. So this keyboard path takes the mouse for one click",
+        "Enter: a choice among 1 (Hick–Hyman 0.15 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "send-to-session.mouse",
+      "task": "Send a message to another session",
+      "path": "mouse",
+      "operators": "H M P B B P B B H 25K M K",
+      "counts": {
+        "K": 26,
+        "P": 2,
+        "B": 4,
+        "H": 2,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 13.44,
+      "waitMs": 14,
+      "travelPx": 1175,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "session row \"Optimize images\"",
+          "operators": "H M P B B",
+          "seconds": 2.97,
+          "pointer": {
+            "D": 532,
+            "W": 153,
+            "ID": 2.16
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the session",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        },
+        {
+          "kind": "click",
+          "label": "prompt-input (focus)",
+          "operators": "P B B",
+          "seconds": 1.45,
+          "pointer": {
+            "D": 643,
+            "W": 30,
+            "ID": 4.48
+          }
+        },
+        {
+          "kind": "type",
+          "label": "\"Also convert the SVGs\"",
+          "operators": "H 25K",
+          "seconds": 7.4
+        },
+        {
+          "kind": "press",
+          "label": "Enter",
+          "operators": "M K",
+          "seconds": 1.63
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "switch-session.keyboard-back",
+      "task": "Switch back to the session you were just in",
+      "path": "keyboard",
+      "operators": "M K K",
+      "counts": {
+        "K": 2,
+        "P": 0,
+        "B": 0,
+        "H": 0,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 1.91,
+      "waitMs": 13,
+      "travelPx": 0,
+      "steps": [
+        {
+          "kind": "press",
+          "label": "Alt+ArrowLeft",
+          "operators": "M K K",
+          "seconds": 1.91
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 13
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "switch-session.keyboard-palette",
+      "task": "Switch to another session by name",
+      "path": "keyboard",
+      "operators": "M 7K M K",
+      "counts": {
+        "K": 8,
+        "P": 0,
+        "B": 0,
+        "H": 0,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 4.94,
+      "waitMs": 20,
+      "travelPx": 0,
+      "steps": [
+        {
+          "kind": "press",
+          "label": "Mod+k",
+          "operators": "M K K",
+          "seconds": 1.91
+        },
+        {
+          "kind": "wait",
+          "label": "the palette",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 14
+        },
+        {
+          "kind": "type",
+          "label": "\"optim\"",
+          "operators": "5K",
+          "seconds": 1.4
+        },
+        {
+          "kind": "press",
+          "label": "Enter",
+          "operators": "M K",
+          "seconds": 1.63,
+          "choice": {
+            "n": 1,
+            "bits": 1,
+            "seconds": 0.15
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 6
+        }
+      ],
+      "notes": [
+        "Enter: a choice among 1 (Hick–Hyman 0.15 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "switch-session.mouse",
+      "task": "Switch to another session by name",
+      "path": "mouse",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 2.97,
+      "waitMs": 7,
+      "travelPx": 532,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "session row \"Optimize images\"",
+          "operators": "H M P B B",
+          "seconds": 2.97,
+          "pointer": {
+            "D": 532,
+            "W": 153,
+            "ID": 2.16
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    }
+  ],
+  "pending": [
+    {
+      "id": "create-project.mouse",
+      "task": "Create a new project (an empty folder)",
+      "path": "mouse",
+      "waitingOn": "#515",
+      "reason": "creating a project folder from the dialog is not merged yet"
+    },
+    {
+      "id": "find-conversation.mouse",
+      "task": "Find a past conversation by something said in it",
+      "path": "mouse",
+      "waitingOn": "a mouse path",
+      "reason": "none exists: the palette is the only search, and only ⌘K / Ctrl+K opens it"
+    },
+    {
+      "id": "new-session.keyboard",
+      "task": "Start a new session in a project and give it its first instruction",
+      "path": "keyboard",
+      "waitingOn": "a keyboard path",
+      "reason": "none exists: the palette has no \"New session\" action and no shortcut opens the dialog"
+    },
+    {
+      "id": "open-remote-app.keyboard",
+      "task": "Open an app that lives on another machine",
+      "path": "keyboard",
+      "waitingOn": "a keyboard path",
+      "reason": "none exists: the palette does not list apps"
+    }
+  ]
+}

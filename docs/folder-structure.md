@@ -81,6 +81,7 @@ centralu/
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts and seed-store.mts
 │                               #   measure against a seeded heavy store (fixtures/heavy-store.ts)
+│  └─ ux/                       # task cost in keyboard and mouse operations: `pnpm ux` (ux-metrics.md)
 ├─ .centralu/apps/              # project apps committed with this repository (apps.md §2): project-board
 └─ tooling/                     # eslint config, dependency-cruiser rules, shared tsconfig
 ```

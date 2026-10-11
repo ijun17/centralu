@@ -15,6 +15,8 @@
     "verify": "pnpm lint && pnpm depcruise && pnpm typecheck && pnpm test",
     "dev": "pnpm --filter @cc/web dev",
     "e2e": "playwright test --config e2e/playwright.config.ts",
+    "ux": "playwright test --config e2e/ux/playwright.config.ts",
+    "ux:report": "tsx e2e/ux/report.ts",
     "perf": "PERF=1 playwright test perf- --config e2e/playwright.config.ts --workers=1",
     "host": "tsx packages/agent-host/src/main.ts",
     "verify:all": "pnpm verify && pnpm e2e",

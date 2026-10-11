@@ -83,6 +83,7 @@ centralu/
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts와 seed-store.mts는
 │                               #   시드한 무거운 스토어(fixtures/heavy-store.ts)로 메모리를 잰다
+│  └─ ux/                       # 작업 비용을 키보드·마우스 조작으로 잰다: `pnpm ux` (ux-metrics.md)
 ├─ .centralu/apps/              # project apps committed with this repository (apps.md §2): project-board
 └─ tooling/                     # eslint config, dependency-cruiser rules, shared tsconfig
 ```

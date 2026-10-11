@@ -150,6 +150,13 @@ one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed t
 leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
 something in WebKit goes in the shared fixture and skips itself in other engines.
 
+**A change to how a task is done is measured in operations.** `pnpm ux` runs the core tasks
+(`e2e/ux/*.task.ts`) and prices each in keyboard and mouse operations with the Keystroke-Level
+Model; CI's `ux tasks` job fails when a task goes over its budget. A new feature a person does
+often gets a task, by the keyboard and by the mouse where both exist; a change that makes a task
+cost more raises its budget in the same pull request and says why. How to write one and read the
+numbers: [docs/ux-metrics.md](docs/ux-metrics.md).
+
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
 with the fix removed is not testing the fix.
