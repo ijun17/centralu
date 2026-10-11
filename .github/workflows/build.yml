@@ -296,17 +296,21 @@ jobs:
   # all: nine WebKit-only failures piled up on main unseen (#424), two of them real product bugs
   # (#480). `E2E_BROWSER=webkit` runs every spec in WebKit (e2e/playwright.config.ts).
   #
-  # Sharded so the job finishes inside the time the slowest other job already takes. Each shard
-  # runs a slice of the tests with its own dev servers and hosts; every shard keeps a blob report,
-  # and when one fails the `e2e report` job below merges them into one HTML report with traces.
+  # Sharded so the job finishes inside the time the slowest other job already takes (`windows
+  # tests`, about 6.5 minutes). Measured 2026-10-11: the suite is about 18 minutes of one runner's
+  # time; 4 shards took 5.7 to 6.3 minutes a job, 5 take 3.9 to 5.3 (about 45 seconds of it setup
+  # and installing WebKit). Playwright's default of 2 workers on these 4-CPU runners: 3 workers
+  # were no faster. Each shard runs a slice of the tests with its own dev servers and hosts; every
+  # shard keeps a blob report, and when one fails the `e2e report` job below merges them into one
+  # HTML report with traces. No retries: a test that needs one is a test to fix.
   e2e:
-    name: e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }} w${{ matrix.workers }})
+    name: e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        workers: [2, 3]
+        # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
         shards: [5]
         shard: [1, 2, 3, 4, 5]
     steps:
@@ -334,13 +338,13 @@ jobs:
           E2E_BROWSER: webkit
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
           # One name per shard, so the merge below does not overwrite one shard's report with another's
-          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.workers }}-${{ matrix.shard }}.zip
-        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --workers=${{ matrix.workers }} --reporter=list,blob --trace=retain-on-failure
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
+        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob --trace=retain-on-failure
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
-          name: e2e-blob-${{ matrix.workers }}-${{ matrix.shard }}
+          name: e2e-blob-${{ matrix.shard }}
           path: blob-report
           retention-days: 7
           if-no-files-found: error

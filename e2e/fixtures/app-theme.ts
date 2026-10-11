@@ -405,12 +405,20 @@ export function appThemeTests() {
     await expect.poll(async () => Math.abs(await offset('On hold'))).toBeLessThanOrEqual(1)
     await expect.poll(current).toBe('On hold')
 
-    // Scrolling by hand moves the mark with the section in view
+    // Scrolling by hand takes the mark back from the tab, and the mark follows the section in view.
+    // The wheel is sent again until it lands: Playwright's WebKit can drop a wheel (in CI it once
+    // left the mark where it was), and to the top is the same place however many arrive.
     await v.locator('.board').hover()
-    await page.mouse.wheel(0, -100000)
-    await expect.poll(current).toBe('Needs decision')
+    await expect
+      .poll(async () => {
+        await page.mouse.wheel(0, -100000)
+        return current()
+      })
+      .toBe('Needs decision')
+    // Then the board is moved by an exact amount, which a wheel that may arrive twice is not: what
+    // is checked here is the mark following the scroll, and the wheel has already shown it unpins
     const inProgress = await offset('In progress')
-    await page.mouse.wheel(0, inProgress + 4)
+    await v.locator('.board').evaluate((board, by) => board.scrollBy(0, by), inProgress + 4)
     await expect.poll(current).toBe('In progress')
 
     // The wide layout has no tabs
