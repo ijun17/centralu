@@ -19,18 +19,18 @@
       "id": "add-machine.mouse-manual",
       "task": "Link another machine by typing its name and ssh target",
       "path": "mouse",
-      "operators": "H M P B B M P B B P B B H 10K H P B B H 13K H M P B B",
+      "operators": "H M P B B M P B B H 10K H P B B H 13K H M P B B",
       "counts": {
         "K": 23,
-        "P": 5,
-        "B": 10,
+        "P": 4,
+        "B": 8,
         "H": 5,
         "M": 3,
         "R": 3
       },
-      "seconds": 18.79,
-      "waitMs": 328,
-      "travelPx": 2204,
+      "seconds": 17.71,
+      "waitMs": 340,
+      "travelPx": 2161,
       "steps": [
         {
           "kind": "click",
@@ -48,7 +48,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 304
+          "waitMs": 321
         },
         {
           "kind": "click",
@@ -66,18 +66,7 @@
           "label": "the form",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 13
-        },
-        {
-          "kind": "click",
-          "label": "machines-add-name (focus)",
-          "operators": "P B B",
-          "seconds": 1.14,
-          "pointer": {
-            "D": 322,
-            "W": 203,
-            "ID": 1.37
-          }
+          "waitMs": 8
         },
         {
           "kind": "type",
@@ -89,11 +78,11 @@
           "kind": "click",
           "label": "machines-add-target (focus)",
           "operators": "H P B B",
-          "seconds": 1.56,
+          "seconds": 1.62,
           "pointer": {
-            "D": 55,
-            "W": 27,
-            "ID": 1.62
+            "D": 334,
+            "W": 91,
+            "ID": 2.22
           }
         },
         {
@@ -140,7 +129,7 @@
         "R": 4
       },
       "seconds": 11.05,
-      "waitMs": 492,
+      "waitMs": 436,
       "travelPx": 2240,
       "steps": [
         {
@@ -159,7 +148,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 436
+          "waitMs": 406
         },
         {
           "kind": "click",
@@ -177,7 +166,7 @@
           "label": "the hosts",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 12
+          "waitMs": 8
         },
         {
           "kind": "click",
@@ -200,7 +189,7 @@
           "label": "the probe",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 24
+          "waitMs": 14
         },
         {
           "kind": "click",
@@ -218,7 +207,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 21
+          "waitMs": 8
         }
       ],
       "notes": [
@@ -282,7 +271,7 @@
         "R": 2
       },
       "seconds": 3.82,
-      "waitMs": 1941,
+      "waitMs": 1471,
       "travelPx": 0,
       "steps": [
         {
@@ -296,7 +285,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 1924
+          "waitMs": 1454
         },
         {
           "kind": "press",
@@ -329,7 +318,7 @@
         "R": 2
       },
       "seconds": 5.6,
-      "waitMs": 26,
+      "waitMs": 47,
       "travelPx": 767,
       "steps": [
         {
@@ -348,7 +337,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 8
         },
         {
           "kind": "click",
@@ -366,7 +355,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 20
+          "waitMs": 39
         }
       ],
       "notes": [],
@@ -386,7 +375,7 @@
         "R": 3
       },
       "seconds": 8.35,
-      "waitMs": 49,
+      "waitMs": 47,
       "travelPx": 1049,
       "steps": [
         {
@@ -405,17 +394,17 @@
           "label": "the waiting list",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 19
+          "waitMs": 25
         },
         {
           "kind": "click",
           "label": "waiting-list row \"Clean up leftover processes\"",
           "operators": "M P B B",
-          "seconds": 2.5,
+          "seconds": 2.51,
           "pointer": {
             "D": 230,
-            "W": 119,
-            "ID": 1.55
+            "W": 118,
+            "ID": 1.56
           },
           "choice": {
             "n": 3,
@@ -428,7 +417,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 10
         },
         {
           "kind": "click",
@@ -436,7 +425,7 @@
           "operators": "M P B B",
           "seconds": 2.65,
           "pointer": {
-            "D": 242,
+            "D": 241,
             "W": 34,
             "ID": 3.01
           }
@@ -446,7 +435,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 21
+          "waitMs": 12
         }
       ],
       "notes": [
@@ -469,7 +458,7 @@
         "R": 3
       },
       "seconds": 4.66,
-      "waitMs": 273,
+      "waitMs": 174,
       "travelPx": 0,
       "steps": [
         {
@@ -496,7 +485,7 @@
           "label": "the conversation hits",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 254
+          "waitMs": 157
         },
         {
           "kind": "press",
@@ -514,7 +503,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 14
+          "waitMs": 13
         }
       ],
       "notes": [
@@ -526,18 +515,18 @@
       "id": "new-session.mouse",
       "task": "Start a new session in a project and give it its first instruction",
       "path": "mouse",
-      "operators": "H M P B B M P B B M P B B P B B H 18K M K",
+      "operators": "H M P B B M P B B M P B B H 18K M K",
       "counts": {
         "K": 19,
-        "P": 4,
-        "B": 8,
+        "P": 3,
+        "B": 6,
         "H": 2,
         "M": 4,
         "R": 3
       },
-      "seconds": 16.87,
-      "waitMs": 26,
-      "travelPx": 1823,
+      "seconds": 15.44,
+      "waitMs": 20,
+      "travelPx": 1338,
       "steps": [
         {
           "kind": "click",
@@ -584,18 +573,7 @@
           "label": "the new session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
-        },
-        {
-          "kind": "click",
-          "label": "prompt-input (focus)",
-          "operators": "P B B",
-          "seconds": 1.43,
-          "pointer": {
-            "D": 485,
-            "W": 27,
-            "ID": 4.26
-          }
+          "waitMs": 5
         },
         {
           "kind": "type",
@@ -614,7 +592,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 16
+          "waitMs": 10
         }
       ],
       "notes": [],
@@ -634,7 +612,7 @@
         "R": 1
       },
       "seconds": 2.98,
-      "waitMs": 51,
+      "waitMs": 55,
       "travelPx": 534,
       "steps": [
         {
@@ -653,7 +631,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 51
+          "waitMs": 55
         }
       ],
       "notes": [],
@@ -663,18 +641,18 @@
       "id": "send-to-session.keyboard",
       "task": "Send a message to another session",
       "path": "keyboard",
-      "operators": "M 7K M K H P B B H 25K M K",
+      "operators": "M 7K M 26K M K",
       "counts": {
         "K": 34,
-        "P": 1,
-        "B": 2,
-        "H": 2,
+        "P": 0,
+        "B": 0,
+        "H": 0,
         "M": 3,
         "R": 3
       },
-      "seconds": 15.78,
-      "waitMs": 22,
-      "travelPx": 369,
+      "seconds": 13.57,
+      "waitMs": 32,
+      "travelPx": 0,
       "steps": [
         {
           "kind": "press",
@@ -687,7 +665,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 6
         },
         {
           "kind": "type",
@@ -711,24 +689,13 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
-        },
-        {
-          "kind": "click",
-          "label": "prompt-input (focus)",
-          "operators": "H P B B",
-          "seconds": 1.81,
-          "pointer": {
-            "D": 369,
-            "W": 23,
-            "ID": 4.12
-          }
+          "waitMs": 13
         },
         {
           "kind": "type",
           "label": "\"Also convert the SVGs\"",
-          "operators": "H 25K",
-          "seconds": 7.4
+          "operators": "25K",
+          "seconds": 7
         },
         {
           "kind": "press",
@@ -741,11 +708,10 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 12
         }
       ],
       "notes": [
-        "The palette leaves the keyboard on the page, not in the composer, and no key reliably reaches it: one Tab does in WebKit on macOS, not in WebKit on Linux or in Chromium. So this keyboard path takes the mouse for one click",
         "Enter: a choice among 1 (Hick–Hyman 0.15 s, not added)"
       ],
       "breaches": []
@@ -764,7 +730,7 @@
         "R": 2
       },
       "seconds": 13.44,
-      "waitMs": 14,
+      "waitMs": 25,
       "travelPx": 1175,
       "steps": [
         {
@@ -783,7 +749,7 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 9
         },
         {
           "kind": "click",
@@ -813,7 +779,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 15
         }
       ],
       "notes": [],
@@ -833,7 +799,7 @@
         "R": 1
       },
       "seconds": 1.91,
-      "waitMs": 13,
+      "waitMs": 5,
       "travelPx": 0,
       "steps": [
         {
@@ -847,7 +813,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 13
+          "waitMs": 5
         }
       ],
       "notes": [],
@@ -867,7 +833,7 @@
         "R": 2
       },
       "seconds": 4.94,
-      "waitMs": 20,
+      "waitMs": 10,
       "travelPx": 0,
       "steps": [
         {
@@ -881,7 +847,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 14
+          "waitMs": 5
         },
         {
           "kind": "type",
@@ -905,7 +871,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 5
         }
       ],
       "notes": [
@@ -927,7 +893,7 @@
         "R": 1
       },
       "seconds": 2.97,
-      "waitMs": 7,
+      "waitMs": 8,
       "travelPx": 532,
       "steps": [
         {
@@ -946,7 +912,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 8
         }
       ],
       "notes": [],

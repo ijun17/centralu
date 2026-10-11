@@ -174,23 +174,25 @@ cheaper, lower the budget so the gain is kept. Update `e2e/ux/baseline.json` wit
 
 WebKit on Linux (the CI run), 1280 × 840 (the desktop app's default window), the `?demo` scene.
 On macOS the numbers agree to within 0.01 s and a few pixels of travel. Paths with no
-counterpart are listed under "Pending".
+counterpart are listed under "Pending". Since #528 the composer of a session just created or
+picked in the palette, and the typed Add machine form's first field, take the keyboard: those three
+rows lost their click into the field.
 
 | Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Start a new session and give it its first instruction | mouse | `H M P B B M P B B M P B B P B B H 18K M K` | 19 | 4 | 8 | 2 | 4 | 37 | 16.87 | 1823 |
+| Start a new session and give it its first instruction | mouse | `H M P B B M P B B M P B B H 18K M K` | 19 | 3 | 6 | 2 | 4 | 34 | 15.44 | 1338 |
 | Answer an approval waiting in another session | keyboard | `M 3K M K` | 4 | 0 | 0 | 0 | 2 | 6 | 3.82 | 0 |
 | | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.60 | 767 |
 | | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1049 |
 | Switch back to the session you were just in | keyboard (back) | `M K K` | 2 | 0 | 0 | 0 | 1 | 3 | 1.91 | 0 |
 | Switch to another session by name | keyboard (palette) | `M 7K M K` | 8 | 0 | 0 | 0 | 2 | 10 | 4.94 | 0 |
 | | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.97 | 532 |
-| Send a message to another session | keyboard (palette, then one click) | `M 7K M K H P B B H 25K M K` | 34 | 1 | 2 | 2 | 3 | 42 | 15.78 | 369 |
+| Send a message to another session | keyboard (palette) | `M 7K M 26K M K` | 34 | 0 | 0 | 0 | 3 | 37 | 13.57 | 0 |
 | | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.44 | 1175 |
 | Find a past conversation | keyboard | `M 6K M K` | 7 | 0 | 0 | 0 | 2 | 9 | 4.66 | 0 |
 | Open an app on another machine | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.98 | 534 |
 | Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2240 |
-| | mouse (typed by hand) | `H M P B B M P B B P B B H 10K H P B B H 13K H M P B B` | 23 | 5 | 10 | 5 | 3 | 46 | 18.79 | 2204 |
+| | mouse (typed by hand) | `H M P B B M P B B H 10K H P B B H 13K H M P B B` | 23 | 4 | 8 | 5 | 3 | 43 | 17.71 | 2161 |
 | Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 521 |
 
 Pending:
