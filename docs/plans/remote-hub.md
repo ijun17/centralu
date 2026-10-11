@@ -400,7 +400,7 @@ process. On posix, SIGTERM to the launcher stays the stop (agent-host.md §4.7).
 hub, plus `loginctl enable-linger`, which some distributions allow a user and others refuse without an administrator.
 Windows: a per-user scheduled task at logon (no administrator needed; not created on the test laptop, so not
 measured). WSL needs that Windows task too, since nothing inside a stopped distro runs. The rest of phase 3 needs none
-of these.
+of these. Built as `centralu serve --autostart`, which the hub runs over ssh (§10.10, step 6).
 
 **The keeper on a remote** is what would let an update leave agents running (§4). Today it cannot run there: the Linux
 package carries the host unpacked but the keeper only inside the AppImage (read from the published package), its idle
@@ -556,7 +556,7 @@ either (the link-bound fallback ran).
 | 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL. **Done** as `machines.install` (additive), [agent-host.md](../agent-host.md) §4.8; the posix scripts run for real in the tests, the Windows and WSL ones are checked as built but **not yet run on a Windows machine** (choices below) | 2–3 days |
 | 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows. **Done** as `machines.update`, `machines.rollback`, `machines.uninstall` and `machines.activity` (with the remote's `host.activity`), `MachineInfo.install`, `MachineInfo.operation` and the status `updating` (all additive), [agent-host.md](../agent-host.md) §4.8 (choices below); the posix path runs for real in the tests, the Windows and WSL paths **not yet run on a Windows machine** | 2–3 days |
 | 5 | (Owner decision 2) Host-only packages in the release. **Done**: `@centralu/host-linux-x64`, `-linux-arm64` and `-win32-x64` (`host/` only, 3.7 MB packed against 88 MB for the Linux platform package), published by each platform's release job before its platform package; the installer prefers them and falls back to the platform package when the registry has none at that version; the shim's `serve` finds the host in either ([releasing.md](../releasing.md) "Host-only packages"). The release itself is **not yet rehearsed** with them (choices below) | 1 day |
-| 6 | (Owner decisions 4, 5) Boot autostart; the remote keeper after #350 | 1 day; 3–5 days |
+| 6 | (Owner decisions 4, 5) Boot autostart; the remote keeper after #350. **Partly done**: boot autostart, as `centralu serve --autostart on\|off\|status` and `machines.autostart`, with `MachineInfo.autostart` and the connection line's `autostart` (all additive), [agent-host.md](../agent-host.md) §4.7, §4.8 (choices below); the unit, the task and every command are tested against fakes, **not yet run by a real Linux boot or a real Windows Task Scheduler**. The remote keeper is still open | 1 day; 3–5 days |
 
 Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind phase 1's manual path, which keeps working.
 
@@ -623,4 +623,35 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
   npm install again.
 - **What stops is the remote's own count** (`host.activity`, the `hostBusy` rule counted). A remote predating it is said
   as "anything running"; no remote has a keeper yet, so the prompt always says the agents stop.
-- **Uninstall keeps the autostart question for step 6**: nothing writes one yet, so there is none to remove.
+- **Uninstall keeps the autostart question for step 6**: nothing writes one yet, so there is none to remove. (Step 6
+  now removes it: below.)
+
+**Choices made building step 6, boot autostart** (within §10.4 and owner decision 4):
+
+- **The remote writes its own entry.** The hub runs `centralu serve --autostart on|off|status` through the lookup, and
+  the Centralu found there writes, removes or reads the entry; the hub keeps nothing (S12). Only the lookup crosses ssh,
+  as short as `--connection`'s, so it fits cmd.exe's 8,191 characters (#489); the scheduled task's PowerShell, which is
+  long, is built and run there, on a command line of its own.
+- **What the entry runs is the launcher of the lookup**: the managed launcher when the hub installed Centralu there (it
+  reads `current`, so an update or rollback needs no new entry), else the launcher `serve` keeps for an npm install.
+- **Linux**: a `systemd --user` unit (`centralu-serve.service`) running `serve` in the foreground, `KillMode=mixed`,
+  `Restart=on-failure` bounded to five starts in five minutes, enabled for `default.target`; then `loginctl
+  --no-ask-password enable-linger`. Where lingering is refused the switch stays on and the row says it starts at login
+  until an administrator runs `sudo loginctl enable-linger $USER`. Lingering is never turned off again: other things may
+  rely on it.
+- **Windows and WSL**: a scheduled task for this user at their sign-in (`Interactive`, no administrator, no stored
+  password), running `serve` in a hidden PowerShell window with no time limit and on battery too. Not `--detach`: a task
+  is not an ssh session, and it needs no WMI (decision 3). For WSL the task runs `wsl.exe -d <distro> -u <user> --exec
+  <launcher> serve`, which holds the distro while the host runs. One task per data folder, so a laptop linked as
+  Windows and as WSL gets two. Starting before sign-in would need an administrator or a stored password, so it is not
+  offered; with automatic sign-in, sign-in is boot.
+- **Nothing offered** on macOS, a Linux without systemd, or WSL without interop: the row shows no switch.
+- **On and off never start or stop a host.** The link has already started one; the entry is for the next boot. `on`
+  does not `enable --now`: a second `serve` beside the running one would fail and be restarted.
+- **The connection line says it** (`autostart: { on, how, linger }`) from a mark `--autostart` keeps in the data folder
+  (`autostart.json`), so no link start asks systemd or Task Scheduler. `--autostart status` asks them and corrects the
+  mark.
+- **Uninstall removes the entry** after the stop and before `<data>/remote/` goes, through `serve --autostart off`; it
+  refuses to go on when the entry would not go. A version older than `--autostart` is passed by: it cannot have written
+  one from here. Not covered: an entry written by a newer version, then a rollback past `--autostart`, then an uninstall
+  leaves the entry (it then runs a launcher that is gone, which fails at boot and does nothing else).

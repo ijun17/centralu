@@ -891,7 +891,8 @@ WantedBy=default.target
 
 Then `systemctl --user daemon-reload && systemctl --user enable --now centralu`, and once,
 `loginctl enable-linger $USER`, so the host keeps running after you log out. Run the first `centralu serve` by hand:
-that is what writes `~/.centralu/bin/centralu`.
+that is what writes `~/.centralu/bin/centralu`. `centralu serve --autostart on` (below) writes and enables a unit like
+this one for you.
 
 **The commands:**
 
@@ -903,6 +904,7 @@ that is what writes `~/.centralu/bin/centralu`.
 | `centralu serve --stop` | Asks the running host to stop (`host.stop`), waits until it has, and prints one JSON line |
 | `centralu serve --connection` | Prints one JSON line and exits (below). Creates the token if there is none yet |
 | `centralu serve --rotate-token` | Replaces the token, keeping the port. A running serve keeps the old one until it restarts |
+| `centralu serve --autostart on\|off\|status` | Starts this machine's host at boot, stops doing that, or says whether it does (below). Never starts or stops a host now. Prints one JSON line |
 | `centralu serve --help` | The above |
 
 `--connection` answers the one question the client asks over `ssh -T -o BatchMode=yes <target> …`:
@@ -919,6 +921,7 @@ that is what writes `~/.centralu/bin/centralu`.
 | `version`, `protocolVersion` | The running host's when `hostRunning`, read from its `hello_ok`; otherwise the installed package's (`host/bundle-info.json`). They differ after an `npm i -g` the host was not restarted for |
 | `dataDir` | The data folder the host owns |
 | `hostRunning` | A host holding this token answered a hello on `port` just now. A TCP connect alone does not count |
+| `autostart` | Additive: `{ on, how, linger }`. `how` is what this machine starts its host at boot with (`systemd`, a scheduled `task`), null where it offers nothing; `on` whether `--autostart on` wrote that entry; `linger` (systemd) whether the user's manager starts at boot or only at login. Read from `<data>/autostart.json`, the mark `--autostart` keeps, so no link start asks systemd or Task Scheduler |
 | `install` | Additive (the line stays `v: 1`): `{ managed, current, previous, node }`. `managed` is whether the managed launcher of an install the app made over ssh ran this command ([plans/remote-hub.md](plans/remote-hub.md) §10.1); `current` and `previous` are that install's pointer files as `{ version, node }` (null when absent or not two plain words); `node` is the Node that answered |
 
 stdout carries that line and nothing else; anything to explain goes to stderr. If the command is not found (exit 127),
@@ -984,6 +987,24 @@ at every start and runs that version's `centralu.mjs` on that version's pinned N
 `serve` that sees `CENTRALU_MANAGED=1` leaves `<data>/bin/centralu` to an npm install on the same machine, and drops
 the variable from the host's environment.
 
+**Starting at boot: `--autostart`** ([plans/remote-hub.md](plans/remote-hub.md) §10.4, owner decision 4: offered per
+machine, off by default; the hub's switch is §4.8). `centralu serve --autostart on` writes an entry that starts `serve`
+when the machine starts, `off` removes it, `status` asks systemd or Task Scheduler and corrects the mark. Neither starts
+nor stops a host now. The entry runs the launcher the hub's lookup would find (the managed launcher, else
+`<data>/bin/centralu`) and carries `CC_DATA_DIR` when it is set; one entry per data folder (any but `~/.centralu` gets a
+suffix from its path).
+
+| Where | The entry | What it does not do |
+|---|---|---|
+| Linux with systemd | `~/.config/systemd/user/centralu-serve.service`, as above but `Restart=on-failure` bounded to five starts in five minutes; `daemon-reload`, `enable` (never `--now`: a second serve beside the running one would fail and be restarted), then `loginctl --no-ask-password enable-linger` | Where lingering needs an administrator, it starts at login, not boot; the answer says to run `sudo loginctl enable-linger $USER`. `off` leaves lingering as it is |
+| Windows | A scheduled task "Centralu host" for this user at their sign-in (`Interactive`, no administrator, no stored password), running `serve` in a hidden Windows PowerShell window, on battery too, with no time limit (Task Scheduler's default ends a task after 72 hours) | Starts at sign-in, not before it (with automatic sign-in, that is boot) |
+| WSL (interop on) | The same task, "Centralu host (WSL <distro>)", registered through `powershell.exe` on the Windows side; it runs `wsl.exe -d <distro> -u <user> --cd ~ --exec <launcher> serve`, which holds the distro for as long as the host runs | A unit inside the distro would never run: WSL stops a distro with no Windows client |
+| macOS, Linux without systemd, WSL without interop | None: one sentence says so | — |
+
+It prints `{ "v": 1, "autostart": { "ok", "on", "how", "linger", "message"? } }`. The task's PowerShell travels to
+`powershell.exe` as `-EncodedCommand` on a command line of its own (CreateProcess, 32,767 characters), never through
+ssh. None of the entries has been created on a real machine yet (plan §10.10, step 6).
+
 **What phase 1 does not cover.** App views open from the host's HTTP door at `127.0.0.1:<port>`, so they work
 through a forward whose local port equals the remote port. An app whose manifest asks for its own origin gets a port of
 its own (`views/origin-ports.ts`), which one forward does not carry. The other end, the host that links to this one, is
@@ -1012,6 +1033,7 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 | Mirror | `stored.ts`, store v46 `machine_headers` | Each machine's sessions and projects as last listed, for when it cannot be reached |
 | Installer | `install.ts`, `registry.ts`, `remote-install.mjs` | `machines.install`: preflight, the pinned Node and the npm packages on the remote, checked against the release's pin and the registry's signed metadata (below) |
 | Update | `update.ts` | `machines.update`, `machines.rollback`, `machines.uninstall`: stop the remote's host, switch its pointers, start and check, or put back (below) |
+| Autostart | `autostart.ts` | `machines.autostart`: `centralu serve --autostart` there, through the lookup (below) |
 
 The three choke points of §5 of the plan are where it sits: the router is the `onRpc` the server calls, a link puts
 the remote's events into `server.broadcast` (so they get the hub's own `seq` and replay) and its terminal frames into
@@ -1083,10 +1105,19 @@ at a time per machine, and the remote's `install.lock` guards the files.
 | Install beside | `machines.install`'s steps with `activate: false`: the new version lands in `versions/<v>/`, nothing points at it, nothing is removed, and no launcher is written yet, so the lookup still finds what runs | — | — |
 | Hold | The link stops reconnecting and starting a host of its own (Reconnect included) until the check; it would otherwise start the old version between the stop and the switch | the same | the same |
 | Stop | `centralu serve --stop` through the lookup: the running version stops itself in order (§4.7). Not stopped: the call fails and nothing is switched | the same | the same; not stopped, nothing is removed |
+| Boot entry | — | — | `serve --autostart off` through the lookup (§4.7), after the stop. Not removed: nothing is removed. A version older than `--autostart` is passed by (it cannot have written one from here) |
 | Switch | `remote-install.mjs` with `action: 'pointers'`: `previous` = the old `current`, `current` = the new one, each by rename; the launcher is written now if there is none | `current` = `previous`, `previous` removed: one step back only | `<data>/remote/` removed, by a script per shell (a running `node.exe` could not remove itself) |
 | Start | `serve --detach` (`Tunnel.startHost`) | the same | — |
 | Check | The link opens again; only a hello whose `build.version` is the target ends it, within 30 s | the same | — |
 | After | Success: `action: 'prune'` removes what neither pointer names. Failure: the end of `host.log`, `serve --stop` again, the old pointers back (none, after a first update over an npm install: then the launcher goes too), the old version started if one was running, and the call fails with that sentence | Failure: the same, towards the version it left | The link opens again and finds what is left (an npm install, or nothing) |
+
+**Starting a machine's host at boot** (plan §10.4, owner decision 4; `autostart.ts`). `machines.autostart { machineId,
+on? }` (additive) runs `centralu serve --autostart on|off|status` there through the lookup, and the Centralu found
+writes, removes or reads its own entry (§4.7); without `on` it only reads. The row's `autostart` (`MachineInfo`,
+additive) comes from the connection line at every link start and from the call's answer; a remote that predates it
+says nothing, and the window shows no switch. Nothing starts or stops, so nothing is asked first and the link is not
+held. Refused while an install, update, rollback or uninstall runs there, and where the hub has no shell on the
+machine. Only the lookup crosses ssh, as short as `--connection`'s, so it fits cmd.exe's line.
 
 What would stop is asked of the remote first: `machines.activity` calls the remote's `host.activity` (additive), which
 counts what `hostBusy` counts (`activityCounts`, idle.ts): working sessions, approvals and questions waiting,
@@ -1151,7 +1182,7 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 | Where | What it does with the links |
 |---|---|
 | Sidebar | Once there is a linked machine, groups by `machine`: this computer first (with "Your apps"), then each machine with its name and link state (`connected`, `connecting`, `away`, `version mismatch`, …), its projects and its user-folder apps. A project or session of a machine that is not connected stays listed, dimmed (`data-away`), and is never woken. A machine's + adds a folder there by its path (`projects.add {path, machine}`); its name opens Settings → Machines |
-| Settings → Machines | `machines.list/add/remove/reconnect`. Each row says the last error as what to do (`machineProblem` in `@cc/core`: a key not loaded, a host key never accepted, Centralu not installed or not serving there), and holds the version prompt |
+| Settings → Machines | `machines.list/add/remove/reconnect`. Each row says the last error as what to do (`machineProblem` in `@cc/core`: a key not loaded, a host key never accepted, Centralu not installed or not serving there), and holds the version prompt. Where the machine offers it, a "Start Centralu when <machine> starts" switch (`machines.autostart`, `autostartRow` in `@cc/core`), with a line where it falls short of boot: a systemd manager that starts only at login, a Windows sign-in |
 | Version prompt | From `MachineInfo.versions`: an older hub gets the existing update path; an older remote gets the exact `npm i -g centralu@<hub version>` to run there (phase 1 cannot update it); "Connect anyway" is `machines.acceptVersions`, offered only on one protocol |
 | New-session dialog, session menu | `agents.detect`, `agents.models`, `agents.capabilities` with the project's `machine` |
 | Session header | Names the machine (also every grid panel's header, and where approvals and questions are answered); "older CLI" compares with `agents.versions {machine}` |

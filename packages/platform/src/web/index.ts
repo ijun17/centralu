@@ -543,6 +543,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       update: (machineId) => rpc.call('machines.update', { machineId }),
       rollback: (machineId) => rpc.call('machines.rollback', { machineId }),
       uninstall: (machineId) => rpc.call('machines.uninstall', { machineId }),
+      autostart: (machineId, on) => rpc.call('machines.autostart', on === undefined ? { machineId } : { machineId, on }),
       activity: async (machineId) => (await rpc.call('machines.activity', { machineId })).activity,
     },
     workspace: {

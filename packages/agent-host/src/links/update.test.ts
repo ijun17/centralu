@@ -14,7 +14,8 @@ import { parseStopLine, rollbackRemote, uninstallRemote, updateRemote, type Host
  * fake registry, and the scripts and `remote-install.mjs` run for real. Each fake `centralu.mjs`
  * plays its version's `serve`: `--stop` and `--detach` write what happened to `<data>/events` and
  * which version runs to `<data>/running`; `FAKE_BROKEN=<version>` makes that version fail to start
- * and leave a line in `host.log`.
+ * and leave a line in `host.log`. `--autostart off` removes `<data>/autostart`, the stand-in for a boot
+ * entry; `FAKE_AUTOSTART_FAILS` makes it refuse, `FAKE_NO_AUTOSTART` plays a version that predates it.
  */
 
 const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve.mjs')
@@ -38,6 +39,17 @@ if (a === 'serve --stop') {
   } else {
     writeFileSync(d + '/running', '${version}')
     console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: '${version}', protocolVersion: 1, dataDir: d, hostRunning: true, detach: { ok: true, how: 'setsid' } }))
+  }
+} else if (a === 'serve --autostart off') {
+  log('autostart off')
+  if (process.env.FAKE_NO_AUTOSTART) {
+    console.error('unknown option for serve: --autostart')
+    process.exitCode = 2
+  } else if (process.env.FAKE_AUTOSTART_FAILS) {
+    console.log(JSON.stringify({ v: 1, autostart: { ok: false, on: true, how: 'systemd', linger: null, message: 'Failed to connect to bus' } }))
+  } else {
+    rmSync(d + '/autostart', { force: true })
+    console.log(JSON.stringify({ v: 1, autostart: { ok: true, on: false, how: 'systemd', linger: null } }))
   }
 } else console.log('unexpected ' + a)
 `
@@ -211,11 +223,32 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     await expect(uninstallRemote(control({ FAKE_STOP_FAILS: '1' }).c)).rejects.toThrow(/could not be stopped/)
     expect(existsSync(remote('versions', '9.9.1', 'install.json'))).toBe(true)
     writeFileSync(data('running'), '9.9.1')
+    writeFileSync(data('autostart'), 'on')
+    rmSync(data('events'))
     const { c, seen } = control()
     expect(await uninstallRemote(c)).toEqual({ stopped: true })
-    expect(seen).toEqual(['hold', 'stop', 'remove'])
+    expect(seen).toEqual(['hold', 'stop', 'autostart', 'remove'])
+    // The boot entry goes, through the Centralu it would start, after the host stopped and before its files go
+    expect(events()).toEqual(['stop 9.9.1', 'autostart off'])
+    expect(existsSync(data('autostart'))).toBe(false)
     expect(existsSync(remote())).toBe(false)
     expect(existsSync(data('serve.json'))).toBe(true)
     expect(running()).toBeNull()
+  }, 60_000)
+
+  it('does not uninstall when the boot entry would not go: it would start a launcher that is gone at every boot', async () => {
+    await installedAndRunning()
+    writeFileSync(data('autostart'), 'on')
+    await expect(uninstallRemote(control({ FAKE_AUTOSTART_FAILS: '1' }).c)).rejects.toThrow('Centralu on box could not stop starting at boot: Failed to connect to bus')
+    expect(existsSync(remote('versions', '9.9.1', 'install.json'))).toBe(true)
+    expect(existsSync(data('autostart'))).toBe(true)
+  }, 60_000)
+
+  it('uninstalls a version that predates --autostart: it cannot have written an entry from here', async () => {
+    await installedAndRunning()
+    const { c, seen } = control({ FAKE_NO_AUTOSTART: '1' })
+    expect(await uninstallRemote(c)).toEqual({ stopped: true })
+    expect(seen).toEqual(['hold', 'stop', 'autostart', 'remove'])
+    expect(existsSync(remote())).toBe(false)
   }, 60_000)
 })

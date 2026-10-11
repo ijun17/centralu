@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
+import { autostartRow, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -18,6 +18,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   hostStarted: null,
   install: null,
   operation: null,
+  autostart: null,
   ...patch,
 })
 
@@ -168,5 +169,26 @@ describe('the update prompt and the install rows (plan §10.5)', () => {
       'Installed from this computer: Centralu 2 (1 kept to roll back to)',
     )
     expect(installNote(machine({ install: { managed: false, current: null, previous: null } }))).toBeNull()
+  })
+})
+
+describe('the start-at-boot switch (plan §10.4, owner decision 4)', () => {
+  it('is offered only where the machine said what it would start it with', () => {
+    expect(autostartRow(machine({ autostart: null }))).toBeNull()
+    expect(autostartRow(machine({ autostart: { on: false, how: null, linger: null } }))).toBeNull()
+    expect(autostartRow(machine({ autostart: { on: false, how: 'systemd', linger: null } }))).toEqual({ label: 'Start Centralu when Box starts', on: false, note: null })
+  })
+
+  it('says where it falls short of boot: a user manager that only starts at login, and a Windows sign-in', () => {
+    expect(autostartRow(machine({ autostart: { on: true, how: 'systemd', linger: true } }))!.note).toBeNull()
+    expect(autostartRow(machine({ autostart: { on: true, how: 'systemd', linger: false } }))!.note).toBe(
+      'Until an administrator there runs `sudo loginctl enable-linger $USER` for your account, it starts when you log in to Box, not at boot.',
+    )
+    expect(autostartRow(machine({ shell: 'powershell', autostart: { on: false, how: 'task', linger: null } }))).toEqual({ label: 'Start Centralu when you sign in to Box', on: false, note: null })
+    expect(autostartRow(machine({ shell: 'wsl', autostart: { on: true, how: 'task', linger: null } }))!.note).toBe('Windows starts it at sign-in; with automatic sign-in, that is at boot.')
+  })
+
+  it('names the uninstall step that removes it', () => {
+    expect(operationNote(machine({ operation: { kind: 'uninstall', step: 'autostart', target: null, at: 1 } }))).toBe('Removing Centralu: removing its start at boot…')
   })
 })

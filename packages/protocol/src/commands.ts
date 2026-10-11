@@ -43,7 +43,7 @@ import {
   UpdateStatus,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
-import { HostActivity, MachineId, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell } from './machines.js'
+import { HostActivity, MachineAutostartResult, MachineId, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell } from './machines.js'
 import { parseTolerant } from './tolerant.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
@@ -2009,6 +2009,14 @@ export const RpcMethods = {
    * data and an npm install of its own. The machine stays linked
    */
   'machines.uninstall': { params: z.object({ machineId: MachineId }), result: MachineUninstallResult },
+  /**
+   * Starts a linked machine's host at boot, or stops doing that, or (without `on`) reads whether it
+   * does (docs/plans/remote-hub.md §10.4, owner decision 4: per machine, off by default). The
+   * Centralu there writes its own entry (`centralu serve --autostart`): a systemd user unit with
+   * lingering on Linux, a scheduled task at sign-in on Windows and for WSL. A host running there is
+   * neither started nor stopped. Refused by a machine that predates it or offers none (macOS)
+   */
+  'machines.autostart': { params: z.object({ machineId: MachineId, on: z.boolean().optional() }), result: MachineAutostartResult },
   /**
    * What would stop on a linked machine if its host stopped now (`host.activity`, asked of it), for the
    * "Update <machine>" prompt. Null when the machine cannot say (unreachable, other protocol, older)

@@ -87,6 +87,20 @@ export const MachineOperation = z.object({
 })
 export type MachineOperation = z.infer<typeof MachineOperation>
 
+/**
+ * Whether a linked machine starts its host at boot (docs/plans/remote-hub.md §10.4, owner decision 4:
+ * offered per machine, off by default), as the machine said. `how` is what it uses: `systemd`, a user
+ * unit on Linux; `task`, a scheduled task at sign-in on Windows and for WSL; null where it offers
+ * nothing (macOS, a Linux without systemd, WSL without interop). `linger` (systemd only): whether the
+ * user's manager starts at boot, or only at login because `loginctl enable-linger` needs an administrator
+ */
+export const MachineAutostart = z.object({
+  on: z.boolean().catch(false),
+  how: z.enum(['systemd', 'task']).nullable().catch(null),
+  linger: z.boolean().nullable().catch(null).default(null),
+})
+export type MachineAutostart = z.infer<typeof MachineAutostart>
+
 export const MachineInfo = z.object({
   id: MachineId,
   /** What the person calls it; shown as the group header in the sidebar */
@@ -140,6 +154,12 @@ export const MachineInfo = z.object({
    * (`machines.install` / `update` / `rollback` / `uninstall`). Null otherwise. Additive
    */
   operation: MachineOperation.nullable().catch(null).default(null),
+  /**
+   * Whether the machine starts its host at boot, from its connection line and the last
+   * `machines.autostart` (`MachineAutostart`). Null when the machine has not answered, or predates it.
+   * Additive
+   */
+  autostart: MachineAutostart.nullable().catch(null).default(null),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
 
@@ -163,6 +183,10 @@ export type MachineInstallResult = z.infer<typeof MachineInstallResult>
  */
 export const MachineUninstallResult = z.object({ machine: MachineInfo, stopped: z.boolean() })
 export type MachineUninstallResult = z.infer<typeof MachineUninstallResult>
+
+/** What `machines.autostart` left: the row after it, and the machine's answer */
+export const MachineAutostartResult = z.object({ machine: MachineInfo, autostart: MachineAutostart })
+export type MachineAutostartResult = z.infer<typeof MachineAutostartResult>
 
 /**
  * What would stop if a host stopped now (the `hostBusy` rule, docs/agent-host.md): its live sessions
