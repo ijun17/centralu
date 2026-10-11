@@ -50,12 +50,14 @@ import {
   forgetUnlistedSizes,
   isAtBottom,
   isScrollUpKey,
+  laidOutAsMeasured,
   MOVED_UP_SLACK,
   personIsScrolling,
   shouldFollowAgain,
   rowKeys,
   stickAfterScroll,
   writeScroll,
+  type LaidOutRow,
 } from './scroll.js'
 
 /** The maximum height the composer can grow to. Must match CSS's max-h-40 */
@@ -100,6 +102,15 @@ const EMPTY_QUESTIONS: SessionSummary['pendingQuestions'] = []
  * the moment the person touches anything.
  */
 const LANDING_FRAMES = 30
+
+/** The conversation's mounted rows as laid out, for `laidOutAsMeasured` (#61) */
+function mountedRows(scroller: HTMLElement): LaidOutRow[] {
+  return [...scroller.querySelectorAll<HTMLElement>('[data-index]')].map((row) => ({
+    index: Number(row.dataset.index),
+    top: row.offsetTop,
+    height: row.getBoundingClientRect().height,
+  }))
+}
 
 /**
  * The focus view — one chosen session at full width.
@@ -1974,8 +1985,9 @@ function ChatStream({
           const target = m.start + anchor.offset
           el.scrollTop = target
           lastTop.current = el.scrollTop
-          // The target has stopped moving = every row above it has been measured. No reason to wait any longer
-          if (Math.abs(target - prev) <= 1) setSettling(false)
+          // The target has stopped moving and the rows above it sit where they were measured: it
+          // will not move again, so there is no reason to wait any longer (`laidOutAsMeasured`)
+          if (Math.abs(target - prev) <= 1 && laidOutAsMeasured(mountedRows(el), index, m.start)) setSettling(false)
           prev = target
         }
         if (++frames < LANDING_FRAMES) landing.current = requestAnimationFrame(seek)

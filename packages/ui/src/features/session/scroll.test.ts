@@ -8,6 +8,7 @@ import {
   rowKeys,
   isAtBottom,
   isScrollUpKey,
+  laidOutAsMeasured,
   personIsScrolling,
   shouldFollowAgain,
   stickAfterScroll,
@@ -249,5 +250,45 @@ describe('forgetUnlistedSizes (#392)', () => {
       [2, 50],
       ['3@4', 70],
     ])
+  })
+})
+
+describe('laidOutAsMeasured (#61)', () => {
+  // Rows 10 to 13 mounted, 100px each, row 12 aimed at
+  const rows = [
+    { index: 10, top: 1000, height: 100 },
+    { index: 11, top: 1100, height: 100 },
+    { index: 12, top: 1200, height: 100 },
+    { index: 13, top: 1300, height: 100 },
+  ]
+
+  it('holds when the row aimed at is mounted where it is aimed and the rows above it meet end to end', () => {
+    expect(laidOutAsMeasured(rows, 12, 1200)).toBe(true)
+  })
+
+  it('does not hold while a row above has grown and its new height has not reached the scroller', () => {
+    // Row 11 laid out at 172px, the rows below it still placed for 100: the aim moves once it is measured
+    const grown = rows.map((r) => (r.index === 11 ? { ...r, height: 172 } : r))
+    expect(laidOutAsMeasured(grown, 12, 1200)).toBe(false)
+  })
+
+  it('ignores a row below the one aimed at, whose height does not move the aim', () => {
+    const below = rows.map((r) => (r.index === 13 ? { ...r, height: 400 } : r))
+    expect(laidOutAsMeasured(below, 12, 1200)).toBe(true)
+  })
+
+  it('does not hold while the row aimed at is not mounted, or not yet where it is aimed', () => {
+    expect(laidOutAsMeasured(rows.filter((r) => r.index !== 12), 12, 1200)).toBe(false)
+    expect(laidOutAsMeasured(rows, 12, 1272)).toBe(false)
+  })
+
+  it('skips a row held outside the range, which is not next to its neighbours', () => {
+    const held = [{ index: 2, top: 200, height: 300 }, ...rows]
+    expect(laidOutAsMeasured(held, 12, 1200)).toBe(true)
+  })
+
+  it('takes a pixel of rounding', () => {
+    const rounded = rows.map((r) => (r.index === 11 ? { ...r, height: 100.6 } : r))
+    expect(laidOutAsMeasured(rounded, 12, 1200.4)).toBe(true)
   })
 })
