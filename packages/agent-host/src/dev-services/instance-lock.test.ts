@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { OWNERSHIP_FILE, acquireInstanceLock, lockConflictMessage, processStartTime } from './instance-lock.js'
+import { OWNERSHIP_FILE, acquireInstanceLock, alive, lockConflictMessage, processStartTime } from './instance-lock.js'
 
 /**
  * If two hosts use the same data folder, each carries a different session list while writing to
@@ -240,5 +240,65 @@ setTimeout(() => process.exit(0), ${holdMs})
     writeFileSync(join(db, '..', OWNERSHIP_FILE), 'this is not a database, and it is longer than a SQLite header')
     expect(() => acquireInstanceLock(db)).toThrow(/Cannot check who owns this data folder/)
     expect(existsSync(join(db, '..', 'host.lock'))).toBe(false)
+  })
+})
+
+/*
+ * LK2: the ownership is an open SQLite handle, and a handle the garbage collector takes is closed,
+ * which releases the lock (measured: a second taker in the same process gets it after `gc()`). A
+ * caller that keeps nothing of the result must still be the owner, so the module keeps the handle
+ * reachable itself. Run in a process of its own, with `--expose-gc`, so the collection is real.
+ */
+describe('ownership survives garbage collection (LK2)', () => {
+  const lockModule = fileURLToPath(new URL('./instance-lock.ts', import.meta.url))
+  const root = fileURLToPath(new URL('../../../../', import.meta.url))
+
+  it('a lock whose result nobody kept is still held after a collection', () => {
+    const db = dbIn()
+    const script = join(dirname(db), 'gc-check.mts')
+    writeFileSync(
+      script,
+      `const { acquireInstanceLock } = await import(${JSON.stringify(pathToFileURL(lockModule).href)})
+;(() => { acquireInstanceLock(${JSON.stringify(db)}) })()
+for (let i = 0; i < 5; i++) { globalThis.gc(); await new Promise((r) => setTimeout(r, 20)) }
+console.log(acquireInstanceLock(${JSON.stringify(db)}).ok ? 'second owner' : 'still held')
+process.exit(0)
+`,
+    )
+    const r = spawnSync(process.execPath, ['--expose-gc', '--import', 'tsx', script], { cwd: root, encoding: 'utf8', timeout: 30_000 })
+    expect(r.stdout.trim()).toBe('still held')
+  }, 30_000)
+})
+
+/*
+ * LK3: a pid is not an identity, and reading it must not depend on the reader. `ps -o lstart=`
+ * follows the locale, so a Korean-locale writer and a C-locale reader read the same start time
+ * differently and stole a live lock; and `kill(pid, 0)` failing with EPERM is someone else's
+ * process, alive.
+ */
+describe('reading another process (LK3)', () => {
+  it.skipIf(process.platform === 'win32')('ps runs in the C locale whatever the host was started with', () => {
+    const d = mkdtempSync(join(tmpdir(), 'cc-ps-'))
+    dirs.push(d)
+    writeFileSync(join(d, 'ps'), '#!/bin/sh\necho "locale=$LC_ALL"\n', { mode: 0o755 })
+    const saved = { PATH: process.env.PATH, LC_ALL: process.env.LC_ALL }
+    try {
+      process.env.PATH = `${d}:${saved.PATH}`
+      process.env.LC_ALL = 'ko_KR.UTF-8'
+      expect(processStartTime(process.pid)).toBe('locale=C')
+    } finally {
+      process.env.PATH = saved.PATH
+      if (saved.LC_ALL === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = saved.LC_ALL
+    }
+  })
+
+  it('EPERM means alive; only a process that is not there is dead', () => {
+    const failing = (code: string) => () => {
+      throw Object.assign(new Error(code), { code })
+    }
+    expect(alive(4242, failing('EPERM'))).toBe(true)
+    expect(alive(4242, failing('ESRCH'))).toBe(false)
+    expect(alive(4242, () => {})).toBe(true)
   })
 })

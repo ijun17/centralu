@@ -53,10 +53,10 @@ const held = new Set<Database.Database>()
 type Holder = { pid: number; started: string | null }
 
 /** Whether that pid is still alive (signal 0 only confirms existence) */
-function alive(pid: number): boolean {
+export function alive(pid: number, kill: (pid: number, signal: 0) => void = (p, s) => void process.kill(p, s)): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {
-    process.kill(pid, 0)
+    kill(pid, 0)
     return true
   } catch (err) {
     // EPERM means it belongs to someone else, but it is **alive** — this must not read as dead

@@ -1056,6 +1056,33 @@ describe('bounded outbound work (#82)', () => {
   })
 })
 
+describe('listening (HO13)', () => {
+  it('binds the loopback address only', async () => {
+    const { server: srv } = await start()
+    const addr = (srv as unknown as { http: { address(): { address: string } } }).http.address()
+    expect(addr.address).toBe('127.0.0.1')
+  })
+
+  it('a port another program holds is a sentence to read, and the error never escapes as an uncaught one', async () => {
+    const { createServer } = await import('node:net')
+    const holder = createServer()
+    await new Promise<void>((r) => holder.listen(0, '127.0.0.1', () => r()))
+    const taken = (holder.address() as { port: number }).port
+    const uncaught: unknown[] = []
+    const onUncaught = (e: unknown) => void uncaught.push(e)
+    process.on('uncaughtException', onUncaught)
+    try {
+      const busy = new HostServer({ port: taken, token: TOKEN, onRpc: async () => ({}) })
+      await expect(busy.listen()).rejects.toThrow(`Port ${taken} is already in use.`)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(uncaught).toEqual([])
+    } finally {
+      process.off('uncaughtException', onUncaught)
+      holder.close()
+    }
+  })
+})
+
 describe('deterministic shutdown (#82)', () => {
   it('does not wait for a half-sent HTTP request', async () => {
     const { createConnection } = await import('node:net')
@@ -1086,6 +1113,17 @@ describe('deterministic shutdown (#82)', () => {
     expect(Date.now() - t0).toBeLessThan(1000)
     server = null
     c.ws.terminate()
+  })
+
+  it('a socket that connected but never said hello does not hold close() open (HO9)', async () => {
+    // A deadline far past the test: only close() itself may end this socket
+    const { server: srv, port } = await start(undefined, { handshakeTimeoutMs: 60_000, closeGraceMs: 100 })
+    const c = connect(port)
+    await c.open()
+    const outcome = await Promise.race([srv.close().then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 1500))])
+    server = null
+    c.ws.terminate()
+    expect(outcome).toBe('closed')
   })
 
   it('a second close() is the same shutdown, not a new one', async () => {

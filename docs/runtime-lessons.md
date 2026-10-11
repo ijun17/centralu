@@ -197,9 +197,11 @@ Rule: the token is never an argument. The host reads `CC_KEEPER`, `CC_HOST_SOURC
 no `CENTRALU_*` except their own id and data folder; a detached remote launcher is given no token.
 Guard: `tooling/launcher-serve.test.ts` "passes the token in the environment, never on the command line";
 `tooling/launcher-serve.test.ts` "carries only the data folder, the host entry and the managed mark to a detached
-launcher, never the token"; `host/apps/external/lifecycle.test.ts` "receives its data folder (created for it) and only
-its declared secrets, never the host's own variables". The deletion in `main.ts` and the `CENTRALU_*` stripping are
-**UNGUARDED**.
+launcher, never the token"; `host/lifecycle/host-process.test.ts` "the first child the host spawns sees none of the
+launcher's variables, the token least of all (ST16)" (a real host whose login-shell probe records its environment);
+`host/lifecycle/start.test.ts` "are read once and taken out of the environment"; `host/apps/external/lifecycle.test.ts`
+"receives its data folder (created for it) and only its declared secrets, never the host's own variables" (with the
+launcher's `CENTRALU_MANAGED` and `CENTRALU_HOST_ENTRY` in the host's environment). *Changed by step 3.*
 Platforms: all. *Changed by #462.*
 
 ## 2. Finding and launching programs
@@ -211,9 +213,11 @@ fixed Homebrew list missed nvm, mise and volta. Dev mode inherits the terminal's
 Rule: anything that looks up node, claude, codex or git in a tree started by the GUI or launchd asks the person's
 interactive login shell once (`$SHELL -ilc`, a marked line only, merged after the inherited PATH, static folders as
 the fallback). Changes touching PATH are checked in the packaged app.
-Guard: `host/env-path.test.ts` "finds a tool the shell knows even from the GUI app's meager PATH" (returns early when
-the machine's shell finds nothing, so on CI it usually asserts nothing); `keeper/host_proc.rs`
-`finds_the_node_this_shell_knows`. A probe that finds a tool on a bare PATH in CI is **UNGUARDED**.
+Guard: `host/env-path.test.ts` "a tool only the login shell knows is found from a bare PATH (PA1)" and
+`keeper/os/unix.rs` `the_node_the_login_shell_names_is_found_whatever_else_it_prints`, both against a shell the test
+writes, so they assert on CI too; `host/env-path.test.ts` "finds a tool the shell knows even from the GUI app's meager
+PATH" and `keeper/host_proc.rs` `finds_the_node_this_shell_knows` against the machine's real shell (early returns on
+CI). *Changed by step 3.*
 Platforms: macOS, Linux.
 
 **PA2. The login-shell probe is bounded and cannot be stopped by a terminal.**
@@ -222,7 +226,11 @@ controlling terminal (the npm launcher runs the AppImage attached to one) an int
 is stopped by SIGTTOU, so the keeper's probe waited out 5 s every time (measured, #458).
 Rule: the host's probe: 3 s, `SIGKILL`, stdin ignored, `TERM=dumb`, `CI=1`, any failure falls back. The keeper's
 probe: a session of its own, 5 s, then the group is killed.
-Guard: **UNGUARDED** (nothing runs a hanging or terminal-stopped probe).
+Guard: `host/env-path.test.ts` "a shell that never answers is cut off at the bound and the fallback is used (PA2)",
+"a shell that ignores SIGTERM is still cut off at the bound: the probe is killed, not asked (PA2)" and "a shell stopped
+by its terminal (SIGTTOU, SIGSTOP) is cut off too (PA2)"; `keeper/os/unix.rs`
+`a_shell_that_never_answers_is_cut_off_at_the_bound` and `a_shell_that_job_control_would_stop_still_answers` (fails
+when the probe runs in a group of its own instead of a session). *Changed by step 3.*
 Platforms: macOS, Linux. *Changed by #458.*
 
 **PA3. The probe runs once per process.**
@@ -249,8 +257,8 @@ Platforms: all.
 Happened: a `SHELL` set on Windows is Git Bash's POSIX path, which cannot be run (#14).
 Rule: no probe on Windows; the fallback folders are `%APPDATA%\npm`, `%LOCALAPPDATA%\pnpm`, `%LOCALAPPDATA%\Volta\bin`
 and the profile's `.local\bin`, `.bun\bin`, `.cargo\bin`, `scoop\shims`.
-Guard: `host/env-path.test.ts` "falls back to the folders Windows installers write to, not unix ones". The skip of
-the probe itself is **UNGUARDED**.
+Guard: `host/env-path.test.ts` "falls back to the folders Windows installers write to, not unix ones";
+`host/env-path.test.ts` "Windows runs no probe at all, even with a SHELL that could run (PA6)". *Changed by step 3.*
 Platforms: Windows.
 
 **PA7. On Windows a tool is looked up by PATHEXT, folder by folder, in absolute entries only, whatever the case of
@@ -312,8 +320,9 @@ Platforms: Windows.
 Happened: bundling the host broke the SDK's lookup of its own native binary, so every session creation failed in the
 packaged app (47c010f3).
 Rule: always pass `pathToClaudeCodeExecutable`; a shim becomes its `.js` entry or `.exe`.
-Guard: `host/adapters/claude/windows-start.test.ts` "off Windows the path found on PATH is started as it is". The shim
-conversion (`toolExecutable`) is **UNGUARDED**.
+Guard: `host/adapters/claude/windows-start.test.ts` "off Windows the path found on PATH is started as it is";
+`host/tool-launch.test.ts` "a .js behind the npm shim is handed over as the .js, never the .cmd" and "an .exe behind the
+shim is handed over as the .exe" (`toolExecutable` now looks up with the platform it is given). *Changed by step 3.*
 Platforms: all.
 
 **PA13. The dev host is started directly, never through a wrapper.**
@@ -321,8 +330,9 @@ Happened: killing the pnpm wrapper left the host orphaned holding its port (M1.5
 `.bin/tsx` is an sh script `CreateProcessW` cannot start.
 Rule: start `node_modules/.bin/tsx` (unix) or Node with tsx's `cli.mjs` (Windows) directly, in a process group of its
 own.
-Guard: **UNGUARDED** in Rust; `scripts/keeper-integration.mjs` check "stop ends the host and the keeper even with
-background mode on" covers the group stop only.
+Guard: `keeper/host_proc.rs` `the_dev_host_is_started_directly_never_through_a_package_manager`;
+`keeper/host_proc.rs` `a_host_leads_a_process_group_of_its_own`; `scripts/keeper-integration.mjs` check "stop ends the
+host and the keeper even with background mode on". *Changed by step 3.*
 Platforms: all.
 
 **PA14. A codex started by the keeper would hit the `.cmd` refusal on Windows.**
@@ -367,7 +377,10 @@ Happened: a Finder-launched app has stderr on `/dev/null`; a day was lost to cod
 Rule: the stderr copy to `<data>/host.log` starts as soon as the data folder is known, before PATH, the lock and the
 store; the banner (build, Node, pid, db) is the first line.
 Guard: `host/log-file.test.ts` "text written to stderr also remains in the file"; `host/log-file.test.ts` "the startup
-banner states the build, DB, and pid on its own". The order in `main.ts` is **UNGUARDED**.
+banner states the build, DB, and pid on its own"; `host/lifecycle/host-process.test.ts` "the log is on before PATH and
+the lock: a refused start says why in host.log, after the banner (HO3)"; `host/lifecycle/start.test.ts` "the log is on
+before the PATH probe, the lock and the store (HO3)", with `StartSequence` throwing at a step `main.ts` takes out of
+`START_ORDER`. *Changed by step 3.*
 Platforms: all.
 
 **HO4. Log rotation never keeps a closed descriptor number.**
@@ -377,7 +390,8 @@ Rule: the fd is cleared on close even when the rename fails; every log keeps one
 logging failure never throws.
 Guard: `host/log-file.test.ts` "does not hold onto a dead fd when the rollover fails, and keeps writing to the same
 file"; `host/log-file.test.ts` "rolls over and keeps only one prior generation once it overflows (does not silently eat
-up the folder)". Rotation of `host-errors.log` in `main.ts` is **UNGUARDED**.
+up the folder)"; `host/lifecycle/endings.test.ts` "keeps one previous generation once it passes its size, and the new
+entry starts the file" (`host-errors.log`, `crashRecorder`). *Changed by step 3.*
 Platforms: all.
 
 **HO5. One path to exit, and it is the full shutdown.**
@@ -392,9 +406,13 @@ Platforms: macOS, Linux.
 Happened: until a listener exists the kernel default kills the process; Ctrl+C right after the ready line killed
 `centralu serve`'s host every time, and 3 s later shut it down cleanly (#390, 8cf2dd28).
 Rule: holding handlers are installed right after the lock is taken; the first signal runs the shutdown as soon as it
-exists; a second one during startup exits at once with 1.
-Guard: `tooling/launcher-serve.test.ts` "passes Ctrl+C (SIGINT) to the host, which shuts down cleanly". The second
-signal is **UNGUARDED**.
+exists; a second one during startup exits at once with 1, unless it comes within 1 s of the first (the same request
+delivered twice, see HO8).
+Guard: `tooling/launcher-serve.test.ts` "passes Ctrl+C (SIGINT) to the host, which shuts down cleanly";
+`host/lifecycle/endings.test.ts` "a second one while still starting, a second or more later, exits at once with 1", "the
+same request delivered twice while starting (within a second) does not exit" and "is held, not obeyed, and acted on once
+the shutdown exists"; `host/lifecycle/start.test.ts` "signals are held right after the lock, before
+anything that takes time (HO6)". *Changed by step 3.*
 Platforms: macOS, Linux.
 
 **HO7. The host ends when its parent's pipe closes, and only when asked to watch it.**
@@ -404,8 +422,10 @@ Rule: only a supervisor passes `--watch-parent`; then stdin `end`/`close`/`error
 down (detach under a keeper's child service, otherwise stop). Without the flag stdin EOF means nothing. This is the
 only parent-death signal on Windows.
 Guard: `tooling/launcher-serve.test.ts` "takes the host down when the launcher itself is killed, instead of leaving
-it unsupervised"; `scripts/keeper-integration.mjs` check "a SIGKILLed keeper takes its host with it". The no-flag half
-is **UNGUARDED**.
+it unsupervised"; `scripts/keeper-integration.mjs` check "a SIGKILLed keeper takes its host with it";
+`host/lifecycle/host-process.test.ts` "without --watch-parent the end of stdin means nothing, and a signal still shuts it
+down (HO7)" and "with --watch-parent the end of stdin is the parent gone, and the host shuts down (HO7)".
+*Changed by step 3.*
 Platforms: all.
 
 **HO8. Shutdown order: ptys first, the store last, every close runs once.**
@@ -414,10 +434,22 @@ reach them, and ptys disposed after `await mgr.disposeAll()` were never reached 
 store stayed open with its WAL unfolded, and on the signal path the host never exited (#396, bda7de5c).
 Rule: in stop mode terminals and commands are disposed synchronously before any await; app processes stop in parallel
 with sessions; the server closes last among services, then the store and the keeper connection; every close runs even
-after a failure, the first error wins; `shutdown()` runs at most once and always ends with its log line and exit 0.
-Guard: `host/shutdown.test.ts` "a close that throws does not skip the next one"; `host/shutdown.test.ts` "run when a
-step threw, and the step's error is the one that comes out". The pty-first order and the run-once guard are
-**UNGUARDED**.
+after a failure, the first error wins; a leave runs at most once and ends with its log line and exit 0. It is bounded
+(10 s, past the supervisor's budget, for a host nothing supervises): past it, or at a second signal while leaving, the
+host says so and exits 1 at once, never a second, different ending. A second signal within 1 s of the first is the same
+request delivered twice (the launcher's forward and the terminal's own, SIGHUP right after SIGINT) and changes nothing
+(`REPEAT_AFTER_MS`, `lifecycle/endings.ts`; owner, 2026-10-12). SIGHUP runs the shutdown like SIGINT and SIGTERM.
+Guard: `host/lifecycle/shutdown.test.ts` "a close that throws does not skip the next one", "run when a step threw, and
+the step's error is the one that comes out", "in stop mode terminals and commands end before anything is awaited, even
+when the links never stop", "the server closes after every service, then the store, then the keeper connection", "a
+service that fails to stop does not keep the server, the store or the keeper connection open", "a second ending changes
+nothing: the services stop once and the process exits once" and "ends with its log line and exit 0 even when a step
+failed", "a step that never settles does not hold the process: past the bound it says so and exits 1";
+`host/lifecycle/endings.test.ts` "a second signal while shutting down, a second or more later, exits at once instead of
+waiting it out", "the same request delivered twice (the launcher forward and the terminal, or SIGHUP right after SIGINT)
+does not force the exit" and "a terminal closing (SIGHUP) runs the shutdown, not the kernel default".
+*Changed by step 3*: the ptys used to be ended only after the ssh links were awaited, and a service that threw
+skipped every service after it; `stopPlan` puts them first and `runSteps` runs every step.
 Platforms: all (the setsid point is POSIX).
 
 **HO9. Shutdown finishes within the supervisor's budget.**
@@ -426,7 +458,8 @@ the fix); a peer that never answers a close frame makes `ws` wait 30 s (#82, 185
 Rule: close every socket, 250 ms grace, then terminate; `closeAllConnections()`; a second close is the same promise.
 Guard: `host/transport/server.test.ts` "cuts a peer that never answers the close frame after the grace period";
 `host/transport/server.test.ts` "does not wait for a half-sent HTTP request"; `host/transport/server.test.ts` "a second
-close() is the same shutdown, not a new one". The never-authenticated socket is **UNGUARDED**.
+close() is the same shutdown, not a new one"; `host/transport/server.test.ts` "a socket that connected but never said
+hello does not hold close() open (HO9)". *Changed by step 3.*
 Platforms: all.
 
 **HO10. Rejections are survived; uncaught exceptions shut down in order.**
@@ -434,7 +467,8 @@ Happened: one rejection that leaked while adding a project killed the host and e
 packaged app had no stderr to say why (df8ad446).
 Rule: `unhandledRejection` is logged to stderr and `host-errors.log` and survived; `uncaughtException` is logged and
 runs the normal shutdown.
-Guard: **UNGUARDED**.
+Guard: `host/lifecycle/endings.test.ts` "a rejection is recorded and survived; an uncaught exception is recorded and
+shuts down"; "a log that cannot be written is not thrown again". *Changed by step 3.*
 Platforms: all.
 
 **HO11. Nothing is pushed to clients before the server exists.**
@@ -442,8 +476,9 @@ Happened: an adopted pty replays its output as soon as it is attached; an await 
 (#329) made every host restart that held a terminal crash, five times, until the keeper gave up (#348, ea5a9611).
 Only a hand run noticed.
 Rule: early frames are dropped (services keep their own scrollback); broadcasts before listen are swallowed.
-Guard: `scripts/keeper-children-integration.mjs` check "the keeper restarts a crashed host". No unit test:
-**UNGUARDED** in vitest.
+Guard: `scripts/keeper-children-integration.mjs` check "the keeper restarts a crashed host";
+`host/lifecycle/start.test.ts` "are dropped, not thrown, and the ones after it opens are sent" (`lifecycle/gate.ts`:
+every service is handed a gate's `push`, never the server). *Changed by step 3.*
 Platforms: macOS, Linux.
 
 **HO12. The keeper's control lines reach only a host the keeper started.**
@@ -452,15 +487,18 @@ host's to read.
 Rule: the control channel is attached only with `CC_KEEPER=1`; one object per line, anything else ignored, a buffer
 past 64 KiB without a newline dropped; when the stream ends every waiter is rejected.
 Guard: `host/swap-control.test.ts` "reads one JSON object per line, across chunk boundaries, and ignores anything
-else"; `host/swap-control.test.ts` "a waiter is rejected when the keeper closes the pipe". The 64 KiB cap is
-**UNGUARDED**.
+else"; `host/swap-control.test.ts` "a waiter is rejected when the keeper closes the pipe"; `host/swap-control.test.ts`
+"a line that grows past 64 KiB without a newline is dropped, even one that would parse, and the next line is read
+(HO12)". *Changed by step 3.*
 Platforms: macOS, Linux.
 
 **HO13. The host listens on loopback only, and a busy port is a sentence.**
 Happened: a port conflict crashed the host because `ws` re-emits the HTTP server's error (m1-result.md).
 Rule: listen on `127.0.0.1`; EADDRINUSE becomes a readable message and exit 1 with no ready line; `wss.on('error')`
 is always attached.
-Guard: **UNGUARDED** (the launcher test matches a log line, not the socket).
+Guard: `host/transport/server.test.ts` "binds the loopback address only"; `host/transport/server.test.ts` "a port
+another program holds is a sentence to read, and the error never escapes as an uncaught one" (fails without the `wss`
+error listener, and with a bind to every address). *Changed by step 3.*
 Platforms: all.
 
 **HO14. A failed spawn fails one session, never the host.**
@@ -469,7 +507,10 @@ exception that kills the host and every live session.
 Rule: every child has an `error` listener; the failure ends only its session and `onExit` fires once; EPIPE on a
 child's stdin (git, an app's fd 3) is swallowed.
 Guard: `host/adapters/codex/client.test.ts` "a nonexistent command fails only this session, without killing the
-process". The EPIPE listeners (`git-exec.ts`, `app-process.ts`) are **UNGUARDED**.
+process"; `host/dev-services/git-exec.test.ts` "fails only the call: EPIPE on its stdin never escapes";
+`host/apps/external/app-process.test.ts` "fails the start, and EPIPE never escapes as an uncaught exception". The app's
+stdin has two listeners (`app-process.ts` and `stream-transport.ts`, which every write goes through): the test fails
+only with both removed. *Changed by step 3.*
 Platforms: all.
 
 **HO15. Detach or stop is decided by whether the keeper holds the children.**
@@ -477,7 +518,11 @@ Happened: under the keeper's child service a signal means a restart and the agen
 (#280 step 2).
 Rule: on a signal the mode is detach only when held children exist; the keeper's `stop` forces stop; ssh links and
 app processes always end with the host.
-Guard: **UNGUARDED** at the `main.ts` level.
+Guard: `host/lifecycle/shutdown.test.ts` "a signal detaches only when the keeper holds the children" and "a detach
+lets go of terminals, commands and sessions, but still ends the ssh links and app processes";
+`host/lifecycle/endings.test.ts` "under the keeper's child service a signal is a restart: detach, and the next host takes
+the views", "without it a signal is a stop, and nothing is handed over", "the keeper's stop forces a stop even when it
+holds the children" and "a crash or a vanished parent hands nothing over". *Changed by step 3.*
 Platforms: all.
 
 ## 4. One instance per data folder
@@ -498,7 +543,8 @@ close it. Not valid on network file systems.
 Guard: `host/dev-services/instance-lock.test.ts` "of hosts started at the same moment, exactly one owns the folder";
 `host/dev-services/instance-lock.test.ts` "the operating system releases ownership when the owner is SIGKILLed — the
 next host starts"; `host/dev-services/instance-lock.test.ts` "an ownership file that cannot be read refuses the start
-instead of guessing". Keeping the handle from collection is **UNGUARDED**.
+instead of guessing"; `host/dev-services/instance-lock.test.ts` "a lock whose result nobody kept is still held after a
+collection" (`--expose-gc`; measured: a collected handle releases the lock). *Changed by step 3.*
 Platforms: all.
 
 **LK3. A pid is not an identity.**
@@ -508,8 +554,9 @@ Rule: record pid and start time; same pid, other start time means reused; an unr
 with `LC_ALL=C`; `kill(pid, 0)` failing with EPERM means alive.
 Guard: `host/dev-services/instance-lock.test.ts` "even with a living pid, a different start time means the number was
 reused by someone else — it is taken over"; `host/dev-services/instance-lock.test.ts` "blocked when that pid's current
-start time cannot be read — stealing the lock when in doubt is the riskier choice". `LC_ALL=C` and EPERM are
-**UNGUARDED**.
+start time cannot be read — stealing the lock when in doubt is the riskier choice"; `host/dev-services/instance-lock.test.ts`
+"ps runs in the C locale whatever the host was started with" and "EPERM means alive; only a process that is not there
+is dead". *Changed by step 3.*
 Platforms: macOS, Linux.
 
 **LK4. On Windows a pid in `host.lock` refuses nothing.**
@@ -1755,29 +1802,9 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 2 | ST4: the legacy folder move runs before `create_dir_all` in the window | `window/sidecar.rs` | all | 7 |
 | 4 | ST11: `leave_app_folder()` runs before anything is started | `window/lib.rs` | Windows | 7 |
 | 5 | ST13: no console window (CREATE_NO_WINDOW, `windowsHide`, not `detached`) | `keeper/host_proc.rs`, `host/adapters/local-process.ts`, `host/apps/external/app-process.ts` | Windows | 2 |
-| 6 | ST16: `main.ts` deletes the keeper's variables before any spawn; apps get no `CENTRALU_*` | `host/main.ts`, `host/apps/external/runtime.ts` | all | 3 |
-| 7 | PA1: the login-shell probe finds a tool a bare PATH does not, in CI | `host/env-path.ts`, `keeper/host_proc.rs` | macOS, Linux | 3 |
-| 8 | PA2: a hanging or terminal-stopped probe is bounded and falls back | `host/env-path.ts`, `keeper/host_proc.rs` | macOS, Linux | 3 |
-| 9 | PA6: no probe on Windows | `host/env-path.ts` | Windows | 3 |
 | 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts` | Windows | 8 |
-| 11 | PA12: a shim becomes the SDK's single executable path | `host/tool-launch.ts` | Windows | 3 |
-| 12 | PA13: the dev host started directly, in its own group | `keeper/host_proc.rs` | all | 3 |
 | 13 | PA14: a keeper-started codex goes through command resolution | `host/adapters/codex/index.ts` | Windows | 9 |
 | 14 | PA15: a child's environment keeps `SystemRoot` | `host/` spawn sites | Windows | 9 |
-| 15 | HO3: logging starts before PATH, lock and store | `host/main.ts` | all | 3 |
-| 16 | HO4: `host-errors.log` rotates | `host/main.ts` | all | 3 |
-| 17 | HO6: a second signal during startup exits at once | `host/main.ts` | macOS, Linux | 3 |
-| 18 | HO7: without `--watch-parent`, stdin EOF is ignored | `host/main.ts` | all | 3 |
-| 19 | HO8: ptys disposed before any await; `shutdown()` runs once | `host/main.ts` | all | 3 |
-| 20 | HO9: a socket that never said hello does not hold close | `host/transport/server.ts` | all | 3 |
-| 21 | HO10: rejections survived, uncaught exceptions shut down | `host/main.ts` | all | 3 |
-| 22 | HO11: frames before the server exists are dropped (unit test) | `host/main.ts` | all | 3 |
-| 23 | HO12: the control channel's 64 KiB line cap | `host/swap-control.ts` | macOS, Linux | 3 |
-| 24 | HO13: loopback bind, EADDRINUSE sentence, `wss` error listener | `host/transport/server.ts` | all | 3 |
-| 25 | HO14: EPIPE on a child's stdin is swallowed | `host/dev-services/git-exec.ts`, `host/apps/external/app-process.ts` | all | 3 |
-| 26 | HO15: stop or detach chosen by held children | `host/main.ts` | all | 3 |
-| 27 | LK2: the ownership handle is kept from garbage collection | `host/dev-services/instance-lock.ts` | all | 3 |
-| 28 | LK3: `LC_ALL=C` for `ps`; EPERM means alive | `host/dev-services/instance-lock.ts` | macOS, Linux | 3 |
 | 29 | LK7: the socket path length is checked before bind | `keeper/keeper/server.rs` | macOS, Linux | 2 |
 | 33 | SU6: a host group stop ends with KILL to the group | `keeper/host_proc.rs` | macOS, Linux | 2 |
 | 35 | SU8: the window reaps every child | `window/lib.rs` | all | 7 |

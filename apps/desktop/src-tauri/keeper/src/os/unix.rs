@@ -192,19 +192,27 @@ pub fn kill_group(pid: u32) {
 /// Only the line carrying the marker is picked out, so it does not matter what else the shell
 /// configuration prints.
 pub fn probe_login_shell() -> Option<String> {
+    let shell = std::env::var("SHELL").ok()?;
+    probe_shell(&shell, PROBE_TIMEOUT)
+}
+
+/// How long the login shell gets to answer before the fixed paths are used (lessons PA2).
+pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// `probe_login_shell` with the shell and the bound given, so a test can hand it a shell that hangs
+/// or stops itself.
+pub fn probe_shell(shell: &str, timeout: std::time::Duration) -> Option<String> {
     use std::io::Read;
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Stdio;
     use std::thread;
-    use std::time::Duration;
 
-    let shell = std::env::var("SHELL").ok()?;
-    if !Path::new(&shell).exists() {
+    if !Path::new(shell).exists() {
         return None;
     }
 
-    let mut cmd = Command::new(&shell);
+    let mut cmd = Command::new(shell);
     cmd.args(["-ilc", "command -p echo \"__CC_NODE__:$(command -v node)\""])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -233,7 +241,7 @@ pub fn probe_login_shell() -> Option<String> {
         let _ = BufReader::new(stdout).read_to_string(&mut buf);
         let _ = tx.send(buf);
     });
-    let out = match rx.recv_timeout(Duration::from_secs(5)) {
+    let out = match rx.recv_timeout(timeout) {
         Ok(out) => out,
         Err(_) => {
             kill_group(pid);
@@ -289,6 +297,52 @@ mod tests {
         let pid = gone.id();
         gone.wait().unwrap();
         assert!(!pid_alive(pid), "a reaped child is gone");
+    }
+
+    /// A shell of the test's own, as the probe would run it. Written by a `sh` child, never by this
+    /// process: another test thread that forks while this one holds the file open for writing hands
+    /// the descriptor on, and Linux then refuses to run the script (`ETXTBSY`, #503's `fake_node`).
+    fn fake_shell(name: &str, body: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("cc-keeper-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name).to_string_lossy().to_string();
+        let script = format!("#!/bin/sh\n{body}\n");
+        let written = Command::new("/bin/sh")
+            .args(["-c", "rm -f \"$2\" && printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"", "sh", &script, &path])
+            .status()
+            .unwrap();
+        assert!(written.success(), "could not write {path}");
+        path
+    }
+
+    /// PA1: the node only the login shell knows is found, on any machine, CI included: the shell
+    /// here answers whatever PATH the test runs with. What else a shell's configuration prints is
+    /// ignored.
+    #[test]
+    fn the_node_the_login_shell_names_is_found_whatever_else_it_prints() {
+        let node = fake_shell("node", "exit 0");
+        let shell = fake_shell("knows-node", &format!("echo 'noise from a .zshrc'\necho \"__CC_NODE__:{node}\""));
+        assert_eq!(probe_shell(&shell, PROBE_TIMEOUT), Some(node));
+    }
+
+    /// PA2: a shell that never answers is cut off at the bound, and its group with it.
+    #[test]
+    fn a_shell_that_never_answers_is_cut_off_at_the_bound() {
+        let shell = fake_shell("hangs", "exec sleep 30");
+        let began = std::time::Instant::now();
+        assert_eq!(probe_shell(&shell, std::time::Duration::from_millis(300)), None);
+        assert!(began.elapsed() < std::time::Duration::from_secs(3), "{:?}", began.elapsed());
+    }
+
+    /// PA2: an interactive shell sets up job control, and in a background group of a terminal's
+    /// session it is stopped by SIGTTOU (measured under the npm launcher, #458). In a session of
+    /// its own its group is orphaned and the kernel discards the stop: the shell answers at once.
+    /// The shell here stops itself the way job control would.
+    #[test]
+    fn a_shell_that_job_control_would_stop_still_answers() {
+        let node = fake_shell("node-ttou", "exit 0");
+        let shell = fake_shell("ttou", &format!("kill -TTOU $$\necho \"__CC_NODE__:{node}\""));
+        assert_eq!(probe_shell(&shell, std::time::Duration::from_secs(3)), Some(node));
     }
 
     /// A process that ended but is not reaped yet is not alive. `kill(pid, 0)` succeeds on a

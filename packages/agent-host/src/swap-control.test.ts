@@ -73,6 +73,18 @@ describe('the control channel on the host’s stdin (#280 step 3)', () => {
     expect(seen).toEqual(['drain 10'])
   })
 
+  it('a line that grows past 64 KiB without a newline is dropped, even one that would parse, and the next line is read (HO12)', async () => {
+    const input = new PassThrough()
+    const ch = new ControlChannel(input)
+    const seen: string[] = []
+    ch.on('drain', (m) => seen.push(`drain ${m.timeoutMs}`))
+    // Valid JSON once its end arrives, but over the cap before it does
+    input.write(`{"op":"drain","timeoutMs":1,"pad":"${'x'.repeat(64 * 1024)}`)
+    input.write('"}\n{"op":"drain","timeoutMs":2}\n')
+    await new Promise((r) => setImmediate(r))
+    expect(seen).toEqual(['drain 2'])
+  })
+
   it('a waiter is rejected when the keeper closes the pipe', async () => {
     const input = new PassThrough()
     const ch = new ControlChannel(input)

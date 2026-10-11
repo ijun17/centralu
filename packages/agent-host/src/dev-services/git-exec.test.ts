@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runGit } from './git-exec.js'
 
 /**
  * Every git the host starts goes through `runGit` (#407), so a new call is locked before trust by
@@ -43,5 +45,27 @@ describe('git is started in one place', () => {
       expect(STARTS_GIT.test(line)).toBe(true)
     }
     expect(STARTS_GIT.test("exec(programPath('gh'), ['pr', 'view'])")).toBe(false)
+  })
+})
+
+/**
+ * A git that exits before reading what it was given (lessons HO14): the write lands on a closed
+ * pipe, and a stream 'error' nobody listens to is an uncaught exception that ends the host and
+ * every session. The input is several times a pipe's buffer, so the write is still going when git
+ * has already said `fatal: not a git repository` and gone.
+ */
+describe('input to a git that does not read it', () => {
+  it('fails only the call: EPIPE on its stdin never escapes', async () => {
+    const notARepo = mkdtempSync(join(tmpdir(), 'cc-git-epipe-'))
+    const uncaught: unknown[] = []
+    const onUncaught = (e: unknown) => void uncaught.push(e)
+    process.on('uncaughtException', onUncaught)
+    try {
+      await expect(runGit(notARepo, ['commit', '-F', '-'], { input: 'x'.repeat(8 * 1024 * 1024) })).rejects.toThrow()
+      await new Promise((r) => setTimeout(r, 100))
+      expect(uncaught.map((e) => (e as NodeJS.ErrnoException).code)).toEqual([])
+    } finally {
+      process.off('uncaughtException', onUncaught)
+    }
   })
 })

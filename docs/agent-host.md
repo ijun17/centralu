@@ -6,8 +6,13 @@ A standalone Node process. In dev the developer starts it directly (`pnpm host`)
 
 ```
 agent-host/src/
-├─ main.ts              # CLI (--port --token --dev-services), startup order, and the
-│                       #   tool → adapter registry (a Map literal; there is no registry.ts)
+├─ main.ts              # CLI (--port --token --db --watch-parent), the wiring of the services,
+│                       #   each start step marked against lifecycle/start.ts's START_ORDER
+├─ lifecycle/           # the process's start and ending (runtime-unification.md step 3):
+│                       #   launch-env (variables read once, deleted), start (the order as data,
+│                       #   the final refusal), gate (nothing to a screen before the server),
+│                       #   steps + shutdown (the ordered, run-once, bounded stop plan),
+│                       #   endings (signals, the parent's pipe, crashes, host-errors.log)
 ├─ rpc.ts               # RPC method dispatch
 ├─ transport/
 │  ├─ server.ts         # ws server, handshake, RPC routing
@@ -693,7 +698,7 @@ that is SIGKILLed takes it along only through stdin EOF, on which codex exits at
 is in. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so the adapter
 adds it the same way.
 
-**Leaving** (`main.ts`, `stopServices(mode)`). *Detach* — SIGTERM, SIGINT, the keeper's pipe closing, an
+**Leaving** (`lifecycle/shutdown.ts`, `stopPlan(mode)`). *Detach* — SIGTERM, SIGINT, SIGHUP, the keeper's pipe closing, an
 uncaught exception, a swap's drain — calls `detach()` on every session handle, terminal and command run: nothing
 is sent to the tool, a waiting approval stays waiting, and output still in flight is recorded before the store
 closes. App processes and the in-process tool servers stop, as they live in the host. *Stop* — the keeper's `stop`
@@ -954,7 +959,8 @@ by absolute path. Those paths are versioned under nvm and Homebrew, so after a N
 | Default port 17175 | Below every OS's ephemeral range and below the host's per-app view origins (20000–32767, `views/origin-ports.ts`) |
 | A recorded or default port another program holds moves to the next free one above it (up to 19 more, below 20000) and is recorded; `--port` is used as given | One Windows laptop linked twice, its Windows side and a WSL distro, had both hosts on 17175: WSL2 relays the distro's loopback ports to Windows (`wslrelay.exe`), so the second could not start (#482). Inside WSL, the ports Windows listens on count as taken too (`netstat.exe` through interop): a host there on such a port would be unreachable, because the hub's forward ends on Windows' loopback. `--connection` reports the port the host got |
 | The host gets its own process group and `--watch-parent` | Ctrl+C reaches the launcher, which passes one SIGINT to the host alone, and the host stops its agents in order. Killing the launcher, even with SIGKILL, closes the host's stdin and takes it down: it is never left running unsupervised (`tooling/launcher-serve.test.ts`) |
-| A signal during startup is held until the host can shut down | Before the host attaches its handlers the kernel's default applies and ends it on the spot. Measured: a SIGINT passed on as soon as the ready line was read killed the host every time. Now it shuts down cleanly once started; a second signal while starting exits at once (`main.ts`, `pendingSignal`) |
+| A signal during startup is held until the host can shut down | Before the host attaches its handlers the kernel's default applies and ends it on the spot. Measured: a SIGINT passed on as soon as the ready line was read killed the host every time. Now it shuts down cleanly once started; a second signal while starting exits at once (`lifecycle/endings.ts`, `holdSignals`) |
+| A second signal forces the exit only when it comes 1 s or more after the first; SIGHUP shuts down like SIGINT and SIGTERM | A person pressing Ctrl+C again, while starting or while shutting down, gets the host gone at once (exit 1); a shutdown is also bounded at 10 s (`lifecycle/shutdown.ts`). One request often arrives as two: Ctrl+C reaches the launcher, which forwards a SIGINT, and the terminal may deliver its own; a closing terminal sends SIGHUP right after SIGINT. Within `REPEAT_AFTER_MS` (1 s, `lifecycle/endings.ts`) the second is the same request and changes nothing, so it cannot cut the shutdown it asked for short (owner, 2026-10-12, #504). Without a listener SIGHUP's default ended the host with no shutdown at all |
 | A second `serve`, or any other host on the same data folder, is refused | The ownership lock (`instance-lock.ts`) is the authority. `serve` first asks the port it recorded, so a serve already up is named with its port; for any other owner the host's lock message is followed by a line naming the pid |
 | No `DISPLAY` / `WAYLAND_DISPLAY` in the host's environment | Nothing it starts can open a window or a keyring dialog nobody would see; a tool that would ask falls back to its file store or fails with a message in the log |
 | Windows: no own group, no forwarding | `detached` means a new console there; the host shares the launcher's console and gets Ctrl+C itself. Not exercised yet |

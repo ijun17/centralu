@@ -334,7 +334,7 @@ describe('the shutdown rule (S-5)', () => {
 describe('what an app receives', () => {
   it('receives its data folder (created for it) and only its declared secrets, never the host\'s own variables', async () => {
     plant('notes', 'normal', { secrets: ['FIXTURE_SECRET'] })
-    make({}, { ...process.env, CC_HOST_TOKEN: 'host-ws-token', CC_DATA_DIR: '/somewhere' })
+    make({}, { ...process.env, CC_HOST_TOKEN: 'host-ws-token', CC_DATA_DIR: '/somewhere', CENTRALU_MANAGED: '1', CENTRALU_HOST_ENTRY: '/launcher/host.mjs' })
     rt.setSecret(ref('notes'), 'FIXTURE_SECRET', 's3cret-value')
     rt.setSecret(ref('notes'), 'UNDECLARED_SECRET', 'not-for-this-app')
     await rt.tools(ref('notes'))
@@ -348,6 +348,9 @@ describe('what an app receives', () => {
       UNDECLARED_SECRET: null,
       CC_HOST_TOKEN: null,
       CC_DATA_DIR: null,
+      // The launcher's own variables (ST16): an app gets only its id and data folder of the CENTRALU_ ones
+      CENTRALU_MANAGED: null,
+      CENTRALU_HOST_ENTRY: null,
     })
     expect(statSync(dataDir).isDirectory()).toBe(true)
     // Windows has no mode bits (Node reports 0o666); the profile folder's ACL guards the file there (#14)

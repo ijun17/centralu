@@ -170,8 +170,12 @@ export function __forgetPrograms(): void {
  * The single path the Claude Agent SDK accepts as `pathToClaudeCodeExecutable`: the SDK runs a
  * `.js` through Node and anything else directly, so a shim becomes its entry or its executable.
  */
-export function toolExecutable(name: string, deps: Deps = realDeps()): string | null {
-  const found = whichTool(name)
+export function toolExecutable(
+  name: string,
+  deps: Deps = realDeps(),
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const found = whichTool(name, env, deps.platform, deps.exists)
   if (!found) return null
   const launch = launchFor(found, deps)
   return launch.command === deps.node && launch.args.length === 1 ? launch.args[0]! : launch.command

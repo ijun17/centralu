@@ -50,7 +50,7 @@ const log = (rec) => {
   if (LOG) appendFileSync(LOG, `${JSON.stringify({ pid: process.pid, at: Date.now(), ...rec })}\n`)
 }
 
-const ENV_SEEN = ['CENTRALU_APP_ID', 'CENTRALU_APP_DATA', 'CC_HOST_TOKEN', 'CC_DATA_DIR', 'FIXTURE_SECRET', 'UNDECLARED_SECRET']
+const ENV_SEEN = ['CENTRALU_APP_ID', 'CENTRALU_APP_DATA', 'CENTRALU_MANAGED', 'CENTRALU_HOST_ENTRY', 'CC_HOST_TOKEN', 'CC_DATA_DIR', 'FIXTURE_SECRET', 'UNDECLARED_SECRET']
 log({ t: 'start', mode: MODE, cwd: process.cwd(), env: Object.fromEntries(ENV_SEEN.map((k) => [k, process.env[k] ?? null])) })
 
 if (MODE === 'crash-on-start') {

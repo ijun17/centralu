@@ -79,6 +79,46 @@ fn signals_go_only_to_a_real_pid_or_group() {
     assert_eq!(signal_target(12345), Some(12345));
 }
 
+/// PA13: the dev host is started directly, never through a package manager. Killing the pnpm
+/// wrapper left the real host orphaned holding its port (M1.5 defect 1); on Windows `.bin/tsx` is
+/// an sh script `CreateProcessW` cannot start, so Node runs tsx's own entry.
+#[test]
+fn the_dev_host_is_started_directly_never_through_a_package_manager() {
+    let launch = source_launch(&[]);
+    let root = workspace_root();
+    let program = launch.program.replace('\\', "/");
+    for wrapper in ["pnpm", "npm", "npx", "yarn"] {
+        assert!(!program.ends_with(&format!("/{wrapper}")) && program != wrapper, "{program}");
+    }
+    if os::RUNS_SH_SCRIPTS {
+        assert_eq!(launch.program, format!("{root}/node_modules/.bin/tsx"));
+        assert_eq!(launch.args[0], format!("{root}/packages/agent-host/src/main.ts"));
+    } else {
+        assert_eq!(launch.args[0], format!("{root}/node_modules/tsx/dist/cli.mjs"));
+        assert_eq!(launch.args[1], format!("{root}/packages/agent-host/src/main.ts"));
+    }
+    assert!(launch.args.iter().any(|a| a == "--watch-parent"), "{:?}", launch.args);
+    assert!(launch.env.iter().any(|(k, v)| k == "CC_DEV" && v == "1"));
+}
+
+/// PA13: a host leads a process group of its own, so the whole tree it starts (tsx starts Node
+/// under it) can be stopped as one. The "host" here reports its pid and its group.
+#[cfg(unix)]
+#[test]
+fn a_host_leads_a_process_group_of_its_own() {
+    use std::io::BufRead;
+    let launch = HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), "echo $$ $(ps -o pgid= -p $$)".into()], env: vec![] };
+    let mut child = spawn_host(&launch).unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let _ = child.wait();
+    let ids: Vec<u32> = line.split_whitespace().map(|s| s.parse().unwrap()).collect();
+    assert_eq!(ids.len(), 2, "{line:?}");
+    assert_eq!(ids[1], ids[0], "the host's group is not its own: {line:?}");
+    // SAFETY: getpgrp takes no arguments.
+    assert_ne!(ids[1] as i32, unsafe { libc::getpgrp() }, "the host shares the supervisor's group");
+}
+
 /// A group leader and the pid of a member it started in its group, read from its first line.
 #[cfg(unix)]
 fn group_with_a_member(script: &str) -> (Child, u32) {

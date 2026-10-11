@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { __forgetPrograms, launchFor, nodeShimEntry, programPath, resolveCommand, shimTarget } from './tool-launch.js'
+import { __forgetPrograms, launchFor, nodeShimEntry, programPath, resolveCommand, shimTarget, toolExecutable } from './tool-launch.js'
 
 /**
  * Windows (#14), simulated. Node refuses to spawn a `.cmd` without a shell, and a shell would read
@@ -100,6 +100,30 @@ describe('reading a batch shim for the program it starts', () => {
 
   it('a file that is not a shim names nothing', () => {
     expect(shimTarget('@echo off\r\necho hello\r\n')).toBeNull()
+  })
+})
+
+/**
+ * PA12: the Claude Agent SDK takes one path (`pathToClaudeCodeExecutable`) and runs a `.js` through
+ * Node and anything else directly, so a shim found on PATH becomes the program behind it. Handing
+ * it `claude.cmd` would fail the spawn the same way Node's own `.cmd` refusal does.
+ */
+describe('the single path handed to the Claude SDK', () => {
+  const dir = 'C:\\Users\\me\\AppData\\Roaming\\npm'
+  const env = { Path: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }
+
+  it('a .js behind the npm shim is handed over as the .js, never the .cmd', () => {
+    const entry = `${dir}\\node_modules\\@openai\\codex\\bin\\codex.js`
+    expect(toolExecutable('codex', deps({ [`${dir}\\codex.cmd`]: NPM_SHIM, [entry]: '' }), env)).toBe(entry)
+  })
+
+  it('an .exe behind the shim is handed over as the .exe', () => {
+    const exe = `${dir}\\node_modules\\tool\\bin\\tool.exe`
+    expect(toolExecutable('tool', deps({ [`${dir}\\tool.cmd`]: EXE_SHIM, [exe]: '' }), env)).toBe(exe)
+  })
+
+  it('a tool not on PATH is null', () => {
+    expect(toolExecutable('claude', deps({}), env)).toBeNull()
   })
 })
 

@@ -57,22 +57,33 @@ export function fallbackDirs(
   ]
 }
 
-/** Asks the login shell for PATH. It has to be interactive (-i) for .zshrc's nvm/mise init to take effect */
-function loginShellPath(): string[] {
-  // Windows: no login shell. A `SHELL` set there is Git Bash's, a POSIX path that cannot be run.
-  if (process.platform === 'win32') return []
-  const shell = process.env.SHELL
+/** How long the login shell gets to answer before the fallback folders are used (lessons PA2) */
+export const PROBE_TIMEOUT_MS = 3000
+
+/**
+ * Asks the login shell for PATH. It has to be interactive (-i) for .zshrc's nvm/mise init to take
+ * effect. Bounded (PA2): some shells ignore SIGTERM, and a shell config that waits on a prompt, or
+ * a shell stopped by its terminal, would otherwise keep the host from ever reaching ready.
+ */
+export function probeLoginShell(
+  platform: NodeJS.Platform = process.platform,
+  env: Env = process.env,
+  timeoutMs: number = PROBE_TIMEOUT_MS,
+): string[] {
+  // Windows: no login shell (PA6). A `SHELL` set there is Git Bash's, a POSIX path that cannot be run.
+  if (platform === 'win32') return []
+  const shell = env.SHELL
   if (!shell || !existsSync(shell)) return []
   try {
     const out = execFileSync(shell, ['-ilc', 'command -p echo "__CC_PATH__:$PATH"'], {
       encoding: 'utf8',
-      timeout: 3000,
+      timeout: timeoutMs,
       // Some shells ignore SIGTERM, so SIGKILL is used to guarantee it is cut off —
       // if this hangs, the host never reaches ready and the whole app fails to start
       killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'ignore'],
       // So that a shell init script does not pop up an interactive prompt
-      env: { ...process.env, TERM: 'dumb', CI: '1' },
+      env: { ...env, TERM: 'dumb', CI: '1' },
     })
     // The shell config might print something else, so only the marked line is picked out
     const line = out.split('\n').find((l) => l.startsWith('__CC_PATH__:'))
@@ -90,7 +101,7 @@ function loginShellPath(): string[] {
 /**
  * Cache of the login shell PATH lookup result.
  *
- * loginShellPath() launches the whole shell, so it costs around a second each time. Calling it
+ * probeLoginShell() launches the whole shell, so it costs around a second each time. Calling it
  * every time a terminal is opened would stall by that much every time (measured: terminal creation
  * takes 1 to 4 seconds). PATH cannot change while the process is alive, so it is asked only once.
  */
@@ -104,7 +115,7 @@ export function __resetToolPathCache(): void {
 export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' | 'unchanged' } {
   const current = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
 
-  cachedShellPath ??= loginShellPath()
+  cachedShellPath ??= probeLoginShell()
   const fromShell = cachedShellPath
   const source = fromShell.length > 0 ? 'shell' : 'fallback'
   const candidates = fromShell.length > 0 ? fromShell : fallbackDirs().filter((p) => existsSync(p))
