@@ -1188,6 +1188,26 @@ export const RpcMethods = {
     }),
   },
   /**
+   * What an open screen instance shows, for a hub that serves it in its own window (#82, remote hub phase 2,
+   * docs/plans/remote-hub.md §11). A host asks this of a linked machine; the UI never needs it.
+   *
+   * The instance decides the app, as everywhere: the answer names it, the resource it reads, and the origin method
+   * its manifest asks for. `resource` is the app's MCP `resources/read` answer as is: the hub reads the view out of it
+   * and applies its own CSP, sandbox and origin rules, so nothing that decides a view's reach is taken from the other
+   * machine as finished text. An instance that is not open there fails with a reason. Additive: an older host answers
+   * "Unknown method", and the hub's window says that view cannot open until the versions are aligned.
+   */
+  'apps.viewDocument': {
+    params: z.object({ instanceId: z.string() }),
+    result: z.object({
+      appId: AppId,
+      projectId: z.string().nullable(),
+      uri: z.string(),
+      origin: z.enum(['opaque', 'app']),
+      resource: z.looseObject({ contents: z.array(z.unknown()) }),
+    }),
+  },
+  /**
    * Opens the pinned screen (M4 B-2). The host calls the manifest's `home` tool **as the screen
    * caller** (the one path used for this: visibility scope, run history), then opens a screen
    * instance at the `_meta.ui.resourceUri` that tool declared. The response has everything
@@ -1198,9 +1218,13 @@ export const RpcMethods = {
    * (not trusted, or failed to start), this fails with a reason and leaves no instance behind. If
    * the app itself answered with a failure, this still opens — drawing a failure is also the
    * screen's job.
+   *
+   * `machine` (#82, additive) names a linked machine for its user-folder app, which has no project id to say so; the
+   * hub opens it there and hands back the instance qualified. Ignored with a project, whose id already names its
+   * machine. Absent: this host's own app, as before.
    */
   'apps.openView': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: z.object({
       instanceId: z.string(),
       tool: z.string(),

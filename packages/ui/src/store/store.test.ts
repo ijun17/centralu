@@ -2406,6 +2406,23 @@ describe('a pinned view (M4 B-2)', () => {
     expect(useStore.getState()).toMatchObject({ view: 'focus', focusedApp: null, focusedSessionId: 'pin-s1' })
   })
 
+  it('a linked machine’s user-folder app opens on that machine, apart from this computer’s app of the same id (#82)', async () => {
+    const mock = await live()
+    useStore.getState().openApp(null, 'slider', { machine: 'm1' })
+    expect(useStore.getState().focusedApp).toEqual({ projectId: null, appId: 'slider', machine: 'm1' })
+    await useStore.getState().startPinnedView('m1:_user/slider')
+    useStore.getState().openApp(null, 'slider')
+    await useStore.getState().startPinnedView('_user/slider')
+    expect(mock.openedViews).toEqual([
+      { appId: 'slider', projectId: null, machine: 'm1' },
+      { appId: 'slider', projectId: null },
+    ])
+    // Two views, one per machine: closing theirs leaves this computer's open
+    expect(pinned().map((p) => p.key)).toEqual(['m1:_user/slider', '_user/slider'])
+    useStore.getState().closeApp('m1:_user/slider')
+    expect(pinned().map((p) => p.key)).toEqual(['_user/slider'])
+  })
+
   it('closing it while it is opening also releases the just-opened instance', async () => {
     const mock = await live()
     let release!: () => void

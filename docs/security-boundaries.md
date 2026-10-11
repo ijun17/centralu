@@ -844,6 +844,17 @@ its own script hash and that one frame origin (`origin-ports.test.ts`; `view-hos
 "per-app origin"; `e2e/app-frame.spec.ts` "per-app origin mode: gets a real origin on its own
 port, storage is separated per app, and reopening gets the same origin").
 
+**A linked machine's views are served by the hub** (#82, [plans/remote-hub.md](plans/remote-hub.md) §11). Storage
+lives in the window that renders a view, so the port has to come from the book of the host whose window shows it: a
+machine's own ports would collide with the hub's in the one WebKit that holds both. The hub keys a machine's app as
+`<machine>.<that machine's key>` in its own book, asks the machine only for the app's raw resource
+(`apps.viewDocument`), and builds the CSP, sandbox and proxy page itself, so a loopback entry is dropped by the hub's
+rule whatever the machine's build does. The machine's answer must name a project of its own machine or none; one
+naming another machine's project is "not open" (`links/linked-views.test.ts`). No address of the machine reaches the
+window, and the machine's HTTP secret never leaves it. A machine removed and another linked under the same name gets
+the same machine id, and so the old origins and their storage: accepted (owner, 2026-10-11), as for a local app made
+again under the same id.
+
 **CSP.** A view's policy is assembled from its resource's `_meta.ui.csp` (`views/csp.ts`) and sent
 as a header on the proxy page, which the `srcdoc` document inherits: the view can tighten it with
 its own `<meta>`, never widen it. By default: `default-src 'none'`; inline script and style;

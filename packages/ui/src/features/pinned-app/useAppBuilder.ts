@@ -25,7 +25,11 @@ export type AppBuilder = {
   error: string | null
 }
 
-export function useAppBuilder(projectId: string | null, appId: string): AppBuilder {
+/**
+ * `machine`: a linked machine's user-folder app (#82). Its builder lives on that machine, and the calls that find and
+ * start one name no machine yet, so this says there is none rather than answering with this computer's app of the same id.
+ */
+export function useAppBuilder(projectId: string | null, appId: string, machine?: string | null): AppBuilder {
   const platform = usePlatform()
   const sessionCount = useStore((s) => Object.keys(s.sessions).length)
   const [id, setId] = useState<string | null | undefined>(undefined)
@@ -33,6 +37,7 @@ export function useAppBuilder(projectId: string | null, appId: string): AppBuild
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (machine) return
     let alive = true
     platform.apps
       .builder(appId, projectId)
@@ -42,9 +47,13 @@ export function useAppBuilder(projectId: string | null, appId: string): AppBuild
     return () => {
       alive = false
     }
-  }, [platform, appId, projectId, sessionCount])
+  }, [platform, appId, projectId, machine, sessionCount])
 
   const start = useCallback(async () => {
+    if (machine) {
+      setError("Another machine's own apps are built from a session on that machine for now.")
+      return
+    }
     setStarting(true)
     setError(null)
     try {
@@ -57,7 +66,7 @@ export function useAppBuilder(projectId: string | null, appId: string): AppBuild
     } finally {
       setStarting(false)
     }
-  }, [platform, appId, projectId])
+  }, [platform, appId, projectId, machine])
 
-  return { id, start, starting, error }
+  return { id: machine ? null : id, start, starting, error }
 }

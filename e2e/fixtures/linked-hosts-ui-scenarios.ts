@@ -66,7 +66,66 @@ async function withPair(opts: Parameters<typeof startPair>[0], body: (pair: Link
   }
 }
 
+/** The app's own document inside a pinned view: the proxy frame, then the app's frame inside it */
+function appView(page: Page, key: string) {
+  return page.getByTestId(`pinned-app-${key}`).getByTestId('app-frame-iframe').contentFrame().locator('iframe').contentFrame()
+}
+
 export function linkedHostsUiTests(): void {
+  test('another machine’s apps open here through the hub: a project app, one with its own origin, and a user-folder app', async ({ page }) => {
+    test.setTimeout(150_000)
+    await withPair({ apps: true }, async (pair) => {
+      await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
+      const calls = watchCalls(page)
+      await page.goto('/')
+      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+
+      await test.step('a project app of the machine opens, from the hub’s own door, and its tool calls reach the machine', async () => {
+        const key = `${MACHINE}.p-remote/board`
+        await page.getByTestId(`app-row-${key}`).click()
+        const view = appView(page, key)
+        await expect(view.locator('#count')).toHaveText('0', { timeout: 30_000 })
+        // The address is the hub's: its port, and the instance qualified by the machine (the machine never sees that id)
+        const src = (await page.getByTestId(`pinned-app-${key}`).getByTestId('app-frame-iframe').getAttribute('src'))!
+        expect(src.startsWith(`http://127.0.0.1:${pair.hub.port}/`)).toBe(true)
+        expect(src).toMatch(new RegExp(`/views/${MACHINE}\\.[A-Za-z0-9_-]{16,}/`))
+        expect(src).not.toContain(`:${pair.remotePort}/`)
+        await view.locator('#increment').click()
+        await expect(view.locator('#count')).toHaveText('1')
+        expect(calls.find((c) => c.method === 'apps.invoke')?.params).toMatchObject({ appId: 'board', projectId: `${MACHINE}.p-remote` })
+      })
+
+      await test.step('an app that asks for its own origin gets one of the hub’s per-app ports', async () => {
+        const key = `${MACHINE}.p-remote/board-own`
+        await page.getByTestId(`app-row-${key}`).click()
+        await expect(appView(page, key).locator('#count')).toHaveText('0', { timeout: 30_000 })
+        const inner = page.frames().find((f) => new RegExp(`/views/${MACHINE}\\.[A-Za-z0-9_-]{16,}/view$`).test(f.url()))
+        expect(inner, 'the per-app origin document, served by the hub').toBeTruthy()
+        const origin = Number(new URL(inner!.url()).port)
+        expect(origin).toBeGreaterThanOrEqual(20000)
+        expect(origin).toBeLessThanOrEqual(32767)
+        expect([pair.hub.port, pair.remotePort]).not.toContain(origin)
+      })
+
+      await test.step('the machine’s user-folder app opens by its machine, apart from this computer’s app of the same id', async () => {
+        await page.getByTestId(`app-row-${MACHINE}:_user/notes`).click()
+        await expect(page.getByTestId(`pinned-app-${MACHINE}:_user/notes`).getByTestId('pinned-title')).toHaveText('Remote notes')
+        await expect(appView(page, `${MACHINE}:_user/notes`).locator('#count')).toHaveText('0', { timeout: 30_000 })
+        expect(calls.filter((c) => c.method === 'apps.openView' && c.params.appId === 'notes').map((c) => c.params)).toEqual([
+          { appId: 'notes', projectId: null, machine: MACHINE },
+        ])
+
+        await page.getByTestId('app-row-_user/notes').click()
+        await expect(page.getByTestId('pinned-app-_user/notes').getByTestId('pinned-title')).toHaveText('Hub notes')
+        await expect(appView(page, '_user/notes').locator('#count')).toHaveText('0', { timeout: 30_000 })
+        expect(calls.filter((c) => c.method === 'apps.openView' && c.params.appId === 'notes').map((c) => c.params)).toEqual([
+          { appId: 'notes', projectId: null, machine: MACHINE },
+          { appId: 'notes', projectId: null },
+        ])
+      })
+    })
+  })
+
   test('a machine added in Settings: grouped in the sidebar, a session created, sent to and approved on it', async ({ page }) => {
     test.setTimeout(120_000)
     await withPair({ link: false }, async (pair) => {

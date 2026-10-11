@@ -406,10 +406,10 @@ export type SshTunnelOptions = {
  *   interactive shells (§4.7 of agent-host.md, which is why `serve` keeps that launcher).
  * - The forward binds 127.0.0.1 on both ends, explicitly: never 0.0.0.0 and never `GatewayPorts`,
  *   so nothing on the hub's network can use the link.
- * - **The same port number on both ends** when it is free here (agent-host.md §4.7: an app view's
- *   address carries the host's own port). When it is taken, typically by a second linked machine
- *   on the default 17175, a free port is used instead; app views of that machine then need the
- *   proxy of phase 2, which they need anyway.
+ * - **The same port number on both ends** when it is free here, another one when it is taken
+ *   (typically by a second linked machine on the default 17175). Nothing depends on it any more:
+ *   app views of a linked machine are served by the hub on its own port (plan §11), never through
+ *   this forward. Kept because the number reads the same in both machines' logs.
  * - **Closing ends every ssh it started**, the held forward and an asking one still in flight, also
  *   when `close()` comes in the middle of `open()` (a machine removed while it connects): `open()`
  *   then starts nothing more and fails.

@@ -800,8 +800,8 @@ export class MockPlatform implements Platform {
      * nothing is plugged in, this just records the call and fabricates an instance with an
      * empty result.
      */
-    openView: async (appId: string, projectId: string | null): Promise<AppHomeView> => {
-      this.openedViews.push({ appId, projectId })
+    openView: async (appId: string, projectId: string | null, machine?: string): Promise<AppHomeView> => {
+      this.openedViews.push(machine ? { appId, projectId, machine } : { appId, projectId })
       const v: AppHomeView = this.openViewProvider
         ? await this.openViewProvider(appId, projectId)
         : {
@@ -1355,7 +1355,7 @@ export class MockPlatform implements Platform {
   /** A deleted user-folder app — tests check it only reaches the host after confirmation */
   readonly removedApps: string[] = []
   /** Pinned screens opened and instances closed — tests check "how many times opened," "released on close" */
-  readonly openedViews: { appId: string; projectId: string | null }[] = []
+  readonly openedViews: { appId: string; projectId: string | null; machine?: string }[] = []
   readonly closedViews: string[] = []
   /** An in-conversation screen's instance → its conversation and app (M4 B-1) — recorded when broadcasting `app_view`'s open */
   readonly inlineInstances = new Map<string, { sessionId: string; appId: string; projectId: string | null }>()

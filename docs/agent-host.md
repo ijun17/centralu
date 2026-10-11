@@ -1005,10 +1005,10 @@ It prints `{ "v": 1, "autostart": { "ok", "on", "how", "linger", "message"? } }`
 `powershell.exe` as `-EncodedCommand` on a command line of its own (CreateProcess, 32,767 characters), never through
 ssh. None of the entries has been created on a real machine yet (plan §10.10, step 6).
 
-**What phase 1 does not cover.** App views open from the host's HTTP door at `127.0.0.1:<port>`, so they work
-through a forward whose local port equals the remote port. An app whose manifest asks for its own origin gets a port of
-its own (`views/origin-ports.ts`), which one forward does not carry. The other end, the host that links to this one, is
-§4.8.
+**App views of this host, shown on a hub.** The hub's window never loads an address of this host: the hub asks
+`apps.viewDocument` for an open instance (its app, its origin method and the app's raw `resources/read` answer) and
+serves the view from its own door and its own per-app origin ports ([plans/remote-hub.md](plans/remote-hub.md) §11). This host
+binds nothing for it, and its HTTP secret stays here. The other end, the host that links to this one, is §4.8.
 
 A host refuses a client of another protocol with `version_mismatch` and close code 4002. The message names both numbers
 and which side is older, so the person knows whether to update the app or the remote ([protocol.md](protocol.md) §1).
@@ -1133,7 +1133,7 @@ sessions resume on the new host through their stored ids, as after any restart.
 | A WSL lookup takes `/mnt/*` off PATH | WSL appends Windows' PATH, and Windows' npm folder has a `centralu` shim: measured, `command -v centralu` in the distro named `/mnt/c/Users/<me>/AppData/Roaming/npm/centralu`, the Windows install |
 | The WSL forward runs `wsl.exe -d <distro> --exec sleep infinity` instead of `-N` | WSL stops a distro about 15 s after its last `wsl.exe` client exits, and its services with it. Measured: `centralu serve` under a systemd unit was stopped 19 s after it started, with no client attached; a forward to Windows' sshd alone never holds the distro |
 | Both ends of the forward bind 127.0.0.1, `GatewayPorts=no` | Nothing on either machine's network can use the link |
-| The same port number on both ends when it is free here, another one otherwise | §4.7: an app view's address carries the host's own port. Two machines on the default 17175 cannot both have it; app views of the second need the proxy of phase 2 anyway |
+| The same port number on both ends when it is free here, another one otherwise | The number reads the same in both machines' logs. Nothing depends on it since phase 2: the hub serves a linked machine's app views on its own port (plan §11). Two machines on the default 17175 cannot both have it |
 | `BatchMode=yes` everywhere | A password or host-key prompt nobody can answer would hang the link. The person sets the keys up once, as for any ssh use |
 | The token is not stored; it is asked over ssh at every link start | It is the key to every RPC on that machine. One ssh round trip per start (measured 2.1 to 4.3 s to connected on a LAN) is cheap |
 | The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
@@ -1189,10 +1189,10 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 | Inbox, notice cards, OS notifications | Name the machine of a remote session |
 | Usage gauges (phase 2) | This computer's donuts first, then each linked machine's behind its name: `agents.detect` and `agents.usage` with its `machine`. Only connected machines are asked (on the 5-minute refresh, on the host connection coming back, and when that machine's link comes back); one that is not connected shows its state |
 | Open in VS Code (phase 2) | For another machine's project, the project's sidebar menu, the diff, the viewer and the file tree's row menu offer "Open in VS Code": a `vscode://vscode-remote/ssh-remote+<sshTarget><path>` link through `system.openUrl` (`remoteIdeUrl` in `@cc/core`). Not offered for a WSL machine, nor for an ssh target a link cannot carry |
-| Off for another machine's project | Reveal in the file manager and the file tree's other verbs, this computer's Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app, app views (`appStatus` says they open in a later version) |
+| App views (phase 2) | Another machine's apps open like this computer's: a pinned view, a view in its conversations, Pin. The hub serves each from its own door with the machine's document (`apps.viewDocument`), and per-app origins from its own port book, keyed by machine ([plans/remote-hub.md](plans/remote-hub.md) §11). A user-folder app is opened with its `machine` (`apps.openView`), and its pinned view leaves out the side panels and Restart, whose calls cannot name a machine yet. Another machine's apps are not dragged onto the grid yet |
+| Off for another machine's project | Reveal in the file manager and the file tree's other verbs, this computer's Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app |
 
-**What phase 1 does not cover yet.** App views of another machine are phase 2 (listed, their tools work there, their
-view says so); installing and updating the remote over ssh is phase 3 ([plans/remote-hub.md](plans/remote-hub.md) §10), of which the
+**What phase 1 does not cover yet.** Grid panels of another machine's apps come next (plan §11.7); installing and updating the remote over ssh is phase 3 ([plans/remote-hub.md](plans/remote-hub.md) §10), of which the
 link starting a host it finds not running is in. `processes.strays/stop` and the quit dialog still ask this computer
 only.
 

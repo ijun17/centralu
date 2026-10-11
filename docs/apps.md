@@ -345,7 +345,10 @@ A summary; the reasoning is in security-boundaries.md, "App views".
   with its `sandbox` set first, then gives it the app's HTML through `srcdoc`. Under the keeper the
   address names the front door's port and a secret derived from the keeper's token, and open
   instances are handed to the next host, so a view stays as it was across a build switch
-  ([agent-host.md](agent-host.md) §4.2).
+  ([agent-host.md](agent-host.md) §4.2). A linked machine's view is served the same way by the hub,
+  from the machine's raw document and with the hub's own per-app origin ports, so storage stays
+  apart per app and per machine in the one window that renders them all
+  ([plans/remote-hub.md](plans/remote-hub.md) §11).
 - **Opaque origin** (default): the inner frame gets `allow-scripts allow-forms` only. No browser
   storage, so no two views share any. **Per-app origin** (`view.origin: "app"`): the inner frame is
   `allow-same-origin` on `http://127.0.0.1:<port>`, a port fixed for that (project, app) and never
@@ -865,7 +868,8 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.list` | Every discovered app, with status and reason |
 | `apps.invoke` | A view's tool call (`projectId` absent or null means a user-folder app) |
 | `apps.viewFrame`, `apps.readResource` | The frame address of a view instance; a resource of the frame's own app |
-| `apps.openView`, `apps.closeView` | Open a pinned view (calls `home`); close any view instance |
+| `apps.viewDocument` | An open instance's app, origin method and raw document, for a hub that serves this host's view in its own window (#82, [plans/remote-hub.md](plans/remote-hub.md) §11) |
+| `apps.openView`, `apps.closeView` | Open a pinned view (calls `home`; `machine` names a linked machine's user-folder app); close any view instance |
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver a view's message once the person agreed (an inline view's to its conversation, a pinned view's to the session picked) |
 | `apps.runs`, `apps.errors` | Run records with their chains; the latest error bundles |
 | `apps.reach` | Whether a session can use one app's tools now, and if not why (§6.7) |

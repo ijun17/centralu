@@ -214,3 +214,26 @@ describe('apps.closeView', () => {
     await expect(rpc('apps.closeView', { instanceId: v.instanceId })).resolves.toEqual({ ok: true })
   })
 })
+
+describe('apps.viewDocument (a hub asking for a view it serves, #82)', () => {
+  it('answers an open instance with its app, its origin method and the document the app process served — and a closed one not at all', async () => {
+    plant('slider', { home: 'home' })
+    await start()
+    const v = await openView('slider')
+    const d = (await rpc('apps.viewDocument', { instanceId: v.instanceId })) as {
+      appId: string
+      projectId: string | null
+      uri: string
+      origin: string
+      resource: { contents: { text?: string }[] }
+    }
+    expect(d).toMatchObject({ appId: 'slider', projectId: 'p1', uri: 'ui://fixture/main', origin: 'opaque' })
+    // The app's own answer, as is: the hub reads the view out of it and applies its own rules
+    expect(d.resource.contents[0]?.text).toContain(`view from app process ${v.toolResult._meta?.['fixture/served-by']}`)
+
+    await rpc('apps.closeView', { instanceId: v.instanceId })
+    await expect(rpc('apps.viewDocument', { instanceId: v.instanceId })).rejects.toThrow(/not open/)
+    // An id of the shape a hub shows its window is never one of this host's own
+    await expect(rpc('apps.viewDocument', { instanceId: `m1.${v.instanceId}` })).rejects.toThrow(/not open/)
+  })
+})

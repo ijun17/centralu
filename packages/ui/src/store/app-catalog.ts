@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { ExternalAppInfo } from '@cc/protocol'
-import { externalAppKey, useStore } from './store.js'
+import { externalAppKey, isApp, useStore } from './store.js'
 
 /**
  * One app registry (M4 A-8) — the external apps the host discovered, as a single list.
@@ -54,15 +54,16 @@ export type AppCatalog = {
 export const UNTRUSTED_REASON = "This project isn't trusted, so its apps don't run."
 
 /**
- * An app on a linked machine (#82): listed, and its tools work for that machine's sessions, but its view needs the
- * proxy through the hub of phase 2 (docs/plans/remote-hub.md §3.4, §6). Said where the view would stand.
+ * A user-folder app of a linked machine (#82). It opens like any app, through the hub (docs/plans/remote-hub.md §11),
+ * but it has no project to name its machine, so whatever opens it names the machine as well (`openApp`'s `machine`).
+ * A project app of a linked machine needs nothing of the kind: its project id is qualified.
  */
-export const REMOTE_APP_REASON =
-  'Apps on another machine open here in a later version of Centralu. Their tools already work for the sessions on that machine.'
+export function isRemoteUserApp(info: ExternalAppInfo): boolean {
+  return !!info.machine && info.projectId === null
+}
 
+/** An app of a linked machine reads its status like this computer's: its view opens here through the hub (§11) */
 export function appStatus(info: ExternalAppInfo): AppStatusView {
-  // Before its own status: whatever state it is in there, its view cannot open here yet
-  if (info.machine) return { label: 'Later version', reason: REMOTE_APP_REASON, runnable: false, tone: 'quiet' }
   switch (info.status) {
     case 'running':
       return { label: 'Running', reason: null, runnable: true, tone: 'quiet' }
@@ -161,12 +162,14 @@ export function useMachineApps(machine: string): ExternalCatalogApp[] {
   return useMemo(() => buildCatalog(external).byMachine[machine] ?? NONE, [external, machine])
 }
 
-/** A single app — undefined if it is gone (the folder disappeared, the project was deleted) */
-export function useExternalApp(projectId: string | null, appId: string): ExternalCatalogApp | undefined {
+/**
+ * A single app — undefined if it is gone (the folder disappeared, the project was deleted). A user-folder app is this
+ * computer's unless `machine` names a linked machine (#82).
+ */
+export function useExternalApp(projectId: string | null, appId: string, machine?: string | null): ExternalCatalogApp | undefined {
   const external = useStore((s) => s.externalApps)
   return useMemo(() => {
-    // This computer's, for a user-folder app: another machine's has no view to open here (#82)
-    const info = external.find((a) => a.appId === appId && a.projectId === projectId && (projectId !== null || !a.machine))
+    const info = external.find((a) => isApp(a, projectId, appId, machine))
     return info ? buildCatalog([info]).external[0] : undefined
-  }, [external, projectId, appId])
+  }, [external, projectId, appId, machine])
 }

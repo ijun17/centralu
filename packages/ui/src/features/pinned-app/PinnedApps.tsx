@@ -67,7 +67,7 @@ const OUT_OF_SIGHT = 'absolute inset-y-0 -left-[200vw] flex w-full min-h-0 min-w
 export function PinnedApps() {
   const pinned = useStore((s) => s.pinnedViews)
   const showing = useStore((s) => s.view === 'app')
-  const focusedKey = useStore((s) => (s.focusedApp ? externalAppKey(s.focusedApp.projectId, s.focusedApp.appId) : null))
+  const focusedKey = useStore((s) => (s.focusedApp ? externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) : null))
   /*
    * The views laid over panels: the project screen's apps, or the grid's (#288). Only one of the two screens shows at a
    * time, so at most one of these lists is not empty. Joined into one string: a selector that returns a new array on
@@ -126,7 +126,13 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     // this window takes it back into this document
     window.focus()
   }, [mode])
-  const app =useExternalApp(pv.projectId, pv.appId)
+  const app = useExternalApp(pv.projectId, pv.appId, pv.machine)
+  /*
+   * A linked machine's user-folder app (#82): its view opens and works, but the calls behind the side panels (runs,
+   * secrets, versions, the builder) name an app by project and id and would answer for this computer's app of the same
+   * id, so they are left out until they can name the machine too
+   */
+  const elsewhere = !!pv.machine
   const frame = useRef<AppFrameHandle>(null)
   const start = useStore((s) => s.startPinnedView)
   const release = useStore((s) => s.releasePinnedView)
@@ -141,7 +147,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   const [versionsOpen, setVersionsOpen] = useState(false)
   const missing = missingSecrets(app)
   // The builder session (C-5) — the input row below sends into it, and its conversation opens and closes beside the view (BuilderPane)
-  const builder = useAppBuilder(pv.projectId, pv.appId)
+  const builder = useAppBuilder(pv.projectId, pv.appId, pv.machine)
   const [builderOpen, setBuilderOpen] = useState(false)
   // A builder session's conversation opened beside it is a session that is on screen — its turn ending is a breeze, not a card (`isOnScreen`)
   const setBuilderPane = useStore((s) => s.setBuilderPane)
@@ -362,19 +368,22 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               Builder
             </button>
           )}
-          <button
-            type="button"
-            className={`${builder.id ? '' : 'ml-auto '}rounded-md px-2 py-0.5 text-xs transition-colors ${
-              runsOpen ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
-            }`}
-            aria-pressed={runsOpen}
-            onClick={() => setRunsOpen((v) => !v)}
-            data-testid="pinned-runs-toggle"
-            title="Recent runs of this app — who called which tool, and how it ended"
-          >
-            Runs
-          </button>
-          {!!app?.info.secrets?.length && (
+          {!elsewhere && (
+            <button
+              type="button"
+              className={`${builder.id ? '' : 'ml-auto '}rounded-md px-2 py-0.5 text-xs transition-colors ${
+                runsOpen ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:bg-surface-hover/50 hover:text-ink'
+              }`}
+              aria-pressed={runsOpen}
+              onClick={() => setRunsOpen((v) => !v)}
+              data-testid="pinned-runs-toggle"
+              title="Recent runs of this app — who called which tool, and how it ended"
+            >
+              Runs
+            </button>
+          )}
+          {elsewhere && <span className="ml-auto" />}
+          {!elsewhere && !!app?.info.secrets?.length && (
             <button
               type="button"
               className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
@@ -407,7 +416,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               {app.info.shared ? 'Shared' : 'Share'}
             </button>
           )}
-          {app && (
+          {app && !elsewhere && (
             <button
               type="button"
               className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
@@ -447,7 +456,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
         </div>
         {/* Drawn only while visible — if the focus view drew the same session while this is hidden, one conversation would stand in two panels */}
         {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}
-        {visible && runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
+        {visible && runsOpen && !elsewhere && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
         {visible && secretsOpen && app && <SecretsPanel app={app} />}
         {visible && versionsOpen && app && <VersionsPanel app={app} />}
       </div>

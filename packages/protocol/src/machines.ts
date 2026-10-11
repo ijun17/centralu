@@ -122,8 +122,9 @@ export const MachineInfo = z.object({
   /** When the link last completed a hello, for "last seen" */
   lastConnectedAt: z.number().nullable().default(null),
   /**
-   * The local end of the forward, and whether it equals the remote host's port. App views of a
-   * remote machine (phase 2) need them to match (docs/agent-host.md §4.7).
+   * The local end of the forward, and whether it equals the remote host's port. For diagnosis only:
+   * app views of a linked machine are served by the hub itself and need neither
+   * (docs/plans/remote-hub.md §11).
    */
   localPort: z.number().int().nullable().default(null),
   sameLocalPort: z.boolean().default(false),

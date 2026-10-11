@@ -323,10 +323,18 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
 - **What stays on the hub in phase 1.** The orchestrator and its tools, the coordinators
   already in its store, layout, grid, preferences, themes, updates, app imports and screen
   questions. A remote machine's own orchestrator and coordinators are not
-  listed, and their events are not passed on. `fs.resolve` (a path for this computer's OS) and the
-  app-view calls (`apps.viewFrame`, `apps.openView`, `apps.readResource`, `apps.invoke`,
-  `apps.inlineReopen`, `apps.viewMessage`) are refused for another machine's project or session:
-  a view's address carries that host's own ports, which phase 2 proxies through the hub.
+  listed, and their events are not passed on. `fs.resolve` (a path for this computer's OS) is
+  refused for another machine's project.
+- **App views of another machine** ([plans/remote-hub.md](plans/remote-hub.md) §11). The instance
+  is opened on the machine and reaches the UI qualified (`<machine>.<id>`: the `apps.openView` and
+  `apps.inlineReopen` answers, `apps.inlineViews` rows, `app_view` events, an
+  `external_app_state_changed` cause). `apps.viewFrame` stays on the hub, which serves every view
+  from its own door, asking the machine `apps.viewDocument { instanceId }` (additive; answers
+  `{ appId, projectId, uri, origin, resource }`, the app's `resources/read` answer as is).
+  `apps.invoke`, `apps.readResource`, `apps.viewMessage` and `apps.closeView` go to the machine
+  their instance, project or conversation names; one naming two machines, or a machine and the
+  hub, is refused. A user-folder app has no project to name its machine, so `apps.openView` takes
+  the optional `machine` (additive).
   `messages.image` is read on the session's own machine, and the hub drops `file` from its answer: that path is on the
   other machine, so the window offers no reveal for it.
 - **When a machine is away.** `sessions.list` and `projects.list` answer for it from the hub's

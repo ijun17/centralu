@@ -3,7 +3,8 @@
 > **Status: decided by the owner on 2026-10-05 (§9), recorded on #82.** It replaces the "multi-host client" shape decided on 2026-10-03
 > (decision 1 on #82) with linked hosts, after the owner asked on 2026-10-05 why the UI should
 > hold several hosts at all. Phase 3 (installing and updating remotes) and probe 4 are designed in §10 (2026-10-08);
-> the owner decided its open questions the same day (§10.9).
+> the owner decided its open questions the same day (§10.9). Phase 2's app views through the hub are designed and built
+> in §11 (2026-10-11); the owner decided its questions the same day (§11.7).
 
 ## 1. The shape
 
@@ -73,7 +74,8 @@ machine it runs on.
    shown** (owner, 2026-10-05), grouped by machine and qualified by it (`_user/<appId>` collides
    across machines otherwise). They run on their own machine; their views need the proxy of
    phase 2, so in phase 1 they are listed and their tools work, and their views say they open in a
-   later version.
+   later version. Phase 2 (§11) opens their views, named by their machine where no project can
+   say it (§11.4).
 
 ## 4. Versions: align before connecting (owner, 2026-10-05)
 
@@ -136,7 +138,7 @@ wakes sessions that were live. So the hub must:
 | Grid panels holding remote sessions | Needs a table or column: `grid_layout.session_id` references the local `sessions` table | |
 | Reveal in Finder, open in IDE | Off for remote projects | Done (phase 2): "Open in VS Code" (the project's sidebar menu, the diff, the viewer, the file tree's row menu) opens the file, folder or project on that machine through a `vscode://vscode-remote/ssh-remote+<target><path>` link, the path being the project root the remote reported (`ProjectInfo.path`) joined with the project-relative one. A Windows (PowerShell) machine gets `/C:/...`; a WSL machine gets nothing, as Remote-SSH reaches the Windows side and not the distro. Reveal and trash stay off |
 | File tree, diff, search | Off for remote projects | Routed (paths are project-relative already) |
-| App views | Off for remote projects | View URLs carry the host's own port and per-app origin ports; needs a proxy through the hub |
+| App views | Off for remote projects | **Built (§11):** the hub serves them from its own door with the machine's document; grid panels of remote apps come next (§11.7) |
 | Attachments | Work: saved and read on the same machine as the session | Upload through the hub |
 | Usage gauges | Hub machine only | Done (phase 2): the top bar shows this computer's donuts, then each linked machine's behind its name (`agents.usage {machine}`, `agents.detect {machine}`). A machine that is not connected shows its state and is not asked; it is asked when its link comes back, and every connected machine on the 5-minute refresh |
 | Orchestrator and Centralu tools (`list_sessions`, `read_session`, `recall`, `ask_project`) | Local only, documented | Through the router; `ask_project` across machines also has to handle the paths it hands back |
@@ -255,7 +257,7 @@ own update, the remote by the exact `npm i -g centralu@<version>` in phase 1, "c
 away rows dimmed and never woken, `machine_resync` handled by a recovery scoped to that machine, the per-machine
 questions passed with `machine`, and remote sessions named by machine in the inbox, notices, notifications and the
 session header (so in the grid and where approvals are answered). Remote apps are listed per machine and say their
-views open in a later version. Details: [agent-host.md](../agent-host.md) §4.8, [state-management.md](../state-management.md) §7.
+views open in a later version (phase 2 opened them, §11). Details: [agent-host.md](../agent-host.md) §4.8, [state-management.md](../state-management.md) §7.
 
 ## 9. Decisions (owner, 2026-10-05)
 
@@ -655,3 +657,103 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
   refuses to go on when the entry would not go. A version older than `--autostart` is passed by: it cannot have written
   one from here. Not covered: an entry written by a newer version, then a rollback past `--autostart`, then an uninstall
   leaves the entry (it then runs a launcher that is gone, which fails at boot and does nothing else).
+
+## 11. Phase 2: app views through the hub (design and build, 2026-10-11)
+
+> **Status: built, the owner decided §11.7 on 2026-10-11.** Before this, every app-view call naming another machine's
+> project or session was refused (`noRemote` in `links/routes.ts`), and the window said those views open "in a later
+> version".
+
+### 11.1 What stood in the way
+
+A view is two nested frames ([apps.md](../apps.md)). The outer one is the host's proxy page at
+`http://127.0.0.1:<host port>/<secret>/views/<instance>/`; for an app that asks for its own origin, the inner one is
+`http://127.0.0.1:<that app's port>/<derived secret>/views/<instance>/view`, a port from the host's port book
+(`views/origin-ports.ts`, 20000–32767, fixed per app and never reused). A linked machine's addresses name that
+machine's ports, which the hub's window cannot reach: the ssh forward carries the host port only, and opening one more
+forward per origin port needs either a new ssh session per app (seconds each) or OpenSSH multiplexing, which Windows'
+OpenSSH does not have and probe 4 turned down (§10.6).
+
+There is a second, deeper reason not to forward the machine's origin ports at all: **browser storage lives in the
+window that renders the view, the hub's.** The machine's port book keeps its apps apart from each other, not from the
+hub's: the machine's `notes` app on its port 23456 and the hub's `board` app on the hub's port 23456 would render under
+the same origin, `http://127.0.0.1:23456`, in the one WebKit that holds both, and share localStorage and IndexedDB.
+Isolation per app holds only if the port comes from the book of the host whose window shows it.
+
+### 11.2 The design: the hub serves the view, the machine hands over the document
+
+The instance stays where it was opened: on the machine whose app it is, holding that app from idling, exactly as
+today. Only the serving moves.
+
+| Step | Where | What |
+|---|---|---|
+| Open | the machine | `apps.openView` (or an agent's call, for a view in a conversation) opens the instance there. Its id reaches the window qualified, `<machine>.<id>` (§3.3), from the answer, the `app_view` event and `apps.inlineViews` / `apps.inlineReopen` |
+| Address | the hub | `apps.viewFrame` stays on the hub. Its ViewHost sees the qualified id and asks the machine `apps.viewDocument { instanceId }` (new, additive): the app, the resource URI, the origin method the app's manifest asks for, and the app's `resources/read` answer **as is** |
+| Proxy page | the hub | Served from the hub's own door, under the hub's own secret, at `/views/<machine>.<id>/`. CSP, sandbox, `allow`, drag relay: the hub's code applied to the machine's raw document, the same code as for its own views |
+| Per-app origin | the hub | A port from **the hub's** book, keyed `<machine>.<the machine's own key>`: `m1.<project>/<app>`, or `m1._user/<app>` for a user-folder app, apart from every key of the hub's own (`_user/<app>`, `<project>/<app>`) |
+| Calls | the machine | `apps.invoke`, `apps.readResource`, `apps.viewMessage`, `apps.closeView` go to the machine the instance (or project, or conversation) names (route kind `view`) |
+
+So the hub rewrites nothing in a URL: no address the machine made ever reaches the window. The machine binds no port
+for a view the hub serves, and its HTTP secret never leaves it.
+
+### 11.3 Security
+
+- **Loopback only, behind a secret, as before.** The address is the hub's own door (`127.0.0.1`, its per-run or
+  keeper-derived secret), and the per-app origin server the hub's (`127.0.0.1`, its HMAC-derived secret per key). The
+  link itself carries only RPCs the hub already makes with the machine's token.
+- **Nothing that decides a view's reach is taken as finished text.** The machine answers the app's raw resource; the
+  hub reads the view out of it (`viewDocumentFromResource`) and builds the CSP itself, so loopback in a declared domain
+  is dropped by the hub's rule (`csp.ts`) whatever the machine's build does. The one thing taken from the machine is
+  which origin method the manifest asks for, which the hub takes from its own apps' manifests as well.
+- **The instance decides the app,** as everywhere (#93, #94). The hub checks the app the window claims against the
+  machine's answer, and the machine's answer against the id it was asked by: a project of another machine (`m2.…` asked
+  through `m1`) is "not open", so a machine cannot put its view under another machine's origin.
+- **One call reaches one machine.** A view call naming two machines, or a machine and the hub (a pinned view of `m1`
+  sending to a conversation on this computer), is refused (`AcrossMachinesError`): the instance and the conversation
+  would live on two hosts, and neither could check the other.
+- **The direction is unchanged** (§3.2): the hub asks, the machine answers. A machine still cannot call the hub.
+
+### 11.4 A linked machine's user-folder app
+
+A project app's id already names its machine (`m1.<project>`). A user-folder app's is null, so whatever opens one names
+the machine: `apps.openView { appId, projectId: null, machine }` (additive, the same optional `MachineId` as the ten
+per-machine questions of §5). In the window, a pinned view and `focusedApp` carry `machine`, and its key is
+`<machine>:_user/<app>`, the sidebar row's key since phase 1. After that, its calls are named by the qualified instance.
+A view in a machine's conversation needs nothing new: the instance names the machine.
+
+The pinned view's side panels (runs, secrets, versions, builder) and Restart are left out for such an app: their calls
+still name an app by project and id alone, and would answer for this computer's app of the same id. Restart reopens
+the view instead.
+
+### 11.5 Lifecycle
+
+- **Link drop.** The machine notices nothing; its instances stay open. While the link is away, a new address fails at
+  once and says to retry (`MachineUnreachableError`), the proxy page is a 404, and an open view's calls fail like any
+  call to that machine. A view already loaded keeps running: its document needs nothing more from the link.
+- **Hub swap.** The hub holds nothing per remote view but a 15-second, 64-entry cache of documents it just read (three
+  reads per load become one). The address is the front door's port and the keeper-derived secret, so the next hub
+  serves the same address by asking the machine again, about a second after it serves (§10.6). The per-app port comes
+  from the hub's store, so it is the same too.
+- **Machine restart.** Its instances are gone (no keeper on a remote yet, §10.4): the view gets "not open" and the
+  window's existing failure path, as for the hub's own views after a restart without a hand-over.
+- **A machine from before this.** It answers "Unknown method" to `apps.viewDocument`; the window says to update
+  Centralu there (§4 normally aligns versions first; "connect anyway" is the case this covers).
+- **A removed machine.** An id whose prefix names no link reaches the hub's own handler, where it is never open.
+
+### 11.6 What was measured and tested
+
+No live link was measured for this step: the RPC through the hub is 5–22 ms at the median (§8.1), and a view load
+costs one `apps.viewDocument` within the cache window. Tested: `links/linked-views.test.ts` (two real ViewHosts with the
+real router and qualifier between them: the hub's door and CSP, four apps named `board` on two machines getting four
+origins, the machine's answer checked, a hub that never gave the address out serving it, away, older and unlinked
+machines), `links/router.test.ts` (each view call and the `machine` parameter), `app-home-view.test.ts`
+(`apps.viewDocument` against a real app process), the window's keys and status (`app-catalog.test.ts`,
+`store.test.ts`), and e2e on the linked-hosts rig (`e2e/fixtures/linked-hosts-ui-scenarios.ts`).
+
+### 11.7 Decided (owner, 2026-10-11)
+
+| # | Question | Decided | Why |
+|---|---|---|---|
+| 1 | Another machine's user-folder apps: open their pinned views now? | **Yes, with an optional `machine` on the opening call and in the window's pinned-app identity** (§11.4) | The rest follows from the qualified instance; the side panels wait until their calls can name the machine |
+| 2 | Grid panels of another machine's apps | **Next, in a separate pull request** | The hub keeps an app panel only while it knows the app's project (`setGridView`), which a linked machine's it does not; a remote session's panel already has its own column (v46) |
+| 3 | A machine removed and another linked under the same name | **Keeps the old origins, and with them the old browser storage: accepted** | The key is `<machine id>.<app key>`, and a machine id comes from its name (`newMachineId`). This is the same trade-off already made for a local app deleted and made again under the same id: same key, same origin. The ports never go to a different key, so no other app ever reads it |

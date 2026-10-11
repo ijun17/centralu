@@ -514,7 +514,7 @@ export type WorkspaceSnapshot = {
    * 'app'. An app is identified by (project, id). If that app is not in the list when
    * restoring (its folder is gone), this is silently skipped.
    */
-  focusedApp?: { projectId: string | null; appId: string } | null
+  focusedApp?: { projectId: string | null; appId: string; machine?: string | null } | null
   /** Whether the evidence panel (git/files) was open */
   panelOpen?: boolean
   /** What the evidence panel was showing — pre-#20 single-tab field, kept for old snapshots/builds */
@@ -826,9 +826,10 @@ export interface AppsPort {
   /**
    * Opens a pinned screen (M4 B-2) — the host calls the manifest's `home` as the screen caller
    * and opens an instance. Fails with a reason if there is no home, the app did not declare a
-   * screen, or the app could not be reached.
+   * screen, or the app could not be reached. `machine` names a linked machine for its user-folder
+   * app (#82); a project app's id already names its machine.
    */
-  openView(appId: AppId, projectId: string | null): Promise<AppHomeView>
+  openView(appId: AppId, projectId: string | null, machine?: string): Promise<AppHomeView>
   /** Closes a pinned screen — releases the app it was holding. Passes quietly if it is already closed */
   closeView(instanceId: string): Promise<void>
   /**

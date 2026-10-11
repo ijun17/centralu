@@ -50,7 +50,14 @@ export function InlineViewSlot({ sessionId, callId, leaving = false }: { session
 type Ask = { text: string; dropped: number; resolve: (sent: boolean) => void }
 
 function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view: InlineViewState; leaving: boolean }) {
-  const app = useExternalApp(view.projectId, view.appId)
+  /*
+   * A user-folder app's view in a linked machine's conversation is that machine's app (#82), never this computer's of
+   * the same id: it shows under that machine's title, and Pin opens that machine's app. A project app's id already
+   * names its machine.
+   */
+  const machine = useStore((s) => (view.projectId === null ? (s.sessions[sessionId]?.machine ?? null) : null))
+  const app = useExternalApp(view.projectId, view.appId, machine)
+  const pinnable = !!app?.info.home
   const title = app?.title ?? view.appId
   const frame = useRef<AppFrameHandle>(null)
   const close = useStore((s) => s.closeInlineView)
@@ -157,11 +164,11 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
             Changed · Reload
           </button>
         )}
-        {app?.info.home && !view.rejected && (
+        {pinnable && !view.rejected && (
           <button
             type="button"
             className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
-            onClick={() => openApp(view.projectId, view.appId)}
+            onClick={() => openApp(view.projectId, view.appId, { machine })}
             title={`Open ${title} in its own view, beside your sessions`}
             data-testid="inline-view-pin"
           >
@@ -187,8 +194,8 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
           <Placeholder
             view={view}
             title={title}
-            canOpen={!!app?.info.home}
-            onOpen={() => openApp(view.projectId, view.appId)}
+            canOpen={pinnable}
+            onOpen={() => openApp(view.projectId, view.appId, { machine })}
             onReopen={() => void reopen(sessionId, callId)}
           />
         )}

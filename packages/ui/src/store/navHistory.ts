@@ -13,7 +13,7 @@
 export type Screen =
   | { kind: 'session'; id: string }
   | { kind: 'project'; id: string }
-  | { kind: 'app'; projectId: string | null; appId: string }
+  | { kind: 'app'; projectId: string | null; appId: string; machine?: string | null }
   | { kind: 'grid' }
   | { kind: 'orchestrator' }
   | { kind: 'settings' }
@@ -36,7 +36,7 @@ export function sameScreen(a: Screen | undefined, b: Screen | undefined): boolea
     case 'project':
       return a.id === (b as typeof a).id
     case 'app':
-      return a.projectId === (b as typeof a).projectId && a.appId === (b as typeof a).appId
+      return a.projectId === (b as typeof a).projectId && a.appId === (b as typeof a).appId && (a.machine ?? null) === ((b as typeof a).machine ?? null)
     default:
       return true
   }

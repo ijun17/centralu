@@ -180,8 +180,21 @@ function fitWidth(px: number, minReal: number, max: number, otherLane: number, z
  * different projects are two different apps. `_user` is the user-folder app; it matches the
  * host's scope name and never collides with a project id (a UUID).
  */
-export function externalAppKey(projectId: string | null | undefined, appId: string): string {
-  return appKeyOf(projectId, appId)
+export function externalAppKey(projectId: string | null | undefined, appId: string, machine?: string | null): string {
+  /*
+   * A linked machine's user-folder app has no project to tell it from this computer's app of the same id (both read
+   * `_user/<id>`), so its key names the machine (#82). A project app's key already does: its project id is qualified.
+   */
+  return machine && !projectId ? `${machine}:${appKeyOf(null, appId)}` : appKeyOf(projectId, appId)
+}
+
+/**
+ * Whether an app in the list is the one (project, id, machine) names. `machine` matters only for a user-folder app
+ * (#82): absent or null is this computer's, a machine id is that linked machine's.
+ */
+export function isApp(a: ExternalAppInfo, projectId: string | null | undefined, appId: string, machine?: string | null): boolean {
+  if (a.appId !== appId || a.projectId !== (projectId ?? null)) return false
+  return projectId ? true : (a.machine ?? null) === (machine ?? null)
 }
 
 /**
@@ -218,6 +231,8 @@ export type PinnedView = {
   key: string
   projectId: string | null
   appId: string
+  /** A linked machine's user-folder app (#82): which machine. Absent for this computer's apps and for project apps */
+  machine?: string | null
   phase: 'idle' | 'opening' | 'open' | 'failed' | 'restarting'
   instanceId: string | null
   toolInput: Record<string, unknown> | undefined
@@ -371,8 +386,8 @@ export const AUTO_RELOAD_WINDOW_MS = 60_000
 const autoReloads = reloadBudget(AUTO_RELOADS, AUTO_RELOAD_WINDOW_MS)
 
 /** The app's current code as reported by the list — `null` if unknown (never came up, or an old host) */
-function codeStampOf(apps: readonly ExternalAppInfo[], projectId: string | null, appId: string): string | null {
-  return apps.find((a) => a.appId === appId && a.projectId === projectId)?.codeStamp ?? null
+function codeStampOf(apps: readonly ExternalAppInfo[], projectId: string | null, appId: string, machine?: string | null): string | null {
+  return apps.find((a) => isApp(a, projectId, appId, machine))?.codeStamp ?? null
 }
 
 /**
@@ -402,7 +417,7 @@ function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<A
   const { externalApps, pinnedViews, inlineViews } = get()
   for (const pv of pinnedViews) {
     if (pv.phase !== 'open' || !pv.instanceId) continue
-    const now = codeStampOf(externalApps, pv.projectId, pv.appId)
+    const now = codeStampOf(externalApps, pv.projectId, pv.appId, pv.machine)
     if ((pv.codeStamp ?? null) === null) {
       if (now !== null) set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === pv.key ? { ...p, codeStamp: now } : p)) }))
       continue
@@ -414,7 +429,7 @@ function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<A
   for (const [sessionId, views] of Object.entries(inlineViews)) {
     for (const v of Object.values(views)) {
       if (v.state !== 'live' || !v.instanceId) continue
-      const now = codeStampOf(externalApps, v.projectId, v.appId)
+      const now = codeStampOf(externalApps, v.projectId, v.appId, get().sessions[sessionId]?.machine)
       const patch = (next: Partial<InlineView>) =>
         set((s) => {
           const cur = s.inlineViews[sessionId]?.[v.callId]
@@ -1341,7 +1356,7 @@ export type AppState = {
    * Not cleared by going to view something else — pressing the app's sidebar row again, and reviving
    * it, both return to the same place.
    */
-  focusedApp: { projectId: string | null; appId: string } | null
+  focusedApp: { projectId: string | null; appId: string; machine?: string | null } | null
   /** Open pinned views, in the order they were opened. Ones not visible stay alive too (`PinnedView`) */
   pinnedViews: PinnedView[]
   /**
@@ -1380,7 +1395,7 @@ export type AppState = {
    * panel — on the grid or the project screen — shows the builder: the panel has no room for the pane, so "Show the
    * conversation" goes to the app view through this same door the panel's Open uses.
    */
-  openApp(projectId: string | null, appId: string, opts?: { builder?: boolean }): void
+  openApp(projectId: string | null, appId: string, opts?: { builder?: boolean; machine?: string | null }): void
   /**
    * The pinned view key whose builder pane should open the next time that view is the one on screen (`openApp` with
    * `builder`) — the view opens it and clears this. Only this screen session's: not saved with the workspace.
@@ -2157,7 +2172,7 @@ export function returnsToPanel(
   s: Pick<AppState, 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'>,
   key: string,
 ): boolean {
-  if (s.view !== 'app' || !s.focusedApp || externalAppKey(s.focusedApp.projectId, s.focusedApp.appId) !== key) return false
+  if (s.view !== 'app' || !s.focusedApp || externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) !== key) return false
   return projectScreenAppKeys({ ...s, view: 'focus' }).includes(key)
 }
 
@@ -2670,7 +2685,7 @@ export const useStore = create<AppState>((set, get) => ({
   panelOpen: true,
   panelLayout: defaultLayout(),
   view: 'focus' as 'focus' | 'grid' | 'orchestrator' | 'app',
-  focusedApp: null as { projectId: string | null; appId: string } | null,
+  focusedApp: null as { projectId: string | null; appId: string; machine?: string | null } | null,
   nav: EMPTY_NAV,
   pinnedViews: [] as PinnedView[],
   inlineViews: {} as Record<string, Record<string, InlineView>>,
@@ -2975,8 +2990,8 @@ export const useStore = create<AppState>((set, get) => ({
            * has the host call `home`: what comes back to that spot is a single app process.
            */
           const app = snap.focusedApp
-          if (app && get().externalApps.some((a) => a.appId === app.appId && a.projectId === app.projectId)) {
-            get().openApp(app.projectId, app.appId)
+          if (app && get().externalApps.some((a) => isApp(a, app.projectId, app.appId, app.machine))) {
+            get().openApp(app.projectId, app.appId, { machine: app.machine })
           }
         }
         /*
@@ -3432,7 +3447,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
       if (e.phase === 'open') {
         // The code this view was opened with (C-4) — if the list's fingerprint differs from this, it is stale HTML (`followAppCode`)
-        const codeStamp = codeStampOf(get().externalApps, e.projectId, e.appId)
+        const codeStamp = codeStampOf(get().externalApps, e.projectId, e.appId, get().sessions[sessionId]?.machine)
         set((s) => {
           const cur = s.inlineViews[sessionId]?.[e.callId]
           return cur?.state === 'live' ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [e.callId]: { ...cur, codeStamp } } } } : {}
@@ -5577,7 +5592,7 @@ export const useStore = create<AppState>((set, get) => ({
         reason: undefined,
         liveAt: ++inlineLiveSeq,
         // The code the new instance opens with (C-4) — reopened again if the list's fingerprint ever differs from this
-        codeStamp: codeStampOf(get().externalApps, v.projectId, v.appId),
+        codeStamp: codeStampOf(get().externalApps, v.projectId, v.appId, get().sessions[sessionId]?.machine),
       })
       capInlineViews(get, sessionId, callId)
     } catch (e) {
@@ -5598,10 +5613,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   openApp(projectId, appId, opts) {
-    const key = externalAppKey(projectId, appId)
+    // Only a user-folder app needs its machine named (#82); a project app's id already carries it
+    const machine = projectId ? null : (opts?.machine ?? null)
+    const key = externalAppKey(projectId, appId, machine)
     set((s) => ({
       view: 'app',
-      focusedApp: { projectId, appId },
+      focusedApp: machine ? { projectId, appId, machine } : { projectId, appId },
       ...(opts?.builder ? { builderPaneFor: key } : {}),
       // What is picked must be shown (the same rule as `focusSession`) — any covering wide surface is dismissed
       overlay: null,
@@ -5612,7 +5629,7 @@ export const useStore = create<AppState>((set, get) => ({
         ? s.pinnedViews
         : [
             ...s.pinnedViews,
-            { key, projectId, appId, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null },
+            { key, projectId, appId, ...(machine ? { machine } : {}), phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null },
           ],
     }))
     get().saveWorkspace()
@@ -5665,7 +5682,7 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === key ? fn(p) : p)) }))
     patch((p) => ({ ...p, phase: 'opening', error: null }))
     try {
-      const v = await platform.apps.openView(pv.appId, pv.projectId)
+      const v = await platform.apps.openView(pv.appId, pv.projectId, pv.machine ?? undefined)
       /*
        * It was closed while opening (its slot is gone), or the app was blocked and returned to idle.
        * The instance just opened has nowhere to go — if it is not released, a view nobody sees ends up
@@ -5677,7 +5694,7 @@ export const useStore = create<AppState>((set, get) => ({
         return
       }
       // The code this instance was opened with — if the list's fingerprint ever differs from this, it is stale HTML (`followAppCode`)
-      const codeStamp = codeStampOf(get().externalApps, pv.projectId, pv.appId)
+      const codeStamp = codeStampOf(get().externalApps, pv.projectId, pv.appId, pv.machine)
       patch((p) => ({ ...p, phase: 'open', instanceId: v.instanceId, toolInput: v.toolInput, toolResult: v.toolResult, codeStamp }))
     } catch (e) {
       if (get().pinnedViews.find((p) => p.key === key)?.phase === 'opening') {
@@ -5702,7 +5719,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (!pv) return
     if (pv.instanceId) void get().platform?.apps.closeView(pv.instanceId).catch(() => {})
     set((s) => {
-      const focused = !!s.focusedApp && externalAppKey(s.focusedApp.projectId, s.focusedApp.appId) === key
+      const focused = !!s.focusedApp && externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === key
       return {
         pinnedViews: s.pinnedViews.filter((p) => p.key !== key),
         ...(focused ? { focusedApp: null } : {}),
@@ -5729,7 +5746,8 @@ export const useStore = create<AppState>((set, get) => ({
     // "Updated" is a message for a view that reopened with new code — it is never re-attached to a view the person just restarted themselves
     patch((p) => ({ ...p, phase: 'restarting', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false, updatedAt: null }))
     try {
-      await platform.apps.restart(pv.appId, pv.projectId)
+      // A linked machine's user-folder app (#82) is only opened again: `apps.restart` names no machine yet, and would restart this computer's app of the same id
+      if (!pv.machine) await platform.apps.restart(pv.appId, pv.projectId)
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'idle' } : p))
     } catch (e) {
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${(e as Error).message}` } : p))
@@ -6319,7 +6337,7 @@ function screenUnder(
     case 'orchestrator':
       return { kind: 'orchestrator' }
     case 'app':
-      return s.focusedApp ? { kind: 'app', projectId: s.focusedApp.projectId, appId: s.focusedApp.appId } : null
+      return s.focusedApp ? { kind: 'app', projectId: s.focusedApp.projectId, appId: s.focusedApp.appId, ...(s.focusedApp.machine ? { machine: s.focusedApp.machine } : {}) } : null
     case 'focus': {
       if (s.focusedSessionId) return { kind: 'session', id: s.focusedSessionId }
       const pid = projectScreenOf(s)
@@ -6339,7 +6357,7 @@ export function screenExists(
     case 'project':
       return !!s.projects[screen.id]
     case 'app':
-      return s.externalApps.some((a) => a.appId === screen.appId && a.projectId === screen.projectId)
+      return s.externalApps.some((a) => isApp(a, screen.projectId, screen.appId, screen.machine))
     default:
       return true
   }
@@ -6372,7 +6390,7 @@ function navigate(get: () => AppState, set: (partial: Partial<AppState>) => void
         st.focusProject(screen.id)
         break
       case 'app':
-        st.openApp(screen.projectId, screen.appId)
+        st.openApp(screen.projectId, screen.appId, { machine: screen.machine })
         break
       case 'grid':
       case 'orchestrator':

@@ -21,7 +21,7 @@ import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
-import { REMOTE_APP_REASON, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { isRemoteUserApp, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { isAway } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
@@ -695,7 +695,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             anchorEl={menuAnchor.current}
             onClose={() => setMenuOpen(false)}
             onNewSession={() => openNewSession(projectId)}
-            // An app's view on another machine opens in a later version (#82), so a new one is not offered there yet
+            // Making an app on another machine is not offered yet (#82): its views open here (remote-hub.md §11), its making does not
             onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
             onStartManager={() => setManagerDialog(true)}
             onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
@@ -1042,20 +1042,26 @@ function UserAppSessions({ appId, machine }: { appId: string; machine: string | 
 
 function AppRow({ app }: { app: ExternalCatalogApp }) {
   const openApp = useStore((s) => s.openApp)
-  const setToast = useStore((s) => s.setToast)
-  // An app on a linked machine (#82): listed, its tools work there, its view opens in a later version
-  const remote = !!app.info.machine
+  /*
+   * A linked machine's user-folder app (#82) opens like this computer's, through the hub (remote-hub.md §11); only
+   * its machine has to be named, since it has no project to say so. A project app's id already names its machine.
+   */
+  const remote = isRemoteUserApp(app.info)
+  const machine = remote ? (app.info.machine ?? null) : null
   // Same rule as a session row: lit only while **currently looking at** that screen (useSelectedSessionId in selectors)
   const active = useStore(
-    (s) => s.view === 'app' && s.focusedApp?.appId === app.appId && (s.focusedApp?.projectId ?? null) === app.projectId,
+    (s) => s.view === 'app' && !!s.focusedApp && externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === app.key,
   )
   /*
    * A chain started from this app's screen is waiting on the person's answer (M4 D-4) — visible
    * here even without the pinned app screen open. Pressing it opens that screen, with the question
    * standing there. Written in a bright word: that belongs to whatever is blocked (the palette rule).
    */
-  const asking = useStore((s) => s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId))
-  const hint = asking ? 'asks you' : remote ? 'later version' : APP_HINT[app.info.status]
+  // The questions are this computer's own (another machine's stay there), so another machine's user-folder app never matches one
+  const asking = useStore(
+    (s) => !remote && s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId),
+  )
+  const hint = asking ? 'asks you' : APP_HINT[app.info.status]
   const projectId = app.projectId
   return (
     <li
@@ -1064,9 +1070,10 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         An app row is dragged like a session row: onto the grid, any app (#288), or onto its
         project screen, a project's app (#203), where a hidden one comes back where it is dropped.
         A user-folder app carries no project type, so every project screen refuses it while it is
-        still being dragged.
+        still being dragged. Another machine's app is not dragged yet (#82): the hub keeps a grid
+        panel of an app only while it knows the app's project, which a linked machine's it does not.
       */
-      draggable={!remote}
+      draggable={!app.info.machine}
       onDragStart={(e) => {
         e.dataTransfer.setData(APP_MIME, app.key)
         if (projectId) e.dataTransfer.setData(projectItemMime(projectId), projectId)
@@ -1075,7 +1082,7 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
     >
       <button
         type="button"
-        onClick={() => (remote ? setToast(REMOTE_APP_REASON) : openApp(app.projectId, app.appId))}
+        onClick={() => openApp(app.projectId, app.appId, { machine })}
         data-testid={`app-row-${app.key}`}
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}

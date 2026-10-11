@@ -12,6 +12,13 @@ import { Router } from '../../packages/agent-host/src/links/router.js'
 import { DirectTunnel, SshTunnel, type RemoteSpec } from '../../packages/agent-host/src/links/tunnel.js'
 import { storeMirror, storeRegistry } from '../../packages/agent-host/src/links/stored.js'
 import { scriptedAdapters } from '../../packages/agent-host/src/links/scripted-agent.test-helpers.js'
+import { linkedViews } from '../../packages/agent-host/src/links/linked-views.js'
+import { ExternalApps } from '../../packages/agent-host/src/apps/external/runtime.js'
+import { storeRunLedger } from '../../packages/agent-host/src/app-run-ledger.js'
+import { runtimeViewSource } from '../../packages/agent-host/src/app-view-source.js'
+import { ViewHost } from '../../packages/agent-host/src/views/view-host.js'
+import { OriginPorts, type PortBook } from '../../packages/agent-host/src/views/origin-ports.js'
+import { randomBytes } from 'node:crypto'
 
 /**
  * A host for the linked-hosts e2e (#82): the real store, session manager, RPC handler, terminals,
@@ -96,23 +103,58 @@ const links = new Links({
   retryMs: [300, 2000],
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
-const router = new Router({
-  local: createRpcHandler(mgr, adapters, { terminals, commands, machines: links }),
+const allowedOrigins = (process.env.CC_HOST_ALLOWED_ORIGINS ?? '').split(',').filter(Boolean)
+/*
+ * Apps and their views, composed as `main.ts` composes them (remote-hub.md §11): the real runtime (an app is a real
+ * `node` process scaffolded from the template), the real ViewHost with its port book in this host's store, and, on a
+ * hub, a linked machine's views served from here through `linkedViews`. Discovery only scans until an app is needed.
+ */
+const externalApps = new ExternalApps({
+  projects: () => store.projectRoots(),
+  dataRoot: process.env.CC_DATA_DIR!,
+  reservedIds: [],
+  runs: storeRunLedger(store),
+  emitChanged: () => {},
+  emitRunsChanged: () => {},
+})
+externalApps.refresh()
+mgr.useExternalApps(externalApps)
+const httpSecret = randomBytes(32).toString('base64url')
+let port = 0
+const views: ViewHost = new ViewHost({
+  secret: httpSecret,
+  allowedOrigins,
+  source: runtimeViewSource(externalApps),
+  ports: new OriginPorts({
+    load: () => {
+      const raw = store.appSetting('apps.viewPorts')
+      return raw ? (JSON.parse(raw) as PortBook) : null
+    },
+    save: (book) => store.setAppSetting('apps.viewPorts', JSON.stringify(book)),
+  }),
+  hostPort: () => port || null,
+  remote: linkedViews((method, params) => router.handle(method, params)),
+})
+const router: Router = new Router({
+  local: createRpcHandler(mgr, adapters, { terminals, commands, machines: links, externalApps, views }),
   machines: () => links.all(),
 })
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
-  allowedOrigins: (process.env.CC_HOST_ALLOWED_ORIGINS ?? '').split(',').filter(Boolean),
+  allowedOrigins,
   onRpc: router.handle,
+  http: { secret: httpSecret, routes: views.routes },
 })
 up = true
-const port = await server.listen()
+port = await server.listen()
 links.start()
 console.log(JSON.stringify({ ready: true, port }))
 
 const stop = async () => {
   await links.stop()
+  await views.dispose()
+  await externalApps.dispose()
   terminals.disposeAll()
   commands.disposeAll()
   await mgr.disposeAll()

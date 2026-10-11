@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appTemplateDir, scaffoldApp } from '../../packages/agent-host/src/apps/external/scaffold.js'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { Store } from '../../packages/agent-host/src/dev-services/store.js'
@@ -80,7 +81,7 @@ export type LinkedPair = { hub: LinkedHost; remote: LinkedHost; hubSide: Side; r
  * test that adds the machine through the UI (`direct:<remotePort>`, linked-host-main.ts); `hubVersion` makes the hub a
  * release of that version, so it compares versions with the machine (plan §4).
  */
-export async function startPair(opts: { link?: boolean; hubVersion?: string } = {}): Promise<LinkedPair> {
+export async function startPair(opts: { link?: boolean; hubVersion?: string; apps?: boolean } = {}): Promise<LinkedPair> {
   const hubSide = side('hub')
   const remoteSide = side('remote')
   for (const [s, id, name] of [
@@ -91,10 +92,13 @@ export async function startPair(opts: { link?: boolean; hubVersion?: string } = 
     try {
       store.setAppSetting('updates.auto', 'false')
       store.addProject({ id, path: s.project, name })
+      // An app only runs in a trusted project
+      if (opts.apps) store.setProjectTrusted(id, true)
     } finally {
       store.close()
     }
   }
+  if (opts.apps) seedApps(hubSide, remoteSide)
   const remotePort = await freePort()
   const remote = await startLinkedHost(remoteSide, remotePort)
   const hub = await startLinkedHost(hubSide, await freePort(), opts.link === false ? undefined : { port: remotePort }, { hubVersion: opts.hubVersion })
@@ -113,6 +117,25 @@ export async function startPair(opts: { link?: boolean; hubVersion?: string } = 
     },
   }
   return pair
+}
+
+/**
+ * Apps from the template (a real `node` process each, remote-hub.md §11): on the remote, a project app with the default
+ * opaque origin (`board`), one that asks for its own origin (`board-own`), and a user-folder app (`notes`); on the hub, a
+ * user-folder `notes` of its own, so the two machines' apps of one id stand side by side.
+ */
+function seedApps(hub: Side, remote: Side): void {
+  const app = (dir: string, id: string, name: string, origin?: 'app') => {
+    mkdirSync(dirname(dir), { recursive: true })
+    scaffoldApp(appTemplateDir(), dir, { id, name, description: `${name} for the linked-hosts e2e` })
+    if (!origin) return
+    const file = join(dir, 'centralu.app.json')
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), view: { origin } }, null, 2))
+  }
+  app(join(remote.project, '.centralu', 'apps', 'board'), 'board', 'Remote board')
+  app(join(remote.project, '.centralu', 'apps', 'board-own'), 'board-own', 'Remote own origin', 'app')
+  app(join(remote.dir, 'data', 'apps', 'notes'), 'notes', 'Remote notes')
+  app(join(hub.dir, 'data', 'apps', 'notes'), 'notes', 'Hub notes')
 }
 
 /** Starts the remote host again on its own store and port, after a test stopped it (the machine comes back) */

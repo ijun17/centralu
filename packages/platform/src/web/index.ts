@@ -367,8 +367,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
       list: () => rpc.call('apps.list', {}),
       // The response's result is exactly the MCP result the app gave — the shape is known to the screen and the app, so this just carries it
-      openView: async (appId, projectId) => {
-        const v = await rpc.call('apps.openView', { appId, projectId })
+      openView: async (appId, projectId, machine) => {
+        const v = await rpc.call('apps.openView', { appId, projectId, ...(machine ? { machine } : {}) })
         return { ...v, toolResult: v.toolResult as AppToolResult }
       },
       closeView: async (instanceId) => {
