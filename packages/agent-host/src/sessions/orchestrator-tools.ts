@@ -106,11 +106,13 @@ export const ORCHESTRATOR_TOOLS = [
      */
     name: 'create_project',
     description:
-      "Makes a new project: an empty folder on this computer's Desktop, or in parent. The person approves the path on a card first; " +
+      "Makes a new project: an empty folder, or a clone of git, on this computer's Desktop or in parent. The person approves it on a card first; " +
       'the call waits for the answer. An existing folder is never reused.',
     schema: z.object({
-      name: z.string().describe('Folder and project name.'),
+      name: z.string().optional().describe("Folder and project name; with git, the repository's if omitted."),
       parent: z.string().optional().describe('Full path of the folder to make it in.'),
+      git: z.string().optional().describe('Repository to clone: https, ssh or user@host:path.'),
+      branch: z.string().optional(),
     }),
   },
   {
@@ -595,13 +597,16 @@ export async function runOrchestratorTool(
      * path on it. The names come back JSON-quoted: the folder's name is whatever the model was given.
      */
     const folder = typeof args.name === 'string' ? args.name : ''
-    if (!folder.trim()) return { text: 'Give a name — the new folder is named by it, and so is the project.', isError: true }
+    const git = typeof args.git === 'string' && args.git.trim() ? args.git.trim() : undefined
+    if (!folder.trim() && !git) return { text: 'Give a name — the new folder is named by it, and so is the project.', isError: true }
     const parent = typeof args.parent === 'string' && args.parent.trim() ? args.parent.trim() : undefined
-    const r = await tools.createProject({ name: folder, ...(parent ? { parent } : {}) }, signal)
+    const branch = git && typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined
+    const source = git ? { git, ...(branch ? { branch } : {}) } : undefined
+    const r = await tools.createProject({ name: folder, ...(parent ? { parent } : {}), ...(source ? { source } : {}) }, signal)
     if (!r.ok) return { text: `No project was made: ${r.error}`, isError: true }
     return {
       text:
-        `Made the project ${trustedJsonText(r.name)} [${r.projectId}], an empty folder at ${trustedJsonText(r.path)}. ` +
+        `Made the project ${trustedJsonText(r.name)} [${r.projectId}], ${git ? `a clone of ${trustedJsonText(git)}` : 'an empty folder'} at ${trustedJsonText(r.path)}. ` +
         'Start work in it with create_session (project = that id).',
     }
   }

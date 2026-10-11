@@ -442,7 +442,8 @@ The project-creation answer ends in an action: the orchestrator's `create_projec
 which replaced `propose_project`) raises an approval card in its own conversation with the full
 path of the new, empty folder (on the Desktop unless another location is given). Nothing is made
 until the person chooses Create, and nothing already there is reused. Adding a folder that
-exists stays the person's, through Add project in the sidebar.
+exists stays the person's, through Add project in the sidebar. The new folder can also be a
+clone of a git repository (https or ssh), made with that machine's own git and saved sign-ins.
 
 #### FR-20. Session archive — **retired (2026-09-02)**
 

@@ -45,6 +45,7 @@ import type {
   MachineInfo,
   MachineProbe,
   SshHostList,
+  GitSource,
 } from '@cc/protocol'
 import {
   APP_VERSION,
@@ -61,6 +62,8 @@ import {
   formatThemeFile,
   osPathBaseName,
   folderNameError,
+  gitSourceError,
+  repoNameOf,
   sessionLiveDefaults,
   SUBAGENT_STEPS_PAGE,
 } from '@cc/protocol'
@@ -158,19 +161,23 @@ export class MockPlatform implements Platform {
   /** For tests: paths a new project may not take, as if a folder of that name were already there (#515) */
   takenPaths = new Set<string>()
   /** Every `projects.create` call, as asked (#515) */
-  readonly createProjectCalls: { name: string; parent?: string; machine?: string | null }[] = []
+  readonly createProjectCalls: { name: string; parent?: string; machine?: string | null; source?: GitSource }[] = []
+  /** For tests: the sentence the next clone fails with, as a host's would (#515); null clones */
+  nextCloneError: string | null = null
 
   /**
    * Where a new project would go on a machine (#515), as its host would say: the Desktop of this computer, or of a
    * linked machine in its own path terms. Refuses what the host refuses — the name rule is the host's own (protocol).
    */
-  private newProjectTarget(name: string, parent?: string, machine?: string | null): { parent: string; path: string | null; error: string | null } {
+  private newProjectTarget(name: string, parent?: string, machine?: string | null, source?: GitSource): { parent: string; path: string | null; error: string | null } {
     const windows = !!machine && this.machinesList.find((m) => m.id === machine)?.shell === 'powershell'
     const sep = windows ? '\\' : '/'
     const home = !machine ? '/Users/you/Desktop' : windows ? 'C:\\Users\\you\\Desktop' : '/home/you/Desktop'
     const where = parent?.trim() || home
-    const folder = name.trim()
-    if (!folder) return { parent: where, path: null, error: null }
+    const folder = name.trim() || (source ? repoNameOf(source.git) : '')
+    if (!name.trim() && !source?.git.trim()) return { parent: where, path: null, error: null }
+    const urlError = source ? gitSourceError(source.git) : null
+    if (urlError) return { parent: where, path: null, error: urlError }
     const nameError = folderNameError(folder, windows)
     if (nameError) return { parent: where, path: null, error: nameError }
     const path = `${where.replace(/[\\/]+$/, '')}${sep}${folder}`
@@ -2265,18 +2272,22 @@ export class MockPlatform implements Platform {
       this.projectsList.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
       return [...this.projectsList]
     },
-    create: async (name: string, parent?: string, machine?: string | null) => {
-      this.createProjectCalls.push({ name, ...(parent ? { parent } : {}), ...(machine ? { machine } : {}) })
-      const t = this.newProjectTarget(name, parent, machine)
+    create: async (name: string, parent?: string, machine?: string | null, source?: GitSource) => {
+      this.createProjectCalls.push({ name, ...(parent ? { parent } : {}), ...(machine ? { machine } : {}), ...(source ? { source } : {}) })
+      const t = this.newProjectTarget(name, parent, machine, source)
       if (!t.path) throw Object.assign(new Error(t.error ?? 'Give the new folder a name.'), { code: 'internal' })
+      // A failed clone leaves nothing, as the host's does
+      const cloneError = source ? this.nextCloneError : null
+      this.nextCloneError = null
+      if (cloneError) throw Object.assign(new Error(cloneError), { code: 'internal' })
       this.takenPaths.add(t.path)
-      // A new folder is empty: no repository, until an agent makes one
+      // A new folder is empty: no repository, until an agent makes one. A clone is one, on its branch
       const info = await this.projects.add(t.path, machine)
-      const made = { ...info, git: { branch: '', changedFiles: 0, isRepo: false } }
+      const made = { ...info, git: source ? { branch: source.branch ?? 'main', changedFiles: 0, isRepo: true } : { branch: '', changedFiles: 0, isRepo: false } }
       this.projectsList = this.projectsList.map((p) => (p.id === info.id ? made : p))
       return made
     },
-    createPreview: async (name: string, parent?: string, machine?: string | null) => this.newProjectTarget(name, parent, machine),
+    createPreview: async (name: string, parent?: string, machine?: string | null, source?: GitSource) => this.newProjectTarget(name, parent, machine, source),
     add: async (path: string, machine?: string | null) => {
       const existing = this.projectsList.find((p) => p.path === path && (p.machine ?? null) === (machine ?? null))
       if (existing) return existing

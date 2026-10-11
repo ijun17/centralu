@@ -79,6 +79,57 @@ export function osPathBaseName(path: string): string {
   return path.split(/[/\\]/).filter(Boolean).pop() ?? ''
 }
 
+/** The longest repository address a new project takes (#515) */
+export const MAX_GIT_URL_LENGTH = 2048
+
+/**
+ * Why `url` cannot be cloned into a new project (#515), in one sentence, or null when it can. Here, like
+ * `folderNameError`, so the host, the dialog and the mock refuse the same addresses.
+ *
+ * Three shapes only: `https://host/path`, `ssh://[user@]host[:port]/path` and scp-like `[user@]host:path`. Everything
+ * else is refused, deliberately (owner decision on #515): `ext::` and every other `<transport>::` helper (they run a
+ * command named in the address), `file://` and local paths (an agent could have a folder of the person's copied into a
+ * project it then reads), `git://` and `http://` (unauthenticated and unencrypted), an address that starts with `-`
+ * (read as an option), and a password written into the address (it would be kept in the clone's `.git/config` and shown
+ * on the card; the machine's own saved sign-in is what a clone uses).
+ */
+export function gitSourceError(url: string): string | null {
+  const u = url.trim()
+  if (!u) return 'Give the address of the repository to clone.'
+  if (u.length > MAX_GIT_URL_LENGTH) return 'The repository address is too long.'
+  // First: a helper's address is a command line, spaces and all, and this is the sentence that says why it is refused
+  if (u.includes('::')) return 'Transport helpers such as ext:: are not cloned — give an https:// or ssh address.'
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001f\u007f]/.test(u)) return 'The repository address has a space or a control character in it.'
+  if (u.startsWith('-')) return 'A repository address cannot start with "-".'
+  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(u)?.[1]?.toLowerCase()
+  if (scheme) {
+    if (scheme !== 'https' && scheme !== 'ssh') {
+      return `${scheme}:// addresses are not cloned — only https://, ssh:// and user@host:path.`
+    }
+    let parsed: URL
+    try {
+      parsed = new URL(u)
+    } catch {
+      return 'That is not a repository address.'
+    }
+    if (!parsed.hostname || parsed.hostname.startsWith('-') || parsed.username.startsWith('-')) return 'The repository address names no host.'
+    if (parsed.password) return 'Leave the password out of the address — the machine’s own saved sign-in is used.'
+    if (parsed.pathname.replace(/\/+/g, '') === '') return 'The repository address names no repository.'
+    return null
+  }
+  // scp-like: [user@]host:path, where the host has no slash and is not a Windows drive letter
+  const scp = /^(?:[A-Za-z0-9._~-]+@)?([A-Za-z0-9.-]+):(.+)$/.exec(u)
+  if (scp && scp[1]!.length > 1 && !scp[1]!.startsWith('-') && !scp[2]!.startsWith('-')) return null
+  return 'A local folder is not cloned — give an https://, ssh:// or user@host:path address.'
+}
+
+/** The folder name a clone of `url` gets by default: the repository's own name, without `.git` (#515) */
+export function repoNameOf(url: string): string {
+  const path = url.trim().replace(/[?#].*$/, '').replace(/[/\\]+$/, '').replace(/\.git$/i, '')
+  return path.split(/[/:\\]/).pop() ?? ''
+}
+
 /** Reserved device names on Windows, alone or before an extension (`CON`, `con.txt`, `COM1`) */
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i
 /** The longest name most file systems take (255 bytes on ext4 and APFS) */

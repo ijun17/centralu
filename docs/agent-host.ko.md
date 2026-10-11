@@ -223,15 +223,33 @@ OS별 바탕화면(`dev-services/project-folder.ts`, 플랫폼 모듈):
 않는다. macOS에서 바탕화면은 보호된 폴더라, 처음 들여다볼 때(대화상자에 이름을 입력할 때) Centralu 이름으로
 접근 권한을 묻는다.
 
-**오케스트레이터의 `create_project { name, parent? }`**는 사이드바의 Add project 버튼에 불만 켜던
-`propose_project`를 대체했다. 오케스트레이터 자신의 승인 자리에 카드를 띄우고(`project_create`: 이름과 전체
-경로), 호출은 `ask_project`의 동의 카드처럼 답을 기다린다(`askHost`). 사람이 만들기를 누르기 전에는 아무것도
+**빈 폴더 대신 클론**(`source: { git, branch? }`, #515에 오너가 덧붙인 것). 폴더는 같은 규칙으로 먼저 빈 채로
+만들고, 그 안에 `git clone -- <url> <folder>`를 돌린다(`dev-services/project-clone.ts`):
+
+| 규칙 | 방법 |
+|---|---|
+| 그 머신의 git과 로그인 | 프로젝트가 사는 머신의 호스트가 `runGit`으로, 사람의 git 설정 그대로 클론한다(갓 만든 클론에는 자기 설정도 훅도 없어서, 저장소가 고른 것은 아무것도 돌지 않는다) |
+| 로그인을 묻지 않는다 | `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=`·`SSH_ASKPASS=`(빈 값, git이 건너뛴다), `SSH_ASKPASS_REQUIRE=never`, `GCM_INTERACTIVE=never`(Git Credential Manager는 저장된 것만 쓰고 창을 띄우지 않는다), 사람이 자기 ssh 명령을 정하지 않았으면 `GIT_SSH_COMMAND='ssh -o BatchMode=yes'`. 그 머신에 저장되지 않은 로그인이 필요한 저장소는 바로 한 문장으로 실패한다 |
+| 주소 | `https://`, `ssh://`, scp 꼴 `user@host:path`만(`gitSourceError`, protocol). 거절: `ext::`와 모든 `<transport>::`, `file://`와 로컬 경로(에이전트가 사람의 폴더를 자기가 읽는 프로젝트로 복사하게 만들 수 있다), `git://`·`http://`(인증·암호화 없음), `-`로 시작하는 주소나 호스트, 주소에 적은 비밀번호(`.git/config`에 남고 카드에 보인다). 리다이렉트에 대비해 `protocol.ext.allow=never`, `protocol.file.allow=never`도 넘긴다 |
+| 서브모듈 없음 | `--recurse-submodules`를 쓰지 않는다: 그 주소는 사람이 승인한 것 너머에서 저장소가 고른다 |
+| 이름 | `name`이 비면 저장소 이름(`repoNameOf`: 마지막 경로 조각에서 `.git`을 뺀 것) |
+| 실패하면 아무것도 남지 않는다 | 그 클론을 위해 만든 폴더를 지우고 프로젝트를 등록하지 않는다. 실패마다 한 문장(`cloneFailure`: 없는 로그인·브랜치·호스트·저장소, git 없음, 10분 초과) |
+| 시간 | 호스트는 10분이 지난 클론을 멈춘다. 창의 호출은 180초(`LONG_CALLS`), 연결된 머신 한 단계는 200초를 기다리고, 그 뒤로는 대화상자가 아직 클론 중이라고 말하며 프로젝트는 끝나면 목록에 들어온다(`projects_changed`) |
+
+https로 서비스하는 로컬 bare 저장소를 상대로 끝까지 시험한다(정적 서버로 git의 dumb 프로토콜, `GIT_SSL_CAINFO`로
+믿게 한 자체 서명 인증서, 사람의 git 설정은 빼고). 로그인이 필요한 저장소로 401을 답하는 경로도 포함한다
+(`sessions/clone-project.test.ts`).
+
+**오케스트레이터의 `create_project { name?, parent?, git?, branch? }`**는 사이드바의 Add project 버튼에 불만 켜던
+`propose_project`를 대체했다. 오케스트레이터 자신의 승인 자리에 카드를 띄우고(`project_create`: 이름, 전체
+경로, 클론이면 저장소와 브랜치), 호출은 `ask_project`의 동의 카드처럼 답을 기다린다(`askHost`). 사람이 만들기를 누르기 전에는 아무것도
 만들지 않는다. "항상"은 허용으로 읽고 아무것도 기억하지 않으며, 거절하거나 호출이 멈추면 아무것도 만들지 않는다.
 대상은 카드 전에(거절은 사람에게 아무 비용이 없다) 그리고 카드 뒤에 다시 확인한다. 이렇게 만든 프로젝트는
 `projects_changed`로 알리고, 모든 창이 프로젝트 목록을 다시 읽는다. 오케스트레이터만 가진 도구이고
 (security-boundaries.md) 이 컴퓨터에만 만든다: 허브의 오케스트레이터는 연결된 머신을 보지 못하므로 그 머신의
-프로젝트는 그 머신의 +에서 만든다. 이 교체로 오케스트레이터가 늘 싣는 정의는
-전보다 작아졌다(`residentCost`, Claude: 11,798 → 11,620자; docs/tool-cost.md).
+프로젝트는 그 머신의 +에서 만든다. 클론이면 만들기를 누른 뒤 호출이 도는 동안 오케스트레이터 대화에 "Cloning … into …"라고 알린다.
+이 교체로 오케스트레이터가 늘 싣는 정의는 전보다 작아졌다(`residentCost`, Claude: 11,798 → 11,620자, 클론 인자까지
+11,770자; docs/tool-cost.md).
 
 ## 2. AgentAdapter 계약 (product spec §6.2의 구현 명세)
 

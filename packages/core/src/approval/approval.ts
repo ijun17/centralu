@@ -98,5 +98,6 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
  * the sentence wherever the question stands: the card, the conversation row, a notification.
  */
 export function projectCreateQuestion(d: Extract<ApprovalDetail, { kind: 'project_create' }>): string {
+  if (d.source) return `Clone ${d.source.git}${d.source.branch ? ` (${d.source.branch})` : ''} into ${d.path} and add it as the project ${d.name}?`
   return `Make the empty folder ${d.path} and add it as the project ${d.name}?`
 }

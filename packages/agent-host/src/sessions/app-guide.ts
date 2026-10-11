@@ -64,7 +64,8 @@ One session = one agent process (Claude Code or Codex).
   in that folder (Load).
 - Projects: **Add project** at the bottom of the sidebar adds a folder that exists (it opens a
   folder picker); **New folder** beside it makes a new, empty folder on the Desktop (or another
-  location) and adds it. A linked machine's + offers both, made on that machine. The orchestrator
+  location) and adds it, or clones a git repository (https or ssh) into it with that machine's own
+  git and saved sign-ins. A linked machine's + offers both, made on that machine. The orchestrator
   makes a new project with create_project: the person approves the folder's full path on a card
   first. With zero projects there is no place to open New session from, so for "make me a
   project" use create_project, and for "add my folder" point to Add project.

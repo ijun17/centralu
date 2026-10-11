@@ -130,3 +130,62 @@ test('a project the host made on its own joins the sidebar when the host says so
   })
   await expect(page.getByTestId('project-shop')).toBeVisible()
 })
+
+/**
+ * A clone instead of an empty folder (#515): the folder is named after the repository unless a name is given, an
+ * address the host would refuse is refused as it is typed, and a clone that fails leaves the form with its sentence.
+ */
+test('New folder: clone a repository — named after it, refused addresses said at once, a failed clone keeps its reason', async ({ page }) => {
+  await start(page)
+  await page.getByTestId('create-project').click()
+  const dialog = page.getByTestId('create-project-dialog')
+  await dialog.getByTestId('create-project-clone').check()
+
+  await dialog.getByTestId('create-project-git').fill('ext::sh -c x')
+  await expect(dialog.getByTestId('create-project-error')).toContainText('ext::')
+  await dialog.getByTestId('create-project-git').fill('/Users/you/code/app')
+  await expect(dialog.getByTestId('create-project-error')).toContainText('local folder')
+
+  await dialog.getByTestId('create-project-git').fill('https://github.com/me/game.git')
+  await expect(dialog.getByTestId('create-project-name')).toHaveAttribute('placeholder', 'game')
+  await expect(dialog.getByTestId('create-project-path')).toHaveText('/Users/you/Desktop/game')
+  await expect(dialog.getByTestId('create-project-confirm')).toHaveText('Clone project')
+
+  await page.evaluate(() => {
+    ;(window as any).__mock.nextCloneError = 'https://github.com/me/game.git needs a sign-in this machine does not have saved.'
+  })
+  await dialog.getByTestId('create-project-confirm').click()
+  await expect(dialog.getByTestId('create-project-error')).toContainText('needs a sign-in')
+  await expect(page.getByTestId('project-game')).toHaveCount(0)
+
+  await dialog.getByTestId('create-project-branch').fill('dev')
+  await dialog.getByTestId('create-project-confirm').click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByTestId('project-game')).toBeVisible()
+  expect((await page.evaluate(() => (window as any).__mock.createProjectCalls)).at(-1)).toEqual({
+    name: '',
+    source: { git: 'https://github.com/me/game.git', branch: 'dev' },
+  })
+})
+
+test('create_project with git: the card names the repository, its branch and where it goes', async ({ page }) => {
+  await start(page)
+  await page.getByTestId('suggest-create-project').click()
+  await expect(page.getByTestId('msg-user').first()).toBeVisible()
+  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  await page.evaluate(
+    (sid) =>
+      (window as any).__mock.requestApproval(
+        sid,
+        { kind: 'project_create', name: 'game', path: '/Users/you/Desktop/game', source: { git: 'git@github.com:me/game.git', branch: 'dev' } },
+        'mk-3',
+      ),
+    orc,
+  )
+  const card = page.getByTestId('approval-card')
+  await expect(card.getByTestId('approval-detail')).toHaveText('Clone a repository as the new project game?')
+  await expect(card.getByTestId('approval-source')).toHaveText('git@github.com:me/game.git (branch dev)')
+  await expect(card.getByTestId('approval-path')).toHaveText('into /Users/you/Desktop/game')
+  await card.getByTestId('approve-deny').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__mock.approvalAnswers)).toEqual([{ sessionId: orc, requestId: 'mk-3', decision: 'deny' }])
+})

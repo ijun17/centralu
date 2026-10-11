@@ -11,6 +11,7 @@ import type {
   SavedCommand,
   PermissionPreset,
   ProjectInfo,
+  GitSource,
   QuestionAnswer,
   StoredMessage,
   ToolDefaults,
@@ -1169,9 +1170,10 @@ export type AppState = {
   addProject(path: string, machine?: string | null): Promise<ProjectInfo>
   /**
    * Makes a new project (#515): an empty folder `name` in `parent` (that machine's Desktop when absent), made by the
-   * host of `machine` (this computer's when absent), then registered as `addProject` registers one.
+   * host of `machine` (this computer's when absent), then registered as `addProject` registers one. With `source`, a
+   * clone of that repository instead of an empty folder.
    */
-  createProject(name: string, parent?: string, machine?: string | null): Promise<ProjectInfo>
+  createProject(name: string, parent?: string, machine?: string | null, source?: GitSource): Promise<ProjectInfo>
   /** Re-reads the project list for projects the host made on its own (#515, `projects_changed`) */
   refreshProjects(): Promise<void>
   /**
@@ -4462,8 +4464,8 @@ export const useStore = create<AppState>((set, get) => ({
     return p
   },
 
-  async createProject(name, parent, machine) {
-    const p = await get().platform!.projects.create(name, parent, machine)
+  async createProject(name, parent, machine, source) {
+    const p = await get().platform!.projects.create(name, parent, machine, source)
     set((s) => joinProject(s, p))
     return p
   },

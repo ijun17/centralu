@@ -432,7 +432,8 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 `propose_project`를 대체)는 자기 대화에 승인 카드를 띄우고, 카드에는 새 빈 폴더의 전체
 경로(다른 위치를 주지 않으면 바탕화면)가 적힌다. 사람이 만들기를 누르기 전에는 아무것도
 만들지 않고, 이미 있는 것은 다시 쓰지 않는다. 있는 폴더를 추가하는 일은 여전히 사람의
-몫이다(사이드바의 Add project).
+몫이다(사이드바의 Add project). 새 폴더는 git 저장소(https나 ssh)의 클론일 수도 있고, 그 머신의 git과
+저장된 로그인으로 만든다.
 
 #### FR-20. 세션 아카이브 — **폐기 (2026-09-02)**
 

@@ -57,6 +57,8 @@ export type RunGitOptions = {
   input?: string
   timeout?: number
   maxBuffer?: number
+  /** Added to the host's environment for this call (a clone's non-interactive settings, #515) */
+  env?: Record<string, string>
 }
 
 const DEFAULTS = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
@@ -140,6 +142,7 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
     cwd,
     timeout: opts.timeout ?? DEFAULTS.timeout,
     maxBuffer: opts.maxBuffer ?? DEFAULTS.maxBuffer,
+    ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
   })
   if (opts.input !== undefined) {
     /*

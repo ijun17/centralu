@@ -567,6 +567,13 @@ export type ApprovalDecision = z.infer<typeof ApprovalDecision>
 export const ProjectConsentKind = z.enum(['delegate', 'apps'])
 export type ProjectConsentKind = z.infer<typeof ProjectConsentKind>
 
+/**
+ * A repository a new project is cloned from (#515): an https, ssh or scp-like address (`gitSourceError` says which),
+ * and the branch to check out, the repository's default when absent.
+ */
+export const GitSource = z.object({ git: z.string().max(2048), branch: z.string().max(255).optional() })
+export type GitSource = z.infer<typeof GitSource>
+
 export const ApprovalScope = z.enum(['session', 'project'])
 export type ApprovalScope = z.infer<typeof ApprovalScope>
 
@@ -635,6 +642,8 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     name: z.string(),
     /** The full path of the folder that will be made, in its machine's own terms */
     path: z.string(),
+    /** The repository the folder is a clone of (#515), when it is not made empty */
+    source: GitSource.optional(),
   }),
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>

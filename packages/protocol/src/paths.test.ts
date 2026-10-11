@@ -1,6 +1,55 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { folderNameError, osPathBaseName, wireBaseName, wireJoin, wireSegments } from './paths.js'
+import { folderNameError, gitSourceError, osPathBaseName, repoNameOf, wireBaseName, wireJoin, wireSegments } from './paths.js'
+
+/** A repository a new project is cloned from (#515): https, ssh and scp-like only */
+describe('a clone source', () => {
+  it('takes https, ssh:// and user@host:path addresses', () => {
+    for (const ok of [
+      'https://github.com/me/app.git',
+      'https://me@gitlab.example.com/group/sub/app',
+      'ssh://git@host:2222/me/app.git',
+      'git@github.com:me/app.git',
+      'host.example:repos/app',
+    ]) {
+      expect(gitSourceError(ok), ok).toBeNull()
+    }
+  })
+
+  it('refuses transport helpers, file://, local paths, plain git:// and http://, options and passwords', () => {
+    for (const bad of [
+      '',
+      'ext::sh -c touch% /tmp/x',
+      'fd::17',
+      'file:///srv/repo.git',
+      '/srv/repo.git',
+      './repo',
+      '~/repo',
+      'C:\\repos\\app',
+      'C:/repos/app',
+      '\\\\server\\share\\repo',
+      'git://host/app.git',
+      'http://host/app.git',
+      '-uhttps://host/app.git',
+      'git@host:-oProxyCommand=x',
+      'ssh://-oProxyCommand=x/repo.git',
+      'https://me:secret@host/app.git',
+      'https://host/',
+      'https://host/a b.git',
+      `https://host/${'a'.repeat(2048)}`,
+    ]) {
+      expect(gitSourceError(bad), bad).not.toBeNull()
+    }
+  })
+
+  it('names the folder after the repository', () => {
+    expect(repoNameOf('https://github.com/me/app.git')).toBe('app')
+    expect(repoNameOf('https://github.com/me/app/')).toBe('app')
+    expect(repoNameOf('git@github.com:me/app.git')).toBe('app')
+    expect(repoNameOf('host:app.git')).toBe('app')
+    expect(repoNameOf('ssh://git@host:22/team/site.GIT')).toBe('site')
+  })
+})
 
 /** A new project's folder name (#515): one segment, and nothing a Windows checkout of it would choke on */
 describe('a new folder name', () => {

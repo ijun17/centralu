@@ -271,16 +271,35 @@ call with no `parent` is refused. That is what keeps tests and the linked-hosts 
 temporary `HOME`'s Desktop) off the Desktop of whoever runs them. On macOS the Desktop is a protected
 folder: the first look into it (typing a name in the dialog) asks for access in Centralu's name.
 
-**The orchestrator's `create_project { name, parent? }`** replaced `propose_project`, which only lit
+**A clone instead of an empty folder** (`source: { git, branch? }`; the owner's addition on #515). The folder is made
+empty first, by the same rules, and then `git clone -- <url> <folder>` runs into it (`dev-services/project-clone.ts`):
+
+| Rule | How |
+|---|---|
+| The machine's own git and sign-ins | the clone runs on the host of the machine the project lives on, through `runGit`, with the person's git configuration (a fresh clone has no configuration or hooks of its own, so nothing the repository chose can run) |
+| Never asks for a sign-in | `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=` and `SSH_ASKPASS=` (empty, which git skips), `SSH_ASKPASS_REQUIRE=never`, `GCM_INTERACTIVE=never` (Git Credential Manager uses what it has saved, no window), and `GIT_SSH_COMMAND='ssh -o BatchMode=yes'` unless the person set their own ssh command. A repository that needs a sign-in the machine has not saved fails at once with one sentence |
+| Addresses | `https://`, `ssh://` and scp-like `user@host:path` only (`gitSourceError`, protocol). Refused: `ext::` and every `<transport>::`, `file://` and local paths (an agent could otherwise have a folder of the person's copied into a project it reads), `git://` and `http://` (unauthenticated, unencrypted), an address or host starting with `-`, and a password written into the address (it would be kept in `.git/config` and shown on the card). `protocol.ext.allow=never` and `protocol.file.allow=never` are also passed, for a redirect |
+| No submodules | no `--recurse-submodules`: their addresses are the repository's to choose, past the one the person approved |
+| Name | an empty `name` is the repository's own (`repoNameOf`: the last path segment without `.git`) |
+| Failure leaves nothing | the folder made for it is removed and no project is registered; each failure is one sentence (`cloneFailure`: a missing sign-in, branch, host or repository, no git, or over the 10-minute limit) |
+| Time | the host stops a clone after 10 minutes. The window's call waits 180 s (`LONG_CALLS`) and a linked machine's hop 200 s; past that the dialog says it is still cloning, and the project joins the list when it lands (`projects_changed`) |
+
+Tested end to end against a local bare repository served over https (git's dumb protocol from a static server, a
+self-signed certificate trusted through `GIT_SSL_CAINFO`, the person's git configuration left out), including a
+path that answers 401 for a repository that needs a sign-in (`sessions/clone-project.test.ts`).
+
+**The orchestrator's `create_project { name?, parent?, git?, branch? }`** replaced `propose_project`, which only lit
 up the sidebar's Add project button. It raises a card in the orchestrator's own approval slot
-(`project_create`: the name and the full path), and the call waits for the answer, as `ask_project`'s
+(`project_create`: the name, the full path and, for a clone, the repository and branch), and the call waits for the answer, as `ask_project`'s
 consent card does (`askHost`). Nothing is made until the person chooses Create; "always" is read as
 allow and nothing is remembered; deny, or the call stopping, makes nothing. The target is checked
 before the card (a refusal costs the person nothing) and again after it. A project made this way is
 announced with `projects_changed`, which every window answers by re-reading the project list. It is
 the orchestrator's alone (security-boundaries.md), and it makes projects on this computer only: the
-hub's orchestrator does not see the linked machines; their projects are made from that machine's +. The swap left the
-orchestrator's resident set smaller than before (`residentCost`, Claude: 11,798 → 11,620 characters; docs/tool-cost.md).
+hub's orchestrator does not see the linked machines; their projects are made from that machine's +. A
+clone also says "Cloning … into …" in the orchestrator's conversation once Create is chosen, while the call runs. The
+swap left the orchestrator's resident set smaller than before (`residentCost`, Claude: 11,798 → 11,620 characters, and
+11,770 with the clone's arguments; docs/tool-cost.md).
 
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 

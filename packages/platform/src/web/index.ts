@@ -10,6 +10,7 @@ import type {
   ToolName,
   QuestionAnswer,
   UpdateSettingsParams,
+  GitSource,
 } from '@cc/protocol'
 import type {
   AgentPort,
@@ -246,11 +247,11 @@ class WebProjectPort implements ProjectPort {
   add(path: string, machine?: MachineRef) {
     return this.rpc.call('projects.add', { path, ...on(machine) })
   }
-  create(name: string, parent?: string, machine?: MachineRef) {
-    return this.rpc.call('projects.create', { name, ...(parent ? { parent } : {}), ...on(machine) })
+  create(name: string, parent?: string, machine?: MachineRef, source?: GitSource) {
+    return this.rpc.call('projects.create', { name, ...(parent ? { parent } : {}), ...(source ? { source } : {}), ...on(machine) })
   }
-  createPreview(name: string, parent?: string, machine?: MachineRef) {
-    return this.rpc.call('projects.createPreview', { name, ...(parent ? { parent } : {}), ...on(machine) })
+  createPreview(name: string, parent?: string, machine?: MachineRef, source?: GitSource) {
+    return this.rpc.call('projects.createPreview', { name, ...(parent ? { parent } : {}), ...(source ? { source } : {}), ...on(machine) })
   }
   list() {
     return this.rpc.call('projects.list', {})

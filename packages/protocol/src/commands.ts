@@ -41,6 +41,7 @@ import {
   UiPreferences,
   UiPreferencesPatch,
   UpdateStatus,
+  GitSource,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
 import { HostActivity, MachineAutostartResult, MachineId, MachineInfo, MachineInstallResult, MachineProbe, MachineUninstallResult, RemoteShell, SshHostList } from './machines.js'
@@ -1050,9 +1051,14 @@ export const RpcMethods = {
    * Desktop of the machine the project lives on when `parent` is absent, then registers it as `projects.add` does.
    * The machine's own host makes it. Refused with one sentence when the name is not one folder name, when `parent` is
    * not a full path to a folder, or when anything of that name is already there: nothing existing is reused.
+   *
+   * With `source` the folder is a **clone** of that repository instead of empty, made by that machine's own git with
+   * its own saved sign-ins, never asking for one (a repository that needs a password it does not have is refused with
+   * one sentence). An empty `name` is then the repository's own (`repoNameOf`). A failed clone leaves nothing: the
+   * folder it made is removed and no project is registered. Submodules are not cloned.
    */
   'projects.create': {
-    params: z.object({ name: z.string().max(255), parent: z.string().max(4096).optional(), ...machineParam }),
+    params: z.object({ name: z.string().max(255), parent: z.string().max(4096).optional(), source: GitSource.optional(), ...machineParam }),
     result: ProjectInfo,
   },
   /**
@@ -1061,7 +1067,7 @@ export const RpcMethods = {
    * are null; otherwise exactly one of them is set, `error` being the sentence `projects.create` would refuse with.
    */
   'projects.createPreview': {
-    params: z.object({ name: z.string().max(255), parent: z.string().max(4096).optional(), ...machineParam }),
+    params: z.object({ name: z.string().max(255), parent: z.string().max(4096).optional(), source: GitSource.optional(), ...machineParam }),
     result: z.object({ parent: z.string(), path: z.string().nullable(), error: z.string().nullable() }),
   },
   /**

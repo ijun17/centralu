@@ -240,13 +240,22 @@ function ProjectCreateCard({
         <span className="text-xs text-ink-faint">The orchestrator wants to make a new project, and waits</span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
-        Make a new project <span className="readout">{detail.name}</span>?
+        {detail.source ? 'Clone a repository as the new project' : 'Make a new project'} <span className="readout">{detail.name}</span>?
       </p>
+      {detail.source && (
+        <p className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink" data-testid="approval-source">
+          {detail.source.git}
+          {detail.source.branch ? ` (branch ${detail.source.branch})` : ''}
+        </p>
+      )}
       <p className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink-muted" data-testid="approval-path">
+        {detail.source ? 'into ' : ''}
         {detail.path}
       </p>
       <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
-        An empty folder is made there and added to the sidebar. Nothing is made unless you choose Create.
+        {detail.source
+          ? "It is cloned with this machine's own git and saved sign-ins, without its submodules, and added to the sidebar. Nothing is made unless you choose Create."
+          : 'An empty folder is made there and added to the sidebar. Nothing is made unless you choose Create.'}
       </p>
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k="y" label="Create" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />

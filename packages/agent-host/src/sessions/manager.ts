@@ -13,10 +13,11 @@ import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, u
 import { builderRole } from './app-builder.js'
 import { remember } from './folder-cache.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
+import { cloneInto } from '../dev-services/project-clone.js'
 import { contextAt, labelOf, lastActiveOf, orchestratorMemory, previewOf, timeOf } from './transcript-view.js'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, rmSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
   AppQuestion,
@@ -48,6 +49,7 @@ import type {
   UiPreferences,
   UiPreferencesPatch,
   SettingsApplied,
+  GitSource,
 } from '@cc/protocol'
 import {
   APP_SLUG,
@@ -56,6 +58,8 @@ import {
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
   // also needs to put words into a session built with the same frame.
   frameField,
+  gitSourceError,
+  repoNameOf,
   isProjectId,
   isSessionId,
   parseUiPreferences,
@@ -795,13 +799,30 @@ export class SessionManager {
     return this.desktopAnswer
   }
 
+  /**
+   * The folder a new project would get, and whether a clone source is one this host clones (#515) — checked, nothing
+   * made. With a source and no name, the folder is named after the repository.
+   */
+  private async newProjectTarget(name: string, parent?: string, source?: GitSource): Promise<ProjectFolderTarget> {
+    if (source) {
+      const urlError = gitSourceError(source.git)
+      if (urlError) throw Object.assign(new Error(urlError), { code: 'internal' })
+      if (source.branch !== undefined && !(await gitValidBranchName(source.branch))) {
+        throw Object.assign(new Error(`"${source.branch}" is not a branch name.`), { code: 'internal' })
+      }
+    }
+    const folder = name.trim() || (source ? repoNameOf(source.git) : '')
+    if (!folder && source) throw Object.assign(new Error('The repository address gives no name for the folder — give one.'), { code: 'internal' })
+    return projectFolderTarget({ name: folder, parent }, parent?.trim() ? null : await this.desktopDir())
+  }
+
   /** Where `projects.create` would make the folder, and why it would refuse (#515) — nothing is made */
-  async projectCreatePreview(name: string, parent?: string): Promise<{ parent: string; path: string | null; error: string | null }> {
+  async projectCreatePreview(name: string, parent?: string, source?: GitSource): Promise<{ parent: string; path: string | null; error: string | null }> {
     const given = parent?.trim()
     const location = given || (await this.desktopDir())
-    if (!name.trim()) return { parent: location, path: null, error: null }
+    if (!name.trim() && !source?.git.trim()) return { parent: location, path: null, error: null }
     try {
-      const t = projectFolderTarget({ name, parent: given }, given ? null : location)
+      const t = await this.newProjectTarget(name, given, source)
       return { parent: t.parent, path: t.path, error: null }
     } catch (e) {
       return { parent: location, path: null, error: (e as Error).message }
@@ -809,12 +830,25 @@ export class SessionManager {
   }
 
   /**
-   * Makes a new project (#515): an empty folder named `name` in `parent` (this machine's Desktop when absent), then
-   * registers it. Never reuses anything already there — see `projectFolderTarget`.
+   * Makes a new project (#515): a folder named `name` in `parent` (this machine's Desktop when absent), empty, or a
+   * clone of `source` made with this machine's git and saved sign-ins, then registers it. Never reuses anything
+   * already there (`projectFolderTarget`). A clone that fails leaves nothing behind: the folder this made is removed
+   * and no project is registered.
    */
-  async createProject(name: string, parent?: string): Promise<ProjectInfo> {
-    const target = projectFolderTarget({ name, parent }, parent?.trim() ? null : await this.desktopDir())
+  async createProject(name: string, parent?: string, source?: GitSource): Promise<ProjectInfo> {
+    const target = await this.newProjectTarget(name, parent, source)
     makeProjectFolder(target)
+    if (source) {
+      console.error(`[projects] cloning ${source.git}${source.branch ? ` (${source.branch})` : ''} into ${target.path}`)
+      try {
+        await cloneInto(source.git, target.path, target.parent, source.branch)
+      } catch (e) {
+        // Only the folder made just above: it held nothing before the clone
+        rmSync(target.path, { recursive: true, force: true })
+        console.error(`[projects] clone into ${target.path} failed, folder removed: ${(e as Error).message}`)
+        throw e
+      }
+    }
     console.error(`[projects] made ${target.path}`)
     const info = await this.addProject(target.path)
     // Every window learns of it, the one that asked included: the orchestrator's card answers no list (#515)
@@ -823,26 +857,34 @@ export class SessionManager {
   }
 
   /**
-   * create_project (#515): the orchestrator's request becomes a card in its own approval slot, with the full path on
-   * it, and the folder is made only when the person allows it. Checked before the card (a refusal costs the person
-   * nothing) and again after it (a folder of that name may have appeared while the card stood).
+   * create_project (#515): the orchestrator's request becomes a card in its own approval slot, with the full path (and
+   * the repository, for a clone) on it, and the folder is made only when the person allows it. Checked before the card
+   * (a refusal costs the person nothing) and again after it (a folder of that name may have appeared while the card
+   * stood). A clone says so in the conversation while it runs, since it can take minutes.
    */
   private async createProjectAsked(
     sessionId: string,
-    spec: { name: string; parent?: string },
+    spec: { name: string; parent?: string; source?: GitSource },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string } | { ok: false; error: string }> {
     let target: ProjectFolderTarget
     try {
-      target = projectFolderTarget(spec, spec.parent?.trim() ? null : await this.desktopDir())
+      target = await this.newProjectTarget(spec.name, spec.parent, spec.source)
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
-    const decision = await this.askHost(sessionId, { kind: 'project_create', name: target.name, path: target.path }, signal)
+    const decision = await this.askHost(
+      sessionId,
+      { kind: 'project_create', name: target.name, path: target.path, ...(spec.source ? { source: spec.source } : {}) },
+      signal,
+    )
     if (decision === 'deny') return { ok: false, error: 'The person did not approve it. Do not ask again unless they tell you to.' }
     if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so nothing was made.' }
+    if (spec.source) {
+      this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${spec.source.git} into ${target.path}…` })
+    }
     try {
-      const info = await this.createProject(spec.name, spec.parent)
+      const info = await this.createProject(target.name, spec.parent, spec.source)
       return { ok: true, projectId: info.id, name: info.name, path: info.path }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -4798,7 +4840,7 @@ export class SessionManager {
       proposeSkill: async (spec) => this.proposals.proposeSkill(spec),
 
       // A new project (#515) — made only once the person approves the card this raises in the orchestrator's own slot
-      createProject: async (spec, signal) => this.createProjectAsked(orchestratorId, spec, signal),
+      createProject: async (spec, signal) => this.createProjectAsked(orchestratorId, { name: spec.name, parent: spec.parent, source: spec.source }, signal),
 
       // Checks its own app (C-3) — which app it is is decided by the calling session. Refused if it is not a
       // builder session (the directory has changed)

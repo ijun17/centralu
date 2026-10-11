@@ -328,14 +328,14 @@ export function createRpcHandler(
       return info
     },
     'projects.create': async (p) => {
-      const { name, parent } = RpcMethods['projects.create'].params.parse(p)
-      const info = await mgr.createProject(name, parent)
+      const { name, parent, source } = RpcMethods['projects.create'].params.parse(p)
+      const info = await mgr.createProject(name, parent, source)
       externalApps?.refresh()
       return info
     },
     'projects.createPreview': async (p) => {
-      const { name, parent } = RpcMethods['projects.createPreview'].params.parse(p)
-      return mgr.projectCreatePreview(name, parent)
+      const { name, parent, source } = RpcMethods['projects.createPreview'].params.parse(p)
+      return mgr.projectCreatePreview(name, parent, source)
     },
     'orchestrator.get': async () => mgr.orchestrator(),
     'orchestrator.peek': async () => mgr.orchestratorPeek(),
