@@ -28,7 +28,13 @@ type Fake = {
   note(n: { method: string; params?: unknown }): void
 }
 
-const state = vi.hoisted(() => ({ instances: [] as Fake[] }))
+const state = vi.hoisted(() => ({
+  instances: [] as Fake[],
+  /** What `config/read` answers with (#382): the person's policy as Codex resolves it, or a failure */
+  configRead: { config: {} } as Record<string, unknown> | Error,
+  /** The policy the thread reports in its start and resume responses */
+  threadPolicy: undefined as unknown,
+}))
 
 vi.mock('./client.js', () => ({
   CodexClient: class {
@@ -42,8 +48,9 @@ vi.mock('./client.js', () => ({
     }
     request(method: string, params: Record<string, unknown> = {}) {
       this.requests.push({ method, params })
-      if (method === 'thread/start') return Promise.resolve({ thread: { id: 'thread-1' } })
-      if (method === 'thread/resume') return Promise.resolve({ thread: { id: params.threadId } })
+      if (method === 'thread/start') return Promise.resolve({ thread: { id: 'thread-1' }, approvalPolicy: state.threadPolicy })
+      if (method === 'thread/resume') return Promise.resolve({ thread: { id: params.threadId }, approvalPolicy: state.threadPolicy })
+      if (method === 'config/read') return state.configRead instanceof Error ? Promise.reject(state.configRead) : Promise.resolve(state.configRead)
       return Promise.resolve({})
     }
     notify() {}
@@ -84,6 +91,8 @@ const mcpServers = (c: Fake, method: 'thread/start' | 'thread/resume' = 'thread/
   (threadConfig(c, method).mcp_servers ?? null) as Record<string, Record<string, unknown>> | null
 
 beforeEach(() => {
+  state.configRead = { config: {} }
+  state.threadPolicy = undefined
   w = attachWorld(kit)
   w.plant('p1', 'notes')
   w.plant('p1', 'tasks')
@@ -140,6 +149,83 @@ describe('thread/start — one bridge per app', () => {
       expect(Object.keys(mcpServers(c)!['app-notes']!.tools as object).sort()).toEqual(['peek', 'run_status'])
     })
   }
+})
+
+/*
+ * Owner decision 2026-10-11 (#382, question 1): under normal, an app write tool follows the person's own Codex
+ * policy, as Claude's normal follows the person's bypass. With `writes` and the person's `approval_policy =
+ * "never"`, Codex refuses the call ("requires approval, but approval policy is never"; codex source
+ * `mcp_tool_call.rs`), so a bypass has to reach the bridge as `approve`.
+ */
+describe("normal follows the person's own Codex policy for app tools (#382)", () => {
+  const configReads = (c: Fake) => c.requests.filter((r) => r.method === 'config/read').map((r) => r.params)
+
+  it("the person's approval_policy = never: app tools are approved, on start and on resume", async () => {
+    state.configRead = { config: { approval_policy: 'never' } }
+    const c = await start(WORKER)
+    expect(mcpServers(c)!['app-notes']).toMatchObject({ default_tools_approval_mode: 'approve' })
+    const r = await start(WORKER, { resumeExternalId: 'thread-9' })
+    await (handle as unknown as { ready: Promise<void> }).ready
+    expect(mcpServers(r, 'thread/resume')!['app-notes']).toMatchObject({ default_tools_approval_mode: 'approve' })
+  })
+
+  for (const policy of ['on-request', 'untrusted', { granular: { mcp_elicitations: true } }, null]) {
+    it(`the person's policy ${JSON.stringify(policy)}: app write tools still ask (writes)`, async () => {
+      state.configRead = { config: { approval_policy: policy } }
+      const c = await start(WORKER)
+      expect(mcpServers(c)!['app-notes']).toMatchObject({ default_tools_approval_mode: 'writes' })
+    })
+  }
+
+  it('a Codex that cannot answer config/read keeps writes', async () => {
+    state.configRead = new Error('Method not found')
+    const c = await start(WORKER)
+    expect(mcpServers(c)!['app-notes']).toMatchObject({ default_tools_approval_mode: 'writes' })
+  })
+
+  it('safe and auto do not read the policy: they set the thread policy themselves', async () => {
+    state.configRead = { config: { approval_policy: 'never' } }
+    for (const [preset, mode] of [['safe', 'prompt'], ['auto', 'approve']] as const) {
+      const c = await start(WORKER, { permissionPreset: preset })
+      expect(mcpServers(c)!['app-notes']).toMatchObject({ default_tools_approval_mode: mode })
+      expect(configReads(c)).toEqual([])
+    }
+  })
+
+  /*
+   * Which layers count follows what the thread loads (measured in personsApprovalPolicy): a repository's
+   * `.codex/config.toml` is read only with a folder, and only Codex-trusted folders contribute it. A session whose
+   * repository files are kept out must not let that file turn its app tools into `approve`.
+   */
+  it("a trusted project's session reads from its folder; an untrusted one, and the orchestrator, read only the person's layers", async () => {
+    const trusted = await start(WORKER, { cwd: '/tmp/proj' })
+    expect(configReads(trusted)).toEqual([{ cwd: '/tmp/proj' }])
+    const untrusted = await start(WORKER, { cwd: '/tmp/proj', projectTrusted: false })
+    expect(configReads(untrusted)).toEqual([{}])
+    const orch = await start(ORCH, { cwd: '/tmp/orch', noSettingFiles: true, projectTrusted: false })
+    expect(configReads(orch)).toEqual([{}])
+  })
+
+  it('a session with no attached app does not ask', async () => {
+    const c = await start({ id: 'codex-s2', kind: 'worker', projectId: 'p2' })
+    expect(configReads(c)).toEqual([])
+  })
+
+  it("logs when the thread reports a policy the bridges were not set for", async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      state.configRead = { config: { approval_policy: 'on-request' } }
+      state.threadPolicy = 'never'
+      await start(WORKER)
+      expect(err.mock.calls.flat().join(' ')).toMatch(/app tools were set to writes, but the thread runs approval policy "never"/)
+      err.mockClear()
+      state.threadPolicy = 'on-request'
+      await start(WORKER)
+      expect(err).not.toHaveBeenCalled()
+    } finally {
+      err.mockRestore()
+    }
+  })
 })
 
 describe('thread/resume — servers are loaded again on resume too', () => {

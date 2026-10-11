@@ -37,7 +37,8 @@ export default defineConfig({
      * (see `packages/agent-host/src/data-dir.ts`).
      *
      * The setup file gives each test file a temporary folder of its own: a shared one let one
-     * file's managers sweep away what another file had just written there (#368).
+     * file's managers sweep away what another file had just written there (#368). It also points
+     * `CLAUDE_CONFIG_DIR` away from the person's `~/.claude` (#382).
      */
     setupFiles: [r('./tooling/vitest-data-dir.ts')],
     testTimeout: 5_000 * SLOW,

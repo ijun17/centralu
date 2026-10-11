@@ -1,4 +1,5 @@
-import { query, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
+import { query, resolveSettings, type McpServerConfig, type PermissionMode } from '@anthropic-ai/claude-agent-sdk'
+import { homedir } from 'node:os'
 
 /**
  * Only the part of the SDK Query that we use.
@@ -211,6 +212,32 @@ function permissionOptionsFor(preset: 'safe' | 'normal' | 'auto'): Record<string
   return { resolvePermissionModeInCli: true } // Follows the person's own settings — the key matters only below SDK 0.3.286, see above.
 }
 
+const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']
+
+/**
+ * The person's own default mode, for a session that reads no settings files (#382, owner decision 2026-10-11).
+ *
+ * The orchestrator and coordinators read no files (`settingSourcesFor`: `[]`), so under normal the CLI found no
+ * `defaultMode` and the person's global bypass did not reach them: app tools and their own commands asked. On Codex
+ * the same sessions load `~/.codex` and the bypass applies. The owner chose the direction of decision 1 (the person's
+ * policy applies), so the two now agree: the person's mode is carried, and nothing else is. Their `CLAUDE.md`, hooks
+ * and rules stay out, because an instruction arriving through a file is what `[]` exists to keep away from a session
+ * that directs others.
+ *
+ * Read with the SDK's own merge engine (`resolveSettings`, "the same engine as the CLI") from the user tier only,
+ * which honours `CLAUDE_CONFIG_DIR` and the managed policy tier the way the CLI does. A mode the SDK does not know,
+ * or a read that fails, leaves the old behaviour (the CLI's own default, which asks).
+ */
+export async function personsDefaultMode(): Promise<PermissionMode | null> {
+  try {
+    const resolved = await resolveSettings({ cwd: homedir(), settingSources: ['user'] })
+    const mode = resolved.effective.permissions?.defaultMode
+    return typeof mode === 'string' && (PERMISSION_MODES as readonly string[]).includes(mode) ? (mode as PermissionMode) : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Which settings files get read (M4 decision 3, #92, #152) — **so that a file committed to the
  * repo cannot be able to decide an approval.**
@@ -228,7 +255,8 @@ function permissionOptionsFor(preset: 'safe' | 'normal' | 'auto'): Record<string
  * builder session through this adapter and having it run `touch`, normal, CLI 2.1.282, haiku,
  * 2026-09-25): before (`[]`) — card popped up, project hooks did not run, CLAUDE.md was not read;
  * now (omitted) — no card (the user's own bypass), hooks ran, CLAUDE.md was read. The orchestrator
- * still pops a card and still reads nothing, as before.
+ * still reads nothing; since #382 it is given the person's own mode instead (`personsDefaultMode`), so it
+ * no longer pops a card the person turned off everywhere else.
  *
  * A `.claude/` planted in the repo was able to disable our own approval card. Measured
  * (probe-project-trust.mts, CLI 2.1.282, SDK 0.3.263, planted into a temp folder standing in for
@@ -407,6 +435,8 @@ class ClaudeSession implements SessionHandle {
       this.orchestratorServer = orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile, this.opts.sessionId)
     }
     const servers = this.mcpServers()
+    // Normal in a session that reads no settings files still follows the person's own mode (#382, personsDefaultMode)
+    const personsMode = preset === 'normal' && this.opts.noSettingFiles ? await personsDefaultMode() : null
 
     /*
      * Spaced out on Windows, so processes started together (the orchestrator waking its sessions, a
@@ -510,7 +540,7 @@ class ClaudeSession implements SessionHandle {
                 : {}),
             }
           : {}),
-        ...permissionOptionsFor(preset),
+        ...(personsMode ? { permissionMode: personsMode } : permissionOptionsFor(preset)),
         /*
          * The agent an app hands a schema and asks for output (M4 D-1). It is a per-query option,
          * so it can only be given when the session starts. Measured (SDK 0.3.263, CLI 2.1.282,

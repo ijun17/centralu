@@ -149,9 +149,14 @@ console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', 
 const tick = () => new Promise((r) => setTimeout(r, 20))
 
 /** Starts a session and sends one message — returns whether an approval card came up. */
-async function askedIn(cwd: string, permissionPreset: PermissionPreset, projectTrusted: boolean | undefined): Promise<boolean> {
+async function askedIn(
+  cwd: string,
+  permissionPreset: PermissionPreset,
+  projectTrusted: boolean | undefined,
+  over: { noSettingFiles?: boolean } = {},
+): Promise<boolean> {
   const events: NormalizedEvent[] = []
-  const handle = await new ClaudeAdapter().createSession({ sessionId: 's', cwd, permissionPreset, projectTrusted }, (e) => events.push(e))
+  const handle = await new ClaudeAdapter().createSession({ sessionId: 's', cwd, permissionPreset, projectTrusted, ...over }, (e) => events.push(e))
   handle.send('touch it')
   for (let i = 0; i < 50 && state.verdicts.length === 0; i++) await tick()
   await tick()
@@ -272,6 +277,52 @@ describe('does a .claude/ planted in the repo disable the approval card? (#92, s
     // safe asks regardless of the user's own bypass (as it does today).
     expect(await askedIn(dir, 'safe', false)).toBe(true)
     expect(state.verdicts).toEqual(['rule-allowed', 'mode-allowed', 'ask'])
+  })
+})
+
+/*
+ * Owner decision 2026-10-11 (#382, question 5): the orchestrator and coordinators follow the person's bypass on both
+ * CLIs. On Codex they load `~/.codex`, so the person's `approval_policy` already applied; on Claude they read no files
+ * (`[]`), so the person's `defaultMode` never reached them and normal asked. Now the mode is carried, and only the mode:
+ * the session still reads no file, and a folder's own settings cannot set it.
+ */
+describe("the orchestrator and coordinators follow the person's own mode under normal (#382)", () => {
+  const orchestrator = { noSettingFiles: true }
+
+  it("the person's bypass reaches a session that reads no files: no card under normal, and still no files read", async () => {
+    writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
+    expect(await askedIn(root, 'normal', false, orchestrator)).toBe(false)
+    expect(state.options[0]).toMatchObject({ settingSources: [], permissionMode: 'bypassPermissions' })
+    expect(state.verdicts).toEqual(['mode-allowed'])
+  })
+
+  it("the person's other modes are carried as they are", async () => {
+    writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'acceptEdits' } }))
+    await (await new ClaudeAdapter().createSession({ sessionId: 'o', cwd: root, permissionPreset: 'normal', noSettingFiles: true }, () => {})).dispose()
+    expect(state.options[0]).toMatchObject({ settingSources: [], permissionMode: 'acceptEdits' })
+  })
+
+  it('safe still asks and auto still allows whatever the person set; without a mode of their own, normal asks as before', async () => {
+    writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
+    expect(await askedIn(root, 'safe', false, orchestrator)).toBe(true)
+    writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'acceptEdits' } }))
+    expect(await askedIn(root, 'auto', false, orchestrator)).toBe(false)
+    writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'not-a-mode' } }))
+    expect(await askedIn(root, 'normal', false, orchestrator)).toBe(true)
+    expect(state.verdicts).toEqual(['ask', 'mode-allowed', 'ask'])
+    expect(state.options.map((o) => o.permissionMode)).toEqual(['default', 'bypassPermissions', undefined])
+  })
+
+  it("a bypass planted in the orchestrator's own folder does not count: only the person's own settings do", async () => {
+    const dir = repo({ local: { permissions: { defaultMode: 'bypassPermissions' } }, settings: { permissions: { defaultMode: 'bypassPermissions' } } })
+    expect(await askedIn(dir, 'normal', true, orchestrator)).toBe(true)
+  })
+
+  it("a project's ordinary session is unchanged: the CLI resolves its mode from the files it reads", async () => {
+    writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
+    await (await new ClaudeAdapter().createSession({ sessionId: 'w', cwd: root, permissionPreset: 'normal', projectTrusted: true }, () => {})).dispose()
+    expect(state.options[0]).toMatchObject({ resolvePermissionModeInCli: true })
+    expect('permissionMode' in state.options[0]!).toBe(false)
   })
 })
 

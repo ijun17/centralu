@@ -167,15 +167,30 @@ function realPathOr(path: string): string {
  * each value was read from codex source (`requires_mcp_tool_approval_for_mode` in
  * `core/src/mcp_tool_call.rs`).
  *
- * One trap in normal: since normal defers to the user's own config.toml (permissionOptionsFor),
- * if the user has written `approval_policy = "never"`, Codex rejects a tool that `writes` should
- * have prompted for. We do not read the user's settings — in that combination, a write tool
- * comes back rejected.
+ * Normal follows the person's own policy (#382, owner decision 2026-10-11). Normal defers to the
+ * person's config.toml (permissionOptionsFor), and with their `approval_policy = "never"` Codex
+ * refuses a tool that `writes` would have asked about ("requires approval, but approval policy is
+ * never"), where Claude lets the same call through under the person's bypass. So under normal the
+ * mode comes from that policy (`appApprovalModeFor`, read by `CodexSession.personsApprovalPolicy`):
+ * `never` → `approve`, anything else → `writes`.
  */
 const APP_APPROVAL_MODE: Record<PermissionPreset, 'approve' | 'writes' | 'prompt'> = {
   auto: 'approve',
   normal: 'writes',
   safe: 'prompt',
+}
+
+type AppApprovalMode = 'approve' | 'writes' | 'prompt'
+
+/**
+ * The mode for an app bridge, given the policy the person's own Codex settings resolve to (#382). Only normal
+ * reads it: safe and auto set the thread's policy themselves (permissionOptionsFor). Only `never` is a bypass; a
+ * granular policy or an unreadable one keeps `writes`, which asks where Codex can ask and refuses where the
+ * person's policy refuses, as before.
+ */
+export function appApprovalModeFor(preset: PermissionPreset, personsPolicy: unknown): AppApprovalMode {
+  if (preset !== 'normal') return APP_APPROVAL_MODE[preset]
+  return personsPolicy === 'never' ? 'approve' : 'writes'
 }
 
 /**
@@ -252,6 +267,8 @@ class CodexSession implements SessionHandle {
   private appServers = new Set<string>()
   /** Whether this thread was given Centralu's own server — only then is an elicitation under that name ours to accept (#382) */
   private ownServer = false
+  /** The approval mode the app bridges on this thread were given, or null when it has none (#382, `checkAppMode`) */
+  private appModeLoaded: AppApprovalMode | null = null
   private reqCounter = 0
   private alwaysAllow = new AlwaysAllowRules()
   /**
@@ -486,6 +503,7 @@ class CodexSession implements SessionHandle {
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       this.threadSettings = threadSettingsOf(res)
+      this.checkAppMode(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
       if (adopted) this.takeStartedTurn(runningTurnOf(res) ?? (await this.latestRunningTurn(res)))
       /*
@@ -541,6 +559,7 @@ class CodexSession implements SessionHandle {
       })
       this.threadId = threadIdOf(res)
       this.threadSettings = threadSettingsOf(res)
+      this.checkAppMode(res)
     }
     this.externalId = this.threadId
   }
@@ -565,6 +584,53 @@ class CodexSession implements SessionHandle {
    * (`url`) never received a single request in 0.147.0, and we could not re-check in 0.153.4.
    * The bridge is the same file as the orchestrator's (they are split by `CC_APP_SERVER`).
    */
+  /**
+   * The approval policy the person's own Codex settings resolve to, for an app bridge under normal (#382, decision
+   * 1). Asked of Codex itself (`config/read`), so profiles, managed layers and the person's own file are merged the
+   * way Codex merges them.
+   *
+   * Which layers count follows what this thread will load. Measured (codex-cli 0.160.0, a scratch `CODEX_HOME`, the
+   * person's `approval_policy` and a repository's `.codex/config.toml` set to opposite values, 2026-10-11):
+   *
+   *   Codex's trust for the folder   config/read {}   config/read {cwd}   thread/start (no per-thread trust)
+   *   trusted                        person's         repository's        repository's
+   *   untrusted                      person's         person's            person's
+   *   unset                          person's         person's            person's
+   *
+   * and with `repoFilesConfig`'s per-thread `untrusted` the thread reports the person's in every row. So a session
+   * whose repository files are kept out (an untrusted project, the orchestrator and coordinators) reads without a
+   * folder, and a trusted project's session reads from its folder, as Claude's normal reads the project's settings
+   * there. Should the two still differ (a layer this read does not see), the thread's own report is compared
+   * afterwards (`checkAppMode`) and the difference logged. A Codex without `config/read`, or one that fails, keeps
+   * `writes`.
+   */
+  private async personsApprovalPolicy(): Promise<unknown> {
+    const projectFiles = Object.keys(repoFilesConfig(this.opts)).length === 0
+    try {
+      const res = await this.client.request<{ config?: { approval_policy?: unknown } }>('config/read', projectFiles ? { cwd: this.opts.cwd } : {})
+      return res?.config?.approval_policy ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * The thread says which policy it runs under (`approvalPolicy` in the start and resume responses). If that is not
+   * the one the app bridges were set for, the apps on this thread ask or refuse differently from the person's policy
+   * until the next start; said in the log so it can be found (#382).
+   */
+  private checkAppMode(res: Record<string, unknown> | undefined): void {
+    if (this.appModeLoaded === null || this.opts.permissionPreset !== 'normal') return
+    const policy = res?.approvalPolicy
+    if (policy === undefined) return
+    const expected = appApprovalModeFor('normal', policy)
+    if (expected !== this.appModeLoaded) {
+      console.error(
+        `[codex] ${this.sessionId.slice(0, 8)} app tools were set to ${this.appModeLoaded}, but the thread runs approval policy ${JSON.stringify(policy)}`,
+      )
+    }
+  }
+
   private async mcpConfig(): Promise<Record<string, unknown>> {
     const bridge = this.opts.orchestratorBridge
     const servers: Record<string, unknown> = {}
@@ -590,6 +656,7 @@ class CodexSession implements SessionHandle {
     const apps = this.opts.apps
     const attached = apps?.current() ?? []
     this.appServers = new Set()
+    this.appModeLoaded = null
     if (apps && bridge && attached.length > 0) {
       /*
        * Read the tool list first — a read-only tool has to be written per tool for even safe to
@@ -597,6 +664,8 @@ class CodexSession implements SessionHandle {
        * A session with no attached app never reaches this line.
        */
       const lists = await Promise.all(attached.map((a) => (a.tools ? Promise.resolve(a.tools) : apps.tools(a.server))))
+      const mode = appApprovalModeFor(this.opts.permissionPreset, this.opts.permissionPreset === 'normal' ? await this.personsApprovalPolicy() : null)
+      this.appModeLoaded = mode
       attached.forEach((a, i) => {
         servers[a.server] = {
           command: process.execPath,
@@ -608,7 +677,7 @@ class CodexSession implements SessionHandle {
             CC_APP_SERVER: a.server,
             CC_APP_WAIT_MS: String(APP_CALL_WAIT_MS),
           },
-          default_tools_approval_mode: APP_APPROVAL_MODE[this.opts.permissionPreset],
+          default_tools_approval_mode: mode,
           // A tool the app itself declares read-only is never asked about, under any preset (decision 5)
           tools: Object.fromEntries(
             (lists[i] ?? []).filter((t) => t.annotations?.readOnlyHint === true).map((t) => [t.name, { approval_mode: 'approve' }]),

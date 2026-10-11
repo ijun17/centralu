@@ -124,14 +124,19 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 | `attach_app`, a user-folder app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card: the person's own folder) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `AppAccess.gate` |
 | An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
-| Any other app tool | asks | asks | allowed | allowed | asks | asks | **refused** | allowed | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `APP_APPROVAL_MODE` (`prompt`, `writes`, `approve`) |
+| Any other app tool | asks | asks | allowed | allowed | asks | asks | allowed | allowed | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
 | The agent's own tools (commands, edits) | asks, reads run | the person's settings | allowed | allowed | asks, reads run | the person's settings | allowed | allowed | `permissionOptionsFor` in each adapter |
 
 Rows that differ by session:
 
-- **The orchestrator and coordinators on Claude** read no settings files (`settingSources: []`), so the
-  person's bypass does not reach them: under `normal` an app tool and their own commands ask. On
-  Codex `~/.codex` still loads, so the bypass applies there.
+- **The orchestrator and coordinators** read no settings files, but under `normal` they follow the
+  person's bypass on both CLIs (owner decision 2026-10-11, #382). On Codex `~/.codex` loads, so the
+  person's `approval_policy` applies. On Claude (`settingSources: []`) only the person's own
+  `defaultMode` is carried, read from the user tier with the SDK's merge engine
+  (`personsDefaultMode` in `adapters/claude/index.ts`); their `CLAUDE.md`, hooks and rules stay out,
+  and a mode written in the orchestrator's own folder does not count. The direction is decision 1's:
+  the person's global choice applies to every session that runs under `normal`, and someone who wants
+  a card from the orchestrator has `safe`.
 - **An agent an app started** (`run_agent`, `SessionManager.runAppAgent`) is `safe` whatever the
   calling session uses, has no Centralu server and no apps. Reads run; everything else asks.
 - **A session `ask_project` opened** in the other project starts under `normal` with that project's
@@ -141,10 +146,19 @@ Rows that differ by session:
 - **A builder's `check`** starts its app and runs the app's code without a card, like any Centralu
   tool. Builders exist only in trusted projects and the user folder.
 
-The **Codex `normal` + bypass** cell is refused, not allowed: `writes` needs an approval and the
-person's `approval_policy = "never"` refuses it ("requires approval, but approval policy is never").
-Claude lets the same call through. Confirmed from Codex source only, not by a logged-in run; whether
-to follow the person's policy here is an open question in #382.
+The **Codex `normal` + bypass** cell follows the person's policy, as Claude's does (owner decision
+2026-10-11, #382). With `writes`, the person's `approval_policy = "never"` turned "needs approval"
+into a refusal ("requires approval, but approval policy is never", codex source `mcp_tool_call.rs`).
+So under `normal` the adapter asks Codex for the policy before it loads the app bridges
+(`config/read`, `personsApprovalPolicy`) and gives them `approve` when it resolves to `never`, `writes`
+otherwise. Which layers count follows what the thread loads, measured with codex-cli 0.160.0 in a
+scratch `CODEX_HOME` (the person's policy and a repository's `.codex/config.toml` set to opposite
+values): `config/read` without a folder returns the person's layers only, and with the folder adds the
+repository's only when Codex trusts that folder, as `thread/start` does. A session whose repository
+files are kept out (an untrusted project, the orchestrator, coordinators) reads without the folder, so
+a planted `.codex/config.toml` cannot turn its app tools into `approve`. The thread's own
+`approvalPolicy` is compared afterwards and a difference logged. The refusal itself is still from
+Codex source, and no logged-in app call was run.
 
 ### Turning things off
 
@@ -272,9 +286,9 @@ trusted in `~/.codex/config.toml` on first use. The user's own settings in `~/.c
 `~/.codex` still decide under the `normal` preset. What a session reads follows from what the
 session is, not from whether it carries Centralu's own tools (#152). Only the orchestrator and
 coordinators read no settings files, trusted or not: they belong to no project and work in a folder
-other sessions can write to (in Claude, `settingSources: []`, which leaves out `~/.claude` too; in
-Codex, their folder is marked `untrusted` and `project_doc_max_bytes = 0`, while `~/.codex` still
-loads). Worktree managers and the builders of project apps follow their project's trust like any
+other sessions can write to (in Claude, `settingSources: []`, which leaves out `~/.claude` too, except
+the person's own `defaultMode`, carried under `normal` since #382; in Codex, their folder is marked
+`untrusted` and `project_doc_max_bytes = 0`, while `~/.codex` still loads). Worktree managers and the builders of project apps follow their project's trust like any
 worker. The builder of a user-folder app counts as trusted, because that folder is the user's own
 (decision 3).
 

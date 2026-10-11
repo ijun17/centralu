@@ -22,6 +22,12 @@ import { afterAll } from 'vitest'
  */
 const dir = mkdtempSync(join(tmpdir(), 'centralu-test-data-'))
 process.env.CC_DATA_DIR = dir
+/*
+ * **Nor do tests read the person's Claude settings** (#382). The orchestrator and coordinators take the person's own
+ * `defaultMode` under `normal` (`personsDefaultMode`), so a machine with a global bypass in `~/.claude` started them
+ * differently from CI. A folder that does not exist reads as no settings; a test that plants settings sets its own.
+ */
+process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude-config')
 
 // Last of the file's afterAll hooks (they run in reverse order of registration). A process a test
 // started may still be writing into it on Windows; what it leaves behind is in the temp folder.

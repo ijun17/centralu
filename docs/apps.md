@@ -586,7 +586,8 @@ and "Send to builder".
   `~/.claude`, a global bypass included, and a Codex builder reads `AGENTS.md`. Once the project's
   trust is withdrawn, it reads only the person's own settings from its next start. A user-folder
   app's builder counts as trusted, since that folder is the person's own (decision 3). Only the
-  orchestrator and coordinators read no settings files.
+  orchestrator and coordinators read no settings files; under `normal` they still follow the person's
+  own default mode, a global bypass included (#382).
 - **`check`**: reads the manifest again; restarts the app **from the files on disk** (waiting up to
   30 s for calls in progress; past that it inspects the running process and says so); calls
   `tools/list` for real; reads every `ui://` screen the tools point at (MIME type, not empty, bridge
@@ -689,8 +690,9 @@ leads with a `summary` field).
 checked against the installed 0.153.4's generated types, its binary's strings and Codex's source,
 not by a logged-in run: the approval-mode values, the configuration field names, the elicitation's
 `_meta` key, and whether the MCP configuration sent with `thread/resume` takes effect (spikes S-3
-and S-7 wait for a login). One gap is known: `normal` follows the person's `~/.codex/config.toml`,
-so with `approval_policy = "never"` there, Codex refuses an app's write tools.
+and S-7 wait for a login). `normal` follows the person's own policy for an app's write tools, as
+Claude does: with `approval_policy = "never"`, which would refuse a tool that asks, the bridges are
+loaded with `approve` instead (#382, [security-boundaries.md](security-boundaries.md)).
 
 ### 9.3 Long calls and cancellation
 
