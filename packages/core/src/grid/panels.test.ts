@@ -35,6 +35,30 @@ describe('grid panel keys', () => {
   })
 })
 
+describe('a linked machine’s apps on the grid (#82, remote-hub.md §11.8)', () => {
+  it('a machine’s user-folder app is keyed by its machine, apart from this computer’s app of the same id, and reads back', () => {
+    const theirs = appGridPanel(null, 'notes', 'm1')
+    expect(theirs).toEqual({ kind: 'app', projectId: null, appId: 'notes', machine: 'm1' })
+    expect(gridPanelKey(theirs)).toBe('app:m1:_user/notes')
+    expect(gridPanelKey(appGridPanel(null, 'notes'))).toBe('app:_user/notes')
+    expect(parseAppKey('m1:_user/notes')).toEqual({ projectId: null, appId: 'notes', machine: 'm1' })
+    // A project app's qualified id already names its machine: no machine is kept, and its key is as before
+    expect(appGridPanel('m1.p1', 'board', 'm1')).toEqual({ kind: 'app', projectId: 'm1.p1', appId: 'board' })
+    expect(appKeyOf('m1.p1', 'board', 'm1')).toBe('m1.p1/board')
+    // Only a machine's user folder can stand before `:`
+    expect(parseAppKey('m1:p1/board')).toBeNull()
+    expect(parseAppKey('M!:_user/notes')).toBeNull()
+  })
+
+  it('shows a machine’s app only when the list has that machine’s, and sanitizing keeps the machine or drops a bad one', () => {
+    const theirs = appGridPanel(null, 'notes', 'm1')
+    const mine = appGridPanel(null, 'notes')
+    expect(visibleGridPanels([theirs, mine], new Set(), new Set(['_user/notes']))).toEqual([mine])
+    expect(visibleGridPanels([theirs, mine], new Set(), new Set(['m1:_user/notes']))).toEqual([theirs])
+    expect(sanitizeGridPanels([theirs, mine, { kind: 'app', projectId: null, appId: 'notes', machine: 'Not a machine' }])).toEqual([theirs, mine])
+  })
+})
+
 describe('gridSessionIds', () => {
   it('lists only the sessions, in order', () => {
     expect(

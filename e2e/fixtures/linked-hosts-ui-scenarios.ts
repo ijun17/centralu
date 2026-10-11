@@ -5,6 +5,7 @@ import { APP_VERSION } from '../../packages/protocol/src/brand.js'
 import { Relay } from './real-host.js'
 import { LINKED_RELAY_PORT, MACHINE, restartRemote, startPair, type LinkedPair } from './linked-hosts.js'
 import { hubCall } from './linked-hosts-scenarios.js'
+import { dragRowToGrid } from './grid-apps.js'
 
 /**
  * The linked-hosts UI of phase 1 (#82, docs/plans/remote-hub.md §7): the real web UI on a hub and a second host, each on
@@ -122,6 +123,64 @@ export function linkedHostsUiTests(): void {
           { appId: 'notes', projectId: null, machine: MACHINE },
           { appId: 'notes', projectId: null },
         ])
+      })
+    })
+  })
+
+  test('another machine’s apps stand on the grid: dragged there, each with its own view, kept by the hub across a reload', async ({ page }) => {
+    test.setTimeout(150_000)
+    await withPair({ apps: true }, async (pair) => {
+      await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
+      const calls = watchCalls(page)
+      await page.goto('/')
+      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      await page.getByTestId('grid-button').click()
+      await expect(page.getByTestId('grid')).toBeVisible()
+      const board = `${MACHINE}.p-remote/board`
+      const theirNotes = `${MACHINE}:_user/notes`
+      const gridView = (key: string) =>
+        page.getByTestId(`pinned-app-grid:${key}`).getByTestId('app-frame-iframe').contentFrame().locator('iframe').contentFrame()
+
+      await test.step('a project app of the machine, dropped on the empty grid, shows its view', async () => {
+        await dragRowToGrid(page, page.getByTestId(`app-row-${board}`), 'padding')
+        await expect(page.getByTestId(`grid-panel-app:${board}`)).toBeVisible()
+        // The window shows a drop at once; the hub's answer is what stays
+        await expect
+          .poll(() => hubCall(pair.hub.port, 'grid.get', { tagged: true }))
+          .toEqual([{ kind: 'app', projectId: `${MACHINE}.p-remote`, appId: 'board' }])
+        await expect(gridView(board).locator('#count')).toHaveText('0', { timeout: 30_000 })
+      })
+
+      await test.step('the machine’s user-folder app and this computer’s app of the same id are two panels', async () => {
+        await dragRowToGrid(page, page.getByTestId(`app-row-${theirNotes}`), { panel: `app:${board}`, side: 'after' })
+        await expect(page.getByTestId(`grid-panel-app:${theirNotes}`)).toBeVisible()
+        await dragRowToGrid(page, page.getByTestId('app-row-_user/notes'), { panel: `app:${theirNotes}`, side: 'after' })
+        await expect(page.getByTestId('grid-panel-app:_user/notes')).toBeVisible()
+        await expect(gridView(theirNotes).locator('#count')).toHaveText('0', { timeout: 30_000 })
+        await expect(gridView('_user/notes').locator('#count')).toHaveText('0', { timeout: 30_000 })
+        // Theirs was opened on that machine, this computer's here
+        await expect
+          .poll(() => calls.filter((c) => c.method === 'apps.openView' && c.params.appId === 'notes').map((c) => c.params.machine ?? null).sort())
+          .toEqual([MACHINE, null].sort())
+      })
+
+      await test.step('the hub keeps the panels, and a reload brings them back where they stood', async () => {
+        const expected = [
+          { kind: 'app', projectId: `${MACHINE}.p-remote`, appId: 'board' },
+          { kind: 'app', projectId: null, appId: 'notes', machine: MACHINE },
+          { kind: 'app', projectId: null, appId: 'notes' },
+        ]
+        await expect.poll(() => hubCall(pair.hub.port, 'grid.get', { tagged: true })).toEqual(expected)
+        await page.reload()
+        await expect(page.getByTestId('grid')).toBeVisible()
+        await expect
+          .poll(() =>
+            page.evaluate(() =>
+              [...document.querySelectorAll('[data-testid="grid"] [data-testid^="grid-panel-"]')].map((el) => el.getAttribute('data-testid')),
+            ),
+          )
+          .toEqual([`grid-panel-app:${board}`, `grid-panel-app:${theirNotes}`, 'grid-panel-app:_user/notes'])
+        await expect(gridView(theirNotes).locator('#count')).toHaveText('0', { timeout: 30_000 })
       })
     })
   })

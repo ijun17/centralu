@@ -1752,6 +1752,27 @@ export class Store {
           }
         },
       },
+      {
+        to: 47,
+        breaksOlderReaders: false,
+        /**
+         * Grid panels of another machine's apps (#82, docs/plans/remote-hub.md §11.8).
+         *
+         *   grid_layout.remote_app_id   the app of such a panel, with `app_id` left NULL
+         *   grid_layout.app_machine     the machine it is on; `project_id` is its qualified project, or NULL for that
+         *                               machine's user-folder app
+         *
+         * **Expand only (#292's rule).** Two nullable columns. An older host reads app rows only where `app_id` is set,
+         * so it never mistakes a machine's `notes` for its own; its `setGridView` drops those rows when it rewrites the
+         * layout, which loses a panel, not the layout.
+         */
+        run: () => {
+          const cols = new Set((this.db.prepare(`PRAGMA table_info(grid_layout)`).all() as { name: string }[]).map((c) => c.name))
+          if (cols.size === 0) return
+          if (!cols.has('remote_app_id')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN remote_app_id TEXT`)
+          if (!cols.has('app_machine')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN app_machine TEXT`)
+        },
+      },
     ]
   }
 
@@ -2282,7 +2303,8 @@ export class Store {
   listGridView(): GridPanel[] {
     const rows = this.db
       .prepare(
-        `SELECT g.kind, COALESCE(g.session_id, g.remote_session_id) AS session_id, g.project_id, g.app_id, g.span_cols, g.span_rows
+        `SELECT g.kind, COALESCE(g.session_id, g.remote_session_id) AS session_id, g.project_id,
+                COALESCE(g.app_id, g.remote_app_id) AS app_id, g.app_machine, g.span_cols, g.span_rows
            FROM grid_layout g
            LEFT JOIN sessions s ON g.kind = 'session' AND s.id = g.session_id
            LEFT JOIN projects p ON g.kind = 'app' AND p.id = g.project_id
@@ -2291,6 +2313,11 @@ export class Store {
                   SELECT 1 FROM machine_headers h
                    WHERE h.kind = 'session' AND h.machine_id || '.' || h.item_id = g.remote_session_id))
              OR (g.kind = 'app' AND g.app_id IS NOT NULL AND (g.project_id IS NULL OR p.id IS NOT NULL))
+             OR (g.kind = 'app' AND g.app_id IS NULL AND g.remote_app_id IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM linked_machines m WHERE m.id = g.app_machine)
+                 AND (g.project_id IS NULL OR EXISTS (
+                  SELECT 1 FROM machine_headers h
+                   WHERE h.kind = 'project' AND h.machine_id = g.app_machine AND h.machine_id || '.' || h.item_id = g.project_id)))
           ORDER BY g.position`,
       )
       .all() as {
@@ -2298,6 +2325,7 @@ export class Store {
       session_id: string | null
       project_id: string | null
       app_id: string | null
+      app_machine: string | null
       span_cols: number | null
       span_rows: number | null
     }[]
@@ -2309,6 +2337,8 @@ export class Store {
         kind: 'app' as const,
         projectId: r.project_id,
         appId: r.app_id!,
+        // A linked machine's user-folder app names its machine; a project app's qualified id already does (#82)
+        ...(r.app_machine && r.project_id === null ? { machine: r.app_machine } : {}),
         ...(span.success ? { span: span.data } : {}),
       }
     })
@@ -2322,7 +2352,12 @@ export class Store {
    * transaction means no intermediate state is ever visible. A panel named twice keeps its first
    * place (`panel_key` is the primary key).
    */
-  setGridView(panels: readonly GridPanel[], remote: (sessionId: string) => boolean = () => false): void {
+  setGridView(
+    panels: readonly GridPanel[],
+    remote: (sessionId: string) => boolean = () => false,
+    /** The linked machine an app panel's app is on (#82), or null for this host's own */
+    appMachine: (panel: Extract<GridPanel, { kind: 'app' }>) => string | null = () => null,
+  ): void {
     const del = this.db.prepare(`DELETE FROM grid_layout`)
     const ins = this.db.prepare(
       `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, position, span_cols, span_rows)
@@ -2332,12 +2367,24 @@ export class Store {
     const insRemote = this.db.prepare(
       `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, remote_session_id, position) VALUES (?, 'session', NULL, ?, ?)`,
     )
+    // Another machine's app keeps `app_id` empty, so a host from before v47 never reads it as its own (v47, #82)
+    const insRemoteApp = this.db.prepare(
+      `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, remote_app_id, app_machine, position, span_cols, span_rows)
+       VALUES (?, 'app', NULL, ?, NULL, ?, ?, ?, ?, ?)`,
+    )
     this.db.transaction(() => {
       del.run()
       panels.forEach((p, i) => {
         if (p.kind === 'session' && remote(p.sessionId)) insRemote.run(`session:${p.sessionId}`, p.sessionId, i)
         else if (p.kind === 'session') ins.run(`session:${p.sessionId}`, 'session', p.sessionId, null, null, i, null, null)
         else {
+          const machine = appMachine(p)
+          if (machine) {
+            // The UI's key (`gridPanelKey`): a machine's user-folder app names the machine, a project app its qualified project
+            const key = p.projectId ? `app:${p.projectId}/${p.appId}` : `app:${machine}:_user/${p.appId}`
+            insRemoteApp.run(key, p.projectId, p.appId, machine, i, p.span?.cols ?? null, p.span?.rows ?? null)
+            return
+          }
           const key = `app:${p.projectId ?? '_user'}/${p.appId}`
           ins.run(key, 'app', null, p.projectId, p.appId, i, p.span?.cols ?? null, p.span?.rows ?? null)
         }
@@ -3473,6 +3520,7 @@ export class Store {
     this.db.transaction(() => {
       this.db.prepare(`DELETE FROM machine_headers WHERE machine_id = ?`).run(id)
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_session_id IS NOT NULL AND substr(remote_session_id, 1, ?) = ?`).run(id.length + 1, `${id}.`)
+      this.db.prepare(`DELETE FROM grid_layout WHERE remote_app_id IS NOT NULL AND app_machine = ?`).run(id)
       this.db.prepare(`DELETE FROM linked_machines WHERE id = ?`).run(id)
       this.deleteAppSetting(`${MIRRORED_KEY}${id}.session`)
       this.deleteAppSetting(`${MIRRORED_KEY}${id}.project`)

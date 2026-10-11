@@ -27,13 +27,14 @@ export function gridTakes(types: readonly string[]): boolean {
 export function droppedGridPanel(
   read: (type: string) => string,
   sessions: ReadonlySet<string>,
-  apps: ReadonlyMap<string, { projectId: string | null; appId: string }>,
+  apps: ReadonlyMap<string, { projectId: string | null; appId: string; info?: { machine?: string | null } }>,
 ): GridPanel | null {
   const sessionId = read(SESSION_MIME)
   if (sessionId) return sessions.has(sessionId) ? sessionGridPanel(sessionId) : null
   const key = read(APP_MIME)
   const app = key ? apps.get(key) : undefined
-  return app ? appGridPanel(app.projectId, app.appId) : null
+  // A linked machine's user-folder app keeps its machine (#82); `appGridPanel` drops it for a project app
+  return app ? appGridPanel(app.projectId, app.appId, app.info?.machine) : null
 }
 
 /**

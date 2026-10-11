@@ -362,7 +362,7 @@ import confirmations (`<data>/app-imports.json`), kept versions (`<data>/app-ver
 Where it is stored:
 
 - `grid_layout`: the grid's panels (sessions and apps, store v42; spans v43; a linked machine's session in a column
-  of its own, v46).
+  of its own, v46; a linked machine's app in columns of their own, v47).
 - `grid_panels`: the grid of session panels as v9 made it, kept for hosts older than v42 (this build copies it once
   and afterwards only removes a trashed session's row); dropped in a later contract step
   ([agent-host.md](agent-host.md) §5.1).

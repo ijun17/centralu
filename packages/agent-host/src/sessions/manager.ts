@@ -1011,14 +1011,34 @@ export class SessionManager {
     const projects = new Set(this.store.listProjects().map((p) => p.id))
     // A linked machine's session (#82) is kept while the hub's mirror knows it (links/links.ts)
     const remote = (id: string) => !known.has(id) && this.linkedSession(id)
+    /*
+     * Another machine's app (#82, remote-hub.md §11.8) is kept while that machine is linked and, for a project app,
+     * while the hub's mirror knows its project: the machine of a user-folder app is named by `machine`, a project
+     * app's by its qualified project. A `machine` on a panel of this host's own app is dropped: it would name nothing.
+     */
+    const appMachine = (p: Extract<GridPanel, { kind: 'app' }>): string | null =>
+      p.projectId === null ? (p.machine && this.linkedApps.linked(p.machine) ? p.machine : null) : this.linkedApps.projectMachine(p.projectId)
     const seen = new Set<string>()
-    const clean = panels.filter((p) => {
-      const key = p.kind === 'session' ? `session:${p.sessionId}` : `app:${p.projectId ?? '_user'}/${p.appId}`
-      if (seen.has(key)) return false
+    const clean: GridPanel[] = []
+    for (const p of panels) {
+      if (p.kind === 'session') {
+        const key = `session:${p.sessionId}`
+        if (seen.has(key) || !(known.has(p.sessionId) || remote(p.sessionId))) continue
+        seen.add(key)
+        clean.push(p)
+        continue
+      }
+      const { machine: _machine, ...own } = p
+      const elsewhere = projects.has(p.projectId ?? '') ? null : appMachine(p)
+      // A panel naming a machine this host does not link is nobody's app here
+      if (!elsewhere && (p.machine || (p.projectId !== null && !projects.has(p.projectId)))) continue
+      const panel: GridPanel = elsewhere && p.projectId === null ? { ...own, machine: elsewhere } : own
+      const key = elsewhere && p.projectId === null ? `app:${elsewhere}:_user/${p.appId}` : `app:${p.projectId ?? '_user'}/${p.appId}`
+      if (seen.has(key)) continue
       seen.add(key)
-      return p.kind === 'session' ? known.has(p.sessionId) || remote(p.sessionId) : p.projectId === null || projects.has(p.projectId)
-    })
-    this.store.setGridView(clean, remote)
+      clean.push(panel)
+    }
+    this.store.setGridView(clean, remote, (p) => (projects.has(p.projectId ?? '') ? null : appMachine(p)))
     return clean
   }
 
@@ -1027,6 +1047,16 @@ export class SessionManager {
 
   useLinkedSessions(known: (sessionId: string) => boolean): void {
     this.linkedSession = known
+  }
+
+  /** The linked machines, for grid panels of their apps (#82). None without links */
+  private linkedApps: { linked(machine: string): boolean; projectMachine(projectId: string): string | null } = {
+    linked: () => false,
+    projectMachine: () => null,
+  }
+
+  useLinkedApps(lookup: { linked(machine: string): boolean; projectMachine(projectId: string): string | null }): void {
+    this.linkedApps = lookup
   }
 
   async listProjects(): Promise<ProjectInfo[]> {

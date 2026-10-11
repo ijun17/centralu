@@ -695,6 +695,18 @@ export class Links {
   }
 
   /** Whether a qualified id names a session the hub has heard of on a linked machine (grid panels, #82) */
+  /** The linked machine a qualified project id is on, when the hub's mirror knows that project (grid panels of its apps) */
+  projectMachine(id: string): string | null {
+    const split = splitQualified(id)
+    const m = split ? this.machines.get(split.machine) : undefined
+    return m && (m.lastKnown('projects') ?? []).some((p) => isObj(p) && p.id === split!.id) ? m.id : null
+  }
+
+  /** Whether a machine id is one the person linked */
+  linked(machine: string): boolean {
+    return this.machines.has(machine)
+  }
+
   knowsSession(id: string): boolean {
     const split = splitQualified(id)
     const m = split ? this.machines.get(split.machine) : undefined

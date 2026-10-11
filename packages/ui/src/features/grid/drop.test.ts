@@ -38,6 +38,18 @@ describe('droppedGridPanel', () => {
     )
   })
 
+  it('a linked machine’s user-folder app keeps its machine, apart from this computer’s app of the same id (#82)', () => {
+    const both = new Map<string, { projectId: string | null; appId: string; info?: { machine?: string | null } }>([
+      ...apps,
+      ['m1:_user/notes', { projectId: null, appId: 'notes', info: { machine: 'm1' } }],
+      ['m1.p1/board', { projectId: 'm1.p1', appId: 'board', info: { machine: 'm1' } }],
+    ])
+    expect(droppedGridPanel(carrying({ [APP_MIME]: 'm1:_user/notes' }), new Set(), both)).toEqual(appGridPanel(null, 'notes', 'm1'))
+    expect(droppedGridPanel(carrying({ [APP_MIME]: '_user/notes' }), new Set(), both)).toEqual(appGridPanel(null, 'notes'))
+    // A project app's qualified id already names its machine
+    expect(droppedGridPanel(carrying({ [APP_MIME]: 'm1.p1/board' }), new Set(), both)).toEqual({ kind: 'app', projectId: 'm1.p1', appId: 'board' })
+  })
+
   it('takes nothing the grid could not draw: a session that is gone, an app the list does not have', () => {
     expect(droppedGridPanel(carrying({ [SESSION_MIME]: 'gone' }), new Set(['s1']), apps)).toBeNull()
     expect(droppedGridPanel(carrying({ [APP_MIME]: 'p2/slider' }), new Set(), apps)).toBeNull()

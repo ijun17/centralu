@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 46, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 47, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -99,6 +99,8 @@ erDiagram
     INTEGER span_cols
     INTEGER span_rows
     TEXT remote_session_id
+    TEXT remote_app_id
+    TEXT app_machine
   }
   grid_panels {
     TEXT session_id PK, FK
@@ -333,6 +335,8 @@ Added in v42.
 | `span_cols` | INTEGER | yes |  |  | v43 |
 | `span_rows` | INTEGER | yes |  |  | v43 |
 | `remote_session_id` | TEXT | yes |  |  | v46 |
+| `remote_app_id` | TEXT | yes |  |  | v47 |
+| `app_machine` | TEXT | yes |  |  | v47 |
 
 ### `grid_panels`
 

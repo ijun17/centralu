@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MachineId } from './machines.js'
 
 /**
  * A session id — an opaque identifier we generate ourselves (`randomUUID()`).
@@ -244,6 +245,12 @@ export const GridPanel = z.discriminatedUnion('kind', [
      * defaults; nothing else changes.
      */
     span: GridSpan.optional(),
+    /**
+     * A linked machine's user-folder app (#82, docs/plans/remote-hub.md §11.8): which machine, since a null project
+     * cannot say so. Absent for this computer's apps and for any project app, whose qualified id already names its
+     * machine. Additive: a host from before it strips it, and its `grid.set` drops a panel it cannot place.
+     */
+    machine: MachineId.optional(),
   }),
 ])
 export type GridPanel = z.infer<typeof GridPanel>

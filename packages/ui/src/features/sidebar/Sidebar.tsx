@@ -1070,10 +1070,11 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         An app row is dragged like a session row: onto the grid, any app (#288), or onto its
         project screen, a project's app (#203), where a hidden one comes back where it is dropped.
         A user-folder app carries no project type, so every project screen refuses it while it is
-        still being dragged. Another machine's app is not dragged yet (#82): the hub keeps a grid
-        panel of an app only while it knows the app's project, which a linked machine's it does not.
+        still being dragged. Another machine's app is dragged the same way (#82): the hub keeps its
+        grid panel while it knows that machine and project (remote-hub.md §11.8), and the row's key
+        names the machine of a user-folder app.
       */
-      draggable={!app.info.machine}
+      draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(APP_MIME, app.key)
         if (projectId) e.dataTransfer.setData(projectItemMime(projectId), projectId)

@@ -103,6 +103,7 @@ const links = new Links({
   retryMs: [300, 2000],
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
+mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
 const allowedOrigins = (process.env.CC_HOST_ALLOWED_ORIGINS ?? '').split(',').filter(Boolean)
 /*
  * Apps and their views, composed as `main.ts` composes them (remote-hub.md §11): the real runtime (an app is a real

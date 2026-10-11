@@ -548,7 +548,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
  * worth sizing.
  */
 function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
-  const setting = useStore((s) => s.appSpans[appKeyOf(app.projectId, app.appId)])
+  const setting = useStore((s) => s.appSpans[appKeyOf(app.projectId, app.appId, app.info.machine)])
   const setAppSpan = useStore((s) => s.setAppSpan)
   if (!app.info.home) return null
   const current = explainGridSpan(undefined, setting, app.info.span)
@@ -560,7 +560,7 @@ function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
         value={current.span}
         chosen={current.from === 'setting'}
         fallback={{ span: fallback.span, label: fallback.from === 'app' ? 'as the app recommends' : 'one cell' }}
-        onPick={(span) => setAppSpan(app.projectId, app.appId, span)}
+        onPick={(span) => setAppSpan(app.projectId, app.appId, span, app.info.machine)}
         testId="external-app-span"
         title="Panel size in grid cells"
       />

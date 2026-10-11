@@ -66,6 +66,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     ...extra,
   })
   mgr.useLinkedSessions((id) => links.knowsSession(id))
+  mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   const port = await server.listen()
@@ -355,6 +356,30 @@ describe('a hub linked to another host (#82)', () => {
     expect(await u.call('sessions.list')).toEqual([])
     expect(await u.call('grid.get', { tagged: true })).toEqual([])
     expect(u.events().some((e: any) => e.type === 'machine_resync' && e.machineId === 'remote-box')).toBe(true)
+  })
+
+  it('keeps grid panels of a machine’s apps while the hub knows it, refuses a stranger’s, and drops them with the machine (plan §11.8)', async () => {
+    const remote = await remoteHost(0, seeded([['w1', 'worker', true]]).store)
+    const hub = await hubHost(() => lineFor(remote.port), new Store(), false)
+    const u = await ui(hub.port)
+    await u.call('machines.add', { name: 'Remote box', sshTarget: 'box' })
+    await until(() => status(hub) === 'connected')
+    // The mirror learns the machine's projects from the list the window reads
+    await u.call('projects.list')
+    const panels = [
+      { kind: 'app', projectId: 'remote-box.p-remote', appId: 'board' },
+      { kind: 'app', projectId: null, appId: 'notes', machine: 'remote-box' },
+      { kind: 'app', projectId: null, appId: 'notes' },
+      // A project the mirror never heard of, and a machine nobody linked: nothing the hub could place
+      { kind: 'app', projectId: 'remote-box.p-gone', appId: 'board' },
+      { kind: 'app', projectId: null, appId: 'notes', machine: 'stranger' },
+    ]
+    const kept = [panels[0], panels[1], panels[2]]
+    expect(await u.call('grid.set', { panels })).toEqual(kept)
+    expect(await u.call('grid.get', { tagged: true })).toEqual(kept)
+
+    await u.call('machines.remove', { machineId: 'remote-box' })
+    expect(await u.call('grid.get', { tagged: true })).toEqual([{ kind: 'app', projectId: null, appId: 'notes' }])
   })
 
   it('closes what the tunnel opened when the machine is removed while it was opening', async () => {

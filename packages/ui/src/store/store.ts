@@ -185,7 +185,7 @@ export function externalAppKey(projectId: string | null | undefined, appId: stri
    * A linked machine's user-folder app has no project to tell it from this computer's app of the same id (both read
    * `_user/<id>`), so its key names the machine (#82). A project app's key already does: its project id is qualified.
    */
-  return machine && !projectId ? `${machine}:${appKeyOf(null, appId)}` : appKeyOf(projectId, appId)
+  return appKeyOf(projectId, appId, machine)
 }
 
 /**
@@ -210,8 +210,8 @@ export function isApp(a: ExternalAppInfo, projectId: string | null | undefined, 
  * down first whenever it goes. `grid:` cannot begin an app key, whose first segment is a project
  * id or `_user`.
  */
-export function gridAppViewKey(projectId: string | null, appId: string): string {
-  return `grid:${appKeyOf(projectId, appId)}`
+export function gridAppViewKey(projectId: string | null, appId: string, machine?: string | null): string {
+  return `grid:${appKeyOf(projectId, appId, machine)}`
 }
 
 /**
@@ -864,7 +864,7 @@ export type AppState = {
    */
   appSpans: Record<string, GridSpan>
   /** Sets or clears (`null`) the person's span for an app, and saves the snapshot */
-  setAppSpan(projectId: string | null, appId: string, span: GridSpan | null): void
+  setAppSpan(projectId: string | null, appId: string, span: GridSpan | null, machine?: string | null): void
   /**
    * Sets or clears (`null`) the span of one app panel on the grid, keyed by core's `gridPanelKey` — the panel's top bar
    * (#306). Saved with the grid, like a move.
@@ -1413,7 +1413,7 @@ export type AppState = {
    * Gives an app on the grid its view (#288), keyed `gridAppViewKey` — apart from the app's pinned view, so the grid
    * and the project screen each keep their own document. Does nothing if it already has one.
    */
-  ensureGridAppView(projectId: string | null, appId: string): void
+  ensureGridAppView(projectId: string | null, appId: string, machine?: string | null): void
   /** Closes a pinned view from outside its own header (the project screen's ×) — teardown first, as every way down does */
   dismissPinnedView(key: string): Promise<void>
   /**
@@ -2158,9 +2158,9 @@ export function projectScreenAppKeys(
  */
 export function gridScreenAppKeys(s: Pick<AppState, 'view' | 'gridPanels' | 'externalApps'>): string[] {
   if (s.view !== 'grid') return []
-  const listed = new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId)))
+  const listed = new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine)))
   return s.gridPanels.flatMap((p) =>
-    p.kind === 'app' && listed.has(appKeyOf(p.projectId, p.appId)) ? [gridAppViewKey(p.projectId, p.appId)] : [],
+    p.kind === 'app' && listed.has(appKeyOf(p.projectId, p.appId, p.machine)) ? [gridAppViewKey(p.projectId, p.appId, p.machine)] : [],
   )
 }
 
@@ -4331,8 +4331,8 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ projectPanels: { ...s.projectPanels, [projectId]: next } }))
     get().saveWorkspace()
   },
-  setAppSpan(projectId, appId, span) {
-    const key = appKeyOf(projectId, appId)
+  setAppSpan(projectId, appId, span, machine) {
+    const key = appKeyOf(projectId, appId, machine)
     set((s) => {
       const { [key]: _old, ...rest } = s.appSpans
       return { appSpans: span ? { ...rest, [key]: span } : rest }
@@ -5650,13 +5650,15 @@ export const useStore = create<AppState>((set, get) => ({
     }))
   },
 
-  ensureGridAppView(projectId, appId) {
-    const key = gridAppViewKey(projectId, appId)
+  ensureGridAppView(projectId, appId, machine) {
+    // A linked machine's user-folder app opens on that machine (#82): the view carries it, as a pinned view does
+    const own = projectId ? null : (machine ?? null)
+    const key = gridAppViewKey(projectId, appId, own)
     if (get().pinnedViews.some((p) => p.key === key)) return
     set((s) => ({
       pinnedViews: [
         ...s.pinnedViews,
-        { key, projectId, appId, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null },
+        { key, projectId, appId, ...(own ? { machine: own } : {}), phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null },
       ],
     }))
   },
@@ -5921,7 +5923,7 @@ export const useStore = create<AppState>((set, get) => ({
      */
     const kept = new Set(panels.map(gridPanelKey))
     for (const p of before) {
-      if (p.kind === 'app' && !kept.has(gridPanelKey(p))) void get().dismissPinnedView(gridAppViewKey(p.projectId, p.appId))
+      if (p.kind === 'app' && !kept.has(gridPanelKey(p))) void get().dismissPinnedView(gridAppViewKey(p.projectId, p.appId, p.machine))
     }
     set({ gridPanels: panels })
     try {

@@ -65,6 +65,62 @@ describe('linked machines in the store (#82)', () => {
     expect(store.listGridView()).toEqual([])
   })
 
+  it('keeps a grid panel of a remote app while its machine and project are known, apart from this host’s app of one id, and drops it with the machine', () => {
+    const store = new Store()
+    storeRegistry(store).add(machine('a'))
+    storeMirror(store).replace('a', 'projects', [{ id: 'p1' }])
+    const elsewhere = (p: { projectId: string | null; machine?: string }) => (p.projectId?.startsWith('a.') ? 'a' : (p.machine ?? null))
+    store.setGridView(
+      [
+        { kind: 'app', projectId: null, appId: 'notes' },
+        { kind: 'app', projectId: null, appId: 'notes', machine: 'a', span: { cols: 2, rows: 1 } },
+        { kind: 'app', projectId: 'a.p1', appId: 'board' },
+        { kind: 'app', projectId: 'a.gone', appId: 'board' },
+      ],
+      () => false,
+      elsewhere,
+    )
+    // a.gone's project is not known to the mirror: not listed
+    expect(store.listGridView()).toEqual([
+      { kind: 'app', projectId: null, appId: 'notes' },
+      { kind: 'app', projectId: null, appId: 'notes', machine: 'a', span: { cols: 2, rows: 1 } },
+      { kind: 'app', projectId: 'a.p1', appId: 'board' },
+    ])
+    storeRegistry(store).remove('a')
+    expect(store.listGridView()).toEqual([{ kind: 'app', projectId: null, appId: 'notes' }])
+  })
+
+  it('v47 only adds: a host before it reads only its own apps from the grid, never a machine’s app of the same id', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v47-'))
+    try {
+      const db = join(dir, 'store.db')
+      const store = new Store(db)
+      storeRegistry(store).add(machine('a'))
+      store.setGridView(
+        [
+          { kind: 'app', projectId: null, appId: 'notes', machine: 'a' },
+          { kind: 'app', projectId: null, appId: 'timer' },
+        ],
+        () => false,
+        (p) => p.machine ?? null,
+      )
+      store.close()
+      // What a v46 host runs to read the grid's apps (store.ts before #82 phase 2)
+      const raw = new Database(db)
+      const rows = raw
+        .prepare(
+          `SELECT g.project_id, g.app_id FROM grid_layout g
+             LEFT JOIN projects p ON g.kind = 'app' AND p.id = g.project_id
+            WHERE (g.kind = 'app' AND g.app_id IS NOT NULL AND (g.project_id IS NULL OR p.id IS NOT NULL))`,
+        )
+        .all()
+      expect(rows).toEqual([{ project_id: null, app_id: 'timer' }])
+      raw.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('v46 only adds: a store built by it still reads its grid through the old query', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v46-'))
     try {

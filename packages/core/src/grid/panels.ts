@@ -1,4 +1,4 @@
-import type { GridPanel, GridSpan } from '@cc/protocol'
+import { MACHINE_ID_RE, type GridPanel, type GridSpan } from '@cc/protocol'
 import { sanitizeGridSpan } from './span.js'
 
 /**
@@ -21,27 +21,41 @@ import { sanitizeGridSpan } from './span.js'
  */
 export const USER_APP_SCOPE = '_user'
 
-/** One app as a single string: `<project id | _user>/<app id>` — the UI's `externalAppKey` */
-export function appKeyOf(projectId: string | null | undefined, appId: string): string {
-  return `${projectId ?? USER_APP_SCOPE}/${appId}`
+/**
+ * One app as a single string: `<project id | _user>/<app id>` — the UI's `externalAppKey`.
+ *
+ * A linked machine's user-folder app (#82) has no project to tell it from this computer's app of the same id, so its
+ * key names the machine: `<machine>:_user/<app id>`. `machine` is ignored with a project, whose id already names it.
+ */
+export function appKeyOf(projectId: string | null | undefined, appId: string, machine?: string | null): string {
+  return machine && !projectId ? `${machine}:${USER_APP_SCOPE}/${appId}` : `${projectId ?? USER_APP_SCOPE}/${appId}`
 }
 
 /**
- * The (project, app) pair an app key stands for, or null for a string that is not one. Neither a
- * project id nor an app id can contain `/`, so the first one splits it.
+ * The (project, app) an app key stands for, with the machine of a linked machine's user-folder app, or null for a
+ * string that is not one. Neither a project id nor an app id can contain `/`, so the first one splits it; a project
+ * id never contains `:` (a UUID, or `<machine>.<uuid>`), so `<machine>:_user` is a machine's user folder.
  */
-export function parseAppKey(key: string): { projectId: string | null; appId: string } | null {
+export function parseAppKey(key: string): { projectId: string | null; appId: string; machine?: string } | null {
   const at = key.indexOf('/')
   if (at <= 0 || at === key.length - 1) return null
   const scope = key.slice(0, at)
-  return { projectId: scope === USER_APP_SCOPE ? null : scope, appId: key.slice(at + 1) }
+  const appId = key.slice(at + 1)
+  const colon = scope.indexOf(':')
+  if (colon >= 0) {
+    const machine = scope.slice(0, colon)
+    return scope.slice(colon + 1) === USER_APP_SCOPE && MACHINE_ID_RE.test(machine) ? { projectId: null, appId, machine } : null
+  }
+  return { projectId: scope === USER_APP_SCOPE ? null : scope, appId }
 }
 
 export const sessionGridPanel = (sessionId: string): GridPanel => ({ kind: 'session', sessionId })
-export const appGridPanel = (projectId: string | null, appId: string): GridPanel => ({
+/** An app's panel. `machine` is kept only for a linked machine's user-folder app (see `appKeyOf`) */
+export const appGridPanel = (projectId: string | null, appId: string, machine?: string | null): GridPanel => ({
   kind: 'app',
   projectId,
   appId,
+  ...(machine && !projectId ? { machine } : {}),
 })
 
 /**
@@ -59,7 +73,7 @@ export function withPanelSpan(panels: readonly GridPanel[], key: string, span: G
 
 /** The panel's key on the screen — see the file comment */
 export function gridPanelKey(p: GridPanel): string {
-  return p.kind === 'session' ? p.sessionId : `app:${appKeyOf(p.projectId, p.appId)}`
+  return p.kind === 'session' ? p.sessionId : `app:${appKeyOf(p.projectId, p.appId, p.machine)}`
 }
 
 /** The sessions on the grid, in order — what "is this session on screen" and warming up at launch ask about */
@@ -82,7 +96,7 @@ export function visibleGridPanels(
   apps: ReadonlySet<string>,
 ): GridPanel[] {
   return panels.filter((p) =>
-    p.kind === 'session' ? sessions.has(p.sessionId) : apps.has(appKeyOf(p.projectId, p.appId)),
+    p.kind === 'session' ? sessions.has(p.sessionId) : apps.has(appKeyOf(p.projectId, p.appId, p.machine)),
   )
 }
 
@@ -111,7 +125,7 @@ export function sanitizeGridPanels(raw: unknown): GridPanel[] {
       continue
     }
     if (!item || typeof item !== 'object') continue
-    const v = item as { kind?: unknown; sessionId?: unknown; projectId?: unknown; appId?: unknown; span?: unknown }
+    const v = item as { kind?: unknown; sessionId?: unknown; projectId?: unknown; appId?: unknown; span?: unknown; machine?: unknown }
     if (v.kind === 'session' && typeof v.sessionId === 'string' && v.sessionId)
       put(sessionGridPanel(v.sessionId))
     else if (
@@ -122,7 +136,10 @@ export function sanitizeGridPanels(raw: unknown): GridPanel[] {
     ) {
       // The span chosen for this placement (#306) comes along when it is one; anything else reads as none chosen
       const span = sanitizeGridSpan(v.span)
-      put({ ...appGridPanel(v.projectId as string | null, v.appId), ...(span ? { span } : {}) })
+      // A linked machine's user-folder app (#82) keeps its machine. A malformed one is dropped: read as none, the panel would become this computer's app of the same id
+      const machine = typeof v.machine === 'string' && MACHINE_ID_RE.test(v.machine) ? v.machine : null
+      if (v.machine !== undefined && v.machine !== null && machine === null) continue
+      put({ ...appGridPanel(v.projectId as string | null, v.appId, machine), ...(span ? { span } : {}) })
     }
   }
   return out

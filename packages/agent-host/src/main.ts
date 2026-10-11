@@ -511,6 +511,8 @@ const links = new Links({
   log: (line) => console.error(line),
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
+// Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
+mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
 const router: Router = new Router({
   local: createRpcHandler(mgr, adapters, {
     themes,

@@ -138,7 +138,7 @@ wakes sessions that were live. So the hub must:
 | Grid panels holding remote sessions | Needs a table or column: `grid_layout.session_id` references the local `sessions` table | |
 | Reveal in Finder, open in IDE | Off for remote projects | Done (phase 2): "Open in VS Code" (the project's sidebar menu, the diff, the viewer, the file tree's row menu) opens the file, folder or project on that machine through a `vscode://vscode-remote/ssh-remote+<target><path>` link, the path being the project root the remote reported (`ProjectInfo.path`) joined with the project-relative one. A Windows (PowerShell) machine gets `/C:/...`; a WSL machine gets nothing, as Remote-SSH reaches the Windows side and not the distro. Reveal and trash stay off |
 | File tree, diff, search | Off for remote projects | Routed (paths are project-relative already) |
-| App views | Off for remote projects | **Built (§11):** the hub serves them from its own door with the machine's document; grid panels of remote apps come next (§11.7) |
+| App views | Off for remote projects | **Built (§11):** the hub serves them from its own door with the machine's document, and its apps stand on the grid (§11.8) |
 | Attachments | Work: saved and read on the same machine as the session | Upload through the hub |
 | Usage gauges | Hub machine only | Done (phase 2): the top bar shows this computer's donuts, then each linked machine's behind its name (`agents.usage {machine}`, `agents.detect {machine}`). A machine that is not connected shows its state and is not asked; it is asked when its link comes back, and every connected machine on the 5-minute refresh |
 | Orchestrator and Centralu tools (`list_sessions`, `read_session`, `recall`, `ask_project`) | Local only, documented | Through the router; `ask_project` across machines also has to handle the paths it hands back |
@@ -755,5 +755,31 @@ machines), `links/router.test.ts` (each view call and the `machine` parameter), 
 | # | Question | Decided | Why |
 |---|---|---|---|
 | 1 | Another machine's user-folder apps: open their pinned views now? | **Yes, with an optional `machine` on the opening call and in the window's pinned-app identity** (§11.4) | The rest follows from the qualified instance; the side panels wait until their calls can name the machine |
-| 2 | Grid panels of another machine's apps | **Next, in a separate pull request** | The hub keeps an app panel only while it knows the app's project (`setGridView`), which a linked machine's it does not; a remote session's panel already has its own column (v46) |
+| 2 | Grid panels of another machine's apps | **Next, in a separate pull request** (built: §11.8) | The hub keeps an app panel only while it knows the app's project (`setGridView`), which a linked machine's it does not; a remote session's panel already has its own column (v46) |
 | 3 | A machine removed and another linked under the same name | **Keeps the old origins, and with them the old browser storage: accepted** | The key is `<machine id>.<app key>`, and a machine id comes from its name (`newMachineId`). This is the same trade-off already made for a local app deleted and made again under the same id: same key, same origin. The ports never go to a different key, so no other app ever reads it |
+
+### 11.8 Grid panels of another machine's apps (2026-10-11)
+
+Owner decision 2 of §11.7. An app panel on the grid is `{ kind: 'app', projectId, appId, span? }` (#288), kept by the hub
+in `grid_layout`, and the hub's `setGridView` kept one only while its project was in the hub's own `projects` table, which
+a linked machine's project never is. Its view is already the hub's (§11.2), so only the panel's place had to change.
+
+- **Naming the machine.** A project app's qualified id names it. A user-folder app gets an optional `machine` on its
+  panel (additive in `GridPanel`), and its key is `app:<machine>:_user/<app>`, the sidebar row's key with `app:` in front
+  (`appKeyOf` in `@cc/core` now takes the machine, and `parseAppKey` reads it back). The grid's view of such an app
+  carries the machine and opens it there (`ensureGridAppView`, `apps.openView { machine }`).
+- **What the hub keeps** (`setGridView` in the manager): another machine's project app while the mirror knows its
+  project (`Links.projectMachine`), and a machine's user-folder app while that machine is linked (`Links.linked`). A
+  panel naming a machine nobody linked, or a project the mirror never heard of, is dropped, as an unknown session is.
+  `listGridView` asks the same of the store, so a panel whose project left the machine's list stops showing without the
+  layout losing its place; removing the machine removes its panels.
+- **Where it is stored** (store v47, expand only): two nullable columns, `remote_app_id` and `app_machine`, with `app_id`
+  left NULL, as v46 did for sessions with `remote_session_id`. A host from before v47 reads app rows only where `app_id`
+  is set, so it never takes a machine's `notes` for its own; rewriting the layout, it drops those rows, which loses a
+  panel, not the layout.
+- **Not changed:** the side panels of a machine's user-folder app (§11.4) still wait on the owner's answer.
+
+Tested: `links/stored.test.ts` (kept and dropped by machine and mirror, and the query of a v46 host), `links/links.test.ts`
+(through `grid.set` and `grid.get` on a real link, and removing the machine), `core/grid/panels.test.ts`,
+`ui/features/grid/drop.test.ts`, and the linked-hosts e2e in Chromium and WebKit (a project app and both `notes`
+dragged onto the grid, each with its own view, back in place after a reload).

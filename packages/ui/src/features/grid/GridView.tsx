@@ -161,7 +161,7 @@ export function GridView() {
   const askedOf = (id: string): { span: GridSpan; from: GridSpanSource } => {
     const p = byKey.get(id)
     if (!p || p.kind === 'session') return { span: ONE_CELL, from: 'default' }
-    const key = appKeyOf(p.projectId, p.appId)
+    const key = appKeyOf(p.projectId, p.appId, p.machine)
     return explainGridSpan(p.span, appSpans[key], appsByKey.get(key)?.info.span)
   }
   const arranged = arrangeGrid(
@@ -213,11 +213,11 @@ export function GridView() {
    * Every app panel shows its view, so every app on the grid has one. Opening it is the view's own business (it calls
    * `home` when the app can run), so an untrusted, invalid or stopped app stands here with its reason and its button.
    */
-  const appKeys = shown.flatMap((p) => (p.kind === 'app' ? [appKeyOf(p.projectId, p.appId)] : [])).join('\n')
+  const appKeys = shown.flatMap((p) => (p.kind === 'app' ? [appKeyOf(p.projectId, p.appId, p.machine)] : [])).join('\n')
   useEffect(() => {
     for (const key of appKeys ? appKeys.split('\n') : []) {
       const app = parseAppKey(key)
-      if (app) ensureGridAppView(app.projectId, app.appId)
+      if (app) ensureGridAppView(app.projectId, app.appId, app.machine)
     }
   }, [appKeys, ensureGridAppView])
 
@@ -252,7 +252,7 @@ export function GridView() {
     const p = byKey.get(id)
     if (!p) return
     if (p.kind === 'session') e.dataTransfer.setData(SESSION_MIME, p.sessionId)
-    else e.dataTransfer.setData(APP_MIME, appKeyOf(p.projectId, p.appId))
+    else e.dataTransfer.setData(APP_MIME, appKeyOf(p.projectId, p.appId, p.machine))
     e.dataTransfer.effectAllowed = 'move'
     /*
        What is being dragged is **the panel**, not the header.
@@ -458,12 +458,12 @@ export function GridView() {
                 {isWorking && <div className="cc-orbit-ring-layer" aria-hidden />}
                 {panel.kind === 'app' ? (
                   <AppPanel
-                    app={appsByKey.get(appKeyOf(panel.projectId, panel.appId))}
+                    app={appsByKey.get(appKeyOf(panel.projectId, panel.appId, panel.machine))}
                     appId={panel.appId}
-                    viewKey={gridAppViewKey(panel.projectId, panel.appId)}
+                    viewKey={gridAppViewKey(panel.projectId, panel.appId, panel.machine)}
                     dragged={dragging === id}
                     onDragStart={(e) => startDrag(id, e)}
-                    onOpen={() => openApp(panel.projectId, panel.appId)}
+                    onOpen={() => openApp(panel.projectId, panel.appId, { machine: panel.machine })}
                     // Removing takes the panel off the screen and closes its view, teardown first (the store's setGridPanels)
                     remove={{
                       label: 'Remove from the grid (closes this view)',
@@ -480,8 +480,8 @@ export function GridView() {
                       room,
                       fallback: explainGridSpan(
                         undefined,
-                        appSpans[appKeyOf(panel.projectId, panel.appId)],
-                        appsByKey.get(appKeyOf(panel.projectId, panel.appId))?.info.span,
+                        appSpans[appKeyOf(panel.projectId, panel.appId, panel.machine)],
+                        appsByKey.get(appKeyOf(panel.projectId, panel.appId, panel.machine))?.info.span,
                       ),
                       onPick: (next) => void setGridPanelSpan(id, next),
                       testId: `grid-span-${id}`,
