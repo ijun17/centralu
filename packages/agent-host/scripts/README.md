@@ -30,7 +30,13 @@ pnpm smoke:models        # do both tools give a model list
 pnpm smoke:terminal      # exercises the terminal with a real PTY
 pnpm smoke:orphan        # behavior when the session disappears on the tool's side
 pnpm perf:idle           # idle performance (host process only, against the §7.1 target)
+pnpm measure:tools       # what Centralu's MCP tools cost (#513): dry by default, --live for real models
 ```
+
+`measure-tools.mts` is the one to run before and after a change to how tools are exposed: dry it
+spends nothing (the real Claude CLI talks to a fake API), `--live` measures tokens, cache rebuilds,
+tool selection and result growth, and `--compare a.json b.json` sets two runs side by side. How to
+read it, and the baseline: [docs/tool-cost.md](../../../docs/tool-cost.md).
 
 ## Probes — kept as the basis for a decision
 

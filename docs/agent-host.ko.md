@@ -80,6 +80,15 @@ Claude는 셋 다 미루며, 그 값은 요청마다 +31 토큰이다(같은 측
 두면 +263을 더한다. Codex 세션이 그만큼 낸다. 모델은 여전히 찾는다: 새 haiku 세션 5번 중 5번이 평범한 요청에서
 도구 검색으로 `find_apps`를 찾았다(apps.md §9.4).
 
+**다시 재기**(#513). `pnpm measure:tools`가 모든 프로필을 두 CLI에서 같은 방식으로, 되풀이할 수 있게
+잰다: 상주 토큰(API의 사용량, 그리고 Centralu 도구를 넣고 뺀 `count_tokens`), 요청마다의 캐시 읽기·쓰기와
+재구축을 일으킨 사건, 고정 프롬프트 묶음에서의 도구 선택과 첫 시도 인자 유효성, 긴 세션에서 도구 결과가
+더하는 양. `orchestrator-tools.test.ts`는 프로필마다 상주 문자 수(`RESIDENT_BUDGET_CHARS`)를,
+`adapters/claude/tool-prefix.test.ts`는 앱을 붙이고 떼도 Claude 세션의 도구 목록이 바뀌지 않음을 고정한다.
+돌리는 법·읽는 법과 기준선: [tool-cost.md](tool-cost.md)(영어만). 그 기준선(2026-10-12)에서 Codex는 더 이상
+MCP 도구를 요청에 미리 싣지 않았다: codex-cli 0.160.0은 자기 `exec` 도구 안에서 그 도구들에 닿는다. 그래서
+위의 "Codex에는 미루기가 없다"는 위 숫자를 잰 CLI의 이야기다.
+
 묶음을 받은 Codex 세션은 stdio 다리를 띄우므로, #320 이후 모든 Codex 세션이 node 프로세스를
 하나 더 띄운다(유휴 시 상주 메모리 약 40 MB). 다리는 `default_tools_approval_mode: 'approve'`를
 건다: 우리 도구는 Claude 쪽처럼 묻지 않으며, 이것이 없으면 auto(`approvalPolicy: never`)의

@@ -367,6 +367,22 @@ export const READER_INSTRUCTIONS = ''
  */
 export const READER_BUDGET_CHARS = 1000
 
+/**
+ * The ceiling for what each profile carries in every request (#513), in characters of its resident
+ * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts; the
+ * Claude side, the larger, since Codex is sent no instructions). Measured 2026-10-12: orchestrator
+ * 11,798 (9,954 + 1,844), manager 6,264 (3,479 + 2,785), scoped 2,267, builder 1,432; the tokens they
+ * cost are in docs/tool-cost.md. The reader is the sum of its three sets' ceilings, since Codex loads
+ * all of them. Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request.
+ */
+export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
+  orchestrator: 12_000,
+  manager: 6_400,
+  scoped: 2_300,
+  builder: 1_450,
+  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS,
+}
+
 /** The building session's MCP guide — the role (the app's place and rules) is applied by roleAppend */
 export const BUILDER_INSTRUCTIONS = [
   "You are the session that builds one Centralu app. This server's check inspects your app.",

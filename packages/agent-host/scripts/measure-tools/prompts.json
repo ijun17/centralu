@@ -1,0 +1,54 @@
+{
+  "comment": "The fixed prompt set of scripts/measure-tools.mts (#513). Placeholders: {project} this project's name, {other} the other project's name, {seed} the seeded session's name. A run's JSON keeps the prompts it used; change this file and the two runs no longer compare.",
+  "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "selection": [
+    {
+      "id": "other-sessions",
+      "profile": "reader",
+      "prompt": "What are the other sessions in this project working on right now?",
+      "expect": ["read_session"]
+    },
+    {
+      "id": "earlier-decision",
+      "profile": "reader",
+      "prompt": "In an earlier conversation we decided how to back up the database. What did we choose?",
+      "expect": ["recall", "read_session"]
+    },
+    {
+      "id": "centralu-howto",
+      "profile": "reader",
+      "prompt": "How do I let my other Centralu projects use an app from this project?",
+      "expect": ["app_guide"]
+    },
+    {
+      "id": "ask-project",
+      "profile": "reader",
+      "prompt": "Have the {other} project list the files in its top folder, then tell me what it found.",
+      "expect": ["ask_project"]
+    },
+    {
+      "id": "open-app",
+      "profile": "reader",
+      "prompt": "One of my other Centralu projects shares a counter app. What number is it showing now?",
+      "expect": ["find_apps", "attach_app"]
+    },
+    {
+      "id": "no-tool",
+      "profile": "reader",
+      "prompt": "What is 17 times 23? Answer with the number only.",
+      "expect": []
+    },
+    {
+      "id": "orch-overview",
+      "profile": "orchestrator",
+      "prompt": "Which sessions are there in {project}, and what is each one doing?",
+      "expect": ["list_sessions", "read_session"]
+    },
+    {
+      "id": "orch-delegate",
+      "profile": "orchestrator",
+      "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
+      "expect": ["send_to_session"]
+    }
+  ]
+}

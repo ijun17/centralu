@@ -83,6 +83,16 @@ loaded they would add +263, which is what a
 Codex session pays. The model still finds them: 5 of 5 fresh haiku sessions found `find_apps` through
 tool search from a plain request (apps.md §9.4).
 
+**Measuring it again** (#513). `pnpm measure:tools` measures every profile on both CLIs the same way,
+repeatably: resident tokens (the API's usage, and `count_tokens` with and without Centralu's tools), cache
+reads and writes per request and which event caused a rebuild, tool selection and first-try argument
+validity on a fixed prompt set, and what tool results add over a longer session. `orchestrator-tools.test.ts`
+pins each profile's resident characters (`RESIDENT_BUDGET_CHARS`), and `adapters/claude/tool-prefix.test.ts`
+that attaching or detaching an app never changes a Claude session's tool list. How to run it and read it,
+and the baseline: [tool-cost.md](tool-cost.md). That baseline (2026-10-12) found that Codex no longer puts
+MCP tools in the request up front: codex-cli 0.160.0 reaches them from its own `exec` tool, so "Codex has no
+deferral" above describes the CLI the numbers above were taken with.
+
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts
 one more node process (about 40 MB resident, idle). The bridge sets
 `default_tools_approval_mode: 'approve'`: our tools are never asked about, as on the Claude side,

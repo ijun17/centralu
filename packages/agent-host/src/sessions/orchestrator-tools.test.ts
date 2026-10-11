@@ -10,11 +10,13 @@ import {
   ORCHESTRATOR_TOOLS,
   READER_BUDGET_CHARS,
   READER_TOOLS,
+  RESIDENT_BUDGET_CHARS,
   instructionsFor,
   orchestratorToolSchemas,
   profileAllows,
   runOrchestratorTool,
 } from './orchestrator-tools.js'
+import { TOOL_PROFILES, definitionChars, residentCost } from './tool-cost.js'
 
 /**
  * Text a worker wrote arrives at the orchestrator as a **tool result** (#121).
@@ -83,9 +85,7 @@ describe('the JSON fence around an orchestrator tool result', () => {
 
 /** What the model is sent for a set of tools, in characters: each one's full name, description and JSON schema */
 function sentChars(defs: readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape> }[]): number {
-  return defs
-    .map((t) => JSON.stringify({ name: `mcp__${ORCHESTRATOR_MCP_NAME}__${t.name}`, description: t.description, input_schema: z.toJSONSchema(t.schema) }))
-    .join('').length
+  return defs.reduce((n, t) => n + definitionChars(`mcp__${ORCHESTRATOR_MCP_NAME}__${t.name}`, t.description, z.toJSONSchema(t.schema)), 0)
 }
 
 /**
@@ -200,5 +200,27 @@ describe('ask_project', () => {
 
   it(`stays within ${DELEGATE_BUDGET_CHARS} characters`, () => {
     expect(sentChars(DELEGATE_TOOLS)).toBeLessThanOrEqual(DELEGATE_BUDGET_CHARS)
+  })
+})
+
+/**
+ * What every profile carries in every request (#513), on each CLI: the resident definitions and the
+ * instructions sent with them. The reader's sets have their own ceilings above; this is the whole seat.
+ * The measurement script (scripts/measure-tools.mts) reports the same count, and the tokens it costs.
+ */
+describe('the resident cost of each profile', () => {
+  for (const profile of TOOL_PROFILES) {
+    for (const cli of ['claude', 'codex'] as const) {
+      it(`keeps ${profile} on ${cli} within ${RESIDENT_BUDGET_CHARS[profile]} characters`, () => {
+        const c = residentCost(profile, cli)
+        expect(c.residentChars + c.instructionsChars).toBeLessThanOrEqual(RESIDENT_BUDGET_CHARS[profile])
+      })
+    }
+  }
+
+  it('counts the reader seat on Codex as exactly its three counted sets, and on Claude only the ones not deferred', () => {
+    expect(residentCost('reader', 'codex').residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(APP_ACCESS_TOOLS))
+    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => !('deferred' in t && t.deferred))
+    expect(residentCost('reader', 'claude').residentChars).toBe(sentChars(loaded))
   })
 })

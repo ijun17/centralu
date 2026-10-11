@@ -46,7 +46,8 @@
     "icon": "tsx scripts/render-icon.mts",
     "docs:schema": "tsx packages/agent-host/scripts/schema-doc.mts",
     "smoke:goal": "tsx packages/agent-host/scripts/smoke-goal.mts",
-    "smoke:interrupt": "tsx packages/agent-host/scripts/smoke-interrupt.mts"
+    "smoke:interrupt": "tsx packages/agent-host/scripts/smoke-interrupt.mts",
+    "measure:tools": "tsx packages/agent-host/scripts/measure-tools.mts"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

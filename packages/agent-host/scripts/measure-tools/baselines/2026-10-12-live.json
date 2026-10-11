@@ -1,0 +1,5110 @@
+{
+ "meta": {
+  "mode": "live",
+  "at": "2026-10-11T16:34:40.375Z",
+  "commit": "31e42c56",
+  "versions": {
+   "claude": "2.1.289 (Claude Code)",
+   "codex": "codex-cli 0.160.0",
+   "node": "v26.9.0"
+  },
+  "reps": {
+   "claude": 3,
+   "codex": 2
+  },
+  "clis": [
+   "claude",
+   "codex"
+  ],
+  "prompts": {
+   "comment": "The fixed prompt set of scripts/measure-tools.mts (#513). Placeholders: {project} this project's name, {other} the other project's name, {seed} the seeded session's name. A run's JSON keeps the prompts it used; change this file and the two runs no longer compare.",
+   "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+   "selection": [
+    {
+     "id": "other-sessions",
+     "profile": "reader",
+     "prompt": "What are the other sessions in this project working on right now?",
+     "expect": [
+      "read_session"
+     ]
+    },
+    {
+     "id": "earlier-decision",
+     "profile": "reader",
+     "prompt": "In an earlier conversation we decided how to back up the database. What did we choose?",
+     "expect": [
+      "recall",
+      "read_session"
+     ]
+    },
+    {
+     "id": "centralu-howto",
+     "profile": "reader",
+     "prompt": "How do I let my other Centralu projects use an app from this project?",
+     "expect": [
+      "app_guide"
+     ]
+    },
+    {
+     "id": "ask-project",
+     "profile": "reader",
+     "prompt": "Have the {other} project list the files in its top folder, then tell me what it found.",
+     "expect": [
+      "ask_project"
+     ]
+    },
+    {
+     "id": "open-app",
+     "profile": "reader",
+     "prompt": "One of my other Centralu projects shares a counter app. What number is it showing now?",
+     "expect": [
+      "find_apps",
+      "attach_app"
+     ]
+    },
+    {
+     "id": "no-tool",
+     "profile": "reader",
+     "prompt": "What is 17 times 23? Answer with the number only.",
+     "expect": []
+    },
+    {
+     "id": "orch-overview",
+     "profile": "orchestrator",
+     "prompt": "Which sessions are there in {project}, and what is each one doing?",
+     "expect": [
+      "list_sessions",
+      "read_session"
+     ]
+    },
+    {
+     "id": "orch-delegate",
+     "profile": "orchestrator",
+     "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
+     "expect": [
+      "send_to_session"
+     ]
+    }
+   ]
+  },
+  "models": {
+   "claude": {
+    "model": "haiku",
+    "change": "sonnet",
+    "measuredOnDefault": []
+   },
+   "codex": {
+    "change": "gpt-6-astra",
+    "measuredOnDefault": []
+   }
+  },
+  "note": "Two runs merged: --live --cli claude --reps 3 and --live --cli codex --reps 2 (meta and summary only)"
+ },
+ "summary": {
+  "definitions": {
+   "claude": {
+    "orchestrator": {
+     "profile": "orchestrator",
+     "cli": "claude",
+     "tools": 12,
+     "residentTools": 12,
+     "residentChars": 9954,
+     "deferredChars": 0,
+     "instructionsChars": 1844,
+     "prefixHash": "ef6a0ca714ab"
+    },
+    "manager": {
+     "profile": "manager",
+     "cli": "claude",
+     "tools": 5,
+     "residentTools": 5,
+     "residentChars": 3479,
+     "deferredChars": 0,
+     "instructionsChars": 2785,
+     "prefixHash": "bb1e5719f144"
+    },
+    "scoped": {
+     "profile": "scoped",
+     "cli": "claude",
+     "tools": 3,
+     "residentTools": 3,
+     "residentChars": 1888,
+     "deferredChars": 0,
+     "instructionsChars": 379,
+     "prefixHash": "50fe63f80274"
+    },
+    "builder": {
+     "profile": "builder",
+     "cli": "claude",
+     "tools": 1,
+     "residentTools": 1,
+     "residentChars": 610,
+     "deferredChars": 0,
+     "instructionsChars": 822,
+     "prefixHash": "c220d1208e2a"
+    },
+    "reader": {
+     "profile": "reader",
+     "cli": "claude",
+     "tools": 7,
+     "residentTools": 3,
+     "residentChars": 968,
+     "deferredChars": 1153,
+     "instructionsChars": 0,
+     "prefixHash": "640b4efe1e2c"
+    }
+   },
+   "codex": {
+    "orchestrator": {
+     "profile": "orchestrator",
+     "cli": "codex",
+     "tools": 12,
+     "residentTools": 12,
+     "residentChars": 9954,
+     "deferredChars": 0,
+     "instructionsChars": 0,
+     "prefixHash": "30aa3c2b909e"
+    },
+    "manager": {
+     "profile": "manager",
+     "cli": "codex",
+     "tools": 5,
+     "residentTools": 5,
+     "residentChars": 3479,
+     "deferredChars": 0,
+     "instructionsChars": 0,
+     "prefixHash": "235aa770a3c6"
+    },
+    "scoped": {
+     "profile": "scoped",
+     "cli": "codex",
+     "tools": 3,
+     "residentTools": 3,
+     "residentChars": 1888,
+     "deferredChars": 0,
+     "instructionsChars": 0,
+     "prefixHash": "45c0bab51982"
+    },
+    "builder": {
+     "profile": "builder",
+     "cli": "codex",
+     "tools": 1,
+     "residentTools": 1,
+     "residentChars": 610,
+     "deferredChars": 0,
+     "instructionsChars": 0,
+     "prefixHash": "95dd3af3348c"
+    },
+    "reader": {
+     "profile": "reader",
+     "cli": "codex",
+     "tools": 7,
+     "residentTools": 7,
+     "residentChars": 2121,
+     "deferredChars": 0,
+     "instructionsChars": 0,
+     "prefixHash": "9db439260fe1"
+    }
+   }
+  },
+  "resident": {
+   "claude": {
+    "none": {
+     "runs": [
+      16143,
+      16143,
+      16143
+     ],
+     "median": 16143,
+     "delta": 0,
+     "ours": 0,
+     "centraluChars": 0,
+     "toolsChars": 47361,
+     "systemChars": 137
+    },
+    "reader": {
+     "runs": [
+      16469,
+      16469,
+      16467
+     ],
+     "median": 16469,
+     "delta": 326,
+     "ours": 326,
+     "centraluChars": 866,
+     "toolsChars": 48230,
+     "systemChars": 137
+    },
+    "orchestrator": {
+     "runs": [
+      25661,
+      25513,
+      25661
+     ],
+     "median": 25661,
+     "delta": 9518,
+     "ours": 3223,
+     "centraluChars": 9541,
+     "toolsChars": 56914,
+     "systemChars": 29417
+    },
+    "manager": {
+     "runs": [
+      17617,
+      17617,
+      17617
+     ],
+     "median": 17617,
+     "delta": 1474,
+     "ours": 1476,
+     "centraluChars": 3309,
+     "toolsChars": 50675,
+     "systemChars": 137
+    },
+    "builder": {
+     "runs": [
+      23623,
+      23623,
+      23623
+     ],
+     "median": 23623,
+     "delta": 7480,
+     "ours": 462,
+     "centraluChars": 576,
+     "toolsChars": 47938,
+     "systemChars": 30629
+    }
+   },
+   "codex": {
+    "none": {
+     "runs": [
+      17872,
+      17872
+     ],
+     "median": 17872,
+     "delta": 0
+    },
+    "reader": {
+     "runs": [
+      17872,
+      17872
+     ],
+     "median": 17872,
+     "delta": 0
+    },
+    "orchestrator": {
+     "runs": [
+      18146,
+      18146
+     ],
+     "median": 18146,
+     "delta": 274
+    },
+    "manager": {
+     "runs": [
+      18652,
+      18652
+     ],
+     "median": 18652,
+     "delta": 780
+    },
+    "builder": {
+     "runs": [
+      18486,
+      18486
+     ],
+     "median": 18486,
+     "delta": 614
+    }
+   }
+  },
+  "cache": {
+   "claude": [
+    [
+     {
+      "step": "first",
+      "event": "first",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16457,
+       "cacheWrite": 0,
+       "output": 44
+      },
+      "tools": "first",
+      "deferredEntries": "first",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "first",
+      "history": "first",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "counted": {
+       "sent": 16321,
+       "withoutOurs": 15995
+      },
+      "total": 16467,
+      "lost": null
+     },
+     {
+      "step": "steady",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16457,
+       "cacheWrite": 61,
+       "output": 44
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16528,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16518,
+       "cacheWrite": 75,
+       "output": 149
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16603,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16593,
+       "cacheWrite": 270,
+       "output": 234
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [
+       "mcp__centralu__app_guide"
+      ],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16873,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn, after mcp__centralu__app_guide",
+      "usage": {
+       "input": 8,
+       "cacheRead": 16863,
+       "cacheWrite": 630,
+       "output": 208
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17501,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 17493,
+       "cacheWrite": 251,
+       "output": 165
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17754,
+      "lost": 8
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 17744,
+       "cacheWrite": 376,
+       "output": 94
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458
+      },
+      "toolCalls": [
+       "mcp__centralu__find_apps"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18130,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after mcp__centralu__find_apps",
+      "usage": {
+       "input": 8,
+       "cacheRead": 18120,
+       "cacheWrite": 179,
+       "output": 126
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240
+      },
+      "toolCalls": [
+       "mcp__centralu__attach_app"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18307,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after mcp__centralu__attach_app",
+      "usage": {
+       "input": 8,
+       "cacheRead": 18299,
+       "cacheWrite": 339,
+       "output": 128
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18646,
+      "lost": 8
+     },
+     {
+      "step": "after attach",
+      "event": "app attached",
+      "usage": {
+       "input": 10,
+       "cacheRead": 18638,
+       "cacheWrite": 266,
+       "output": 108
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18914,
+      "lost": 8
+     },
+     {
+      "step": "after attach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 18904,
+       "cacheWrite": 287,
+       "output": 71
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [
+       "mcp__app-counter__peek"
+      ],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19201,
+      "lost": 10
+     },
+     {
+      "step": "after attach",
+      "event": "same turn, after mcp__app-counter__peek",
+      "usage": {
+       "input": 8,
+       "cacheRead": 19191,
+       "cacheWrite": 95,
+       "output": 89
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19294,
+      "lost": 10
+     },
+     {
+      "step": "detach",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19286,
+       "cacheWrite": 109,
+       "output": 212
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19405,
+      "lost": 8
+     },
+     {
+      "step": "detach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19395,
+       "cacheWrite": 336,
+       "output": 97
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [
+       "mcp__centralu__detach_app"
+      ],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19741,
+      "lost": 10
+     },
+     {
+      "step": "detach",
+      "event": "same turn, after mcp__centralu__detach_app",
+      "usage": {
+       "input": 8,
+       "cacheRead": 19731,
+       "cacheWrite": 338,
+       "output": 59
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 20077,
+      "lost": 10
+     },
+     {
+      "step": "after detach",
+      "event": "app detached",
+      "usage": {
+       "input": 10,
+       "cacheRead": 20069,
+       "cacheWrite": 74,
+       "output": 35
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 20153,
+      "lost": 8
+     },
+     {
+      "step": "preset change",
+      "event": "preset changed (normal → auto)",
+      "usage": {
+       "input": 10,
+       "cacheRead": 20143,
+       "cacheWrite": 52,
+       "output": 33
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 20205,
+      "lost": 10
+     },
+     {
+      "step": "restart",
+      "event": "session restarted",
+      "usage": {
+       "input": 10,
+       "cacheRead": 20195,
+       "cacheWrite": 50,
+       "output": 28
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 20255,
+      "lost": 10
+     },
+     {
+      "step": "woken",
+      "event": "woken (host restarted, session resumed)",
+      "usage": {
+       "input": 10,
+       "cacheRead": 20245,
+       "cacheWrite": 45,
+       "output": 28
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 20300,
+      "lost": 10
+     },
+     {
+      "step": "model change",
+      "event": "model changed (→ sonnet)",
+      "usage": {
+       "input": 2,
+       "cacheRead": 17322,
+       "cacheWrite": 7404,
+       "output": 4
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": {
+       "rewrittenAt": 0
+      },
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 310,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 80
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 24728,
+      "lost": 2978
+     }
+    ],
+    [
+     {
+      "step": "first",
+      "event": "first",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16457,
+       "cacheWrite": 0,
+       "output": 50
+      },
+      "tools": "first",
+      "deferredEntries": "first",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "first",
+      "history": "first",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "counted": {
+       "sent": 16321,
+       "withoutOurs": 15995
+      },
+      "total": 16467,
+      "lost": null
+     },
+     {
+      "step": "steady",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16457,
+       "cacheWrite": 67,
+       "output": 41
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16534,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16524,
+       "cacheWrite": 72,
+       "output": 131
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16606,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16596,
+       "cacheWrite": 252,
+       "output": 157
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [
+       "mcp__centralu__app_guide"
+      ],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16858,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn, after mcp__centralu__app_guide",
+      "usage": {
+       "input": 8,
+       "cacheRead": 16848,
+       "cacheWrite": 536,
+       "output": 175
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17392,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 17384,
+       "cacheWrite": 218,
+       "output": 145
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17612,
+      "lost": 8
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 17602,
+       "cacheWrite": 356,
+       "output": 124
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382
+      },
+      "toolCalls": [
+       "mcp__centralu__find_apps"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17968,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after mcp__centralu__find_apps",
+      "usage": {
+       "input": 8,
+       "cacheRead": 17958,
+       "cacheWrite": 206,
+       "output": 102
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240
+      },
+      "toolCalls": [
+       "mcp__centralu__attach_app"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18172,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after mcp__centralu__attach_app",
+      "usage": {
+       "input": 8,
+       "cacheRead": 18164,
+       "cacheWrite": 315,
+       "output": 122
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18487,
+      "lost": 8
+     },
+     {
+      "step": "after attach",
+      "event": "app attached",
+      "usage": {
+       "input": 10,
+       "cacheRead": 18479,
+       "cacheWrite": 260,
+       "output": 108
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18749,
+      "lost": 8
+     },
+     {
+      "step": "after attach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 18739,
+       "cacheWrite": 287,
+       "output": 67
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [
+       "mcp__app-counter__peek"
+      ],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19036,
+      "lost": 10
+     },
+     {
+      "step": "after attach",
+      "event": "same turn, after mcp__app-counter__peek",
+      "usage": {
+       "input": 8,
+       "cacheRead": 19026,
+       "cacheWrite": 91,
+       "output": 54
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19125,
+      "lost": 10
+     },
+     {
+      "step": "detach",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19117,
+       "cacheWrite": 74,
+       "output": 110
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19201,
+      "lost": 8
+     },
+     {
+      "step": "detach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19191,
+       "cacheWrite": 234,
+       "output": 97
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [
+       "mcp__centralu__detach_app"
+      ],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19435,
+      "lost": 10
+     },
+     {
+      "step": "detach",
+      "event": "same turn, after mcp__centralu__detach_app",
+      "usage": {
+       "input": 8,
+       "cacheRead": 19425,
+       "cacheWrite": 338,
+       "output": 38
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19771,
+      "lost": 10
+     },
+     {
+      "step": "after detach",
+      "event": "app detached",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19763,
+       "cacheWrite": 53,
+       "output": 31
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19826,
+      "lost": 8
+     },
+     {
+      "step": "preset change",
+      "event": "preset changed (normal → auto)",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19816,
+       "cacheWrite": 48,
+       "output": 36
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19874,
+      "lost": 10
+     },
+     {
+      "step": "restart",
+      "event": "session restarted",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19864,
+       "cacheWrite": 53,
+       "output": 36
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19927,
+      "lost": 10
+     },
+     {
+      "step": "woken",
+      "event": "woken (host restarted, session resumed)",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19917,
+       "cacheWrite": 53,
+       "output": 28
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19980,
+      "lost": 10
+     },
+     {
+      "step": "model change",
+      "event": "model changed (→ sonnet)",
+      "usage": {
+       "input": 2,
+       "cacheRead": 17322,
+       "cacheWrite": 7417,
+       "output": 4
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": {
+       "rewrittenAt": 0
+      },
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1382,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 310,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 80
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 24741,
+      "lost": 2658
+     }
+    ],
+    [
+     {
+      "step": "first",
+      "event": "first",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16457,
+       "cacheWrite": 0,
+       "output": 66
+      },
+      "tools": "first",
+      "deferredEntries": "first",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "first",
+      "history": "first",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "counted": {
+       "sent": 16321,
+       "withoutOurs": 15995
+      },
+      "total": 16467,
+      "lost": null
+     },
+     {
+      "step": "steady",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16457,
+       "cacheWrite": 83,
+       "output": 39
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16550,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16540,
+       "cacheWrite": 70,
+       "output": 141
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 48230,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16620,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 16610,
+       "cacheWrite": 262,
+       "output": 143
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {},
+      "toolCalls": [
+       "mcp__centralu__app_guide"
+      ],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 16882,
+      "lost": 10
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn, after mcp__centralu__app_guide",
+      "usage": {
+       "input": 8,
+       "cacheRead": 16872,
+       "cacheWrite": 539,
+       "output": 128
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17419,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 17411,
+       "cacheWrite": 171,
+       "output": 146
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 48497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17592,
+      "lost": 8
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 17582,
+       "cacheWrite": 357,
+       "output": 120
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458
+      },
+      "toolCalls": [
+       "mcp__centralu__find_apps"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 17949,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after mcp__centralu__find_apps",
+      "usage": {
+       "input": 8,
+       "cacheRead": 17939,
+       "cacheWrite": 202,
+       "output": 108
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240
+      },
+      "toolCalls": [
+       "mcp__centralu__attach_app"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18149,
+      "lost": 10
+     },
+     {
+      "step": "attach",
+      "event": "same turn, after mcp__centralu__attach_app",
+      "usage": {
+       "input": 8,
+       "cacheRead": 18141,
+       "cacheWrite": 321,
+       "output": 122
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18470,
+      "lost": 8
+     },
+     {
+      "step": "after attach",
+      "event": "app attached",
+      "usage": {
+       "input": 10,
+       "cacheRead": 18462,
+       "cacheWrite": 260,
+       "output": 108
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 49064,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 18732,
+      "lost": 8
+     },
+     {
+      "step": "after attach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 18722,
+       "cacheWrite": 287,
+       "output": 80
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831
+      },
+      "toolCalls": [
+       "mcp__app-counter__peek"
+      ],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19019,
+      "lost": 10
+     },
+     {
+      "step": "after attach",
+      "event": "same turn, after mcp__app-counter__peek",
+      "usage": {
+       "input": 8,
+       "cacheRead": 19009,
+       "cacheWrite": 104,
+       "output": 67
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19121,
+      "lost": 10
+     },
+     {
+      "step": "detach",
+      "event": "next turn",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19113,
+       "cacheWrite": 87,
+       "output": 121
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [
+       "ToolSearch"
+      ],
+      "chars": {
+       "tools": 49226,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19210,
+      "lost": 8
+     },
+     {
+      "step": "detach",
+      "event": "same turn, after ToolSearch",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19200,
+       "cacheWrite": 245,
+       "output": 97
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__app-counter__peek",
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33
+      },
+      "toolCalls": [
+       "mcp__centralu__detach_app"
+      ],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19455,
+      "lost": 10
+     },
+     {
+      "step": "detach",
+      "event": "same turn, after mcp__centralu__detach_app",
+      "usage": {
+       "input": 8,
+       "cacheRead": 19445,
+       "cacheWrite": 338,
+       "output": 39
+      },
+      "tools": "same",
+      "deferredEntries": "changed",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19791,
+      "lost": 10
+     },
+     {
+      "step": "after detach",
+      "event": "app detached",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19783,
+       "cacheWrite": 54,
+       "output": 27
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19847,
+      "lost": 8
+     },
+     {
+      "step": "preset change",
+      "event": "preset changed (normal → auto)",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19837,
+       "cacheWrite": 44,
+       "output": 29
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19891,
+      "lost": 10
+     },
+     {
+      "step": "restart",
+      "event": "session restarted",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19881,
+       "cacheWrite": 46,
+       "output": 29
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19937,
+      "lost": 10
+     },
+     {
+      "step": "woken",
+      "event": "woken (host restarted, session resumed)",
+      "usage": {
+       "input": 10,
+       "cacheRead": 19927,
+       "cacheWrite": 46,
+       "output": 29
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": "extends",
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__echo",
+       "mcp__app-counter__hold",
+       "mcp__app-counter__peek",
+       "mcp__app-counter__poke",
+       "mcp__app-counter__run_status"
+      ],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 831,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 964
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 19983,
+      "lost": 10
+     },
+     {
+      "step": "model change",
+      "event": "model changed (→ sonnet)",
+      "usage": {
+       "input": 2,
+       "cacheRead": 17322,
+       "cacheWrite": 7398,
+       "output": 4
+      },
+      "tools": "same",
+      "deferredEntries": "same",
+      "deferredEntryNames": [
+       "mcp__centralu__app_guide",
+       "mcp__centralu__attach_app",
+       "mcp__centralu__detach_app",
+       "mcp__centralu__find_apps",
+       "mcp__app-counter__peek",
+       "DeferredToolPlaceholder"
+      ],
+      "system": "same",
+      "history": {
+       "rewrittenAt": 0
+      },
+      "loadedCentralu": [
+       "mcp__centralu__ask_project",
+       "mcp__centralu__read_session",
+       "mcp__centralu__recall"
+      ],
+      "appLoaded": [],
+      "deferred": [],
+      "resultChars": {
+       "mcp__centralu__app_guide": 1458,
+       "mcp__centralu__find_apps": 240,
+       "mcp__centralu__attach_app": 310,
+       "mcp__app-counter__peek": 33,
+       "mcp__centralu__detach_app": 80
+      },
+      "toolCalls": [],
+      "chars": {
+       "tools": 49497,
+       "centralu": 866,
+       "system": 137
+      },
+      "total": 24722,
+      "lost": 2661
+     }
+    ]
+   ],
+   "codex": [
+    [
+     {
+      "step": "first",
+      "event": "first",
+      "usage": {
+       "input": 208,
+       "cacheRead": 17664,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 17872,
+      "lost": null
+     },
+     {
+      "step": "steady",
+      "event": "next turn",
+      "usage": {
+       "input": 1469,
+       "cacheRead": 17664,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 19133,
+      "lost": 208
+     },
+     {
+      "step": "deferred load",
+      "event": "next turn",
+      "usage": {
+       "input": 220,
+       "cacheRead": 18944,
+       "cacheWrite": 0,
+       "output": 55
+      },
+      "toolCalls": [
+       "app_guide"
+      ],
+      "total": 19164,
+      "lost": 189
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn",
+      "usage": {
+       "input": 374,
+       "cacheRead": 18944,
+       "cacheWrite": 0,
+       "output": 29
+      },
+      "total": 19318,
+      "lost": 220
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn",
+      "usage": {
+       "input": 542,
+       "cacheRead": 19200,
+       "cacheWrite": 0,
+       "output": 37
+      },
+      "total": 19742,
+      "lost": 118
+     },
+     {
+      "step": "attach",
+      "event": "next turn",
+      "usage": {
+       "input": 234,
+       "cacheRead": 19584,
+       "cacheWrite": 0,
+       "output": 46
+      },
+      "toolCalls": [
+       "find_apps",
+       "attach_app"
+      ],
+      "total": 19818,
+      "lost": 158
+     },
+     {
+      "step": "attach",
+      "event": "same turn",
+      "usage": {
+       "input": 449,
+       "cacheRead": 19584,
+       "cacheWrite": 0,
+       "output": 27
+      },
+      "total": 20033,
+      "lost": 234
+     },
+     {
+      "step": "attach",
+      "event": "same turn",
+      "usage": {
+       "input": 319,
+       "cacheRead": 19840,
+       "cacheWrite": 0,
+       "output": 29
+      },
+      "total": 20159,
+      "lost": 193
+     },
+     {
+      "step": "attach",
+      "event": "same turn",
+      "usage": {
+       "input": 373,
+       "cacheRead": 19968,
+       "cacheWrite": 0,
+       "output": 10
+      },
+      "total": 20341,
+      "lost": 191
+     },
+     {
+      "step": "after attach",
+      "event": "app attached",
+      "usage": {
+       "input": 147,
+       "cacheRead": 20224,
+       "cacheWrite": 0,
+       "output": 42
+      },
+      "toolCalls": [
+       "peek"
+      ],
+      "total": 20371,
+      "lost": 117
+     },
+     {
+      "step": "after attach",
+      "event": "same turn",
+      "usage": {
+       "input": 278,
+       "cacheRead": 20224,
+       "cacheWrite": 0,
+       "output": 22
+      },
+      "total": 20502,
+      "lost": 147
+     },
+     {
+      "step": "after attach",
+      "event": "same turn",
+      "usage": {
+       "input": 214,
+       "cacheRead": 20352,
+       "cacheWrite": 0,
+       "output": 11
+      },
+      "total": 20566,
+      "lost": 150
+     },
+     {
+      "step": "detach",
+      "event": "next turn",
+      "usage": {
+       "input": 239,
+       "cacheRead": 20352,
+       "cacheWrite": 0,
+       "output": 40
+      },
+      "toolCalls": [
+       "detach_app"
+      ],
+      "total": 20591,
+      "lost": 214
+     },
+     {
+      "step": "detach",
+      "event": "same turn",
+      "usage": {
+       "input": 373,
+       "cacheRead": 20352,
+       "cacheWrite": 0,
+       "output": 29
+      },
+      "total": 20725,
+      "lost": 239
+     },
+     {
+      "step": "detach",
+      "event": "same turn",
+      "usage": {
+       "input": 217,
+       "cacheRead": 20608,
+       "cacheWrite": 0,
+       "output": 10
+      },
+      "total": 20825,
+      "lost": 117
+     },
+     {
+      "step": "after detach",
+      "event": "app detached",
+      "usage": {
+       "input": 240,
+       "cacheRead": 20608,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 20848,
+      "lost": 217
+     },
+     {
+      "step": "preset change",
+      "event": "preset changed (normal → auto)",
+      "usage": {
+       "input": 721,
+       "cacheRead": 20608,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21329,
+      "lost": 240
+     },
+     {
+      "step": "restart",
+      "event": "session restarted",
+      "usage": {
+       "input": 227,
+       "cacheRead": 21120,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21347,
+      "lost": 209
+     },
+     {
+      "step": "woken",
+      "event": "woken (host restarted, session resumed)",
+      "usage": {
+       "input": 245,
+       "cacheRead": 21120,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21365,
+      "lost": 227
+     },
+     {
+      "step": "model change",
+      "event": "model changed (→ gpt-6-astra)",
+      "usage": {
+       "input": 135,
+       "cacheRead": 21248,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21383,
+      "lost": 117
+     }
+    ],
+    [
+     {
+      "step": "first",
+      "event": "first",
+      "usage": {
+       "input": 976,
+       "cacheRead": 16896,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 17872,
+      "lost": null
+     },
+     {
+      "step": "steady",
+      "event": "next turn",
+      "usage": {
+       "input": 1469,
+       "cacheRead": 17664,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 19133,
+      "lost": 208
+     },
+     {
+      "step": "deferred load",
+      "event": "next turn",
+      "usage": {
+       "input": 220,
+       "cacheRead": 18944,
+       "cacheWrite": 0,
+       "output": 51
+      },
+      "toolCalls": [
+       "app_guide"
+      ],
+      "total": 19164,
+      "lost": 189
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn",
+      "usage": {
+       "input": 370,
+       "cacheRead": 18944,
+       "cacheWrite": 0,
+       "output": 46
+      },
+      "total": 19314,
+      "lost": 220
+     },
+     {
+      "step": "deferred load",
+      "event": "same turn",
+      "usage": {
+       "input": 656,
+       "cacheRead": 19072,
+       "cacheWrite": 0,
+       "output": 39
+      },
+      "total": 19728,
+      "lost": 242
+     },
+     {
+      "step": "attach",
+      "event": "next turn",
+      "usage": {
+       "input": 222,
+       "cacheRead": 19584,
+       "cacheWrite": 0,
+       "output": 50
+      },
+      "toolCalls": [
+       "find_apps",
+       "attach_app"
+      ],
+      "total": 19806,
+      "lost": 144
+     },
+     {
+      "step": "attach",
+      "event": "same turn",
+      "usage": {
+       "input": 441,
+       "cacheRead": 19584,
+       "cacheWrite": 0,
+       "output": 48
+      },
+      "total": 20025,
+      "lost": 222
+     },
+     {
+      "step": "attach",
+      "event": "same turn",
+      "usage": {
+       "input": 307,
+       "cacheRead": 19840,
+       "cacheWrite": 0,
+       "output": 50
+      },
+      "total": 20147,
+      "lost": 185
+     },
+     {
+      "step": "attach",
+      "event": "same turn",
+      "usage": {
+       "input": 364,
+       "cacheRead": 19968,
+       "cacheWrite": 0,
+       "output": 10
+      },
+      "total": 20332,
+      "lost": 179
+     },
+     {
+      "step": "after attach",
+      "event": "app attached",
+      "usage": {
+       "input": 266,
+       "cacheRead": 20096,
+       "cacheWrite": 0,
+       "output": 42
+      },
+      "toolCalls": [
+       "peek"
+      ],
+      "total": 20362,
+      "lost": 236
+     },
+     {
+      "step": "after attach",
+      "event": "same turn",
+      "usage": {
+       "input": 269,
+       "cacheRead": 20224,
+       "cacheWrite": 0,
+       "output": 44
+      },
+      "total": 20493,
+      "lost": 138
+     },
+     {
+      "step": "after attach",
+      "event": "same turn",
+      "usage": {
+       "input": 210,
+       "cacheRead": 20352,
+       "cacheWrite": 0,
+       "output": 13
+      },
+      "total": 20562,
+      "lost": 141
+     },
+     {
+      "step": "detach",
+      "event": "next turn",
+      "usage": {
+       "input": 237,
+       "cacheRead": 20352,
+       "cacheWrite": 0,
+       "output": 40
+      },
+      "toolCalls": [
+       "detach_app"
+      ],
+      "total": 20589,
+      "lost": 210
+     },
+     {
+      "step": "detach",
+      "event": "same turn",
+      "usage": {
+       "input": 371,
+       "cacheRead": 20352,
+       "cacheWrite": 0,
+       "output": 50
+      },
+      "total": 20723,
+      "lost": 237
+     },
+     {
+      "step": "detach",
+      "event": "same turn",
+      "usage": {
+       "input": 8539,
+       "cacheRead": 12288,
+       "cacheWrite": 0,
+       "output": 10
+      },
+      "total": 20827,
+      "lost": 8435
+     },
+     {
+      "step": "after detach",
+      "event": "app detached",
+      "usage": {
+       "input": 242,
+       "cacheRead": 20608,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 20850,
+      "lost": 219
+     },
+     {
+      "step": "preset change",
+      "event": "preset changed (normal → auto)",
+      "usage": {
+       "input": 723,
+       "cacheRead": 20608,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21331,
+      "lost": 242
+     },
+     {
+      "step": "restart",
+      "event": "session restarted",
+      "usage": {
+       "input": 741,
+       "cacheRead": 20608,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21349,
+      "lost": 723
+     },
+     {
+      "step": "woken",
+      "event": "woken (host restarted, session resumed)",
+      "usage": {
+       "input": 247,
+       "cacheRead": 21120,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21367,
+      "lost": 229
+     },
+     {
+      "step": "model change",
+      "event": "model changed (→ gpt-6-astra)",
+      "usage": {
+       "input": 137,
+       "cacheRead": 21248,
+       "cacheWrite": 0,
+       "output": 5
+      },
+      "toolCalls": [],
+      "total": 21385,
+      "lost": 119
+     }
+    ]
+   ]
+  },
+  "results": {
+   "claude": [
+    {
+     "step": "first",
+     "event": "first",
+     "usage": {
+      "input": 10,
+      "cacheRead": 16457,
+      "cacheWrite": 0,
+      "output": 43
+     },
+     "tools": "first",
+     "deferredEntries": "first",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "first",
+     "history": "first",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {},
+     "toolCalls": [],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "counted": {
+      "sent": 16321,
+      "withoutOurs": 15995
+     },
+     "total": 16467,
+     "added": null
+    },
+    {
+     "step": "list sessions",
+     "event": "next turn",
+     "usage": {
+      "input": 10,
+      "cacheRead": 16457,
+      "cacheWrite": 69,
+      "output": 111
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {},
+     "toolCalls": [
+      "mcp__centralu__read_session"
+     ],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 16536,
+     "added": 26
+    },
+    {
+     "step": "list sessions",
+     "event": "same turn, after mcp__centralu__read_session",
+     "usage": {
+      "input": 8,
+      "cacheRead": 16526,
+      "cacheWrite": 193,
+      "output": 171
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 174
+     },
+     "toolCalls": [],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 16727,
+     "added": 80
+    },
+    {
+     "step": "read a session",
+     "event": "next turn",
+     "usage": {
+      "input": 10,
+      "cacheRead": 16719,
+      "cacheWrite": 202,
+      "output": 155
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 174
+     },
+     "toolCalls": [
+      "mcp__centralu__read_session"
+     ],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 16931,
+     "added": 33
+    },
+    {
+     "step": "read a session",
+     "event": "same turn, after mcp__centralu__read_session",
+     "usage": {
+      "input": 8,
+      "cacheRead": 16921,
+      "cacheWrite": 254,
+      "output": 85
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461
+     },
+     "toolCalls": [],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 17183,
+     "added": 97
+    },
+    {
+     "step": "recall",
+     "event": "next turn",
+     "usage": {
+      "input": 10,
+      "cacheRead": 17175,
+      "cacheWrite": 114,
+      "output": 102
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461
+     },
+     "toolCalls": [
+      "mcp__centralu__recall"
+     ],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 17299,
+     "added": 31
+    },
+    {
+     "step": "recall",
+     "event": "same turn, after mcp__centralu__recall",
+     "usage": {
+      "input": 8,
+      "cacheRead": 17289,
+      "cacheWrite": 225,
+      "output": 93
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461,
+      "mcp__centralu__recall": 318
+     },
+     "toolCalls": [],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 17522,
+     "added": 121
+    },
+    {
+     "step": "recall again",
+     "event": "next turn",
+     "usage": {
+      "input": 10,
+      "cacheRead": 17514,
+      "cacheWrite": 113,
+      "output": 98
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461,
+      "mcp__centralu__recall": 318
+     },
+     "toolCalls": [
+      "mcp__centralu__recall"
+     ],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 17637,
+     "added": 22
+    },
+    {
+     "step": "recall again",
+     "event": "same turn, after mcp__centralu__recall",
+     "usage": {
+      "input": 8,
+      "cacheRead": 17627,
+      "cacheWrite": 221,
+      "output": 75
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461,
+      "mcp__centralu__recall": 636
+     },
+     "toolCalls": [],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 17856,
+     "added": 121
+    },
+    {
+     "step": "guide",
+     "event": "next turn",
+     "usage": {
+      "input": 10,
+      "cacheRead": 17848,
+      "cacheWrite": 105,
+      "output": 150
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461,
+      "mcp__centralu__recall": 636
+     },
+     "toolCalls": [
+      "ToolSearch"
+     ],
+     "chars": {
+      "tools": 48230,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 17963,
+     "added": 32
+    },
+    {
+     "step": "guide",
+     "event": "same turn, after ToolSearch",
+     "usage": {
+      "input": 10,
+      "cacheRead": 17953,
+      "cacheWrite": 368,
+      "output": 102
+     },
+     "tools": "same",
+     "deferredEntries": "changed",
+     "deferredEntryNames": [
+      "mcp__centralu__app_guide",
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461,
+      "mcp__centralu__recall": 636
+     },
+     "toolCalls": [
+      "mcp__centralu__app_guide"
+     ],
+     "chars": {
+      "tools": 48497,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 18331,
+     "added": 218
+    },
+    {
+     "step": "guide",
+     "event": "same turn, after mcp__centralu__app_guide",
+     "usage": {
+      "input": 8,
+      "cacheRead": 18321,
+      "cacheWrite": 498,
+      "output": 250
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "mcp__centralu__app_guide",
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461,
+      "mcp__centralu__recall": 636,
+      "mcp__centralu__app_guide": 1458
+     },
+     "toolCalls": [],
+     "chars": {
+      "tools": 48497,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 18827,
+     "added": 394
+    },
+    {
+     "step": "last",
+     "event": "next turn",
+     "usage": {
+      "input": 10,
+      "cacheRead": 18819,
+      "cacheWrite": 265,
+      "output": 35
+     },
+     "tools": "same",
+     "deferredEntries": "same",
+     "deferredEntryNames": [
+      "mcp__centralu__app_guide",
+      "DeferredToolPlaceholder"
+     ],
+     "system": "same",
+     "history": "extends",
+     "loadedCentralu": [
+      "mcp__centralu__ask_project",
+      "mcp__centralu__read_session",
+      "mcp__centralu__recall"
+     ],
+     "appLoaded": [],
+     "deferred": [
+      "mcp__centralu__app_guide",
+      "mcp__centralu__attach_app",
+      "mcp__centralu__detach_app",
+      "mcp__centralu__find_apps"
+     ],
+     "resultChars": {
+      "mcp__centralu__read_session": 461,
+      "mcp__centralu__recall": 636,
+      "mcp__centralu__app_guide": 1458
+     },
+     "toolCalls": [],
+     "chars": {
+      "tools": 48497,
+      "centralu": 866,
+      "system": 137
+     },
+     "total": 19094,
+     "added": 17
+    }
+   ],
+   "codex": [
+    {
+     "step": "first",
+     "event": "first",
+     "usage": {
+      "input": 976,
+      "cacheRead": 16896,
+      "cacheWrite": 0,
+      "output": 5
+     },
+     "toolCalls": [],
+     "total": 17872,
+     "added": null
+    },
+    {
+     "step": "list sessions",
+     "event": "next turn",
+     "usage": {
+      "input": 6853,
+      "cacheRead": 12288,
+      "cacheWrite": 0,
+      "output": 53
+     },
+     "toolCalls": [
+      "read_session"
+     ],
+     "total": 19141,
+     "added": 1264
+    },
+    {
+     "step": "list sessions",
+     "event": "same turn",
+     "usage": {
+      "input": 7661,
+      "cacheRead": 18944,
+      "cacheWrite": 0,
+      "output": 23
+     },
+     "total": 26605,
+     "added": 7411
+    },
+    {
+     "step": "list sessions",
+     "event": "same turn",
+     "usage": {
+      "input": 360,
+      "cacheRead": 26368,
+      "cacheWrite": 0,
+      "output": 55
+     },
+     "total": 26728,
+     "added": 100
+    },
+    {
+     "step": "read a session",
+     "event": "next turn",
+     "usage": {
+      "input": 315,
+      "cacheRead": 26496,
+      "cacheWrite": 0,
+      "output": 68
+     },
+     "toolCalls": [
+      "read_session"
+     ],
+     "total": 26811,
+     "added": 28
+    },
+    {
+     "step": "read a session",
+     "event": "same turn",
+     "usage": {
+      "input": 372,
+      "cacheRead": 26624,
+      "cacheWrite": 0,
+      "output": 36
+     },
+     "total": 26996,
+     "added": 117
+    },
+    {
+     "step": "recall",
+     "event": "next turn",
+     "usage": {
+      "input": 178,
+      "cacheRead": 26880,
+      "cacheWrite": 0,
+      "output": 48
+     },
+     "toolCalls": [
+      "recall"
+     ],
+     "total": 27058,
+     "added": 26
+    },
+    {
+     "step": "recall",
+     "event": "same turn",
+     "usage": {
+      "input": 320,
+      "cacheRead": 26880,
+      "cacheWrite": 0,
+      "output": 27
+     },
+     "total": 27200,
+     "added": 94
+    },
+    {
+     "step": "recall",
+     "event": "same turn",
+     "usage": {
+      "input": 357,
+      "cacheRead": 27008,
+      "cacheWrite": 0,
+      "output": 32
+     },
+     "total": 27365,
+     "added": 138
+    },
+    {
+     "step": "recall again",
+     "event": "next turn",
+     "usage": {
+      "input": 278,
+      "cacheRead": 27136,
+      "cacheWrite": 0,
+      "output": 46
+     },
+     "toolCalls": [
+      "recall"
+     ],
+     "total": 27414,
+     "added": 17
+    },
+    {
+     "step": "recall again",
+     "event": "same turn",
+     "usage": {
+      "input": 334,
+      "cacheRead": 27264,
+      "cacheWrite": 0,
+      "output": 32
+     },
+     "total": 27598,
+     "added": 138
+    },
+    {
+     "step": "guide",
+     "event": "next turn",
+     "usage": {
+      "input": 265,
+      "cacheRead": 27392,
+      "cacheWrite": 0,
+      "output": 46
+     },
+     "toolCalls": [
+      "app_guide"
+     ],
+     "total": 27657,
+     "added": 27
+    },
+    {
+     "step": "guide",
+     "event": "same turn",
+     "usage": {
+      "input": 282,
+      "cacheRead": 27520,
+      "cacheWrite": 0,
+      "output": 24
+     },
+     "total": 27802,
+     "added": 99
+    },
+    {
+     "step": "guide",
+     "event": "same turn",
+     "usage": {
+      "input": 573,
+      "cacheRead": 27648,
+      "cacheWrite": 0,
+      "output": 26
+     },
+     "total": 28221,
+     "added": 395
+    },
+    {
+     "step": "last",
+     "event": "next turn",
+     "usage": {
+      "input": 228,
+      "cacheRead": 28032,
+      "cacheWrite": 0,
+      "output": 5
+     },
+     "toolCalls": [],
+     "total": 28260,
+     "added": 13
+    }
+   ]
+  },
+  "selection": {
+   "claude": {
+    "other-sessions": {
+     "profile": "reader",
+     "expect": [
+      "read_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "read_session",
+        "read_session"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [
+        "read_session"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [
+        "read_session"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {},
+       "firstOk": true
+      }
+     ]
+    },
+    "earlier-decision": {
+     "profile": "reader",
+     "expect": [
+      "recall",
+      "read_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "recall"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "query": "database backup"
+       },
+       "firstOk": true
+      },
+      {
+       "called": [
+        "recall"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "query": "database backup"
+       },
+       "firstOk": true
+      },
+      {
+       "called": [
+        "recall"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "query": "database backup"
+       },
+       "firstOk": true
+      }
+     ]
+    },
+    "centralu-howto": {
+     "profile": "reader",
+     "expect": [
+      "app_guide"
+     ],
+     "runs": [
+      {
+       "called": [
+        "app_guide",
+        "app_guide",
+        "app_guide"
+       ],
+       "calls": 4,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "topic": "sharing apps between projects"
+       },
+       "firstOk": false
+      },
+      {
+       "called": [
+        "app_guide",
+        "app_guide"
+       ],
+       "calls": 3,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "topic": "sharing apps between projects"
+       },
+       "firstOk": false
+      },
+      {
+       "called": [],
+       "calls": 1,
+       "verdict": "none",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      }
+     ]
+    },
+    "ask-project": {
+     "profile": "reader",
+     "expect": [
+      "ask_project"
+     ],
+     "runs": [
+      {
+       "called": [
+        "ask_project"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "project": "ops",
+        "task": "List all files and directories in your top folder (root directory)"
+       },
+       "firstOk": false
+      },
+      {
+       "called": [
+        "ask_project"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "project": "ops",
+        "task": "List the files in your top folder"
+       },
+       "firstOk": false
+      },
+      {
+       "called": [
+        "ask_project"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "project": "ops",
+        "task": "List the files in your top folder"
+       },
+       "firstOk": false
+      }
+     ]
+    },
+    "open-app": {
+     "profile": "reader",
+     "expect": [
+      "find_apps",
+      "attach_app"
+     ],
+     "runs": [
+      {
+       "called": [
+        "read_session",
+        "ask_project",
+        "ask_project"
+       ],
+       "calls": 3,
+       "verdict": "wrong",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      },
+      {
+       "called": [
+        "recall",
+        "read_session",
+        "read_session",
+        "ask_project",
+        "ask_project"
+       ],
+       "calls": 5,
+       "verdict": "wrong",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      },
+      {
+       "called": [
+        "read_session",
+        "read_session",
+        "recall",
+        "recall"
+       ],
+       "calls": 4,
+       "verdict": "wrong",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      }
+     ]
+    },
+    "no-tool": {
+     "profile": "reader",
+     "expect": [],
+     "runs": [
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      },
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      },
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      }
+     ]
+    },
+    "orch-overview": {
+     "profile": "orchestrator",
+     "expect": [
+      "list_sessions",
+      "read_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "list_sessions"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "none",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      },
+      {
+       "called": [
+        "list_sessions"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {},
+       "firstOk": true
+      }
+     ]
+    },
+    "orch-delegate": {
+     "profile": "orchestrator",
+     "expect": [
+      "send_to_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "send_to_session"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "sessionId": "e93bec26-73ac-4d22-bc79-bc3e1ca84f52",
+        "text": "Reply with the single word DONE."
+       },
+       "firstOk": true
+      },
+      {
+       "called": [
+        "send_to_session"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "sessionId": "e93bec26-73ac-4d22-bc79-bc3e1ca84f52",
+        "text": "Reply with the single word DONE."
+       },
+       "firstOk": true
+      },
+      {
+       "called": [
+        "send_to_session"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": true,
+       "firstArgs": {
+        "sessionId": "e93bec26-73ac-4d22-bc79-bc3e1ca84f52",
+        "text": "Reply with the single word DONE."
+       },
+       "firstOk": true
+      }
+     ]
+    }
+   },
+   "codex": {
+    "other-sessions": {
+     "profile": "reader",
+     "expect": [
+      "read_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "read_session",
+        "read_session"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [
+        "read_session",
+        "read_session"
+       ],
+       "calls": 4,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      }
+     ]
+    },
+    "earlier-decision": {
+     "profile": "reader",
+     "expect": [
+      "recall",
+      "read_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "recall",
+        "read_session"
+       ],
+       "calls": 4,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [
+        "recall"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      }
+     ]
+    },
+    "centralu-howto": {
+     "profile": "reader",
+     "expect": [
+      "app_guide"
+     ],
+     "runs": [
+      {
+       "called": [
+        "app_guide",
+        "app_guide"
+       ],
+       "calls": 5,
+       "verdict": "right",
+       "steps": 3,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false
+      },
+      {
+       "called": [
+        "app_guide",
+        "app_guide",
+        "app_guide",
+        "app_guide"
+       ],
+       "calls": 7,
+       "verdict": "right",
+       "steps": 3,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false
+      }
+     ]
+    },
+    "ask-project": {
+     "profile": "reader",
+     "expect": [
+      "ask_project"
+     ],
+     "runs": [
+      {
+       "called": [
+        "ask_project"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false
+      },
+      {
+       "called": [
+        "ask_project"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false
+      }
+     ]
+    },
+    "open-app": {
+     "profile": "reader",
+     "expect": [
+      "find_apps",
+      "attach_app"
+     ],
+     "runs": [
+      {
+       "called": [
+        "find_apps",
+        "attach_app"
+       ],
+       "calls": 4,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [
+        "find_apps",
+        "attach_app"
+       ],
+       "calls": 4,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      }
+     ]
+    },
+    "no-tool": {
+     "profile": "reader",
+     "expect": [],
+     "runs": [
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      },
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null
+      }
+     ]
+    },
+    "orch-overview": {
+     "profile": "orchestrator",
+     "expect": [
+      "list_sessions",
+      "read_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "list_sessions",
+        "read_session"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [
+        "list_sessions",
+        "read_session"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      }
+     ]
+    },
+    "orch-delegate": {
+     "profile": "orchestrator",
+     "expect": [
+      "send_to_session"
+     ],
+     "runs": [
+      {
+       "called": [
+        "send_to_session"
+       ],
+       "calls": 1,
+       "verdict": "right",
+       "steps": 1,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      },
+      {
+       "called": [
+        "read_session",
+        "send_to_session",
+        "read_session"
+       ],
+       "calls": 3,
+       "verdict": "wrong",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": true
+      }
+     ]
+    }
+   }
+  }
+ }
+}
