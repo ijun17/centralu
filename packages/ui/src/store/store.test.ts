@@ -2466,6 +2466,18 @@ describe('a pinned view (M4 B-2)', () => {
     expect(pinned().map((p) => p.key)).toEqual(['_user/slider'])
   })
 
+  it('removing a linked machine’s user-folder app names that machine; removing this computer’s names none (#82)', async () => {
+    const mock = await live()
+    const removed: unknown[][] = []
+    vi.spyOn(mock.apps, 'remove').mockImplementation(async (...args: unknown[]) => void removed.push(args))
+    expect(await useStore.getState().removeUserApp('slider', 'm1')).toBe(true)
+    expect(await useStore.getState().removeUserApp('slider')).toBe(true)
+    expect(removed).toEqual([
+      ['slider', null, 'm1'],
+      ['slider', null, undefined],
+    ])
+  })
+
   it('Restart of a linked machine’s user-folder app restarts it on that machine, not this computer’s app of the same id (#82)', async () => {
     const mock = await live()
     const restarts: unknown[][] = []

@@ -1394,7 +1394,8 @@ export const RpcMethods = {
    * relevant list is `apps.list`'s apps with `projectId: null`.
    */
   'apps.remove': {
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
+    /** `machine` (#82, additive): a linked machine's user-folder app, removed on that machine; this host's app of the same id is untouched */
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**

@@ -729,7 +729,8 @@ export type AppState = {
    * caller is confirmed first.
    * @returns whether it was removed — a failure is reported as a toast
    */
-  removeUserApp(appId: string): Promise<boolean>
+  /** `machine`: a linked machine's user-folder app (#82), removed on that machine and nowhere else */
+  removeUserApp(appId: string, machine?: string | null): Promise<boolean>
   /**
    * Shares a project app with the person's other projects, or stops (#371 part A). The list follows
    * from the host's broadcast; a failure is reported as a toast.
@@ -5099,11 +5100,11 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async removeUserApp(appId) {
+  async removeUserApp(appId, machine) {
     const platform = get().platform
     if (!platform) return false
     try {
-      await platform.apps.remove(appId, null)
+      await platform.apps.remove(appId, null, machine ?? undefined)
       return true
     } catch (e) {
       set({ toast: `Could not remove the app: ${(e as Error).message}` })

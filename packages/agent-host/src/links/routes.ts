@@ -187,7 +187,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Apps: a project app routes with its project; a user-folder app by `machine` where the call takes it ──
   'apps.runs': app((r, q) => (Array.isArray(r) ? r.map((x) => q.appRun(x)) : r)),
   'apps.restart': app(),
-  'apps.remove': project(),
+  'apps.remove': app(),
   'apps.create': project((r, q) =>
     r && typeof r === 'object'
       ? { ...(r as object), app: q.app((r as { app?: unknown }).app), builder: q.session((r as { builder?: unknown }).builder) }

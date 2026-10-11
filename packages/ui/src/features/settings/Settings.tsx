@@ -3,7 +3,7 @@ import type { SessionInfo, ToolName, ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { useTools } from '../../store/selectors.js'
+import { useMachineName, useTools } from '../../store/selectors.js'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { isPlainEscape } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -413,7 +413,7 @@ function AppsSettings() {
             </div>
           ))}
           {catalog.user.length > 0 && (
-            <div>
+            <div className="mb-4">
               <p className="readout text-2xs uppercase text-ink-faint">Your apps</p>
               <ul className="mt-2 space-y-2">
                 {catalog.user.map((a) => (
@@ -422,9 +422,28 @@ function AppsSettings() {
               </ul>
             </div>
           )}
+          {/* Each linked machine's own apps (#82), under its name: what is done to one here is done on that machine */}
+          {Object.keys(catalog.byMachine).map((machine) => (
+            <MachineAppsGroup key={machine} machine={machine} apps={catalog.byMachine[machine]!} />
+          ))}
         </div>
       )}
     </section>
+  )
+}
+
+/** A linked machine's user-folder apps (#82), named by the machine */
+function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCatalogApp[] }) {
+  const name = useMachineName(machine) ?? machine
+  return (
+    <div className="mb-4" data-testid={`settings-machine-apps-${machine}`}>
+      <p className="readout text-2xs uppercase text-ink-faint">{name}’s apps</p>
+      <ul className="mt-2 space-y-2">
+        {apps.map((a) => (
+          <ExternalAppRow key={a.key} app={a} />
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -447,6 +466,8 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const openApp = useStore((s) => s.openApp)
   const removeUserApp = useStore((s) => s.removeUserApp)
   const [confirming, setConfirming] = useState(false)
+  // A linked machine's user-folder app (#82): removed there, so the question names the machine
+  const machineName = useMachineName(app.projectId === null ? app.info.machine : null)
   return (
     <li className="rounded-md border border-line bg-surface-raised px-3 py-2" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
       <div className="flex items-center gap-2 text-sm text-ink">
@@ -496,13 +517,14 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       <SecretsLine app={app} />
       <ShareLine app={app} />
       <GridSpanLine app={app} />
-      {/* Another machine's user-folder app (#82) is not removed from here: `apps.remove` names no machine, and would remove this computer's app of the same id */}
+      {/* Another machine's user-folder app (#82) is removed on that machine: `machine` names it, so this computer's app of the same id is never touched */}
       {app.projectId === null &&
-        !app.info.machine &&
         (confirming ? (
           <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid="external-app-remove-confirm">
             <p className="text-xs leading-body text-ink-muted">
-              Remove {app.title}? Its folder moves to the app trash and agents lose its tools. Its run records stay.
+              {machineName
+                ? `Remove ${app.title} from ${machineName}? Its folder moves to the app trash there and agents there lose its tools. Its run records stay. Apps on this computer are not touched.`
+                : `Remove ${app.title}? Its folder moves to the app trash and agents lose its tools. Its run records stay.`}
             </p>
             <div className="mt-1.5 flex justify-end gap-2">
               <button
@@ -516,7 +538,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
               <button
                 type="button"
                 className="rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:text-ink-signal"
-                onClick={() => void removeUserApp(app.appId).then((ok) => ok || setConfirming(false))}
+                onClick={() => void removeUserApp(app.appId, app.info.machine).then((ok) => ok || setConfirming(false))}
                 data-testid="external-app-remove-yes"
               >
                 Remove

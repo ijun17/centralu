@@ -797,10 +797,27 @@ call, and an instance of one machine with a `machine` of another is refused. The
 qualified (`projectId`, `callerSessionId`, `sessionId`), so the panel's link reaches the agent session on that machine.
 
 In the window, every one of those calls passes the machine of a machine's user-folder app (`userAppMachine`), the
-pinned view shows all its panels, and Restart restarts it there. Settings → Apps does not offer Remove for such an app:
-`apps.remove` names no machine, and would remove this computer's app of the same id.
+pinned view shows all its panels, and Restart restarts it there. Remove was left out of this step: `apps.remove` named no
+machine, and would have removed this computer's app of the same id (§11.10 adds it).
 
 Tested: `links/router.test.ts` (each call sent by `machine`, the hub's own without it, the runs qualified, a builder
 asked from a view naming one machine), `store.test.ts` (Restart passes the machine), and the linked-hosts e2e in
 Chromium and WebKit (the machine's `notes` lists its own runs and asks that machine for its versions; this computer's
 `notes` lists none of them).
+
+### 11.10 Removing a machine's user-folder app (owner, 2026-10-12)
+
+The owner allowed removing another machine's user-folder app from Settings → Apps. `apps.remove` takes the same optional
+`machine` (additive) and routes like the panels' calls (§11.9): with no project and a `machine`, the call goes to that
+machine without the parameter and removes its own app there; without `machine` it is this computer's, as before; a
+machine nobody linked removes nothing anywhere. That machine broadcasts `external_apps_changed`, which reaches the window
+through the link, and the window reads the merged list again: the app's pinned view closes as any vanished app's does
+(machine-aware since §11.4), and its grid panel stops showing (`visibleGridPanels`, keyed by machine since §11.8).
+
+Settings → Apps did not list a machine's user-folder apps at all before this: they now stand in a group per machine
+under its name, and the question before Remove names the machine and says this computer's apps are not touched.
+
+Tested: `links/router.test.ts` (removed on the named machine only, the hub's own without `machine`, an unlinked machine
+refused), `store.test.ts` (the window passes the machine), and the linked-hosts e2e in Chromium and WebKit: with both
+`notes` on the grid and in pinned views, removing the machine's from Settings moves that machine's folder away and leaves
+this computer's folder, row, pinned view and grid panel as they were, while the machine's row, view and panel go.

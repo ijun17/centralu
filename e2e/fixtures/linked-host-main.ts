@@ -16,6 +16,7 @@ import { linkedViews } from '../../packages/agent-host/src/links/linked-views.js
 import { ExternalApps } from '../../packages/agent-host/src/apps/external/runtime.js'
 import { storeRunLedger } from '../../packages/agent-host/src/app-run-ledger.js'
 import { runtimeViewSource } from '../../packages/agent-host/src/app-view-source.js'
+import { onExternalAppListChanged } from '../../packages/agent-host/src/app-list-events.js'
 import { ViewHost } from '../../packages/agent-host/src/views/view-host.js'
 import { OriginPorts, type PortBook } from '../../packages/agent-host/src/views/origin-ports.js'
 import { randomBytes } from 'node:crypto'
@@ -119,6 +120,10 @@ const externalApps = new ExternalApps({
   emitRunsChanged: () => {},
 })
 externalApps.refresh()
+// An app's place or status changed: the window (and a hub linked here) reads the list again, as main.ts wires it
+onExternalAppListChanged(externalApps, () => {
+  if (up) server.broadcast({ type: 'external_apps_changed' })
+})
 mgr.useExternalApps(externalApps)
 const httpSecret = randomBytes(32).toString('base64url')
 let port = 0

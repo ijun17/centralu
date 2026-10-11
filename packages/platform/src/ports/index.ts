@@ -880,7 +880,7 @@ export interface AppsPort {
    * folder, and the run history stays. The host rejects this for a project app (it is a file
    * in the repository, so git is where it gets collected).
    */
-  remove(appId: AppId, projectId: string | null): Promise<void>
+  remove(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<void>
   /**
    * Creates a new app from a template (M4 C-1) — called by the "New app" window. The same
    * door as the orchestrator's `create_app`. The host validates the name, trust and any

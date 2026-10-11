@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { APP_VERSION } from '../../packages/protocol/src/brand.js'
@@ -164,6 +164,64 @@ export function linkedHostsUiTests(): void {
         await page.getByTestId('pinned-app-_user/notes').getByTestId('pinned-runs-toggle').click()
         await expect.poll(async () => (await tools('_user/notes').allTextContents()).length).toBeGreaterThan(0)
         expect((await tools('_user/notes').allTextContents()).filter((t) => t === 'increment')).toEqual([])
+      })
+    })
+  })
+
+  test('removing another machine’s user-folder app removes it there only: its views and panel go, this computer’s app of the same id stays', async ({ page }) => {
+    test.setTimeout(150_000)
+    await withPair({ apps: true }, async (pair) => {
+      await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
+      const calls = watchCalls(page)
+      await page.goto('/')
+      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      const theirs = `${MACHINE}:_user/notes`
+      const theirFolder = join(pair.remoteSide.dir, 'data', 'apps', 'notes')
+      const ourFolder = join(pair.hubSide.dir, 'data', 'apps', 'notes')
+      const gridView = (key: string) =>
+        page.getByTestId(`pinned-app-grid:${key}`).getByTestId('app-frame-iframe').contentFrame().locator('iframe').contentFrame()
+
+      await test.step('both notes stand on the grid and in their own pinned views', async () => {
+        await page.getByTestId('grid-button').click()
+        await expect(page.getByTestId('grid')).toBeVisible()
+        await dragRowToGrid(page, page.getByTestId(`app-row-${theirs}`), 'padding')
+        await expect(page.getByTestId(`grid-panel-app:${theirs}`)).toBeVisible()
+        await dragRowToGrid(page, page.getByTestId('app-row-_user/notes'), { panel: `app:${theirs}`, side: 'after' })
+        await expect(page.getByTestId('grid-panel-app:_user/notes')).toBeVisible()
+        await expect(gridView('_user/notes').locator('#count')).toHaveText('0', { timeout: 30_000 })
+        await page.getByTestId(`app-row-${theirs}`).click()
+        await expect(appView(page, theirs).locator('#count')).toHaveText('0', { timeout: 30_000 })
+        await page.getByTestId('app-row-_user/notes').click()
+        await expect(appView(page, '_user/notes').locator('#count')).toHaveText('0', { timeout: 30_000 })
+      })
+
+      await test.step('Settings → Apps removes theirs, saying where', async () => {
+        await page.getByTestId('open-settings').click()
+        await page.getByTestId('settings-tab-apps').click()
+        const row = page.getByTestId(`external-app-${theirs}`)
+        await row.getByTestId('external-app-remove').click()
+        await expect(row.getByTestId('external-app-remove-confirm')).toContainText('from Remote box')
+        await row.getByTestId('external-app-remove-yes').click()
+        await expect(row).toHaveCount(0, { timeout: 15_000 })
+        // Removed there, by name of that machine; this computer's app was never asked
+        expect(calls.filter((c) => c.method === 'apps.remove').map((c) => c.params)).toEqual([{ appId: 'notes', projectId: null, machine: MACHINE }])
+        expect(existsSync(theirFolder)).toBe(false)
+        expect(existsSync(ourFolder)).toBe(true)
+        await expect(page.getByTestId('external-app-_user/notes')).toBeVisible()
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('their views and panel go; this computer’s notes keeps its row, view and panel', async () => {
+        await expect(page.getByTestId(`app-row-${theirs}`)).toHaveCount(0)
+        await expect(page.getByTestId(`pinned-app-${theirs}`)).toHaveCount(0)
+        await expect(page.getByTestId('app-row-_user/notes')).toBeVisible()
+        await expect(appView(page, '_user/notes').locator('#count')).toHaveText('0')
+        await page.getByTestId('grid-button').click()
+        await expect(page.getByTestId('grid')).toBeVisible()
+        await expect(page.getByTestId(`grid-panel-app:${theirs}`)).toHaveCount(0)
+        await expect(page.getByTestId(`pinned-app-grid:${theirs}`)).toHaveCount(0)
+        await expect(page.getByTestId('grid-panel-app:_user/notes')).toBeVisible()
+        await expect(gridView('_user/notes').locator('#count')).toHaveText('0')
       })
     })
   })

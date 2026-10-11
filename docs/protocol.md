@@ -338,7 +338,8 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   the optional `machine` (additive), and so do the calls of its panels and Restart: `apps.runs`,
   `apps.permissions`, `apps.forgetPermission`, `apps.usage`, `apps.setSecret`, `apps.versions`,
   `apps.restoreVersion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.errors`,
-  `apps.sendError`, `apps.restart` (additive; [plans/remote-hub.md](plans/remote-hub.md) §11.9).
+  `apps.sendError`, `apps.restart` (additive; [plans/remote-hub.md](plans/remote-hub.md) §11.9), and `apps.remove`,
+  which then removes that machine's app and never this host's of the same id (§11.10).
   `apps.runs` rows come back with their session ids qualified.
   `messages.image` is read on the session's own machine, and the hub drops `file` from its answer: that path is on the
   other machine, so the window offers no reveal for it.

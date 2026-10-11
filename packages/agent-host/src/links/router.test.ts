@@ -238,6 +238,22 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(m2.calls).toHaveLength(calls.length)
     })
 
+    it('removes a machine’s user-folder app on that machine only, never this computer’s app of the same id (plan §11.10)', async () => {
+      const { router, local, m1, m2 } = rig()
+      await router.handle('apps.remove', { appId: 'notes', projectId: null, machine: 'm2' })
+      // There it is its own app: the parameter does not travel, and neither the hub nor another machine hears of it
+      expect(m2.calls).toEqual([{ method: 'apps.remove', params: { appId: 'notes', projectId: null } }])
+      expect(local).toEqual([])
+      expect(m1.calls).toEqual([])
+      // Without `machine`, this computer's own app, and only it
+      await router.handle('apps.remove', { appId: 'notes', projectId: null })
+      expect(local).toEqual([{ method: 'apps.remove', params: { appId: 'notes', projectId: null } }])
+      expect(m2.calls).toHaveLength(1)
+      // A machine nobody linked removes nothing anywhere
+      await expect(router.handle('apps.remove', { appId: 'notes', projectId: null, machine: 'm9' })).rejects.toThrow(/No linked machine m9/)
+      expect(local).toHaveLength(1)
+    })
+
     it('qualifies a remote app’s runs, so the panel’s link reaches the agent session on that machine', async () => {
       const { router, m1 } = rig()
       m1.answers['apps.runs'] = [{ id: 'r1', projectId: null, appId: 'notes', callerSessionId: 's1', sessionId: 's9', parentRunId: null }]

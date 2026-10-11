@@ -389,8 +389,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('apps.restart', { appId, projectId, ...on(machine) })
       },
       runs: (appId, projectId, limit, machine) => rpc.call('apps.runs', { appId, projectId, limit, ...on(machine) }),
-      remove: async (appId, projectId) => {
-        await rpc.call('apps.remove', { appId, projectId })
+      remove: async (appId, projectId, machine) => {
+        await rpc.call('apps.remove', { appId, projectId, ...on(machine) })
       },
       create: (spec) => rpc.call('apps.create', spec),
       builder: (appId, projectId, machine) => rpc.call('apps.builder', { appId, projectId, ...on(machine) }),
