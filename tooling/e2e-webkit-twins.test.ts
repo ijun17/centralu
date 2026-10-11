@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest'
 /**
  * The WebKit twins in e2e/ (`<name>-webkit.spec.ts`).
  *
- * A twin runs its base spec's scenarios again in WebKit. CI runs the whole suite in WebKit
- * (`E2E_BROWSER=webkit`, e2e/playwright.config.ts), and there every twin is left out because its
- * base spec already runs in WebKit. That is only safe while a twin adds nothing: a test that lived
+ * A twin runs its base spec's scenarios again in WebKit. CI runs the whole suite once per engine
+ * (`E2E_BROWSER=webkit` and `=chromium`, e2e/playwright.config.ts), and both runs leave every twin
+ * out: its base spec already runs in each engine. That is only safe while a twin adds nothing: a test that lived
  * only in a twin would run in no CI job at all. So a twin holds its base spec's lines and nothing
  * else, apart from its imports, its comments and the `test.use` that picks WebKit. A scenario that
  * only means something in WebKit goes in the shared fixture and skips itself elsewhere

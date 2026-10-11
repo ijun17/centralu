@@ -38,7 +38,7 @@ Linux 패키지는 번들 호스트를 한 번 더, 풀린 채로 AppImage 옆�
 
 - `.github/workflows/build.yml` — 모든 push와 PR에서 모든 플랫폼을 빌드하고 번들을 아티팩트로 업로드한다. 프로젝트에 Linux 머신을 가진 사람이 없으므로, Linux 빌드가 실제로 돌아가는 곳은 여기뿐이다. 써 보려면 아티팩트를 내려받는다. GitHub 아티팩트는 zip이라 실행 비트가 사라지므로, 압축을 푼 뒤 AppImage에 `chmod +x`를 해 준다.
 - 같은 워크플로가 **windows-x64**(#14)도 빌드해 아티팩트 두 개를 올린다: 포터블 폴더 `centralu-windows-x64`(`Centralu\centralu.exe` 옆에 `Centralu\resources\host\`)와 NSIS 설치 파일 `centralu-windows-x64-setup`(사용자별 설치, 관리자 권한 불필요). 둘 다 서명되어 있지 않다. 별도의 `windows tests` 잡이 `pnpm verify`의 네 부분을 돌리며, 다른 플랫폼처럼 모두 막는다(단위 테스트 단계는 #307의 W2 목록이 고쳐질 때까지 막지 않았다). npm 패키지 `@centralu/win32-x64`는 같은 폴더를 싣고, `release.yml`의 Windows 잡이 따로 다시 빌드한다(아래 [Windows](#windows-14-w3) 참고).
-- 같은 워크플로가 Playwright 시나리오(`e2e/`)를 ubuntu-24.04에서 WebKit으로 돌린다. 나란히 도는 샤드로 나누어(`e2e (webkit i/n)` 잡) 가장 느린 다른 잡이 이미 걸리는 시간 안에 끝난다. 샤드가 실패하면 `e2e report`가 모든 샤드의 리포트를 트레이스가 담긴 HTML 리포트 하나로 합쳐 `e2e-report` 아티팩트로 올린다.
+- 같은 워크플로가 Playwright 시나리오(`e2e/`)를 ubuntu-24.04에서 데스크톱 앱이 그려지는 두 엔진, WebKit과 Chromium으로 돌린다. 엔진마다 나란히 도는 샤드로 나눈다(`e2e (webkit i/n)`, `e2e (chromium i/n)` 잡). 샤드가 실패하면 `e2e report (<엔진>)`이 그 엔진의 샤드 리포트를 트레이스가 담긴 HTML 리포트 하나로 합쳐 `e2e-report-<엔진>` 아티팩트로 올린다.
 - `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 모든 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다.
 
 브랜치 push나 머지는 여전히 아무것도 배포하지 않는다. **`v*` 태그는 이제 배포한다** — 태그가 존재하는 이유가 그것이다.

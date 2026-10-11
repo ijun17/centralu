@@ -344,18 +344,73 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
-          name: e2e-blob-${{ matrix.shard }}
+          name: e2e-blob-webkit-${{ matrix.shard }}
           path: blob-report
           retention-days: 7
           if-no-files-found: error
 
-  # One HTML report out of every shard's blob report, with the traces of the tests that failed.
-  # Only when a shard failed: a green run has nothing in it worth downloading.
-  e2e-report:
-    name: e2e report
-    needs: e2e
-    if: ${{ !cancelled() && needs.e2e.result == 'failure' }}
+  # The same suite in Chromium (owner decision, 2026-10-12): the Windows app renders in WebView2,
+  # which is Chromium, so both engines are the app somewhere. `E2E_BROWSER=chromium` runs every spec
+  # in Chromium and leaves out the WebKit twins and grid-ring.spec.ts, which the job above covers.
+  # Its own job, not a row of the one above, so each engine can have its own shard count.
+  e2e-chromium:
+    name: e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
+        shards: [5]
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Never the real data folder (AGENTS.md). The hosts the specs start get folders of their own.
+      - name: Point CC_DATA_DIR at a temporary folder
+        run: echo "CC_DATA_DIR=$RUNNER_TEMP/centralu-data" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Chromium at the build this lockfile's Playwright expects, with the system libraries it needs
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
+        env:
+          E2E_BROWSER: chromium
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
+        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob --trace=retain-on-failure
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() }}
+        with:
+          name: e2e-blob-chromium-${{ matrix.shard }}
+          path: blob-report
+          retention-days: 7
+          if-no-files-found: error
+
+  # One HTML report per engine out of its shards' blob reports, with the traces of the tests that
+  # failed. Per engine, because both runs have the same projects and test ids: merged together, one
+  # engine's result for a test would stand in for the other's. Only when a shard failed: a green run
+  # has nothing in it worth downloading.
+  e2e-report:
+    name: e2e report (${{ matrix.engine }})
+    needs: [e2e, e2e-chromium]
+    if: ${{ !cancelled() && (needs.e2e.result == 'failure' || needs.e2e-chromium.result == 'failure') }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [webkit, chromium]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -370,7 +425,7 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: e2e-blob-*
+          pattern: e2e-blob-${{ matrix.engine }}-*
           path: all-blob-reports
           merge-multiple: true
 
@@ -379,7 +434,7 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: e2e-report
+          name: e2e-report-${{ matrix.engine }}
           path: playwright-report
           retention-days: 14
           if-no-files-found: error

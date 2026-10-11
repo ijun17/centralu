@@ -140,14 +140,15 @@ CI also runs the keeper's end-to-end scripts on macOS, the parts that need no mo
 (`scripts/keeper-*integration.mjs`, the `keeper e2e` job; [docs/agent-host.md](docs/agent-host.md) §4.1).
 Run `pnpm e2e` for anything the UI shows.
 
-CI runs the whole Playwright suite **in WebKit**, the engine the desktop app is, split across
-parallel shards (the `e2e (webkit i/n)` jobs). Locally `pnpm e2e` runs in Chromium, plus the
-`-webkit.spec.ts` twins in WebKit; `E2E_BROWSER=webkit pnpm e2e` runs it the way CI does. When a
-shard fails, the `e2e report` job uploads one HTML report of every shard, with traces of the
-failed tests (`pnpm exec playwright show-report <folder>` after unzipping it). A twin repeats its
-base spec in WebKit and adds nothing, since CI leaves it out (`tooling/e2e-webkit-twins.test.ts`
-checks this): a scenario that only means something in WebKit goes in the shared fixture and skips
-itself in other engines.
+CI runs the whole Playwright suite **in both engines the desktop app is**: WebKit (WKWebView on
+macOS, WebKitGTK on Linux) and Chromium (WebView2 on Windows), each split across parallel shards
+(the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). Locally `pnpm e2e` runs in Chromium, plus
+the `-webkit.spec.ts` twins in WebKit; `E2E_BROWSER=webkit pnpm e2e` or `E2E_BROWSER=chromium pnpm
+e2e` runs it the way one CI engine does. When a shard fails, the `e2e report (<engine>)` jobs upload
+one HTML report per engine, with traces of the failed tests (`pnpm exec playwright show-report
+<folder>` after unzipping it). A twin repeats its base spec in WebKit and adds nothing, since CI
+leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
+something in WebKit goes in the shared fixture and skips itself in other engines.
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes

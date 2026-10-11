@@ -36,16 +36,22 @@ const LINKED_URL = `http://127.0.0.1:${LINKED_PORT}`
 const LINKED_SPEC = /linked-hosts(-webkit)?\.spec\.ts/
 
 /**
- * The engine the suite runs in. Chromium by default, with the scenarios that most depend on the
- * engine run a second time in WebKit by their `-webkit.spec.ts` twins. `E2E_BROWSER=webkit` runs
- * every spec in WebKit instead, the engine the desktop app is (WKWebView); that is what CI runs
- * (the `e2e (webkit)` job in .github/workflows/build.yml). A twin only repeats its base spec in
- * WebKit, so in that mode it would run the same tests twice and is left out
- * (tooling/e2e-webkit-twins.test.ts holds every twin to that).
+ * The engine the suite runs in. Unset (`pnpm e2e`), Chromium, with the scenarios that most depend
+ * on the engine run a second time in WebKit by their `-webkit.spec.ts` twins. `E2E_BROWSER` names
+ * one engine and runs every spec in it, which is what CI does, once per engine (the `e2e (webkit)`
+ * and `e2e (chromium)` jobs in .github/workflows/build.yml): WebKit is the desktop app on macOS and
+ * Linux (WKWebView, WebKitGTK), Chromium is the app on Windows (WebView2).
+ *
+ * A one-engine run leaves out what the other engine's run covers. A twin only repeats its base
+ * spec in WebKit, so both runs leave it out (tooling/e2e-webkit-twins.test.ts holds every twin to
+ * that). grid-ring.spec.ts is a WebKit scenario with no Chromium half, so the Chromium run leaves it
+ * out too. Any other spec that picks WebKit itself fails the Chromium run, which installs no WebKit.
  */
-const BROWSER = process.env.E2E_BROWSER === 'webkit' ? 'webkit' : 'chromium'
+const ENGINE = process.env.E2E_BROWSER
+const BROWSER = ENGINE === 'webkit' ? 'webkit' : 'chromium'
 const WEBKIT_TWIN = /-webkit\.spec\.ts/
-const twins = BROWSER === 'webkit' ? [WEBKIT_TWIN] : []
+const WEBKIT_ONLY = /grid-ring\.spec\.ts/
+const leftOut = ENGINE === 'webkit' ? [WEBKIT_TWIN] : ENGINE === 'chromium' ? [WEBKIT_TWIN, WEBKIT_ONLY] : []
 
 export default defineConfig({
   testDir: '.',
@@ -59,12 +65,12 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: 'http://127.0.0.1:5174', trace: 'off', browserName: BROWSER },
   projects: [
-    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, ...twins] },
+    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, ...leftOut] },
     { name: 'startup', testMatch: STARTUP_SPEC, use: { baseURL: STARTUP_URL } },
     // One worker: the relay port (5178) is baked into this project's UI build, so two of its
     // tests at once would collide on it (`--repeat-each 5` failed 4 of 5 with EADDRINUSE).
     { name: 'recovery', testMatch: RECOVERY_SPEC, use: { baseURL: RECOVERY_URL }, workers: 1 },
-    { name: 'linked', testMatch: LINKED_SPEC, testIgnore: twins, use: { baseURL: LINKED_URL }, workers: 1 },
+    { name: 'linked', testMatch: LINKED_SPEC, testIgnore: leftOut, use: { baseURL: LINKED_URL }, workers: 1 },
   ],
   webServer: [
     {

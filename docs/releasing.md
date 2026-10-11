@@ -64,10 +64,11 @@ script rehearses by default and why nothing publishes automatically.
   run on the Node remotes are pinned to ([below](#the-node-remotes-run-82)). The npm
   package `@centralu/win32-x64` ships the same folder, built again by `release.yml`'s own
   Windows job (see [Windows](#windows-14-w3) below).
-- The same workflow runs the Playwright suite (`e2e/`) in WebKit on ubuntu-24.04, split into
-  shards that run side by side (the `e2e (webkit i/n)` jobs), so it finishes inside the time the
-  slowest other job already takes. When a shard fails, `e2e report` merges every shard's report
-  into one HTML report with traces and uploads it as the `e2e-report` artifact.
+- The same workflow runs the Playwright suite (`e2e/`) on ubuntu-24.04 in WebKit and in
+  Chromium, the two engines the desktop app renders in, each split into shards that run side by
+  side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). When a shard fails,
+  `e2e report (<engine>)` merges that engine's shard reports into one HTML report with traces and
+  uploads it as the `e2e-report-<engine>` artifact.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
   tag (`dry_run`, default on). See below.
