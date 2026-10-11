@@ -536,6 +536,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     machines: {
       list: () => rpc.call('machines.list', {}),
       add: (spec) => rpc.call('machines.add', spec),
+      sshHosts: () => rpc.call('machines.sshHosts', {}),
+      probe: (sshTarget) => rpc.call('machines.probe', { sshTarget }),
       remove: async (machineId) => {
         await rpc.call('machines.remove', { machineId })
       },

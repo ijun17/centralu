@@ -22,7 +22,9 @@ import type {
   AgentVersions,
   HostActivity,
   MachineInfo,
+  MachineProbe,
   RemoteShell,
+  SshHostList,
 } from '@cc/protocol'
 import {
   allDoneNotification,
@@ -979,6 +981,13 @@ export type AppState = {
    */
   recoverMachine(machineId: string): Promise<void>
   addMachine(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): Promise<MachineInfo>
+  /**
+   * The hosts of the ssh config of the computer the host runs on (#514), for the Add machine dialog.
+   * Null when the host cannot say (an older host): the dialog then asks for a target by hand
+   */
+  machineSshHosts(): Promise<SshHostList | null>
+  /** What runs at the other end of a target, asked over one BatchMode ssh (#514); null when the host cannot ask */
+  probeMachine(sshTarget: string): Promise<MachineProbe | null>
   removeMachine(machineId: string): Promise<void>
   reconnectMachine(machineId: string): Promise<void>
   acceptMachineVersions(machineId: string): Promise<void>
@@ -4077,6 +4086,22 @@ export const useStore = create<AppState>((set, get) => ({
     const m = await get().platform!.machines.add(spec)
     set((s) => ({ machines: withAnswered(s.machines, m) }))
     return m
+  },
+
+  async machineSshHosts() {
+    try {
+      return await get().platform!.machines.sshHosts()
+    } catch {
+      return null
+    }
+  },
+
+  async probeMachine(sshTarget) {
+    try {
+      return await get().platform!.machines.probe(sshTarget)
+    } catch {
+      return null
+    }
   },
 
   async removeMachine(machineId) {

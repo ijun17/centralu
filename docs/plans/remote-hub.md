@@ -259,6 +259,19 @@ questions passed with `machine`, and remote sessions named by machine in the inb
 session header (so in the grid and where approvals are answered). Remote apps are listed per machine and say their
 views open in a later version (phase 2 opened them, §11). Details: [agent-host.md](../agent-host.md) §4.8, [state-management.md](../state-management.md) §7.
 
+### 8.4 Adding a machine from the ssh config (#514, owner, 2026-10-12)
+
+Linking a machine used to mean typing an ssh target and choosing a shell. The Add machine dialog now lists the hosts
+of the hub computer's `~/.ssh/config`, as VS Code's Remote-SSH does: the host reads the config the way OpenSSH reads
+it (`Include`, several patterns per `Host`, `Match` blocks left out with a note) and resolves each alias with
+`ssh -G`, never opening a key (`machines.sshHosts`). Picking one runs one BatchMode ssh that tells a Unix shell from
+Windows, and on Windows which shell answers ssh and which WSL distros exist (`machines.probe`), so the dialog offers
+"Windows", "WSL (Ubuntu)" or "Linux or macOS" with a name, and confirming links it. What is already linked through an
+alias is marked and not offered again; typing a target stays, for a host not in the config and for a probe that
+cannot tell. The probe is short and shell-neutral (one `-EncodedCommand` line of about 1,640 characters, far under
+cmd.exe's 8,191, §10.9a). Measured on the Windows 11 PC of §10.9a over Tailscale: it answered in 1.15 s with cmd.exe as
+the shell and Ubuntu as the default distro. Details: [agent-host.md](../agent-host.md) §4.8.
+
 ## 9. Decisions (owner, 2026-10-05)
 
 Restored as decided; #410 dropped this section by mistake while §2 and the status line still pointed here.

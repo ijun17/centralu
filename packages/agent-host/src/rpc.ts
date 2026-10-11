@@ -25,7 +25,18 @@ import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { InlineViews } from './inline-views.js'
-import type { GridPanel, HostActivity, MachineAutostartResult, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell, ToolName } from '@cc/protocol'
+import type {
+  GridPanel,
+  HostActivity,
+  MachineAutostartResult,
+  MachineInfo,
+  MachineInstallResult,
+  MachineProbe,
+  MachineUninstallResult,
+  RemoteShell,
+  SshHostList,
+  ToolName,
+} from '@cc/protocol'
 
 /**
  * The optional services a host has. Without one, that feature simply does not exist on this host
@@ -77,6 +88,9 @@ export type MachinesPort = {
   update(id: string): Promise<MachineInstallResult>
   rollback(id: string): Promise<MachineInstallResult>
   uninstall(id: string): Promise<MachineUninstallResult>
+  /** The ssh config's hosts, and what one target runs (#514) */
+  sshHosts(): Promise<SshHostList>
+  probe(sshTarget: string): Promise<MachineProbe>
   autostart(id: string, on?: boolean): Promise<MachineAutostartResult>
   activity(id: string): Promise<HostActivity | null>
 }
@@ -733,6 +747,8 @@ export function createRpcHandler(
     'machines.add': async (p) => {
       return requireMachines().add(RpcMethods['machines.add'].params.parse(p))
     },
+    'machines.sshHosts': async () => requireMachines().sshHosts(),
+    'machines.probe': async (p) => requireMachines().probe(RpcMethods['machines.probe'].params.parse(p).sshTarget),
     'machines.remove': async (p) => {
       await requireMachines().remove(RpcMethods['machines.remove'].params.parse(p).machineId)
       return { ok: true as const }

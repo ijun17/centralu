@@ -1,6 +1,20 @@
 import { HostActivity } from '@cc/protocol'
-import type { MachineAutostartResult, MachineInfo, MachineInstallResult, MachineOperation, MachineSide, MachineStatus, MachineUninstallResult, MachineVersions, NormalizedEvent } from '@cc/protocol'
+import type {
+  MachineAutostartResult,
+  MachineInfo,
+  MachineInstallResult,
+  MachineOperation,
+  MachineProbe,
+  MachineSide,
+  MachineStatus,
+  MachineUninstallResult,
+  MachineVersions,
+  NormalizedEvent,
+  SshHostList,
+} from '@cc/protocol'
 import { autostartRemote } from './autostart.js'
+import { probeTarget } from './probe.js'
+import { listSshHosts } from './ssh-config.js'
 import { installRemote, type InstallResult, type RemoteRuntime } from './install.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import type { RegistryOptions } from './registry.js'
@@ -69,6 +83,11 @@ export type LinkDeps = {
   installer?: LinkInstaller
   /** For tests: how long an updated host has to answer (update.ts `CHECK_MS`) */
   checkMs?: number
+  /**
+   * For tests: the ssh binary, config file and home folder `machines.sshHosts` and `machines.probe` use
+   * in place of the person's own (ssh-config.ts, probe.ts)
+   */
+  ssh?: { ssh?: string; configFile?: string; home?: string; env?: NodeJS.ProcessEnv }
 }
 
 export type LinkInstaller = {
@@ -724,6 +743,32 @@ export class Links {
     }
     const record = this.deps.registry.add({ id: newMachineId(trimmed.name, new Set(this.machines.keys())), ...trimmed, remote, addedAt: Date.now(), acceptedVersions: null })
     return this.startOne(record).info()
+  }
+
+  /**
+   * The hosts of the person's ssh config (#514), each with the machines already linked through it: the
+   * same alias, typed exactly so (an alias is what `machines.add` stores as the target)
+   */
+  async sshHosts(): Promise<SshHostList> {
+    const read = await listSshHosts(this.deps.ssh ?? {})
+    const linked = this.list()
+    return {
+      configFile: read.configFile,
+      notes: read.notes,
+      hosts: read.hosts.map((h) => ({
+        alias: h.alias,
+        hostName: h.hostName,
+        user: h.user,
+        port: h.port,
+        source: `${h.file}:${h.line}`,
+        linked: linked.filter((m) => m.sshTarget === h.alias).map((m) => ({ machineId: m.id, name: m.name, shell: m.shell, wslDistro: m.wslDistro })),
+      })),
+    }
+  }
+
+  /** One BatchMode ssh to tell what runs there (probe.ts); the target need not be linked or in the config */
+  probe(sshTarget: string): Promise<MachineProbe> {
+    return probeTarget(sshTarget, this.deps.ssh ?? {})
   }
 
   reconnect(id: string): MachineInfo {

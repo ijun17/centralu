@@ -210,9 +210,10 @@ export type RemoteSpec = {
   command?: string | null
 }
 
-const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
+export const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
 
-function powershell(script: string): string {
+/** A PowerShell script as one command line any Windows shell passes on untouched (see `RemoteSpec`) */
+export function powershell(script: string): string {
   const full = `[Console]::OutputEncoding=[Text.Encoding]::UTF8\n${script}`
   return `powershell -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(full, 'utf16le').toString('base64')}`
 }

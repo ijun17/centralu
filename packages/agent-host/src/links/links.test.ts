@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
@@ -699,5 +699,30 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
     const hub = await hubHost(() => lineFor(remote.port))
     await until(() => status(hub) === 'connected')
     await expect((await ui(hub.port)).call('machines.autostart', { machineId: 'm1', on: true })).rejects.toThrow(/no shell on Remote box/)
+  })
+})
+
+describe('machines.sshHosts and machines.probe (#514)', () => {
+  it('lists the ssh config’s hosts through the hub, each marked with the machines linked through it, and probes one', async () => {
+    const remote = await remoteHost()
+    const home = folder()
+    mkdirSync(join(home, '.ssh'))
+    writeFileSync(join(home, '.ssh', 'config'), 'Host *\n  User me\nHost box laptop\n')
+    // A fake ssh: `-G` resolves as OpenSSH does; anything else is the probe, answered as a POSIX shell would
+    const ssh = join(home, 'ssh')
+    writeFileSync(ssh, '#!/bin/sh\nif [ "$1" = -G ]; then printf \'user me\\nhostname %s.lan\\nport 22\\n\' "$3"; exit 0; fi\necho "sh: powershell: not found" >&2\nexit 127\n')
+    chmodSync(ssh, 0o755)
+    const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { ssh: { ssh, home } })
+    const u = await ui(hub.port)
+    expect(await u.call('machines.sshHosts')).toEqual({
+      configFile: '~/.ssh/config',
+      notes: [],
+      hosts: [
+        { alias: 'box', hostName: 'box.lan', user: 'me', port: 22, source: '~/.ssh/config:3', linked: [{ machineId: 'm1', name: 'Remote box', shell: 'posix', wslDistro: null }] },
+        { alias: 'laptop', hostName: 'laptop.lan', user: 'me', port: 22, source: '~/.ssh/config:3', linked: [] },
+      ],
+    })
+    expect(await u.call('machines.probe', { sshTarget: 'laptop' })).toMatchObject({ sshTarget: 'laptop', reachable: true, os: 'posix' })
+    await expect(u.call('machines.probe', { sshTarget: '-oProxyCommand=x' })).rejects.toThrow(/Not an ssh target/)
   })
 })

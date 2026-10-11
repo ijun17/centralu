@@ -204,3 +204,56 @@ export const HostActivity = z.object({
   commandRuns: z.number().int().default(0),
 })
 export type HostActivity = z.infer<typeof HostActivity>
+
+/**
+ * One concrete `Host` alias from the ssh config of the computer the hub runs on (#514): what
+ * `machines.sshHosts` lists so the person picks a machine instead of typing it, as VS Code's
+ * Remote-SSH does. `hostName`, `user` and `port` are what `ssh -G <alias>` resolves (null when it
+ * could not). `linked` names the machines already linked through this alias: one Windows computer
+ * can be linked twice, as Windows and as a WSL distro
+ */
+export const SshHost = z.object({
+  alias: z.string(),
+  hostName: z.string().nullable().default(null),
+  user: z.string().nullable().default(null),
+  port: z.number().int().nullable().default(null),
+  /** Where the alias is declared, `<file>:<line>`, with the home folder as `~` */
+  source: z.string().default(''),
+  linked: z
+    .array(z.object({ machineId: MachineId, name: z.string(), shell: RemoteShell.catch('posix'), wslDistro: z.string().nullable().default(null) }))
+    .default([]),
+})
+export type SshHost = z.infer<typeof SshHost>
+
+/**
+ * The answer of `machines.sshHosts`: the aliases in file order (an `Include` read where it stands, as
+ * OpenSSH reads it), and notes for the person about what was left out (a `Match` block, an `Include`
+ * that could not be read, aliases past the cap)
+ */
+export const SshHostList = z.object({
+  /** The file read first, with the home folder as `~` */
+  configFile: z.string(),
+  hosts: z.array(SshHost),
+  notes: z.array(z.string()).default([]),
+})
+export type SshHostList = z.infer<typeof SshHostList>
+
+/**
+ * What one BatchMode ssh found at the other end of a target (`machines.probe`, #514):
+ *
+ *   reachable      ssh got there and ran the probe (false: `error` is ssh's own last line)
+ *   os             `posix` (a Unix shell answered) or `windows` (Windows OpenSSH); null when ssh
+ *                  could not get there, or what came back was not recognised (`error` says what)
+ *   windowsShell   the shell Windows OpenSSH runs a command under (its `DefaultShell`; cmd.exe when
+ *                  none is set). cmd.exe is the one that limits a command line to 8,191 characters
+ *   wslDistros     the WSL distros registered for that account, the default one marked
+ */
+export const MachineProbe = z.object({
+  sshTarget: z.string(),
+  reachable: z.boolean(),
+  os: z.enum(['posix', 'windows']).nullable().catch(null),
+  windowsShell: z.enum(['cmd', 'powershell', 'pwsh', 'other']).nullable().catch(null).default(null),
+  wslDistros: z.array(z.object({ name: z.string(), default: z.boolean().default(false) })).default([]),
+  error: z.string().nullable().default(null),
+})
+export type MachineProbe = z.infer<typeof MachineProbe>

@@ -43,6 +43,8 @@ import type {
   ThemeFileContent,
   ThemeFileEntry,
   MachineInfo,
+  MachineProbe,
+  SshHostList,
 } from '@cc/protocol'
 import {
   APP_VERSION,
@@ -1454,6 +1456,13 @@ export class MockPlatform implements Platform {
    * e2e (`e2e/fixtures/linked-hosts.ts`).
    */
   machinesList: MachineInfo[] = []
+  /**
+   * The ssh config the mock "reads" (#514): none by default, so the Add machine dialog opens on its
+   * fields as before; a test or the demo sets hosts here, and what each answers to the probe in
+   * `probeAnswers` (unreachable when absent). `linked` is filled from `machinesList` as the host fills it
+   */
+  sshConfig: SshHostList = { configFile: '~/.ssh/config', hosts: [], notes: [] }
+  probeAnswers: Record<string, Omit<MachineProbe, 'sshTarget'>> = {}
   private machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
     if (at === -1) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
@@ -1502,6 +1511,18 @@ export class MockPlatform implements Platform {
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })
       return { ...info }
+    },
+    sshHosts: async (): Promise<SshHostList> => ({
+      ...this.sshConfig,
+      hosts: this.sshConfig.hosts.map((h) => ({
+        ...h,
+        linked: this.machinesList.filter((m) => m.sshTarget === h.alias).map((m) => ({ machineId: m.id, name: m.name, shell: m.shell, wslDistro: m.wslDistro })),
+      })),
+    }),
+    probe: async (sshTarget: string): Promise<MachineProbe> => {
+      const answer = this.probeAnswers[sshTarget]
+      if (answer) return { sshTarget, ...answer }
+      return { sshTarget, reachable: false, os: null, windowsShell: null, wslDistros: [], error: `ssh: Could not resolve hostname ${sshTarget}: nodename nor servname provided, or not known` }
     },
     remove: async (machineId: string) => {
       this.machinesList = this.machinesList.filter((m) => m.id !== machineId)

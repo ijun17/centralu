@@ -43,7 +43,7 @@ import {
   UpdateStatus,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
-import { HostActivity, MachineAutostartResult, MachineId, MachineInfo, MachineInstallResult, MachineUninstallResult, RemoteShell } from './machines.js'
+import { HostActivity, MachineAutostartResult, MachineId, MachineInfo, MachineInstallResult, MachineProbe, MachineUninstallResult, RemoteShell, SshHostList } from './machines.js'
 import { parseTolerant } from './tolerant.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
@@ -2011,6 +2011,19 @@ export const RpcMethods = {
     }),
     result: MachineInfo,
   },
+  /**
+   * The concrete `Host` aliases of the ssh config of the computer this host runs on (#514): `~/.ssh/config`
+   * and what it `Include`s, read by the host (never the window), each resolved by `ssh -G`, with the
+   * machines already linked through it. Pattern-only entries and `Match` blocks are left out. Nothing
+   * is connected to and no key file is opened. Additive
+   */
+  'machines.sshHosts': { params: z.object({}), result: SshHostList },
+  /**
+   * One BatchMode ssh to a target, to tell what runs there before it is linked (#514): a Unix shell, or
+   * Windows with its default shell and WSL distros. Never a password or host-key prompt; a target that
+   * cannot be reached answers `reachable: false` with ssh's reason. Nothing there is changed. Additive
+   */
+  'machines.probe': { params: z.object({ sshTarget: z.string().min(1).max(255) }), result: MachineProbe },
   /** Unlinks a machine: its sessions and projects leave this computer's lists. Nothing on the machine changes */
   'machines.remove': { params: z.object({ machineId: MachineId }), result: z.object({ ok: z.literal(true) }) },
   /** Tries the link again now instead of waiting out its backoff */

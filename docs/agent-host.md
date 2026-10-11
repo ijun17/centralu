@@ -1054,6 +1054,7 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 | Installer | `install.ts`, `registry.ts`, `remote-install.mjs` | `machines.install`: preflight, the pinned Node and the npm packages on the remote, checked against the release's pin and the registry's signed metadata (below) |
 | Update | `update.ts` | `machines.update`, `machines.rollback`, `machines.uninstall`: stop the remote's host, switch its pointers, start and check, or put back (below) |
 | Autostart | `autostart.ts` | `machines.autostart`: `centralu serve --autostart` there, through the lookup (below) |
+| Ssh config, probe | `ssh-config.ts`, `probe.ts` | `machines.sshHosts`: the hosts of this computer's `~/.ssh/config`; `machines.probe`: what runs at one of them, before it is linked (below) |
 
 The three choke points of §5 of the plan are where it sits: the router is the `onRpc` the server calls, a link puts
 the remote's events into `server.broadcast` (so they get the hub's own `seq` and replay) and its terminal frames into
@@ -1092,6 +1093,40 @@ made runs the version the hub installed; a phase 1 machine finds `centralu` as b
 
 A machine can name its own command in place of `centralu` (`MachineInfo.command`): a source checkout, a data folder
 other than `~/.centralu`. It runs as given, with no fallback.
+
+**Picking a machine from the ssh config** (#514; `ssh-config.ts`, `probe.ts`). The Add machine dialog lists the
+hosts of the ssh config of the computer the hub runs on, as VS Code's Remote-SSH does, so linking needs no typing.
+Two calls, both additive and the hub's own:
+
+- `machines.sshHosts` reads `~/.ssh/config` the way OpenSSH reads it: `Include` where it stands (globs sorted as
+  glob(3) sorts them, a relative path under `~/.ssh`, `~/` expanded, nested at most 16 deep, a file that includes
+  itself read once), `Host` lines with several patterns and quoted values, `#` comments, `Keyword=value`. Pattern-only
+  and negated entries (`Host *`, `Host *.example`, `!bad`) are left out, and so are `Match` blocks, whose conditions
+  only ssh can evaluate (one note says where they are). Each alias, at most 100, is resolved by `ssh -G -- <alias>`
+  (8 at a time, 5 s each) for its `hostname`, `user` and `port`; `ssh -G` prints the configuration and exits before
+  it loads a key. Only the config's text is read, by the host and never by the window; no `IdentityFile` is opened.
+  Each host carries the machines already linked through that alias (`linked`), and the window reads it again each
+  time the dialog opens: no watcher.
+- `machines.probe { sshTarget }` runs one BatchMode ssh (`ConnectTimeout=10`, 30 s in all) with one command:
+  `powershell -NoProfile -NonInteractive -EncodedCommand <base64>`, about 1,640 characters. That line means the same
+  to the three shells an ssh command can land in: cmd.exe (Windows OpenSSH with no `DefaultShell`) and PowerShell
+  both start PowerShell, and a POSIX shell has no `powershell` and answers exit 127. The script only reads the
+  registry: `HKLM\SOFTWARE\OpenSSH\DefaultShell` (where OpenSSH itself reads the shell it runs a command under; empty
+  is cmd.exe) and the WSL distros under `HKCU\...\Lxss` with `DefaultDistribution` (where `wsl.exe -l` reads them).
+  The answer (`MachineProbe`) is `posix`, or `windows` with `windowsShell` (`cmd`, `powershell`, `pwsh`, `other`)
+  and the distros (docker-desktop's own left out), or `reachable: false` with ssh's last line (a key refused, a host
+  key not known, a name that does not resolve, a timeout), or reached but not recognised.
+
+Measured on a Windows 11 PC over Tailscale (2026-10-12, cmd.exe default shell): the probe answered in 1.15 s with
+`platform=Win32NT`, an empty `DefaultShell`, `Ubuntu` as the default distro and `docker-desktop`; PowerShell 5.1 wrote
+its "preparing modules for first use" progress to stderr as CLIXML, which is not read.
+
+| Decision | Why |
+|---|---|
+| The probe is the PowerShell line for every shell, and POSIX is told by exit 127 | No one line runs a program in cmd.exe, PowerShell 5.1 and sh alike: `&`, `&&` and `\|\|` are parse errors in PowerShell 5.1, and `;` is not a separator in cmd.exe. The `-EncodedCommand` line is the one every Windows command already crosses on (above), and 127 is POSIX's "command not found" (csh's own words are read too) |
+| The distros come from the registry, not `wsl.exe -l` | `wsl.exe -l` writes UTF-16, and it starts the WSL service; the registry is where it reads them, and reading it starts nothing |
+| The host reads the config, `ssh -G` resolves it | The window has no file access; `ssh -G` applies everything a hand-written reader would get wrong (`Match`, `CanonicalizeHostname`, defaults), and connects to nothing |
+| The probe runs when a host is picked, not for every listed host | One ssh per host the person chose, never a sweep of every machine in the config |
 
 **Installing on a machine** (phase 3, plan §10.2; `install.ts`, `registry.ts`, `remote-install.mjs`).
 `machines.install` installs the hub's own version there over the same ssh, in three remote commands, each a script for
@@ -1202,7 +1237,7 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 | Where | What it does with the links |
 |---|---|
 | Sidebar | Once there is a linked machine, groups by `machine`: this computer first (with "Your apps"), then each machine with its name and link state (`connected`, `connecting`, `away`, `version mismatch`, …), its projects and its user-folder apps. A project or session of a machine that is not connected stays listed, dimmed (`data-away`), and is never woken. A machine's + adds a folder there by its path (`projects.add {path, machine}`); its name opens Settings → Machines |
-| Settings → Machines | `machines.list/add/remove/reconnect`. Each row says the last error as what to do (`machineProblem` in `@cc/core`: a key not loaded, a host key never accepted, Centralu not installed or not serving there), and holds the version prompt. Where the machine offers it, a "Start Centralu when <machine> starts" switch (`machines.autostart`, `autostartRow` in `@cc/core`), with a line where it falls short of boot: a systemd manager that starts only at login, a Windows sign-in |
+| Settings → Machines | `machines.list/add/remove/reconnect`. Add a machine lists the hosts of this computer's ssh config (`machines.sshHosts`, read again each time it opens), each with what `ssh -G` resolves and "linked as …"; picking one probes it (`machines.probe`) and offers ready rows, "Windows" (with the shell that answers ssh), "WSL (<distro>)" (the default marked) or "Linux or macOS", with a name, the first row not linked yet chosen (`probeChoices` in `@cc/core`). A row already linked through that alias is shown but not offered. A probe that cannot tell says why in one sentence (`probeProblem`), and "Enter a target by hand" keeps the typed fields, prefilled from the host picked; with no hosts in the config, the dialog opens on them. A probe answering after another host was picked is dropped. Each row says the last error as what to do (`machineProblem` in `@cc/core`: a key not loaded, a host key never accepted, Centralu not installed or not serving there), and holds the version prompt. Where the machine offers it, a "Start Centralu when <machine> starts" switch (`machines.autostart`, `autostartRow` in `@cc/core`), with a line where it falls short of boot: a systemd manager that starts only at login, a Windows sign-in |
 | Version prompt | From `MachineInfo.versions`: an older hub gets the existing update path; an older remote gets the exact `npm i -g centralu@<hub version>` to run there (phase 1 cannot update it); "Connect anyway" is `machines.acceptVersions`, offered only on one protocol |
 | New-session dialog, session menu | `agents.detect`, `agents.models`, `agents.capabilities` with the project's `machine` |
 | Session header | Names the machine (also every grid panel's header, and where approvals and questions are answered); "older CLI" compares with `agents.versions {machine}` |
