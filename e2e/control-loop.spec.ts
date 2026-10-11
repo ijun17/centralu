@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { grantClipboard } from './fixtures/clipboard.js'
+import { copied, pressCopy, watchCopies } from './fixtures/clipboard.js'
 
 /**
  * Meets the M1 Phase 5 completion criteria. Drives the UI with the mock platform (?mock).
@@ -1311,7 +1311,7 @@ test('Git: the diff gets the wide area; the list, staging and commit live in the
 test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ page }) => {
   const diff =
     '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n-const old = 1\n+const next = 1\n   indented\n unchanged'
-  await grantClipboard(page)
+  await watchCopies(page)
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate((d) => {
     const m = (window as any).__mock
@@ -1333,11 +1333,11 @@ test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ p
   await page.mouse.down()
   await page.mouse.move(last.x + last.width - 4, last.y + last.height / 2, { steps: 10 })
   await page.mouse.up()
-  await page.keyboard.press('Meta+c')
+  await pressCopy(page)
 
   // Whatever it looks like on screen, what comes off it is a diff you can apply: ASCII
   // markers rather than the typographic −, and indentation the DOM had already collapsed
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(diff)
+  expect(await copied(page)).toBe(diff)
 
   // The file header used to lose a dash to the marker-stripping, on screen too
   await expect(page.getByTestId('diff-view')).toContainText('--- a/src/a.ts')
@@ -1527,7 +1527,7 @@ test('Code viewer: opening a file, search, and large files (C-3, FR-6)', async (
  * because the payload is the whole point — the on-screen highlight is not what was broken.
  */
 async function openBigFile(page: Page, lines: number, opts: { truncated?: boolean } = {}) {
-  await grantClipboard(page)
+  await watchCopies(page)
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(
     ({ n, truncated }) => {
@@ -1544,15 +1544,15 @@ async function openBigFile(page: Page, lines: number, opts: { truncated?: boolea
   await expect(page.getByTestId('code-viewer')).toBeVisible()
 }
 
-const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText())
+const clipboard = copied
 
 test('Viewer copy: ⌘A gives the whole file (#36)', async ({ page }) => {
   await openBigFile(page, 3000)
 
   // Nobody clicked anything: the code area takes focus when the file opens, which is what
   // gives ⌘A somewhere to land.
-  await page.keyboard.press('Meta+a')
-  await page.keyboard.press('Meta+c')
+  await page.keyboard.press('ControlOrMeta+a')
+  await pressCopy(page)
 
   const copied = await clipboard(page)
   expect(copied.split('\n')).toHaveLength(3000)
@@ -1577,7 +1577,7 @@ test('Viewer copy: copying continues through lines that were never rendered (#36
     await page.mouse.move(view.x + 60 + (i % 2), view.y + view.height + 40)
   }
   await page.mouse.up()
-  await page.keyboard.press('Meta+c')
+  await pressCopy(page)
 
   const rows = (await clipboard(page)).split('\n')
   // More lines than the DOM ever holds at once: the ones in between were never there to be
@@ -1593,8 +1593,8 @@ test('Viewer copy: copying continues through lines that were never rendered (#36
 test('Viewer copy: a truncated file says it was truncated (#36)', async ({ page }) => {
   await openBigFile(page, 200, { truncated: true })
 
-  await page.keyboard.press('Meta+a')
-  await page.keyboard.press('Meta+c')
+  await page.keyboard.press('ControlOrMeta+a')
+  await pressCopy(page)
 
   // Select-all claims "this is the file". When it is not, the clipboard says the same thing
   // the screen says rather than handing over half a file that looks whole.
@@ -1610,7 +1610,7 @@ test('Viewer copy: ⌘A inside the search box behaves normally (#36)', async ({ 
   // to keep meaning select-all inside that field.
   const search = page.getByTestId('viewer-search')
   await search.fill('line1')
-  await search.press('Meta+a')
+  await search.press('ControlOrMeta+a')
   await search.type('line2')
   await expect(search).toHaveValue('line2')
 })
@@ -7454,6 +7454,61 @@ async function seedLongChat(page: Page, sessionId: string) {
     .toBeLessThanOrEqual(80)
 }
 
+/** The row at the top edge of the conversation and how far into it the edge is: what is being read (#61) */
+type Spot = { index: number; into: number }
+
+function readingSpot(stream: Locator): Promise<Spot> {
+  return stream.evaluate((el) => (window as any).__readingSpot(el))
+}
+
+/**
+ * Runs `act`, which leaves the conversation and comes back to it, and returns the spot the
+ * conversation shows **at the moment it is shown again** (#61).
+ *
+ * Returning hides the list (`data-settling`) while it aims at the row it left, and shows it once
+ * it is there. The spot is read in the same task that shows it, by a MutationObserver, so a list
+ * shown short of the spot and corrected a few frames later is caught: that is what a person
+ * would see. Read any later and the correction has already happened. The page's own observer
+ * also outlives the grid rebuilding the panel, which a locator taken before would not.
+ */
+async function spotWhenShown(page: Page, sessionId: string, act: () => Promise<void>): Promise<Spot> {
+  await page.evaluate((sid) => {
+    const w = window as any
+    w.__shownAt = undefined
+    new MutationObserver((records) => {
+      for (const r of records) {
+        const el = r.target as HTMLElement
+        // The focus view's list, showing this session, going from hidden to shown. Not a grid
+        // panel's list, which settles on its own, nor another session's
+        if (w.__shownAt || el.dataset.testid !== 'chat-stream' || el.closest('[data-testid="grid"]')) continue
+        if (r.oldValue !== 'true' || el.dataset.settling === 'true') continue
+        if (w.__store.getState().focusedSessionId !== sid) continue
+        w.__shownAt = w.__readingSpot(el)
+      }
+    }).observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-settling'] })
+  }, sessionId)
+  await act()
+  // A list that never hides to settle never went back to a row at all (the #61 bug itself)
+  const shown = await page.waitForFunction(() => (window as any).__shownAt, undefined, { timeout: 10_000 }).catch(() => {
+    throw new Error('the conversation was never hidden to settle and shown again: it did not go back to the row being read')
+  })
+  return (await shown.jsonValue()) as Spot
+}
+
+/** Puts `__readingSpot` on the page, for `readingSpot` and `spotWhenShown` */
+async function installReadingSpot(page: Page) {
+  await page.evaluate(() => {
+    ;(window as any).__readingSpot = (el: HTMLElement) => {
+      const top = el.getBoundingClientRect().top
+      const row = [...el.querySelectorAll<HTMLElement>('[data-index]')].find((r) => {
+        const b = r.getBoundingClientRect()
+        return b.top <= top && b.bottom > top
+      })
+      return row ? { index: Number(row.dataset.index), into: Math.round(top - row.getBoundingClientRect().top) } : { index: -1, into: 0 }
+    }
+  })
+}
+
 /** How far the stream is from its own bottom, in px. `< BOTTOM_SLACK` means "at the bottom" */
 function distanceFromBottom(stream: Locator): Promise<number> {
   return stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)
@@ -7467,11 +7522,15 @@ function distanceFromBottom(stream: Locator): Promise<number> {
  * scroll. And the list keeps moving after the wheel: the rows it brought in measure taller than
  * the virtualiser's guess and the offset is corrected by as much (measured: 4,863 read at once,
  * 5,944 half a second later). The spot being read is where it rests.
+ *
+ * 1,000px a wheel, not more: a wheel that did not scroll at once can still arrive, so the poll
+ * can land two. At 3,000 a wheel, two took the 6,830px list of the session-switching scenario to
+ * its very top in macOS WebKit, where that scenario then compared nothing with nothing.
  */
 async function wheelUpToRead(page: Page, stream: Locator): Promise<number> {
   await expect
     .poll(async () => {
-      await page.mouse.wheel(0, -3000)
+      await page.mouse.wheel(0, -1000)
       return distanceFromBottom(stream)
     })
     .toBeGreaterThan(80)
@@ -7569,29 +7628,29 @@ test('Returns to the spot being read — not the top (#61)', async ({ page }) =>
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await seedLongChat(page, id)
+  await installReadingSpot(page)
 
   const stream = page.getByTestId('chat-stream')
   // Scroll up to somewhere in the middle to read (the bug only lives in a spot that is neither
   // the bottom nor the top)
   await stream.hover()
-  const before = await wheelUpToRead(page, stream)
-  expect(before).toBeGreaterThan(200)
+  expect(await wheelUpToRead(page, stream)).toBeGreaterThan(200)
+  const reading = await readingSpot(stream)
 
-  // Leave the screen and come back (the grid discards the panel entirely and rebuilds it)
-  await page.getByTestId('grid-button').click()
-  await expect(page.getByTestId('grid')).toBeVisible()
-  await page.getByTestId(`session-row-${id}`).click()
-  await expect(stream).toBeVisible()
+  // Leave the screen and come back (the grid discards the panel entirely and rebuilds it). The
+  // intermediate position is never drawn while settling — it stays hidden while being measured
+  const shown = await spotWhenShown(page, id, async () => {
+    await page.getByTestId('grid-button').click()
+    await expect(page.getByTestId('grid')).toBeVisible()
+    await page.getByTestId(`session-row-${id}`).click()
+  })
 
-  // The intermediate position is never drawn while settling — it stays hidden while being measured
-  await expect(stream).not.toHaveAttribute('data-settling', 'true')
-
-  // It lands near the same row. Not requiring pixel-exact equality is because rows get
-  // re-measured — but this is clearly distinguishable from "it went back to the top"
-  const after = await stream.evaluate((el) => el.scrollTop)
-  expect(Math.abs(after - before)).toBeLessThan(120)
+  // The same row at the top, the same distance into it. A row, not a scrollTop: the rows above
+  // it can be measured differently on the way back (a row not on screen keeps the 64px guess), so
+  // the same spot can sit at a different offset — 4,357 before and 2,975 after, with the same row
+  // and the same 49px into it, in CI's Chromium
+  expectSameSpot(shown, reading)
 })
-
 /**
  * The same thing happens without the grid too (pointed out by the person): even just switching
  * sessions in the focus view reuses the same component with only sessionId swapped, so without
@@ -7603,28 +7662,33 @@ test('Switching sessions and returning keeps the spot being read (#61)', async (
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await seedLongChat(page, a)
   await newSession(page, 'alpha', 'second')
+  await installReadingSpot(page)
 
   await page.getByTestId(`session-row-${a}`).click()
   const stream = page.getByTestId('chat-stream')
   await stream.hover()
-  const before = await wheelUpToRead(page, stream)
+  expect(await wheelUpToRead(page, stream)).toBeGreaterThan(200)
+  const reading = await readingSpot(stream)
 
   // Visit a neighboring session and come back — the screen type stays the same, only sessionId
-  // changes
+  // changes. What the person sees is the list once it shows: it stays hidden while it settles
   const b = await page.evaluate(
     (aId: string) => Object.keys((window as any).__store.getState().sessions).find((x) => x !== aId),
     a,
   )
-  await page.getByTestId(`session-row-${b}`).click()
-  await page.getByTestId(`session-row-${a}`).click()
-  await expect(stream).toBeVisible()
-  // What the person sees is the list once it shows: it stays hidden while it settles
-  await expect(stream).not.toHaveAttribute('data-settling', 'true')
-
-  const after = await stream.evaluate((el) => el.scrollTop)
-  expect(Math.abs(after - before)).toBeLessThan(120)
+  const shown = await spotWhenShown(page, a, async () => {
+    await page.getByTestId(`session-row-${b}`).click()
+    await page.getByTestId(`session-row-${a}`).click()
+  })
+  expectSameSpot(shown, reading)
 })
 
+/** The same row at the top, within a couple of pixels of the same place in it (#61) */
+function expectSameSpot(shown: Spot, reading: Spot) {
+  expect(reading.index, 'a row is at the top before leaving').toBeGreaterThan(0)
+  expect(shown.index, `shown at row ${shown.index} (${shown.into}px in), left at row ${reading.index} (${reading.into}px in)`).toBe(reading.index)
+  expect(Math.abs(shown.into - reading.into)).toBeLessThanOrEqual(2)
+}
 /** Confirms that sending actually attaches to the conversation — history is drawn from what attached (#38) */
 async function sendMessage(page: Page, body: string) {
   const seen = await page.getByTestId('msg-user').count()

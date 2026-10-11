@@ -250,3 +250,32 @@ export function forgetUnlistedSizes(sizes: Map<unknown, number>, keys: readonly 
   const listed = new Set(keys)
   for (const key of sizes.keys()) if (!listed.has(key)) sizes.delete(key)
 }
+
+/** A mounted row of the virtual list as laid out: its index, and its top and height in the list */
+export type LaidOutRow = { index: number; top: number; height: number }
+
+/**
+ * Whether the rows down to the one being returned to are laid out as the scroller has measured
+ * them, so the position aimed at will not move again (#61).
+ *
+ * Returning to a row aims at `start` (where the scroller puts that row) every frame, and the view
+ * is shown once the aim stops moving. Two equal aims in a row are not enough: a row's new height
+ * reaches the scroller a frame or more after layout (measuring waits for its own frame), and in
+ * WebKit the view was shown two rows past the spot and then jumped back to it. The DOM already
+ * knows: the row aimed at is mounted at `start`, and every mounted row above it ends where the
+ * next one begins. A row whose height has changed and not yet been measured breaks that chain.
+ * Rows held outside the range (an inline frame kept mounted) are not next to their neighbours and
+ * are skipped. 1px of slack, because layout heights are fractional and offsets are not.
+ */
+export function laidOutAsMeasured(rows: readonly LaidOutRow[], index: number, start: number): boolean {
+  const above = rows.filter((r) => r.index <= index).sort((a, b) => a.index - b.index)
+  const target = above[above.length - 1]
+  if (!target || target.index !== index || Math.abs(target.top - start) > 1) return false
+  for (let k = 0; k + 1 < above.length; k++) {
+    const row = above[k]!
+    const next = above[k + 1]!
+    if (next.index !== row.index + 1) continue
+    if (Math.abs(row.top + row.height - next.top) > 1) return false
+  }
+  return true
+}
