@@ -10,6 +10,7 @@ import {
 } from '@cc/protocol'
 import { EventLog } from './event-log.js'
 import { createHttpHandler, type HttpGate } from './http.js'
+import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { DrainCut, type Drain } from '../drain.js'
 
 /**
@@ -366,6 +367,8 @@ export class HostServer {
 
   private onConnection(ws: WebSocket): void {
     let authed = false
+    /** The session whose bridge credential this socket said hello with; null for the front door's token */
+    let bridgeOf: string | null = null
     // A socket that never says hello is closed, not kept forever (#82)
     this.handshakeTimers.set(
       ws,
@@ -395,8 +398,12 @@ export class HostServer {
          */
         if (authed) return
         if (frame.data.token !== this.opts.token) {
-          ws.close(CLOSE_AUTH, 'bad token')
-          return
+          // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)
+          bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
+          if (bridgeOf === null) {
+            ws.close(CLOSE_AUTH, 'bad token')
+            return
+          }
         }
         if (frame.data.protocolVersion !== PROTOCOL_VERSION) {
           this.sendError(ws, null, {
@@ -415,6 +422,15 @@ export class HostServer {
         authed = true
         clearTimeout(this.handshakeTimers.get(ws))
         this.handshakeTimers.delete(ws)
+        /*
+         * A bridge is not a client: it reads nothing but answers to its own calls, so it is never
+         * added to the broadcast set and gets no replay. Every session's conversation, terminal
+         * output and approval would otherwise reach whoever read the bridge's credential.
+         */
+        if (bridgeOf !== null) {
+          this.sendTo(ws, this.helloOk(false))
+          return
+        }
         this.clients.add(ws)
         this.greet(ws, frame.data.afterSeq ?? 0, frame.data.streamEpoch)
         return
@@ -427,6 +443,10 @@ export class HostServer {
 
       // RPC
       const { method, params, id } = frame.data
+      if (bridgeOf !== null) {
+        const refusal = bridgeRefusal(bridgeOf, method, params)
+        if (refusal !== null) return this.sendError(ws, id, { code: 'internal', message: refusal, retryable: false })
+      }
       try {
         const run = () => this.opts.onRpc(method, params)
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
@@ -456,6 +476,17 @@ export class HostServer {
     ws.on('error', forget)
   }
 
+  private helloOk(resyncRequired: boolean): string {
+    return JSON.stringify({
+      kind: 'hello_ok',
+      protocolVersion: PROTOCOL_VERSION,
+      resyncRequired,
+      currentSeq: this.log.currentSeq,
+      streamEpoch: this.log.streamEpoch,
+      ...(this.opts.build ? { build: this.opts.build } : {}),
+    })
+  }
+
   /**
    * `hello_ok` and the replay of what was missed (docs/protocol.md §1) — sent in one go, so no
    * broadcast can slip in between.
@@ -468,24 +499,15 @@ export class HostServer {
    * a 2,000 x 50 kB history replayed to a stalled peer left 99.6 MB buffered in the host.
    */
   private greet(ws: WebSocket, afterSeq: number, streamEpoch: string | undefined): void {
-    const hello = (resyncRequired: boolean) =>
-      JSON.stringify({
-        kind: 'hello_ok',
-        protocolVersion: PROTOCOL_VERSION,
-        resyncRequired,
-        currentSeq: this.log.currentSeq,
-        streamEpoch: this.log.streamEpoch,
-        ...(this.opts.build ? { build: this.opts.build } : {}),
-      })
     const window = this.log.since(afterSeq, streamEpoch)
     const frames = window.events.map((e) => JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
-    let bytes = ws.bufferedAmount + wireBytes(hello(window.resyncRequired))
+    let bytes = ws.bufferedAmount + wireBytes(this.helloOk(window.resyncRequired))
     for (const f of frames) bytes += wireBytes(f)
     if (bytes > this.limits.replayBudgetBytes) {
-      this.sendTo(ws, hello(true))
+      this.sendTo(ws, this.helloOk(true))
       return
     }
-    this.sendTo(ws, hello(window.resyncRequired))
+    this.sendTo(ws, this.helloOk(window.resyncRequired))
     // Resend what was missed — so that reconnecting never loses state (docs/protocol.md §1)
     for (const f of frames) this.sendTo(ws, f)
   }

@@ -3,15 +3,23 @@ import { PassThrough } from 'node:stream'
 import { Drain, DrainCut } from './drain.js'
 import { bridgeAddress, ControlChannel, runDrain, standby, viewPort, type StandbyDeps } from './swap-control.js'
 import type { StoreInspection } from './dev-services/store.js'
+import { bridgeSessionOf } from './transport/bridge-token.js'
 
 describe('the Codex bridge address (#280 step 3)', () => {
   it('under a keeper is the front door, which outlives this host, and not the host’s own port', () => {
-    expect(bridgeAddress('ws://127.0.0.1:61000', 52001, 'tok')).toEqual({ url: 'ws://127.0.0.1:61000', token: 'tok' })
+    expect(bridgeAddress('ws://127.0.0.1:61000', 52001, 'tok', 's1')?.url).toBe('ws://127.0.0.1:61000')
   })
 
   it('without a keeper is the host itself, and nothing before the host listens', () => {
-    expect(bridgeAddress(undefined, 52001, 'tok')).toEqual({ url: 'ws://127.0.0.1:52001', token: 'tok' })
-    expect(bridgeAddress('ws://127.0.0.1:61000', undefined, 'tok')).toBeNull()
+    expect(bridgeAddress(undefined, 52001, 'tok', 's1')?.url).toBe('ws://127.0.0.1:52001')
+    expect(bridgeAddress('ws://127.0.0.1:61000', undefined, 'tok', 's1')).toBeNull()
+  })
+
+  it('carries the session’s bridge credential, never the host’s token, which would open every RPC (#382)', () => {
+    const token = 'front-door-token-0123456789abcdef'
+    const given = bridgeAddress('ws://127.0.0.1:61000', 52001, token, 's1')!
+    expect(given.token).not.toContain(token)
+    expect(bridgeSessionOf(token, given.token)).toBe('s1')
   })
 })
 

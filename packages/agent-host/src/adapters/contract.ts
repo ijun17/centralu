@@ -551,6 +551,9 @@ export type CreateSessionOpts = {
    * server through per-thread config, so a separate process starts, and that process calls back to
    * this address. The bridge for orchestrator tools and the bridge for an external app (M4 A-5)
    * both use the same path — the name follows whichever one existed first.
+   *
+   * `token` is this session's bridge credential, not the host's token: it opens only this
+   * session's bridge calls (`transport/bridge-token.ts`, #382).
    */
   orchestratorBridge?: { url: string; token: string }
 }

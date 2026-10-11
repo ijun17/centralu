@@ -1,6 +1,7 @@
 import type { Readable } from 'node:stream'
 import { DEFAULT_DRAIN_MS, type Drain, type DrainReport } from './drain.js'
 import type { StoreInspection } from './dev-services/store.js'
+import { bridgeToken } from './transport/bridge-token.js'
 
 /**
  * The host's half of a blue-green swap (#280, option C step 3).
@@ -28,14 +29,23 @@ import type { StoreInspection } from './dev-services/store.js'
 export const KEEPS_AGENTS_ACROSS_SWAP = true
 
 /**
- * The address and token a Codex orchestrator bridge is started with. Under a keeper that is the
- * front door, never this host's own port: a running codex keeps the bridge it started for as long
- * as its thread lives, and the bridge reads its address once, from its environment, so an address
- * that dies with this host would cut every bridge at the next swap.
+ * The address and credential the Codex bridge of `sessionId` is started with. Under a keeper the
+ * address is the front door, never this host's own port: a running codex keeps the bridge it
+ * started for as long as its thread lives, and the bridge reads its address once, from its
+ * environment, so an address that dies with this host would cut every bridge at the next swap.
+ *
+ * The credential is the session's bridge token, never the host's own (`transport/bridge-token.ts`,
+ * #382): the bridge's environment can be read by any process of the same user. It is derived from
+ * the host's token, which under a keeper is the front door's, so the next host accepts it too.
  */
-export function bridgeAddress(frontDoor: string | undefined, port: number | undefined, token: string): { url: string; token: string } | null {
+export function bridgeAddress(
+  frontDoor: string | undefined,
+  port: number | undefined,
+  hostToken: string,
+  sessionId: string,
+): { url: string; token: string } | null {
   if (!port) return null
-  return { url: frontDoor || `ws://127.0.0.1:${port}`, token }
+  return { url: frontDoor || `ws://127.0.0.1:${port}`, token: bridgeToken(hostToken, sessionId) }
 }
 
 /**

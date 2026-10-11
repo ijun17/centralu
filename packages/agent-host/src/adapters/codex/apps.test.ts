@@ -118,7 +118,7 @@ describe('thread/start — one bridge per app', () => {
     expect(servers['app-notes']).toMatchObject({
       command: process.execPath,
       args: [bridgePath()],
-      env: { CC_HOST_URL: BRIDGE.url, CC_HOST_TOKEN: BRIDGE.token, CC_SESSION_ID: 'codex-s1', CC_APP_SERVER: 'app-notes' },
+      env: { CC_HOST_URL: BRIDGE.url, CC_BRIDGE_TOKEN: BRIDGE.token, CC_SESSION_ID: 'codex-s1', CC_APP_SERVER: 'app-notes' },
       tool_timeout_sec: 300,
     })
     // A long-running call is returned with a run id before Codex's own 300-second ceiling (at 240 seconds) — the bridge carries this value to the host
@@ -250,7 +250,7 @@ describe('thread/resume — servers are loaded again on resume too', () => {
     expect(mcpServers(c, 'thread/resume')!['centralu']).toMatchObject({
       command: process.execPath,
       args: [bridgePath()],
-      env: { CC_HOST_URL: BRIDGE.url, CC_HOST_TOKEN: BRIDGE.token, CC_SESSION_ID: 'codex-o1' },
+      env: { CC_HOST_URL: BRIDGE.url, CC_BRIDGE_TOKEN: BRIDGE.token, CC_SESSION_ID: 'codex-o1' },
     })
   })
 

@@ -305,7 +305,7 @@ const mgr = new SessionManager(
     server.broadcast(e)
     versionsRef.current?.observe(e)
   },
-  () => bridgeAddress(frontDoor, port, token),
+  (sessionId) => bridgeAddress(frontDoor, port, token, sessionId),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
   held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {},

@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, SessionInfo, ToolName } from '@cc/protocol'
+import { WebSocket } from 'ws'
+import { PROTOCOL_VERSION, type AdapterCapabilities, type SessionInfo, type ToolName } from '@cc/protocol'
 import { storeRunLedger } from '../../app-run-ledger.js'
 import { ExternalApps } from '../../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp, until } from '../../apps/external/test-helpers.js'
@@ -13,6 +14,8 @@ import { SessionManager } from '../../sessions/manager.js'
 import { FIXTURE_APP } from '../../sessions/session-apps.test-helpers.js'
 import { HostServer } from '../../transport/server.js'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
+import { bridgeAddress } from '../../swap-control.js'
+import { bridgeToken } from '../../transport/bridge-token.js'
 import { bridgePath } from './bridge-path.js'
 
 /**
@@ -48,26 +51,35 @@ class NullAdapter implements AgentAdapter {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }
   async createSession(opts: CreateSessionOpts) {
+    if (opts.orchestratorBridge) handedBridge.set(opts.sessionId, opts.orchestratorBridge)
     return new Handle(opts.sessionId)
   }
 }
 
 const TOKEN = 'bridge-test-token-0123'
+/** What the manager handed the adapter to start each session's bridge with */
+const handedBridge = new Map<string, { url: string; token: string }>()
 let root = ''
 let store: Store
 let rt: ExternalApps
 let mgr: SessionManager
 let server: HostServer
 let port = 0
+/** The host's RPC handler, called directly: what the person's own app can do */
+let call: (method: string, params: unknown) => Promise<unknown>
 let projectId = ''
 let bridges: ChildProcessWithoutNullStreams[] = []
 /** A gate file that releases the `hold` tool */
 let gate = ''
 
-/** Starts one bridge and speaks to it as if it were Codex */
+/**
+ * Starts one bridge and speaks to it as if it were Codex. It holds the credential the adapter was
+ * handed for that session (one made the same way for a session that never started).
+ */
 function bridge(sessionId: string, appServer: string, env: Record<string, string> = {}) {
+  const credential = handedBridge.get(sessionId)?.token ?? bridgeToken(TOKEN, sessionId)
   const child = spawn(process.execPath, [bridgePath()], {
-    env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_HOST_TOKEN: TOKEN, CC_SESSION_ID: sessionId, CC_APP_SERVER: appServer, ...env },
+    env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_BRIDGE_TOKEN: credential, CC_SESSION_ID: sessionId, CC_APP_SERVER: appServer, ...env },
   })
   bridges.push(child)
   const got: { id?: number; result?: Record<string, unknown>; error?: { message: string } }[] = []
@@ -102,10 +114,12 @@ beforeEach(async () => {
 
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>([['codex', new NullAdapter()]])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: `ws://127.0.0.1:${port}`, token: TOKEN }))
+  // The host's own wiring (main.ts): each session's bridge gets its own credential, not TOKEN
+  mgr = new SessionManager(store, adapters, () => {}, (sessionId) => bridgeAddress(undefined, port, TOKEN, sessionId))
   rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'], runs: storeRunLedger(store) })
   mgr.useExternalApps(rt)
   const rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
+  call = (m, p) => rpc(m as never, p)
   server = new HostServer({ port: 0, token: TOKEN, onRpc: (m, p) => rpc(m as never, p) })
   port = await server.listen()
   projectId = ((await rpc('projects.add', { path: proj })) as { id: string }).id
@@ -115,6 +129,7 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const b of bridges) b.kill()
   bridges = []
+  handedBridge.clear()
   await mgr.disposeAll()
   await rt.dispose()
   await server.close()
@@ -164,6 +179,66 @@ describe('app bridge — end to end, seen from Codex\'s own spot', () => {
     const out = await request('tools/call', { name: 'peek', arguments: {} })
     expect(out.result).toMatchObject({ isError: true })
     expect(JSON.stringify(out.result)).toContain('it is not running')
+  })
+})
+
+/** Speaks to the host directly over WebSocket with `token`, the way any other process could */
+async function rawClient(token: string) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  const frames: { kind: string; id?: string; ok?: boolean; error?: { message: string } }[] = []
+  ws.on('message', (d) => frames.push(JSON.parse(String(d))))
+  await new Promise<void>((r) => ws.once('open', () => r()))
+  ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION }))
+  let n = 0
+  return {
+    rpc: async (method: string, params: unknown) => {
+      const id = `c${++n}`
+      ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
+      return (await until(() => frames.find((f) => f.kind === 'res' && f.id === id), (f) => f !== undefined, 5_000))!
+    },
+    close: () => ws.close(),
+  }
+}
+
+/**
+ * The bridge's credential (#382, owner question 4). The bridge's environment can be read by any
+ * process of the same user (`ps eww`, measured on macOS 27.0.1), so this is what such a process
+ * would get by reading it.
+ */
+describe('app bridge — its credential opens only its own session\'s bridge calls (#382)', () => {
+  it("the adapter is handed a credential that is not the host's token, and a bridge holding it reaches the app", async () => {
+    const s = await worker()
+    const handed = handedBridge.get(s.id)!
+    expect(handed.token).not.toContain(TOKEN)
+    const { request } = bridge(s.id, 'app-notes')
+    await request('initialize', {})
+    const out = await request('tools/call', { name: 'poke', arguments: { to: 3 } })
+    expect(out.result).toMatchObject({ content: [{ type: 'text', text: 'poked 3' }], isError: false })
+  })
+
+  it("a bridge holding one session's credential cannot call as another session", async () => {
+    const a = await worker()
+    const b = await worker()
+    const { request } = bridge(b.id, 'app-notes', { CC_BRIDGE_TOKEN: handedBridge.get(a.id)!.token })
+    await request('initialize', {})
+    const out = await request('tools/call', { name: 'poke', arguments: { to: 1 } })
+    expect(out.result).toMatchObject({ isError: true })
+    expect(JSON.stringify(out.result)).toContain('for another session')
+    expect(rt.runs({ projectId, appId: 'notes' })).toEqual([])
+  })
+
+  it("cannot set its session's preset to auto or change a project's trust", async () => {
+    const s = await worker()
+    const stolen = await rawClient(handedBridge.get(s.id)!.token)
+    const preset = await stolen.rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
+    const trust = await stolen.rpc('projects.setTrusted', { projectId, trusted: false })
+    stolen.close()
+    expect(preset).toMatchObject({ ok: false, error: { message: expect.stringContaining('cannot call agents.updateSettings') } })
+    expect(trust).toMatchObject({ ok: false, error: { message: expect.stringContaining('cannot call projects.setTrusted') } })
+    const sessions = (await call('sessions.list', {})) as SessionInfo[]
+    expect(sessions.find((x) => x.id === s.id)?.permissionPreset).toBe('normal')
+    const projects = (await call('projects.list', {})) as { id: string; trusted: boolean }[]
+    expect(projects.find((p) => p.id === projectId)?.trusted).toBe(true)
   })
 })
 

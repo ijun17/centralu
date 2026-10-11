@@ -560,6 +560,16 @@ environment once read, so terminals, agents and commands do not inherit them. Th
 front door's address (`swap-control.ts`, `bridgeAddress`): a running codex keeps its bridge, and only an address
 that outlives this host survives a swap. Without a keeper the bridge gets the host's own port, as before.
 
+**The bridge's credential** (#382). The bridge is not given the token. It gets `CC_BRIDGE_TOKEN`, an HMAC of its
+session id keyed by the host's token (`transport/bridge-token.ts`), because any process of the same user can read
+the environment the bridge started with ([security-boundaries.md](security-boundaries.md), "The front door"). A
+connection that says hello with one is not a client: it gets `hello_ok` and nothing else (no replay, no broadcast,
+no terminal output), and it may call only `orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools` and
+`apps.sessionCall`, each naming the session the credential was made for. Under a keeper the key is the front door's
+token, so the next host accepts a running bridge's credential without anything being handed over. A host from before
+this change refuses it: after switching back to such a build, a Codex session started by a newer one loses its
+Centralu tools until it is restarted, and the bridge says so.
+
 **Control lines on stdin** (`swap-control.ts`). The keeper's pipe also carries one JSON object per line; the host
 answers on stdout next to its ready line. Neither side parses anything else the other says.
 
@@ -699,7 +709,7 @@ codex-cli 0.160.0 with `gpt-5.6-luna`, low effort):
 | tool | measured |
 |---|---|
 | claude | A new `query()` over the kept process: its `initialize` re-delivered the pending approval to the new `canUseTool` at once; answering it ran the command and finished the turn. Mid-turn, the remaining three Bash calls and the result arrived through the new host. |
-| codex | `initialize` again: `-32600 "Already initialized"`, nothing else changes. `thread/resume`: `thread.status` `active`/`waitingOnApproval`, the running turn in `thread.turns` (the id Stop needs), and the approval re-sent with the same request id (`0`); accepting it finished the turn. Since #342 the resume asks for no turns (`excludeTurns: true`), and the running turn comes from `thread/turns/list` (`limit: 1`, newest first, `itemsView: 'notLoaded'`), asked only when the thread is `active`; measured again on 0.160.0 (2026-10-05): the turn came back `inProgress`, and a pending approval was still re-sent under its id. A Codex that predates the flag answers with the turns, and those are read as before. It does not restart the thread's MCP servers (a probe server configured on resume never started), which is why the bridge has the front door's address and token. |
+| codex | `initialize` again: `-32600 "Already initialized"`, nothing else changes. `thread/resume`: `thread.status` `active`/`waitingOnApproval`, the running turn in `thread.turns` (the id Stop needs), and the approval re-sent with the same request id (`0`); accepting it finished the turn. Since #342 the resume asks for no turns (`excludeTurns: true`), and the running turn comes from `thread/turns/list` (`limit: 1`, newest first, `itemsView: 'notLoaded'`), asked only when the thread is `active`; measured again on 0.160.0 (2026-10-05): the turn came back `inProgress`, and a pending approval was still re-sent under its id. A Codex that predates the flag answers with the turns, and those are read as before. It does not restart the thread's MCP servers (a probe server configured on resume never started), which is why the bridge has the front door's address and a credential every host the keeper runs accepts (§4.2). |
 
 **A lost in-process call.** A call to the host's own in-process tools (orchestrator `mcp__centralu__*`, app
 proxies `mcp__app-*`) in flight when the host died is never answered: measured, the adopted claude waited silently

@@ -5,6 +5,7 @@ import { request, type IncomingHttpHeaders } from 'node:http'
 import { PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
+import { bridgeToken } from './bridge-token.js'
 
 const TOKEN = 'test-token'
 let server: HostServer | null = null
@@ -14,7 +15,7 @@ afterEach(async () => {
   server = null
 })
 
-async function start(onRpc = async () => ({ ok: true }), extra: Partial<HostServerOptions> = {}) {
+async function start(onRpc: HostServerOptions['onRpc'] = async () => ({ ok: true }), extra: Partial<HostServerOptions> = {}) {
   server = new HostServer({ port: 0, token: TOKEN, onRpc, ...extra })
   const port = await server.listen()
   return { server: server!, port }
@@ -424,6 +425,126 @@ describe('RPC round trip', () => {
       ok: false,
       error: { code: 'internal', retryable: true, data: { machine: 'm1', reason: 'unreachable' } },
     })
+    c.ws.close()
+  })
+})
+
+/**
+ * The Codex bridge's credential (#382, owner question 4). The bridge's environment is readable by
+ * any process of the same user (measured on macOS 27.0.1 with `ps eww`), so what it holds must open
+ * the bridge's own calls for its own session and nothing else.
+ */
+describe("the Codex bridge's credential (#382)", () => {
+  async function bridgeConn(port: number, token: string) {
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION })
+    return c
+  }
+  const recorder = () => {
+    const calls: [string, unknown][] = []
+    const onRpc = async (method: string, params: unknown) => {
+      calls.push([method, params])
+      return { text: 'ran' } as never
+    }
+    return { calls, onRpc }
+  }
+  const resOf = async (c: ReturnType<typeof connect>, id: string) => {
+    await c.wait(() => c.frames.some((f) => f.kind === 'res' && f.id === id))
+    return c.frames.find((f) => f.kind === 'res' && f.id === id) as { ok: boolean; error?: { message: string } }
+  }
+
+  it("is accepted at hello and carries the bridge's own calls for its own session", async () => {
+    const { calls, onRpc } = recorder()
+    const { port } = await start(onRpc)
+    const c = await bridgeConn(port, bridgeToken(TOKEN, 's1'))
+    c.send({ kind: 'rpc', id: 'a', method: 'orchestrator.tool', params: { sessionId: 's1', name: 'list_sessions', args: {} } })
+    c.send({ kind: 'rpc', id: 'b', method: 'apps.sessionCall', params: { sessionId: 's1', server: 'app-x', name: 't', args: {} } })
+    expect(await resOf(c, 'a')).toMatchObject({ ok: true })
+    expect(await resOf(c, 'b')).toMatchObject({ ok: true })
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok' })
+    expect(calls.map(([m]) => m)).toEqual(['orchestrator.tool', 'apps.sessionCall'])
+    c.ws.close()
+  })
+
+  it('cannot call any RPC the bridge does not send, even naming its own session; the handler never sees it', async () => {
+    const { calls, onRpc } = recorder()
+    const { port } = await start(onRpc)
+    const c = await bridgeConn(port, bridgeToken(TOKEN, 's1'))
+    const attempts: [string, unknown][] = [
+      ['agents.updateSettings', { sessionId: 's1', permissionPreset: 'auto' }],
+      ['projects.setTrusted', { projectId: 'p1', trusted: true }],
+      ['sessions.list', {}],
+      ['terminals.open', { sessionId: 's1' }],
+    ]
+    attempts.forEach(([method, params], i) => c.send({ kind: 'rpc', id: `x${i}`, method, params }))
+    for (let i = 0; i < attempts.length; i++) {
+      const res = await resOf(c, `x${i}`)
+      expect(res.ok).toBe(false)
+      expect(res.error?.message).toContain(`cannot call ${attempts[i]![0]}`)
+    }
+    expect(calls).toEqual([])
+    c.ws.close()
+  })
+
+  it("cannot call for another session, nor list the full orchestrator set by naming none", async () => {
+    const { calls, onRpc } = recorder()
+    const { port } = await start(onRpc)
+    const c = await bridgeConn(port, bridgeToken(TOKEN, 's1'))
+    c.send({ kind: 'rpc', id: 'o', method: 'orchestrator.tool', params: { sessionId: 's2', name: 'list_sessions', args: {} } })
+    c.send({ kind: 'rpc', id: 'n', method: 'orchestrator.tools', params: {} })
+    for (const id of ['o', 'n']) {
+      const res = await resOf(c, id)
+      expect(res.ok).toBe(false)
+      expect(res.error?.message).toContain('for another session')
+    }
+    expect(calls).toEqual([])
+    c.ws.close()
+  })
+
+  it('gets no replay, no broadcast and no terminal output: it is not a client', async () => {
+    const { server: srv, port } = await start()
+    srv.broadcast(ev('before'))
+    const bridge = await bridgeConn(port, bridgeToken(TOKEN, 's1'))
+    const app = connect(port)
+    await app.open()
+    app.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await bridge.wait(() => bridge.frames.length > 0)
+    await app.wait(() => app.frames.some((f) => f.kind === 'event'))
+    srv.broadcast(ev('after'))
+    srv.pushTerminal({ terminalId: 't1', data: 'secret output' })
+    // The app is the control: once it has both, the bridge has had every chance to get them too
+    await app.wait(() => app.frames.filter((f) => f.kind === 'event').length === 2 && app.frames.some((f) => f.kind === 'term'))
+    bridge.send({ kind: 'rpc', id: 'r', method: 'orchestrator.tools', params: { sessionId: 's1' } })
+    await resOf(bridge, 'r')
+    expect(bridge.frames.map((f) => f.kind)).toEqual(['hello_ok', 'res'])
+    bridge.ws.close()
+    app.ws.close()
+  })
+
+  it("is accepted by the next host given the same token, as after a keeper's swap", async () => {
+    const first = await start()
+    const credential = bridgeToken(TOKEN, 's1')
+    await first.server.close()
+    server = null
+    const { port } = await start()
+    const c = await bridgeConn(port, credential)
+    await c.wait(() => c.frames.length > 0)
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok' })
+    c.ws.close()
+  })
+
+  it.each([
+    ["another host's credential", () => bridgeToken('another-token', 's1')],
+    ['a credential with its session swapped', () => bridgeToken(TOKEN, 's1').replace(':s1:', ':s2:')],
+    ['a credential with no mac', () => 'ccb1:s1:'],
+    ['a credential naming something that is not a session id', () => bridgeToken(TOKEN, '../x')],
+  ])('%s is refused like a wrong token', async (_, make) => {
+    const { port } = await start()
+    const c = await bridgeConn(port, make())
+    // Whichever comes first, so an accepted credential fails here rather than as a timeout
+    const outcome = await Promise.race([c.closed(), c.wait(() => c.frames.length > 0).then(() => c.frames[0]!.kind)])
+    expect(outcome).toBe(4001)
     c.ws.close()
   })
 })

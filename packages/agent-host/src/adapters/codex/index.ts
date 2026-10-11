@@ -640,7 +640,7 @@ class CodexSession implements SessionHandle {
       servers[ORCHESTRATOR_MCP_NAME] = {
         command: process.execPath,
         args: [bridgePath()],
-        env: { CC_HOST_URL: bridge!.url, CC_HOST_TOKEN: bridge!.token, CC_SESSION_ID: this.opts.sessionId },
+        env: { CC_HOST_URL: bridge!.url, CC_BRIDGE_TOKEN: bridge!.token, CC_SESSION_ID: this.opts.sessionId },
         /*
          * Our own tools are never asked about, under any preset — the same as Claude, where they
          * skip canUseTool (isOrchestratorTool). Without this, auto (`approvalPolicy: never`) made
@@ -672,7 +672,7 @@ class CodexSession implements SessionHandle {
           args: [bridgePath()],
           env: {
             CC_HOST_URL: bridge.url,
-            CC_HOST_TOKEN: bridge.token,
+            CC_BRIDGE_TOKEN: bridge.token,
             CC_SESSION_ID: this.opts.sessionId,
             CC_APP_SERVER: a.server,
             CC_APP_WAIT_MS: String(APP_CALL_WAIT_MS),

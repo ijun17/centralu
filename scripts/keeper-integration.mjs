@@ -35,7 +35,7 @@
  *   - a swap closes connections through the door, the same address and token reach the new host
  *     after a reconnect, the attached app hears every phase, one host remains, running from the
  *     new build's copy, and the old copy is removed; a bridge process started before the swap
- *     reaches the new host on its next call;
+ *     reaches the new host on its next call, which accepts its session credential (#382);
  *   - a swap to a broken build fails its standby check and leaves the running host serving, its
  *     clients connected;
  *   - a new host that fails after the old one drained is reported, and the old build serves again;
@@ -49,6 +49,7 @@
  * (`keeper-test-processes.mjs`); a failed scenario prints the end of its keeper's and host's logs.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { createHmac } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
@@ -796,10 +797,22 @@ function phases(app) {
 }
 const swapOf = async (sock) => (await status(sock))?.swap
 
+/**
+ * A session's bridge credential, made the way the host makes it (packages/agent-host/src/transport/
+ * bridge-token.ts, #382). Spelled out here rather than imported: this script drives built copies of
+ * the host and imports none of its source. If the two drift apart, the swap scenario's bridge checks
+ * fail, because the host refuses the credential.
+ */
+function bridgeToken(hostToken, sessionId) {
+  const mac = createHmac('sha256', hostToken).update(`centralu bridge token v1\0${sessionId}`).digest('base64url')
+  return `ccb1:${sessionId}:${mac}`
+}
+
 /** The Codex bridge from a host copy, spoken to the way codex speaks to it */
-function startBridge(copyDir, url, token) {
+function startBridge(copyDir, url, hostToken) {
+  const sessionId = 'integration-no-such-session'
   const child = spawn(process.execPath, [join(copyDir, 'codex-orchestrator-bridge.mjs')], {
-    env: { ...process.env, CC_HOST_URL: url, CC_HOST_TOKEN: token, CC_SESSION_ID: 'integration-no-such-session' },
+    env: { ...process.env, CC_HOST_URL: url, CC_BRIDGE_TOKEN: bridgeToken(hostToken, sessionId), CC_SESSION_ID: sessionId },
     stdio: ['pipe', 'pipe', 'ignore'],
   })
   started.add(child.pid)
@@ -853,7 +866,8 @@ async function scenarioSwap() {
   const copyA = view.source.copyDir
   const bridge = startBridge(copyA, door, token)
   const before = await bridge.ask('tools/list')
-  check(before && (before.result || before.error), 'a Codex bridge with the front door in its environment reaches the host', JSON.stringify(before))
+  // A result, not an error: a refused credential comes back as an error too (#382)
+  check(before?.result, 'a Codex bridge with the front door and its session’s credential in its environment reaches the host', JSON.stringify(before))
 
   const src2 = makeBuild('swapcommit2')
   const sw = await request(sock, { op: 'switch', source: { commit: 'swapcommit2', hostDir: src2, bundlePath: '/tmp/Other.app' } })
@@ -885,7 +899,7 @@ async function scenarioSwap() {
   check(await waitFor(() => !existsSync(copyA), 5000), 'the old build’s copy is removed afterwards')
   const later = await bridge.ask('tools/list')
   const text = JSON.stringify(later)
-  check(later && !/closed before it answered|ECONNREFUSED|timed out/.test(text), 'the same bridge process reaches the new host on its next call', text)
+  check(later?.result, 'the same bridge process reaches the new host on its next call, which accepts its credential', text)
   bridge.kill()
   c2.close()
 

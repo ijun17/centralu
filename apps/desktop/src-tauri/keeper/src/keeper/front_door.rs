@@ -13,7 +13,8 @@
 //!   - **The token stays stable anyway.** The keeper makes one per keeper lifetime and hands it to
 //!     every host it starts (`CC_HOST_TOKEN`), so the host checks the same token clients already
 //!     hold, and the Origin rule still sees the browser's own header. A Codex bridge, which gets its
-//!     address and token once when its thread starts, keeps working across every swap.
+//!     address and a credential derived from this token once when its thread starts, keeps working
+//!     across every swap (the host's `transport/bridge-token.ts`, #382).
 //!
 //! The door listens on loopback only. Anyone on this machine can open a TCP connection to it, as
 //! they can to a host today; what they cannot do without the token is get past the host's `hello`.

@@ -59,7 +59,9 @@ decides both which tools the session sees and which calls run (`profileAllows` i
 `sessions/orchestrator-tools.ts`). Claude's in-process server is built from the profile
 (`adapters/claude/orchestrator-mcp.ts`, `toolDefsFor`); Codex calls through the bridge, and the host
 checks the profile again on every call (`SessionManager.runOrchestratorTool`), so a name the
-session was not given is refused even when the bridge asks for it.
+session was not given is refused even when the bridge asks for it. The bridge connects with a
+credential for its own session's bridge calls, not with the host's token (owner question 4; "The
+front door" below).
 
 | Profile | Which sessions | What its tools see |
 |---|---|---|
@@ -405,7 +407,9 @@ only with the intended local client. Mock/demo modes do not connect to the host.
 A socket that has not sent a valid hello within 10 seconds is closed, and a socket whose undrained
 outbound backlog passes 64 MiB is cut, so a connection cannot make the host hold unbounded memory or
 an endless slot (#82; `transport/server.ts`, `TRANSPORT_LIMITS`). An authenticated socket's hello is
-answered once; a repeat is ignored.
+answered once; a repeat is ignored. A hello may carry a Codex bridge's credential instead of the token
+(#382, "The front door" below); that socket receives no events and may call only its own session's
+bridge RPCs.
 
 ## The remote host (`centralu serve`, #82)
 
@@ -468,14 +472,36 @@ host. It changes where a client connects, not what it must prove:
 - **The token is the keeper's**, 16 random bytes from `/dev/urandom`, one per keeper lifetime. It reaches clients
   only through the user-only control socket, and hosts only through their environment (`CC_HOST_TOKEN`). The host
   deletes it from its environment once read, so terminals, agents, commands and app processes do not inherit it;
-  app processes never received `CC_*` variables anyway. A process's initial environment can still be read by the
-  same user (`ps eww` on macOS), which is the same trust as the control socket. It is never written to
-  `keeper.json`, `keeper.log` or `host.log`.
+  app processes never received `CC_*` variables anyway. It is never written to `keeper.json`, `keeper.log` or
+  `host.log`.
+- **Deleting it hides it from children only, not from other processes of the same user.** Measured on macOS 27.0.1
+  (build 26A434, 2026-10-11): a node process started with `CC_PROBE_SECRET=<marker>` deleted it from `process.env`
+  at once and set another variable afterwards. From a separate process of the same user, started with an empty
+  environment (`env -i`), `ps eww -p <pid>`, `ps -E -ww -p <pid>` and a `sysctl` read of `KERN_PROCARGS2` (2,164
+  bytes back) all printed `CC_PROBE_SECRET=<marker>`; the variable set after start appeared in none of them. The
+  same `sysctl` for pid 1, a root process, failed with `EINVAL`. So what a process is started with stays readable
+  to every process of its user for as long as it runs; on Linux `/proc/<pid>/environ` is the same initial block
+  (not measured here). The host's own initial environment holds the token, and the control socket's `status` hands
+  it out, both to this user only: the token is not a boundary between processes of the same user, and does not try
+  to be one.
+- **The Codex bridge gets a credential of its own, not the token** (#382, owner question 4, decided 2026-10-11).
+  Codex starts the bridge with the front door's address and `CC_BRIDGE_TOKEN`, an HMAC of the bridge's session id
+  keyed by the token (`transport/bridge-token.ts`, `bridgeAddress`). Before this the bridge held the token itself,
+  so a command a session ran could take it from the bridge's environment as measured above and call every RPC:
+  set its own preset to auto (`agents.updateSettings`), trust a project (`projects.setTrusted`). A socket that says
+  hello with a bridge credential is not a client: it gets `hello_ok` and nothing else (no replay, no broadcast, no
+  terminal output), and may call only `orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools` and
+  `apps.sessionCall`, each naming the credential's own session (`bridgeRefusal`); everything else is refused before
+  it reaches the handler (`server.test.ts`, `app-bridge.test.ts`). Because it is derived from the front door's token,
+  the next host after a swap accepts it with nothing handed over or stored, and a running bridge keeps working
+  (`scripts/keeper-integration.mjs`, the swap scenario). What it still opens is that session's own Centralu tools and
+  attached apps as that session, gated by the session's profile like the session's own calls; a process that reads
+  an orchestrator's bridge gets the orchestrator's set. It is valid for the keeper's lifetime. This takes the token
+  out of the one process that held it for a session; per the bullet above, the token itself stays within reach of
+  the same user.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
   the agents it serves; a keeper restart makes a new one, and a keeper update (step 4) passes the
   same one on to the new keeper over the handoff channel below.
-- The Codex orchestrator bridge is given the front door's address and token in its environment (codex starts it),
-  as it was given the host's before.
 - While no host is ready, the door holds a connection up to 45 s before closing it, so an unauthenticated
   connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
   timeout (10 s) applies.

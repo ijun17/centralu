@@ -40,7 +40,7 @@ describe('the Codex bridge across a host swap (#280 step 3)', () => {
     const port = (wss.address() as { port: number }).port
 
     child = spawn(process.execPath, [bridgePath()], {
-      env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_HOST_TOKEN: 't', CC_SESSION_ID: 's1' },
+      env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_BRIDGE_TOKEN: 't', CC_SESSION_ID: 's1' },
     })
     const got: { id: number; result: { content: { text: string }[]; isError: boolean } }[] = []
     let buf = ''

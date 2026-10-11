@@ -468,11 +468,12 @@ export class SessionManager {
     private adapters: Map<ToolName, AgentAdapter>,
     private emit: (e: NormalizedEvent) => void,
     /**
-     * The host's own address. The port is only decided after listen(), so this is received as a
-     * **function to ask**, not a value. The bridge for adapters that cannot attach to the tool
-     * in-process (Codex) comes back through this address.
+     * The host's own address, and the credential for one session's bridge. The port is only decided
+     * after listen(), so this is received as a **function to ask**, not a value. The bridge for
+     * adapters that cannot attach to the tool in-process (Codex) comes back through this address.
+     * The credential opens only that session's bridge calls (`transport/bridge-token.ts`, #382).
      */
-    private endpoint?: () => { url: string; token: string } | null,
+    private endpoint?: (sessionId: string) => { url: string; token: string } | null,
     /**
      * Root under which worktrees are created. **Placed next to the data folder** — that way dev and
      * the packaged app naturally separate (`~/.centralu-dev` vs `~/.centralu`), and tests supply a
@@ -1380,7 +1381,7 @@ export class SessionManager {
           // (M4 A-5)
           orchestratorBridge:
             info.kind === 'orchestrator' || params.builderOf || apps || this.readsOwnProject(info)
-              ? (this.endpoint?.() ?? undefined)
+              ? (this.endpoint?.(id) ?? undefined)
               : undefined,
           // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
           apps,
@@ -2017,7 +2018,7 @@ export class SessionManager {
                 (m.roleAppend ?? undefined),
           orchestratorBridge:
             m.kind === 'orchestrator' || m.kind === 'coordinator' || builds || this.isWorktreeManager(sessionId) || apps || this.readsOwnProject(m)
-              ? (this.endpoint?.() ?? undefined)
+              ? (this.endpoint?.(sessionId) ?? undefined)
               : undefined,
           // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
           // A-7)

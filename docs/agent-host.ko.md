@@ -496,6 +496,15 @@ ubuntu-24.04에서 돌린다. 그곳의 첫 시도(2026-10-05)는 스크립트 �
 물려받지 않게 한다. Codex 브리지는 정문 주소로 띄운다(`swap-control.ts`, `bridgeAddress`): 도는 codex는 브리지를
 계속 쥐고, 이 호스트보다 오래 사는 주소만 교체를 견딘다. 키퍼가 없으면 예전처럼 호스트 자신의 포트를 준다.
 
+**브리지의 자격 증명** (#382). 브리지는 토큰을 받지 않는다. 대신 `CC_BRIDGE_TOKEN`을 받는데, 호스트의 토큰을 키로
+한 세션 id의 HMAC이다(`transport/bridge-token.ts`). 같은 사용자의 어떤 프로세스든 브리지가 시작될 때의 환경을 읽을
+수 있기 때문이다([security-boundaries.md](security-boundaries.md), "The front door"). 이것으로 hello한 연결은
+클라이언트가 아니다: `hello_ok` 말고는 아무것도 받지 않고(재생도, 방송도, 터미널 출력도 없다), 호출할 수 있는 것은
+`orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools`, `apps.sessionCall`뿐이며, 그것도 자격 증명을
+만든 세션을 이름으로 댈 때만이다. 키퍼 아래에서 키는 정문의 토큰이라서, 다음 호스트도 아무것도 넘겨받지 않고 돌던
+브리지의 자격 증명을 받아 준다. 이 변경 이전의 호스트는 거절한다: 그런 빌드로 되돌아가면 새 빌드가 시작한 Codex
+세션은 다시 시작할 때까지 Centralu 도구를 잃고, 브리지가 그렇게 말한다.
+
 **stdin의 제어 줄** (`swap-control.ts`). 키퍼의 파이프는 한 줄에 JSON 객체 하나씩도 나른다. 호스트는 준비 줄
 옆 stdout으로 답한다. 어느 쪽도 상대가 하는 다른 말은 해석하지 않는다.
 
@@ -624,7 +633,7 @@ pty는 쓸어 내지 않는다: 셸이 끝나면 커널이 터미널의 전경 �
 | 도구 | 측정 |
 |---|---|
 | claude | 쥐어 둔 프로세스 위의 새 `query()`: 그 `initialize`가 기다리던 승인을 새 `canUseTool`에 즉시 다시 전했고, 답하자 명령이 돌고 턴이 끝났다. 턴 도중이면 남은 Bash 호출 셋과 결과가 새 호스트를 통해 왔다. |
-| codex | `initialize`를 다시: `-32600 "Already initialized"`, 그 밖에 바뀌는 것 없음. `thread/resume`: `thread.status`는 `active`/`waitingOnApproval`, 도는 턴은 `thread.turns`에(Stop에 필요한 id), 승인은 같은 요청 id(`0`)로 다시 왔고, 수락하자 턴이 끝났다. #342부터 resume은 턴을 달라고 하지 않고(`excludeTurns: true`), 도는 턴은 스레드가 `active`일 때만 `thread/turns/list`(`limit: 1`, 최신부터, `itemsView: 'notLoaded'`)로 묻는다. 0.160.0에서 다시 측정(2026-10-05): 턴은 `inProgress`로 왔고, 기다리던 승인은 여전히 같은 id로 다시 왔다. 이 플래그를 모르는 Codex는 턴을 실어 답하고, 그것을 예전처럼 읽는다. 스레드의 MCP 서버는 다시 띄우지 않는다(resume에 설정한 탐침 서버는 뜨지 않았다). 브리지가 정문의 주소와 토큰을 갖는 이유가 이것이다. |
+| codex | `initialize`를 다시: `-32600 "Already initialized"`, 그 밖에 바뀌는 것 없음. `thread/resume`: `thread.status`는 `active`/`waitingOnApproval`, 도는 턴은 `thread.turns`에(Stop에 필요한 id), 승인은 같은 요청 id(`0`)로 다시 왔고, 수락하자 턴이 끝났다. #342부터 resume은 턴을 달라고 하지 않고(`excludeTurns: true`), 도는 턴은 스레드가 `active`일 때만 `thread/turns/list`(`limit: 1`, 최신부터, `itemsView: 'notLoaded'`)로 묻는다. 0.160.0에서 다시 측정(2026-10-05): 턴은 `inProgress`로 왔고, 기다리던 승인은 여전히 같은 id로 다시 왔다. 이 플래그를 모르는 Codex는 턴을 실어 답하고, 그것을 예전처럼 읽는다. 스레드의 MCP 서버는 다시 띄우지 않는다(resume에 설정한 탐침 서버는 뜨지 않았다). 브리지가 정문의 주소와, 키퍼가 돌리는 모든 호스트가 받아 주는 자격 증명을 갖는 이유가 이것이다(§4.2). |
 
 **잃어버린 in-process 호출.** 호스트가 죽을 때 진행 중이던 호스트 자신의 in-process 도구 호출(오케스트레이터
 `mcp__centralu__*`, 앱 프록시 `mcp__app-*`)은 결코 답을 받지 못한다: 측정해 보니 넘겨받은 claude는 새 주인이

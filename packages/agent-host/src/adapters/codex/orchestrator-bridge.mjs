@@ -15,7 +15,9 @@
  *
  * What it receives through environment variables:
  *   CC_HOST_URL       the host's WS address (under the keeper, its front door: stable across host swaps)
- *   CC_HOST_TOKEN     the auth token
+ *   CC_BRIDGE_TOKEN   this session's bridge credential (transport/bridge-token.ts). Not the host's
+ *                     token: any process of the same user can read this environment (`ps eww`), so
+ *                     it opens only the four calls below, and only for CC_SESSION_ID (#382)
  *   CC_SESSION_ID     this session's id (the host judges permission by this)
  *   CC_APP_SERVER     (if present) this is the bridge for a single external app — that app's session server name `app-<id>` (M4 A-5)
  *
@@ -29,7 +31,7 @@
 import { WebSocket } from 'ws'
 
 const URL_ = process.env.CC_HOST_URL
-const TOKEN = process.env.CC_HOST_TOKEN
+const TOKEN = process.env.CC_BRIDGE_TOKEN
 const SESSION_ID = process.env.CC_SESSION_ID
 const APP_SERVER = process.env.CC_APP_SERVER || null
 /**
@@ -82,11 +84,19 @@ function connect() {
      * front door, and a host swap closes every connection through it. Waiting out the call's own
      * timeout (60 s, 280 s for an app) would leave the model staring at a dead call for minutes.
      */
-    sock.on('close', () => {
+    sock.on('close', (code) => {
       if (ws === sock) ws = null
+      /*
+       * 4001 is the host refusing the credential (transport/server.ts). Calling again cannot help
+       * then: a host that predates bridge credentials refuses it every time, so say what fixes it.
+       */
+      const why =
+        code === 4001
+          ? 'Centralu refused this bridge\'s credential; restart the session to get a new one'
+          : 'the connection to Centralu closed before it answered; call the tool again'
       for (const [id, p] of pending) {
         pending.delete(id)
-        p.reject(new Error('the connection to Centralu closed before it answered; call the tool again'))
+        p.reject(new Error(why))
       }
     })
     sock.on('open', () => {
@@ -193,7 +203,7 @@ async function handleApp(id, method, params) {
 }
 
 if (!URL_ || !TOKEN || !SESSION_ID) {
-  log('CC_HOST_URL, CC_HOST_TOKEN, and CC_SESSION_ID are required')
+  log('CC_HOST_URL, CC_BRIDGE_TOKEN, and CC_SESSION_ID are required')
   process.exit(1)
 }
 
