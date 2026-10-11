@@ -60,6 +60,7 @@ import {
   parseThemeFile,
   formatThemeFile,
   osPathBaseName,
+  folderNameError,
   sessionLiveDefaults,
   SUBAGENT_STEPS_PAGE,
 } from '@cc/protocol'
@@ -154,6 +155,29 @@ export class MockPlatform implements Platform {
 
   /** For tests: the value the directory picker will return */
   nextPickedDirectory: string | null = '/tmp/picked'
+  /** For tests: paths a new project may not take, as if a folder of that name were already there (#515) */
+  takenPaths = new Set<string>()
+  /** Every `projects.create` call, as asked (#515) */
+  readonly createProjectCalls: { name: string; parent?: string; machine?: string | null }[] = []
+
+  /**
+   * Where a new project would go on a machine (#515), as its host would say: the Desktop of this computer, or of a
+   * linked machine in its own path terms. Refuses what the host refuses — the name rule is the host's own (protocol).
+   */
+  private newProjectTarget(name: string, parent?: string, machine?: string | null): { parent: string; path: string | null; error: string | null } {
+    const windows = !!machine && this.machinesList.find((m) => m.id === machine)?.shell === 'powershell'
+    const sep = windows ? '\\' : '/'
+    const home = !machine ? '/Users/you/Desktop' : windows ? 'C:\\Users\\you\\Desktop' : '/home/you/Desktop'
+    const where = parent?.trim() || home
+    const folder = name.trim()
+    if (!folder) return { parent: where, path: null, error: null }
+    const nameError = folderNameError(folder, windows)
+    if (nameError) return { parent: where, path: null, error: nameError }
+    const path = `${where.replace(/[\\/]+$/, '')}${sep}${folder}`
+    const taken = this.takenPaths.has(path) || this.projectsList.some((p) => p.path === path && (p.machine ?? null) === (machine ?? null))
+    if (taken) return { parent: where, path: null, error: `Something named "${folder}" is already in ${where} — choose another name.` }
+    return { parent: where, path, error: null }
+  }
   /** The value the file picker will return (M4 E-3 — the .zip to import). Null means the person cancelled */
   nextPickedFile: string | null = '/tmp/picked.zip'
   /** What the file picker was asked to filter by */
@@ -2241,6 +2265,18 @@ export class MockPlatform implements Platform {
       this.projectsList.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
       return [...this.projectsList]
     },
+    create: async (name: string, parent?: string, machine?: string | null) => {
+      this.createProjectCalls.push({ name, ...(parent ? { parent } : {}), ...(machine ? { machine } : {}) })
+      const t = this.newProjectTarget(name, parent, machine)
+      if (!t.path) throw Object.assign(new Error(t.error ?? 'Give the new folder a name.'), { code: 'internal' })
+      this.takenPaths.add(t.path)
+      // A new folder is empty: no repository, until an agent makes one
+      const info = await this.projects.add(t.path, machine)
+      const made = { ...info, git: { branch: '', changedFiles: 0, isRepo: false } }
+      this.projectsList = this.projectsList.map((p) => (p.id === info.id ? made : p))
+      return made
+    },
+    createPreview: async (name: string, parent?: string, machine?: string | null) => this.newProjectTarget(name, parent, machine),
     add: async (path: string, machine?: string | null) => {
       const existing = this.projectsList.find((p) => p.path === path && (p.machine ?? null) === (machine ?? null))
       if (existing) return existing

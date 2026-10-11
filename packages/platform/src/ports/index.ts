@@ -238,6 +238,14 @@ export interface ProjectPort {
   reorder(orderedIds: string[]): Promise<ProjectInfo[]>
   /** `machine`: a folder on that linked machine, the path in its own terms (#82) */
   add(path: string, machine?: MachineRef): Promise<ProjectInfo>
+  /**
+   * Makes a new project (#515): an empty folder `name` inside `parent`, or the Desktop of `machine` (this computer
+   * when absent), made by that machine's host and registered. Refused with one sentence when anything of that name
+   * is already there, or the name is not one folder name.
+   */
+  create(name: string, parent?: string, machine?: MachineRef): Promise<ProjectInfo>
+  /** Where `create` would make the folder, or why it would refuse — nothing is made (#515) */
+  createPreview(name: string, parent?: string, machine?: MachineRef): Promise<{ parent: string; path: string | null; error: string | null }>
   list(): Promise<ProjectInfo[]>
   gitStatus(projectId: string): Promise<ProjectInfo>
   /**

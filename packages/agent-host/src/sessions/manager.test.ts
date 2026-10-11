@@ -3506,16 +3506,6 @@ describe('the orchestrator', () => {
     expect(mgr.orchestratorPeek()?.id).toBe(orc.id)
   })
 
-  it('propose_project only proposes — it does not create a project (#63 propose-then-confirm)', async () => {
-    const orc = await mgr.orchestrator()
-    const before = ((await rpc('projects.list', {})) as unknown[]).length
-    const r = await mgr.runOrchestratorTool(orc.id, 'propose_project', { reason: 'a working folder is needed' })
-    expect(r.isError).toBeFalsy()
-    expect(r.text).toContain('person')
-    // There is no path for the tool to register a folder — only the card's button (the person's picker) can.
-    expect(((await rpc('projects.list', {})) as unknown[]).length).toBe(before)
-  })
-
   it('create_session — creates by project name, and refuses a request with no name', async () => {
     const p = await addProject()
     const orc = await mgr.orchestrator()

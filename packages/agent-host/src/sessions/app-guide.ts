@@ -62,10 +62,12 @@ One session = one agent process (Claude Code or Codex).
 - Creating one: hover over a project row in the sidebar for the ⋯ menu → New session. In the
   window that opens, start a new conversation, or pick and load a past conversation that tool had
   in that folder (Load).
-- Projects are created from **the Add project button at the bottom of the sidebar** (pressing it
-  opens a folder picker). The folder-picker link shown when the orchestrator's conversation is
-  empty opens the same window. With zero projects there is no place to open New session from, so
-  for "how do I make a project?" point to Add project and use propose_project to mark the spot.
+- Projects: **Add project** at the bottom of the sidebar adds a folder that exists (it opens a
+  folder picker); **New folder** beside it makes a new, empty folder on the Desktop (or another
+  location) and adds it. A linked machine's + offers both, made on that machine. The orchestrator
+  makes a new project with create_project: the person approves the folder's full path on a card
+  first. With zero projects there is no place to open New session from, so for "make me a
+  project" use create_project, and for "add my folder" point to Add project.
 - Sleeping and waking: turning the app off and on again keeps the record and only drops the
   process — choosing the session, clicking the input box, or sending it a message wakes it back up.
 - Worktree option (git repositories only): turning on "Run in a git worktree" in the New session

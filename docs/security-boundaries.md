@@ -93,7 +93,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `recall` | yes | — | — | — | yes | — |
 | `app_guide` | yes | — | — | — | yes | — |
 | `update_session_settings` | yes | — | — | — | — | — |
-| `propose_project` | yes | — | — | — | — | — |
+| `create_project` | yes | — | — | — | — | — |
 | `create_session` | yes | — | — | — | — | — |
 | `propose_worktree_session` | yes | yes | — | — | — | — |
 | `delete_worktree_session` | — | yes | — | — | — | — |
@@ -131,6 +131,7 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 | `ask_project` from a session that was itself asked | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (depth one) |
 | `ask_project` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (the caller's project trust, #382) |
 | `ask_project` into an untrusted project, first time for the pair | asks (the card says it is not trusted) | asks | asks | asks | asks | asks | asks | asks | `ensureProjectAccess` (`to.trusted`), `projectAccessQuestion` |
+| `create_project` (the orchestrator makes a new project) | asks (a card with the full path, every time) | asks | asks | asks | asks | asks | asks | asks | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`) |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card: the person's own folder) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `AppAccess.gate` |

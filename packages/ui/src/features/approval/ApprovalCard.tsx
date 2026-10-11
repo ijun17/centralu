@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import type { ApprovalDetail } from '@cc/protocol'
-import { projectAccessQuestion } from '@cc/core'
+import { projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { letterOf } from '../../app/keys.js'
@@ -38,7 +38,8 @@ export function ApprovalCard({
       })
       if (!action) return
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
-      if (detail.kind === 'capability' && action.decision === 'always') return
+      // Nor does a new project (#515): it is one folder, made once — there is nothing to always allow
+      if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always') return
       // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
       if (detail.kind === 'project_access') {
         void respond(sessionId, requestId, action.decision)
@@ -56,6 +57,16 @@ export function ApprovalCard({
   if (detail.kind === 'project_access') {
     return (
       <ProjectAccessCard
+        detail={detail}
+        busy={busy}
+        onAnswer={(decision) => void respond(sessionId, requestId, decision)}
+      />
+    )
+  }
+
+  if (detail.kind === 'project_create') {
+    return (
+      <ProjectCreateCard
         detail={detail}
         busy={busy}
         onAnswer={(decision) => void respond(sessionId, requestId, decision)}
@@ -205,6 +216,46 @@ function ProjectAccessCard({
   )
 }
 
+/**
+ * The orchestrator asks to make a new project (#515, create_project). The full path stands on the card, since where
+ * the folder goes is the whole of what is agreed to; nothing exists until Create. No "always": it is one folder.
+ */
+function ProjectCreateCard({
+  detail,
+  busy,
+  onAnswer,
+}: {
+  detail: Extract<ApprovalDetail, { kind: 'project_create' }>
+  busy: boolean
+  onAnswer: (decision: 'allow' | 'deny') => void
+}) {
+  return (
+    <div
+      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      data-testid="approval-card"
+      data-kind="project_create"
+    >
+      <div className="flex items-center gap-2 px-3 pt-2.5">
+        <span className="signal text-2xs font-medium">Awaiting approval</span>
+        <span className="text-xs text-ink-faint">The orchestrator wants to make a new project, and waits</span>
+      </div>
+      <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
+        Make a new project <span className="readout">{detail.name}</span>?
+      </p>
+      <p className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink-muted" data-testid="approval-path">
+        {detail.path}
+      </p>
+      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
+        An empty folder is made there and added to the sidebar. Nothing is made unless you choose Create.
+      </p>
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
+        <ActionKey k="y" label="Create" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+      </div>
+    </div>
+  )
+}
+
 function ActionKey({
   k,
   label,
@@ -304,6 +355,7 @@ export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'file_edit') return `${d.path}\n\n${d.diffPreview}`
   if (d.kind === 'capability') return `${d.app.name} wants to ${d.text}`
   if (d.kind === 'project_access') return projectAccessQuestion(d)
+  if (d.kind === 'project_create') return projectCreateQuestion(d)
   return d.raw
 }
 

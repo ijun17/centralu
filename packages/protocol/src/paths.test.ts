@@ -1,6 +1,40 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { osPathBaseName, wireBaseName, wireJoin, wireSegments } from './paths.js'
+import { folderNameError, osPathBaseName, wireBaseName, wireJoin, wireSegments } from './paths.js'
+
+/** A new project's folder name (#515): one segment, and nothing a Windows checkout of it would choke on */
+describe('a new folder name', () => {
+  it('is one segment: no separator, no climbing, not empty', () => {
+    for (const bad of ['', '.', '..', 'a/b', 'a\\b', '../up', '/abs', 'x\u0000y', 'tab\there']) {
+      expect(folderNameError(bad, false), JSON.stringify(bad)).not.toBeNull()
+    }
+    expect(folderNameError('x'.repeat(256), false)).toMatch(/too long/)
+    // Counted in bytes: 128 two-byte letters are 256 bytes
+    expect(folderNameError('é'.repeat(128), false)).toMatch(/too long/)
+  })
+
+  it('refuses the reserved Windows device names on every machine, with or without an extension', () => {
+    for (const bad of ['CON', 'con', 'nul', 'Aux.txt', 'COM1', 'lpt9', 'com¹']) {
+      expect(folderNameError(bad, false), bad).toMatch(/Windows/)
+      expect(folderNameError(bad, true), bad).toMatch(/Windows/)
+    }
+    expect(folderNameError('console', false)).toBeNull()
+    expect(folderNameError('com10', false)).toBeNull()
+  })
+
+  it('refuses what only Windows forbids only where the folder is made on Windows', () => {
+    for (const bad of ['end.', 'end ', 'a:b', 'a?b', 'a*b', 'a|b', 'a<b', 'a"b']) {
+      expect(folderNameError(bad, true), bad).not.toBeNull()
+      expect(folderNameError(bad, false), bad).toBeNull()
+    }
+  })
+
+  it('takes an ordinary name, a dotted one and one in another script', () => {
+    for (const ok of ['game', 'my-site', '.config-like', 'v1.2', 'Café Écrit']) {
+      expect(folderNameError(ok, true), ok).toBeNull()
+    }
+  })
+})
 
 /**
  * The wire encoding (issue #47).

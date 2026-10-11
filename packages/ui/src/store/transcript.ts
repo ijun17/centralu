@@ -1,5 +1,5 @@
 import type { Attachment, NormalizedEvent, StoredMessage, SubagentStep } from '@cc/protocol'
-import { projectAccessQuestion } from '@cc/core'
+import { projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 
 /**
  * The conversation transcript — the rows a session's conversation draws, and the pure rules that
@@ -274,7 +274,9 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
                   ? `${e.detail.app.name} wants to ${e.detail.text}`
                   : e.detail.kind === 'project_access'
                     ? projectAccessQuestion(e.detail)
-                    : e.detail.raw,
+                    : e.detail.kind === 'project_create'
+                      ? projectCreateQuestion(e.detail)
+                      : e.detail.raw,
         },
       ]
     case 'approval_resolved':

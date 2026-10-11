@@ -229,91 +229,6 @@ test('First-run escape hatch: does not force a conversation — picking a folder
 })
 
 /**
- * Proposal (#63): for propose_project, **pointing is the entire action**.
- *
- * Putting a second folder picker inside the conversation would create two doors that do the
- * same thing as the sidebar's Add project, and a first-time person would learn that "a project
- * is something you ask the orchestrator to do". There must be one door in the app, and the
- * orchestrator only tells the person where it is.
- */
-test('Project proposal: no button in the conversation, but the sidebar Add project lights up', async ({
-  page,
-}) => {
-  await page.goto('/?mock=1')
-  await page.getByTestId('intro-card-claude').click()
-  await page.getByTestId('suggest-create-project').click()
-  await expect(page.getByTestId('msg-user').first()).toBeVisible()
-
-  // Before it lights up, it is an ordinary button
-  await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
-
-  await page.evaluate(() => {
-    const m = (window as any).__mock
-    const orc = [...m.sessions.values()].find((s: any) => s.projectId === null)
-    m.emit({
-      type: 'tool_call',
-      sessionId: orc.id,
-      callId: 'c-prop',
-      summary: {
-        tool: 'mcp__centralu__propose_project',
-        title: 'so your agents have a folder to work in',
-        readOnly: false,
-        paths: [],
-      },
-    })
-  })
-
-  // What remains in the conversation is one line pointing to the location — not something to click
-  await expect(page.getByTestId('project-proposal')).toContainText('Add project')
-  await expect(page.getByTestId('project-proposal').locator('button')).toHaveCount(0)
-  // And the real door lights up
-  await expect(page.getByTestId('add-project')).toHaveAttribute('data-hint', 'true')
-
-  // Once the pointed-to door is used, the light turns off — a hint that keeps blinking after it
-  // has done its job is nagging
-  await page.evaluate(() => {
-    ;(window as any).__mock.nextPickedDirectory = '/tmp/proposed'
-  })
-  await page.getByTestId('add-project').click()
-  await expect(page.getByTestId('project-proposed')).toBeVisible()
-  await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
-})
-
-test('Starting a different topic after the pointer turns the light off — the subject has moved on (#63)', async ({
-  page,
-}) => {
-  await page.goto('/?mock=1')
-  await page.getByTestId('intro-card-claude').click()
-  await page.getByTestId('suggest-create-project').click()
-  await expect(page.getByTestId('msg-user').first()).toBeVisible()
-
-  // Reproduce the situation where the orchestrator has called propose_project
-  await page.evaluate(() => {
-    const m = (window as any).__mock
-    const orc = [...m.sessions.values()].find((s: any) => s.projectId === null)
-    m.emit({
-      type: 'tool_call',
-      sessionId: orc.id,
-      callId: 'c-prop',
-      summary: {
-        tool: 'mcp__centralu__propose_project',
-        title: 'To give your agents a folder to work in',
-        readOnly: false,
-        paths: [],
-      },
-    })
-  })
-  await expect(page.getByTestId('add-project')).toHaveAttribute('data-hint', 'true')
-
-  // Start a different conversation without creating the project
-  await page.getByTestId('prompt-input').fill('never mind — what can you do?')
-  await page.getByTestId('prompt-input').press('Enter')
-
-  // The hint ends here. If it keeps blinking, it is nagging, not a hint.
-  await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
-})
-
-/**
  * The last tool picked becomes that project's default.
  *
  * default_tool used to be hardcoded to 'claude' at project creation with no place that updated
@@ -359,6 +274,11 @@ test('The Add project button sits inside the sidebar, below the project list', a
   expect(add.x + add.width).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
   // Right below where a new project is appended (the end of the list)
   expect(add.y).toBeGreaterThanOrEqual(project.y + project.height - 1)
+  // New folder (#515) stands beside it, on the same row and inside the sidebar too
+  const create = (await page.getByTestId('create-project').boundingBox())!
+  expect(Math.abs(create.y - add.y)).toBeLessThanOrEqual(1)
+  expect(create.x).toBeGreaterThan(add.x + add.width - 1)
+  expect(create.x + create.width).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
 })
 
 test('Creating a session renders the conversation stream (T5-3)', async ({ page }) => {

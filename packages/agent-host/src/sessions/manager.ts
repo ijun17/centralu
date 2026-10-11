@@ -12,6 +12,7 @@ import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, underGrant } from './ask-project.js'
 import { builderRole } from './app-builder.js'
 import { remember } from './folder-cache.js'
+import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
 import { contextAt, labelOf, lastActiveOf, orchestratorMemory, previewOf, timeOf } from './transcript-view.js'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -768,6 +769,84 @@ export class SessionManager {
     const id = existing?.id ?? randomUUID()
     this.store.addProject({ id, path, name: basename(path) })
     return this.projectInfo(id, path)
+  }
+
+  /**
+   * Where a new project goes by default: this machine's Desktop (#515). Unset, there is none and creating without a
+   * parent is refused — main.ts wires the real one in, so a test that forgets to give a folder fails instead of
+   * writing on the Desktop of whoever runs it.
+   */
+  private desktop: () => Promise<string> = async () => {
+    throw Object.assign(new Error('This host has no default location for a new project — give a parent folder'), { code: 'internal' })
+  }
+  private desktopAnswer: Promise<string> | null = null
+
+  useDesktop(resolve: () => Promise<string>): void {
+    this.desktop = resolve
+    this.desktopAnswer = null
+  }
+
+  /** The Desktop, asked once (on Windows it is a PowerShell call) and asked again only after a failure */
+  private desktopDir(): Promise<string> {
+    this.desktopAnswer ??= this.desktop().catch((e: unknown) => {
+      this.desktopAnswer = null
+      throw e
+    })
+    return this.desktopAnswer
+  }
+
+  /** Where `projects.create` would make the folder, and why it would refuse (#515) — nothing is made */
+  async projectCreatePreview(name: string, parent?: string): Promise<{ parent: string; path: string | null; error: string | null }> {
+    const given = parent?.trim()
+    const location = given || (await this.desktopDir())
+    if (!name.trim()) return { parent: location, path: null, error: null }
+    try {
+      const t = projectFolderTarget({ name, parent: given }, given ? null : location)
+      return { parent: t.parent, path: t.path, error: null }
+    } catch (e) {
+      return { parent: location, path: null, error: (e as Error).message }
+    }
+  }
+
+  /**
+   * Makes a new project (#515): an empty folder named `name` in `parent` (this machine's Desktop when absent), then
+   * registers it. Never reuses anything already there — see `projectFolderTarget`.
+   */
+  async createProject(name: string, parent?: string): Promise<ProjectInfo> {
+    const target = projectFolderTarget({ name, parent }, parent?.trim() ? null : await this.desktopDir())
+    makeProjectFolder(target)
+    console.error(`[projects] made ${target.path}`)
+    const info = await this.addProject(target.path)
+    // Every window learns of it, the one that asked included: the orchestrator's card answers no list (#515)
+    this.emit({ type: 'projects_changed' })
+    return info
+  }
+
+  /**
+   * create_project (#515): the orchestrator's request becomes a card in its own approval slot, with the full path on
+   * it, and the folder is made only when the person allows it. Checked before the card (a refusal costs the person
+   * nothing) and again after it (a folder of that name may have appeared while the card stood).
+   */
+  private async createProjectAsked(
+    sessionId: string,
+    spec: { name: string; parent?: string },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; projectId: string; name: string; path: string } | { ok: false; error: string }> {
+    let target: ProjectFolderTarget
+    try {
+      target = projectFolderTarget(spec, spec.parent?.trim() ? null : await this.desktopDir())
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+    const decision = await this.askHost(sessionId, { kind: 'project_create', name: target.name, path: target.path }, signal)
+    if (decision === 'deny') return { ok: false, error: 'The person did not approve it. Do not ask again unless they tell you to.' }
+    if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so nothing was made.' }
+    try {
+      const info = await this.createProject(spec.name, spec.parent)
+      return { ok: true, projectId: info.id, name: info.name, path: info.path }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
   }
 
   /**
@@ -3491,7 +3570,8 @@ export class SessionManager {
     const ask = this.hostAsks.get(requestId)
     if (ask && ask.sessionId === sessionId) {
       this.hostAsks.delete(requestId)
-      const answer = ask.detail.kind === 'capability' && decision === 'always' ? 'allow' : decision
+      // A new project (#515) has nothing to remember either: "always" makes this one, as allow does
+      const answer = ask.detail.kind !== 'project_access' && decision === 'always' ? 'allow' : decision
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
       ask.resolve(answer)
       // The agent is still inside that tool call — if there are no other pending questions, it is working
@@ -4355,6 +4435,7 @@ export class SessionManager {
       updateSessionSettings: refuse,
       proposeMcpServer: refuse,
       proposeSkill: refuse,
+      createProject: async () => ({ ok: false as const, error }),
       checkApp: async () => ({ ok: false, text: error }),
       createApp: refuse,
       // Another project's apps, on demand (#371 part A) — the one thing this seat may change, and only for itself
@@ -4716,6 +4797,9 @@ export class SessionManager {
       // effect until approved
       proposeSkill: async (spec) => this.proposals.proposeSkill(spec),
 
+      // A new project (#515) — made only once the person approves the card this raises in the orchestrator's own slot
+      createProject: async (spec, signal) => this.createProjectAsked(orchestratorId, spec, signal),
+
       // Checks its own app (C-3) — which app it is is decided by the calling session. Refused if it is not a
       // builder session (the directory has changed)
       checkApp: async () => {
@@ -4958,34 +5042,19 @@ export class SessionManager {
     const to = projects.find((p) => p.id === toProjectId)
     if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
     if (this.store.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
-    const decision = await new Promise<HostAskAnswer>((resolve) => {
-      if (signal?.aborted) return resolve(null)
-      const requestId = `xp-${randomUUID()}`
-      const ask: HostAsk = {
-        requestId,
-        sessionId: callerSessionId,
-        detail: {
-          kind: 'project_access',
-          access,
-          from: { id: from.id, name: from.name },
-          // Said on the card (#382): a session opened there follows its trust, so the person should know before allowing
-          to: { id: to.id, name: to.name, trusted: to.trusted },
-          text: what.text,
-          ...(what.app ? { app: what.app } : {}),
-        },
-        shown: false,
-        resolve,
-      }
-      this.hostAsks.set(requestId, ask)
-      signal?.addEventListener('abort', () => {
-        if (!this.hostAsks.delete(requestId)) return
-        // An unanswerable card is never left behind
-        const m = this.meta.get(callerSessionId)
-        if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId: callerSessionId, requestId, decision: 'deny' })
-        resolve(null)
-      }, { once: true })
-      this.raiseHostAsks(callerSessionId)
-    })
+    const decision = await this.askHost(
+      callerSessionId,
+      {
+        kind: 'project_access',
+        access,
+        from: { id: from.id, name: from.name },
+        // Said on the card (#382): a session opened there follows its trust, so the person should know before allowing
+        to: { id: to.id, name: to.name, trusted: to.trusted },
+        text: what.text,
+        ...(what.app ? { app: what.app } : {}),
+      },
+      signal,
+    )
     if (decision === 'always') {
       this.store.setProjectConsent(fromId, toProjectId, access)
       this.emit({ type: 'project_consents_changed' })
@@ -4996,6 +5065,26 @@ export class SessionManager {
       return { ok: false, error: `The person did not allow ${from.name} to reach ${to.name} this way. Do not ask again unless they tell you to.` }
     }
     return { ok: false, error: `The question to the person was withdrawn before they answered, so ${to.name} was not reached.` }
+  }
+
+  /**
+   * Raises a card of the host's own in a session's approval slot and waits for the person's answer (#371, #515):
+   * null when `signal` fires first, the card then taken down so none is left unanswerable.
+   */
+  private askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal): Promise<HostAskAnswer> {
+    return new Promise<HostAskAnswer>((resolve) => {
+      if (signal?.aborted) return resolve(null)
+      const requestId = `${detail.kind === 'project_access' ? 'xp' : 'mk'}-${randomUUID()}`
+      this.hostAsks.set(requestId, { requestId, sessionId, detail, shown: false, resolve })
+      signal?.addEventListener('abort', () => {
+        if (!this.hostAsks.delete(requestId)) return
+        // An unanswerable card is never left behind
+        const m = this.meta.get(sessionId)
+        if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: 'deny' })
+        resolve(null)
+      }, { once: true })
+      this.raiseHostAsks(sessionId)
+    })
   }
 
   /** Every remembered cross-project consent, with the projects' names as they are now (#371, Settings) */
@@ -6235,7 +6324,7 @@ type HostAskAnswer = 'allow' | 'always' | 'deny' | null
 type HostAsk = {
   requestId: string
   sessionId: string
-  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' }>
+  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' }>
   shown: boolean
   resolve: (d: HostAskAnswer) => void
 }

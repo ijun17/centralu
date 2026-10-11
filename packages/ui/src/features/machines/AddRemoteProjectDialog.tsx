@@ -3,11 +3,15 @@ import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 import { isPlainEscape } from '../../app/keys.js'
+import { CreateProjectForm } from '../project/CreateProjectDialog.jsx'
 
 /**
  * Adds a folder on a linked machine as a project (#82). The folder picker is this computer's, and cannot see another
  * machine's disk, so the path is typed, in that machine's own terms (`/home/me/app`, `C:\Users\me\app`, or a path
  * inside the WSL distro). The machine's host checks it exists and answers with the project, named as the hub names it.
+ *
+ * Or a new, empty folder made there (#515): by default on that machine's Desktop, which only its host can name (a
+ * Windows Desktop may be redirected to OneDrive or carry a localized name), so the form asks it as the person types.
  */
 export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; onClose: () => void }) {
   const name = useMachineName(machine) ?? machine
@@ -15,10 +19,41 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mode, setMode] = useState<'existing' | 'new'>('existing')
+  const tab = (m: 'existing' | 'new', label: string) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={mode === m}
+      onClick={() => setMode(m)}
+      data-testid={`add-remote-project-mode-${m}`}
+      className={`rounded-md px-2 py-1 text-xs transition-colors ${mode === m ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:text-ink'}`}
+    >
+      {label}
+    </button>
+  )
+  const tabs = (
+    <div className="mt-2 flex gap-1" role="tablist">
+      {tab('existing', 'Add an existing folder')}
+      {tab('new', 'Create a new folder')}
+    </div>
+  )
+  const shell = 'w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)'
+  if (mode === 'new') {
+    return (
+      <Modal onClose={onClose} testId="add-remote-project-dialog">
+        <div className={shell}>
+          <p className="text-md text-ink">Add a project on {name}</p>
+          {tabs}
+          <CreateProjectForm machine={machine} onDone={onClose} onCancel={onClose} />
+        </div>
+      </Modal>
+    )
+  }
   return (
     <Modal onClose={onClose} testId="add-remote-project-dialog">
       <form
-        className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)"
+        className={shell}
         onSubmit={async (e) => {
           e.preventDefault()
           if (!path.trim()) return
@@ -36,6 +71,7 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
         }}
       >
         <p className="text-md text-ink">Add a project on {name}</p>
+        {tabs}
         <p className="mt-1.5 text-xs leading-body text-ink-muted">
           The folder&apos;s path on {name}, as that machine writes it. Its agents, files and terminals run there.
         </p>

@@ -312,7 +312,7 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   names, and answers the rest itself. A per-machine question takes an optional `machine`
   parameter, absent meaning the hub: `agents.detect`, `agents.capabilities`, `agents.models`,
   `agents.usage`, `agents.versions`, `agents.setAutoApplyVersions`, `agents.applyVersions`,
-  `projects.add`, `processes.strays`, `processes.stop`. Lists the UI rebuilds from
+  `projects.add`, `projects.create`, `projects.createPreview` (#515), `processes.strays`, `processes.stop`. Lists the UI rebuilds from
   (`sessions.list`, `projects.list`, `trash.list`, `messages.search`, `apps.list`,
   `approvals.rules`, `projectConsents.list`) are merged across machines. The table, one entry per
   method, is `packages/agent-host/src/links/routes.ts`; a method added to the protocol does not

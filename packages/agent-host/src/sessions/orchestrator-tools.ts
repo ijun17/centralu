@@ -98,11 +98,19 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
-    name: 'propose_project',
+    /*
+     * Replaced propose_project (#515), which only lit up the sidebar's Add project button: asked for a project, the
+     * orchestrator now makes it, behind a card the person approves. One tool for one intent, so the model is not
+     * choosing between pointing and doing, and the set does not grow. Adding a folder that already exists stays the
+     * person's (the folder picker is theirs); the instructions say where to send them. Kept short: it rides in every orchestrator request (RESIDENT_BUDGET_CHARS).
+     */
+    name: 'create_project',
     description:
-      '**Points** the person to the sidebar\'s "Add project" button (#63). The button lights up, and a line marking its location stays in the conversation. Choosing the folder and registering it is entirely the person\'s job, done through that button — this tool creates nothing. Use it together with an answer to "how do I make a project?": explain it in words, and use this to mark the spot.',
+      "Makes a new project: an empty folder on this computer's Desktop, or in parent. The person approves the path on a card first; " +
+      'the call waits for the answer. An existing folder is never reused.',
     schema: z.object({
-      reason: z.string().optional().describe('A short note on why it is needed. Appended to the end of the pointing line.'),
+      name: z.string().describe('Folder and project name.'),
+      parent: z.string().optional().describe('Full path of the folder to make it in.'),
     }),
   },
   {
@@ -131,7 +139,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'propose_worktree_session',
     description:
-      "**Proposes** a worktree branch session to the person (#69). A new session window is prepared with the branch name pre-filled, and the ⋯ button on that project's sidebar row lights up — the person creates it from that menu's New session window. This tool creates nothing (the same rule as propose_project).",
+      "**Proposes** a worktree branch session to the person (#69). A new session window is prepared with the branch name pre-filled, and the ⋯ button on that project's sidebar row lights up — the person creates it from that menu's New session window. This tool creates nothing: the person does.",
     schema: z.object({
       branch: z.string().describe('The branch name to propose. Choose a name that reads the work it is for (for example, feat/login-fix).'),
       reason: z.string().optional().describe('A short note on what work the branch is for.'),
@@ -455,7 +463,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'If the person is waiting for the result, turn on reportBack — it notifies you here when that session finishes.',
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session — deleting it is the person\'s job.',
-  'If asked how to make a project, use propose_project to point at Add project in the sidebar — the person does the registering.',
+  'Make a new project with create_project; to add an existing folder, point the person to Add project in the sidebar.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
@@ -579,24 +587,27 @@ export async function runOrchestratorTool(
     return { text: head + (r.lines?.join('\n') || '(no conversation)') }
   }
 
-  if (name === 'propose_project') {
+  if (name === 'create_project') {
     /*
-     * Does not go through the manager — running this tool **is the pointing, itself**. Once the
-     * tool_call event is left in the conversation, the UI lights up the sidebar's "Add project"
-     * button and draws a line pointing to it. If a project were created here instead, this would
-     * turn from guidance into a permission (a path for an injection carried in through
-     * read_session/recall to reach an arbitrary folder).
+     * The card is the permission (#515): the manager raises it and makes nothing until the person approves, so an
+     * instruction carried in through read_session or recall reaches, at most, a card the person reads with the full
+     * path on it. The names come back JSON-quoted: the folder's name is whatever the model was given.
      */
+    const folder = typeof args.name === 'string' ? args.name : ''
+    if (!folder.trim()) return { text: 'Give a name — the new folder is named by it, and so is the project.', isError: true }
+    const parent = typeof args.parent === 'string' && args.parent.trim() ? args.parent.trim() : undefined
+    const r = await tools.createProject({ name: folder, ...(parent ? { parent } : {}) }, signal)
+    if (!r.ok) return { text: `No project was made: ${r.error}`, isError: true }
     return {
       text:
-        'Lit up the "Add project" button in the sidebar. Choosing the folder and registering it is entirely the person\'s job, done through that button — ' +
-        'you cannot pick one on their behalf or rush them. You will find out once the person registers it.',
+        `Made the project ${trustedJsonText(r.name)} [${r.projectId}], an empty folder at ${trustedJsonText(r.path)}. ` +
+        'Start work in it with create_session (project = that id).',
     }
   }
 
   if (name === 'propose_worktree_session') {
     /*
-     * The same rule as propose_project (#69): running this tool **is the pointing, itself**.
+     * Running this tool **is the pointing, itself** (#69).
      * Once the tool_call event is left in the conversation, the UI prepares a new session window
      * with the branch name filled in. If a session were created here instead, the proposal would
      * turn into a permission — next to merging, the most destructive thing is creating a branch

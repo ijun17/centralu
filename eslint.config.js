@@ -21,6 +21,8 @@ export const PLATFORM_MODULES = [
   'packages/agent-host/src/dev-services/terminal.ts',
   // How Claude Code is started on Windows (#353)
   'packages/agent-host/src/adapters/claude/exe-link.ts',
+  // A new project's folder (#515): the Desktop (Windows' known folder, XDG, ~/Desktop) and each OS's path rules
+  'packages/agent-host/src/dev-services/project-folder.ts',
   // The npm launcher's platform layer
   'packaging/npm/centralu/bin/platform.mjs',
   // TODO: move the launcher's own checks into platform.mjs once remote phase 3's launcher work has

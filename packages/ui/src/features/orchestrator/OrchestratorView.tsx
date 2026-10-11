@@ -146,7 +146,7 @@ export function OrchestratorView() {
  * answer**.
  *
  * There is no "what does this app do?": whoever downloaded it already roughly knows (user's
- * observation). Instead: one action (creating a project — it ends in a propose_project card),
+ * observation). Instead: one action (creating a project — it ends in create_project's approval card, #515),
  * one capability of this channel, and one reason someone picked this app (running several
  * sessions). **A click sends it right away** — there is no intermediate step that just fills the
  * composer. That click is the lazy-start trigger that wakes the orchestrator.

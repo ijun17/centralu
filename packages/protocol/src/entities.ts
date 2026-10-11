@@ -624,6 +624,18 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     text: z.string(),
     app: z.object({ appId: z.string(), name: z.string() }).optional(),
   }),
+  /**
+   * The orchestrator asks to make a new project (#515, create_project) — raised by **the host** in the orchestrator's
+   * session. Nothing exists until the person allows it: then the folder at `path` is made (empty) and registered as
+   * the project `name`. Allow or deny only; there is no "always".
+   */
+  z.object({
+    kind: z.literal('project_create'),
+    /** The folder's name, which is the project's */
+    name: z.string(),
+    /** The full path of the folder that will be made, in its machine's own terms */
+    path: z.string(),
+  }),
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>
 

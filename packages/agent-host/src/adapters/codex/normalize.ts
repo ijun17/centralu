@@ -94,18 +94,6 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      */
     const tool = str(item.tool) || str(obj(item.invocation).tool)
     const server = str(item.server)
-    // The proposal card (#63) uses the reason as its title — same rule as toolSummary on the claude side
-    if (tool.endsWith('propose_project')) {
-      const rawArgs = obj(item.invocation).arguments
-      let reason = ''
-      try {
-        const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
-        reason = str(obj(parsed).reason)
-      } catch {
-        /* If the arguments are not JSON, the card just shows up with no reason — the button still works */
-      }
-      return { tool, title: reason || tool, readOnly: false, paths: [] }
-    }
     // ask_project (#371) — the project asked is the title, the same rule as toolSummary on the claude side
     if (tool === 'ask_project' && (!server || server === 'centralu')) {
       const rawArgs = item.arguments ?? obj(item.invocation).arguments

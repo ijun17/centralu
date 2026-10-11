@@ -681,6 +681,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('project_consents_changed') }),
   /**
+   * The host made a project of its own accord (#515): the orchestrator's create_project, once the person approved it,
+   * or `projects.create` from another window. Carries nothing; the list is re-read and new projects join it.
+   */
+  z.object({ ...appScoped, type: z.literal('projects_changed') }),
+  /**
    * A linked machine's link changed state (#82, docs/plans/remote-hub.md): connecting, connected,
    * unreachable, waiting on a version decision. Carries the whole record, the same shape
    * `machines.list` answers, so the receiving side replaces its row rather than patching it.

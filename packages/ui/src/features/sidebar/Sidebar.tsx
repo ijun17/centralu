@@ -9,6 +9,7 @@ import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
 import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
+import { CreateProjectDialog } from '../project/CreateProjectDialog.jsx'
 import {
   useIsProjectOpen,
   useIsProjectSelected,
@@ -177,8 +178,7 @@ export function Sidebar() {
   const addProject = useStore((s) => s.addProject)
   const setToast = useStore((s) => s.setToast)
   const [adding, setAdding] = useState(false)
-  // Is the orchestrator currently pointing at this button (#63)?
-  const hint = useStore((s) => s.addProjectHint)
+  const [creating, setCreating] = useState(false)
 
   return (
     <aside
@@ -236,23 +236,13 @@ export function Sidebar() {
         used constantly, while this is something done rarely, so it has to stay unobtrusive while
         the list is being read.
       */}
-      <div className="px-2 py-2">
+      {/*
+        Two ways in, side by side (#515): an existing folder through the picker, or a new empty one made on the
+        Desktop (the dialog says where). The orchestrator's create_project makes the same folder behind a card.
+      */}
+      <div className="flex gap-1.5 px-2 py-2">
         <button
-          /*
-           * Lights up when the orchestrator is pointing here (#63).
-           *
-           * Instead of putting a second folder picker inside the conversation, **this one button
-           * lights up** — the app should have one door for this, and drawing a second door
-           * teaches the person that "projects are something you ask the orchestrator to do." No
-           * chromatic color is used (the palette rule): this button, normally muted, becoming
-           * ink is by itself enough to make it the brightest thing on screen, and that
-           * brightness itself means "here."
-           */
-          className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors disabled:opacity-40 ${
-            hint
-              ? 'breathe border-ink-muted text-ink'
-              : 'border-line text-ink-faint hover:border-line-strong hover:text-ink'
-          }`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
           /*
            * **There should be exactly one way to pick a folder in this app.**
            *
@@ -276,14 +266,22 @@ export function Sidebar() {
           }}
           disabled={adding}
           data-testid="add-project"
-          data-hint={hint || undefined}
-          title={grouped ? 'Register a directory on this computer for agents to run in' : 'Register a directory for agents to run in'}
+          title={grouped ? 'Add an existing folder on this computer as a project' : 'Add an existing folder as a project'}
         >
           <PlusIcon size={13} />
           {/* With machines listed, the picker is this computer's: a folder elsewhere is added from its machine's + */}
           <span className="truncate">{grouped ? 'Add project on this computer' : 'Add project'}</span>
         </button>
+        <button
+          className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
+          onClick={() => setCreating(true)}
+          data-testid="create-project"
+          title="Create a new, empty folder on this computer's Desktop as a project"
+        >
+          New folder
+        </button>
       </div>
+      {creating && <CreateProjectDialog onClose={() => setCreating(false)} />}
     </aside>
   )
 }

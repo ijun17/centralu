@@ -78,3 +78,33 @@ export function wireJoin(...parts: string[]): string {
 export function osPathBaseName(path: string): string {
   return path.split(/[/\\]/).filter(Boolean).pop() ?? ''
 }
+
+/** Reserved device names on Windows, alone or before an extension (`CON`, `con.txt`, `COM1`) */
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i
+/** The longest name most file systems take (255 bytes on ext4 and APFS) */
+const MAX_FOLDER_NAME_BYTES = 255
+
+/**
+ * Why `name` cannot be a new project's folder name (#515), in one sentence, or null when it can. It is here rather than
+ * in the host because the dialog says it as the person types and the mock has to refuse what the host refuses.
+ *
+ * One path segment only: a name that climbs (`..`) or descends (`a/b`) would put the folder somewhere the card or the
+ * dialog did not say. Reserved Windows names are refused on every machine, not only Windows: a project is a folder
+ * people copy, sync and clone elsewhere, and a `nul` in it breaks every Windows checkout. The other characters Windows
+ * forbids, and a trailing dot or space (which it silently drops, so the folder would not be the name), are refused
+ * where the folder is made on Windows.
+ */
+export function folderNameError(name: string, windows: boolean): string | null {
+  if (!name) return 'Give the new folder a name.'
+  if (name === '.' || name === '..') return `"${name}" is not a folder name.`
+  if (/[/\\]/.test(name)) return 'The name is one folder, without / or \\ in it.'
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(name)) return 'The name has a control character in it.'
+  if (new TextEncoder().encode(name).length > MAX_FOLDER_NAME_BYTES) return 'The name is too long for a folder.'
+  if (WINDOWS_RESERVED_NAME.test(name)) return `"${name}" is a name Windows keeps for a device — choose another.`
+  if (windows) {
+    if (/[<>:"|?*]/.test(name)) return 'The name has a character Windows does not allow in a folder name (< > : " | ? *).'
+    if (/[. ]$/.test(name)) return 'A folder name on Windows cannot end with a dot or a space.'
+  }
+  return null
+}

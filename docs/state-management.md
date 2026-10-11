@@ -130,4 +130,4 @@ by its `machine_status`.
      keeper), and none of any other machine.
 - **Per-machine questions carry the machine**: the new-session dialog's `agents.detect`, the model and capability
   lists of a session's menu, a remote session's "older CLI" line (`machineAgentVersions[machine]`, read when its header
-  first needs it and again on its resync), and `projects.add {path, machine}`.
+  first needs it and again on its resync), `projects.add {path, machine}`, and `projects.create`/`projects.createPreview {name, parent?, machine}` (#515).

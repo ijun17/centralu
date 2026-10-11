@@ -262,8 +262,10 @@ export class Qualifier {
       case 'external_app_runs_changed':
       case 'fs_changed':
         return { ...base, projectId: this.maybeId(e.projectId) }
+      // `projects_changed`: a project another machine made (#515); the hub's windows re-read the merged list
       case 'external_apps_changed':
       case 'project_consents_changed':
+      case 'projects_changed':
         return base
       default:
         return sid === undefined ? null : base

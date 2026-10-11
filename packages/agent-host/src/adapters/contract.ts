@@ -206,6 +206,16 @@ export type OrchestratorTools = {
    */
   proposeSkill(spec: { name: string; content: string; why?: string }): Promise<{ ok: boolean; error?: string }>
   /**
+   * Makes a new project — an empty folder, by default on this computer's Desktop — **only once the person approves
+   * the card it raises** (#515). The card stands in the calling session's approval slot with the full path on it, and
+   * the call waits for the answer, so the model learns whether the project exists and where. `signal` is the tool
+   * call's: aborted, the card is withdrawn and nothing is made.
+   */
+  createProject(
+    spec: { name: string; parent?: string },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; projectId: string; name: string; path: string } | { ok: false; error: string }>
+  /**
    * Checks its own app (M4 C-3) — for a session that creates an app only. Which app is decided by
    * the calling session itself (the app it is creating): it takes no name, so there is no way to
    * probe someone else's app. `text` is the report meant for the agent to read.

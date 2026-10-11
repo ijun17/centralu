@@ -24,8 +24,6 @@ export function toolSummary(name: string, input: Json): ToolSummary {
     if (p) paths.push(p)
     title = `${name}: ${p || '?'}`
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
-  // A proposal card (#63) uses the reason as its title — the only argument the UI shows the person as-is.
-  else if (name.endsWith('propose_project')) title = str(input.reason, name)
   // The only channel through which a proposal card can pre-fill a branch name (#69) — carried in the title.
   else if (name.endsWith('propose_worktree_session')) title = str(input.branch, name)
   // The project asked (#371) — the caller's card names it, and finds the delegated session by it before the answer

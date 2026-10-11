@@ -1158,6 +1158,13 @@ export type AppState = {
   /** `machine`: a folder on that linked machine, its path in that machine's terms (#82) */
   addProject(path: string, machine?: string | null): Promise<ProjectInfo>
   /**
+   * Makes a new project (#515): an empty folder `name` in `parent` (that machine's Desktop when absent), made by the
+   * host of `machine` (this computer's when absent), then registered as `addProject` registers one.
+   */
+  createProject(name: string, parent?: string, machine?: string | null): Promise<ProjectInfo>
+  /** Re-reads the project list for projects the host made on its own (#515, `projects_changed`) */
+  refreshProjects(): Promise<void>
+  /**
    * A project just registered whose trust is still being asked about (M4, decision 3). Asked
    * **once**, at registration — answering or dismissing it clears it. Nothing is blocked while it
    * is being asked (it stands under that project in the sidebar): right after registering there is
@@ -1473,15 +1480,6 @@ export type AppState = {
   /** A session is being created for the first question (#63) — a flag so the empty screen does not look dead */
   orchestratorWaking: boolean
   /**
-   * Pointing at the sidebar's Add project (#63).
-   *
-   * Turned on by the orchestrator's `propose_project`, and **turned off once the person goes through
-   * that door or changes the subject.** Why turning it off is tied to an action rather than a timer:
-   * turning off mid-read would be the same as never having pointed at all, and leaving it on forever
-   * would stop being guidance and become nagging.
-   */
-  addProjectHint: boolean
-  /**
    * Whether the intro screen (orchestrator plus tool cards) has been passed (#63).
    * Kept in the workspace snapshot — this screen appears exactly once, on first run.
    */
@@ -1663,6 +1661,14 @@ const handoffInFlight = new Set<string>()
  *
  * Exported because the e2e tests identify the handoff message by this wording.
  */
+/**
+ * A project the person registered from this window (adding a folder, or making one, #515) joins the list, and is asked
+ * about once for trust — unless it is already trusted (the same folder chosen again).
+ */
+function joinProject(s: Pick<AppState, 'projects' | 'trustAsk'>, p: ProjectInfo): Pick<AppState, 'projects' | 'trustAsk'> {
+  return { projects: { ...s.projects, [p.id]: p }, trustAsk: p.trusted ? s.trustAsk : p.id }
+}
+
 export function handoffPrompt(): string {
   return `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor. Your final message in this turn is the note: the app saves that message to a file and hands the file to your successor. Do not write the note to a file yourself, and do not add a preamble or a closing line around it — whatever your final message says is the note.
 
@@ -2706,7 +2712,6 @@ export const useStore = create<AppState>((set, get) => ({
   orchestratorId: null as string | null,
   orchestratorWaking: false,
   introSeen: false,
-  addProjectHint: false,
   trustAsk: null as string | null,
   panelSplit: 0.5,
   panelWidth: PANEL_DEFAULT,
@@ -3249,6 +3254,12 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
+    // The host made a project (#515): the orchestrator's, once approved, or another window's
+    if (e.type === 'projects_changed') {
+      void get().refreshProjects()
+      return
+    }
+
     // A cross-project consent was remembered or revoked (#371) — Settings' list re-reads on the version
     if (e.type === 'project_consents_changed') {
       set((s) => ({ projectConsentsVersion: s.projectConsentsVersion + 1 }))
@@ -3499,16 +3510,6 @@ export const useStore = create<AppState>((set, get) => ({
     const had = get().chat[sessionId]
     const appended = appendChat(had ?? [], e)
     const chat = had === undefined && appended.length === 0 ? undefined : appended
-    /*
-     * A project suggestion (#63) ends with **pointing**, nothing more.
-     *
-     * Putting a folder-picker button inside the conversation would create a second door doing the
-     * same job as the sidebar's Add project, and a first-time viewer would learn "projects are
-     * something you ask the orchestrator to do" — which should be exactly backwards. So this only
-     * lights up the sidebar button: there is one door in the app, and the orchestrator just points at
-     * where it is.
-     */
-    if (e.type === 'tool_call' && /propose_project$/.test(e.summary.tool)) set({ addProjectHint: true })
     // An MCP server suggestion (`propose_mcp_server`) — the list is re-read because the host holds the truth
     if (e.type === 'tool_call' && /propose_mcp_server$/.test(e.summary.tool)) void get().refreshMcpProposals()
     // A skill suggestion (#71) — the same rule
@@ -4441,14 +4442,26 @@ export const useStore = create<AppState>((set, get) => ({
 
   async addProject(path, machine) {
     const p = await get().platform!.projects.add(path, machine)
-    // Went through the door that was being pointed at, so the light turns off (#63) — a lingering hint blinking after the fact would be nagging
-    set((s) => ({
-      projects: { ...s.projects, [p.id]: p },
-      addProjectHint: false,
-      // A project already trusted (the same folder chosen again) is not asked about again
-      trustAsk: p.trusted ? s.trustAsk : p.id,
-    }))
+    set((s) => joinProject(s, p))
     return p
+  },
+
+  async createProject(name, parent, machine) {
+    const p = await get().platform!.projects.create(name, parent, machine)
+    set((s) => joinProject(s, p))
+    return p
+  },
+
+  async refreshProjects() {
+    const platform = get().platform
+    if (!platform) return
+    const list = await platform.projects.list().catch(() => null)
+    if (!list) return
+    // Only new projects join, at the end: the rows already listed keep their objects (and their place)
+    set((s) => {
+      const fresh = list.filter((p) => !s.projects[p.id])
+      return fresh.length ? { projects: { ...s.projects, ...Object.fromEntries(fresh.map((p) => [p.id, p])) } } : {}
+    })
   },
 
   async answerTrustAsk(trust) {
@@ -4877,8 +4890,6 @@ export const useStore = create<AppState>((set, get) => ({
      * awaited.** A failure is undone below.
      */
     const prevState = get().sessions[sessionId]?.state
-    // Talking again means the topic has moved on. Any lingering hint turns off here (#63)
-    if (get().addProjectHint) set({ addProjectHint: false })
     set((s) => {
       const sessions = s.sessions[sessionId]
         ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' as const } }

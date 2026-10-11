@@ -134,6 +134,21 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     })
   })
 
+  it("makes a new project on the machine it is for, which names its own Desktop (#515)", async () => {
+    const { router, local, m2 } = rig()
+    m2.answers['projects.createPreview'] = { parent: 'C:\\Users\\me\\Desktop', path: 'C:\\Users\\me\\Desktop\\game', error: null }
+    expect(await router.handle('projects.createPreview', { name: 'game', machine: 'm2' })).toEqual(m2.answers['projects.createPreview'])
+    m2.answers['projects.create'] = { id: 'p6', path: 'C:\\Users\\me\\Desktop\\game', name: 'game' }
+    expect(await router.handle('projects.create', { name: 'game', machine: 'm2' })).toMatchObject({ id: 'm2.p6', machine: 'm2' })
+    expect(m2.calls).toEqual([
+      { method: 'projects.createPreview', params: { name: 'game' } },
+      { method: 'projects.create', params: { name: 'game' } },
+    ])
+    // Without a machine it is this computer's
+    await router.handle('projects.create', { name: 'here' })
+    expect(local).toEqual([{ method: 'projects.create', params: { name: 'here' } }])
+  })
+
   it('keeps hub calls on the hub whatever their parameters name', async () => {
     const { router, local, m1 } = rig()
     await router.handle('grid.set', { panels: [{ kind: 'session', sessionId: 'm1.s1' }] })

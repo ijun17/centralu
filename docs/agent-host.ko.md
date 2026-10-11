@@ -185,6 +185,47 @@ project export the sprites again, then tell me where the files are"에 로드하
 쓴다, 시작할 때 한 번과 바뀔 때마다(`keeper-link.ts`). 키퍼의 유휴 규칙이 읽는 것이 이것이다. 다른 방법으로
 띄우면 호스트는 준비 줄 말고 아무것도 쓰지 않는다.
 
+### 1.3 새 프로젝트 만들기 (`projects.create`, `create_project`, #515)
+
+예전에는 프로젝트를 만들려면 폴더가 이미 있어야 했다(`projects.add`는 없는 폴더를 거절한다). 이제 호스트가
+폴더를 만든다: `projects.create { name, parent?, machine? }`는 **빈** 폴더를 만들고(`git init`도 템플릿도
+없다) `projects.add`처럼 등록한다. `projects.createPreview`는 아무것도 만들지 않고 어디에 생길지, 왜 거절될지를
+답한다. 대화상자가 사람이 입력하는 동안 이것을 묻는다. 둘 다 `projects.add`처럼 `machine`으로 라우팅되므로
+(remote-hub.md §5) 폴더는 프로젝트가 사는 머신의 호스트가 그 머신의 경로 규칙으로 만든다.
+
+| 규칙 | 위치 |
+|---|---|
+| 이름은 폴더 하나: `/`나 `\` 없음, `.`나 `..` 아님, 제어 문자 없음, 255바이트 이하, 어느 머신에서든 Windows 장치 이름(`CON`, `nul.txt`, `COM1`) 금지. Windows에서는 `< > : " \| ? *`와 끝의 점·공백도 금지 | `folderNameError` (protocol, 대화상자·목과 공유) |
+| 이미 있는 것은 다시 쓰지 않는다: 같은 이름의 폴더·파일·깨진 링크가 있으면 거절하고, 폴더 자체는 재귀로 만들지 않으므로 확인 뒤에 생긴 이름도 거절된다 | `projectFolderTarget`, `makeProjectFolder` (`dev-services/project-folder.ts`) |
+| 준 `parent`는 이미 있는 폴더의 전체 경로여야 하고, 만들지 않는다 | 같은 곳 |
+| `parent`가 없으면 그 머신의 바탕화면. 없으면 만든다(WSL 배포판이나 서버에는 없다) | `desktopDir` |
+
+OS별 바탕화면(`dev-services/project-folder.ts`, 플랫폼 모듈):
+
+- **macOS**: `~/Desktop`.
+- **Linux(WSL 포함)**: `~/.config/user-dirs.dirs`가 XDG 바탕화면을 정하면 그것(다른 언어의 데스크톱은 그
+  언어로 이름을 붙인다), 아니면 `~/Desktop`.
+- **Windows**: 바탕화면 알려진 폴더 `[Environment]::GetFolderPath('Desktop', 'DoNotVerify')`. OneDrive로
+  옮겨졌거나 현지화된 이름일 수 있다. PowerShell이 답하지 못할 때만 `%USERPROFILE%\Desktop`. 스크립트는
+  `-EncodedCommand`로 보내고, 답은 경로의 UTF-8 바이트를 base64로 받는다. `cmd.exe`를 셸로 쓰는 ssh로 붙은
+  Windows 11 PC에서 측정(2026-10-12): 호출은 거기서 답하고, 콘솔 코드 페이지는 시스템 것(CP949)이라 한국어
+  경로를 글자로 찍으면 깨져서 온다. 답은 호스트가 살아 있는 동안 간직한다.
+
+호스트는 `main.ts`가 연결해 줄 때만 바탕화면을 안다(`SessionManager.useDesktop`). 없으면 `parent` 없는 호출은
+거절된다. 그래서 테스트와 linked-hosts e2e(임시 `HOME`의 바탕화면을 준다)는 실행하는 사람의 바탕화면에 손대지
+않는다. macOS에서 바탕화면은 보호된 폴더라, 처음 들여다볼 때(대화상자에 이름을 입력할 때) Centralu 이름으로
+접근 권한을 묻는다.
+
+**오케스트레이터의 `create_project { name, parent? }`**는 사이드바의 Add project 버튼에 불만 켜던
+`propose_project`를 대체했다. 오케스트레이터 자신의 승인 자리에 카드를 띄우고(`project_create`: 이름과 전체
+경로), 호출은 `ask_project`의 동의 카드처럼 답을 기다린다(`askHost`). 사람이 만들기를 누르기 전에는 아무것도
+만들지 않는다. "항상"은 허용으로 읽고 아무것도 기억하지 않으며, 거절하거나 호출이 멈추면 아무것도 만들지 않는다.
+대상은 카드 전에(거절은 사람에게 아무 비용이 없다) 그리고 카드 뒤에 다시 확인한다. 이렇게 만든 프로젝트는
+`projects_changed`로 알리고, 모든 창이 프로젝트 목록을 다시 읽는다. 오케스트레이터만 가진 도구이고
+(security-boundaries.md) 이 컴퓨터에만 만든다: 허브의 오케스트레이터는 연결된 머신을 보지 못하므로 그 머신의
+프로젝트는 그 머신의 +에서 만든다. 이 교체로 오케스트레이터가 늘 싣는 정의는
+전보다 작아졌다(`residentCost`, Claude: 11,798 → 11,620자; docs/tool-cost.md).
+
 ## 2. AgentAdapter 계약 (product spec §6.2의 구현 명세)
 
 ```ts

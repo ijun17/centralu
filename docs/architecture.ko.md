@@ -54,7 +54,7 @@ npm 런처에서 `process.platform`(또는 `os.platform()`)을 읽거나 무엇�
 `case 'darwin':`)은 `eslint.config.js`의 `PLATFORM_MODULES` 밖에서는 린트 에러다: `os.ts`(다른 점의 이름으로 묻는
 호스트의 질문들: `hasPs`, `clonesFiles`, `locksRunningPrograms`, `pathsOf`, `installedCopyPath`), `env-path.ts`와
 `tool-launch.ts`(도구 찾기와 띄우기), `dev-services/kill-tree.ts`(프로세스 트리 끝내기, `hasProcessGroups`),
-`dev-services/terminal.ts`(셸), `adapters/claude/exe-link.ts`(Windows에서 Claude Code 띄우기, `windowsStart`), 그리고
+`dev-services/terminal.ts`(셸), `adapters/claude/exe-link.ts`(Windows에서 Claude Code 띄우기, `windowsStart`), `dev-services/project-folder.ts`(새 프로젝트의 바탕화면과 폴더 이름 규칙, #515), 그리고
 런처의 `platform.mjs`. 다른 곳의 코드는 그중 하나에 다른 점의 이름으로 묻는다. 그래서 OS마다의 답은 한 번만 쓰이고, 새
 OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 검사하지 않는다. 호스트가 뜨는 방식에 대한 Rust 쪽의 짝은
 `start_plan`이다([agent-host.md](agent-host.md) §4.0).

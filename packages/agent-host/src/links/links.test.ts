@@ -236,7 +236,10 @@ describe('a hub linked to another host (#82)', () => {
     // Hub-only events of the remote stay there
     remote.server.broadcast({ type: 'themes_changed' })
     remote.server.broadcast({ type: 'external_apps_changed' })
+    // A project the remote made (#515) reaches the hub's windows, which re-read the merged list
+    remote.server.broadcast({ type: 'projects_changed' })
     await until(() => u.events().some((e) => e.type === 'external_apps_changed'))
+    await until(() => u.events().some((e) => e.type === 'projects_changed'))
     expect(u.events().some((e) => e.type === 'themes_changed')).toBe(false)
   })
 

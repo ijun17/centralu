@@ -51,6 +51,8 @@ const token = values.token!
 const store = new Store(values.db!)
 const adapters = scriptedAdapters()
 const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), () => null, join(dirname(values.db!), 'worktrees'))
+// A new project's Desktop (#515) is the one in this host's temporary HOME, never the Desktop of whoever runs the suite
+mgr.useDesktop(async () => join(process.env.HOME!, 'Desktop'))
 let up = false
 const toScreens = (f: Parameters<HostServer['pushTerminal']>[0]) => {
   if (up) server.pushTerminal(f)

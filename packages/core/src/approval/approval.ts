@@ -92,3 +92,11 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
   if (d.access === 'apps') return `Let ${d.from.name} use ${d.app ? `the app ${d.app.name} from ` : 'apps from '}${to}?`
   return `Let ${d.from.name} ask ${to} to ${d.text}?`
 }
+
+/**
+ * The question a new-project card asks (#515) — the full path is the whole of what is being agreed to, so it is in
+ * the sentence wherever the question stands: the card, the conversation row, a notification.
+ */
+export function projectCreateQuestion(d: Extract<ApprovalDetail, { kind: 'project_create' }>): string {
+  return `Make the empty folder ${d.path} and add it as the project ${d.name}?`
+}

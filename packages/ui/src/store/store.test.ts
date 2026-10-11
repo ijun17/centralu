@@ -3012,6 +3012,35 @@ describe('handing off and starting fresh', () => {
   })
 })
 
+/** A new project (#515): made from this window it joins at once; made by the host on its own, the event brings it */
+describe('new projects', () => {
+  it('a project the host made (the orchestrator, once approved) joins the list on projects_changed, after the ones there', async () => {
+    const mock = new MockPlatform()
+    await mock.projects.add('/tmp/old')
+    await useStore.getState().attach(mock)
+    const before = useStore.getState().projects
+    // Made behind the window's back, as the orchestrator's card does
+    const made = await mock.projects.create('shop')
+    expect(Object.keys(useStore.getState().projects)).not.toContain(made.id)
+
+    mock.emit({ type: 'projects_changed' } as NormalizedEvent)
+
+    await vi.waitFor(() => expect(Object.keys(useStore.getState().projects)).toEqual([...Object.keys(before), made.id]))
+    // The rows already listed keep their objects
+    for (const id of Object.keys(before)) expect(useStore.getState().projects[id]).toBe(before[id])
+  })
+
+  it('createProject registers what the host made and asks about trust once, as adding a folder does', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const p = await useStore.getState().createProject('site')
+    expect(p.path).toBe('/Users/you/Desktop/site')
+    expect(useStore.getState().projects[p.id]).toEqual(p)
+    expect(useStore.getState().trustAsk).toBe(p.id)
+    await expect(useStore.getState().createProject('site')).rejects.toThrow(/already in/)
+  })
+})
+
 /** An MCP server suggestion card (option B) — a suggestion event re-reads the list, and clicking approve goes to the host */
 describe('MCP server suggestions', () => {
   it('a propose_mcp_server tool call re-reads the suggestion list', async () => {

@@ -128,4 +128,4 @@ selector는 `core`의 순수 함수를 메모이즈해 감싼 형태로 구현�
      깨우지 않는다.
 - **기기별 질문은 기기를 싣는다**: 새 세션 대화상자의 `agents.detect`, 세션 메뉴의 모델과 능력 목록, 원격 세션의
   "older CLI" 줄(`machineAgentVersions[machine]`, 머리줄이 처음 필요할 때와 resync 때 읽는다), `projects.add {path,
-  machine}`.
+  machine}`, `projects.create`/`projects.createPreview {name, parent?, machine}`(#515).

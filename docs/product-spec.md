@@ -438,9 +438,11 @@ rather than on the maintainer. Exactly two stops, no wizard:
    spawns the orchestrator process (lazy spawn). The suggestions are a function of message
    count, not an onboarding state machine; the composer, sidebar and grid stay fully usable.
 
-The project-creation answer ends in an action: the orchestrator's `propose_project` tool
-renders a proposal card whose only power is to open the **native picker for the human** —
-the tool itself cannot register a folder (propose-not-power; see §FR-11 security notes).
+The project-creation answer ends in an action: the orchestrator's `create_project` tool (#515,
+which replaced `propose_project`) raises an approval card in its own conversation with the full
+path of the new, empty folder (on the Desktop unless another location is given). Nothing is made
+until the person chooses Create, and nothing already there is reused. Adding a folder that
+exists stays the person's, through Add project in the sidebar.
 
 #### FR-20. Session archive — **retired (2026-09-02)**
 

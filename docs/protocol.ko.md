@@ -304,7 +304,8 @@ type ProtocolError = {
 - **라우팅.** 허브는 `sessionId`, `projectId`, `terminalId`가 가리키는 기기로 호출을 보내고, 나머지는
   스스로 답한다. 기기별 질문은 선택적인 `machine` 매개변수를 받는다(없으면 허브): `agents.detect`,
   `agents.capabilities`, `agents.models`, `agents.usage`, `agents.versions`,
-  `agents.setAutoApplyVersions`, `agents.applyVersions`, `projects.add`, `processes.strays`,
+  `agents.setAutoApplyVersions`, `agents.applyVersions`, `projects.add`, `projects.create`,
+  `projects.createPreview`(#515), `processes.strays`,
   `processes.stop`. UI가 다시 쌓는 목록(`sessions.list`, `projects.list`, `trash.list`,
   `messages.search`, `apps.list`, `approvals.rules`, `projectConsents.list`)은 기기를 가로질러
   합친다. 메서드마다 한 줄인 표는 `packages/agent-host/src/links/routes.ts`이고, 프로토콜에 더한

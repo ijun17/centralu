@@ -2894,10 +2894,7 @@ const ChatRow = memo(function ChatRow({
     }
     return <ImageMessage mime={item.mime} data={item.data} path={item.path} />
   }
-  // The orchestrator's project proposal (#63) — a single line pointing at the sidebar rather
-  // than a tool card
-  if (/propose_project$/.test(item.tool)) return <ProjectProposalRow item={item} />
-  // A manager's worktree proposal (#69) — the same principle: point at it, and the value
+  // A manager's worktree proposal (#69) — a line pointing at the door rather than a tool card, and the value
   // (branch name) is pre-filled into the window
   if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
   // Another project asked to do a task (#371) — a compact card that links to the session doing it
@@ -3099,42 +3096,7 @@ const AttachmentStrip = memo(function AttachmentStrip({
 })
 
 /**
- * A project proposal (#63) — **a pointing finger, not a button.**
- *
- * This originally had a folder picker button attached to it here. Dogfooding showed that was
- * wrong: it created a second door doing exactly what the sidebar's Add project already does,
- * and someone seeing this for the first time would learn that "a project is something the
- * orchestrator is asked to do" — exactly the opposite of how it should work. It also broke, right at
- * that moment, the rule that there is exactly one way to pick a folder in this app (the
- * sidebar's Add project).
- *
- * So this row does nothing at all. Instead, **the sidebar's button lights up**
- * (the store's addProjectHint). What the orchestrator does is not open the door on someone's
- * behalf, but point at where the door is — and a place learned once is found unaided the next
- * time.
- */
-function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
-  // The adapter sends the reason riding on the title (a special case for propose_project in
-  // normalize) — with no reason, the tool name comes through as-is, so this falls back to a
-  // default sentence in that case
-  const reason = item.title && !/propose_project$/.test(item.title) ? item.title : null
-  return (
-    <p className="flex items-baseline gap-2 text-sm text-ink-muted" data-testid="project-proposal">
-      {/* Points down and to the left — the actual direction of the lit-up button */}
-      <span className="shrink-0 text-ink-faint" aria-hidden>
-        ↙
-      </span>
-      <span>
-        <span className="text-ink">Add project</span> at the bottom of the sidebar
-        {reason ? ` — ${reason}` : ''}
-      </span>
-    </p>
-  )
-}
-
-/**
- * A worktree proposal (#69) — the same principle as propose_project (one door, this is only a
- * finger pointing at it), with one value riding along: the branch name. The sidebar's + button
+ * A worktree proposal (#69) — one door, and this is only a finger pointing at it, with one value riding along: the branch name. The sidebar's + button
  * lights up, and opening that door brings up a dialog with the worktree toggle already on and
  * the name pre-filled. Creating it is, to the very end, the person's own act.
  */

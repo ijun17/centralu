@@ -57,6 +57,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     requestId: 'cap-1',
     detail: { kind: 'capability', app: { appId: 'notes', projectId: 'p1', name: 'Notes' }, capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' },
   },
+  // The orchestrator's create_project card (#515)
+  { type: 'approval_request', sessionId: 's1', requestId: 'mk-1', detail: { kind: 'project_create', name: 'shop', path: '/Users/me/Desktop/shop' } },
   { type: 'approval_resolved', sessionId: 's1', requestId: 'r1', decision: 'allow' },
   {
     type: 'question_request',
@@ -175,6 +177,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'themes_changed' },
   { type: 'external_app_questions_changed' },
   { type: 'project_consents_changed' },
+  { type: 'projects_changed' },
   // A linked machine's link changed state, and what the UI holds about it has to be read again (#82)
   {
     type: 'machine_status',

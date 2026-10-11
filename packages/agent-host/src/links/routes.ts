@@ -169,6 +169,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.models': { kind: 'machine' },
   'agents.usage': { kind: 'machine' },
   'projects.add': { kind: 'machine', result: (r, q) => q.project(r) },
+  // Made by the host of the machine the project lives on, in its own Desktop and path terms (#515)
+  'projects.create': { kind: 'machine', result: (r, q) => q.project(r) },
+  'projects.createPreview': { kind: 'machine' },
   'processes.strays': { kind: 'machine' },
   'processes.stop': { kind: 'machine' },
 
