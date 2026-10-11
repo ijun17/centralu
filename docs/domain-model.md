@@ -255,6 +255,8 @@ classDiagram
 
 - A pending approval or question lives in the host's memory while the session's process is alive. What was asked
   and how it was answered is also written into the conversation (message kind `approval`), so it survives.
+  It closes when it is answered, when Stop refuses it, or when the agent withdraws it: Claude Code cancelling the
+  permission request, Codex ending the request or the turn it was asked in, or the process going away.
 - An approval rule only ever matches a `command`, and only "always allow" is stored. Answering "always" on a
   `project_access` card stores a project consent instead; a `capability` card is remembered per app either way
   (§2.3).

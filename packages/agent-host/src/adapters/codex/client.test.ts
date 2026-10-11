@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AgentProcess } from '../contract.js'
 import { CodexClient } from './client.js'
 
 /**
@@ -183,5 +186,86 @@ describe('a broken frame', () => {
     } finally {
       await client.dispose()
     }
+  })
+})
+
+/** An app-server stand-in held in memory: what the client writes arrives on `sent`, and `reply` answers it */
+function fakeProcess(init: { exitCode?: number | null; signalCode?: NodeJS.Signals | null } = {}) {
+  const proc = Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: init.exitCode ?? null,
+    signalCode: init.signalCode ?? null,
+    killed: false,
+    kill: vi.fn(() => true),
+  })
+  const sent: { id: string; method: string }[] = []
+  let buf = ''
+  proc.stdin.on('data', (d: Buffer) => {
+    buf += String(d)
+    let nl
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      sent.push(JSON.parse(buf.slice(0, nl)) as { id: string; method: string })
+      buf = buf.slice(nl + 1)
+    }
+  })
+  const reply = (frame: Record<string, unknown>) => proc.stdout.write(JSON.stringify(frame) + '\n')
+  return { proc: proc as unknown as AgentProcess & { kill: ReturnType<typeof vi.fn> }, emitter: proc, sent, reply }
+}
+
+const quiet = { onNotification: () => {}, onServerRequest: () => {}, onExit: () => {} }
+
+/**
+ * A request's timeout goes with it however it settles. The timer used to run its full 120 s after the answer came,
+ * one per request, keeping each request's closure alive that long.
+ */
+describe('a request timer', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('is cleared when the request is answered, with a result or with an error', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { proc, sent, reply } = fakeProcess()
+    const client = new CodexClient(quiet, { process: proc })
+
+    const ok = client.request('probe')
+    const failed = client.request('probe')
+    expect(vi.getTimerCount()).toBe(2)
+    await vi.waitFor(() => expect(sent).toHaveLength(2))
+    reply({ id: sent[0]!.id, result: { ok: true } })
+    reply({ id: sent[1]!.id, error: { code: -32600, message: 'no' } })
+    await expect(ok).resolves.toEqual({ ok: true })
+    await expect(failed).rejects.toThrow(/-32600/)
+
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('is cleared when the process ends with the request still waiting', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { proc, emitter } = fakeProcess()
+    const client = new CodexClient(quiet, { process: proc })
+
+    const waiting = client.request('probe')
+    emitter.emit('exit', 1, null)
+    await expect(waiting).rejects.toThrow(/exited/)
+
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('closing a codex app-server', () => {
+  /*
+   * A process killed by a signal has no exit code, only a signal code, and its 'exit' is reported only once its
+   * output drains. Checking the exit code alone treated it as still running: dispose waited for an exit that, for
+   * a process that never reports one, ends in the 2 s wait and a SIGKILL to a process that is already gone.
+   */
+  it('does not wait for or kill a process that a signal already ended', async () => {
+    const { proc } = fakeProcess({ signalCode: 'SIGTERM' })
+    const client = new CodexClient(quiet, { process: proc })
+
+    await client.dispose()
+    expect(proc.kill).not.toHaveBeenCalled()
   })
 })

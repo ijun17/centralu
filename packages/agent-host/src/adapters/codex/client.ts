@@ -205,10 +205,24 @@ export class CodexClient {
     const id = `${this.idPrefix}${this.nextId++}`
     this.write({ id, method, params })
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
-      setTimeout(() => {
+      /*
+       * The timer goes with the request however it settles. Left running after an answer, every request kept a
+       * closure (and its answer's caller) alive for the full timeout: a session streaming `turn/start` and approval
+       * traffic held one per request for 120 s.
+       */
+      const timer = setTimeout(() => {
         if (this.pending.delete(id)) reject(new Error(`No response for ${method}`))
       }, timeoutMs)
+      this.pending.set(id, {
+        resolve: (v) => {
+          clearTimeout(timer)
+          resolve(v as T)
+        },
+        reject: (e) => {
+          clearTimeout(timer)
+          reject(e)
+        },
+      })
     })
   }
 
@@ -243,7 +257,12 @@ export class CodexClient {
      */
     this.proc.stdin.end()
     const exited = await new Promise<boolean>((resolve) => {
-      if (this.proc.exitCode !== null || this.finished) return resolve(true)
+      /*
+       * Ended is ended, by code or by signal: a process killed by a signal has no exit code, only a signal code. Its
+       * 'exit' is reported only after its output drains (up to 1 s, local-process.ts and keeper/agent-process.ts),
+       * so checking the exit code alone made a signalled process wait that out as if it were still running.
+       */
+      if (this.proc.exitCode !== null || this.proc.signalCode != null || this.finished) return resolve(true)
       const t = setTimeout(() => resolve(false), 2000)
       this.proc.once('exit', () => {
         clearTimeout(t)
