@@ -172,7 +172,8 @@ cheaper, lower the budget so the gain is kept. Update `e2e/ux/baseline.json` wit
 
 ## Baseline (2026-10-12)
 
-WebKit, 1280 × 840 (the desktop app's default window), the `?demo` scene. Paths with no
+WebKit on Linux (the CI run), 1280 × 840 (the desktop app's default window), the `?demo` scene.
+On macOS the numbers agree to within 0.01 s and a few pixels of travel. Paths with no
 counterpart are listed under "Pending".
 
 | Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
@@ -184,7 +185,7 @@ counterpart are listed under "Pending".
 | Switch back to the session you were just in | keyboard (back) | `M K K` | 2 | 0 | 0 | 0 | 1 | 3 | 1.91 | 0 |
 | Switch to another session by name | keyboard (palette) | `M 7K M K` | 8 | 0 | 0 | 0 | 2 | 10 | 4.94 | 0 |
 | | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.97 | 532 |
-| Send a message to another session | keyboard | `M 7K M K M 26K M K` | 35 | 0 | 0 | 0 | 4 | 39 | 15.20 | 0 |
+| Send a message to another session | keyboard (palette, then one click) | `M 7K M K H P B B H 25K M K` | 34 | 1 | 2 | 2 | 3 | 42 | 15.78 | 369 |
 | | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.44 | 1175 |
 | Find a past conversation | keyboard | `M 6K M K` | 7 | 0 | 0 | 0 | 2 | 9 | 4.66 | 0 |
 | Open an app on another machine | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.98 | 534 |
@@ -206,10 +207,11 @@ What the first baseline shows:
 - **A new session does not give the composer the keyboard.** After the dialog closes, the first
   instruction needs a click into the composer (the `P B B` before `H 18K`): about 1.4 s of the
   task's 16.9.
-- **Switching sessions from the palette leaves the keyboard on the page.** In WebKit one Tab
-  reaches the composer (the `M K` before `26K` in the keyboard path of "send a message"); in
-  Chromium (the Windows app) it does not, and the same path costs `H P B B H` more: 44 operators
-  and 17.4 s instead of 39 and 15.2.
+- **Switching sessions from the palette leaves the keyboard on the page**, and no key reliably
+  reaches the composer: one Tab does in WebKit on macOS, but not in WebKit on Linux or in Chromium
+  (the Windows app). So the keyboard path of "send a message" takes the mouse for one click
+  (`H P B B H`, 2.2 s) and costs more than the mouse path: 42 operators and 15.8 s against 36 and
+  13.4. With the composer taking the keyboard it would be 37 and 13.6.
 - **The add-machine form does not focus its first field**, and the mouse path moves between
   the hand and the mouse five times (2 s of H alone).
 - **Answering an approval by keyboard is the cheapest core task after going back** (`⌘⇧A`, `y`:

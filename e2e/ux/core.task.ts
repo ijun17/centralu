@@ -149,13 +149,19 @@ async function twoSessions(page: Page): Promise<void> {
 
 const backIn = async (page: Page) => expect(page.getByTestId('session-name')).toHaveText(DONE)
 
+/**
+ * Back, as this keyboard presses it (app/keys.ts `navKeyOf`): ⌘[ on a Mac, Alt+← elsewhere. Ctrl+[ is
+ * not back, so `ControlOrMeta+[` would test nothing on Linux. Two keys either way.
+ */
+const BACK = process.platform === 'darwin' ? 'Meta+[' : 'Alt+ArrowLeft'
+
 uxTask({
   id: 'switch-session.keyboard-back',
   task: 'Switch back to the session you were just in',
   path: 'keyboard',
   start: twoSessions,
   run: async (u) => {
-    await u.press('ControlOrMeta+[')
+    await u.press(BACK)
   },
   goal: backIn,
   budget: { operators: 3, M: 1, H: 0, seconds: 2.0 },
@@ -202,6 +208,9 @@ uxTask({
   id: 'send-to-session.keyboard',
   task: 'Send a message to another session',
   path: 'keyboard',
+  notes: [
+    'The palette leaves the keyboard on the page, not in the composer, and no key reliably reaches it: one Tab does in WebKit on macOS, not in WebKit on Linux or in Chromium. So this keyboard path takes the mouse for one click',
+  ],
   start: demo,
   run: async (u, page) => {
     await u.press('ControlOrMeta+k')
@@ -209,13 +218,11 @@ uxTask({
     await u.type('optim')
     await u.press('Enter', { among: page.locator('[data-testid^="palette-item-"]') })
     await u.until('the session', () => expect(page.getByTestId('session-name')).toHaveText(DONE))
-    // The palette leaves the keyboard on the page, not in the composer: Tab is the keyboard's way there
-    await u.press('Tab')
     await u.fill(page.getByTestId('prompt-input'), MESSAGE)
     await u.press('Enter')
   },
   goal: sentThere,
-  budget: { operators: 39, M: 4, H: 0, seconds: 15.6 },
+  budget: { operators: 42, M: 3, H: 2, seconds: 16.2 },
 })
 
 uxTask({
