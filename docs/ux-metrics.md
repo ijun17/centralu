@@ -178,10 +178,10 @@ counterpart are listed under "Pending".
 
 | Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Start a new session and give it its first instruction | mouse | `H M P B B M P B B M P B B P B B H 18K M K` | 19 | 4 | 8 | 2 | 4 | 37 | 16.88 | 1833 |
+| Start a new session and give it its first instruction | mouse | `H M P B B M P B B M P B B P B B H 18K M K` | 19 | 4 | 8 | 2 | 4 | 37 | 16.87 | 1823 |
 | Answer an approval waiting in another session | keyboard | `M 3K M K` | 4 | 0 | 0 | 0 | 2 | 6 | 3.82 | 0 |
-| | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.60 | 766 |
-| | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1052 |
+| | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.60 | 767 |
+| | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1049 |
 | Switch back to the session you were just in | keyboard (back) | `M K K` | 2 | 0 | 0 | 0 | 1 | 3 | 1.91 | 0 |
 | Switch to another session by name | keyboard (palette) | `M 7K M K` | 8 | 0 | 0 | 0 | 2 | 10 | 4.94 | 0 |
 | | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.97 | 532 |
@@ -189,8 +189,8 @@ counterpart are listed under "Pending".
 | | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.44 | 1175 |
 | Find a past conversation | keyboard | `M 6K M K` | 7 | 0 | 0 | 0 | 2 | 9 | 4.66 | 0 |
 | Open an app on another machine | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.98 | 534 |
-| Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2242 |
-| | mouse (typed by hand) | `H M P B B M P B B P B B H 10K H P B B H 13K H M P B B` | 23 | 5 | 10 | 5 | 3 | 46 | 18.79 | 2206 |
+| Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2240 |
+| | mouse (typed by hand) | `H M P B B M P B B P B B H 10K H P B B H 13K H M P B B` | 23 | 5 | 10 | 5 | 3 | 46 | 18.79 | 2204 |
 | Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 521 |
 
 Pending:
