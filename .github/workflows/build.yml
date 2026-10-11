@@ -447,6 +447,53 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  # What the core tasks cost in keyboard and mouse operations (#518, docs/ux-metrics.md): the
+  # `*.task.ts` scenarios against the mock, priced by the Keystroke-Level Model. A task over its
+  # budget fails this job. The table, and the comparison with the committed baseline, go to the
+  # job's summary; the JSON is kept as an artifact for `pnpm ux:report --compare`.
+  #
+  # One engine, WebKit (the desktop app on macOS and Linux): operator counts do not depend on the
+  # engine, and pointing times only a little, so a second engine would double the cost for no new
+  # answer. Its own job rather than a step in an e2e shard, so it adds no time to any of them:
+  # measured on this PR, the whole job takes about as long as its setup (about 1.5 minutes), while
+  # the slowest e2e shard takes 4 to 5.
+  ux-tasks:
+    name: ux tasks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Never the real data folder (AGENTS.md); the mock starts no host, but the rule has no exceptions
+      - name: Point CC_DATA_DIR at a temporary folder
+        run: echo "CC_DATA_DIR=$RUNNER_TEMP/centralu-data" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install WebKit
+        run: pnpm exec playwright install --with-deps webkit
+
+      - name: pnpm ux
+        env:
+          UX_REPORT: ux-report/report.json
+          UX_BASELINE: e2e/ux/baseline.json
+        run: pnpm ux
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() }}
+        with:
+          name: ux-report
+          path: ux-report
+          retention-days: 14
+          if-no-files-found: error
+
   # The host's tests on the Node a remote runs (docs/plans/remote-hub.md §10.2; owner decision 1 of
   # §10.9, 2026-10-08). A machine the hub installs runs the host on the Node pinned in
   # packaging/remote-runtime.json, not on the 22 every other job here uses, so a host change that

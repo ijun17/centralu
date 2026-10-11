@@ -70,6 +70,7 @@ describe('which checks a workflow requires', () => {
       'keeper e2e (linux)',
       'linux-arm64',
       'linux-x64',
+      'ux tasks',
       'verify',
       'windows tests',
       'windows-x64',
