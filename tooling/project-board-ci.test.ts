@@ -407,14 +407,15 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-function runtime(state: Record<string, unknown>, timing: { callTimeoutMs?: number } = {}) {
+function runtime(state: Record<string, unknown>) {
   writeFileSync(statePath, JSON.stringify(state))
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
     env: { PATH: `${join(root, 'bin')}:${join(root, 'node')}`, HOME: root, FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, PROJECT_BOARD_CI_POLL_MS: '250' },
-    timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000, ...timing },
+    // The product's probe and call limits: a shorter one only adds a way to fail under load (#368)
+    timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
   return rt
@@ -518,22 +519,29 @@ describe.skipIf(process.platform === 'win32')('the project board app: ci_status 
   })
 
   it('waits until every required check is reported and passed, keeping the call alive, then squash-merges once with a clean message', async () => {
-    // Nothing, then some running, then green. The call deadline (2.5 s) is shorter than the wait (11
-    // polls of 250 ms at least): only the progress notifications keep the call open.
+    /*
+     * Nothing, then some running, then green. What keeps a long wait open is a progress notification
+     * for every poll: the runtime ends a call after `callTimeoutMs` without one, and its reset on
+     * progress has its own test (app-template.test.ts). So this counts the notifications that reach
+     * the caller, one per wait, rather than outliving a short deadline. A 2.5 s deadline did that
+     * before, over eleven waits, and failed under load (#368, "Request timed out"): every read is a
+     * fake `gh` process, the reads before the first notification are about a dozen, and each round
+     * of polling several more. One wait per state is all the merge decision needs.
+     */
     const some = [ghRun('verify', 'success', 11)]
     const running = [ghRun('verify', 'success', 11), ghRun('windows tests', null, 12), ghRun('linux-x64', 'success', 13)]
-    runtime(ghState({ checkRuns: [[], [], [], [], some, some, some, running, running, running, running, green()] }), { callTimeoutMs: 2_500 })
+    runtime(ghState({ checkRuns: [[], some, running, green()] }))
     const progress: string[] = []
-    const started = Date.now()
     const r = await call('merge_when_green', { pr: '#77', wait: true }, progress)
-    expect(Date.now() - started).toBeGreaterThan(2_500)
     expect(r.isError).toBe(false)
     // Merged after the read that was green, not at the first one where everything reported had passed
-    expect(ghCalls().filter((a) => a.some((x) => x.includes('/check-runs?')))).toHaveLength(12)
+    expect(ghCalls().filter((a) => a.some((x) => x.includes('/check-runs?')))).toHaveLength(4)
     expect(r.data).toMatchObject({ outcome: 'merged', merged: true, commit: 'abcdef1234567890', subject: 'feat(apps): merge when green (#77)' })
     expect(r.text.split('\n')[0]).toBe('Merged PR #77 (squash) as abcdef1: "feat(apps): merge when green (#77)".')
-    expect(progress.length).toBeGreaterThanOrEqual(3)
-    expect(progress[0]).toMatch(/^Waiting for PR #77 \(0 s so far\): No checks are reported/)
+    // One per read that was not green yet. The time in the first is however long the first reads took: 0 s on an idle
+    // machine, 1 s or more under load (#368)
+    expect(progress).toHaveLength(3)
+    expect(progress[0]).toMatch(/^Waiting for PR #77 \(\d+ s so far\): No checks are reported/)
     expect(merges()).toEqual([
       ['pr', 'merge', '77', '-R', 'ijun17/centralu', '--squash', '--match-head-commit', 'c0ffee0000000000000000000000000000000000', '--subject', 'feat(apps): merge when green (#77)', '--body', 'Because.\n\nThings.\n\nRefs #386'],
     ])

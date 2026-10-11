@@ -1,5 +1,5 @@
 /** T3-3 completion criteria: verify RPC integration with an in-memory adapter mock */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
@@ -2542,7 +2542,8 @@ describe('worktree sessions', () => {
     execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
     writeFileSync(join(repo, 'a.txt'), 'hello\n')
     execFileSync('git', ['add', '.'], { cwd: repo })
-    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], { cwd: repo })
+    // No detached `git maintenance run --auto` after the commit (#368): see the hard gate section
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', 'commit', '-qm', 'init'], { cwd: repo })
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
     wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, wtRoot)
@@ -3094,8 +3095,27 @@ describe('worktree sessions', () => {
    * spot.
    */
   describe("the manager's authority to clean up — hard gate (#76)", () => {
+    /*
+     * Every git process counts on Windows, where starting one took 100-470 ms on windows-2022 (#415), and the submodule
+     * test below started about fifty. It timed out there at 15 s under load (#368, job 112891672601; 2.7-9 s in passing
+     * runs). So the fixture starts no more than it needs: `maintenance.auto=false` stops each commit from starting a
+     * detached `git maintenance run --auto`, which also kept working in the repository after the commit returned, and
+     * the submodule's source repository is made once for the whole section.
+     */
     const g = (dir: string, args: string[]) =>
-      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir, encoding: 'utf8' })
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', ...args], { cwd: dir, encoding: 'utf8' })
+
+    let moduleRoot = ''
+    let moduleRepo = ''
+    beforeAll(() => {
+      moduleRoot = mkdtempSync(join(tmpdir(), 'cc-mgr-module-'))
+      moduleRepo = join(moduleRoot, 'module-source')
+      execFileSync('git', ['init', '-q', '-b', 'main', moduleRepo], { cwd: moduleRoot })
+      writeFileSync(join(moduleRepo, 'module.txt'), 'committed\n')
+      g(moduleRepo, ['add', '.'])
+      g(moduleRepo, ['commit', '-qm', 'module init'])
+    })
+    afterAll(() => rm(moduleRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }))
 
     const makeChild = async (branch: string) => {
       const s = (await wtRpc('agents.createSession', {
@@ -3118,11 +3138,6 @@ describe('worktree sessions', () => {
     })
 
     it('does not delete when the only uncommitted work is inside a submodule', async () => {
-      const moduleRepo = join(root, 'module-source')
-      execFileSync('git', ['init', '-q', '-b', 'main', moduleRepo], { cwd: root })
-      writeFileSync(join(moduleRepo, 'module.txt'), 'committed\n')
-      g(moduleRepo, ['add', '.'])
-      g(moduleRepo, ['commit', '-qm', 'module init'])
       g(repo, ['-c', 'protocol.file.allow=always', 'submodule', 'add', moduleRepo, 'nested'])
       g(repo, ['commit', '-qm', 'add submodule'])
 

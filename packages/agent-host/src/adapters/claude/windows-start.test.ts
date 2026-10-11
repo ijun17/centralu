@@ -140,18 +140,29 @@ describe('spacing Claude starts on Windows (#353)', () => {
      * the CLI is reached after work the gate does not time (the first session also makes the program's link), so on
      * Windows 11 the first start once landed 13 ms late and the next one only 47 ms after it, still in its slot (#14).
      * 5 ms of slack for Windows timers, which can fire a little before Date.now() says they are due.
+     *
+     * Only lower bounds: how late a start may come is up to the machine. The test used to also require the first start
+     * within 40 ms, and a loaded windows-2022 runner took 42 (#368, job 113423297517). That the first start does not
+     * wait is the next test's, on a gap no machine could hide.
      */
-    expect(at[0]).toBeLessThan(40)
     expect(at[1]).toBeGreaterThanOrEqual(60 - 5)
     expect(at[2]).toBeGreaterThanOrEqual(120 - 5)
     await Promise.all(all.map((s) => s.handle.dispose()))
   })
 
+  it('the first start does not wait for a gap', async () => {
+    // Held to a gap, this start would come an hour later and the test would time out
+    const { handle, cli } = await session(adapter({ startGapMs: 3_600_000 }))
+    expect(sdk.started).toEqual([cli])
+    await handle.dispose()
+  })
+
   it('by default only Windows waits', async () => {
+    // Windows' default gap is 1.5 s. Held to it, the second start could not come before t0 + 1.5 s
     const a = new ClaudeAdapter({ platform: 'darwin', executable: () => exe })
     const t0 = Date.now()
     const all = await Promise.all([session(a, 'a'), session(a, 'b')])
-    expect(sdk.started.at(-1)!.at - t0).toBeLessThan(40)
+    expect(sdk.started.at(-1)!.at - t0).toBeLessThan(1_500)
     await Promise.all(all.map((s) => s.handle.dispose()))
   })
 })

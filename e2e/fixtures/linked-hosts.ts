@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { Store } from '../../packages/agent-host/src/dev-services/store.js'
-import { freePort } from './real-host.js'
+import { freePort, hostRun } from './real-host.js'
 
 /**
  * Two hosts for the linked-hosts e2e (#82): a remote and a hub linked to it as machine `m1`
@@ -39,9 +39,11 @@ export async function startLinkedHost(s: Side, port: number, link?: { port: numb
   const args = ['--import', 'tsx', 'e2e/fixtures/linked-host-main.ts', '--port', String(port), '--db', s.db, '--token', LINKED_TOKEN]
   if (link) args.push('--link', JSON.stringify({ id: MACHINE, name: 'Remote box', port: link.port, token: LINKED_TOKEN }))
   if (opts.hubVersion) args.push('--hub-version', opts.hubVersion)
+  // What the host starts (the tool probes `agents.detect` runs, with HOME in `s`) is waited for before `s` is removed (#368)
+  const run = hostRun()
   const child = spawn(process.execPath, args, {
     cwd: root,
-    env: { ...process.env, CC_DATA_DIR: join(s.dir, 'data'), HOME: s.home, CC_HOST_ALLOWED_ORIGINS: LINKED_UI_ORIGIN, CI: '1' },
+    env: { ...process.env, CC_DATA_DIR: join(s.dir, 'data'), HOME: s.home, CC_HOST_ALLOWED_ORIGINS: LINKED_UI_ORIGIN, CI: '1', ...run.env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let stderr = ''
@@ -65,10 +67,12 @@ export async function startLinkedHost(s: Side, port: number, link?: { port: numb
     child,
     stderr: () => stderr,
     async kill(signal: NodeJS.Signals = 'SIGTERM') {
-      if (child.exitCode !== null || child.signalCode !== null) return
-      const exited = once(child, 'exit')
-      child.kill(signal)
-      await exited
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit')
+        child.kill(signal)
+        await exited
+      }
+      await run.gone()
     },
   }
 }
