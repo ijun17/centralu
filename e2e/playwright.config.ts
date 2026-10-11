@@ -35,6 +35,18 @@ const LINKED_PORT = 5179
 const LINKED_URL = `http://127.0.0.1:${LINKED_PORT}`
 const LINKED_SPEC = /linked-hosts(-webkit)?\.spec\.ts/
 
+/**
+ * The engine the suite runs in. Chromium by default, with the scenarios that most depend on the
+ * engine run a second time in WebKit by their `-webkit.spec.ts` twins. `E2E_BROWSER=webkit` runs
+ * every spec in WebKit instead, the engine the desktop app is (WKWebView); that is what CI runs
+ * (the `e2e (webkit)` job in .github/workflows/build.yml). A twin only repeats its base spec in
+ * WebKit, so in that mode it would run the same tests twice and is left out
+ * (tooling/e2e-webkit-twins.test.ts holds every twin to that).
+ */
+const BROWSER = process.env.E2E_BROWSER === 'webkit' ? 'webkit' : 'chromium'
+const WEBKIT_TWIN = /-webkit\.spec\.ts/
+const twins = BROWSER === 'webkit' ? [WEBKIT_TWIN] : []
+
 export default defineConfig({
   testDir: '.',
   // Keep security-diff.spec.ts in the default `pnpm e2e` suite; the separate config is only for isolated local reruns.
@@ -45,14 +57,14 @@ export default defineConfig({
   // Stops CI from being fooled into "all passed" if a `test.only` was left in and pushed locally
   forbidOnly: !!process.env.CI,
   reporter: [['list']],
-  use: { baseURL: 'http://127.0.0.1:5174', trace: 'off' },
+  use: { baseURL: 'http://127.0.0.1:5174', trace: 'off', browserName: BROWSER },
   projects: [
-    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC] },
+    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, ...twins] },
     { name: 'startup', testMatch: STARTUP_SPEC, use: { baseURL: STARTUP_URL } },
     // One worker: the relay port (5178) is baked into this project's UI build, so two of its
     // tests at once would collide on it (`--repeat-each 5` failed 4 of 5 with EADDRINUSE).
     { name: 'recovery', testMatch: RECOVERY_SPEC, use: { baseURL: RECOVERY_URL }, workers: 1 },
-    { name: 'linked', testMatch: LINKED_SPEC, use: { baseURL: LINKED_URL }, workers: 1 },
+    { name: 'linked', testMatch: LINKED_SPEC, testIgnore: twins, use: { baseURL: LINKED_URL }, workers: 1 },
   ],
   webServer: [
     {

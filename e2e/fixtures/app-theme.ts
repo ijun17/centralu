@@ -429,14 +429,19 @@ export function appThemeTests() {
     // Neither a dark canvas from a proxy stuck on dark nor a white one: exactly the page under it
     expect(inside, `frame rgb(${inside.join(', ')})`).toEqual(outside)
   })
+
+  liveTransparencyTest()
 }
 
 /**
  * WebKit repaints a frame's backdrop when the schemes come apart after the first paint (Chromium
  * decides it once, at load), so only WebKit can show a switch leaving an opaque rectangle behind.
+ * Part of `appThemeTests`, skipped outside WebKit, so the WebKit twin repeats its base spec exactly
+ * (tooling/e2e-webkit-twins.test.ts).
  */
-export function liveTransparencyTest() {
-  test('a theme switch with a view open keeps it transparent, both ways', async ({ page }) => {
+function liveTransparencyTest() {
+  test('a theme switch with a view open keeps it transparent, both ways', async ({ page, browserName }) => {
+    test.skip(browserName !== 'webkit', 'only WebKit repaints a frame backdrop after the first paint')
     await mount(page, 'counter', 'ui://counter/main')
     const v = view(page)
     await expect(v.locator('#count')).toBeVisible()
