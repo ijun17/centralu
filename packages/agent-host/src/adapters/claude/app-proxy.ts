@@ -1,6 +1,6 @@
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import type { SessionApps } from '../contract.js'
+import type { AppToolSpec, SessionApps } from '../contract.js'
 import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
 
 /**
@@ -57,6 +57,25 @@ const CallTool = z.object({
  */
 export const CLAUDE_TOOL_USE_META = 'claudecode/toolUseId'
 
+/** The `_meta` key with which an MCP tool asks Claude Code to load it in every request (the SDK's `alwaysLoad`) */
+const ALWAYS_LOAD_META = 'anthropic/alwaysLoad'
+
+/**
+ * An app's tools always wait behind tool search (#513). Claude Code keeps a tool marked
+ * `anthropic/alwaysLoad` in the request's tool list, which is the start of the cached prompt: an
+ * app declaring it would make attaching or detaching that app rewrite the prefix and cost a full
+ * cache rebuild, and would ride in every request of every session it is attached to. Deferred, its
+ * name is announced in the conversation and the prefix stays as it was (measured with
+ * `scripts/measure-tools.mts`, dry, docs/tool-cost.md). The rest of `_meta` passes as declared.
+ */
+function deferredOnly(tools: AppToolSpec[]): AppToolSpec[] {
+  return tools.map((t) => {
+    if (!t._meta || !(ALWAYS_LOAD_META in t._meta)) return t
+    const meta = Object.fromEntries(Object.entries(t._meta).filter(([k]) => k !== ALWAYS_LOAD_META))
+    return { ...t, _meta: meta }
+  })
+}
+
 export type AppProxy = {
   /** The config to pass to the SDK (`mcpServers[name]`) — the same object for as long as the same app stays attached. */
   config: ReturnType<typeof createSdkMcpServer>
@@ -75,7 +94,7 @@ export function appProxy(apps: SessionApps, server: string): AppProxy {
   low.registerCapabilities({ tools: { listChanged: true } })
   low.setRequestHandler(ListTools, async () => ({
     // An empty list if the app has detached — there is a short window where the CLI still holds this server.
-    tools: await apps.tools(server).catch(() => []),
+    tools: deferredOnly(await apps.tools(server).catch(() => [])),
   }))
   low.setRequestHandler(CallTool, async (request, extra) => {
     const { name, arguments: args, _meta } = request.params as { name: string; arguments?: Record<string, unknown>; _meta?: Record<string, unknown> }

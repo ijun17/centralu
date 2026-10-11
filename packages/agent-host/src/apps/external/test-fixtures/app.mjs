@@ -14,7 +14,8 @@
  * `attach` is the bundle for A-5 (attaching to a session): tools with different annotations (the
  * read-only `peek`, the mutating `poke`), a screen-only tool, `hold`, which holds open until a gate
  * (a `--gate <file>`) appears, and tools added at startup from the names listed in
- * `--extra-from <file>` (for an app whose tool list changes).
+ * `--extra-from <file>` (for an app whose tool list changes). `--resident` adds `pinned`, which declares
+ * Claude Code's `anthropic/alwaysLoad` (#513).
  *
  * `mediation` opens the tool bundle for A-4: tools with different audiences, a tool that returns the
  * run id it received, a tool that waits for cancellation, tools that fail or die, and a tool that
@@ -309,6 +310,10 @@ serveStdio(() => {
     const extraFrom = arg('extra-from')
     const extra = extraFrom && existsSync(extraFrom) ? JSON.parse(readFileSync(extraFrom, 'utf8')) : []
     for (const name of extra) server.registerTool(name, { description: `Extra tool ${name}` }, async () => say(`${name} ran`))
+    // An app asking Claude Code to keep its tool loaded in every request (#513): the flag the SDK sets for `alwaysLoad`
+    if (process.argv.includes('--resident')) {
+      server.registerTool('pinned', { description: 'Asks to stay loaded', _meta: { 'anthropic/alwaysLoad': true } }, async () => say('pinned ran'))
+    }
   }
   if (MODE === 'inline') {
     const own = `ui://${process.env.CENTRALU_APP_ID}/main`
