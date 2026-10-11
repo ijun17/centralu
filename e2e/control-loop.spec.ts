@@ -7522,11 +7522,15 @@ function distanceFromBottom(stream: Locator): Promise<number> {
  * scroll. And the list keeps moving after the wheel: the rows it brought in measure taller than
  * the virtualiser's guess and the offset is corrected by as much (measured: 4,863 read at once,
  * 5,944 half a second later). The spot being read is where it rests.
+ *
+ * 1,000px a wheel, not more: a wheel that did not scroll at once can still arrive, so the poll
+ * can land two. At 3,000 a wheel, two took the 6,830px list of the session-switching scenario to
+ * its very top in macOS WebKit, where that scenario then compared nothing with nothing.
  */
 async function wheelUpToRead(page: Page, stream: Locator): Promise<number> {
   await expect
     .poll(async () => {
-      await page.mouse.wheel(0, -3000)
+      await page.mouse.wheel(0, -1000)
       return distanceFromBottom(stream)
     })
     .toBeGreaterThan(80)
@@ -7663,7 +7667,7 @@ test('Switching sessions and returning keeps the spot being read (#61)', async (
   await page.getByTestId(`session-row-${a}`).click()
   const stream = page.getByTestId('chat-stream')
   await stream.hover()
-  await wheelUpToRead(page, stream)
+  expect(await wheelUpToRead(page, stream)).toBeGreaterThan(200)
   const reading = await readingSpot(stream)
 
   // Visit a neighboring session and come back — the screen type stays the same, only sessionId
