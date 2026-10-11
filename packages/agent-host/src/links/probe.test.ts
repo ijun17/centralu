@@ -36,6 +36,9 @@ process.stdout.write(out.join('\r\n') + '\r\n')
 process.stderr.write('#< CLIXML\r\n<Objs Version="1.1.0.1"><Obj S="progress"></Obj></Objs>')
 `
 
+/** Runs through the fake ssh, a `#!` script that Windows does not start (tunnel.test.ts skips the same way) */
+const viaFake = it.skipIf(process.platform === 'win32')
+
 let dir: string
 let log: string
 let ssh: string
@@ -67,7 +70,7 @@ describe('the probe command', () => {
     expect(script).not.toMatch(/wsl\.exe|Set-|New-|Remove-|Start-|Invoke-|>/i)
   })
 
-  it('goes over BatchMode ssh with the target after --', async () => {
+  viaFake('goes over BatchMode ssh with the target after --', async () => {
     await probe('posix')
     const args = logged()[0] as string[]
     expect(args.slice(0, 6)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--'])
@@ -83,20 +86,20 @@ describe('the probe command', () => {
 })
 
 describe('what it tells apart', () => {
-  it('a POSIX shell: no powershell there, exit 127', async () => {
+  viaFake('a POSIX shell: no powershell there, exit 127', async () => {
     expect(await probe('posix')).toEqual({ sshTarget: 'ijun1', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
   })
 
-  it("csh's own words for a missing command are a POSIX shell too", async () => {
+  viaFake("csh's own words for a missing command are a POSIX shell too", async () => {
     expect((await probe('csh')).os).toBe('posix')
   })
 
-  it('Windows with no DefaultShell: cmd.exe, which is what OpenSSH runs then', async () => {
+  viaFake('Windows with no DefaultShell: cmd.exe, which is what OpenSSH runs then', async () => {
     const r = await probe('windows', { platform: 'Win32NT', defaultShell: '' })
     expect(r).toEqual({ sshTarget: 'ijun1', reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [], error: null })
   })
 
-  it.each([
+  viaFake.each([
     ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'powershell'],
     ['"C:\\Program Files\\PowerShell\\7\\pwsh.exe"', 'pwsh'],
     ['C:\\Windows\\System32\\cmd.exe', 'cmd'],
@@ -105,7 +108,7 @@ describe('what it tells apart', () => {
     expect((await probe('windows', { platform: 'Win32NT', defaultShell })).windowsShell).toBe(shell)
   })
 
-  it('the WSL distros, the default first, without docker-desktop and without a name WSL would not take', async () => {
+  viaFake('the WSL distros, the default first, without docker-desktop and without a name WSL would not take', async () => {
     const r = await probe('windows', {
       platform: 'Win32NT',
       defaultGuid: '{b}',
@@ -122,11 +125,11 @@ describe('what it tells apart', () => {
     ])
   })
 
-  it('PowerShell on a Unix machine, installed as `powershell`, is a POSIX machine', async () => {
+  viaFake('PowerShell on a Unix machine, installed as `powershell`, is a POSIX machine', async () => {
     expect((await probe('windows', { platform: 'Unix' })).os).toBe('posix')
   })
 
-  it("not reached, or a key refused: ssh's own reason, and nothing told", async () => {
+  viaFake("not reached, or a key refused: ssh's own reason, and nothing told", async () => {
     expect(await probe('unreachable')).toEqual({
       sshTarget: 'ijun1',
       reachable: false,
@@ -137,11 +140,11 @@ describe('what it tells apart', () => {
     })
   })
 
-  it('an answer it does not recognise: reached, nothing told, what came back said', async () => {
+  viaFake('an answer it does not recognise: reached, nothing told, what came back said', async () => {
     expect(await probe('odd')).toMatchObject({ reachable: true, os: null, error: 'This account is restricted' })
   })
 
-  it('an ssh that never answers is ended and reported as not reached', async () => {
+  viaFake('an ssh that never answers is ended and reported as not reached', async () => {
     const r = await probe('hang', {}, 500)
     expect(r).toMatchObject({ reachable: false, os: null, error: 'ssh to ijun1 did not answer in time' })
   })

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { expandGlob, isConcreteAlias, listSshHosts, MAX_HOSTS, parseSshG, readSshConfig, splitConfigLine, type ResolvedHost } from './ssh-config.js'
 
 /**
@@ -23,6 +23,10 @@ const write = (rel: string, text: string) => {
   writeFileSync(p, text)
   return p
 }
+/** A path as the reader shows it: the home folder as `~`, in this OS's separator */
+const T = (p: string) => p.replaceAll('/', sep)
+/** The fake ssh is a shell script, and `chmod` takes no read permission away on Windows */
+const posix = process.platform !== 'win32'
 const aliases = () => readSshConfig({ file: join(home, '.ssh', 'config'), home }).hosts.map((h) => h.alias)
 
 describe('one config line, split as OpenSSH splits it', () => {
@@ -65,7 +69,7 @@ describe('the hosts of a config and what it includes', () => {
 
   it('says where each alias is declared, with the home folder as ~', () => {
     write('.ssh/config', '\n# hosts\nHost box\n')
-    expect(readSshConfig({ file: join(home, '.ssh', 'config'), home }).hosts).toEqual([{ alias: 'box', file: '~/.ssh/config', line: 3 }])
+    expect(readSshConfig({ file: join(home, '.ssh', 'config'), home }).hosts).toEqual([{ alias: 'box', file: T('~/.ssh/config'), line: 3 }])
   })
 
   it('reads an Include where it stands: relative to ~/.ssh, globbed and sorted, ~ and absolute paths too', () => {
@@ -89,14 +93,14 @@ describe('the hosts of a config and what it includes', () => {
     write('.ssh/config', ['Match host *.corp exec "true"', '  User corp', 'Host after', 'Match all', '  Compression yes'].join('\n'))
     const r = readSshConfig({ file: join(home, '.ssh', 'config'), home })
     expect(r.hosts.map((h) => h.alias)).toEqual(['after'])
-    expect(r.notes).toEqual(['2 Match blocks (~/.ssh/config:1, ~/.ssh/config:4) are not listed; ssh still applies them'])
+    expect(r.notes).toEqual([`2 Match blocks (${T('~/.ssh/config')}:1, ${T('~/.ssh/config')}:4) are not listed; ssh still applies them`])
   })
 
   it('reads a file that includes itself once, with a note, instead of looping', () => {
     write('.ssh/config', 'Host a\nInclude config\nHost b\n')
     const r = readSshConfig({ file: join(home, '.ssh', 'config'), home })
     expect(r.hosts.map((h) => h.alias)).toEqual(['a', 'b'])
-    expect(r.notes).toEqual(['~/.ssh/config includes itself; it was read once'])
+    expect(r.notes).toEqual([`${T('~/.ssh/config')} includes itself; it was read once`])
   })
 
   // OpenSSH's READCONF_MAX_DEPTH is 16: across the limit, each step of nesting
@@ -117,9 +121,9 @@ describe('the hosts of a config and what it includes', () => {
     const r = readSshConfig({ file: join(home, '.ssh', 'config'), home })
     chmodSync(locked, 0o600)
     // root reads anything; the note is what a person's account gets
-    if (process.getuid?.() !== 0) {
+    if (posix && process.getuid?.() !== 0) {
       expect(r.hosts.map((h) => h.alias)).toEqual(['open'])
-      expect(r.notes).toEqual(['~/.ssh/locked could not be read'])
+      expect(r.notes).toEqual([`${T('~/.ssh/locked')} could not be read`])
     }
   })
 
@@ -150,7 +154,7 @@ describe('resolving each alias with ssh -G', () => {
     expect(parseSshG('')).toEqual({ hostName: null, user: null, port: null })
   })
 
-  it('asks the real ssh binary only for -G, never to connect, and lists what it resolved', async () => {
+  it.skipIf(!posix)('asks the real ssh binary only for -G, never to connect, and lists what it resolved', async () => {
     const log = join(home, 'ssh.log')
     // A fake ssh: logs its arguments, and answers -G as OpenSSH does (the alias as hostname unless the config says otherwise)
     const fake = write(
@@ -160,11 +164,11 @@ describe('resolving each alias with ssh -G', () => {
     chmodSync(fake, 0o755)
     write('.ssh/config', 'Host box lab\nHost broken\n')
     const r = await listSshHosts({ home, ssh: fake })
-    expect(r.configFile).toBe('~/.ssh/config')
+    expect(r.configFile).toBe(T('~/.ssh/config'))
     expect(r.hosts).toEqual([
-      { alias: 'box', file: '~/.ssh/config', line: 1, hostName: 'box.lan', user: 'me', port: 2222 },
-      { alias: 'lab', file: '~/.ssh/config', line: 1, hostName: 'lab.lan', user: 'me', port: 2222 },
-      { alias: 'broken', file: '~/.ssh/config', line: 2, hostName: null, user: null, port: null },
+      { alias: 'box', file: T('~/.ssh/config'), line: 1, hostName: 'box.lan', user: 'me', port: 2222 },
+      { alias: 'lab', file: T('~/.ssh/config'), line: 1, hostName: 'lab.lan', user: 'me', port: 2222 },
+      { alias: 'broken', file: T('~/.ssh/config'), line: 2, hostName: null, user: null, port: null },
     ])
     expect(readFileSync(log, 'utf8').trim().split('\n').sort()).toEqual(['-G -- box', '-G -- broken', '-G -- lab'])
   })

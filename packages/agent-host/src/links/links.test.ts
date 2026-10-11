@@ -703,7 +703,7 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
 })
 
 describe('machines.sshHosts and machines.probe (#514)', () => {
-  it('lists the ssh config’s hosts through the hub, each marked with the machines linked through it, and probes one', async () => {
+  it.skipIf(process.platform === 'win32')('lists the ssh config’s hosts through the hub, each marked with the machines linked through it, and probes one', async () => {
     const remote = await remoteHost()
     const home = folder()
     mkdirSync(join(home, '.ssh'))
