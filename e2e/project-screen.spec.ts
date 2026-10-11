@@ -48,6 +48,40 @@ test('clicking a project name shows only that project’s sessions as panels, an
   expect(await panels(page)).toEqual([`session:${b}`, `session:${a}`, `session:${c}`])
 })
 
+test('a panel let go before its preview has shown still lands on the half it was let go over, as on the grid (#509)', async ({
+  page,
+}) => {
+  // React renders a dragover's update in a later task, so a quick release can drop before the preview of that last
+  // dragover is on the screen. Here the dragover and the drop go in one task, so nothing renders between them.
+  await setup(page, ['/tmp/alpha'])
+  const a = await newSession(page, 'alpha')
+  const b = await newSession(page, 'alpha')
+  await page.getByTestId('project-header-alpha').click()
+  expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
+
+  await page.evaluate((id) => {
+    ;(window as any).__dt = new DataTransfer()
+    document
+      .querySelector(`[data-testid="project-panel-${id}"] [data-testid="pane-header"]`)!
+      .dispatchEvent(new DragEvent('dragstart', { dataTransfer: (window as any).__dt, bubbles: true }))
+  }, `session:${a}`)
+  await expect(page.getByTestId(`project-panel-session:${a}`)).toHaveClass(/opacity-40/)
+  const previewAtDrop = await page.evaluate((to) => {
+    const dt = (window as any).__dt as DataTransfer
+    const card = document.querySelector(`[data-testid="project-panel-${to}"]`)!
+    const r = card.getBoundingClientRect()
+    const at = { clientX: r.left + r.width * 0.8, clientY: r.top + r.height / 2 }
+    card.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, ...at }))
+    const shown = card.getAttribute('data-drop')
+    card.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, ...at }))
+    return shown
+  }, `session:${b}`)
+  // The drop really came before the preview
+  expect(previewAtDrop).toBeNull()
+
+  await expect.poll(() => panels(page)).toEqual([`session:${b}`, `session:${a}`])
+})
+
 test('the order survives a reload, and the global grid keeps its own', async ({ page }) => {
   // The demo scene grows the same ids on every load, so what was arranged by hand comes back (CONTRIBUTING)
   await page.goto('/?demo=grid')

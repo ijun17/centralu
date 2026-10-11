@@ -323,8 +323,16 @@ export function ProjectView({ projectId }: { projectId: string }) {
                     e.preventDefault()
                     e.stopPropagation()
                     snapshotScroll()
-                    // Commit exactly what the preview shows — the drop must not change the screen (#53)
-                    if (preview) arrange(projectId, withOrder(present, saved, preview))
+                    /*
+                      Commit exactly what the preview shows — the drop must not change the screen (#53).
+                      With no preview yet it lands on the half it is let go over, as on the grid (GridView):
+                      React renders a dragover's update in a later task, so a quick release can come before
+                      the preview of its last dragover is on the screen, and that drop used to be lost (#509).
+                    */
+                    const r = e.currentTarget.getBoundingClientRect()
+                    const before = dropsBefore({ top: r.left, height: r.width }, e.clientX)
+                    const next = preview ?? (dragging === id ? null : reorderIds(visible, dragging, id, before))
+                    if (next) arrange(projectId, withOrder(present, saved, next))
                     setOver(null)
                     setDragging(null)
                   }}
