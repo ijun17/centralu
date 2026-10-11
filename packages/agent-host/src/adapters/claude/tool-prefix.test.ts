@@ -159,7 +159,8 @@ describe('the resident tool prefix of a Claude session', () => {
     // The same server object: a new one for the same name would be ignored or reconnected by the SDK
     expect(attached['centralu']).toBe(centralu)
 
-    rmSync(join(w.roots.p1, '.centralu', 'apps', 'pinned-app'), { recursive: true, force: true })
+    // The manifest, not the folder: on Windows the running app holds its folder as its working directory
+    rmSync(join(w.roots.p1, '.centralu', 'apps', 'pinned-app', 'centralu.app.json'))
     w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null && !('app-pinned-app' in s))
     expect(await residentPrefix(last()!)).toBe(before)
