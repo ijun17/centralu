@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { isPlainEscape } from '../../app/keys.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import type { ModelOption, PermissionPreset, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -240,7 +241,7 @@ export function SessionSettings({
       if (!rootRef.current?.contains(e.target as Node)) close()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       // The inbox and modals must not close along with it — only the innermost open thing closes
       e.stopPropagation()
       close()

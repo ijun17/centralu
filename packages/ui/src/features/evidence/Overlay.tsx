@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { isPlainEscape } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
@@ -59,7 +60,7 @@ export function Overlay() {
   useEffect(() => {
     if (!overlay) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       if (!overlayTakesEscape(useStore.getState(), e.target)) return
       e.preventDefault()
       e.stopPropagation()

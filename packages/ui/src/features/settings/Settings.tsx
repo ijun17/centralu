@@ -5,6 +5,7 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useTools } from '../../store/selectors.js'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
+import { isPlainEscape } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
@@ -191,7 +192,8 @@ export function Settings() {
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && toggle(false)
+    // Not the Esc that cancels a composition in one of its fields (a font name, a machine) (#181)
+    const onKey = (e: KeyboardEvent) => isPlainEscape(e) && toggle(false)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, toggle])

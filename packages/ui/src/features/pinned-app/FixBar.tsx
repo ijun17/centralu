@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { composingKey } from '../../app/keys.js'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon, PlusIcon, SendIcon } from '../../components/icons.jsx'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -158,7 +159,7 @@ export function FixBar({
             setSent(null)
           }}
           onKeyDown={(e) => {
-            const composing = e.nativeEvent.isComposing || e.key === 'Process'
+            const composing = composingKey(e.nativeEvent)
             const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
             if (isComposerSendKey(key, sendWithModifierEnter)) {
               e.preventDefault()

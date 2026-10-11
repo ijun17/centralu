@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type R
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
 import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js'
 import { BackgroundMark } from '../session/BackgroundTasks.jsx'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
@@ -1476,8 +1477,9 @@ function SessionNameInput({
       onKeyDown={(e) => {
         // Stopped here so global shortcuts (⌘K, etc.) do not intercept the typing
         e.stopPropagation()
-        if (e.key === 'Enter') finish(text)
-        else if (e.key === 'Escape') finish(initial)
+        // The Enter that finishes a syllable and the Esc that cancels one are the input method's (#181)
+        if (isPlainEnter(e.nativeEvent)) finish(text)
+        else if (isPlainEscape(e.nativeEvent)) finish(initial)
       }}
       // Clicking elsewhere to leave still keeps the edited value — there is no separate confirm button
       onBlur={() => finish(text)}
@@ -1608,7 +1610,7 @@ function RowMenu({
     const away = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose()
     }
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const esc = (e: KeyboardEvent) => isPlainEscape(e) && onClose()
     // capture: the close still fires even when a row below calls stopPropagation
     window.addEventListener('mousedown', away, true)
     window.addEventListener('keydown', esc, true)

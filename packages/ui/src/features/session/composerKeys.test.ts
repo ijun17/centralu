@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isComposerSendKey, isPlainEnter, type ComposerKey } from './composerKeys.js'
+import { isComposerSendKey, type ComposerKey } from './composerKeys.js'
 
 /**
  * With the setting off, behavior **must not differ from before by even a single character**,
@@ -68,18 +68,5 @@ describe('isComposerSendKey — a key that is not Enter', () => {
   it('is never involved, under either setting', () => {
     expect(isComposerSendKey(key({ key: 'a' }), false)).toBe(false)
     expect(isComposerSendKey(key({ key: 'a', metaKey: true }), true)).toBe(false)
-  })
-})
-
-/**
- * #181: the command palette's Enter handling did not check composition state — the last
- * syllable of a Korean-language alias was dropped
- */
-describe('isPlainEnter — the save key for a single-line field (#181)', () => {
-  it('only a non-composing Enter saves', () => {
-    expect(isPlainEnter({ key: 'Enter', isComposing: false })).toBe(true)
-    expect(isPlainEnter({ key: 'Enter', isComposing: true })).toBe(false)
-    expect(isPlainEnter({ key: 'Process', isComposing: false })).toBe(false)
-    expect(isPlainEnter({ key: 'a', isComposing: false })).toBe(false)
   })
 })

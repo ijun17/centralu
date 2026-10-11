@@ -6,6 +6,7 @@ import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde } from '../machines/remoteIde.js'
 import { useShortcut } from '../../app/shortcut.js'
+import { isPlainEnter } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { TRUNCATED_NOTICE, caretAt, selectedText, wholeFileText, type Caret } from './copy.js'
 import { clearViewerJump, currentViewerJump, requestViewerJump, useViewerJump } from './jump.js'
@@ -325,7 +326,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                if (!isPlainEnter(e.nativeEvent)) return
                 e.preventDefault()
                 stepMatch(e.shiftKey ? -1 : 1)
               }}

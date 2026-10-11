@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemeMode } from '@cc/protocol'
 import { useStore, usableThemeFiles } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { isPlainEnter } from '../../app/keys.js'
 import {
   INK_ORDER,
   READING_SURFACES,
@@ -427,7 +428,7 @@ function TokenRow({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') commit()
+          if (isPlainEnter(e.nativeEvent)) commit()
         }}
         aria-invalid={!valid}
         title={valid ? undefined : 'The browser does not accept this value'}

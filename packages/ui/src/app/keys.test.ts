@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { confirmKeyAction, isTextEntry, letterOf, navButtonOf, navKeyOf } from './keys.js'
+import { composingKey, confirmKeyAction, isPlainEnter, isPlainEscape, isTextEntry, letterOf, navButtonOf, navKeyOf } from './keys.js'
 
 /** Only the two fields this function looks at, from a real KeyboardEvent */
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
@@ -112,8 +112,8 @@ describe('navKeyOf / navButtonOf — back and forward between screens (#374)', (
 })
 
 describe('confirmKeyAction — Enter and Esc on the quit confirmation dialog (#181)', () => {
-  const k = (key: string, over: Partial<{ isComposing: boolean; onButton: boolean }> = {}) => ({
-    key, isComposing: false, onButton: false, ...over,
+  const k = (key: string, over: Partial<{ isComposing: boolean; keyCode: number; onButton: boolean }> = {}) => ({
+    key, isComposing: false, keyCode: 0, onButton: false, ...over,
   })
 
   it('Enter on the dialog confirms, Esc cancels', () => {
@@ -130,5 +130,57 @@ describe('confirmKeyAction — Enter and Esc on the quit confirmation dialog (#1
     expect(confirmKeyAction(k('Enter', { isComposing: true }))).toBeNull()
     expect(confirmKeyAction(k('Escape', { isComposing: true }))).toBeNull()
     expect(confirmKeyAction(k('Process'))).toBeNull()
+    // WebKit's shape: the Enter that ended the composition, dispatched after compositionend
+    expect(confirmKeyAction(k('Enter', { keyCode: 229 }))).toBeNull()
+  })
+})
+
+/**
+ * #181: the run dialog's Enter handling did not check composition state — the last syllable of a
+ * Korean-language alias was dropped
+ */
+describe('isPlainEnter — the save key for a single-line field (#181)', () => {
+  it('only a non-composing Enter saves', () => {
+    expect(isPlainEnter({ key: 'Enter', isComposing: false, keyCode: 13 })).toBe(true)
+    expect(isPlainEnter({ key: 'Enter', isComposing: true, keyCode: 229 })).toBe(false)
+    expect(isPlainEnter({ key: 'Process', isComposing: false, keyCode: 229 })).toBe(false)
+    expect(isPlainEnter({ key: 'a', isComposing: false, keyCode: 65 })).toBe(false)
+  })
+})
+
+/**
+ * Each of the three signals on its own has to count, because each engine sends only some of
+ * them. The WebKit one is the desktop app's engine: the Enter that ends a composition can arrive
+ * after `compositionend`, with `isComposing` false and `key` 'Enter', and only `keyCode` 229 gives
+ * it away.
+ */
+describe('composingKey — the shapes an IME key arrives in', () => {
+  it('Chromium: isComposing set', () => {
+    expect(composingKey({ key: 'Enter', isComposing: true, keyCode: 229 })).toBe(true)
+    expect(composingKey({ key: 'Enter', isComposing: true, keyCode: 13 })).toBe(true)
+  })
+
+  it('Chromium on Windows: the key is named Process', () => {
+    expect(composingKey({ key: 'Process', isComposing: false, keyCode: 0 })).toBe(true)
+  })
+
+  it('WebKit (WKWebView): the Enter after compositionend, isComposing already false, keyCode 229', () => {
+    expect(composingKey({ key: 'Enter', isComposing: false, keyCode: 229 })).toBe(true)
+    expect(isPlainEnter({ key: 'Enter', isComposing: false, keyCode: 229 })).toBe(false)
+    expect(isPlainEscape({ key: 'Escape', isComposing: false, keyCode: 229 })).toBe(false)
+  })
+
+  it('a key the person pressed outside any composition is theirs', () => {
+    expect(composingKey({ key: 'Enter', isComposing: false, keyCode: 13 })).toBe(false)
+    expect(composingKey({ key: 'Escape', isComposing: false, keyCode: 27 })).toBe(false)
+    expect(composingKey({ key: 'ArrowDown', isComposing: false, keyCode: 40 })).toBe(false)
+  })
+})
+
+describe('isPlainEscape — the Esc that closes or cancels, not the one that cancels a composition', () => {
+  it('only a non-composing Escape counts', () => {
+    expect(isPlainEscape({ key: 'Escape', isComposing: false, keyCode: 27 })).toBe(true)
+    expect(isPlainEscape({ key: 'Escape', isComposing: true, keyCode: 229 })).toBe(false)
+    expect(isPlainEscape({ key: 'Enter', isComposing: false, keyCode: 13 })).toBe(false)
   })
 })

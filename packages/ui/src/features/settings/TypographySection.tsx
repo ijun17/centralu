@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { TEXT_SIZES, type LineHeight } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { BODY_FONTS, CODE_FONTS, isUsableFont } from '../../app/typography.js'
+import { isPlainEnter } from '../../app/keys.js'
 
 const LINE_HEIGHTS: { id: LineHeight; label: string }[] = [
   { id: 'compact', label: 'Compact' },
@@ -176,7 +177,8 @@ function FontPicker({
               onChange={(e) => setDraft(e.target.value)}
               onBlur={commit}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') commit()
+                // A Korean font name's last syllable is still being composed on that Enter (#181)
+                if (isPlainEnter(e.nativeEvent)) commit()
               }}
               className={`w-56 rounded-md border bg-surface-raised px-2 py-1 text-sm text-ink placeholder:text-ink-faint focus:outline-none ${
                 usable ? 'border-line focus:border-line-strong' : 'border-danger'

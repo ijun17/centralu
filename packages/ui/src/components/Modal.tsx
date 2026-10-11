@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { isPlainEscape } from '../app/keys.js'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store/store.js'
 import { useFocusReturn } from './focusReturn.js'
@@ -50,7 +51,7 @@ export function Modal({
   useOpenLayer()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       e.stopPropagation()
       onClose()
     }

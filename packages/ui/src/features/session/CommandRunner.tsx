@@ -7,7 +7,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { useOpenLayer } from '../../components/Modal.jsx'
-import { isPlainEnter } from './composerKeys.js'
+import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
 import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
 import { followTheme, terminalStyle } from '../../components/terminalTheme.js'
 import { logReplay } from '../../components/logReplay.js'
@@ -81,7 +81,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (!isPlainEscape(e)) return
       e.stopPropagation()
       // While editing an alias, Esc cancels the edit — closing the window too would collapse
       // both steps at once
@@ -196,7 +196,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                       onKeyDown={(e) => {
                         // An Enter that ends a composition does not save (#181) — the last
                         // syllable of a Korean-language alias was dropped
-                        if (isPlainEnter({ key: e.key, isComposing: e.nativeEvent.isComposing }))
+                        if (isPlainEnter(e.nativeEvent))
                           rename(c.command, (e.target as HTMLInputElement).value)
                         // Esc is only cleared from `renaming` by the window listener above
                       }}
@@ -265,7 +265,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (isPlainEnter({ key: e.key, isComposing: e.nativeEvent.isComposing })) add()
+                if (isPlainEnter(e.nativeEvent)) add()
               }}
               placeholder="Command, e.g. pnpm dev"
               data-testid="run-add-input"
@@ -275,7 +275,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
-                if (isPlainEnter({ key: e.key, isComposing: e.nativeEvent.isComposing })) add()
+                if (isPlainEnter(e.nativeEvent)) add()
               }}
               placeholder="Name (optional)"
               data-testid="run-add-name"
