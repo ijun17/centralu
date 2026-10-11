@@ -20,7 +20,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, closeSync } from 'node:fs'
 import { connect, createServer } from 'node:net'
 import { userInfo } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import { createInterface } from 'node:readline'
 
 /**
@@ -1383,12 +1383,27 @@ export function autostartUnsupported(platform, env) {
 }
 
 /**
+ * A folder path as a comparable key on `platform`: either separator as `/`, `.` and `..` folded, no
+ * trailing separator, and lower case on Windows, whose paths do not differ by case
+ */
+export function pathKey(p, platform) {
+  let s = posix.normalize(String(p).replaceAll('\\', '/'))
+  if (s.length > 1) s = s.replace(/\/+$/, '')
+  return platform === 'win32' ? s.toLowerCase() : s
+}
+
+/**
  * The entry's name. One per data folder: the default one gets the plain name, any other (a second
  * install, a test's temporary folder) a suffix from its path, so they never replace each other. A
  * Windows laptop linked twice, as Windows and as a WSL distro, gets two tasks.
+ *
+ * Whether `dataDir` is the default is read the same way whatever OS runs this (`pathKey`), not with
+ * this Node's `join`: the folder may be written with either separator (`CC_DATA_DIR=C:/x` on Windows),
+ * and Windows paths do not differ by case, so `C:\Users\Me\.centralu` is the default folder too.
  */
-export function autostartName(how, { dataDir, home, env }) {
-  const own = dataDir === join(home, '.centralu') ? '' : createHash('sha256').update(dataDir).digest('hex').slice(0, 8)
+export function autostartName(how, { dataDir, home, env, platform = process.platform }) {
+  const key = pathKey(dataDir, platform)
+  const own = key === pathKey(`${home}/.centralu`, platform) ? '' : createHash('sha256').update(key).digest('hex').slice(0, 8)
   if (how === 'systemd') return `centralu-serve${own ? `-${own}` : ''}.service`
   const distro = env.WSL_DISTRO_NAME
   if (distro && !/^[A-Za-z0-9._-]{1,64}$/.test(distro)) throw new Error(`not a WSL distro name: ${distro}`)
@@ -1685,7 +1700,7 @@ export async function runAutostart({
     return report({ ok: action !== 'on', on: false, how: null, linger: null, ...(action === 'off' ? {} : { message: autostartUnsupported(platform, env) }) })
   }
   try {
-    const name = autostartName(how, { dataDir, home, env })
+    const name = autostartName(how, { dataDir, home, env, platform })
     const opts = { dataDir, env, home, name, run, user, platform, interop }
     return report(how === 'systemd' ? await systemdAutostart(action, opts) : await taskAutostart(action, opts))
   } catch (e) {

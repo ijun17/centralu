@@ -49,6 +49,12 @@ function runner(answer: (r: Run) => Partial<Answer> = () => ({})) {
   return { run, runs }
 }
 
+/**
+ * A path as a unit file carries it inside quotes: systemd reads `\\` as one backslash. The paths here
+ * are this machine's temporary folders, which have backslashes when the tests run on Windows
+ */
+const unitText = (p: string) => p.replaceAll('\\', '\\\\')
+
 /** The JSON line `--autostart` printed */
 async function autostart(opts: Record<string, unknown>): Promise<{ code: number; line: Record<string, unknown> }> {
   let out = ''
@@ -91,14 +97,32 @@ describe('what a machine starts its host at boot with (plan §10.4)', () => {
   })
 
   it('names one entry per data folder, so a second data folder (or a test’s) never replaces the person’s', () => {
-    const h = '/home/me'
-    expect(autostartName('systemd', { dataDir: '/home/me/.centralu', home: h, env: {} })).toBe('centralu-serve.service')
-    expect(autostartName('systemd', { dataDir: '/tmp/x', home: h, env: {} })).toMatch(/^centralu-serve-[0-9a-f]{8}\.service$/)
-    expect(autostartName('systemd', { dataDir: '/tmp/x', home: h, env: {} })).not.toBe(autostartName('systemd', { dataDir: '/tmp/y', home: h, env: {} }))
-    expect(autostartName('task', { dataDir: 'C:\\Users\\me\\.centralu', home: 'C:\\Users\\me', env: {} })).not.toMatch(/WSL/)
+    const linux = (dataDir: string, env: Record<string, string> = {}) => autostartName('systemd', { dataDir, home: '/home/me', env, platform: 'linux' })
+    expect(linux('/home/me/.centralu')).toBe('centralu-serve.service')
+    expect(linux('/home/me/.centralu/')).toBe('centralu-serve.service')
+    expect(linux('/tmp/x')).toMatch(/^centralu-serve-[0-9a-f]{8}\.service$/)
+    expect(linux('/tmp/x')).not.toBe(linux('/tmp/y'))
+    // Linux paths differ by case: another folder
+    expect(linux('/home/me/.Centralu')).not.toBe('centralu-serve.service')
     // One laptop linked as Windows and as a WSL distro gets two tasks
-    expect(autostartName('task', { dataDir: '/home/me/.centralu', home: h, env: { WSL_DISTRO_NAME: 'Ubuntu-24.04' } })).toBe('Centralu host (WSL Ubuntu-24.04)')
-    expect(() => autostartName('task', { dataDir: '/home/me/.centralu', home: h, env: { WSL_DISTRO_NAME: 'a"b' } })).toThrow(/not a WSL distro name/)
+    expect(autostartName('task', { dataDir: '/home/me/.centralu', home: '/home/me', env: { WSL_DISTRO_NAME: 'Ubuntu-24.04' }, platform: 'linux' })).toBe('Centralu host (WSL Ubuntu-24.04)')
+    expect(() => autostartName('task', { dataDir: '/home/me/.centralu', home: '/home/me', env: { WSL_DISTRO_NAME: 'a"b' }, platform: 'linux' })).toThrow(/not a WSL distro name/)
+  })
+
+  it('reads the default data folder the same way on Windows, whichever separator or case it is written in', () => {
+    const win = (dataDir: string) => autostartName('task', { dataDir, home: 'C:\\Users\\Me', env: {}, platform: 'win32' })
+    expect(win('C:\\Users\\Me\\.centralu')).toBe('Centralu host')
+    expect(win('C:/Users/Me/.centralu')).toBe('Centralu host')
+    expect(win('c:\\users\\me\\.centralu\\')).toBe('Centralu host')
+    expect(win('D:\\centralu')).toMatch(/^Centralu host [0-9a-f]{8}$/)
+    // The same other folder in either spelling is one entry, not two
+    expect(win('D:\\Centralu')).toBe(win('d:/centralu'))
+  })
+
+  it('names the default folder plainly for the data folder serve itself resolves, on the OS running this test', () => {
+    // serveDataDir joins with this Node's separator; the name must still see it as the default
+    const h = home()
+    expect(autostartName('systemd', { dataDir: join(h, '.centralu'), home: h, env: {}, platform: process.platform })).toBe('centralu-serve.service')
   })
 
   it('runs the managed launcher when the app installed Centralu there, else the one serve keeps for npm', () => {
@@ -217,7 +241,7 @@ describe('centralu serve --autostart, with a fake systemctl and loginctl', () =>
     const s = systemd({ linger: 'no', lingerAllowed: true })
     const r = await autostart({ ...m.base, action: 'on', run: s.run })
     expect(r).toEqual({ code: 0, line: { ok: true, how: 'systemd', on: true, linger: true } })
-    expect(readFileSync(m.unit, 'utf8')).toContain(`ExecStart="${join(m.dataDir, 'remote', 'bin', 'centralu')}" serve`)
+    expect(readFileSync(m.unit, 'utf8')).toContain(`ExecStart="${unitText(join(m.dataDir, 'remote', 'bin', 'centralu'))}" serve`)
     expect(s.runs.map((x) => [x.command, ...x.args].join(' '))).toEqual([
       'systemctl --user daemon-reload',
       'systemctl --user enable centralu-serve.service',
@@ -280,8 +304,8 @@ describe('centralu serve --autostart, with a fake systemctl and loginctl', () =>
     const s = systemd()
     await autostart({ ...m.base, env: { CC_DATA_DIR: other }, action: 'on', run: s.run })
     expect(existsSync(m.unit)).toBe(false)
-    const name = autostartName('systemd', { dataDir: other, home: m.h, env: {} })
-    expect(readFileSync(join(m.h, '.config', 'systemd', 'user', name), 'utf8')).toContain(`Environment="CC_DATA_DIR=${other}"`)
+    const name = autostartName('systemd', { dataDir: other, home: m.h, env: {}, platform: 'linux' })
+    expect(readFileSync(join(m.h, '.config', 'systemd', 'user', name), 'utf8')).toContain(`Environment="CC_DATA_DIR=${unitText(other)}"`)
   })
 
   it('says why where there is nothing to start it with, and turning it off there succeeds', async () => {
