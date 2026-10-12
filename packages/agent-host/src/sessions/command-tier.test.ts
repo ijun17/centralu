@@ -3,10 +3,12 @@ import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import {
   COMMANDS_INSTRUCTION,
+  DEFAULT_RARE_TIER,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
   RARE_COMMANDS,
   commandsFor,
+  currentRareTier,
   instructionsFor,
   profileAllows,
   rareTierFrom,
@@ -38,26 +40,32 @@ function fakeTools() {
 const orchestrator = { sessionId: 'orc', profile: 'orchestrator' as const }
 
 describe('the switch', () => {
-  it('is off unless CC_RARE_COMMANDS names a tier', () => {
-    expect(rareTierFrom(undefined)).toBe('resident')
-    expect(rareTierFrom('')).toBe('resident')
-    expect(rareTierFrom('Commands')).toBe('resident')
-    expect(rareTierFrom('commands')).toBe('commands')
+  it('is the commands tier unless CC_RARE_COMMANDS names another (decision of 2026-10-12)', () => {
+    expect(DEFAULT_RARE_TIER).toBe('commands')
+    expect(currentRareTier()).toBe('commands')
+    expect(rareTierFrom(undefined)).toBe('commands')
+    expect(rareTierFrom('')).toBe('commands')
+    expect(rareTierFrom('Resident')).toBe('commands')
+    expect(rareTierFrom('resident')).toBe('resident')
     expect(rareTierFrom('deferred')).toBe('deferred')
   })
 
-  it('leaves every profile as it was by default', () => {
+  it("changes only the orchestrator by default: every other seat is shown what the resident tier shows it", () => {
     for (const p of PROFILES) {
-      expect(toolDefsFor(p).map((t) => t.name)).toEqual(toolDefsFor(p, 'resident').map((t) => t.name))
-      expect(toolDefsFor(p).some((t) => t.name.startsWith('centralu_'))).toBe(false)
+      if (p === 'orchestrator') continue
+      expect(toolDefsFor(p).map((t) => t.name), p).toEqual(toolDefsFor(p, 'resident').map((t) => t.name))
+      expect(toolDefsFor(p).some((t) => t.name.startsWith('centralu_')), p).toBe(false)
+      expect(instructionsFor(p), p).toBe(instructionsFor(p, 'resident'))
     }
-    expect(instructionsFor('orchestrator')).toBe(ORCHESTRATOR_INSTRUCTIONS)
+    expect(toolDefsFor('orchestrator').map((t) => t.name)).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run']))
+    expect(instructionsFor('orchestrator')).toBe(`${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}`)
+    expect(instructionsFor('orchestrator', 'resident')).toBe(ORCHESTRATOR_INSTRUCTIONS)
   })
 })
 
 describe('the commands tier', () => {
   beforeEach(() => setRareTier('commands'))
-  afterEach(() => setRareTier('resident'))
+  afterEach(() => setRareTier(DEFAULT_RARE_TIER))
 
   it('takes the rare commands out of the orchestrator\'s tool list and puts the three fixed tools and one line in', () => {
     const names = toolDefsFor('orchestrator').map((t) => t.name)
@@ -159,7 +167,7 @@ describe('the commands tier', () => {
 })
 
 describe('the deferred tier', () => {
-  afterEach(() => setRareTier('resident'))
+  afterEach(() => setRareTier(DEFAULT_RARE_TIER))
 
   it("defers the orchestrator's rare tools on Claude and nothing else changes", () => {
     setRareTier('deferred')

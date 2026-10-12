@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OrchestratorTools } from '../contract.js'
-import { RARE_COMMANDS, SCOPED_INSTRUCTIONS, setRareTier } from '../../sessions/orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, RARE_COMMANDS, SCOPED_INSTRUCTIONS, setRareTier } from '../../sessions/orchestrator-tools.js'
 import { orchestratorMcp } from './orchestrator-mcp.js'
 
 /**
@@ -61,7 +61,7 @@ describe('the Claude in-process server', () => {
       expect(Object.values(commands.tools).every((t) => t === 'loaded')).toBe(true)
       expect(commands.instructions).toContain('centralu_commands lists them')
     } finally {
-      setRareTier('resident')
+      setRareTier(DEFAULT_RARE_TIER)
     }
   })
 })

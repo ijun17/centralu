@@ -8,6 +8,8 @@ import { APP_ACCESS_TOOLS, DELEGATE_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, pro
  * The profile × tool matrix in docs/security-boundaries.md (#382) is the code's, not a copy that drifts: every
  * tool Centralu serves has a row, every profile a column, and each cell says what `profileAllows` (execution)
  * and `toolDefsFor` (what the session sees) decide. The "none" column is the sessions that get no server.
+ * The table is drawn for the `resident` tier, where every command is a tool; the default tier (#512) reaches the
+ * orchestrator's rare ones through centralu_run, and command-tier.test.ts checks that it reaches exactly these.
  */
 const doc = readFileSync(fileURLToPath(new URL('../../../../docs/security-boundaries.md', import.meta.url)), 'utf8')
 
@@ -41,8 +43,8 @@ describe('the tool matrix in docs/security-boundaries.md (#382)', () => {
       PROFILES.forEach((p, i) => {
         const said = cells[i] === 'yes'
         if (cells[i] !== 'yes' && cells[i] !== '—') wrong.push(`${name} × ${p}: "${cells[i]}" is neither yes nor —`)
-        if (profileAllows(p, name) !== said) wrong.push(`${name} × ${p}: the table says ${said ? 'yes' : '—'}, profileAllows says ${!said ? 'yes' : '—'}`)
-        if (toolDefsFor(p).some((t) => t.name === name) !== said) wrong.push(`${name} × ${p}: the table and what the session is shown (toolDefsFor) differ`)
+        if (profileAllows(p, name, 'resident') !== said) wrong.push(`${name} × ${p}: the table says ${said ? 'yes' : '—'}, profileAllows says ${!said ? 'yes' : '—'}`)
+        if (toolDefsFor(p, 'resident').some((t) => t.name === name) !== said) wrong.push(`${name} × ${p}: the table and what the session is shown (toolDefsFor) differ`)
       })
       if (cells[PROFILES.length] !== '—') wrong.push(`${name} × none: a session with no profile gets no Centralu server`)
     }

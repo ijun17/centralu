@@ -394,15 +394,17 @@ export const READER_BUDGET_CHARS = 1000
 
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
- * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts). Measured
- * 2026-10-12 on Claude: orchestrator 11,862 (10,029 + 1,833, with create_project's `machine`, #82), manager 6,264 (3,479 + 2,785), scoped 2,267,
- * builder 1,432; the tokens they cost are in docs/tool-cost.md. Codex carries the same plus the 52-character
+ * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts), in the default
+ * rare-commands tier. Measured 2026-10-12 on Claude: orchestrator 9,317 in the commands tier (7,323 + 1,994; it
+ * was 11,862 with every command resident, against a ceiling of 12,000, before the tier became the default, #512),
+ * manager 6,246 (3,461 + 2,785), scoped 2,267, builder 1,432; the tokens they cost are in docs/tool-cost.md.
+ * Codex carries the same plus the 52-character
  * header its developer instructions put over them (#525, codexToolInstructionsFor), which is what moved scoped
  * from 2,300 and builder from 1,450. The reader is the sum of its three sets' ceilings, since Codex loads all of
  * them. Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  orchestrator: 12_000,
+  orchestrator: 9_500,
   manager: 6_400,
   scoped: 2_350,
   builder: 1_500,
@@ -965,10 +967,12 @@ export const SCOPED_INSTRUCTIONS = [
 ].join('\n')
 
 /**
- * How a seat's rarely used commands reach the model (#512, a prototype behind `CC_RARE_COMMANDS`; the
- * default is unchanged and the comparison of the three is in docs/tool-cost.md §9):
+ * How a seat's rarely used commands reach the model (#512, chosen by `CC_RARE_COMMANDS`; the comparison of the
+ * three is in docs/tool-cost.md §9). `commands` is the default since the owner's decision of 2026-10-12 (no loss
+ * on Sonnet, 835 tokens fewer per orchestrator request, and a tool list that does not grow with the commands);
+ * the other two stay selectable for measurement.
  *
- *   - `resident`: every tool in every request, as before.
+ *   - `resident`: every tool in every request, as before #512.
  *   - `deferred`: the rare ones wait behind Claude's tool search, the way the reader's app_guide does.
  *     Codex reaches every MCP tool through its own `exec` anyway (tool-cost.md §6.2), so this is Claude's alone.
  *   - `commands`: the rare ones leave the tool list. Three fixed tools stand in for them (COMMAND_TOOLS):
@@ -981,11 +985,14 @@ export const SCOPED_INSTRUCTIONS = [
 export const RARE_TIERS = ['resident', 'deferred', 'commands'] as const
 export type RareTier = (typeof RARE_TIERS)[number]
 
-let rareTier: RareTier = 'resident'
+/** The tier a host runs with when `CC_RARE_COMMANDS` names none (#512, decision of 2026-10-12) */
+export const DEFAULT_RARE_TIER: RareTier = 'commands'
+
+let rareTier: RareTier = DEFAULT_RARE_TIER
 
 /** The tier from `CC_RARE_COMMANDS`: anything else is the default */
 export function rareTierFrom(value: string | undefined): RareTier {
-  return (RARE_TIERS as readonly string[]).includes(value ?? '') ? (value as RareTier) : 'resident'
+  return (RARE_TIERS as readonly string[]).includes(value ?? '') ? (value as RareTier) : DEFAULT_RARE_TIER
 }
 
 export function setRareTier(tier: RareTier): void {

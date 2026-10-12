@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../contract.js'
+import { DEFAULT_RARE_TIER, setRareTier } from '../../sessions/orchestrator-tools.js'
 
 /**
  * Can a proposed MCP server take the orchestrator's own name (#93)?
@@ -70,6 +71,13 @@ async function decide(toolName: string): Promise<unknown> {
     new Promise((r) => setTimeout(() => r('asked-the-human'), 200)),
   ])
 }
+
+/*
+ * These call the orchestrator's rare commands by their own names, as tools: the `resident` tier (#512). The
+ * default tier serves them through centralu_run, to the same runners; command-tier.test.ts covers that door.
+ */
+beforeAll(() => setRareTier('resident'))
+afterAll(() => setRareTier(DEFAULT_RARE_TIER))
 
 describe('the orchestrator name cannot be proposed (#93)', () => {
   /*

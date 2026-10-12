@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { RpcMethods, type AdapterCapabilities, type ExternalAppInfo, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
@@ -11,6 +11,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { until } from '../apps/external/test-helpers.js'
 import { SessionManager } from './manager.js'
+import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
 
 /**
  * An app's building session (M4 C-2) — it stands up together with the app when the app is
@@ -114,6 +115,13 @@ afterEach(async () => {
   await rt.dispose()
   rmSync(root, { recursive: true, force: true })
 })
+
+/*
+ * These call the orchestrator's rare commands by their own names, as tools: the `resident` tier (#512). The
+ * default tier serves them through centralu_run, to the same runners; command-tier.test.ts covers that door.
+ */
+beforeAll(() => setRareTier('resident'))
+afterAll(() => setRareTier(DEFAULT_RARE_TIER))
 
 describe('creating an app stands up its building session', () => {
   it('a project app: cwd is the project root, the app panel is that app, and the role prompt states the app\'s place and rules', async () => {

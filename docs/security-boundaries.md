@@ -111,8 +111,9 @@ A reader's `read_session` without an id lists its project's sessions; that is wh
 `list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)`), and
 the object behind them refuses every acting call (`readerToolsFor`).
 
-**The rare-commands switch** (#512, a prototype, off by default). The matrix is the default
-(`CC_RARE_COMMANDS` unset). With `CC_RARE_COMMANDS=commands` the host takes the orchestrator's
+**The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn for
+`CC_RARE_COMMANDS=resident`, where every command is a tool. By default (`CC_RARE_COMMANDS` unset, or
+`commands`) the host takes the orchestrator's
 `create_app`, `propose_skill` and `propose_mcp_server` out of its tool list
 and gives it `centralu_commands`, `centralu_help` and `centralu_run` instead; no other seat changes. Who
 may run what does not change: `centralu_run` lists and runs only the commands `profileAllows` gives the
