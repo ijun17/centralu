@@ -3062,6 +3062,28 @@ describe('MCP server suggestions', () => {
     })
   })
 
+  /*
+   * The commands tier (#512): a Codex call made from inside its exec carries no arguments, so the event names
+   * centralu_run and not the command. It may be either proposal, and both cards must still appear.
+   */
+  it('a centralu_run tool call re-reads both suggestion lists', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('mcp-s2', sessionInfo('mcp-s2'))
+    await useStore.getState().attach(mock)
+    mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: [] })
+    mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday' })
+
+    mock.emit({
+      type: 'tool_call', sessionId: 'mcp-s2', callId: 'c2',
+      summary: { tool: 'centralu_run', title: 'centralu: centralu_run', readOnly: false, paths: [] },
+    } as NormalizedEvent)
+
+    await vi.waitFor(() => {
+      expect(useStore.getState().mcpProposals.map((p) => p.name)).toEqual(['playwright'])
+      expect(useStore.getState().skillProposals.map((p) => p.name)).toEqual(['weekly-report'])
+    })
+  })
+
   it('clicking approve is passed to the host and empties the list', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)

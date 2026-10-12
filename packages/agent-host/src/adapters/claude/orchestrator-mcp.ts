@@ -33,6 +33,9 @@ import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
 export { ORCHESTRATOR_MCP_NAME }
 
 export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile = 'orchestrator', sessionId?: string) {
+  const defs = toolDefsFor(profile)
+  // A set with a deferred tool is loaded tool by tool: the reader's always, the orchestrator's in the `deferred` tier (#512)
+  const someDeferred = defs.some((t) => 'deferred' in t && t.deferred === true)
   return createSdkMcpServer({
     name: ORCHESTRATOR_MCP_NAME,
     version: '1',
@@ -48,13 +51,14 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
      *
      * The reader set (#320) is loaded tool by tool instead: all but app_guide (deferring them made
      * recall go unused, measured), while app_guide waits behind tool search — it rides in every
-     * ordinary session, and the person rarely asks one of them about the app.
+     * ordinary session, and the person rarely asks one of them about the app. The orchestrator's
+     * rare commands are deferred the same way in the `deferred` tier, a prototype measured in #512.
      */
-    alwaysLoad: profile !== 'reader',
+    alwaysLoad: !someDeferred,
     // None for the reader set (#320): server instructions are where a role would creep in
     instructions: instructionsFor(profile),
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
-    tools: toolDefsFor(profile).map((t) =>
+    tools: defs.map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>, extra: unknown) =>
         // Served by the host itself, so a planned swap waits for it, within a bound (#280, drain.ts)
         hostDrain
@@ -68,7 +72,7 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
             if (e instanceof DrainCut) return drainToolResult(e)
             throw e
           }),
-        profile === 'reader' && !('deferred' in t && t.deferred) ? { alwaysLoad: true } : undefined,
+        someDeferred && !('deferred' in t && t.deferred) ? { alwaysLoad: true } : undefined,
       ),
     ),
   })

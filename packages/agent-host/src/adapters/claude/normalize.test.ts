@@ -127,6 +127,25 @@ describe('tool calls (the actual shape from the spike)', () => {
     expect(out.map((e) => e.type)).toEqual(['tool_call'])
   })
 
+  /*
+   * The commands tier (#512): the screen re-reads the proposal lists and fills a worktree window by the call's
+   * name and title, so a command run through centralu_run must arrive as the command, and the record keeps the call.
+   */
+  it('a centralu_run call is summarized as the command it runs', () => {
+    const out = n({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'tu9', name: 'mcp__centralu__centralu_run', input: { command: 'propose_worktree_session', args: { branch: 'feat/login-fix' } } }] },
+    })
+    expect(out[0]).toMatchObject({
+      type: 'tool_call',
+      summary: { tool: 'mcp__centralu__propose_worktree_session', title: 'feat/login-fix' },
+      input: { command: 'propose_worktree_session', args: { branch: 'feat/login-fix' } },
+    })
+    expect(toolSummary('mcp__centralu__centralu_run', { command: 'propose_skill', args: '{"name":"a","content":"b"}' }).tool).toBe('mcp__centralu__propose_skill')
+    expect(toolSummary('mcp__centralu__centralu_run', { command: 'x__y' }).tool).toBe('mcp__centralu__centralu_run')
+    expect(toolSummary('mcp__centralu__centralu_run', {}).tool).toBe('mcp__centralu__centralu_run')
+  })
+
   it('a read-only tool is marked readOnly (card-collapsing policy)', () => {
     expect(toolSummary('Read', { file_path: '/a.ts' }).readOnly).toBe(true)
     expect(toolSummary('Bash', { command: 'ls' }).readOnly).toBe(false)

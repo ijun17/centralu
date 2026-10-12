@@ -25,6 +25,11 @@ export class MeasuredHost {
   /** Who answers approval cards: the driver sets it per step */
   approvals: ApprovalPolicy = () => 'deny'
   readonly answered: { kind: string; tool?: string; decision: string }[] = []
+  /**
+   * The host's `[commands]` lines (#512): which command each centralu_run ran, and whether it got past the
+   * schema. A Codex call from inside `exec` carries no arguments on its event, so this is where its command is.
+   */
+  readonly commandRuns: { sessionId: string; command: string; outcome: string }[] = []
 
   constructor(
     private dataDir: string,
@@ -40,6 +45,10 @@ export class MeasuredHost {
     // The host's own log stays out of the table; the last lines are kept for a failure
     const tail: string[] = []
     proc.stderr!.on('data', (d) => {
+      for (const line of String(d).split('\n')) {
+        const m = /^\[commands\] (\S+) centralu_run ("[^"]*"): (.+)$/.exec(line)
+        if (m) this.commandRuns.push({ sessionId: m[1]!, command: JSON.parse(m[2]!) as string, outcome: m[3]! })
+      }
       tail.push(...String(d).split('\n').filter(Boolean))
       tail.splice(0, Math.max(0, tail.length - 40))
     })

@@ -1,0 +1,6508 @@
+{
+ "comment": "#512, docs/tool-cost.md section 9: the orchestrator's rare commands resident (A), deferred behind Claude's tool search (B), or behind centralu_commands/help/run (C), with scripts/measure-tools/prompts-512.json. trial1 is the first Claude run: four commands in the tier (propose_worktree_session too) and every session's requests in a turn's window, so its tokens include builder sessions; its selection is the orchestrator's own. The Codex runs had the four commands in the tier.",
+ "claude": {
+  "trial1": {
+   "A": {
+    "meta": {
+     "mode": "live",
+     "at": "2026-10-12T10:05:23.506Z",
+     "commit": "81d17084",
+     "versions": {
+      "claude": "2.1.289 (Claude Code)",
+      "codex": "codex-cli 0.160.0",
+      "node": "v26.9.0"
+     },
+     "reps": 3,
+     "clis": [
+      "claude"
+     ],
+     "rare": "resident"
+    },
+    "summary": {
+     "definitions": {
+      "claude": {
+       "orchestrator": {
+        "profile": "orchestrator",
+        "cli": "claude",
+        "tools": 12,
+        "residentTools": 12,
+        "residentChars": 9927,
+        "deferredChars": 0,
+        "instructionsChars": 1833,
+        "prefixHash": "cfe4e6f8335d"
+       },
+       "manager": {
+        "profile": "manager",
+        "cli": "claude",
+        "tools": 5,
+        "residentTools": 5,
+        "residentChars": 3461,
+        "deferredChars": 0,
+        "instructionsChars": 2785,
+        "prefixHash": "e0b49d9c9a1c"
+       },
+       "scoped": {
+        "profile": "scoped",
+        "cli": "claude",
+        "tools": 3,
+        "residentTools": 3,
+        "residentChars": 1888,
+        "deferredChars": 0,
+        "instructionsChars": 379,
+        "prefixHash": "50fe63f80274"
+       },
+       "builder": {
+        "profile": "builder",
+        "cli": "claude",
+        "tools": 1,
+        "residentTools": 1,
+        "residentChars": 610,
+        "deferredChars": 0,
+        "instructionsChars": 822,
+        "prefixHash": "c220d1208e2a"
+       },
+       "reader": {
+        "profile": "reader",
+        "cli": "claude",
+        "tools": 7,
+        "residentTools": 4,
+        "residentChars": 1305,
+        "deferredChars": 945,
+        "instructionsChars": 0,
+        "prefixHash": "9cba5aaa36bf"
+       }
+      },
+      "codex": {
+       "orchestrator": {
+        "profile": "orchestrator",
+        "cli": "codex",
+        "tools": 12,
+        "residentTools": 12,
+        "residentChars": 9927,
+        "deferredChars": 0,
+        "instructionsChars": 1885,
+        "prefixHash": "a8455ecd732e"
+       },
+       "manager": {
+        "profile": "manager",
+        "cli": "codex",
+        "tools": 5,
+        "residentTools": 5,
+        "residentChars": 3461,
+        "deferredChars": 0,
+        "instructionsChars": 2837,
+        "prefixHash": "d0ece3812c2e"
+       },
+       "scoped": {
+        "profile": "scoped",
+        "cli": "codex",
+        "tools": 3,
+        "residentTools": 3,
+        "residentChars": 1888,
+        "deferredChars": 0,
+        "instructionsChars": 431,
+        "prefixHash": "29080fec4519"
+       },
+       "builder": {
+        "profile": "builder",
+        "cli": "codex",
+        "tools": 1,
+        "residentTools": 1,
+        "residentChars": 610,
+        "deferredChars": 0,
+        "instructionsChars": 874,
+        "prefixHash": "8c533c2c0dbc"
+       },
+       "reader": {
+        "profile": "reader",
+        "cli": "codex",
+        "tools": 7,
+        "residentTools": 7,
+        "residentChars": 2250,
+        "deferredChars": 0,
+        "instructionsChars": 0,
+        "prefixHash": "4ec11faef03d"
+       }
+      }
+     },
+     "resident": {
+      "claude": {
+       "none": {
+        "runs": [
+         16142,
+         16142,
+         16142
+        ],
+        "median": 16142,
+        "delta": 0,
+        "ours": 0,
+        "centraluChars": 0,
+        "toolsChars": 47361,
+        "systemChars": 137
+       },
+       "orchestrator": {
+        "runs": [
+         22693,
+         22693,
+         22693
+        ],
+        "median": 22693,
+        "delta": 6551,
+        "ours": 3240,
+        "centraluChars": 9514,
+        "toolsChars": 56887,
+        "systemChars": 16352
+       }
+      }
+     },
+     "selection": {
+      "claude": {
+       "rare-app-project": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_app"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 4,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "shopping-list",
+           "name": "Shopping List",
+           "project": "website",
+           "description": "A shared shopping list the team can add items to"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 6,
+          "tokens": 114648,
+          "output": 1124,
+          "cacheWrite": 14780,
+          "uncached": 36,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "create_app"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "shopping-list",
+           "name": "Shopping List",
+           "project": "website",
+           "description": "Shared shopping list the team can add items to"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 68948,
+          "output": 545,
+          "cacheWrite": 563,
+          "uncached": 26,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "create_app",
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 5,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "shopping-list",
+           "name": "Shopping List",
+           "project": "website",
+           "description": "Shared shopping list the team can add items to"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 7,
+          "tokens": 138273,
+          "output": 1121,
+          "cacheWrite": 11168,
+          "uncached": 44,
+          "rebuilds": 1
+         }
+        ]
+       },
+       "rare-app-user": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_app"
+        ],
+        "runs": [
+         {
+          "called": [
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 3,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "Water Tracker",
+           "id": "water-tracker",
+           "description": "Log daily water intake and track hydration goals."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 95078,
+          "output": 896,
+          "cacheWrite": 18459,
+          "uncached": 28,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 3,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "water-tracker",
+           "name": "Water Tracker",
+           "description": "Log glasses of water consumed each day"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 95066,
+          "output": 887,
+          "cacheWrite": 12536,
+          "uncached": 28,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "water-logger",
+           "name": "Water Logger",
+           "description": "Log daily water intake and track your hydration."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 4,
+          "tokens": 69991,
+          "output": 892,
+          "cacheWrite": 1234,
+          "uncached": 26,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-skill": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_skill"
+        ],
+        "runs": [
+         {
+          "called": [
+           "propose_skill"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "weekly-summary",
+           "why": "You ask every Monday for a summary of what changed across all projects last week. This procedure automates the request so you don't have to re-explain it.",
+           "content": "## Weekly project summary\n\n**When to use:** Invoke this skill every Monday (or whenever you want) to get a summary of activity across all projects.\n\n**The procedure:**\n1. List all sessions across all projects with `list_sessions`\n2. For each session with recent activity, read its conversation history to find what changed\n3. Summarize the week in exactly 5 bullet points covering the most significant changes, shipped features, bugs fixed, or blockers encountered across all projects\n4. Present it as a concise, high-level snapshot for the week"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 46059,
+          "output": 718,
+          "cacheWrite": 4381,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "propose_skill"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "weekly-review",
+           "why": "Every Monday, provide a high-level summary of progress across all projects without the user having to ask.",
+           "content": "**When:** Every Monday\n**What to do:** Review all projects' sessions and summarize the week's work.\n\n1. Call list_sessions to see all active sessions across projects.\n2. For each session that has activity, use read_session to check what was done since last Monday.\n3. Synthesize findings into five bullet points covering:\n   - Major features or fixes completed\n   - Bugs or issues resolved\n   - Architecture or refactoring work\n   - Ongoing work or blockers\n   - Any notable changes or decisions\n\nKeep it concise—one sentence per bullet. Lead with the project/session name for clarity."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45987,
+          "output": 623,
+          "cacheWrite": 535,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "propose_skill"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "weekly-summary",
+           "why": "Every Monday you ask for a summary of what changed across all projects last week. Formalizing this as a skill means you won't need to explain it again.",
+           "content": "**Weekly project summary** — run every Monday.\n\n1. List all active sessions with list_sessions\n2. For each session, read recent conversation (around 50 lines) with read_session\n3. Identify the top changes: new features, bug fixes, completed work, blockers, or ongoing tasks\n4. Summarize in 5 bullet points covering the whole week across all projects\n5. Format: bold verb + outcome (e.g., \"**Merged** auth refactor to main\")\n\nFocus on completed work and shipped changes. Omit routine commits or small fixes unless they unlock something else."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45950,
+          "output": 563,
+          "cacheWrite": 498,
+          "uncached": 18,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-browser": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_mcp_server"
+        ],
+        "runs": [
+         {
+          "called": [
+           "propose_mcp_server"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "@playwright/mcp@latest"
+           ],
+           "why": "Browser automation — open pages, click elements, fill forms, take screenshots, and interact with web content directly"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45881,
+          "output": 470,
+          "cacheWrite": 4218,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "propose_mcp_server"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "@playwright/mcp@latest"
+           ],
+           "why": "Browser automation: opens pages, clicks elements, fills forms, takes screenshots, and navigates through web content so you can interact with live sites."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45864,
+          "output": 446,
+          "cacheWrite": 442,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "propose_mcp_server"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "@playwright/mcp@latest"
+           ],
+           "why": "Browser automation — to open web pages, click elements, fill forms, take screenshots, and interact with web apps in a real browser."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45791,
+          "output": 424,
+          "cacheWrite": 369,
+          "uncached": 18,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-branch": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_worktree_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "propose_worktree_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "branch": "feat/login-fix",
+           "reason": "Isolate login fix on a separate branch while keeping main untouched"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 68959,
+          "output": 516,
+          "cacheWrite": 4285,
+          "uncached": 26,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "propose_worktree_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "branch": "feat/login-fix",
+           "reason": "Isolate login fix work on its own branch while keeping main untouched"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 68888,
+          "output": 510,
+          "cacheWrite": 514,
+          "uncached": 26,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "propose_worktree_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "branch": "feat/login-fix",
+           "reason": "Fix login issue on isolated branch to keep main untouched"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 68873,
+          "output": 465,
+          "cacheWrite": 498,
+          "uncached": 26,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-overview": {
+        "profile": "orchestrator",
+        "expect": [
+         "list_sessions",
+         "read_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45596,
+          "output": 342,
+          "cacheWrite": 3945,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45595,
+          "output": 236,
+          "cacheWrite": 197,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "read_session"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 69108,
+          "output": 691,
+          "cacheWrite": 719,
+          "uncached": 26,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-delegate": {
+        "profile": "orchestrator",
+        "expect": [
+         "send_to_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "51c2e3b8-c9c6-485e-8a96-1b929e494e99",
+           "text": "Reply with the single word DONE.",
+           "reportBack": true
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 85546,
+          "output": 406,
+          "cacheWrite": 4414,
+          "uncached": 36,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "read_session",
+           "send_to_session"
+          ],
+          "calls": 3,
+          "verdict": "wrong",
+          "steps": 3,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "51c2e3b8-c9c6-485e-8a96-1b929e494e99",
+           "text": "Reply with the single word DONE."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 109355,
+          "output": 648,
+          "cacheWrite": 825,
+          "uncached": 44,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "51c2e3b8-c9c6-485e-8a96-1b929e494e99",
+           "text": "Reply with the single word DONE."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 4,
+          "tokens": 68905,
+          "output": 465,
+          "cacheWrite": 538,
+          "uncached": 26,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-recall": {
+        "profile": "orchestrator",
+        "expect": [
+         "recall"
+        ],
+        "runs": [
+         {
+          "called": [
+           "recall"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45696,
+          "output": 557,
+          "cacheWrite": 4045,
+          "uncached": 15,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "recall"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup",
+           "limit": 12
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45706,
+          "output": 433,
+          "cacheWrite": 305,
+          "uncached": 15,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "recall"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup",
+           "limit": 10
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45744,
+          "output": 564,
+          "cacheWrite": 343,
+          "uncached": 15,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-new-session": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45667,
+          "output": 255,
+          "cacheWrite": 4011,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45684,
+          "output": 281,
+          "cacheWrite": 276,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 45715,
+          "output": 343,
+          "cacheWrite": 307,
+          "uncached": 18,
+          "rebuilds": 0
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "B": {
+    "meta": {
+     "mode": "live",
+     "at": "2026-10-12T10:05:57.524Z",
+     "commit": "81d17084",
+     "versions": {
+      "claude": "2.1.289 (Claude Code)",
+      "codex": "codex-cli 0.160.0",
+      "node": "v26.9.0"
+     },
+     "reps": 3,
+     "clis": [
+      "claude"
+     ],
+     "rare": "deferred"
+    },
+    "summary": {
+     "definitions": {
+      "claude": {
+       "orchestrator": {
+        "profile": "orchestrator",
+        "cli": "claude",
+        "tools": 12,
+        "residentTools": 8,
+        "residentChars": 5479,
+        "deferredChars": 4448,
+        "instructionsChars": 1833,
+        "prefixHash": "7c4339a67a8e"
+       },
+       "manager": {
+        "profile": "manager",
+        "cli": "claude",
+        "tools": 5,
+        "residentTools": 5,
+        "residentChars": 3461,
+        "deferredChars": 0,
+        "instructionsChars": 2785,
+        "prefixHash": "e0b49d9c9a1c"
+       },
+       "scoped": {
+        "profile": "scoped",
+        "cli": "claude",
+        "tools": 3,
+        "residentTools": 3,
+        "residentChars": 1888,
+        "deferredChars": 0,
+        "instructionsChars": 379,
+        "prefixHash": "50fe63f80274"
+       },
+       "builder": {
+        "profile": "builder",
+        "cli": "claude",
+        "tools": 1,
+        "residentTools": 1,
+        "residentChars": 610,
+        "deferredChars": 0,
+        "instructionsChars": 822,
+        "prefixHash": "c220d1208e2a"
+       },
+       "reader": {
+        "profile": "reader",
+        "cli": "claude",
+        "tools": 7,
+        "residentTools": 4,
+        "residentChars": 1305,
+        "deferredChars": 945,
+        "instructionsChars": 0,
+        "prefixHash": "9cba5aaa36bf"
+       }
+      },
+      "codex": {
+       "orchestrator": {
+        "profile": "orchestrator",
+        "cli": "codex",
+        "tools": 12,
+        "residentTools": 12,
+        "residentChars": 9927,
+        "deferredChars": 0,
+        "instructionsChars": 1885,
+        "prefixHash": "a8455ecd732e"
+       },
+       "manager": {
+        "profile": "manager",
+        "cli": "codex",
+        "tools": 5,
+        "residentTools": 5,
+        "residentChars": 3461,
+        "deferredChars": 0,
+        "instructionsChars": 2837,
+        "prefixHash": "d0ece3812c2e"
+       },
+       "scoped": {
+        "profile": "scoped",
+        "cli": "codex",
+        "tools": 3,
+        "residentTools": 3,
+        "residentChars": 1888,
+        "deferredChars": 0,
+        "instructionsChars": 431,
+        "prefixHash": "29080fec4519"
+       },
+       "builder": {
+        "profile": "builder",
+        "cli": "codex",
+        "tools": 1,
+        "residentTools": 1,
+        "residentChars": 610,
+        "deferredChars": 0,
+        "instructionsChars": 874,
+        "prefixHash": "8c533c2c0dbc"
+       },
+       "reader": {
+        "profile": "reader",
+        "cli": "codex",
+        "tools": 7,
+        "residentTools": 7,
+        "residentChars": 2250,
+        "deferredChars": 0,
+        "instructionsChars": 0,
+        "prefixHash": "4ec11faef03d"
+       }
+      }
+     },
+     "resident": {
+      "claude": {
+       "none": {
+        "runs": [
+         16141,
+         16141,
+         16141
+        ],
+        "median": 16141,
+        "delta": 0,
+        "ours": 0,
+        "centraluChars": 0,
+        "toolsChars": 47361,
+        "systemChars": 137
+       },
+       "orchestrator": {
+        "runs": [
+         21486,
+         21486,
+         21486
+        ],
+        "median": 21486,
+        "delta": 5345,
+        "ours": 2034,
+        "centraluChars": 5207,
+        "toolsChars": 52576,
+        "systemChars": 16352
+       }
+      }
+     },
+     "selection": {
+      "claude": {
+       "rare-app-project": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_app"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "ToolSearch",
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 5,
+          "verdict": "wrong",
+          "steps": 3,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "shopping-list",
+           "name": "Shopping List",
+           "description": "Shared shopping list the team can add items to",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 7,
+          "tokens": 133165,
+          "output": 1102,
+          "cacheWrite": 15252,
+          "uncached": 46,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "create_app",
+           "create_app"
+          ],
+          "calls": 3,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": false,
+          "firstArgs": {
+           "name": "Shopping List",
+           "project": "website",
+           "description": "Shared shopping list for the team to add and manage items"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 4,
+          "tokens": 87931,
+          "output": 924,
+          "cacheWrite": 994,
+          "uncached": 34,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "create_app",
+           "ToolSearch",
+           "create_app",
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 6,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": false,
+          "firstArgs": {
+           "project": "website",
+           "name": "Shopping List",
+           "description": "A shared shopping list where the team can add, check off, and remove items"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 8,
+          "tokens": 158508,
+          "output": 1494,
+          "cacheWrite": 2416,
+          "uncached": 60,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-app-user": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_app"
+        ],
+        "runs": [
+         {
+          "called": [
+           "create_app",
+           "ToolSearch",
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 5,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": false,
+          "firstArgs": {
+           "name": "Water Tracker",
+           "description": "Log daily water intake by glasses"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 8,
+          "tokens": 137685,
+          "output": 1340,
+          "cacheWrite": 19512,
+          "uncached": 46,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "ToolSearch",
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 4,
+          "verdict": "right",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "water-tracker",
+           "name": "Water Tracker",
+           "description": "Log and track daily water intake in glasses"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 6,
+          "tokens": 115292,
+          "output": 1301,
+          "cacheWrite": 13367,
+          "uncached": 38,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "create_app",
+           "ToolSearch",
+           "create_app",
+           "send_to_session"
+          ],
+          "calls": 5,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": false,
+          "firstArgs": {
+           "name": "Water Log",
+           "description": "Log daily water intake by tracking glasses of water consumed"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 7,
+          "tokens": 137494,
+          "output": 1265,
+          "cacheWrite": 15567,
+          "uncached": 46,
+          "rebuilds": 1
+         }
+        ]
+       },
+       "rare-skill": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_skill"
+        ],
+        "runs": [
+         {
+          "called": [
+           "propose_skill",
+           "ToolSearch",
+           "propose_skill"
+          ],
+          "calls": 3,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": false,
+          "firstArgs": {
+           "name": "weekly-summary",
+           "description": "Every Monday, review all project sessions and report five bullet points on what changed last week",
+           "trigger": "Manual trigger; intended to run every Monday morning"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 4,
+          "tokens": 88585,
+          "output": 859,
+          "cacheWrite": 5068,
+          "uncached": 36,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "propose_skill",
+           "ToolSearch",
+           "propose_skill"
+          ],
+          "calls": 3,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": false,
+          "firstArgs": {
+           "name": "weekly-review",
+           "description": "Every Monday: review all projects' sessions from the past week and summarize changes as 5 bullet points.",
+           "instructions": "Every Monday at the start of your session, gather the current project list and read each project's sessions to see what changed in the past 7 days. Summarize the work across all projects in exactly 5 bullet points covering what was completed, fixed, added, or changed. Present these as a brief status update without verbose explanation — just the facts of what moved."
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 4,
+          "tokens": 89273,
+          "output": 1095,
+          "cacheWrite": 1501,
+          "uncached": 36,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "propose_skill",
+           "ToolSearch",
+           "propose_skill"
+          ],
+          "calls": 4,
+          "verdict": "right",
+          "steps": 2,
+          "firstArgsValid": false,
+          "firstArgs": {
+           "name": "weekly-summary",
+           "description": "Every Monday: list all project sessions and summarize what changed last week in five bullet points",
+           "instructions": "When invoked (typically on Monday morning):\n1. Call list_sessions to see all active sessions across projects\n2. For each session with recent activity, call read_session to review the conversation\n3. Compile findings into five bullet points covering: new features, bug fixes, refactoring, infrastructure changes, and any blockers or decisions\n4. Report back to the user with the summary organized by project"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 5,
+          "tokens": 112253,
+          "output": 1463,
+          "cacheWrite": 1868,
+          "uncached": 44,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-browser": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_mcp_server"
+        ],
+        "runs": [
+         {
+          "called": [
+           "ToolSearch",
+           "propose_mcp_server"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "@playwright/mcp@latest"
+           ],
+           "why": "Browser automation to open web pages, navigate, click, fill forms, and interact with live websites in real-time"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 3,
+          "tokens": 65972,
+          "output": 586,
+          "cacheWrite": 4686,
+          "uncached": 28,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "ToolSearch",
+           "propose_mcp_server"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "@playwright/mcp@latest"
+           ],
+           "why": "Browser automation to open web pages and interact with them (click, type, navigate) in a real browser"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 3,
+          "tokens": 66165,
+          "output": 774,
+          "cacheWrite": 1009,
+          "uncached": 28,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "ToolSearch",
+           "propose_mcp_server"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "@anthropic-sdks/playwright-mcp@latest"
+           ],
+           "why": "Browser automation — to open web pages and interact with them (click, type, take screenshots) in a real browser environment"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 1,
+          "requests": 3,
+          "tokens": 66015,
+          "output": 643,
+          "cacheWrite": 911,
+          "uncached": 28,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-branch": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_worktree_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 4,
+          "tokens": 65294,
+          "output": 496,
+          "cacheWrite": 4353,
+          "uncached": 26,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 4,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 7,
+          "tokens": 117420,
+          "output": 1011,
+          "cacheWrite": 1289,
+          "uncached": 50,
+          "rebuilds": 2
+         },
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 83453,
+          "output": 694,
+          "cacheWrite": 958,
+          "uncached": 34,
+          "rebuilds": 1
+         }
+        ]
+       },
+       "core-overview": {
+        "profile": "orchestrator",
+        "expect": [
+         "list_sessions",
+         "read_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 4,
+          "tokens": 81100,
+          "output": 651,
+          "cacheWrite": 4689,
+          "uncached": 34,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43222,
+          "output": 239,
+          "cacheWrite": 238,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43274,
+          "output": 298,
+          "cacheWrite": 290,
+          "uncached": 18,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-delegate": {
+        "profile": "orchestrator",
+        "expect": [
+         "send_to_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "3baf7743-fb78-4c34-bb94-a065b840ca90",
+           "text": "Please reply with the single word DONE.",
+           "reportBack": true
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 84601,
+          "output": 408,
+          "cacheWrite": 4587,
+          "uncached": 36,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "read_session",
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 3,
+          "verdict": "wrong",
+          "steps": 3,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "3baf7743-fb78-4c34-bb94-a065b840ca90",
+           "text": "Reply with the single word DONE.",
+           "reportBack": true
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 6,
+          "tokens": 107154,
+          "output": 692,
+          "cacheWrite": 818,
+          "uncached": 44,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "read_session",
+           "send_to_session"
+          ],
+          "calls": 3,
+          "verdict": "wrong",
+          "steps": 3,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "3baf7743-fb78-4c34-bb94-a065b840ca90",
+           "text": "Reply with the single word DONE.",
+           "reportBack": true
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 6,
+          "tokens": 107306,
+          "output": 619,
+          "cacheWrite": 786,
+          "uncached": 44,
+          "rebuilds": 1
+         }
+        ]
+       },
+       "core-recall": {
+        "profile": "orchestrator",
+        "expect": [
+         "recall"
+        ],
+        "runs": [
+         {
+          "called": [
+           "recall",
+           "read_session"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup",
+           "limit": 5
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 65671,
+          "output": 612,
+          "cacheWrite": 4305,
+          "uncached": 23,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "recall"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup",
+           "limit": 12
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43313,
+          "output": 387,
+          "cacheWrite": 326,
+          "uncached": 15,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "recall"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup",
+           "limit": 10
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43291,
+          "output": 542,
+          "cacheWrite": 304,
+          "uncached": 15,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-new-session": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43293,
+          "output": 347,
+          "cacheWrite": 4097,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43246,
+          "output": 286,
+          "cacheWrite": 252,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43267,
+          "output": 315,
+          "cacheWrite": 273,
+          "uncached": 18,
+          "rebuilds": 0
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "C": {
+    "meta": {
+     "mode": "live",
+     "at": "2026-10-12T10:06:12.410Z",
+     "commit": "81d17084",
+     "versions": {
+      "claude": "2.1.289 (Claude Code)",
+      "codex": "codex-cli 0.160.0",
+      "node": "v26.9.0"
+     },
+     "reps": 3,
+     "clis": [
+      "claude"
+     ],
+     "rare": "commands"
+    },
+    "summary": {
+     "definitions": {
+      "claude": {
+       "orchestrator": {
+        "profile": "orchestrator",
+        "cli": "claude",
+        "tools": 11,
+        "residentTools": 11,
+        "residentChars": 6477,
+        "deferredChars": 0,
+        "instructionsChars": 1994,
+        "prefixHash": "ede9a50a1648"
+       },
+       "manager": {
+        "profile": "manager",
+        "cli": "claude",
+        "tools": 5,
+        "residentTools": 5,
+        "residentChars": 3461,
+        "deferredChars": 0,
+        "instructionsChars": 2785,
+        "prefixHash": "e0b49d9c9a1c"
+       },
+       "scoped": {
+        "profile": "scoped",
+        "cli": "claude",
+        "tools": 3,
+        "residentTools": 3,
+        "residentChars": 1888,
+        "deferredChars": 0,
+        "instructionsChars": 379,
+        "prefixHash": "50fe63f80274"
+       },
+       "builder": {
+        "profile": "builder",
+        "cli": "claude",
+        "tools": 1,
+        "residentTools": 1,
+        "residentChars": 610,
+        "deferredChars": 0,
+        "instructionsChars": 822,
+        "prefixHash": "c220d1208e2a"
+       },
+       "reader": {
+        "profile": "reader",
+        "cli": "claude",
+        "tools": 7,
+        "residentTools": 4,
+        "residentChars": 1305,
+        "deferredChars": 945,
+        "instructionsChars": 0,
+        "prefixHash": "9cba5aaa36bf"
+       }
+      },
+      "codex": {
+       "orchestrator": {
+        "profile": "orchestrator",
+        "cli": "codex",
+        "tools": 11,
+        "residentTools": 11,
+        "residentChars": 6477,
+        "deferredChars": 0,
+        "instructionsChars": 2046,
+        "prefixHash": "f082be77e884"
+       },
+       "manager": {
+        "profile": "manager",
+        "cli": "codex",
+        "tools": 5,
+        "residentTools": 5,
+        "residentChars": 3461,
+        "deferredChars": 0,
+        "instructionsChars": 2837,
+        "prefixHash": "d0ece3812c2e"
+       },
+       "scoped": {
+        "profile": "scoped",
+        "cli": "codex",
+        "tools": 3,
+        "residentTools": 3,
+        "residentChars": 1888,
+        "deferredChars": 0,
+        "instructionsChars": 431,
+        "prefixHash": "29080fec4519"
+       },
+       "builder": {
+        "profile": "builder",
+        "cli": "codex",
+        "tools": 1,
+        "residentTools": 1,
+        "residentChars": 610,
+        "deferredChars": 0,
+        "instructionsChars": 874,
+        "prefixHash": "8c533c2c0dbc"
+       },
+       "reader": {
+        "profile": "reader",
+        "cli": "codex",
+        "tools": 7,
+        "residentTools": 7,
+        "residentChars": 2250,
+        "deferredChars": 0,
+        "instructionsChars": 0,
+        "prefixHash": "4ec11faef03d"
+       }
+      }
+     },
+     "resident": {
+      "claude": {
+       "none": {
+        "runs": [
+         16142,
+         16142,
+         16142
+        ],
+        "median": 16142,
+        "delta": 0,
+        "ours": 0,
+        "centraluChars": 0,
+        "toolsChars": 47361,
+        "systemChars": 137
+       },
+       "orchestrator": {
+        "runs": [
+         21779,
+         21779,
+         21779
+        ],
+        "median": 21779,
+        "delta": 5637,
+        "ours": 2326,
+        "centraluChars": 6103,
+        "toolsChars": 53475,
+        "systemChars": 16352
+       }
+      }
+     },
+     "selection": {
+      "claude": {
+       "rare-app-project": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_app"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "centralu_commands",
+           "centralu_help",
+           "run:create_app",
+           "send_to_session"
+          ],
+          "calls": 6,
+          "verdict": "wrong",
+          "steps": 4,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "shopping-list",
+           "name": "Shopping List",
+           "project": "website",
+           "description": "A shared shopping list the team can add items to"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": true,
+          "discovery": 2,
+          "requests": 8,
+          "tokens": 158863,
+          "output": 1651,
+          "cacheWrite": 15798,
+          "uncached": 52,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "centralu_commands",
+           "centralu_help",
+           "run:create_app"
+          ],
+          "calls": 4,
+          "verdict": "wrong",
+          "steps": 4,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "shopping-list",
+           "name": "Shopping List",
+           "project": "website",
+           "description": "A shared shopping list the team can add items to"
+          },
+          "firstOk": false,
+          "reached": true,
+          "viaRun": true,
+          "discovery": 2,
+          "requests": 4,
+          "tokens": 90549,
+          "output": 936,
+          "cacheWrite": 1515,
+          "uncached": 34,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 4,
+          "tokens": 66272,
+          "output": 604,
+          "cacheWrite": 641,
+          "uncached": 26,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-app-user": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_app"
+        ],
+        "runs": [
+         {
+          "called": [
+           "create_project",
+           "ToolSearch"
+          ],
+          "calls": 7,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 1,
+          "requests": 6,
+          "tokens": 104931,
+          "output": 1721,
+          "cacheWrite": 9537,
+          "uncached": 44,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "centralu_commands",
+           "centralu_help",
+           "run:create_app",
+           "send_to_session"
+          ],
+          "calls": 4,
+          "verdict": "right",
+          "steps": 3,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "water-logger",
+           "name": "Water Logger",
+           "description": "Log glasses of water consumed each day"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": true,
+          "discovery": 2,
+          "requests": 6,
+          "tokens": 113886,
+          "output": 1176,
+          "cacheWrite": 1988,
+          "uncached": 42,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "centralu_commands",
+           "centralu_help",
+           "run:create_app",
+           "send_to_session"
+          ],
+          "calls": 6,
+          "verdict": "right",
+          "steps": 4,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "id": "water-intake-log",
+           "name": "Water Intake Log",
+           "description": "Log daily water consumption by counting glasses"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": true,
+          "discovery": 2,
+          "requests": 9,
+          "tokens": 166534,
+          "output": 1953,
+          "cacheWrite": 16570,
+          "uncached": 46,
+          "rebuilds": 2
+         }
+        ]
+       },
+       "rare-skill": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_skill"
+        ],
+        "runs": [
+         {
+          "called": [],
+          "calls": 0,
+          "verdict": "none",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 1,
+          "tokens": 21813,
+          "output": 662,
+          "cacheWrite": 3814,
+          "uncached": 10,
+          "rebuilds": 0
+         },
+         {
+          "called": [],
+          "calls": 1,
+          "verdict": "none",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 44126,
+          "output": 711,
+          "cacheWrite": 502,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "run:propose-skill",
+           "show",
+           "centralu_help",
+           "ToolSearch",
+           "run:propose_skill",
+           "add-item",
+           "add-item",
+           "add-item",
+           "add-item",
+           "toggle-item",
+           "toggle-item",
+           "show"
+          ],
+          "calls": 12,
+          "verdict": "wrong",
+          "steps": 5,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "weekly-summary",
+           "content": "Every Monday, list all project sessions and scan their recent activity. For each session, identify what changed or was completed last week. Synthesize these into five concise bullet points capturing the key work across all projects. Present as: **This week's changes (Monday summary)** followed by the five points.",
+           "why": "You ask this every Monday and the procedure is always the same — automating it saves explanation time and ensures consistent weekly reviews across all projects."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": true,
+          "discovery": 2,
+          "requests": 9,
+          "tokens": 227813,
+          "output": 1764,
+          "cacheWrite": 8450,
+          "uncached": 68,
+          "rebuilds": 3
+         }
+        ]
+       },
+       "rare-browser": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_mcp_server"
+        ],
+        "runs": [
+         {
+          "called": [
+           "ToolSearch"
+          ],
+          "calls": 1,
+          "verdict": "none",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 1,
+          "requests": 2,
+          "tokens": 43972,
+          "output": 805,
+          "cacheWrite": 4177,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "centralu_help",
+           "run:propose_mcp_server"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "-y",
+            "@playwright/mcp@latest"
+           ],
+           "why": "Browser automation to open and interact with web pages, click elements, fill forms, and navigate through real browser sessions."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": true,
+          "discovery": 1,
+          "requests": 3,
+          "tokens": 68576,
+          "output": 1522,
+          "cacheWrite": 1783,
+          "uncached": 26,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "centralu_commands",
+           "centralu_help",
+           "run:propose_mcp_server"
+          ],
+          "calls": 3,
+          "verdict": "right",
+          "steps": 3,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "playwright",
+           "command": "npx",
+           "args": [
+            "-y",
+            "@playwright/mcp@latest"
+           ],
+           "why": "Enables opening and interacting with web pages in a real browser, allowing clicking, scrolling, form submission, and screenshot capture for testing and automation tasks."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": true,
+          "discovery": 2,
+          "requests": 4,
+          "tokens": 90355,
+          "output": 1007,
+          "cacheWrite": 1424,
+          "uncached": 34,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "rare-branch": {
+        "profile": "orchestrator",
+        "expect": [
+         "propose_worktree_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 3,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 102456,
+          "output": 775,
+          "cacheWrite": 4932,
+          "uncached": 36,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 4,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 7,
+          "tokens": 176535,
+          "output": 955,
+          "cacheWrite": 1116,
+          "uncached": 52,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "read_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": null,
+          "firstArgsValid": null,
+          "firstArgs": null,
+          "firstOk": null,
+          "reached": false,
+          "viaRun": null,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 68835,
+          "output": 570,
+          "cacheWrite": 3142,
+          "uncached": 26,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-overview": {
+        "profile": "orchestrator",
+        "expect": [
+         "list_sessions",
+         "read_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43787,
+          "output": 324,
+          "cacheWrite": 4004,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43824,
+          "output": 281,
+          "cacheWrite": 254,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {},
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43821,
+          "output": 260,
+          "cacheWrite": 251,
+          "uncached": 18,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-delegate": {
+        "profile": "orchestrator",
+        "expect": [
+         "send_to_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "c46f6d90-0472-4f14-b14b-9eef48cd4099",
+           "text": "Reply with the single word DONE.",
+           "reportBack": true
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 103778,
+          "output": 398,
+          "cacheWrite": 4519,
+          "uncached": 36,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "list_sessions",
+           "read_session",
+           "send_to_session"
+          ],
+          "calls": 3,
+          "verdict": "wrong",
+          "steps": 3,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "c46f6d90-0472-4f14-b14b-9eef48cd4099",
+           "text": "Reply with the single word DONE."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 5,
+          "tokens": 126285,
+          "output": 509,
+          "cacheWrite": 640,
+          "uncached": 44,
+          "rebuilds": 1
+         },
+         {
+          "called": [
+           "list_sessions",
+           "send_to_session"
+          ],
+          "calls": 2,
+          "verdict": "wrong",
+          "steps": 2,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "sessionId": "c46f6d90-0472-4f14-b14b-9eef48cd4099",
+           "text": "Reply with the single word DONE."
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 4,
+          "tokens": 103821,
+          "output": 447,
+          "cacheWrite": 503,
+          "uncached": 36,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-recall": {
+        "profile": "orchestrator",
+        "expect": [
+         "recall"
+        ],
+        "runs": [
+         {
+          "called": [
+           "recall"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup",
+           "limit": 5
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43860,
+          "output": 487,
+          "cacheWrite": 4077,
+          "uncached": 15,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "recall"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "database backup",
+           "limit": 5
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43881,
+          "output": 657,
+          "cacheWrite": 308,
+          "uncached": 15,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "recall",
+           "recall"
+          ],
+          "calls": 2,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "query": "backing up database backup",
+           "limit": 5
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 3,
+          "tokens": 65986,
+          "output": 732,
+          "cacheWrite": 440,
+          "uncached": 23,
+          "rebuilds": 0
+         }
+        ]
+       },
+       "core-new-session": {
+        "profile": "orchestrator",
+        "expect": [
+         "create_session"
+        ],
+        "runs": [
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43872,
+          "output": 388,
+          "cacheWrite": 4084,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43847,
+          "output": 313,
+          "cacheWrite": 267,
+          "uncached": 18,
+          "rebuilds": 0
+         },
+         {
+          "called": [
+           "create_session"
+          ],
+          "calls": 1,
+          "verdict": "right",
+          "steps": 1,
+          "firstArgsValid": true,
+          "firstArgs": {
+           "name": "docs-check",
+           "project": "website"
+          },
+          "firstOk": true,
+          "reached": true,
+          "viaRun": false,
+          "discovery": 0,
+          "requests": 2,
+          "tokens": 43796,
+          "output": 272,
+          "cacheWrite": 216,
+          "uncached": 18,
+          "rebuilds": 0
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  "A": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T10:13:32.468Z",
+    "commit": "81d17084",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 3,
+    "clis": [
+     "claude"
+    ],
+    "rare": "resident"
+   },
+   "summary": {
+    "definitions": {
+     "claude": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "claude",
+       "tools": 12,
+       "residentTools": 12,
+       "residentChars": 9927,
+       "deferredChars": 0,
+       "instructionsChars": 1833,
+       "prefixHash": "cfe4e6f8335d"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "claude",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2785,
+       "prefixHash": "e0b49d9c9a1c"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "claude",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 379,
+       "prefixHash": "50fe63f80274"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "claude",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 822,
+       "prefixHash": "c220d1208e2a"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "claude",
+       "tools": 7,
+       "residentTools": 4,
+       "residentChars": 1305,
+       "deferredChars": 945,
+       "instructionsChars": 0,
+       "prefixHash": "9cba5aaa36bf"
+      }
+     },
+     "codex": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "codex",
+       "tools": 12,
+       "residentTools": 12,
+       "residentChars": 9927,
+       "deferredChars": 0,
+       "instructionsChars": 1885,
+       "prefixHash": "a8455ecd732e"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "codex",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2837,
+       "prefixHash": "d0ece3812c2e"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "codex",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 431,
+       "prefixHash": "29080fec4519"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "codex",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 874,
+       "prefixHash": "8c533c2c0dbc"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "codex",
+       "tools": 7,
+       "residentTools": 7,
+       "residentChars": 2250,
+       "deferredChars": 0,
+       "instructionsChars": 0,
+       "prefixHash": "4ec11faef03d"
+      }
+     }
+    },
+    "resident": {
+     "claude": {
+      "none": {
+       "runs": [
+        16142,
+        16142,
+        16142
+       ],
+       "median": 16142,
+       "delta": 0,
+       "ours": 0,
+       "centraluChars": 0,
+       "toolsChars": 47361,
+       "systemChars": 137
+      },
+      "orchestrator": {
+       "runs": [
+        22693,
+        22693,
+        22693
+       ],
+       "median": 22693,
+       "delta": 6551,
+       "ours": 3240,
+       "centraluChars": 9514,
+       "toolsChars": 56887,
+       "systemChars": 16352
+      }
+     }
+    },
+    "selection": {
+     "claude": {
+      "rare-app-project": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "shopping-list",
+          "name": "Shopping List",
+          "description": "Shared shopping list for the team to add items to.",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 93178,
+         "output": 1013,
+         "cacheWrite": 5001,
+         "uncached": 34,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "shopping-list",
+          "name": "Shopping List",
+          "description": "Shared team shopping list where members can add and manage items",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 93217,
+         "output": 955,
+         "cacheWrite": 1172,
+         "uncached": 34,
+         "rebuilds": 0
+        },
+        {
+         "called": [],
+         "calls": 0,
+         "verdict": "none",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 1,
+         "tokens": 22711,
+         "output": 368,
+         "cacheWrite": 0,
+         "uncached": 10,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-app-user": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-tracker",
+          "name": "Water Tracker",
+          "description": "Log daily water intake by glasses"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 69829,
+         "output": 758,
+         "cacheWrite": 4865,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-tracker",
+          "name": "Water Tracker",
+          "description": "Log your daily water intake by the glass"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 69966,
+         "output": 885,
+         "cacheWrite": 1200,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-logger",
+          "name": "Water Logger",
+          "description": "Log glasses of water consumed each day with date tracking and daily totals."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 69803,
+         "output": 807,
+         "cacheWrite": 1084,
+         "uncached": 26,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-skill": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_skill"
+       ],
+       "runs": [
+        {
+         "called": [
+          "propose_skill"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "monday-weekly-review",
+          "why": "Every Monday you ask for a weekly summary across all projects. This skill captures the routine so you don't have to repeat the request.",
+          "content": "**Monday weekly review: five-bullet summary across projects**\n\nWhen asked for your Monday review:\n1. List all active sessions with list_sessions\n2. For each session, read recent conversation (read_session, last ~2000 lines)\n3. Identify what changed or was completed last week (commits, features, fixes, decisions, blockers)\n4. Synthesize into five bullet points covering the week's progress\n5. Group by project if multiple projects are active\n\nBullet points should be: concrete changes (code, decisions), not process. Focus on what shipped or unblocked, what's blocked, what's next."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45971,
+         "output": 546,
+         "cacheWrite": 4293,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "propose_skill"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "weekly-summary",
+          "why": "Every Monday you want a quick overview of what changed across all projects in the past week. This saves you from re-explaining the task each time.",
+          "content": "Every Monday, review the past week's work across all projects and summarize it for the user.\n\nSteps:\n1. List all current sessions with list_sessions to see project names and recent activity.\n2. For sessions with interesting changes, read their recent conversation with read_session to understand what was done.\n3. Synthesize findings into exactly 5 bullet points covering what changed, what was built, what was fixed, or what was decided.\n4. Report as a concise summary (not a detailed play-by-play).\n\nOutput format: five bullets, one sentence each, plain language. No special formatting or headers."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 46012,
+         "output": 609,
+         "cacheWrite": 560,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "propose_skill"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "weekly-session-review",
+          "why": "Every Monday you ask for a cross-project status: five bullet points per project on what changed in the past week. This automates that request so you don't have to re-explain it each time.",
+          "content": "**Weekly session review (Monday check-in)**\n\nEvery Monday: List all active sessions, read their recent conversation (most recent work first), and summarize what each project accomplished last week in five bullet points. \n\nFor each project's sessions:\n- Scan what they worked on (new features, bug fixes, refactors, tests, deployments)\n- Note any blockers, decisions, or work in progress\n- Check if anything needs follow-up or next steps\n\nReport as: **Project Name** — five bullets on what changed. Order by project name."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 46023,
+         "output": 613,
+         "cacheWrite": 571,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-browser": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_mcp_server"
+       ],
+       "runs": [
+        {
+         "called": [
+          "propose_mcp_server"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "@playwright/mcp@latest"
+          ],
+          "why": "Enables browser automation — I'll be able to open web pages, click elements, fill forms, take screenshots, and navigate through sites just like a user would."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45768,
+         "output": 408,
+         "cacheWrite": 4105,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "propose_mcp_server"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "@playwright/mcp@latest"
+          ],
+          "why": "Browser automation to open web pages and interact with them in a real browser — navigate, click, fill forms, take screenshots, and inspect page content."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45931,
+         "output": 555,
+         "cacheWrite": 509,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "propose_mcp_server"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "@playwright/mcp@latest"
+          ],
+          "why": "Browser automation: open web pages, click elements, fill forms, take screenshots, and interact with the page directly"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45845,
+         "output": 477,
+         "cacheWrite": 423,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-branch": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_worktree_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "propose_worktree_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "feat/login-fix",
+          "reason": "Isolated branch for login fix development, keeping main untouched"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 68928,
+         "output": 523,
+         "cacheWrite": 4297,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "propose_worktree_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "feat/login-fix",
+          "reason": "Work on login fix in isolation while keeping main untouched"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 46051,
+         "output": 695,
+         "cacheWrite": 625,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "propose_worktree_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "fix/login",
+          "reason": "Login fix isolated from main"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45966,
+         "output": 613,
+         "cacheWrite": 540,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-overview": {
+       "profile": "orchestrator",
+       "expect": [
+        "list_sessions",
+        "read_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45644,
+         "output": 334,
+         "cacheWrite": 3993,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "read_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 69055,
+         "output": 613,
+         "cacheWrite": 661,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45734,
+         "output": 473,
+         "cacheWrite": 336,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-delegate": {
+       "profile": "orchestrator",
+       "expect": [
+        "send_to_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "e18032e9-e656-4b56-ac5b-6938bc72c707",
+          "text": "Reply with the single word DONE."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 68726,
+         "output": 379,
+         "cacheWrite": 4189,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "e18032e9-e656-4b56-ac5b-6938bc72c707",
+          "text": "Reply with the single word DONE.",
+          "reportBack": true
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 68815,
+         "output": 418,
+         "cacheWrite": 489,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "e18032e9-e656-4b56-ac5b-6938bc72c707",
+          "text": "Reply with the single word DONE.",
+          "reportBack": true
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 68783,
+         "output": 392,
+         "cacheWrite": 448,
+         "uncached": 26,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-recall": {
+       "profile": "orchestrator",
+       "expect": [
+        "recall"
+       ],
+       "runs": [
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 12
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45746,
+         "output": 633,
+         "cacheWrite": 4095,
+         "uncached": 15,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 12
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45706,
+         "output": 415,
+         "cacheWrite": 305,
+         "uncached": 15,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 5
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45738,
+         "output": 576,
+         "cacheWrite": 337,
+         "uncached": 15,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-new-session": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "docs-check",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45725,
+         "output": 373,
+         "cacheWrite": 4069,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "project": "website",
+          "name": "docs-check"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45642,
+         "output": 287,
+         "cacheWrite": 234,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "project": "website",
+          "name": "docs-check"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 45671,
+         "output": 311,
+         "cacheWrite": 263,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  "B": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T10:13:56.611Z",
+    "commit": "81d17084",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 3,
+    "clis": [
+     "claude"
+    ],
+    "rare": "deferred"
+   },
+   "summary": {
+    "definitions": {
+     "claude": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "claude",
+       "tools": 12,
+       "residentTools": 9,
+       "residentChars": 6223,
+       "deferredChars": 3704,
+       "instructionsChars": 1833,
+       "prefixHash": "17cb5100e6d4"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "claude",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2785,
+       "prefixHash": "e0b49d9c9a1c"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "claude",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 379,
+       "prefixHash": "50fe63f80274"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "claude",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 822,
+       "prefixHash": "c220d1208e2a"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "claude",
+       "tools": 7,
+       "residentTools": 4,
+       "residentChars": 1305,
+       "deferredChars": 945,
+       "instructionsChars": 0,
+       "prefixHash": "9cba5aaa36bf"
+      }
+     },
+     "codex": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "codex",
+       "tools": 12,
+       "residentTools": 12,
+       "residentChars": 9927,
+       "deferredChars": 0,
+       "instructionsChars": 1885,
+       "prefixHash": "a8455ecd732e"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "codex",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2837,
+       "prefixHash": "d0ece3812c2e"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "codex",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 431,
+       "prefixHash": "29080fec4519"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "codex",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 874,
+       "prefixHash": "8c533c2c0dbc"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "codex",
+       "tools": 7,
+       "residentTools": 7,
+       "residentChars": 2250,
+       "deferredChars": 0,
+       "instructionsChars": 0,
+       "prefixHash": "4ec11faef03d"
+      }
+     }
+    },
+    "resident": {
+     "claude": {
+      "none": {
+       "runs": [
+        16141,
+        16141,
+        16141
+       ],
+       "median": 16141,
+       "delta": 0,
+       "ours": 0,
+       "centraluChars": 0,
+       "toolsChars": 47361,
+       "systemChars": 137
+      },
+      "orchestrator": {
+       "runs": [
+        21677,
+        21677,
+        21677
+       ],
+       "median": 21677,
+       "delta": 5536,
+       "ours": 2225,
+       "centraluChars": 5917,
+       "toolsChars": 53287,
+       "systemChars": 16352
+      }
+     }
+    },
+    "selection": {
+     "claude": {
+      "rare-app-project": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "ToolSearch",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "shopping-list",
+          "name": "Shopping List",
+          "description": "Shared shopping list the team can add items to",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 5,
+         "tokens": 112575,
+         "output": 1008,
+         "cacheWrite": 5424,
+         "uncached": 44,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "ToolSearch",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "shopping-list",
+          "name": "Shopping List",
+          "description": "Shared shopping list the team can add items to and check off.",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 5,
+         "tokens": 113032,
+         "output": 1128,
+         "cacheWrite": 1784,
+         "uncached": 44,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "ToolSearch",
+          "list_sessions",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "shopping-list",
+          "name": "Shopping List",
+          "description": "Shared shopping list for the team to add and manage items",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 5,
+         "tokens": 113266,
+         "output": 1119,
+         "cacheWrite": 1740,
+         "uncached": 44,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-app-user": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "ToolSearch",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 3,
+         "verdict": "right",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-log",
+          "name": "Water Log",
+          "description": "Log how many glasses of water you drink each day"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 4,
+         "tokens": 90608,
+         "output": 1050,
+         "cacheWrite": 5621,
+         "uncached": 36,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "ToolSearch",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 3,
+         "verdict": "right",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-tracker",
+          "name": "Water Tracker",
+          "description": "Log and track daily water intake by glass."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 4,
+         "tokens": 90551,
+         "output": 1035,
+         "cacheWrite": 1804,
+         "uncached": 36,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_app",
+          "ToolSearch",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": false,
+         "firstArgs": {
+          "name": "Water Intake Logger",
+          "description": "Track daily water consumption in glasses"
+         },
+         "firstOk": false,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 5,
+         "tokens": 113146,
+         "output": 1077,
+         "cacheWrite": 1945,
+         "uncached": 44,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-skill": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_skill"
+       ],
+       "runs": [
+        {
+         "called": [],
+         "calls": 1,
+         "verdict": "none",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43734,
+         "output": 657,
+         "cacheWrite": 4120,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [],
+         "calls": 1,
+         "verdict": "none",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43758,
+         "output": 574,
+         "cacheWrite": 338,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [],
+         "calls": 1,
+         "verdict": "none",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43649,
+         "output": 752,
+         "cacheWrite": 229,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-browser": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_mcp_server"
+       ],
+       "runs": [
+        {
+         "called": [
+          "propose_mcp_server",
+          "ToolSearch",
+          "propose_mcp_server"
+         ],
+         "calls": 3,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": false,
+         "firstArgs": {
+          "serverName": "browser",
+          "reason": "Open web pages in a real browser and click through them to test web applications and interact with sites"
+         },
+         "firstOk": false,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 4,
+         "tokens": 89555,
+         "output": 869,
+         "cacheWrite": 5115,
+         "uncached": 36,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "ToolSearch",
+          "propose_mcp_server"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "@playwright/mcp@latest"
+          ],
+          "why": "Browser automation to open web pages, navigate, click elements, fill forms, take screenshots, and interact with pages in a real browser environment."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 3,
+         "tokens": 66614,
+         "output": 641,
+         "cacheWrite": 912,
+         "uncached": 28,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "ToolSearch",
+          "propose_mcp_server"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "@playwright/mcp@latest"
+          ],
+          "why": "Browser automation so you can open web pages, navigate, click elements, fill forms, and interact with sites directly"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 3,
+         "tokens": 66846,
+         "output": 711,
+         "cacheWrite": 1013,
+         "uncached": 28,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-branch": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_worktree_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "propose_worktree_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "feat/login-fix",
+          "reason": "Isolated branch for login fix development without affecting main"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 66076,
+         "output": 699,
+         "cacheWrite": 4507,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "propose_worktree_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "feat/login-fix",
+          "reason": "Fix login functionality on an isolated branch while keeping main untouched"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 66005,
+         "output": 572,
+         "cacheWrite": 606,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "propose_worktree_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "feat/login-fix",
+          "reason": "Fix login issue on its own branch, keeping main untouched"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 65891,
+         "output": 531,
+         "cacheWrite": 566,
+         "uncached": 26,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-overview": {
+       "profile": "orchestrator",
+       "expect": [
+        "list_sessions",
+        "read_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43545,
+         "output": 249,
+         "cacheWrite": 3958,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43583,
+         "output": 294,
+         "cacheWrite": 217,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43554,
+         "output": 252,
+         "cacheWrite": 188,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-delegate": {
+       "profile": "orchestrator",
+       "expect": [
+        "send_to_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "c8844c00-9c99-436a-833c-8cecf3e478da",
+          "text": "Reply with the single word DONE."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 65604,
+         "output": 310,
+         "cacheWrite": 4150,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "c8844c00-9c99-436a-833c-8cecf3e478da",
+          "text": "Reply with the single word DONE."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 65757,
+         "output": 410,
+         "cacheWrite": 478,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "c8844c00-9c99-436a-833c-8cecf3e478da",
+          "text": "Reply with the single word DONE.",
+          "reportBack": true
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 65732,
+         "output": 405,
+         "cacheWrite": 468,
+         "uncached": 26,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-recall": {
+       "profile": "orchestrator",
+       "expect": [
+        "recall"
+       ],
+       "runs": [
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 12
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43699,
+         "output": 485,
+         "cacheWrite": 4112,
+         "uncached": 15,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 5
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43667,
+         "output": 441,
+         "cacheWrite": 298,
+         "uncached": 15,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 12
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43673,
+         "output": 413,
+         "cacheWrite": 304,
+         "uncached": 15,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-new-session": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "docs-check",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43639,
+         "output": 307,
+         "cacheWrite": 4047,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "docs-check",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43699,
+         "output": 373,
+         "cacheWrite": 323,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "project": "website",
+          "name": "docs-check"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 43667,
+         "output": 349,
+         "cacheWrite": 291,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  "C": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T10:14:23.148Z",
+    "commit": "81d17084",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 3,
+    "clis": [
+     "claude"
+    ],
+    "rare": "commands"
+   },
+   "summary": {
+    "definitions": {
+     "claude": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "claude",
+       "tools": 12,
+       "residentTools": 12,
+       "residentChars": 7221,
+       "deferredChars": 0,
+       "instructionsChars": 1994,
+       "prefixHash": "69dcf2648b1b"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "claude",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2785,
+       "prefixHash": "e0b49d9c9a1c"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "claude",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 379,
+       "prefixHash": "50fe63f80274"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "claude",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 822,
+       "prefixHash": "c220d1208e2a"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "claude",
+       "tools": 7,
+       "residentTools": 4,
+       "residentChars": 1305,
+       "deferredChars": 945,
+       "instructionsChars": 0,
+       "prefixHash": "9cba5aaa36bf"
+      }
+     },
+     "codex": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "codex",
+       "tools": 12,
+       "residentTools": 12,
+       "residentChars": 7221,
+       "deferredChars": 0,
+       "instructionsChars": 2046,
+       "prefixHash": "abca02e56407"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "codex",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2837,
+       "prefixHash": "d0ece3812c2e"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "codex",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 431,
+       "prefixHash": "29080fec4519"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "codex",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 874,
+       "prefixHash": "8c533c2c0dbc"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "codex",
+       "tools": 7,
+       "residentTools": 7,
+       "residentChars": 2250,
+       "deferredChars": 0,
+       "instructionsChars": 0,
+       "prefixHash": "4ec11faef03d"
+      }
+     }
+    },
+    "resident": {
+     "claude": {
+      "none": {
+       "runs": [
+        16141,
+        16141,
+        16141
+       ],
+       "median": 16141,
+       "delta": 0,
+       "ours": 0,
+       "centraluChars": 0,
+       "toolsChars": 47361,
+       "systemChars": 137
+      },
+      "orchestrator": {
+       "runs": [
+        21983,
+        21983,
+        21983
+       ],
+       "median": 21983,
+       "delta": 5842,
+       "ours": 2531,
+       "centraluChars": 6813,
+       "toolsChars": 54186,
+       "systemChars": 16352
+      }
+     }
+    },
+    "selection": {
+     "claude": {
+      "rare-app-project": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "centralu_commands",
+          "centralu_help",
+          "run:create_app",
+          "send_to_session"
+         ],
+         "calls": 5,
+         "verdict": "wrong",
+         "steps": 4,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "shopping-list",
+          "name": "Shopping List",
+          "project": "website",
+          "description": "Shared shopping list the team can add items to"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 6,
+         "tokens": 138187,
+         "output": 1486,
+         "cacheWrite": 5907,
+         "uncached": 50,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 67098,
+         "output": 798,
+         "cacheWrite": 863,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "centralu_commands",
+          "centralu_help",
+          "run:create_app",
+          "send_to_session"
+         ],
+         "calls": 5,
+         "verdict": "wrong",
+         "steps": 4,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "shared-shopping-list",
+          "name": "Shared Shopping List",
+          "project": "website",
+          "description": "A shared shopping list the team can add items to"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 5,
+         "tokens": 115428,
+         "output": 1282,
+         "cacheWrite": 1953,
+         "uncached": 42,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-app-user": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "centralu_commands",
+          "centralu_help",
+          "run:create_app",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "right",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-tracker",
+          "name": "Water Tracker",
+          "description": "Log daily water intake in glasses"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 5,
+         "tokens": 115221,
+         "output": 1296,
+         "cacheWrite": 5847,
+         "uncached": 42,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "centralu_commands",
+          "centralu_help",
+          "run:create_app",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "right",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-tracker",
+          "name": "Water Tracker",
+          "description": "Log your daily water intake in glasses."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 5,
+         "tokens": 115707,
+         "output": 1489,
+         "cacheWrite": 2287,
+         "uncached": 42,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "centralu_commands",
+          "centralu_help",
+          "run:create_app",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "right",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "id": "water-tracker",
+          "name": "Water Tracker",
+          "description": "Log daily water intake by the glass"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 5,
+         "tokens": 115484,
+         "output": 1418,
+         "cacheWrite": 2208,
+         "uncached": 42,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-skill": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_skill"
+       ],
+       "runs": [
+        {
+         "called": [],
+         "calls": 0,
+         "verdict": "none",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 1,
+         "tokens": 22017,
+         "output": 602,
+         "cacheWrite": 3813,
+         "uncached": 10,
+         "rebuilds": 0
+        },
+        {
+         "called": [],
+         "calls": 1,
+         "verdict": "none",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44638,
+         "output": 840,
+         "cacheWrite": 606,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [],
+         "calls": 1,
+         "verdict": "none",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44439,
+         "output": 1263,
+         "cacheWrite": 407,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-browser": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_mcp_server"
+       ],
+       "runs": [
+        {
+         "called": [
+          "centralu_commands",
+          "centralu_help",
+          "run:propose_mcp_server"
+         ],
+         "calls": 3,
+         "verdict": "right",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "-y",
+           "@playwright/mcp@latest"
+          ],
+          "why": "Browser automation to open web pages and interact with them directly using Playwright"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 4,
+         "tokens": 90941,
+         "output": 951,
+         "cacheWrite": 5117,
+         "uncached": 34,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "ToolSearch",
+          "centralu_commands",
+          "centralu_help",
+          "run:propose_mcp_server"
+         ],
+         "calls": 4,
+         "verdict": "right",
+         "steps": 4,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "-y",
+           "@playwright/mcp@latest"
+          ],
+          "why": "Browser automation to open web pages, interact with them, click elements, and test web interfaces"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 3,
+         "requests": 5,
+         "tokens": 113585,
+         "output": 1012,
+         "cacheWrite": 1430,
+         "uncached": 42,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "centralu_commands",
+          "centralu_help",
+          "run:propose_mcp_server"
+         ],
+         "calls": 3,
+         "verdict": "right",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+           "-y",
+           "@playwright/mcp@latest"
+          ],
+          "why": "Browser automation to open web pages and click through them"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 4,
+         "tokens": 91333,
+         "output": 1103,
+         "cacheWrite": 1479,
+         "uncached": 34,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-branch": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_worktree_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "propose_worktree_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "fix/login",
+          "reason": "Login fix in isolation from main"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 66954,
+         "output": 521,
+         "cacheWrite": 4420,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "propose_worktree_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "feat/login-fix",
+          "reason": "Isolated branch for login fix development, keeping main untouched"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 66883,
+         "output": 522,
+         "cacheWrite": 575,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "propose_worktree_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "branch": "feat/login-fix",
+          "reason": "Fix login issues in isolation, keeping main branch untouched"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44459,
+         "output": 546,
+         "cacheWrite": 453,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-overview": {
+       "profile": "orchestrator",
+       "expect": [
+        "list_sessions",
+        "read_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44254,
+         "output": 321,
+         "cacheWrite": 4062,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44203,
+         "output": 271,
+         "cacheWrite": 225,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "read_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 69095,
+         "output": 427,
+         "cacheWrite": 2939,
+         "uncached": 26,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-delegate": {
+       "profile": "orchestrator",
+       "expect": [
+        "send_to_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "5a814784-aa93-419d-a4d7-1ada2d077172",
+          "text": "Reply with the single word DONE"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 66716,
+         "output": 373,
+         "cacheWrite": 4254,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "5a814784-aa93-419d-a4d7-1ada2d077172",
+          "text": "Reply with the single word DONE."
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 66842,
+         "output": 497,
+         "cacheWrite": 555,
+         "uncached": 26,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "sessionId": "5a814784-aa93-419d-a4d7-1ada2d077172",
+          "text": "Reply with the single word DONE.",
+          "reportBack": true
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 66728,
+         "output": 502,
+         "cacheWrite": 566,
+         "uncached": 26,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-recall": {
+       "profile": "orchestrator",
+       "expect": [
+        "recall"
+       ],
+       "runs": [
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 5
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44291,
+         "output": 428,
+         "cacheWrite": 4099,
+         "uncached": 15,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 5
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44276,
+         "output": 585,
+         "cacheWrite": 295,
+         "uncached": 15,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "query": "database backup",
+          "limit": 5
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44264,
+         "output": 534,
+         "cacheWrite": 283,
+         "uncached": 15,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-new-session": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "docs-check",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44246,
+         "output": 291,
+         "cacheWrite": 4049,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "docs-check",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44309,
+         "output": 357,
+         "cacheWrite": 321,
+         "uncached": 18,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": true,
+         "firstArgs": {
+          "name": "docs-check",
+          "project": "website"
+         },
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 2,
+         "tokens": 44229,
+         "output": 254,
+         "cacheWrite": 241,
+         "uncached": 18,
+         "rebuilds": 0
+        }
+       ]
+      }
+     }
+    }
+   }
+  }
+ },
+ "codex": {
+  "A": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T10:07:44.046Z",
+    "commit": "81d17084",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 2,
+    "clis": [
+     "codex"
+    ],
+    "rare": "resident"
+   },
+   "summary": {
+    "definitions": {
+     "claude": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "claude",
+       "tools": 12,
+       "residentTools": 12,
+       "residentChars": 9927,
+       "deferredChars": 0,
+       "instructionsChars": 1833,
+       "prefixHash": "cfe4e6f8335d"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "claude",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2785,
+       "prefixHash": "e0b49d9c9a1c"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "claude",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 379,
+       "prefixHash": "50fe63f80274"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "claude",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 822,
+       "prefixHash": "c220d1208e2a"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "claude",
+       "tools": 7,
+       "residentTools": 4,
+       "residentChars": 1305,
+       "deferredChars": 945,
+       "instructionsChars": 0,
+       "prefixHash": "9cba5aaa36bf"
+      }
+     },
+     "codex": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "codex",
+       "tools": 12,
+       "residentTools": 12,
+       "residentChars": 9927,
+       "deferredChars": 0,
+       "instructionsChars": 1885,
+       "prefixHash": "a8455ecd732e"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "codex",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2837,
+       "prefixHash": "d0ece3812c2e"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "codex",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 431,
+       "prefixHash": "29080fec4519"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "codex",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 874,
+       "prefixHash": "8c533c2c0dbc"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "codex",
+       "tools": 7,
+       "residentTools": 7,
+       "residentChars": 2250,
+       "deferredChars": 0,
+       "instructionsChars": 0,
+       "prefixHash": "4ec11faef03d"
+      }
+     }
+    },
+    "resident": {
+     "codex": {
+      "none": {
+       "runs": [
+        17872,
+        17872
+       ],
+       "median": 17872,
+       "delta": 0
+      },
+      "orchestrator": {
+       "runs": [
+        18553,
+        18553
+       ],
+       "median": 18553,
+       "delta": 681
+      }
+     }
+    },
+    "selection": {
+     "codex": {
+      "rare-app-project": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "create_app",
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 6,
+         "tokens": 127745,
+         "output": 308,
+         "cacheWrite": 0,
+         "uncached": 20097,
+         "rebuilds": 1
+        },
+        {
+         "called": [
+          "list_sessions",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": false,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 5,
+         "tokens": 105541,
+         "output": 416,
+         "cacheWrite": 0,
+         "uncached": 19525,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "rare-app-user": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "create_app",
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 4,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 6,
+         "tokens": 127980,
+         "output": 481,
+         "cacheWrite": 0,
+         "uncached": 17644,
+         "rebuilds": 2
+        },
+        {
+         "called": [
+          "list_sessions",
+          "create_app",
+          "send_to_session"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 6,
+         "tokens": 120777,
+         "output": 441,
+         "cacheWrite": 0,
+         "uncached": 5833,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "rare-skill": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_skill"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "propose_skill"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 79087,
+         "output": 398,
+         "cacheWrite": 0,
+         "uncached": 15855,
+         "rebuilds": 1
+        },
+        {
+         "called": [
+          "propose_skill"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 58603,
+         "output": 401,
+         "cacheWrite": 0,
+         "uncached": 8043,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-browser": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_mcp_server"
+       ],
+       "runs": [
+        {
+         "called": [
+          "propose_mcp_server"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 62480,
+         "output": 196,
+         "cacheWrite": 0,
+         "uncached": 16400,
+         "rebuilds": 1
+        },
+        {
+         "called": [
+          "propose_mcp_server"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 63747,
+         "output": 214,
+         "cacheWrite": 0,
+         "uncached": 10499,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-branch": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_worktree_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 77500,
+         "output": 304,
+         "cacheWrite": 0,
+         "uncached": 2492,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": null,
+         "firstArgsValid": null,
+         "firstArgs": null,
+         "firstOk": null,
+         "reached": false,
+         "viaRun": null,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 77465,
+         "output": 280,
+         "cacheWrite": 0,
+         "uncached": 8217,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-overview": {
+       "profile": "orchestrator",
+       "expect": [
+        "list_sessions",
+        "read_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "read_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 78508,
+         "output": 217,
+         "cacheWrite": 0,
+         "uncached": 3884,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "read_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 78550,
+         "output": 211,
+         "cacheWrite": 0,
+         "uncached": 3542,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "core-delegate": {
+       "profile": "orchestrator",
+       "expect": [
+        "send_to_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 77371,
+         "output": 169,
+         "cacheWrite": 0,
+         "uncached": 8123,
+         "rebuilds": 1
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 77288,
+         "output": 164,
+         "cacheWrite": 0,
+         "uncached": 14824,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "core-recall": {
+       "profile": "orchestrator",
+       "expect": [
+        "recall"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "recall",
+          "recall"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 58012,
+         "output": 181,
+         "cacheWrite": 0,
+         "uncached": 1180,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "recall",
+          "read_session"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 78600,
+         "output": 202,
+         "cacheWrite": 0,
+         "uncached": 8584,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-new-session": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 58139,
+         "output": 131,
+         "cacheWrite": 0,
+         "uncached": 2331,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "create_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 77398,
+         "output": 153,
+         "cacheWrite": 0,
+         "uncached": 14806,
+         "rebuilds": 1
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  "C": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T10:08:24.668Z",
+    "commit": "81d17084",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 2,
+    "clis": [
+     "codex"
+    ],
+    "rare": "commands"
+   },
+   "summary": {
+    "definitions": {
+     "claude": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "claude",
+       "tools": 11,
+       "residentTools": 11,
+       "residentChars": 6477,
+       "deferredChars": 0,
+       "instructionsChars": 1994,
+       "prefixHash": "ede9a50a1648"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "claude",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2785,
+       "prefixHash": "e0b49d9c9a1c"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "claude",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 379,
+       "prefixHash": "50fe63f80274"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "claude",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 822,
+       "prefixHash": "c220d1208e2a"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "claude",
+       "tools": 7,
+       "residentTools": 4,
+       "residentChars": 1305,
+       "deferredChars": 945,
+       "instructionsChars": 0,
+       "prefixHash": "9cba5aaa36bf"
+      }
+     },
+     "codex": {
+      "orchestrator": {
+       "profile": "orchestrator",
+       "cli": "codex",
+       "tools": 11,
+       "residentTools": 11,
+       "residentChars": 6477,
+       "deferredChars": 0,
+       "instructionsChars": 2046,
+       "prefixHash": "f082be77e884"
+      },
+      "manager": {
+       "profile": "manager",
+       "cli": "codex",
+       "tools": 5,
+       "residentTools": 5,
+       "residentChars": 3461,
+       "deferredChars": 0,
+       "instructionsChars": 2837,
+       "prefixHash": "d0ece3812c2e"
+      },
+      "scoped": {
+       "profile": "scoped",
+       "cli": "codex",
+       "tools": 3,
+       "residentTools": 3,
+       "residentChars": 1888,
+       "deferredChars": 0,
+       "instructionsChars": 431,
+       "prefixHash": "29080fec4519"
+      },
+      "builder": {
+       "profile": "builder",
+       "cli": "codex",
+       "tools": 1,
+       "residentTools": 1,
+       "residentChars": 610,
+       "deferredChars": 0,
+       "instructionsChars": 874,
+       "prefixHash": "8c533c2c0dbc"
+      },
+      "reader": {
+       "profile": "reader",
+       "cli": "codex",
+       "tools": 7,
+       "residentTools": 7,
+       "residentChars": 2250,
+       "deferredChars": 0,
+       "instructionsChars": 0,
+       "prefixHash": "4ec11faef03d"
+      }
+     }
+    },
+    "resident": {
+     "codex": {
+      "none": {
+       "runs": [
+        17874,
+        17874
+       ],
+       "median": 17874,
+       "delta": 0
+      },
+      "orchestrator": {
+       "runs": [
+        18590,
+        18590
+       ],
+       "median": 18590,
+       "delta": 716
+      }
+     }
+    },
+    "selection": {
+     "codex": {
+      "rare-app-project": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "centralu_help",
+          "run:create_app",
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 5,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 1,
+         "requests": 6,
+         "tokens": 125832,
+         "output": 365,
+         "cacheWrite": 0,
+         "uncached": 19720,
+         "rebuilds": 2
+        },
+        {
+         "called": [
+          "list_sessions",
+          "centralu_help",
+          "run:create_app",
+          "centralu_commands",
+          "run:create_app",
+          "send_to_session"
+         ],
+         "calls": 6,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": false,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 7,
+         "tokens": 147804,
+         "output": 614,
+         "cacheWrite": 0,
+         "uncached": 20316,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "rare-app-user": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_app"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "centralu_help",
+          "run:create_app",
+          "centralu_help",
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 6,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 8,
+         "tokens": 161487,
+         "output": 497,
+         "cacheWrite": 0,
+         "uncached": 9935,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "centralu_help",
+          "run:create_app",
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 5,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 1,
+         "requests": 6,
+         "tokens": 125676,
+         "output": 425,
+         "cacheWrite": 0,
+         "uncached": 10476,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-skill": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_skill"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "centralu_help",
+          "run:propose_skill"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 1,
+         "requests": 5,
+         "tokens": 99390,
+         "output": 493,
+         "cacheWrite": 0,
+         "uncached": 9150,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "centralu_help",
+          "run:propose_skill"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 1,
+         "requests": 4,
+         "tokens": 78731,
+         "output": 406,
+         "cacheWrite": 0,
+         "uncached": 8587,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "rare-browser": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_mcp_server"
+       ],
+       "runs": [
+        {
+         "called": [
+          "centralu_help",
+          "run:propose_mcp_server"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 1,
+         "requests": 4,
+         "tokens": 78014,
+         "output": 237,
+         "cacheWrite": 0,
+         "uncached": 1598,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "centralu_help",
+          "run:propose_mcp_server"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 2,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 1,
+         "requests": 4,
+         "tokens": 77988,
+         "output": 231,
+         "cacheWrite": 0,
+         "uncached": 15396,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "rare-branch": {
+       "profile": "orchestrator",
+       "expect": [
+        "propose_worktree_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "centralu_commands",
+          "centralu_help",
+          "run:propose_worktree_session"
+         ],
+         "calls": 4,
+         "verdict": "wrong",
+         "steps": 4,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 6,
+         "tokens": 125478,
+         "output": 308,
+         "cacheWrite": 0,
+         "uncached": 10534,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "centralu_commands",
+          "centralu_help",
+          "run:propose_worktree_session"
+         ],
+         "calls": 4,
+         "verdict": "wrong",
+         "steps": 4,
+         "firstArgsValid": true,
+         "firstArgs": null,
+         "firstOk": true,
+         "reached": true,
+         "viaRun": true,
+         "discovery": 2,
+         "requests": 6,
+         "tokens": 123799,
+         "output": 317,
+         "cacheWrite": 0,
+         "uncached": 12055,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "core-overview": {
+       "profile": "orchestrator",
+       "expect": [
+        "list_sessions",
+        "read_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "read_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 78355,
+         "output": 204,
+         "cacheWrite": 0,
+         "uncached": 8211,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "read_session"
+         ],
+         "calls": 2,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 78346,
+         "output": 192,
+         "cacheWrite": 0,
+         "uncached": 8202,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "core-delegate": {
+       "profile": "orchestrator",
+       "expect": [
+        "send_to_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 78186,
+         "output": 174,
+         "cacheWrite": 0,
+         "uncached": 15338,
+         "rebuilds": 1
+        },
+        {
+         "called": [
+          "list_sessions",
+          "send_to_session"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 4,
+         "tokens": 81240,
+         "output": 158,
+         "cacheWrite": 0,
+         "uncached": 5336,
+         "rebuilds": 1
+        }
+       ]
+      },
+      "core-recall": {
+       "profile": "orchestrator",
+       "expect": [
+        "recall"
+       ],
+       "runs": [
+        {
+         "called": [
+          "recall"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 58234,
+         "output": 132,
+         "cacheWrite": 0,
+         "uncached": 7802,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "list_sessions",
+          "recall"
+         ],
+         "calls": 2,
+         "verdict": "wrong",
+         "steps": 2,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 58540,
+         "output": 156,
+         "cacheWrite": 0,
+         "uncached": 7980,
+         "rebuilds": 0
+        }
+       ]
+      },
+      "core-new-session": {
+       "profile": "orchestrator",
+       "expect": [
+        "create_session"
+       ],
+       "runs": [
+        {
+         "called": [
+          "create_session"
+         ],
+         "calls": 1,
+         "verdict": "right",
+         "steps": 1,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 0,
+         "requests": 3,
+         "tokens": 60339,
+         "output": 101,
+         "cacheWrite": 0,
+         "uncached": 2227,
+         "rebuilds": 0
+        },
+        {
+         "called": [
+          "centralu_help",
+          "list_sessions",
+          "create_session"
+         ],
+         "calls": 3,
+         "verdict": "wrong",
+         "steps": 3,
+         "firstArgsValid": null,
+         "firstArgs": {},
+         "firstOk": true,
+         "reached": true,
+         "viaRun": false,
+         "discovery": 1,
+         "requests": 5,
+         "tokens": 117873,
+         "output": 218,
+         "cacheWrite": 0,
+         "uncached": 12913,
+         "rebuilds": 0
+        }
+       ]
+      }
+     }
+    }
+   }
+  }
+ }
+}

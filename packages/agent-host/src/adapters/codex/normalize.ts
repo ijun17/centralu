@@ -12,6 +12,15 @@ type Notification = { method: string; params?: unknown }
 const obj = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {})
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined)
+/** An object, or JSON text of one; anything else is empty */
+const jsonObject = (v: unknown): Record<string, unknown> => {
+  if (typeof v !== 'string') return Array.isArray(v) ? {} : obj(v)
+  try {
+    return jsonObject(JSON.parse(v) as unknown)
+  } catch {
+    return {}
+  }
+}
 
 /**
  * What the tool **actually answered** — the body that goes on the card.
@@ -94,6 +103,19 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      */
     const tool = str(item.tool) || str(obj(item.invocation).tool)
     const server = str(item.server)
+    /*
+     * A command run through centralu_run (#512) is summarized as the command, the same rule as toolSummary on
+     * the claude side, when its arguments are on the item. A call made from inside `exec` carries none and
+     * stays centralu_run; the screen re-reads both proposal lists for such a call.
+     */
+    if (tool === 'centralu_run' && (!server || server === 'centralu')) {
+      const args = jsonObject(item.arguments ?? obj(item.invocation).arguments)
+      const command = str(args.command).trim()
+      if (/^[a-z]+(?:_[a-z]+)*$/.test(command)) {
+        const inner = jsonObject(args.args)
+        return itemSummary({ ...item, tool: command, arguments: inner, invocation: { ...obj(item.invocation), tool: command, arguments: inner } })
+      }
+    }
     // ask_project (#371) — the project asked is the title, the same rule as toolSummary on the claude side
     if (tool === 'ask_project' && (!server || server === 'centralu')) {
       const rawArgs = item.arguments ?? obj(item.invocation).arguments

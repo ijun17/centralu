@@ -46,6 +46,21 @@ export type SelectionRun = {
   /** Those arguments, as the model wrote them */
   firstArgs: unknown
   firstOk: boolean | null
+  /**
+   * #512: whether an expected tool was called anywhere in the turn (a directing seat often looks at the sessions
+   * first, which `verdict` counts as wrong), whether that call went through centralu_run, and how many calls
+   * looked for a tool (tool search, centralu_commands, centralu_help)
+   */
+  reached?: boolean
+  viaRun?: boolean | null
+  discovery?: number
+  /** #512: the turn's requests, their input tokens summed (cache included), output, cache writes, uncached input, and rebuilds within the turn */
+  requests?: number
+  tokens?: number
+  output?: number
+  cacheWrite?: number
+  uncached?: number
+  rebuilds?: number
 }
 
 export type CacheRows = (RequestRow & { total: number; lost: number | null })[]
@@ -153,19 +168,30 @@ export function printSummary(s: Summary, log: (line: string) => void = console.l
 
   for (const [cli, prompts] of Object.entries(s.selection ?? {})) {
     log(`\n== Tool selection, ${cli} ==`)
-    log(`${pad('prompt', 22)}${pad('expects', 24)}${lpad('right', 7)}${lpad('none', 6)}${lpad('wrong', 7)}${lpad('steps', 7)}${lpad('args ok', 9)}${lpad('1st ok', 8)}  calls`)
+    log(
+      `${pad('prompt', 22)}${pad('expects', 24)}${lpad('right', 7)}${lpad('none', 6)}${lpad('wrong', 7)}${lpad('reached', 9)}${lpad('steps', 7)}${lpad('args ok', 9)}${lpad('1st ok', 8)}` +
+        `${lpad('reqs', 6)}${lpad('tokens', 9)}${lpad('out', 6)}${lpad('rebuild', 9)}  calls`,
+    )
     for (const [id, p] of Object.entries(prompts)) {
       const n = p.runs.length
       const count = (v: SelectionRun['verdict']) => p.runs.filter((r) => r.verdict === v).length
       const steps = p.runs.map((r) => r.steps).filter((x): x is number => x !== null)
       const firsts = p.runs.map((r) => r.firstArgsValid).filter((x): x is boolean => x !== null)
       const oks = p.runs.map((r) => r.firstOk).filter((x): x is boolean => x !== null)
+      const med = (f: (r: SelectionRun) => number | undefined) => {
+        const xs = p.runs.map(f).filter((x): x is number => x !== undefined)
+        return xs.length ? k(median(xs)) : '—'
+      }
       log(
         `${pad(id, 22)}${pad(p.expect.join('|') || '(none)', 24)}${lpad(`${count('right')}/${n}`, 7)}${lpad(count('none'), 6)}${lpad(count('wrong'), 7)}` +
+          `${lpad(p.runs.some((r) => r.reached !== undefined) ? `${p.runs.filter((r) => r.reached).length}/${n}` : '—', 9)}` +
           `${lpad(steps.length ? median(steps) : '—', 7)}${lpad(firsts.length ? `${firsts.filter(Boolean).length}/${firsts.length}` : '—', 9)}` +
-          `${lpad(oks.length ? `${oks.filter(Boolean).length}/${oks.length}` : '—', 8)}  ${p.runs.map((r) => r.called.join('>') || '-').join(' ; ')}`,
+          `${lpad(oks.length ? `${oks.filter(Boolean).length}/${oks.length}` : '—', 8)}` +
+          `${lpad(med((r) => r.requests), 6)}${lpad(med((r) => r.tokens), 9)}${lpad(med((r) => r.output), 6)}${lpad(p.runs.reduce((x, r) => x + (r.rebuilds ?? 0), 0), 9)}` +
+          `  ${p.runs.map((r) => r.called.join('>') || '-').join(' ; ')}`,
       )
     }
+    log('(reqs, tokens, out: medians per turn, tokens = every request\'s input with cache; rebuild: requests within a turn that lost more than a cache block)')
   }
 }
 

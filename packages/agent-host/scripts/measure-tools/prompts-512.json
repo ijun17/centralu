@@ -1,0 +1,70 @@
+{
+  "comment": "The prompt set for #512 (the orchestrator's rare commands: resident, deferred, or behind centralu_run), run with --rare <arm> --phases selection. Each prompt runs in a new orchestrator every repetition (fresh), and what a run made is cleared before the next. The prompts ask for things to be done, so the sessions run under safe: the agent's own tools and the person's skills raise a card the measurement declines, and Centralu's tools run as under every preset. No prompt names a tool. Placeholders as in prompts.json.",
+  "preset": "safe",
+  "seed":"Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "selection": [
+    {
+      "id": "rare-app-project",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "Make me a small tool with its own screen for the {project} project: a shared shopping list the team can add items to.",
+      "expect": ["create_app"]
+    },
+    {
+      "id": "rare-app-user",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "I'd like a little screen of my own, usable from any project, where I can log how many glasses of water I drink each day.",
+      "expect": ["create_app"]
+    },
+    {
+      "id": "rare-skill",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "Every Monday I ask you the same thing: go through every project's sessions and give me five bullet points on what changed last week. Keep that procedure so I don't have to explain it each time.",
+      "expect": ["propose_skill"]
+    },
+    {
+      "id": "rare-browser",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "I want you to be able to open web pages in a real browser and click through them yourself. Can you get that ability?",
+      "expect": ["propose_mcp_server"]
+    },
+    {
+      "id": "rare-branch",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "In {project}, I want to try a login fix on its own git branch so main stays untouched. Set that up for me.",
+      "expect": ["propose_worktree_session"]
+    },
+    {
+      "id": "core-overview",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "Which sessions are there in {project}, and what is each one doing?",
+      "expect": ["list_sessions", "read_session"]
+    },
+    {
+      "id": "core-delegate",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
+      "expect": ["send_to_session"]
+    },
+    {
+      "id": "core-recall",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "Last time we talked about it, what did we decide about backing up the database?",
+      "expect": ["recall"]
+    },
+    {
+      "id": "core-new-session",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "Open a new session in {project} called docs-check. Don't give it any task yet.",
+      "expect": ["create_session"]
+    }
+  ]
+}

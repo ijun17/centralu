@@ -15,7 +15,33 @@ const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 type Json = Record<string, unknown>
 const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
 
+/**
+ * The command a `centralu_run` call runs (#512, the `commands` tier), as the call it stands for: the
+ * command's full name and its arguments. Null when it names no command, which leaves the card as the call.
+ */
+function commandRunOf(name: string, input: Json): { name: string; input: Json } | null {
+  if (!name.endsWith('__centralu_run')) return null
+  const command = str(input.command).trim()
+  if (!/^[a-z]+(?:_[a-z]+)*$/.test(command)) return null
+  let args: unknown = input.args ?? {}
+  if (typeof args === 'string') {
+    try {
+      args = JSON.parse(args)
+    } catch {
+      args = {}
+    }
+  }
+  return { name: name.slice(0, -'centralu_run'.length) + command, input: typeof args === 'object' && args !== null && !Array.isArray(args) ? (args as Json) : {} }
+}
+
 export function toolSummary(name: string, input: Json): ToolSummary {
+  /*
+   * A command run through centralu_run is summarized as the command (#512): the screen reacts to a call by
+   * its name (a skill or MCP proposal card is re-read, a worktree window takes the branch from the title),
+   * and the command keeps that reaction behind the tier. The record keeps the call as made (`input`).
+   */
+  const run = commandRunOf(name, input)
+  if (run) return toolSummary(run.name, run.input)
   const paths: string[] = []
   let title = name
   if (name === 'Bash') title = str(input.command, name)

@@ -13,6 +13,8 @@
  *
  * Options: --cli claude,codex  --reps 2  --model haiku  --codex-model <id>  --change-model <id|none>
  *          --phases resident,cache,results,selection  --prompts <file>  --out <file>  --keep
+ *          --rare resident|deferred|commands (#512: how the orchestrator's rare commands are exposed)
+ *          --kinds none,reader,orchestrator,manager,builder (the session kinds the resident phase starts)
  *
  * Every host it starts runs on a temporary data folder (`CC_DATA_DIR` and `--db`), never `~/.centralu`.
  * Live runs use the person's own CLI logins, as the earlier probes did.
@@ -23,11 +25,11 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { toolDefsFor } from '../src/sessions/orchestrator-tools.js'
+import { ORCHESTRATOR_TOOLS, commandsFor, rareTierFrom, setRareTier, toolDefsFor } from '../src/sessions/orchestrator-tools.js'
 import { TOOL_PROFILES, residentCost, type ResidentCost } from '../src/sessions/tool-cost.js'
 import { MeasuredHost, bareName, toolCalls, toolResults, type Call, type Json } from './measure-tools/host.mjs'
 import { ApiRecorder, call, say, type RecordedRequest, type Usage } from './measure-tools/recorder.mjs'
-import { compare, median, printSummary, total, withLoss, type Cli, type RequestRow, type SelectionRun, type Summary } from './measure-tools/report.mjs'
+import { REBUILD_TOKENS, compare, median, printSummary, total, withLoss, type Cli, type RequestRow, type SelectionRun, type Summary } from './measure-tools/report.mjs'
 
 const { values: opt, positionals } = parseArgs({
   options: {
@@ -42,6 +44,8 @@ const { values: opt, positionals } = parseArgs({
     prompts: { type: 'string' },
     out: { type: 'string' },
     keep: { type: 'boolean', default: false },
+    rare: { type: 'string', default: 'resident' },
+    kinds: { type: 'string', default: 'none,reader,orchestrator,manager,builder' },
   },
   allowPositionals: true,
 })
@@ -65,8 +69,23 @@ const PHASES = new Set((opt.phases ?? (LIVE ? 'resident,cache,results,selection'
 const PROMPTS_FILE = opt.prompts ?? fileURLToPath(new URL('./measure-tools/prompts.json', import.meta.url))
 const PROMPTS = JSON.parse(readFileSync(PROMPTS_FILE, 'utf8')) as {
   seed: string
-  selection: { id: string; profile: 'reader' | 'orchestrator'; prompt: string; expect: string[] }[]
+  /**
+   * The permission preset of every selection session, when not the default `normal`. #512's prompts ask for
+   * things to be done, and under `normal` the person's own bypass applies, so `safe` keeps the agent's own
+   * tools (and the person's skills) to a declined card while Centralu's run under every preset
+   */
+  preset?: 'safe' | 'normal' | 'auto'
+  /** fresh: the orchestrator's prompt runs in a new orchestrator every repetition, with nothing it made before left over */
+  selection: { id: string; profile: 'reader' | 'orchestrator'; prompt: string; expect: string[]; fresh?: boolean }[]
 }
+/*
+ * The arm (#512): the host this run starts exposes the orchestrator's rare commands this way (CC_RARE_COMMANDS),
+ * and this process reads the definitions the same way, for the resident table and for checking arguments
+ */
+const RARE = rareTierFrom(opt.rare)
+if (RARE !== opt.rare) throw new Error(`--rare takes resident, deferred or commands, not ${opt.rare}`)
+setRareTier(RARE)
+const KINDS = opt.kinds.split(',').map((s) => s.trim())
 const FIXTURE = fileURLToPath(new URL('../src/apps/external/test-fixtures/app.mjs', import.meta.url))
 const OK = 'Reply with the single word OK.'
 const log = (...a: unknown[]) => console.error('[measure]', ...a)
@@ -121,7 +140,7 @@ async function world(cli: Cli, recorder: ApiRecorder | null) {
       server: { command: process.execPath, args: [FIXTURE, '--mode', 'attach'] },
     }),
   )
-  const env: Record<string, string> = {}
+  const env: Record<string, string> = { CC_RARE_COMMANDS: RARE }
   if (recorder) {
     env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${recorder.port}`
     /*
@@ -132,6 +151,12 @@ async function world(cli: Cli, recorder: ApiRecorder | null) {
   }
   // The account's claude.ai connectors come up at different moments run to run and moved the baseline (#320's probe)
   env.ENABLE_CLAUDEAI_MCP_SERVERS = 'false'
+  /*
+   * Claude Code's auto memory off (#512): asked to keep a procedure, a trial's orchestrator wrote it to
+   * ~/.claude/projects/<the scratch folder>/memory, and every later orchestrator of the run starts in the same
+   * folder and would read it, so one repetition answered the next
+   */
+  env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1'
   // Dry: no credential leaves for the fake API, and none is needed
   if (recorder && !LIVE) env.ANTHROPIC_API_KEY = 'sk-ant-measure-dry-run'
   const host = new MeasuredHost(data, env)
@@ -214,8 +239,15 @@ class Driver {
     let calls: Call[]
     if (this.recorder) {
       await this.recorder.settle()
-      // The CLI's own errands (a title) are left out; a request that failed has no usage
-      const mine = this.recorder.requests.slice(since).filter((r) => r.main)
+      /*
+       * The CLI's own errands (a title) are left out; a request that failed has no usage. So are other sessions':
+       * every Claude session of the host goes through the recorder, and a turn can start one (#512: create_app's
+       * builder, handed work by send_to_session, made its requests inside the orchestrator's window)
+       */
+      const window = this.recorder.requests.slice(since).filter((r) => r.main)
+      const listed = ((await this.host.rpc('sessions.list', {}).catch(() => [])) as unknown as Json[]).find((x) => x.id === sessionId)
+      const own = typeof listed?.externalId === 'string' ? listed.externalId : (window[0]?.cliSession ?? null)
+      const mine = own && window.some((r) => r.cliSession === own) ? window.filter((r) => r.cliSession === own) : window
       rows = mine.map(rowOf)
       const results = toolResults(events)
       calls = mine.flatMap((r) => r.toolUses).map((t) => ({ name: t.name, args: t.input, callId: t.id, ok: results.get(t.id) ?? null }))
@@ -263,7 +295,7 @@ function rowOf(r: RecordedRequest): RequestRow {
 
 /** Resident context: a fresh session of each kind, one short turn, its first request */
 async function residentPhase(d: Driver): Promise<void> {
-  const kinds = ['none', 'reader', 'orchestrator', 'manager', 'builder'] as const
+  const kinds = (['none', 'reader', 'orchestrator', 'manager', 'builder'] as const).filter((k) => KINDS.includes(k))
   const out: NonNullable<Summary['resident']>[Cli] = {}
   const walk: RequestRow[] = []
   for (const kind of kinds) {
@@ -388,6 +420,73 @@ async function resultsPhase(d: Driver, seed: Json): Promise<void> {
   else (summary.prefixWalk ??= {})['tool results (characters)'] = out
 }
 
+/** The calls that look for a tool rather than use one: Claude's tool search and the commands tier's list and help (#512) */
+const DISCOVERY = new Set(['ToolSearch', 'centralu_commands', 'centralu_help'])
+
+type Resolved = Call & { bare: string; viaRun: boolean; runOutcome?: string }
+
+/**
+ * Each call as the command it stands for (#512): a centralu_run as its command and that command's arguments,
+ * every other call as itself. The host's `[commands]` lines say which command a run ran and whether its
+ * arguments passed. A Codex run arrives named as its command already (normalize.ts reads the run's arguments
+ * off the item), and the host's events carry no arguments, so a command of the arm's tier (`runOnly`: the seat
+ * cannot call it by name) is a run, and the host's line is all there is to say how it went.
+ */
+function resolveCalls(calls: Call[], runs: { command: string; outcome: string }[], runOnly: readonly string[]): Resolved[] {
+  let next = 0
+  const logged = (command: string | null) => {
+    const at = command === null ? next : runs.findIndex((r, i) => i >= next && r.command === command)
+    if (at < 0 || at >= runs.length) return undefined
+    next = at + 1
+    return runs[at]
+  }
+  return calls.map((c) => {
+    const bare = bareName(c.name)
+    const a = typeof c.args === 'object' && c.args !== null ? (c.args as Json) : {}
+    const named = runOnly.includes(bare)
+    const run = bare === 'centralu_run' || named || (typeof a.command === 'string' && a.command === bare && 'args' in a)
+    if (!run) return { ...c, bare, viaRun: false }
+    const command = typeof a.command === 'string' ? a.command : named ? bare : null
+    const line = logged(command)
+    if (named && a.command === undefined) return { ...c, bare, viaRun: true, args: undefined, runOutcome: line?.outcome }
+    let inner: unknown = a.args ?? {}
+    if (typeof inner === 'string') {
+      try {
+        inner = JSON.parse(inner)
+      } catch {
+        /* kept as written: the host answered it with the schema */
+      }
+    }
+    return { ...c, bare: command ?? line?.command ?? 'centralu_run', viaRun: true, args: command !== null ? inner : undefined, runOutcome: line?.outcome }
+  })
+}
+
+/**
+ * Leaves the world as a fresh orchestrator prompt found it (#512): every session but the seed, every app but the
+ * counter, and every proposal waiting on the person go. What one run made (an app id, a skill name) would
+ * otherwise turn the next run's first call into a refusal.
+ */
+async function tidy(d: Driver, keep: string[]): Promise<void> {
+  const host = d.host
+  for (const s of (await host.rpc('sessions.list', {}).catch(() => [])) as unknown as Json[]) if (!keep.includes(s.id)) await d.remove(s.id)
+  for (const a of (await host.rpc('apps.list', {}).catch(() => [])) as unknown as Json[]) {
+    if (a.appId === 'counter') continue
+    // A project's app is part of its repository, which the host does not delete: the scratch project's folder goes instead
+    if (a.projectId) {
+      const project = [d.w.pHere, d.w.pThere].find((p) => p.id === a.projectId)
+      if (project) rmSync(join(project.path as string, '.centralu', 'apps', String(a.appId)), { recursive: true, force: true })
+      continue
+    }
+    await host.rpc('apps.remove', { appId: a.appId, projectId: null }).catch((e) => log(`could not remove app ${a.appId}: ${e}`))
+  }
+  for (const p of ((await host.rpc('agents.skillProposals', {}).catch(() => ({ proposals: [] }))).proposals ?? []) as Json[]) {
+    await host.rpc('agents.resolveSkillProposal', { name: p.name, approve: false }).catch(() => {})
+  }
+  for (const p of ((await host.rpc('agents.mcpProposals', {}).catch(() => ({ proposals: [] }))).proposals ?? []) as Json[]) {
+    await host.rpc('agents.resolveMcpProposal', { name: p.name, approve: false }).catch(() => {})
+  }
+}
+
 /** Tool selection on the fixed prompts: right tool, none, wrong; steps; first-try argument validity */
 async function selectionPhase(d: Driver, seed: Json): Promise<void> {
   const out: NonNullable<Summary['selection']>[Cli] = {}
@@ -396,40 +495,70 @@ async function selectionPhase(d: Driver, seed: Json): Promise<void> {
   d.host.approvals = () => 'deny'
   let orchestrator: Json | null = null
   for (const p of PROMPTS.selection) {
-    const defs = toolDefsFor(p.profile)
-    const ours = new Set(defs.map((t) => t.name))
+    // Every name the seat can reach, whichever arm: a command behind centralu_run is still the seat's
+    const defs = toolDefsFor(p.profile, 'resident')
+    const ours = new Set([...defs, ...toolDefsFor(p.profile)].map((t) => t.name))
     const isOurs = (name: string) => name.startsWith('mcp__centralu__') || name.startsWith('mcp__app-') || ours.has(name)
     const runs: SelectionRun[] = []
     for (let rep = 0; rep < REPS; rep++) {
       let s: Json
+      if (p.profile === 'orchestrator' && p.fresh && orchestrator) {
+        await d.remove(orchestrator.id)
+        orchestrator = null
+      }
       if (p.profile === 'orchestrator') s = orchestrator ??= await d.session('orchestrator')
       else s = await d.session('reader')
-      const { calls } = await d.turn(`select:${p.id}:${rep}`, s.id, p.id, 'selection', fill(p.prompt))
-      const mine = calls.filter((c) => isOurs(c.name))
-      const firstExpected = calls.findIndex((c) => p.expect.includes(bareName(c.name)))
+      if (PROMPTS.preset && s.permissionPreset !== PROMPTS.preset) {
+        await d.host.rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: PROMPTS.preset })
+        s.permissionPreset = PROMPTS.preset
+      }
+      const mark = d.host.commandRuns.length
+      const { calls: made, rows } = await d.turn(`select:${p.id}:${rep}`, s.id, p.id, 'selection', fill(p.prompt))
+      const calls = resolveCalls(made, d.host.commandRuns.slice(mark).filter((r) => r.sessionId === s.id), commandsFor(p.profile))
+      const mine = calls.filter((c) => isOurs(c.name) && !DISCOVERY.has(c.bare))
+      const firstExpected = calls.findIndex((c) => p.expect.includes(c.bare))
       const first = firstExpected >= 0 ? calls[firstExpected]! : null
-      const schema = first ? defs.find((t) => t.name === bareName(first.name))?.schema : undefined
+      const schema = first ? (defs.find((t) => t.name === first.bare)?.schema ?? ORCHESTRATOR_TOOLS.find((t) => t.name === first.bare)?.schema) : undefined
       const verdict: SelectionRun['verdict'] =
-        p.expect.length === 0 ? (mine.length ? 'wrong' : 'right') : !mine.length ? 'none' : p.expect.includes(bareName(mine[0]!.name)) ? 'right' : 'wrong'
+        p.expect.length === 0 ? (mine.length ? 'wrong' : 'right') : !mine.length ? 'none' : p.expect.includes(mine[0]!.bare) ? 'right' : 'wrong'
+      const lossy = withLoss(rows)
       runs.push({
-        called: mine.map((c) => bareName(c.name)),
+        called: calls.filter((c) => isOurs(c.name) || DISCOVERY.has(c.bare)).map((c) => (c.viaRun ? `run:${c.bare}` : c.bare)),
         calls: calls.length,
         verdict,
         steps: first ? firstExpected + 1 : null,
         /*
-         * Codex (codex-cli 0.160.0) calls MCP tools from inside its `exec` tool, as JavaScript, and the
-         * host's event for such a call carries no arguments (measured: `{}` for a `recall` that found
-         * the note), so only Claude's are checked against the schema; `firstOk` covers both
+         * Against the schema as the model is shown it (strict: a key it does not list is wrong), the check
+         * centralu_run makes on the host. Claude's arguments are read from the API (recorder). Codex (codex-cli
+         * 0.160.0) calls MCP tools from inside its `exec` tool, as JavaScript, and the host's event for such a
+         * call carries no arguments, so for Codex only a centralu_run's own outcome (the host's line) says;
+         * `firstOk` covers both
          */
-        firstArgsValid: first && schema && first.args !== undefined && d.cli === 'claude' ? schema.safeParse(first.args).success : null,
+        firstArgsValid:
+          first && first.viaRun && first.runOutcome !== undefined && first.args === undefined
+            ? first.runOutcome === 'ran'
+            : first && schema && first.args !== undefined && d.cli === 'claude'
+              ? schema.strict().safeParse(first.args).success
+              : null,
         firstArgs: first?.args ?? null,
         firstOk: first ? first.ok : null,
+        reached: first !== null,
+        viaRun: first ? first.viaRun : null,
+        discovery: calls.filter((c) => DISCOVERY.has(c.bare)).length,
+        requests: rows.length,
+        tokens: rows.reduce((n, r) => n + total(r.usage), 0),
+        output: rows.reduce((n, r) => n + (r.usage?.output ?? 0), 0),
+        cacheWrite: rows.reduce((n, r) => n + (r.usage?.cacheWrite ?? 0), 0),
+        uncached: rows.reduce((n, r) => n + (r.usage?.input ?? 0), 0),
+        rebuilds: lossy.filter((r, i) => i > 0 && r.lost !== null && r.lost > REBUILD_TOKENS).length,
       })
-      log(`${d.cli} select ${p.id} #${rep + 1}: ${verdict} [${calls.map((c) => bareName(c.name)).join(' > ')}]`)
+      log(`${d.cli} select ${p.id} #${rep + 1}: ${verdict} [${calls.map((c) => (c.viaRun ? `run:${c.bare}` : c.bare)).join(' > ')}]`)
       if (p.profile !== 'orchestrator') await d.remove(s.id)
+      else if (p.fresh) await tidy(d, [seed.id as string, s.id as string])
     }
     out[p.id] = { profile: p.profile, expect: p.expect, runs }
   }
+  if (orchestrator && PROMPTS.selection.some((p) => p.fresh)) await d.remove(orchestrator.id)
   ;(summary.selection ??= {})[d.cli] = out
 }
 
@@ -478,7 +607,7 @@ printSummary(summary)
 const out = opt.out ?? join(tmpdir(), `measure-tools-${LIVE ? 'live' : 'dry'}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
 writeFileSync(
   out,
-  JSON.stringify({ meta: { mode: LIVE ? 'live' : 'dry', at: new Date().toISOString(), commit, versions, reps: REPS, clis: CLIS, prompts: PROMPTS }, summary, raw }, null, 1),
+  JSON.stringify({ meta: { mode: LIVE ? 'live' : 'dry', at: new Date().toISOString(), commit, versions, reps: REPS, clis: CLIS, rare: RARE, prompts: PROMPTS }, summary, raw }, null, 1),
 )
 console.log(`\nwrote ${out}`)
 process.exit(0)

@@ -114,6 +114,21 @@ and the baseline: [tool-cost.md](tool-cost.md). That baseline (2026-10-12) found
 MCP tools in the request up front: codex-cli 0.160.0 reaches them from its own `exec` tool, so "Codex has no
 deferral" above describes the CLI the numbers above were taken with.
 
+**The orchestrator's rare commands** (#512, a prototype behind `CC_RARE_COMMANDS`, off by default).
+`create_app`, `propose_skill` and `propose_mcp_server` are a third of what the orchestrator carries and the
+least of what it calls. `CC_RARE_COMMANDS=deferred` defers them behind Claude's
+tool search (the server is then loaded tool by tool, as the reader's is); `CC_RARE_COMMANDS=commands` takes
+them out of the tool list and serves three fixed tools in their place, `centralu_commands` (one line each),
+`centralu_help` (one command's schema) and `centralu_run` (checked on the host against that schema, strictly;
+a wrong call answers with it), plus one line in the instructions saying they exist. The profile rule is the
+same (`commandsFor` lists and runs only what `profileAllows` gives the seat), and a run goes through the same
+runner, so each command keeps its result and its card. `propose_worktree_session` was in the tier at first and
+came out: nothing in the instructions names it, and hidden it was never reached. `app_guide` stays a tool: the person's questions about
+the app come unannounced, and deferred it was found less often (tool-cost.md §8). The setting is read once at
+start, since a session's tool list is its prompt prefix. The three arms are compared in
+[tool-cost.md](tool-cost.md) §9: the tier saved 709 tokens a request on Claude and reached a rare command in 15
+of 24 runs against 23 of 24 resident, so the default stays; it changes only on numbers, as a separate decision.
+
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts
 one more node process (about 40 MB resident, idle). The bridge sets
 `default_tools_approval_mode: 'approve'`: our tools are never asked about, as on the Claude side,

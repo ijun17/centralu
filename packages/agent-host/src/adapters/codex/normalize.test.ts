@@ -150,6 +150,25 @@ describe('streaming and tool calls', () => {
     )
   })
 
+  /*
+   * The commands tier (#512): the screen re-reads the proposal lists and fills a worktree window by the call's
+   * name and title, so a command run through centralu_run must arrive as the command.
+   */
+  it('a centralu_run card is the command it runs, with its arguments', () => {
+    const summary = (args: unknown) =>
+      (n('item/started', { item: { type: 'mcpToolCall', id: 'r0', server: 'centralu', tool: 'centralu_run', status: 'inProgress', arguments: args } })[0] as {
+        summary: { tool: string; title: string }
+      }).summary
+    expect(summary({ command: 'propose_skill', args: { name: 'weekly-report', content: 'x' } }).tool).toBe('propose_skill')
+    expect(summary(JSON.stringify({ command: 'propose_worktree_session', args: { branch: 'feat/login-fix' } }))).toMatchObject({
+      tool: 'propose_worktree_session',
+      title: 'feat/login-fix',
+    })
+    // Called from inside exec, the item carries no arguments: it stays the call, which the screen answers by re-reading both lists
+    expect(summary({}).tool).toBe('centralu_run')
+    expect(summary({ command: 'mcp__x__y' }).tool).toBe('centralu_run')
+  })
+
   it('a long argument is trimmed — seeing the shape is enough, the full body is not needed', () => {
     const out = n('item/started', {
       item: {

@@ -111,6 +111,20 @@ A reader's `read_session` without an id lists its project's sessions; that is wh
 `list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)`), and
 the object behind them refuses every acting call (`readerToolsFor`).
 
+**The rare-commands switch** (#512, a prototype, off by default). The matrix is the default
+(`CC_RARE_COMMANDS` unset). With `CC_RARE_COMMANDS=commands` the host takes the orchestrator's
+`create_app`, `propose_skill` and `propose_mcp_server` out of its tool list
+and gives it `centralu_commands`, `centralu_help` and `centralu_run` instead; no other seat changes. Who
+may run what does not change: `centralu_run` lists and runs only the commands `profileAllows` gives the
+seat (`commandsFor`), a command's own name is refused like any tool the seat was not shown, and a run is
+checked against the command's own schema before it goes through the same runner, so each command keeps
+its gates and its card (the screen re-reads both proposal lists on a `centralu_run` it cannot name). The
+three are Centralu tools (`mcp__centralu__*`), allowed under every preset like the rest.
+`sessions/command-tier.test.ts` checks, profile by profile, that the tier changes how a seat reaches a
+command and never which commands it reaches. `CC_RARE_COMMANDS=deferred` keeps the three as tools and
+defers them behind Claude's tool search, which changes nothing here. The measurement is in
+[tool-cost.md](tool-cost.md) §9.
+
 Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the
 user-folder apps, a project's sessions that project's apps, and a builder its own app
 (`givesApp` in `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4). An agent an

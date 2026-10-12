@@ -26,6 +26,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, Orches
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
 import { SessionManager } from './manager.js'
+import { setRareTier } from './orchestrator-tools.js'
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
@@ -4176,6 +4177,48 @@ describe('orchestrator skills — propose -> approve -> load into prompt (#71)',
     const again = await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'dup-skill', content: 'a different procedure' })
     expect(again.isError).toBe(true)
     expect(mgr.orchestratorSkills().find((s) => s.name === 'dup-skill')?.content).toBe('procedure')
+  })
+})
+
+/**
+ * The `commands` tier (#512), through the bridge's door: a rare command run through centralu_run lands where
+ * the tool lands (the proposal the person's card lists, approved or dismissed there), its own name is refused
+ * like any tool the seat was not shown, and a seat whose profile does not have the command cannot run it.
+ */
+describe('the commands tier through the host (#512)', () => {
+  beforeEach(() => setRareTier('commands'))
+  afterEach(() => setRareTier('resident'))
+
+  it("keeps each proposal's card: the run saves what the card lists, and approving it is still the person's", async () => {
+    const orc = await mgr.orchestrator()
+    const offered = (await rpc('orchestrator.tools', { sessionId: orc.id })) as { name: string }[]
+    expect(offered.map((t) => t.name)).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run']))
+    expect(offered.map((t) => t.name)).not.toContain('propose_skill')
+
+    const skill = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'propose_skill', args: { name: 'weekly-report', content: 'Every Friday: summarise the week.' } })
+    expect(skill.isError).toBeFalsy()
+    expect(skill.text).toMatch(/An approval card appeared on screen/)
+    expect(mgr.skillProposals().map((p) => p.name)).toEqual(['weekly-report'])
+    expect(mgr.orchestratorSkills()).toEqual([])
+
+    const server = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'propose_mcp_server', args: { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] } })
+    expect(server.isError).toBeFalsy()
+    expect(mgr.mcpProposals()).toEqual([expect.objectContaining({ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] })])
+
+    // By its own name the command is no longer a tool of the seat
+    await expect(mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'other', content: 'x' })).rejects.toThrow(/Not a tool of this session/)
+    expect(mgr.skillProposals().map((p) => p.name)).toEqual(['weekly-report'])
+  })
+
+  it('refuses a command outside the seat: the worktree manager has no centralu_run, and the orchestrator no manager command', async () => {
+    const orc = await mgr.orchestrator()
+    const outside = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'delete_worktree_session', args: { sessionId: orc.id } })
+    expect(outside).toMatchObject({ isError: true })
+    expect(outside.text).toMatch(/No command "delete_worktree_session" for this session/)
+    const p = await addProject()
+    const s = await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' }) as SessionInfo
+    await expect(mgr.runOrchestratorTool(s.id, 'centralu_run', { command: 'propose_skill', args: { name: 'x', content: 'y' } })).rejects.toThrow(/Not a tool of this session/)
+    expect(mgr.skillProposals()).toEqual([])
   })
 })
 

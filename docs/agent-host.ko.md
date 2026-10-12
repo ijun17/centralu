@@ -103,6 +103,19 @@ Claude는 셋 다 미루며, 그 값은 요청마다 +31 토큰이다(같은 측
 MCP 도구를 요청에 미리 싣지 않았다: codex-cli 0.160.0은 자기 `exec` 도구 안에서 그 도구들에 닿는다. 그래서
 위의 "Codex에는 미루기가 없다"는 위 숫자를 잰 CLI의 이야기다.
 
+**오케스트레이터의 드문 명령**(#512, `CC_RARE_COMMANDS` 뒤의 시제품, 기본은 꺼짐). `create_app`,
+`propose_skill`, `propose_mcp_server`는 오케스트레이터가 싣는 것의 3분의 1이면서 가장 적게 부르는 것이다. `CC_RARE_COMMANDS=deferred`는 이들을 Claude의 도구 검색 뒤로 미루고(그때 서버는
+읽기 묶음처럼 도구마다 올린다), `CC_RARE_COMMANDS=commands`는 도구 목록에서 빼고 그 자리에 고정 도구 셋을
+준다: `centralu_commands`(한 줄씩), `centralu_help`(명령 하나의 스키마), `centralu_run`(호스트가 그 스키마로
+엄격하게 확인하고, 틀린 호출에는 스키마로 답한다). 지시문에는 이들이 있다는 한 줄이 붙는다. 프로필 규칙은
+같다(`commandsFor`는 `profileAllows`가 그 자리에 준 것만 보여 주고 실행한다). 실행은 같은 실행기를 지나므로
+명령마다 결과와 카드가 그대로다. `propose_worktree_session`은 처음에 이 층에 있다가 빠졌다: 지시문 어디에도
+그 이름이 없어서, 숨겨 두자 한 번도 닿지 않았다. `app_guide`는 도구로 남는다: 사람이 앱에 대해 묻는 일은 예고 없이 오고,
+미뤄 두면 덜 찾았다(tool-cost.md §8). 설정은 시작할 때 한 번 읽는다: 세션의 도구 목록이 곧 프롬프트
+앞부분이기 때문이다. 세 갈래의 비교는 [tool-cost.md](tool-cost.md) §9(영어만)에 있다: 이 층은 Claude에서 요청마다 709토큰을
+아꼈고, 드문 명령에 24번 중 15번 닿았다(상주는 23번). 그래서 기본값은 그대로이고, 숫자를 보고 따로 결정할
+때만 바뀐다.
+
 묶음을 받은 Codex 세션은 stdio 다리를 띄우므로, #320 이후 모든 Codex 세션이 node 프로세스를
 하나 더 띄운다(유휴 시 상주 메모리 약 40 MB). 다리는 `default_tools_approval_mode: 'approve'`를
 건다: 우리 도구는 Claude 쪽처럼 묻지 않으며, 이것이 없으면 auto(`approvalPolicy: never`)의

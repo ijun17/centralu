@@ -41,8 +41,8 @@ export function servedDefinitions(profile: ToolProfile, cli: AgentCli): ServedDe
   return toolDefsFor(profile).map((t) => {
     const name = `mcp__${ORCHESTRATOR_MCP_NAME}__${t.name}`
     const inputSchema = z.toJSONSchema(t.schema)
-    // The same rule as orchestratorMcp: a directing profile's server is alwaysLoad, the reader set is loaded tool by tool
-    const deferred = cli === 'claude' && profile === 'reader' && 'deferred' in t && t.deferred === true
+    // The same rule as orchestratorMcp: a set with no deferred tool is alwaysLoad, any other is loaded tool by tool
+    const deferred = cli === 'claude' && 'deferred' in t && t.deferred === true
     return { name, description: t.description, inputSchema, resident: !deferred, chars: definitionChars(name, t.description, inputSchema) }
   })
 }

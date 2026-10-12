@@ -25,6 +25,12 @@ pnpm measure:tools --compare before.json after.json
 | `--prompts` | `scripts/measure-tools/prompts.json` | The fixed prompt set |
 | `--out` | a file in the system temp folder | Where the JSON goes (meta, summary, and the raw records) |
 | `--keep` | off | Keep the scratch folder (projects, data folder, `host.log`) |
+| `--rare` | `resident` | How the host exposes the orchestrator's rare commands (`CC_RARE_COMMANDS`: `resident`, `deferred`, `commands`; §9) |
+| `--kinds` | all five | The session kinds the resident phase starts |
+
+A prompt file may set `preset` (the permission preset of every selection session) and, per orchestrator
+prompt, `fresh` (a new orchestrator every repetition, and what the run made is removed before the next:
+sessions, apps, proposals). `prompts-512.json` does both (§9).
 
 What a run starts: per CLI, one host on a fresh temporary data folder (`CC_DATA_DIR` and `--db` both
 inside it, never `~/.centralu`), two trusted scratch git projects, `website` and `ops`, and in `ops` a
@@ -353,3 +359,138 @@ settings skill and wrote permission rules into the scratch project's `.claude/se
 session runs on the `normal` preset, which follows the person's own Claude Code settings). Those runs were
 stopped and discarded; nothing outside the scratch folder changed. Selection prompts ask questions, not for
 changes.
+
+## 9. The orchestrator's rare commands: resident, deferred, or discovered (#512, 2026-10-12)
+
+The orchestrator carries about 3,200 tokens of its own in every request, and three tools it rarely calls
+(`create_app`, `propose_skill`, `propose_mcp_server`) are a third of the characters. #512 asked whether a seat
+should discover such commands like a CLI rather than carry them. A prototype behind `CC_RARE_COMMANDS`
+(agent-host.md §1.1, security-boundaries.md) gives three arms on the same prompts:
+
+- **A** `resident`: today.
+- **B** `deferred`: the rare tools behind Claude's tool search (Claude only: Codex reaches every MCP tool through
+  its `exec` already, §6.2, so on Codex B is A).
+- **C** `commands`: the rare tools leave the tool list; `centralu_commands` (one line each), `centralu_help` (one
+  command's schema) and `centralu_run` (checked on the host against that schema, strictly; a wrong call answers
+  with it) stand in, and one line in the instructions says so. The instructions still name each command and when
+  to use it, in every arm.
+
+Claude Code 2.1.289 on haiku 4.5 (3 repetitions), codex-cli 0.160.0 on gpt-6.1-sol (2 repetitions), macOS, base
+commit 81d17084 with this change. `pnpm measure:tools --live --rare <arm> --phases resident,selection --kinds
+none,orchestrator --prompts packages/agent-host/scripts/measure-tools/prompts-512.json`. The nine prompts name no
+tool: four need a rare command (an app for a project, an app of the person's own, a weekly procedure to keep, a
+browser), one needs `propose_worktree_session`, four need a core one (`list_sessions`/`read_session`,
+`send_to_session`, `recall`, `create_session`). Every repetition runs in a new orchestrator and what the run made
+(sessions, apps, proposals) is removed before the next. The prompts ask for things to be done, so the sessions run
+under `safe`: the agent's own tools and the person's skills raise a card the measurement declines, Centralu's run as
+under every preset. Claude Code's auto memory is off (`CLAUDE_CODE_DISABLE_AUTO_MEMORY`): in a trial the
+orchestrator kept the weekly procedure in its memory folder, where every later orchestrator of the run would read it.
+Claude was run twice: a first run with `propose_worktree_session` in the tier too, and, after the findings below,
+the run the tables report. Every run's summary is kept in `baselines/2026-10-12-rare-commands-512-live.json`. The
+runs cost about $3.90 of Claude usage at list prices (883 haiku requests, the builder sessions `create_app` started
+included) and about 45 Codex turns.
+
+### Resident cost (the orchestrator's first request)
+
+| | A resident | B deferred | C commands |
+|---|---|---|---|
+| Characters: definitions + instructions (Claude) | 9,927 + 1,833 = 11,760 | 6,223 + 1,833 = 8,056 (3,704 deferred) | 7,221 + 1,994 = 9,215 |
+| Claude, first request | 22,693 | 21,677 | 21,983 |
+| **Claude, Centralu's own** (`count_tokens`) | **3,240** | **2,225 (−1,015)** | **2,531 (−709)** |
+| Codex, first request (Δ none) | 18,553 (+681) | = A | 18,590 (+716) |
+
+The three fixed tools cost about 1,000 characters (~280 tokens), which is why C saves less than B. Codex's first
+request carries no MCP definitions (§6.2), so C only adds its instruction line there (+37 tokens). With
+`propose_worktree_session` in the tier too (the first run), B was 2,034 and C 2,326.
+
+### Selection (Claude; both runs, 6 per prompt)
+
+*Reached*: the expected command was called (or run through `centralu_run`) anywhere in the turn. The orchestrator
+often lists sessions first, which §4's first-call verdict counts as wrong; that happened equally in every arm.
+
+| Prompt needs | A resident | B deferred | C commands |
+|---|---|---|---|
+| `create_app`, a project's app | 5/6 | 6/6 | 4/6 |
+| `create_app`, the person's own | 6/6 | 6/6 | 5/6 |
+| `propose_skill` | 6/6 | **3/6** | **1/6** |
+| `propose_mcp_server` | 6/6 | 6/6 | 5/6 |
+| **rare, all** | **23/24** | **21/24** | **15/24** |
+| `propose_worktree_session` (first run, in the tier) | 3/3 | **0/3** | **0/3** |
+| core: list, send, recall, create a session | 24/24 | 24/24 | 24/24 |
+
+The core prompts did not regress in any arm: the same calls, the same first call (the delegate prompt lists
+sessions first in every arm), 1 step, 2 requests.
+
+### First-try arguments and what a discovery costs (Claude, the second run)
+
+| On the rare prompts (12 runs) | A | B | C |
+|---|---|---|---|
+| First call of the command valid (strict schema), both runs | 23/23 | **12/21** | 15/15 |
+| That call worked | 11/11 | 7/9 | 8/8 |
+| Discovery calls (tool search, `centralu_commands`, `centralu_help`) | 0 | 9 | 17 |
+| Steps to the command (median) | 1 | 2 | 3 |
+| Requests per turn (median) | 2 | 4 | 5 |
+| Input tokens per turn, cache included (median) | 46,018 | 90,053 | 102,459 |
+| Output tokens per turn (median) | 611 | 939 | 1,183 |
+| Requests within a turn that rebuilt the cache | 0 | 0 | 0 |
+
+- **B's first-try failures** are all haiku calling a deferred tool by name, with arguments guessed from the
+  instructions (`serverName` for `name`, no `id`, a `description` for `content`), before loading it: the call fails,
+  it searches, then calls it again (9 of 21 first calls).
+- **C's arguments were right every time**, because the model read `centralu_help` before every run that reached
+  the command; in a trial that skipped it, `create_app` went without `id`, the schema came back, and the second
+  run was right.
+- **A discovery costs whole requests**, each one the full context again, mostly read from cache: B about one more
+  (+44k tokens per turn, median), C two to three more (+56k). Against C's 709 tokens saved on every request, one use
+  of a rare command costs what about 80 orchestrator requests save.
+- **The cache held** in every arm: no request in a turn rebuilt, a tool-search load included (as in §4), and C's
+  tool list never changes.
+
+### Codex (2 repetitions; C with `propose_worktree_session` in the tier)
+
+| | A resident | C commands |
+|---|---|---|
+| Rare commands reached | 8/8 | 8/8 |
+| ... first try passed the host's check | — (no arguments on Codex's events, §2) | 8/8 |
+| ... first call worked | 7/8 | 7/8 |
+| Steps to the command (median) | 2 | 3 |
+| Requests / input tokens per rare turn (median) | 5 / 92,314 | 6 / 112,533 |
+| `propose_worktree_session` reached | 0/2 (it delegated with `send_to_session`) | **2/2**, found through `centralu_commands` |
+| Core prompts reached | 8/8 | 8/8 |
+
+Codex calls `centralu_help` before running a command and does it as one more `exec` step: one more request, about
+20k tokens. Its one failed first call in each arm was `create_app` for the project's app in the second repetition,
+while the first repetition's app was still in the scratch project (a project app is part of the repository, so the
+host does not remove it; the measurement now deletes the scratch project's folder instead). The error text is not
+in the record, so a taken id is the likely cause, not a confirmed one.
+
+### What else the runs showed
+
+- **A hidden `propose_skill` loses to the person's own skills.** Asked to keep a weekly procedure, the orchestrator
+  in B and C invoked Claude Code's `Skill` with the person's `schedule` skill (recurring remote agents) instead,
+  in 3 of 6 runs each; most other misses answered in text. Under `safe` nothing was created: no tool past the
+  skill's text was called.
+- **Claude Code's own tool search competes with `centralu_commands`.** In C the model once searched tool search
+  for `propose_mcp_server`, found nothing and stopped; once it made a project with `create_project` for an app.
+- **A command the instructions do not name is not found.** `propose_worktree_session` was reached 3 of 3 as a tool
+  and 0 of 3 deferred or behind `centralu_run` on Claude; the orchestrator's instructions never mention it. It is
+  out of the tier (`RARE_COMMANDS`). On Codex the listing found it where the tool did not.
+- **The measurement had to change** to be fair: a turn's requests are now only the measured session's (the
+  builder `create_app` stands up made requests in the orchestrator's window, which the first run counted), each
+  prompt starts a new orchestrator and removes what the last one made, and the sessions run under `safe` with auto
+  memory off.
+
+### Recommendation
+
+**Keep the default (`resident`).** On Claude, C saves 709 tokens a request (22% of Centralu's own, 3% of the
+request) and reaches a rare command in 15 of 24 runs against 23 of 24; B saves more (1,015) and loses less (21 of
+24), but its losses fall on `propose_skill` and its first calls often fail before the tool is loaded. On Codex C
+saves nothing resident, since Codex's first request carries no MCP definitions, and costs a step each time. The
+case #512 still makes for C, a tool list that stays fixed while apps and commands come and go, was not measured
+here, and §4 found Claude's cache holding through attach and detach already. If a cut is wanted, the next arm to
+measure is B for `create_app` and `propose_mcp_server` only (each reached 6 of 6 deferred), with `propose_skill`
+loaded; the switch stays off until then.
+
+**Not measured.** Other models than haiku and gpt-6.1-sol; a command used late in a long orchestrator conversation;
+app tools behind `app_tools`/`app_call` (#512's app tier); B with `propose_skill` loaded; the proposal cards on screen
+in the real app (the unit tests cover the events the screen reacts to); Windows and the packaged app.

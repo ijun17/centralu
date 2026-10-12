@@ -3541,10 +3541,14 @@ export const useStore = create<AppState>((set, get) => ({
     const had = get().chat[sessionId]
     const appended = appendChat(had ?? [], e)
     const chat = had === undefined && appended.length === 0 ? undefined : appended
-    // An MCP server suggestion (`propose_mcp_server`) — the list is re-read because the host holds the truth
-    if (e.type === 'tool_call' && /propose_mcp_server$/.test(e.summary.tool)) void get().refreshMcpProposals()
+    /*
+     * An MCP server suggestion (`propose_mcp_server`) — the list is re-read because the host holds the truth.
+     * `centralu_run` (#512) is a command whose name the event could not carry (a Codex call from inside its
+     * `exec` has no arguments on it), and it may be either proposal, so it re-reads both.
+     */
+    if (e.type === 'tool_call' && /(propose_mcp_server|centralu_run)$/.test(e.summary.tool)) void get().refreshMcpProposals()
     // A skill suggestion (#71) — the same rule
-    if (e.type === 'tool_call' && /propose_skill$/.test(e.summary.tool)) void get().refreshSkillProposals()
+    if (e.type === 'tool_call' && /(propose_skill|centralu_run)$/.test(e.summary.tool)) void get().refreshSkillProposals()
     /*
      * A worktree suggestion (#69) — the same principle (pointing), carrying one extra value: the
      * branch name. The adapter carries it in the title (there is no other channel). If the title is

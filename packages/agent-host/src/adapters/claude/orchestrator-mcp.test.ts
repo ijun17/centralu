@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OrchestratorTools } from '../contract.js'
-import { SCOPED_INSTRUCTIONS } from '../../sessions/orchestrator-tools.js'
+import { RARE_COMMANDS, SCOPED_INSTRUCTIONS, setRareTier } from '../../sessions/orchestrator-tools.js'
 import { orchestratorMcp } from './orchestrator-mcp.js'
 
 /**
@@ -46,5 +46,22 @@ describe('the Claude in-process server', () => {
       expect(Object.values(tools).every((t) => t === 'loaded'), profile).toBe(true)
     }
     expect(registered('scoped').instructions).toBe(SCOPED_INSTRUCTIONS)
+  })
+
+  it("defers only the orchestrator's rare tools in the deferred tier, and serves the three fixed tools in the commands tier (#512)", () => {
+    try {
+      setRareTier('deferred')
+      const deferred = registered('orchestrator').tools
+      expect(Object.entries(deferred).filter(([, v]) => v === 'deferred').map(([k]) => k).sort()).toEqual([...(RARE_COMMANDS.orchestrator ?? [])].sort())
+      expect(deferred.send_to_session).toBe('loaded')
+      setRareTier('commands')
+      const commands = registered('orchestrator')
+      expect(Object.keys(commands.tools)).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run']))
+      expect(Object.keys(commands.tools)).not.toContain('create_app')
+      expect(Object.values(commands.tools).every((t) => t === 'loaded')).toBe(true)
+      expect(commands.instructions).toContain('centralu_commands lists them')
+    } finally {
+      setRareTier('resident')
+    }
   })
 })

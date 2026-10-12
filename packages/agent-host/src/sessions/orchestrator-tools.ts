@@ -552,6 +552,8 @@ export async function runOrchestratorTool(
 ): Promise<ToolOutput> {
   if (name === 'list_sessions') return listSessionsText(tools, caller)
 
+  if (name === 'centralu_commands' || name === 'centralu_help' || name === 'centralu_run') return runCommandTool(tools, name, args, caller, signal)
+
   if (name === 'ask_project') {
     // Only the reader seat has it (profileAllows) — checked here too, since this runner is shared by every seat
     if (caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
@@ -848,6 +850,98 @@ async function runAppAccess(tools: OrchestratorTools, name: AppAccessToolName, a
   }
 }
 
+/** A command's one line in centralu_commands: its description's first sentence, without emphasis or issue numbers */
+function commandLine(description: string): string {
+  const plain = description.replace(/\*\*/g, '').replace(/ \((?:#\d+|M4)\)/g, '')
+  const end = plain.indexOf('. ')
+  return end >= 0 ? plain.slice(0, end + 1) : plain
+}
+
+function commandDef(name: string) {
+  return ORCHESTRATOR_TOOLS.find((t) => t.name === name)
+}
+
+function commandSchemaText(name: string): string {
+  const def = commandDef(name)
+  return def ? JSON.stringify(z.toJSONSchema(def.schema.strict())) : '{}'
+}
+
+/**
+ * The `commands` tier's three tools (#512). The gate is the seat's: `commandsFor` lists and runs only the
+ * commands its profile allows, so a command outside it is neither listed nor run, the same answer as calling
+ * a tool the seat was not given. A run is checked against the command's own schema here, strictly (a key the
+ * command does not take is wrong, not ignored: `arguments` for propose_mcp_server's `args` would otherwise
+ * propose a server with none), and a wrong call answers with that schema so the next try can be right. A
+ * valid run is the command itself, through the same runner, so its result, its card and its gates are the
+ * ones it has as a tool.
+ */
+async function runCommandTool(
+  tools: OrchestratorTools,
+  name: CommandToolName,
+  args: Record<string, unknown>,
+  caller: ToolCaller,
+  signal?: AbortSignal,
+): Promise<ToolOutput> {
+  const commands = commandsFor(caller.profile)
+  if (!commands.length) return { text: `Not a tool of this session: ${name}`, isError: true }
+  const known = `Commands: ${commands.join(', ')}.`
+  const command = typeof args.command === 'string' ? args.command.trim() : ''
+
+  if (name === 'centralu_commands') {
+    const words = (typeof args.query === 'string' ? args.query.toLowerCase().match(/[a-z0-9]{3,}/g) : null) ?? []
+    const line = (c: string) => `- ${c}: ${commandLine(commandDef(c)?.description ?? '')}`
+    const hits = words.length ? commands.filter((c) => words.some((w) => `${c.replace(/_/g, ' ')} ${line(c)}`.toLowerCase().includes(w))) : commands
+    const head = words.length && !hits.length ? `No command matches ${trustedJsonText(String(args.query))}; every command:\n` : ''
+    return {
+      text: `${head}${(hits.length ? hits : commands).map(line).join('\n')}\nRead one's arguments with centralu_help(command), run it with centralu_run(command, args).`,
+    }
+  }
+
+  if (!(commands as string[]).includes(command)) {
+    if (name === 'centralu_run') logRun(caller, command, 'no such command')
+    return { text: `No command ${trustedJsonText(command)} for this session. ${known}`, isError: true }
+  }
+  const def = commandDef(command)!
+
+  if (name === 'centralu_help') {
+    return {
+      text: `${command}: ${def.description}\nArguments (JSON schema): ${commandSchemaText(command)}\nRun it with centralu_run(command="${command}", args={…}).`,
+    }
+  }
+
+  // Codex's exec may hand the arguments over as JSON text rather than an object
+  let raw: unknown = args.args ?? {}
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw)
+    } catch {
+      /* answered below, with the schema */
+    }
+  }
+  const parsed = def.schema.strict().safeParse(raw)
+  if (!parsed.success) {
+    logRun(caller, command, 'wrong arguments')
+    return {
+      text:
+        `Wrong arguments for ${command}: ${parsed.error.issues.map((i) => `${i.path.join('.') || '(args)'}: ${i.message}`).join('; ')}.\n` +
+        `Its arguments (JSON schema): ${commandSchemaText(command)}\nCall centralu_run again with args that match.`,
+      isError: true,
+    }
+  }
+  logRun(caller, command, 'ran')
+  return runOrchestratorTool(tools, command, parsed.data as Record<string, unknown>, caller, signal)
+}
+
+/**
+ * One line per centralu_run on stderr (the host's log): which command a seat ran and whether it got past the
+ * schema. Codex calls MCP tools from inside its `exec` and the host's event for such a call carries no
+ * arguments, so this is where a run of a command can be told from a wrong one (the measurement reads it).
+ * The command's name only: arguments are the model's words.
+ */
+function logRun(caller: ToolCaller, command: string, outcome: 'ran' | 'wrong arguments' | 'no such command'): void {
+  console.error(`[commands] ${caller.sessionId ?? '-'} centralu_run ${JSON.stringify(command.slice(0, 64))}: ${outcome}`)
+}
+
 /** The shape the bridge (a separate process) can put into tools/list */
 /**
  * The base tools for a scoped coordinating session (#80/#81, physically). There is no notion of
@@ -870,8 +964,111 @@ export const SCOPED_INSTRUCTIONS = [
   'You cannot create or delete a session — report to the person if that is needed.',
 ].join('\n')
 
-/** Whether this profile allows the tool — both exposure (schemas) and execution (run) are decided by this */
-export function profileAllows(profile: ToolProfile, name: string): boolean {
+/**
+ * How a seat's rarely used commands reach the model (#512, a prototype behind `CC_RARE_COMMANDS`; the
+ * default is unchanged and the comparison of the three is in docs/tool-cost.md §9):
+ *
+ *   - `resident`: every tool in every request, as before.
+ *   - `deferred`: the rare ones wait behind Claude's tool search, the way the reader's app_guide does.
+ *     Codex reaches every MCP tool through its own `exec` anyway (tool-cost.md §6.2), so this is Claude's alone.
+ *   - `commands`: the rare ones leave the tool list. Three fixed tools stand in for them (COMMAND_TOOLS):
+ *     list, describe, run. The host checks a run against the command's own schema and the seat's
+ *     profile, the same gates the command has as a tool.
+ *
+ * One host-wide setting, read once at start (main.ts), because the tool list a session starts with is
+ * its prompt prefix: a session that changed tier mid-run would rebuild its cache.
+ */
+export const RARE_TIERS = ['resident', 'deferred', 'commands'] as const
+export type RareTier = (typeof RARE_TIERS)[number]
+
+let rareTier: RareTier = 'resident'
+
+/** The tier from `CC_RARE_COMMANDS`: anything else is the default */
+export function rareTierFrom(value: string | undefined): RareTier {
+  return (RARE_TIERS as readonly string[]).includes(value ?? '') ? (value as RareTier) : 'resident'
+}
+
+export function setRareTier(tier: RareTier): void {
+  rareTier = tier
+}
+
+export function currentRareTier(): RareTier {
+  return rareTier
+}
+
+/**
+ * Which commands are rare, per seat. The orchestrator's alone: the other directing seats carry a few tools
+ * each, all of them their reason to exist (the manager's propose_worktree_session is its main verb).
+ *
+ * In: create_app, propose_skill and propose_mcp_server (1,462, 1,144 and 1,098 characters, a third of the
+ * orchestrator's every request, asked for a few times in a seat's life). The instructions name each of them
+ * and say when, which is what a model that cannot see them goes looking with.
+ * Out: propose_worktree_session. Tried in the first run: asked for a branch, the orchestrator reached it 3 of 3
+ * times as a tool and 0 of 3 deferred or behind centralu_run, since nothing in its instructions names it
+ * (tool-cost.md §9). Out: app_guide. It answers the person's own questions about the app, which come often and
+ * without warning; deferred, a reader found it 4 of 5 times and never for a question about a setting (§8). Out
+ * too: everything the instructions tell the orchestrator to reach for first (list, read, recall, send, create
+ * a session or a project).
+ */
+export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly OrchestratorToolName[]>> = {
+  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server'],
+}
+
+/**
+ * The three fixed tools of the `commands` tier (#512). Short on purpose: they ride in every request in place
+ * of the commands' own definitions. `command` is a string, not an enum of the commands: an enum would put
+ * the names back in every request and change the prefix whenever a command is added, which is what this
+ * tier is for.
+ */
+export const COMMAND_TOOLS = [
+  {
+    name: 'centralu_commands',
+    description: 'Lists the Centralu commands not in your tool list, one line each. query narrows it.',
+    schema: z.object({ query: z.string().optional() }),
+  },
+  {
+    name: 'centralu_help',
+    description: "One Centralu command's description and its arguments' schema.",
+    schema: z.object({ command: z.string() }),
+  },
+  {
+    name: 'centralu_run',
+    description: 'Runs a Centralu command. args must match its schema (centralu_help).',
+    schema: z.object({ command: z.string(), args: z.record(z.string(), z.unknown()).optional() }),
+  },
+] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape> }[]
+
+export type CommandToolName = (typeof COMMAND_TOOLS)[number]['name']
+
+/** The fixed line the `commands` tier adds to the seat's instructions (#512): the tools alone were not a promise the model would look */
+export const COMMANDS_INSTRUCTION =
+  'Some commands, among them those named above, are not in your tool list: centralu_commands lists them, centralu_help gives one\'s arguments, centralu_run runs it.'
+
+/** The commands this seat reaches through centralu_run in this tier: never one its profile does not allow */
+export function commandsFor(profile: ToolProfile | 'human', tier: RareTier = rareTier): OrchestratorToolName[] {
+  if (tier !== 'commands' || profile === 'human') return []
+  return (RARE_COMMANDS[profile] ?? []).filter((n) => baseAllows(profile, n))
+}
+
+/** The tools this seat's Claude server defers behind tool search in this tier (the reader set marks its own) */
+function deferredFor(profile: ToolProfile, tier: RareTier): readonly string[] {
+  return tier === 'deferred' ? (RARE_COMMANDS[profile] ?? []) : []
+}
+
+/**
+ * Whether this profile allows the tool — both exposure (schemas) and execution (run) are decided by this.
+ *
+ * In the `commands` tier a rare command is not a tool of the seat: it is refused by name, as any tool the
+ * seat was not shown, and runs only through centralu_run, which `commandsFor` gates with the same rule.
+ */
+export function profileAllows(profile: ToolProfile, name: string, tier: RareTier = rareTier): boolean {
+  if (COMMAND_TOOLS.some((t) => t.name === name)) return commandsFor(profile, tier).length > 0
+  if ((commandsFor(profile, tier) as string[]).includes(name)) return false
+  return baseAllows(profile, name)
+}
+
+/** The profile rule itself, whatever the tier: who may use which of Centralu's commands */
+function baseAllows(profile: ToolProfile, name: string): boolean {
   if (profile === 'reader') {
     return READER_TOOLS.some((t) => t.name === name) || DELEGATE_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)
   }
@@ -892,22 +1089,27 @@ export function profileAllows(profile: ToolProfile, name: string): boolean {
  */
 export function toolDefsFor(
   profile: ToolProfile,
+  tier: RareTier = rareTier,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
   if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS]
-  return ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name))
+  const deferred = deferredFor(profile, tier)
+  return [
+    ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
+    ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
+  ]
 }
 
 /**
  * The server instructions for a profile, or undefined for none. In one place so the size test
  * measures the exact text the adapter sends.
  */
-export function instructionsFor(profile: ToolProfile): string | undefined {
+export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier): string | undefined {
   switch (profile) {
     case 'manager': return MANAGER_INSTRUCTIONS
     case 'scoped': return SCOPED_INSTRUCTIONS
     case 'builder': return BUILDER_INSTRUCTIONS
     case 'reader': return READER_INSTRUCTIONS || undefined
-    default: return ORCHESTRATOR_INSTRUCTIONS
+    default: return commandsFor(profile, tier).length ? `${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}` : ORCHESTRATOR_INSTRUCTIONS
   }
 }
 
@@ -922,8 +1124,8 @@ export function instructionsFor(profile: ToolProfile): string | undefined {
  * thread's developer instructions. The header says whose they are: Codex shows these tools to the model as
  * `mcp__centralu__<tool>`, and the text names them bare, as Claude Code's section heading (the server's name) does.
  */
-export function codexToolInstructionsFor(profile: ToolProfile): string | undefined {
-  const text = instructionsFor(profile)
+export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = rareTier): string | undefined {
+  const text = instructionsFor(profile, tier)
   return text ? `# How to use the ${ORCHESTRATOR_MCP_NAME} tools (mcp__${ORCHESTRATOR_MCP_NAME}__*)\n\n${text}` : undefined
 }
 
@@ -931,10 +1133,10 @@ export function codexToolInstructionsFor(profile: ToolProfile): string | undefin
  * The tools this profile can call **right now** — the same decision as the exposure logic
  * (orchestratorToolSchemas). The guide uses this when it states what each seat can do (M4 P-4):
  * writing the list out by hand would let the guide fall behind every time a tool is added or
- * removed.
+ * removed. Read in the `resident` tier: the guide says what a seat can do, not how its tools are packed (#512).
  */
 function toolsFor(profile: ToolProfile): GuideTool[] {
-  return toolDefsFor(profile).map((t) => ({ name: t.name, description: t.description }))
+  return toolDefsFor(profile, 'resident').map((t) => ({ name: t.name, description: t.description }))
 }
 
 function guideSeats(): GuideSeats {

@@ -17,6 +17,7 @@ import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
+import { currentRareTier, rareTierFrom, setRareTier } from './sessions/orchestrator-tools.js'
 import { readShared } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
@@ -157,6 +158,13 @@ const pathResult = ensureToolPath()
 if (pathResult.source !== 'unchanged') {
   console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
 }
+
+/*
+ * How the orchestrator's rare commands are exposed (#512): a prototype measured against the default, off unless
+ * this says otherwise. Set before any session starts, since a session's tool list is its prompt prefix.
+ */
+setRareTier(rareTierFrom(process.env.CC_RARE_COMMANDS))
+if (currentRareTier() !== 'resident') console.error(`[agent-host] rare commands: ${currentRareTier()} (CC_RARE_COMMANDS)`)
 
 /*
  * A swap's standby (#280 step 3): checks the store without writing to it, reports, and waits here,
