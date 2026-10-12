@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { launchFor } from '../../tool-launch.js'
+import { codexLaunch } from './native.js'
 import type { AgentProcess } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
 
@@ -65,14 +65,17 @@ export class CodexClient {
     if (opts.process) {
       this.proc = opts.process
     } else {
-      // On Windows an npm-installed codex is a `.cmd` shim, which cannot be spawned without a shell (tool-launch.ts)
-      const launch = launchFor(opts.command ?? 'codex')
+      /*
+       * The platform binary npm's package ships rather than its `node` wrapper (#568, native.ts); otherwise as found, a
+       * Windows `.cmd` shim read for what it starts (tool-launch.ts)
+       */
+      const launch = codexLaunch(opts.command ?? 'codex')
       /*
        * In a process group of its own (Windows: a tree), so stopping it also ends what it started
        * and what it left running after it exited (`local-process.ts`). It no longer shares the host's
        * group: when the host goes, its stdin closes, and codex exits on EOF (#57).
        */
-      this.proc = spawnLocalAgent({ command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], cwd: opts.cwd, env: process.env })
+      this.proc = spawnLocalAgent({ command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], cwd: opts.cwd, env: launch.env(process.env) })
     }
 
     /**

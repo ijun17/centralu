@@ -18,8 +18,9 @@ import type {
 } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import { launchFor } from '../../tool-launch.js'
+import { codexLaunch } from './native.js'
 import { installedCliVersion } from '../../cli-version.js'
-import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
+import type { AgentAdapter, AgentProcess, CreateSessionOpts, DetectResult, EventSink, ProcessSource, SessionHandle } from '../contract.js'
 import { CodexClient, type ServerRequest } from './client.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
@@ -228,6 +229,15 @@ const UNLINKED_CAP = 2_000
 /** The ceiling for a background resume — the same value as the manager's step limit (150s). Past this, it is considered stuck */
 const BACKGROUND_RESUME_CAP_MS = 150_000
 
+/**
+ * An app-server spawned in the keeper (#280 step 2), from the same program a direct spawn uses: the platform binary
+ * rather than npm's `node` wrapper (#568, native.ts).
+ */
+function spawnInKeeper(source: ProcessSource, cwd: string): AgentProcess {
+  const launch = codexLaunch(whichTool('codex') ?? 'codex')
+  return source.spawn({ command: launch.command, args: [...launch.args, 'app-server'], cwd, env: launch.env(process.env) })
+}
+
 class CodexSession implements SessionHandle {
   readonly sessionId: string
   /**
@@ -400,8 +410,7 @@ class CodexSession implements SessionHandle {
         command: whichTool('codex') ?? 'codex',
         // Under the keeper (#280 step 2) the app-server is spawned there, or adopted from a previous host
         process: opts.processSource
-          ? (opts.processSource.adopt?.process ??
-            opts.processSource.spawn({ command: whichTool('codex') ?? 'codex', args: ['app-server'], cwd: opts.cwd, env: process.env }))
+          ? (opts.processSource.adopt?.process ?? spawnInKeeper(opts.processSource, opts.cwd))
           : undefined,
       },
     )

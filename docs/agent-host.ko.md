@@ -262,6 +262,17 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 프로세스는 예전처럼 호스트와 함께 끝난다. 세션이 도는 동안 설치된 Claude Code 업데이트는 각 세션이 다음에
 시작할 때 쓰이고, 옛 버전의 링크는 마지막 세션이 끝나면 지워진다.
 
+**Codex 프로세스를 띄우는 방법 (#568).** `npm i -g @openai/codex`는 `bin/codex.js`를 설치한다. 플랫폼
+바이너리(`@openai/codex-<os>-<arch>/vendor/<triple>/bin/codex`)를 찾아 띄우고, 신호를 전달하려고만 살아 있는
+Node 래퍼다. codex-cli 0.160(macOS arm64)에서 측정: 래퍼로 띄운 유휴 `codex app-server`는 `node` 44 MB와
+바이너리 115 MB, 직접 띄우면 115 MB뿐이다. 그래서 호스트가 띄우는 모든 Codex 클라이언트(세션의 app-server,
+키퍼 안이든 밖이든, 그리고 사용량·모델·기록·포크·삭제용 짧은 것들)는 래퍼가 찾을 자리의 바이너리를 띄운다
+(`adapters/codex/native.ts`): 패키지 안(npm), 패키지 옆(pnpm, 호이스팅 설치), 패키지 자신의 `vendor/`. 래퍼가
+설정하는 `CODEX_MANAGED_BY_<NPM|PNPM|BUN>`과 `CODEX_MANAGED_PACKAGE_ROOT`도 똑같이 설정한다. 바이너리는 이것으로
+업데이트 안내와 설치 점검을 한다. `codex-path/rg`와 `codex-resources`는 바이너리가 자기 옆에서 찾는다. 그 밖의
+경우(Homebrew cask, PATH의 바이너리, 플랫폼 패키지가 빠진 래퍼, 래퍼가 모르는 플랫폼)는 찾은 그대로 띄운다.
+`CC_CODEX_NATIVE=0`이면 예전처럼 래퍼를 띄운다.
+
 추가 하나(#280): 키퍼 아래에서(`CC_KEEPER=1`) 호스트는 `{"activity":{"busy":true|false}}`도 stdout에
 쓴다, 시작할 때 한 번과 바뀔 때마다(`keeper-link.ts`). 키퍼의 유휴 규칙이 읽는 것이 이것이다. 다른 방법으로
 띄우면 호스트는 준비 줄 말고 아무것도 쓰지 않는다.

@@ -326,6 +326,18 @@ CLI's stdin and kills it only after 7 seconds. A process that is mid-turn when t
 still ended with the host, as before. A Claude Code update installed while sessions run is picked
 up by each session's next start; the old version's link goes once its last session ends.
 
+**How a Codex process is started (#568).** `npm i -g @openai/codex` installs `bin/codex.js`, a Node wrapper that
+finds the platform binary (`@openai/codex-<os>-<arch>/vendor/<triple>/bin/codex`), starts it and stays alive only
+to forward signals. Measured on codex-cli 0.160 (macOS arm64): an idle `codex app-server` started through the
+wrapper is 44 MB of `node` plus 115 MB of binary; started directly, the 115 MB alone. So every Codex client the host
+starts (a session's app-server, in the keeper or not, and the short-lived ones for usage, models, history, fork and
+delete) starts the binary where the wrapper would find it (`adapters/codex/native.ts`): nested in the package
+(npm), beside it (pnpm, hoisting installs), or the package's own `vendor/`. It sets what the wrapper sets,
+`CODEX_MANAGED_BY_<NPM|PNPM|BUN>` and `CODEX_MANAGED_PACKAGE_ROOT`, which the binary reads for its update hint and
+its install check; it finds `codex-path/rg` and `codex-resources` beside itself. Anything else (a Homebrew cask, a
+binary on PATH, a wrapper whose platform package is missing, a platform the wrapper does not know) starts as found.
+`CC_CODEX_NATIVE=0` starts the wrapper as before.
+
 The one addition (#280): under the keeper (`CC_KEEPER=1`), the host also writes
 `{"activity":{"busy":true|false}}` to stdout, once at start and whenever it changes
 (`keeper-link.ts`). That is what the keeper's idle rule reads. Started any other way, the host

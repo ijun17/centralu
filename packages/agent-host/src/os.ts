@@ -40,6 +40,24 @@ export function locksRunningPrograms(platform: Platform = HOST_PLATFORM): boolea
   return platform === 'win32'
 }
 
+/** A program's file name on `platform`: `codex.exe` on Windows, `codex` elsewhere. */
+export function programFile(name: string, platform: Platform = HOST_PLATFORM): string {
+  return platform === 'win32' ? `${name}.exe` : name
+}
+
+/**
+ * The Rust target triple a CLI built for this machine carries, as Codex's npm package names its binaries (bin/codex.js,
+ * codex-cli 0.160.0): musl on Linux and Android, MSVC on Windows. Null where it ships no build.
+ */
+export function rustTarget(platform: Platform = HOST_PLATFORM, arch: string = process.arch): string | null {
+  const cpu = arch === 'x64' ? 'x86_64' : arch === 'arm64' ? 'aarch64' : null
+  if (!cpu) return null
+  if (platform === 'darwin') return `${cpu}-apple-darwin`
+  if (platform === 'linux' || platform === 'android') return `${cpu}-unknown-linux-musl`
+  if (platform === 'win32') return `${cpu}-pc-windows-msvc`
+  return null
+}
+
 /** The path rules of `platform`: backslashes and drive letters on Windows, slashes elsewhere. */
 export function pathsOf(platform: Platform = HOST_PLATFORM): PlatformPath {
   return platform === 'win32' ? win32 : posix
