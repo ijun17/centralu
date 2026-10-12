@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { CacheSessionStats, CacheStats, CacheWindowStats } from '@cc/protocol'
-import { cacheHitRate, cacheWindowName, percentOf } from '@cc/core'
+import { cacheHitRate, cacheWindowName, percentOf, rebuildBreakdown } from '@cc/core'
 import { Tooltip } from '../../components/primitives.jsx'
 import { formatTokens } from './format.js'
 
@@ -83,26 +83,31 @@ export function CacheSection({
               testId="written"
             />
             <Figure swatch="bg-ink-faint" label="Uncached input" value={formatTokens(w.inputTokens)} testId="uncached" />
-            {cache.writes && (
-              <Figure
-                label={
-                  <Tooltip
-                    testId="usage-cache-rebuild-tip"
-                    content={
-                      <span className="block max-w-[260px] text-ink-muted">
-                        A request that wrote at least half its input to the cache (4k tokens or more): its cached prompt
-                        had expired or changed, so it was paid again at the write price
-                      </span>
-                    }
-                  >
-                    <span className="underline decoration-dotted decoration-ink-faint underline-offset-2">Rebuilds</span>
-                  </Tooltip>
-                }
-                value={`${w.rebuilds} of ${w.requests} requests`}
-                testId="rebuilds"
-              />
-            )}
+            <Figure
+              label={
+                <Tooltip
+                  testId="usage-cache-rebuild-tip"
+                  content={
+                    <span className="block max-w-[260px] text-ink-muted">
+                      {cache.writes
+                        ? 'A request that wrote at least half its input to the cache (4k tokens or more): its cached prompt had expired or changed, so it was paid again at the write price.'
+                        : 'A request that read less than half its input from the cache (4k tokens or more not read): the rest was paid in full.'}{' '}
+                      The cause is a guess from what happened in the session just before it.
+                    </span>
+                  }
+                >
+                  <span className="underline decoration-dotted decoration-ink-faint underline-offset-2">Rebuilds</span>
+                </Tooltip>
+              }
+              value={`${w.rebuilds} of ${w.requests} requests`}
+              testId="rebuilds"
+            />
           </dl>
+          {w.rebuilds > 0 && w.rebuildCauses && (
+            <p className="mt-1 pl-3.5 text-2xs leading-body text-ink-faint" data-testid="usage-cache-causes">
+              {w.rebuilds} rebuild{w.rebuilds === 1 ? '' : 's'}: {rebuildBreakdown(w.rebuildCauses, w.expiredIdleMs)}
+            </p>
+          )}
           {!cache.writes && (
             <p className="mt-2 text-2xs leading-body text-ink-faint" data-testid="usage-cache-reads-only">
               {toolLabel} reports cache reads only, not writes: the hit rate is cached input over all input.
@@ -195,14 +200,23 @@ function TopSessions({
       <ul className="mt-1 space-y-px">
         {sessions.map((s) => {
           const title = s.name || 'Deleted session'
-          const figure = writes
-            ? `${formatTokens(s.cacheCreationTokens)}${s.rebuilds ? ` · ${s.rebuilds} rebuild${s.rebuilds === 1 ? '' : 's'}` : ''}`
-            : formatTokens(s.inputTokens)
+          const figure = `${formatTokens(writes ? s.cacheCreationTokens : s.inputTokens)}${
+            s.rebuilds ? ` · ${s.rebuilds} rebuild${s.rebuilds === 1 ? '' : 's'}` : ''
+          }`
+          // Why this session rebuilt, under its name: the question the row answers is "what made it write"
+          const causes = s.rebuilds > 0 ? rebuildBreakdown(s.rebuildCauses) : ''
           const body = (
-            <>
-              <span className="truncate">{title}</span>
-              <span className="readout ml-auto shrink-0 text-ink-faint">{figure}</span>
-            </>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="flex items-center gap-2">
+                <span className="truncate">{title}</span>
+                <span className="readout ml-auto shrink-0 text-ink-faint">{figure}</span>
+              </span>
+              {causes && (
+                <span className="truncate text-2xs text-ink-faint" data-testid={`usage-cache-session-causes-${s.sessionId}`}>
+                  {causes}
+                </span>
+              )}
+            </span>
           )
           return (
             <li key={s.sessionId}>

@@ -42,3 +42,57 @@ export function cacheTooltipLine(cache: CacheStats | undefined): string | null {
   const rate = cacheHitRate(w)
   return rate === null ? `Cache: no requests · ${name}` : `Cache hit ${percentOf(rate)}% · ${name}`
 }
+
+/** What each rebuild cause is called on screen (`RebuildCause`, docs/agent-host.md §6.1) */
+export const REBUILD_CAUSE_LABEL: Readonly<Record<string, string>> = {
+  cold_start: 'first request',
+  subagent: 'subagent start',
+  new_process: 'new process',
+  model_change: 'model change',
+  compaction: 'compaction',
+  thread_restart: 'thread restart',
+  instructions: 'tools changed',
+  expired: 'cache expired',
+  probably_expired: 'probably expired',
+  unknown: 'unknown',
+}
+
+/** The order causes are listed in when their counts tie: the order of evidence, unknown last */
+const CAUSE_ORDER = Object.keys(REBUILD_CAUSE_LABEL)
+const rank = (cause: string) => {
+  const i = CAUSE_ORDER.indexOf(cause)
+  // A cause this build does not know goes just before unknown
+  return i >= 0 ? i : CAUSE_ORDER.length - 1.5
+}
+
+/**
+ * The rebuilds by cause, in one line: "3 cache expired · 1 model change · 1 unknown", most first. The idle time before
+ * the rebuilds put down to expiry follows the first of them ("3 cache expired (idle 6–64 min)"). A cause this build
+ * does not know (a newer host's) is shown by its name. Empty when there is nothing to break down.
+ */
+export function rebuildBreakdown(
+  causes: Readonly<Record<string, number>> | undefined,
+  expiredIdleMs?: { min: number; max: number },
+): string {
+  let idleSaid = false
+  return Object.entries(causes ?? {})
+    .filter(([, n]) => n > 0)
+    .sort(([a, x], [b, y]) => y - x || rank(a) - rank(b))
+    .map(([cause, n]) => {
+      let text = `${n} ${REBUILD_CAUSE_LABEL[cause] ?? cause.replace(/_/g, ' ')}`
+      if (!idleSaid && expiredIdleMs && (cause === 'expired' || cause === 'probably_expired')) {
+        idleSaid = true
+        text += ` (idle ${idleRange(expiredIdleMs)})`
+      }
+      return text
+    })
+    .join(' · ')
+}
+
+/** "6–64 min", "12 min", "3–5 h": the idle time in the unit that reads */
+function idleRange({ min, max }: { min: number; max: number }): string {
+  const unit = max >= 120 * 60_000 ? { ms: 3600_000, name: 'h' } : { ms: 60_000, name: 'min' }
+  const lo = Math.round(min / unit.ms)
+  const hi = Math.round(max / unit.ms)
+  return lo === hi ? `${hi} ${unit.name}` : `${lo}–${hi} ${unit.name}`
+}

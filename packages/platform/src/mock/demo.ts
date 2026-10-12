@@ -267,8 +267,8 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
 
   mock.cacheStats = demoCache(
     [
-      { sessionId: working.id, name: 'Finish the collapsed composer', write: 1_120_000, rebuilds: 3 },
-      { sessionId: asking.id, name: 'Pick the hero copy', write: 540_000, rebuilds: 2 },
+      { sessionId: working.id, name: 'Finish the collapsed composer', write: 1_120_000, causes: { expired: 2, model_change: 1 } },
+      { sessionId: asking.id, name: 'Pick the hero copy', write: 540_000, causes: { compaction: 1, expired: 1 } },
     ],
     [
       { sessionId: approving.id, name: 'Clean up leftover processes', input: 260_000 },
@@ -302,7 +302,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
  * reads only. Counted since well before both windows, so they show under their own names.
  */
 function demoCache(
-  claude: { sessionId: string; name: string; write: number; rebuilds: number }[],
+  claude: { sessionId: string; name: string; write: number; causes: Record<string, number> }[],
   codex: { sessionId: string; name: string; input: number }[],
 ): Record<string, CacheStats> {
   const now = Date.now()
@@ -322,7 +322,10 @@ function demoCache(
         inputTokens: n(18_400, scale),
         cacheReadTokens: n(31_200_000, scale),
         cacheCreationTokens: n(1_940_000, scale),
-        rebuilds: n(6, scale),
+        // Rounded per cause first, so the causes add up to the count however the window scales
+        rebuilds: n(3, scale) + 3 * n(1, scale),
+        rebuildCauses: { expired: n(3, scale), model_change: n(1, scale), compaction: n(1, scale), unknown: n(1, scale) },
+        expiredIdleMs: { min: 64 * 60_000, max: 3 * 3600_000 },
         sessions: claude.map((s) => ({
           sessionId: s.sessionId,
           name: s.name,
@@ -330,7 +333,8 @@ function demoCache(
           inputTokens: n(6_000, scale),
           cacheReadTokens: n(9_800_000, scale),
           cacheCreationTokens: n(s.write, scale),
-          rebuilds: n(s.rebuilds, scale),
+          rebuilds: Object.values(s.causes).reduce((sum, k) => sum + n(k, scale), 0),
+          rebuildCauses: Object.fromEntries(Object.entries(s.causes).map(([c, k]) => [c, n(k, scale)])),
         })),
       })),
     },
@@ -343,7 +347,9 @@ function demoCache(
         inputTokens: n(410_000, scale),
         cacheReadTokens: n(3_900_000, scale),
         cacheCreationTokens: 0,
-        rebuilds: 0,
+        rebuilds: 2 * n(1, scale),
+        rebuildCauses: { thread_restart: n(1, scale), probably_expired: n(1, scale) },
+        expiredIdleMs: { min: 9 * 60_000, max: 9 * 60_000 },
         sessions: codex.map((s) => ({
           sessionId: s.sessionId,
           name: s.name,

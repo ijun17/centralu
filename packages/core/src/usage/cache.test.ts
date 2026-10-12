@@ -1,6 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import type { CacheStats, CacheWindowStats } from '@cc/protocol'
-import { cacheHitRate, cacheTooltipLine, cacheWindowName, percentOf } from './cache.js'
+import { cacheHitRate, cacheTooltipLine, cacheWindowName, percentOf, rebuildBreakdown } from './cache.js'
+
+describe('rebuildBreakdown', () => {
+  const MIN = 60_000
+
+  it('lists the causes in one line, most first, ties in the order of evidence', () => {
+    expect(rebuildBreakdown({ unknown: 1, compaction: 1, expired: 3, model_change: 1 })).toBe(
+      '3 cache expired · 1 model change · 1 compaction · 1 unknown',
+    )
+  })
+
+  it('says how long the cache sat idle before the rebuilds put down to expiry, once', () => {
+    expect(rebuildBreakdown({ expired: 2, probably_expired: 1 }, { min: 6 * MIN, max: 64 * MIN })).toBe(
+      '2 cache expired (idle 6–64 min) · 1 probably expired',
+    )
+    expect(rebuildBreakdown({ probably_expired: 1 }, { min: 9 * MIN, max: 9 * MIN })).toBe('1 probably expired (idle 9 min)')
+    expect(rebuildBreakdown({ expired: 2 }, { min: 3 * 60 * MIN, max: 5 * 60 * MIN })).toBe('2 cache expired (idle 3–5 h)')
+  })
+
+  it("shows a cause this build does not know (a newer host's) by its name, before unknown", () => {
+    expect(rebuildBreakdown({ unknown: 1, some_new_reason: 1 })).toBe('1 some new reason · 1 unknown')
+  })
+
+  it('is empty with nothing to break down', () => {
+    expect(rebuildBreakdown(undefined)).toBe('')
+    expect(rebuildBreakdown({ expired: 0 })).toBe('')
+  })
+})
 
 const NOW = new Date(2026, 9, 12, 15, 0).getTime()
 const FIVE_HOURS_AGO = new Date(NOW - 5 * 3600_000).toISOString()

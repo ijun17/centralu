@@ -22,6 +22,7 @@ import { existsSync, rmSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
   CacheStats,
+  RebuildCause,
   AppQuestion,
   AppReach,
   ApprovalDetail,
@@ -396,6 +397,8 @@ export class SessionManager {
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
+  /** Why a session's process is being restarted, for the cache's rebuild cause; taken when the new process comes up */
+  private readonly restartReasons = new Map<string, RebuildCause>()
   /** Session asked to be reported on completion -> orchestrator to notify (removed once notified) */
   private awaitingReport = new Map<string, string>()
   /**
@@ -1715,6 +1718,8 @@ export class SessionManager {
       }
     }
     this.handles.set(id, handle)
+    // The cache's first request (§6.1): a new conversation, or one taken over from outside in a new process
+    this.cacheLedger.note(id, params.resumeExternalId ? 'new_process' : 'cold_start')
     this.running.set(id, {
       model: info.model,
       effort: info.effort,
@@ -2342,6 +2347,9 @@ export class SessionManager {
         return { session: m, resumed: false, reason: leaving }
       }
       this.handles.set(sessionId, handle)
+      // Why the process came up again, if a restart said so; a wake, a revive or a manual restart otherwise (§6.1)
+      this.cacheLedger.note(sessionId, this.restartReasons.get(sessionId) ?? 'new_process')
+      this.restartReasons.delete(sessionId)
       this.running.set(sessionId, launched)
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       // The identifier may only now be available — record it for the next resume
@@ -2824,6 +2832,13 @@ export class SessionManager {
    * Changes model or permissions (FR-7). If the adapter supports it, it applies starting next turn;
    * if not, only the metadata is updated — it comes up with the new configuration on resume.
    */
+  /** A settings restart is a model change when the model is what drifted (§6.1); otherwise a plain new process */
+  private restartCause(sessionId: string): RebuildCause | undefined {
+    const live = this.running.get(sessionId)
+    const m = this.meta.get(sessionId)
+    return live && m && live.model !== m.model ? 'model_change' : undefined
+  }
+
   async updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
@@ -2831,6 +2846,8 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
+    // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
+    if (s.model !== undefined && s.model !== m.model) this.cacheLedger.note(sessionId, 'model_change')
     if (s.model !== undefined) m.model = s.model
     if (s.effort !== undefined) m.effort = s.effort
     if (s.verbosity !== undefined) m.verbosity = s.verbosity
@@ -2894,7 +2911,7 @@ export class SessionManager {
         this.restartAfterTurn.add(sessionId)
         applied = 'after_turn'
       } else {
-        applied = (await this.restartSession(sessionId)).resumed ? 'restarted' : 'saved'
+        applied = (await this.restartSession(sessionId, this.restartCause(sessionId))).resumed ? 'restarted' : 'saved'
       }
     }
 
@@ -3067,7 +3084,9 @@ export class SessionManager {
     if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId)) {
       // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
       const apps = this.appsRestartAfterTurn.delete(e.sessionId)
-      if ((apps || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) void this.restartSession(e.sessionId).catch(() => {})
+      if ((apps || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
+        void this.restartSession(e.sessionId, apps ? 'thread_restart' : this.restartCause(e.sessionId)).catch(() => {})
+      }
     }
   }
 
@@ -3220,6 +3239,11 @@ export class SessionManager {
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
         m.context = null
+        this.cacheLedger.note(m.id, 'compaction')
+        break
+      case 'compaction':
+        // The conversation the next request sends begins with a summary the cache has never seen (§6.1)
+        this.cacheLedger.note(m.id, 'compaction')
         break
       case 'goal':
         // The goal (2026-09-07) is a live field too — after a restart, the tool tells us again (codex fetches
@@ -3359,6 +3383,8 @@ export class SessionManager {
     const m = this.meta.get(e.sessionId)
     if (!m) return
     const live = this.running.get(e.sessionId)
+    // The tool switched models by itself (a refusal's fallback, #304): the next request reads none of the cache
+    if (e.model !== undefined && e.model !== (live ?? m).model) this.cacheLedger.note(e.sessionId, 'model_change')
     let changed = false
     for (const k of ['model', 'effort', 'verbosity', 'serviceTier'] as const) {
       const v = e[k]
@@ -4560,7 +4586,12 @@ export class SessionManager {
    * Creating a new session when a tool has become unresponsive breaks the conversation — this swaps only the
    * process.
    */
-  async restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+  async restartSession(
+    sessionId: string,
+    /** What made the restart, for the cache's rebuild cause (§6.1); a plain new process when absent */
+    cause?: RebuildCause,
+  ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    if (cause) this.restartReasons.set(sessionId, cause)
     // Applying a deferred settings change (#164) is also done by this same restart, and so is an app set's (#371)
     this.restartAfterTurn.delete(sessionId)
     this.appsRestartAfterTurn.delete(sessionId)
@@ -5908,7 +5939,7 @@ export class SessionManager {
    * immediately */
   private async restartOrchestrator(): Promise<void> {
     const orch = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
-    if (orch) await this.restartSession(orch.id).catch(() => {})
+    if (orch) await this.restartSession(orch.id, 'instructions').catch(() => {})
   }
 
   /** The person's answer to an MCP server proposal — if approved, it becomes a user-folder app and the
@@ -6086,13 +6117,17 @@ export class SessionManager {
     this.appsHub?.sessionAppsChanged(sessionId)
     const handle = this.handles.get(sessionId)
     if (!handle) return 'next_turn'
-    if (!handle.appAttachment) return 'now'
+    // Claude takes the new tools at once, and a changed tool list is a changed prompt (§6.1)
+    if (!handle.appAttachment) {
+      this.cacheLedger.note(sessionId, 'instructions')
+      return 'now'
+    }
     const m = this.meta.get(sessionId)
     if (m && inTurn(m.state)) {
       this.restartAfterTurn.add(sessionId)
       this.appsRestartAfterTurn.add(sessionId)
     } else {
-      void this.restartSession(sessionId).catch(() => {})
+      void this.restartSession(sessionId, 'thread_restart').catch(() => {})
     }
     return 'next_turn'
   }

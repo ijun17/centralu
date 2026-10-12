@@ -3,6 +3,7 @@
  * shapes observed during the spike. If the SDK's format changes, this is what breaks first.
  */
 import { describe, expect, it, vi } from 'vitest'
+import type { NormalizedEvent } from '@cc/protocol'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
 
 const SID = 's1'
@@ -652,8 +653,7 @@ describe('a model request, for prompt cache accounting', () => {
     ...extra,
     message: { id, role: 'assistant', content, usage },
   })
-  const requests = (events: { type: string }[]) =>
-    events.flatMap((e) => (e.type === 'usage_update' && 'request' in e && e.request ? [e.request] : []))
+  const requests = (events: NormalizedEvent[]) => events.flatMap((e) => (e.type === 'usage_update' && e.request ? [e.request] : []))
 
   it('is carried once per message id, however many messages repeat it', () => {
     const stream = new ClaudeStreamNormalizer(SID)
@@ -678,12 +678,26 @@ describe('a model request, for prompt cache accounting', () => {
       message: { id: 'msg_sub', role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 21_000 } },
     }
     const out = stream.push(sub)
-    expect(requests(out)).toEqual([{ inputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 21_000 }])
+    // Named by the call that launched it, so its own prompt and cache are judged apart from the parent's
+    expect(requests(out)).toEqual([{ inputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 21_000, agent: 'tu1' }])
     // The reading is still the parent's: the subagent's 21k write is not what the session's figures show
     const reading = out.find((e) => e.type === 'usage_update')
     expect(reading).toMatchObject({ tokens: { inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 } })
     // Repeats of the same subagent message are not counted again
     expect(requests(stream.push(sub))).toEqual([])
+  })
+
+  it('says how long its write stays cached, from the API split of the write', () => {
+    const withSplit = (id: string, split: Record<string, number>) => ({
+      type: 'assistant',
+      message: { id, role: 'assistant', content: [], usage: { ...usage, cache_creation: split } },
+    })
+    const stream = new ClaudeStreamNormalizer(SID)
+    const ttl = (id: string, split: Record<string, number>) => requests(stream.push(withSplit(id, split)))[0]?.cacheTtl
+    expect(ttl('m1h', { ephemeral_1h_input_tokens: 4_213, ephemeral_5m_input_tokens: 0 })).toBe('1h')
+    expect(ttl('m5m', { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 4_213 })).toBe('5m')
+    // Wrote nothing, or no split: the lifetime is not known from this request
+    expect(ttl('none', { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 })).toBeUndefined()
   })
 
   it("is not carried by the turn's result, which is a running total", () => {

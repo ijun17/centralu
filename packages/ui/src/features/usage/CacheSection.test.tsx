@@ -16,8 +16,10 @@ function win(over: Partial<CacheWindowStats> = {}): CacheWindowStats {
     cacheReadTokens: 31_200_000,
     cacheCreationTokens: 1_940_000,
     rebuilds: 6,
+    rebuildCauses: { expired: 3, model_change: 1, compaction: 1, unknown: 1 },
+    expiredIdleMs: { min: 64 * 60_000, max: 64 * 60_000 },
     sessions: [
-      { sessionId: 'here', name: 'Finish the composer', requests: 9, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 1_120_000, rebuilds: 3 },
+      { sessionId: 'here', name: 'Finish the composer', requests: 9, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 1_120_000, rebuilds: 3, rebuildCauses: { expired: 2, model_change: 1 } },
       { sessionId: 'gone', name: '', requests: 2, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 540_000, rebuilds: 1 },
     ],
     ...over,
@@ -40,6 +42,9 @@ describe('CacheSection', () => {
     expect(text).toContain('Written to cache 1.9M')
     expect(text).toContain('Uncached input 18k')
     expect(text).toContain('Rebuilds 6 of 412 requests')
+    expect(text).toContain('6 rebuilds: 3 cache expired (idle 64 min) · 1 model change · 1 compaction · 1 unknown')
+    // Each session that rebuilt says why, under its name
+    expect(text).toContain('Finish the composer 1.1M · 3 rebuilds 2 cache expired · 1 model change')
     expect(text).toContain('Most cache writes')
     expect(text).toContain('Finish the composer 1.1M · 3 rebuilds')
     // A session this screen has opens; one that is gone is named so and is not a button
@@ -54,7 +59,9 @@ describe('CacheSection', () => {
   it('says plainly that a tool reports reads only, and ranks its sessions by uncached input', () => {
     const codex = win({
       cacheCreationTokens: 0,
-      rebuilds: 0,
+      rebuilds: 1,
+      rebuildCauses: { thread_restart: 1 },
+      expiredIdleMs: undefined,
       inputTokens: 410_000,
       cacheReadTokens: 3_900_000,
       sessions: [{ sessionId: 'here', name: 'Optimize images', requests: 3, inputTokens: 260_000, cacheReadTokens: 1, cacheCreationTokens: 0, rebuilds: 0 }],
@@ -65,7 +72,9 @@ describe('CacheSection', () => {
     expect(text).toContain('Codex reports cache reads only, not writes: the hit rate is cached input over all input.')
     expect(text).toContain('Most uncached input')
     expect(text).toContain('Optimize images 260k')
-    expect(text).not.toContain('Rebuilds')
+    // A request that read less than half its input from cache counts as a rebuild for a reads-only tool
+    expect(text).toContain('Rebuilds 1 of 412 requests')
+    expect(text).toContain('1 rebuild: 1 thread restart')
   })
 
   it('says there were no requests rather than drawing 0%', () => {
@@ -81,5 +90,14 @@ describe('CacheSection', () => {
     const { text } = render({ writes: true, countingSince: started.toISOString(), windows: [win()] })
     expect(text).toContain(`cache hit · since ${hhmm}`)
     expect(text).toContain('Counted by the host since it started; earlier requests are not known.')
+  })
+})
+
+describe('CacheSection from a host that predates rebuild causes', () => {
+  it('shows the rebuild count without a breakdown', () => {
+    const { rebuildCauses: _c, expiredIdleMs: _i, ...old } = win()
+    const { text } = render({ writes: true, countingSince: LONG_AGO, windows: [{ ...old, sessions: [] }] })
+    expect(text).toContain('Rebuilds 6 of 412 requests')
+    expect(text).not.toContain('6 rebuilds:')
   })
 })

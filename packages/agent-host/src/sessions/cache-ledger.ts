@@ -1,4 +1,4 @@
-import type { CacheSessionStats, CacheStats, CacheWindowStats, RequestInput, ToolName } from '@cc/protocol'
+import type { CacheSessionStats, CacheStats, CacheWindowStats, RebuildCause, RequestInput, ToolName } from '@cc/protocol'
 
 /**
  * What the prompt cache did lately, per tool (docs/agent-host.md §6.1).
@@ -16,6 +16,10 @@ import type { CacheSessionStats, CacheStats, CacheWindowStats, RequestInput, Too
  * write is a small share. A request whose cached prefix had expired (more than five minutes idle) or changed (another
  * model, edited tools or system prompt) reads almost nothing and writes almost everything. Half is the line between
  * the two, wide on both sides: a long session's ordinary request writes a few percent, a rebuild well over 90%.
+ *
+ * A tool that reports reads only (Codex) has no write figure; for it, what was not read from cache stands in: a
+ * request that read less than half its input from cache paid the rest in full, and that is what the provider caches
+ * for the next one.
  */
 export const REBUILD_SHARE = 0.5
 /**
@@ -24,14 +28,28 @@ export const REBUILD_SHARE = 0.5
  * worth pointing at.
  */
 export const REBUILD_MIN_TOKENS = 4_096
+/**
+ * Idle longer than this, with the cache lifetime unknown, is "probably expired": the API's default lifetime is five
+ * minutes (Claude Code asks for an hour only in some cases, and says which in its usage; Codex does not say).
+ */
+export const DEFAULT_TTL_MS = 5 * 60_000
+const TTL_MS = { '5m': 5 * 60_000, '1h': 60 * 60_000 } as const
 
 /** How long an entry is kept: the longest window is "today", which never reaches back more than a day */
 const KEEP_MS = 24 * 60 * 60_000
-/** At most this many entries per tool, oldest dropped first: a bound on memory however busy a day gets (~100 bytes each) */
+/** At most this many entries per tool, oldest dropped first: a bound on memory however busy a day gets (~120 bytes each) */
 const MAX_ENTRIES = 50_000
+/** At most this many lanes (a session's conversation, or one of its subagents) and sessions with notes held at once */
+const MAX_LANES = 5_000
 /** How many sessions a window names */
 const TOP_SESSIONS = 3
 const FIVE_HOURS_MS = 5 * 60 * 60_000
+
+/**
+ * The causes the host is told about between two requests (`note`), strongest evidence first. Which of them is named
+ * for a rebuild is the first one present; the time gap and "unknown" are judged only when none is.
+ */
+const NOTED: readonly RebuildCause[] = ['cold_start', 'new_process', 'model_change', 'compaction', 'thread_restart', 'instructions']
 
 type Entry = {
   at: number
@@ -40,23 +58,46 @@ type Entry = {
   read: number
   write: number
   rebuild: boolean
+  /** The likely cause, for a rebuild */
+  cause?: RebuildCause
+  /** How long the lane had been idle, for a rebuild put down to expiry */
+  idleMs?: number
 }
+
+/** One prompt and its cache: a session's own conversation, or one subagent of it */
+type Lane = { lastAt: number; ttlMs: number | null }
 
 /** Whether one request rewrote most of its prompt to the cache (the rule above) */
 export function isRebuild(r: RequestInput): boolean {
-  const write = r.cacheCreationTokens ?? 0
-  const total = r.inputTokens + r.cacheReadTokens + write
-  return write >= REBUILD_MIN_TOKENS && write >= total * REBUILD_SHARE
+  const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens ?? 0)
+  const paid = r.cacheCreationTokens ?? r.inputTokens
+  return paid >= REBUILD_MIN_TOKENS && paid >= total * REBUILD_SHARE
 }
 
 export class CacheLedger {
   private readonly entries = new Map<ToolName, Entry[]>()
   /** Tools that have reported a cache write figure at least once (Claude); the others report reads only */
   private readonly reportsWrites = new Set<ToolName>()
+  private readonly lanes = new Map<string, Lane>()
+  /** What happened in a session since its conversation's last request (`note`), consumed by the next one */
+  private readonly notes = new Map<string, Set<RebuildCause>>()
   private readonly startedAt: number
 
   constructor(now: number = Date.now()) {
     this.startedAt = now
+  }
+
+  /**
+   * Something happened in a session that would make its next request rebuild the cache: the session was created, its
+   * process started again, its model changed. Kept until that session's own conversation makes a request.
+   */
+  note(sessionId: string, cause: RebuildCause): void {
+    let set = this.notes.get(sessionId)
+    if (!set) {
+      if (this.notes.size >= MAX_LANES) this.notes.delete(this.notes.keys().next().value!)
+      this.notes.set(sessionId, (set = new Set()))
+    }
+    set.add(cause)
   }
 
   record(tool: ToolName, sessionId: string, r: RequestInput, at: number = Date.now()): void {
@@ -64,9 +105,24 @@ export class CacheLedger {
     // A synthesized answer (Claude's local /usage, "<synthetic>") carries zeros: there was no request
     if (r.inputTokens + r.cacheReadTokens + write <= 0) return
     if (r.cacheCreationTokens !== undefined) this.reportsWrites.add(tool)
+
+    const key = `${sessionId}\n${r.agent ?? ''}`
+    const lane = this.lanes.get(key)
+    // A subagent's request does not take the notes: they are about the session's own conversation
+    const notes = r.agent ? undefined : this.notes.get(sessionId)
+    if (!r.agent) this.notes.delete(sessionId)
+    const rebuild = isRebuild(r)
+    const entry: Entry = { at, sessionId, input: r.inputTokens, read: r.cacheReadTokens, write, rebuild }
+    if (rebuild) Object.assign(entry, causeOf(r, lane, notes, at))
+
+    this.lanes.delete(key) // re-inserted last, so the lane idle longest is the one let go below
+    const ttlMs = r.cacheTtl ? TTL_MS[r.cacheTtl] : (lane?.ttlMs ?? null)
+    this.lanes.set(key, { lastAt: at, ttlMs })
+    if (this.lanes.size > MAX_LANES) this.lanes.delete(this.lanes.keys().next().value!)
+
     let list = this.entries.get(tool)
     if (!list) this.entries.set(tool, (list = []))
-    list.push({ at, sessionId, input: r.inputTokens, read: r.cacheReadTokens, write, rebuild: isRebuild(r) })
+    list.push(entry)
     // Entries arrive in time order, so the old ones are at the front
     let drop = 0
     while (drop < list.length && list[drop]!.at < at - KEEP_MS) drop++
@@ -94,6 +150,31 @@ export class CacheLedger {
   }
 }
 
+/**
+ * The likely cause of a rebuild, strongest evidence first (docs/agent-host.md §6.1):
+ *
+ * 1. what the host was told happened since the conversation's last request (`NOTED`, in that order), and a subagent's
+ *    first request;
+ * 2. a session's conversation the host has never seen a request of, with nothing noted: its process started after
+ *    this host did (a restart or a host swap), so it is a new process;
+ * 3. idle longer than the cache lifetime the API reported for this lane's writes, or more than five minutes when it
+ *    never said;
+ * 4. otherwise unknown.
+ */
+function causeOf(
+  r: RequestInput,
+  lane: Lane | undefined,
+  notes: ReadonlySet<RebuildCause> | undefined,
+  at: number,
+): { cause: RebuildCause; idleMs?: number } {
+  if (notes?.has('cold_start')) return { cause: 'cold_start' }
+  if (!lane) return { cause: r.agent ? 'subagent' : 'new_process' }
+  for (const c of NOTED) if (notes?.has(c)) return { cause: c }
+  const idleMs = at - lane.lastAt
+  if (lane.ttlMs !== null) return idleMs > lane.ttlMs ? { cause: 'expired', idleMs } : { cause: 'unknown' }
+  return idleMs > DEFAULT_TTL_MS ? { cause: 'probably_expired', idleMs } : { cause: 'unknown' }
+}
+
 function windowOf(
   list: readonly Entry[],
   id: string,
@@ -111,8 +192,10 @@ function windowOf(
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     rebuilds: 0,
+    rebuildCauses: {},
     sessions: [],
   }
+  const causes = w.rebuildCauses!
   const bySession = new Map<string, CacheSessionStats>()
   for (const e of list) {
     if (e.at < since) continue
@@ -120,17 +203,25 @@ function windowOf(
     w.inputTokens += e.input
     w.cacheReadTokens += e.read
     w.cacheCreationTokens += e.write
-    if (e.rebuild) w.rebuilds++
     let s = bySession.get(e.sessionId)
     if (!s) {
-      s = { sessionId: e.sessionId, name: '', requests: 0, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, rebuilds: 0 }
+      s = { sessionId: e.sessionId, name: '', requests: 0, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, rebuilds: 0, rebuildCauses: {} }
       bySession.set(e.sessionId, s)
     }
     s.requests++
     s.inputTokens += e.input
     s.cacheReadTokens += e.read
     s.cacheCreationTokens += e.write
-    if (e.rebuild) s.rebuilds++
+    if (!e.rebuild) continue
+    w.rebuilds++
+    s.rebuilds++
+    const cause = e.cause ?? 'unknown'
+    causes[cause] = (causes[cause] ?? 0) + 1
+    s.rebuildCauses![cause] = (s.rebuildCauses![cause] ?? 0) + 1
+    if (e.idleMs !== undefined) {
+      const idle = w.expiredIdleMs
+      w.expiredIdleMs = idle ? { min: Math.min(idle.min, e.idleMs), max: Math.max(idle.max, e.idleMs) } : { min: e.idleMs, max: e.idleMs }
+    }
   }
   /*
    * What a session cost the cache: what it wrote, for a tool that says so. A tool that reports reads only (Codex)

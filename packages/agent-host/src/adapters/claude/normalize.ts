@@ -1,4 +1,4 @@
-import type { ApprovalDetail, BackgroundTask, NormalizedEvent, SessionActivity, SessionGoal, TokenUsage, ToolSummary } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, NormalizedEvent, RequestInput, SessionActivity, SessionGoal, TokenUsage, ToolSummary } from '@cc/protocol'
 import { UnmappedTypes } from '../unmapped.js'
 
 /** The settings a Claude process was launched with — the snapshot a `settings_changed` the tool made carries (#304). */
@@ -962,6 +962,20 @@ const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
  *     the preview both read by row. To keep an event the parent did not emit from cutting the
  *     parent's own text, this is sent after the assistant message that closes that chunk instead.
  */
+/**
+ * How long what a request wrote stays cached, from the API's split of its writes (`cache_creation`:
+ * `ephemeral_1h_input_tokens`, `ephemeral_5m_input_tokens`). Claude Code decides the lifetime per request (CLI 2.1.289:
+ * one hour for a subscriber's main conversation and SDK calls when not on overage, five minutes for subagents, API
+ * keys and overage, with `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and the `promptCacheTtl` setting
+ * over it), and that decision is not visible from outside; what the API reports it wrote is.
+ */
+function ttlOf(split: unknown): { cacheTtl?: '5m' | '1h' } {
+  const c = (split ?? {}) as Json
+  if (Number(c.ephemeral_1h_input_tokens ?? 0) > 0) return { cacheTtl: '1h' }
+  if (Number(c.ephemeral_5m_input_tokens ?? 0) > 0) return { cacheTtl: '5m' }
+  return {}
+}
+
 /** The tokens of the `usage_update` among some events, if there is one */
 function readingOf(events: readonly NormalizedEvent[]): TokenUsage | undefined {
   for (const e of events) if (e.type === 'usage_update') return e.tokens
@@ -1091,10 +1105,12 @@ export class ClaudeStreamNormalizer {
     if (!id || !usage || this.requestsSeen.includes(id)) return events
     this.requestsSeen.push(id)
     if (this.requestsSeen.length > 32) this.requestsSeen.shift()
-    const request = {
+    const request: RequestInput = {
       inputTokens: Number(usage.input_tokens ?? 0),
       cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0),
       cacheCreationTokens: Number(usage.cache_creation_input_tokens ?? 0),
+      ...(subagent ? { agent: str(m.parent_tool_use_id) } : {}),
+      ...ttlOf(usage.cache_creation),
     }
     if (subagent) {
       return this.lastTokens ? [...events, { type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }] : events
