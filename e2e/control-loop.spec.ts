@@ -8258,6 +8258,19 @@ test('A worktree session the person makes stands on its own; one a session start
   })
   await expect(page.locator('li[data-nested]')).toHaveCount(1)
   await expect(page.locator('li[data-nested]').getByText('centralu/write-the-parser-1a2b')).toBeVisible()
+
+  // A child in the parent's own folder nests under it too: grouped by who started it (owner decision, #561)
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const parent = [...m.sessions.values()][0]
+    m.emit({
+      type: 'session_created',
+      sessionId: 'child-2',
+      session: { ...parent, id: 'child-2', name: 'review the parser', worktree: null, parentSessionId: null, askedBy: parent.id },
+    })
+  })
+  await expect(page.locator('li[data-nested]')).toHaveCount(2)
+  await expect(page.locator('li[data-nested]').getByText('review the parser')).toBeVisible()
 })
 
 /**

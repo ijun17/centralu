@@ -256,7 +256,8 @@ What one `start_agent` call does (`SessionManager.startAgent`):
    `project_consents` row of kind `agents`, from and to the same project, listed and revoked in Settings →
    Permissions), deny.
 5. **The child.** A visible session in the caller's own folder (a worktree session's worktree), named from the task,
-   marked `askedBy` the caller (its header links back: "Started by …"), under **the caller's permission preset**:
+   marked `askedBy` the caller (drawn indented under it in the sidebar, owner decision 2026-10-12; its header links
+   back: "Started by …"), under **the caller's permission preset**:
    never more, and no argument or tool of the caller changes it. The task goes in a frame (`agentFrame`: who asks,
    and that the final message is the answer) recorded as sent by the caller (`from`).
 6. **The answer.** Waited for like ask_project's, up to 240 s; past it, or with `wait: false` at once, the answer is
@@ -274,8 +275,9 @@ when the caller is itself a worktree session, so the child starts from the calle
 project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
 worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
-either alone says what is meant. A worktree child hangs under the session that started it in the sidebar
-(`parentSessionId`).
+either alone says what is meant. A worktree child hangs under the session that started it in the sidebar,
+as a same-folder child does: the sidebar groups by who started a session (`askedBy`, `orderAsTree` in
+`ui/features/sidebar/tree.ts`), and `parentSessionId` still places a former worktree manager's sessions.
 
 `agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` is refused while a turn
 the caller gave it runs, while it works on something else (the person may be using it), and when the person has

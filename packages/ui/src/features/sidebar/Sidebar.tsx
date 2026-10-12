@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
+import { orderAsTree } from './tree.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
 import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js'
@@ -480,39 +481,6 @@ function GridIcon({ size = 13 }: { size?: number }) {
       <rect x="9" y="9" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   )
-}
-
-/**
- * Lays out the session list in tree order (#69): a session immediately followed by the worktree sessions it started
- * (#561; a former worktree manager's children keep their place under it).
- *
- * Hierarchy lives only in the sidebar — the grid, the inbox and the palette all stay flat lists
- * (design decision: "The hierarchy lives in the sidebar; the grid stays a flat set of panels").
- *
- * If the parent is not in this list (archived, etc.), the child is drawn at the top level —
- * indentation is only a sign of a relationship, and drawing it indented while the parent is
- * invisible would make it look like it is hanging under nothing.
- */
-function orderAsTree(
-  sessions: SessionSummary[],
-): { s: SessionSummary; nested: boolean }[] {
-  const here = new Set(sessions.map((x) => x.id))
-  const kids = new Map<string, SessionSummary[]>()
-  const roots: SessionSummary[] = []
-  for (const s of sessions) {
-    if (s.parentSessionId && here.has(s.parentSessionId)) {
-      kids.set(s.parentSessionId, [...(kids.get(s.parentSessionId) ?? []), s])
-    } else {
-      roots.push(s)
-    }
-  }
-  return roots.flatMap((root) => {
-    const children = kids.get(root.id) ?? []
-    return [
-      { s: root, nested: false },
-      ...children.map((c) => ({ s: c, nested: true })),
-    ]
-  })
 }
 
 function ProjectBlock({ projectId }: { projectId: string }) {
