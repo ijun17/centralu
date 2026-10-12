@@ -84,10 +84,16 @@ impl ExitBackend {
     }
 }
 
-/// Whether `pid` is a zombie: ended, and not yet reaped by its parent (`/proc/<pid>/stat`'s state
-/// `Z`). `kill(pid, 0)` cannot tell, it succeeds on a zombie (`super::pid_alive`).
+/// Whether `pid` is a zombie: ended, and not yet gone (`/proc/<pid>/stat`'s state `Z`, or `X`).
+/// `kill(pid, 0)` cannot tell, it succeeds on a zombie (`super::pid_alive`).
+///
+/// `X` (dead) is the moment between a parent's `wait` taking the zombie and the kernel removing
+/// it: `kill(pid, 0)` still finds it then (#546). Counting only `Z`, a process being reaped read
+/// as running in about 1 of 300 rounds of `a_zombie_reaped_while_it_is_checked_is_not_alive` on a
+/// CI runner. (`x` is how kernels before 4.14 print it.)
 pub fn is_zombie(pid: u32) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| proc_state(&stat) == Some('Z'))
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .is_ok_and(|stat| matches!(proc_state(&stat), Some('Z' | 'X' | 'x')))
 }
 
 /// The state letter of a `/proc/<pid>/stat` line: the first field after the command name, which is
