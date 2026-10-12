@@ -4,6 +4,7 @@ import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import platformChecks from './tooling/eslint-platform-checks.js'
+import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
 
 /**
  * The modules that may ask which OS this is, each owning one subject (docs/architecture.md §2). A new
@@ -222,5 +223,11 @@ export default tseslint.config(
     ignores: ['**/*.test.{ts,tsx}', ...PLATFORM_MODULES],
     plugins: { local: platformChecks },
     rules: { 'local/platform-checks': 'error' },
+  },
+  {
+    files: ['packages/*/src/**/*.{ts,tsx,mts,mjs}', 'apps/*/src/**/*.{ts,tsx}', 'packaging/**/*.mjs'],
+    ignores: ['**/*.test.{ts,tsx}', '**/*test-helpers.ts', 'packages/agent-host/src/adapters/**'],
+    plugins: { agent: agentAdapterChecks },
+    rules: { 'agent/agent-adapter-checks': 'error' },
   },
 )

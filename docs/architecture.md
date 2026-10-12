@@ -59,6 +59,14 @@ Code elsewhere asks one of those a question named for what differs, so each OS's
 OS is a change to those files. Tests and build scripts are not checked. The Rust side's equivalent for how the host
 starts is `start_plan` ([agent-host.md](agent-host.md) §4.0).
 
+**Which agent CLI this is is asked in its adapter only** (`agent/agent-adapter-checks`,
+`tooling/eslint-agent-adapter-checks.js`). In shipped code, comparing a CLI name is a lint error outside
+`packages/agent-host/src/adapters/` (including its registry) and tests. The host instead asks adapter capabilities
+named for the differing behaviour — tool deferral, instruction channel, sleep, process model, built-in subagents and
+peer messaging. A kept process's launch settings are likewise an adapter fingerprint, not a host branch. This makes a
+third adapter an enrollment in the registry and an implementation under `adapters/`, rather than an edit across
+session policy, links, costs and UI mocks.
+
 **In the runtime's Rust the same holds, enforced by a test** (`keeper/src/platform_checks.rs`): an OS predicate in
 `cfg(…)`, `cfg!(…)` or a `cfg_attr` condition (`unix`, `windows`, `target_os`, …) and `std::env::consts::OS` fail
 `cargo test` in the keeper crate's `src/` and the window's `src/` outside the OS layer (`keeper/src/os/`),
