@@ -1399,6 +1399,8 @@ const Composer = memo(function Composer({
                 : 'Type a message'
           }
           data-testid="prompt-input"
+          // Whose composer this is: that session's approval card takes mod+⇧Y/D/L from here, where y/n/a are letters
+          data-composer-session={sessionId}
         />
         {/*
             The attach button uses **the same component** as send. It used to be a separate one

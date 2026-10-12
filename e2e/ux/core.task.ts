@@ -162,6 +162,54 @@ uxTask({
 })
 
 // ---------------------------------------------------------------------------------------------
+// Answer an approval while typing in its session's composer
+
+const DRAFT = 'Then rerun the tests and'
+
+/** The approving session open, its composer holding a half-written message and the keyboard, not counted */
+async function typingBesideCard(page: Page): Promise<void> {
+  await demo(page)
+  await open(page, APPROVING)
+  await expect(page.getByTestId('approval-card')).toBeVisible()
+  await page.getByTestId('prompt-input').click()
+  await page.keyboard.type(DRAFT)
+}
+
+const answeredKeepingDraft = async (page: Page) => {
+  await expect(page.getByTestId('approval-card')).toBeHidden()
+  await expect(page.getByTestId('prompt-input')).toHaveValue(DRAFT)
+}
+
+// The card's Allow button is on screen, one click from the composer
+uxTask({
+  id: 'approve-while-typing.mouse',
+  task: 'Answer an approval while typing a message in its session',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ['The hand starts on the keyboard, mid-message; the draft stays in the composer'],
+  start: typingBesideCard,
+  run: async (u, page) => {
+    await u.click(page.getByTestId('approve-allow'))
+  },
+  goal: answeredKeepingDraft,
+  budget: { operators: 5, M: 1, H: 1, seconds: 3.2 },
+})
+
+// mod+⇧Y has to be known (the card prints it while the composer has the keyboard): a shortcut, so no budget
+uxTask({
+  id: 'approve-while-typing.keyboard',
+  task: 'Answer an approval while typing a message in its session',
+  path: 'keyboard',
+  access: 'shortcut',
+  notes: ['mod+⇧Y from the composer, where a bare y would be typed into the message'],
+  start: typingBesideCard,
+  run: async (u) => {
+    await u.press('ControlOrMeta+Shift+y')
+  },
+  goal: answeredKeepingDraft,
+})
+
+// ---------------------------------------------------------------------------------------------
 // Switch between two sessions
 
 /** The person was in DONE, then opened OPEN; the task is going back to DONE */

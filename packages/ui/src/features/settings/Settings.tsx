@@ -83,6 +83,10 @@ const SHORTCUTS: [string[], string][] = [
   [['mod', '⇧1~4'], 'Panel tab (git · history · files · terminal)'],
   [['y / n / a'], 'Approve · deny · always allow'],
   [['alt', 'a'], 'Always allow (project scope)'],
+  // In the composer y/n/a are letters of the message; these answer the card from there (ApprovalCard's APPROVAL_COMBOS)
+  [['mod', '⇧Y'], 'Approve, while typing in the composer'],
+  [['mod', '⇧D'], 'Deny, while typing in the composer'],
+  [['mod', '⇧L'], 'Always allow, while typing in the composer'],
   [['d'], 'Dismiss from inbox'],
   [['j / k'], 'Move in inbox'],
   [['Enter / Esc'], 'Send · close'],

@@ -214,6 +214,7 @@ the keyboard. Since #529 every core task has a discoverable path, and the paths 
 | Start a new session and give it its first instruction | mouse (the open project's +, #529) | `H M P B B M P B B H 18K M K` | 19 | 2 | 4 | 2 | 3 | 30 | 12.98 | 1198 |
 | Answer an approval waiting in another session | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.56 | 741 |
 |  | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1050 |
+| Answer an approval while typing a message in its session | mouse (the card's Allow, keyboard still in the composer) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.01 | 357 |
 | Switch to another session by name | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 525 |
 | Switch back to the session you were just in | mouse (the top bar's back arrow) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.21 | 663 |
 | Send a message to another session | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.39 | 1141 |
@@ -230,6 +231,7 @@ the keyboard. Since #529 every core task has a discoverable path, and the paths 
 |---|---|---|---|---|---|---|---|---|---|---|
 | Start a new session and give it its first instruction | keyboard (palette, New session) | `M 8K M 19K M K` | 28 | 0 | 0 | 0 | 3 | 31 | 11.89 | 0 |
 | Answer an approval waiting in another session | keyboard (⌘⇧A, y) | `M 3K M K` | 4 | 0 | 0 | 0 | 2 | 6 | 3.82 | 0 |
+| Answer an approval while typing a message in its session | keyboard (⌘⇧Y from the composer) | `M 3K` | 3 | 0 | 0 | 0 | 1 | 4 | 2.19 | 0 |
 | Switch to another session by name | keyboard (palette) | `M 7K M K` | 8 | 0 | 0 | 0 | 2 | 10 | 4.94 | 0 |
 | Switch back to the session you were just in | keyboard (back) | `M K K` | 2 | 0 | 0 | 0 | 1 | 3 | 1.91 | 0 |
 | Send a message to another session | keyboard (palette) | `M 7K M 26K M K` | 34 | 0 | 0 | 0 | 3 | 37 | 13.57 | 0 |

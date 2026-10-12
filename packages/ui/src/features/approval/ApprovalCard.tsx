@@ -1,13 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ApprovalDetail } from '@cc/protocol'
 import { projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
-import { letterOf } from '../../app/keys.js'
+import { composingKey, letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 /**
- * Approval card (FR-3). Keyboard first — y/n/a, ⌥a scopes it to the project.
+ * Approval card (FR-3). Keyboard first — y/n/a, ⌥a scopes it to the project. With the keyboard in this session's
+ * composer, where y/n/a are letters of the message, mod+⇧Y / mod+⇧D / mod+⇧L answer it instead, and the card shows those.
  * A GUI slower than the mouse is worse than a terminal.
  * Color is used only on the left rail: tinting the whole card would make the command itself
  * unreadable.
@@ -25,6 +26,10 @@ export function ApprovalCard({
   // The buttons cannot be clicked while a response is in flight — a second response would record an executed command as denied (#158)
   const busy = useStore((s) => !!s.approvalsInFlight[requestId])
   const sc = useShortcut()
+  const inComposer = useComposerFocused(sessionId)
+  const keys: AnswerKeys = inComposer
+    ? { allow: sc(...APPROVAL_COMBOS.allow), deny: sc(...APPROVAL_COMBOS.deny), always: sc(...APPROVAL_COMBOS.always) }
+    : BARE_KEYS
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -35,6 +40,7 @@ export function ApprovalCard({
         // Ignored if the card is behind another screen or **is not the card of the focused session** —
         // when several cards are up in the grid, a single y must not approve all of them
         covered: approvalCardCovered(st, sessionId),
+        inComposer: composerOf(e.target) === sessionId,
       })
       if (!action) return
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
@@ -59,6 +65,7 @@ export function ApprovalCard({
       <ProjectAccessCard
         detail={detail}
         busy={busy}
+        keys={keys}
         onAnswer={(decision) => void respond(sessionId, requestId, decision)}
       />
     )
@@ -69,6 +76,7 @@ export function ApprovalCard({
       <ProjectCreateCard
         detail={detail}
         busy={busy}
+        keys={keys}
         onAnswer={(decision) => void respond(sessionId, requestId, decision)}
       />
     )
@@ -79,6 +87,7 @@ export function ApprovalCard({
       <PermissionCard
         appName={detail.app.name}
         text={detail.text}
+        keys={keys}
         onAnswer={(decision) => void respond(sessionId, requestId, decision)}
       />
     )
@@ -88,6 +97,7 @@ export function ApprovalCard({
     <div
       className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid="approval-card"
+      data-keys={inComposer ? 'composer' : 'bare'}
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <span className="signal text-2xs font-medium">
@@ -104,19 +114,22 @@ export function ApprovalCard({
       </pre>
 
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k="y" label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" disabled={busy} />
-        <ActionKey k="n" label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" disabled={busy} />
+        <ActionKey k={keys.allow} label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k={keys.deny} label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" disabled={busy} />
         <ActionKey
-          k="a"
+          k={keys.always}
           label="Always allow"
           testId="approve-always"
           disabled={busy}
           title={`Hold ${sc('alt')} and click to apply to the whole project`}
           onClick={(alt) => void respond(sessionId, requestId, 'always', alt ? 'project' : 'session')}
         />
-        <span className="ml-auto text-2xs text-ink-faint">
-          <Kbd alt /> <Kbd>a</Kbd> whole project
-        </span>
+        {/* Project scope is ⌥a, a letter: from the composer it stays a click with ⌥ held (the button's title says so) */}
+        {!inComposer && (
+          <span className="ml-auto text-2xs text-ink-faint">
+            <Kbd alt /> <Kbd>a</Kbd> whole project
+          </span>
+        )}
       </div>
     </div>
   )
@@ -136,17 +149,20 @@ export function PermissionCard({
   text,
   onAnswer,
   testId = 'approval-card',
+  keys = BARE_KEYS,
 }: {
   appName: string
   text: string
   onAnswer: (decision: 'allow' | 'deny') => void
   testId?: string
+  keys?: AnswerKeys
 }) {
   return (
     <div
       className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid={testId}
       data-kind="capability"
+      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <span className="signal text-2xs font-medium">Awaiting approval</span>
@@ -160,8 +176,8 @@ export function PermissionCard({
         change it later under Runs → Permissions.
       </p>
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k="y" label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />
-        <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" />
+        <ActionKey k={keys.allow} label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />
+        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" />
       </div>
     </div>
   )
@@ -176,10 +192,12 @@ export function PermissionCard({
 function ProjectAccessCard({
   detail,
   busy,
+  keys,
   onAnswer,
 }: {
   detail: Extract<ApprovalDetail, { kind: 'project_access' }>
   busy: boolean
+  keys: AnswerKeys
   onAnswer: (decision: 'allow' | 'deny' | 'always') => void
 }) {
   return (
@@ -187,6 +205,7 @@ function ProjectAccessCard({
       className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid="approval-card"
       data-kind="project_access"
+      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <span className="signal text-2xs font-medium">Awaiting approval</span>
@@ -208,9 +227,9 @@ function ProjectAccessCard({
         </p>
       )}
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k="y" label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
-        <ActionKey k="a" label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />
-        <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+        <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k={keys.always} label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />
+        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
       </div>
     </div>
   )
@@ -223,10 +242,12 @@ function ProjectAccessCard({
 function ProjectCreateCard({
   detail,
   busy,
+  keys,
   onAnswer,
 }: {
   detail: Extract<ApprovalDetail, { kind: 'project_create' }>
   busy: boolean
+  keys: AnswerKeys
   onAnswer: (decision: 'allow' | 'deny') => void
 }) {
   return (
@@ -234,6 +255,7 @@ function ProjectCreateCard({
       className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
       data-testid="approval-card"
       data-kind="project_create"
+      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <span className="signal text-2xs font-medium">Awaiting approval</span>
@@ -258,8 +280,8 @@ function ProjectCreateCard({
           : 'An empty folder is made there and added to the sidebar. Nothing is made unless you choose Create.'}
       </p>
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k="y" label="Create" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
-        <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+        <ActionKey k={keys.allow} label="Create" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
       </div>
     </div>
   )
@@ -340,17 +362,27 @@ export function approvalCardCovered(
  * nor a card hidden behind a modal or overlay is accepted.
  */
 export function approvalKeyAction(
-  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> & { repeat?: boolean },
-  ctx: { typing: boolean; covered: boolean },
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> &
+    Partial<Pick<KeyboardEvent, 'isComposing' | 'keyCode'>> & { repeat?: boolean },
+  ctx: {
+    typing: boolean
+    covered: boolean
+    /** The keyboard is in the composer of the session this card belongs to (`data-composer-session`) */
+    inComposer?: boolean
+  },
 ): ApprovalKeyAction | null {
-  if (e.metaKey || e.ctrlKey || e.shiftKey) return null
   /*
    * A key held down and repeating is not an approval (#158). Holding y down meant that the
    * moment the next card appeared after the first response, it too got approved before anyone
    * had read it.
    */
-  if (e.repeat) return null
-  if (ctx.typing || ctx.covered) return null
+  if (e.repeat || ctx.covered) return null
+  // A key an input method is using belongs to the composition, whatever modifiers it carries (app/keys.ts)
+  if (composingKey({ key: e.key, isComposing: !!e.isComposing, keyCode: e.keyCode ?? 0 })) return null
+  const combo = approvalComboOf(e)
+  if (combo) return ctx.inComposer || !ctx.typing ? combo : null
+  if (e.metaKey || e.ctrlKey || e.shiftKey) return null
+  if (ctx.typing) return null
   // A letter is read by **meaning**, not by keycap — with ⌥ held, or on a Korean keyboard layout, `key` is a different character (app/keys.ts)
   const k = letterOf(e)
   if (k === 'y') return { decision: 'allow' }
@@ -358,6 +390,75 @@ export function approvalKeyAction(
   if (k === 'a') return { decision: 'always', scope: e.altKey ? 'project' : 'session' }
   return null
 }
+
+/**
+ * The combos that answer a card while the keyboard is in the composer, where bare y/n/a are letters of the message.
+ * `mod` is ⌘ on a Mac and Ctrl elsewhere; written by meaning, named by the keyboard (`useShortcut`).
+ */
+export const APPROVAL_COMBOS = {
+  allow: ['mod', '⇧Y'],
+  deny: ['mod', '⇧D'],
+  always: ['mod', '⇧L'],
+} as const
+
+/**
+ * mod+⇧Y allow, mod+⇧D deny, mod+⇧L always allow (session scope), with exactly those modifiers. Chosen against what a
+ * key already does in the composer or the window (2026-10-12):
+ *
+ *  - mod+Enter is the composer's send key when "send with ⌘Enter" is on (composerKeys.ts), and mod+Backspace deletes a
+ *    word (Windows, Linux) or back to the line's start (macOS): both are what a person typing means by them.
+ *  - Bare mod+letters are taken or edit text: ⌘A/C/V/X/Z, Ctrl+Y redo, ⌘N/⌘W/⌘M/⌘H/⌘Q (window and app keys),
+ *    mod+K/I/B and mod+1-9 here. mod+⇧A is "next waiting" (a global shortcut on the desktop), mod+⇧Z redo,
+ *    mod+⇧N/⇧F are new session and search (#529), mod+⇧I/J/C/R are WebView2's developer tools and hard reload.
+ *  - No Alt: Ctrl+Alt is AltGr on many Windows layouts, where it types letters (Polish AltGr+N is ń).
+ *
+ * Y mirrors the bare y; D is Deny; L is the "always" one, kept off the keys a hand reaches for by habit. "Always" here
+ * is session scope: project scope stays on ⌥a and ⌥-click, outside the composer.
+ */
+function approvalComboOf(e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>): ApprovalKeyAction | null {
+  if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return null
+  const k = letterOf(e)
+  if (k === 'y') return { decision: 'allow' }
+  if (k === 'd') return { decision: 'deny' }
+  if (k === 'l') return { decision: 'always', scope: 'session' }
+  return null
+}
+
+/** Is the keyboard in this session's composer right now — the card then shows its combos instead of y/n/a */
+export function composerOf(target: EventTarget | null): string | null {
+  const el = target as HTMLElement | null
+  return el?.dataset?.composerSession ?? null
+}
+
+/** Follows the keyboard into and out of a session's composer, for the hints on its card */
+function useComposerFocused(sessionId: string): boolean {
+  const [focused, setFocused] = useState(() => composerOf(typeof document === 'undefined' ? null : document.activeElement) === sessionId)
+  useEffect(() => {
+    /*
+     * Read after the event, not in it: focus moved by a component's layout effect fires focusin inside React's commit,
+     * where a state update is a flushSync from a lifecycle (React warns). By the microtask, activeElement is settled too.
+     */
+    let live = true
+    const update = () =>
+      queueMicrotask(() => {
+        if (live) setFocused(composerOf(document.activeElement) === sessionId)
+      })
+    update()
+    document.addEventListener('focusin', update)
+    document.addEventListener('focusout', update)
+    return () => {
+      live = false
+      document.removeEventListener('focusin', update)
+      document.removeEventListener('focusout', update)
+    }
+  }, [sessionId])
+  return focused
+}
+
+/** The key each answer shows on the card: the bare letter, or the combo while the keyboard is in the composer */
+export type AnswerKeys = { allow: string; deny: string; always: string }
+
+const BARE_KEYS: AnswerKeys = { allow: 'y', deny: 'n', always: 'a' }
 
 export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'command') return `${d.command}\n${d.cwd}`
