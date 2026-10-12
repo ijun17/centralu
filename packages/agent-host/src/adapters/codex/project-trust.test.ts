@@ -47,7 +47,7 @@ const start = (permissionPreset: PermissionPreset, projectTrusted: boolean | und
 const PRESET: Record<PermissionPreset, Record<string, unknown>> = {
   safe: { approvalPolicy: 'untrusted', sandbox: 'workspace-write' },
   normal: {},
-  auto: { approvalPolicy: 'never', sandbox: 'workspace-write' },
+  auto: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
 }
 
 function ancestors(p: string): string[] {

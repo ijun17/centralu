@@ -308,15 +308,21 @@ or cannot be copied, the configured setup command or the child must install them
 
 **Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
 root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured
-extra roots. This gives git access to its index locks, objects and refs without making the main checkout's
-files writable. On codex-cli 0.160.0, `thread/start` and `thread/resume` accept `sandbox` as a mode; the details
+extra roots (#585). Codex keeps `.git` read-only even inside writable roots, so this does not permit commits
+or index locks: committing in that repository needs `auto`, or a personal full-access mode under `normal`.
+On codex-cli 0.160.0, `thread/start` and `thread/resume` accept `sandbox` as a mode; the details
 ride in `config` as `sandbox_workspace_write.writable_roots` and `sandbox_workspace_write.network_access`.
-`safe` maps to `untrusted` approval and workspace-write, `auto` to `never` approval and workspace-write;
-`normal` keeps the person's approval and sandbox mode. Workspace-write network access is enabled only for
-`auto`, and explicitly disabled for `safe` and `normal`. A person's `normal` full-access sandbox remains
-full-access. The adapter reads the effective sandbox from the thread response: when it blocks network,
+`safe` maps to `untrusted` approval and `workspace-write`, `auto` to `never` approval and `danger-full-access`
+(no sandbox, matching Claude's bypass); `normal` keeps the person's approval and sandbox mode.
+Workspace-write network access is explicitly disabled for `safe` and `normal`; `auto` has unrestricted
+network and OS file access. A person's `normal` full-access sandbox remains full-access. The mapping lives
+inside the Codex adapter and applies on both start and resume, so a changed preset takes effect on the
+session's next thread. `start_agent` children inherit the parent's preset, including full access under `auto`;
+they never receive a higher preset. The adapter reads the effective sandbox from the thread response:
+when it blocks network,
 `start_agent`'s answer (both `working` and `done`) says "this child cannot reach the network under <preset>".
-The manager carries an optional adapter notice; no CLI-name test decides this outside adapters.
+An `auto` child has no network restriction notice. The manager carries an optional adapter notice;
+no CLI-name test decides this outside adapters.
 
 **Claude comparison** (#582). Centralu supplies no Claude SDK `sandbox` override, for children or ordinary
 sessions. Both use the same permission mapping (`safe`: `default`, `auto`: `bypassPermissions`, `normal`:

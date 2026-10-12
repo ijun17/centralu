@@ -35,18 +35,26 @@ same files under the same or a lower preset), but they multiply what runs, so:
   the caller's deletion. Its task is recorded as sent by the caller (`from`), not by the person.
 - **Not from an untrusted project** (#382's rule).
 
-Worktree children (#582) keep the same preset as their parent. In the Codex adapter, every linked-worktree
-session adds its repository's canonical git common directory to workspace-write's writable roots, on start
-and resume. Existing extra roots are retained. This deliberately permits changes to shared git metadata
-(objects, refs, worktree indexes and locks), so commits work; it does not grant writes to the main checkout's
-source files. Git metadata is shared between branches, so a worktree is not isolation from changes to refs
-or repository configuration. No guessed git path is granted when discovery fails.
+Worktree children (#582) keep the same preset as their parent. **Every Codex session under `auto` runs
+with `danger-full-access` (no sandbox) and `never` approval**, including a child of an `auto` parent. This
+matches Claude's `auto` bypass permissions. Commands have the person's OS access, including network and
+files outside the project. `safe` uses workspace-write with `untrusted` approval. `normal` follows the
+person's configured approval policy and sandbox mode, including a personal full-access mode.
 
-Codex workspace-write network access is explicitly off under `safe` and `normal`, and on under `auto`.
-`normal` still follows the person's sandbox mode: their full-access mode remains unrestricted. The effective
+In the Codex adapter, every linked-worktree session still adds its repository's canonical git common
+directory to workspace-write's writable roots on start and resume (#585), retaining existing extra roots.
+**Codex keeps `.git` read-only even inside writable roots**, so this does not permit commits or index locks.
+Committing in that repository needs `auto`, or the person's own full-access sandbox under `normal`.
+Git metadata is shared between branches, so a worktree is not isolation from changes to refs or repository
+configuration. No guessed git path is granted when discovery fails.
+
+Codex workspace-write network access is explicitly off under `safe` and `normal` (#585); `auto` has
+unrestricted network access through its full-access sandbox. The effective
 thread sandbox, rather than the CLI name in the manager, determines the notice in `start_agent`'s answer:
-"this child cannot reach the network under <preset>" when blocked. This controls commands in Codex's
-sandbox, not host-run MCP app servers. Claude children receive no Centralu SDK sandbox override, just like
+"this child cannot reach the network under <preset>" when blocked, with no such notice under `auto`.
+The mapping applies on thread start and resume; a changed preset takes effect on the session's next thread.
+This controls commands in Codex's sandbox, not host-run MCP app servers. Claude children receive no
+Centralu SDK sandbox override, just like
 ordinary Claude sessions; the person's own loaded sandbox settings may still restrict them. This comparison
 was checked against adapter/SDK configuration, not a live Claude model turn.
 
