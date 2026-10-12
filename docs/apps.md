@@ -761,6 +761,12 @@ the consent card answered "always", and a prompt naming neither the tools nor th
 same turn and detached it, and on the next turn no call reached the app (one model tried the old name
 anyway; the CLI answered "No such tool available").
 
+That smoke test ran before `ask_project` (#371 part B) was loaded on the same server. With it loaded, a question about another project's app went to `ask_project` and never to tool search
+(#522: 0 of 10 runs called `attach_app`). Since then Claude loads `find_apps` (+75 tokens per request) and
+`ask_project`'s description ends "For another project's apps, use find_apps." (+11); `attach_app` and
+`detach_app` stay deferred. 9 of 10 runs, and 8 of 10 in a second, then called `attach_app`
+([tool-cost.md](tool-cost.md) §8).
+
 **Attaching and detaching, per agent:**
 
 | | Claude | Codex |

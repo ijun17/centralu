@@ -21,6 +21,12 @@
       "expect": ["app_guide"]
     },
     {
+      "id": "centralu-howto-2",
+      "profile": "reader",
+      "prompt": "What does the Speed option under the input box in Centralu do? Only explain it.",
+      "expect": ["app_guide"]
+    },
+    {
       "id": "ask-project",
       "profile": "reader",
       "prompt": "Have the {other} project list the files in its top folder, then tell me what it found.",
@@ -31,6 +37,18 @@
       "profile": "reader",
       "prompt": "One of my other Centralu projects shares a counter app. What number is it showing now?",
       "expect": ["find_apps", "attach_app"]
+    },
+    {
+      "id": "open-app-named",
+      "profile": "reader",
+      "prompt": "Use the counter app from the {other} project to tell me its current number.",
+      "expect": ["find_apps", "attach_app"]
+    },
+    {
+      "id": "open-app-list",
+      "profile": "reader",
+      "prompt": "Which apps from my other Centralu projects could this session use?",
+      "expect": ["find_apps"]
     },
     {
       "id": "no-tool",

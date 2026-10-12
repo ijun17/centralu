@@ -140,7 +140,8 @@ describe('the resident tool prefix of a Claude session', () => {
   it('holds the reader set\'s loaded tools and no app tool', async () => {
     await start()
     const prefix = JSON.parse(await residentPrefix(initial())) as { name: string }[]
-    expect(prefix.map((t) => t.name)).toEqual(['mcp__centralu__read_session', 'mcp__centralu__recall', 'mcp__centralu__ask_project'])
+    // find_apps joined the loaded tools in #522: deferred, it lost to ask_project
+    expect(prefix.map((t) => t.name)).toEqual(['mcp__centralu__read_session', 'mcp__centralu__recall', 'mcp__centralu__ask_project', 'mcp__centralu__find_apps'])
   })
 
   it('stays byte-identical when an app is attached and detached, even an app that asks to stay loaded', async () => {

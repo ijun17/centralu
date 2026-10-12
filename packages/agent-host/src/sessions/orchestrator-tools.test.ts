@@ -201,6 +201,17 @@ describe('ask_project', () => {
   it(`stays within ${DELEGATE_BUDGET_CHARS} characters`, () => {
     expect(sentChars(DELEGATE_TOOLS)).toBeLessThanOrEqual(DELEGATE_BUDGET_CHARS)
   })
+
+  /*
+   * #522: asked about another project's app, the model took the loaded tool that names "another Centralu project"
+   * and never looked for find_apps. The pointer and find_apps being loaded on Claude are what turned that around
+   * (docs/tool-cost.md §8); the second is pinned in adapters/claude/orchestrator-mcp.test.ts.
+   */
+  it("points another project's apps to find_apps", () => {
+    const ask = DELEGATE_TOOLS.find((t) => t.name === 'ask_project')!
+    expect(ask.description).toMatch(/another project's apps, use find_apps\.$/)
+    expect(APP_ACCESS_TOOLS.find((t) => t.name === 'find_apps')).not.toHaveProperty('deferred', true)
+  })
 })
 
 /**

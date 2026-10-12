@@ -93,8 +93,16 @@ the same server with their own ceiling, `APP_ACCESS_BUDGET_CHARS` (900; the set 
 set grows into the other's headroom. Claude defers all three, which adds +31 tokens per request (the
 same probe, 2026-10-05, measured on the #320 set before `ask_project` joined it: +192 to +223), and
 loaded they would add +263, which is what a
-Codex session pays. The model still finds them: 5 of 5 fresh haiku sessions found `find_apps` through
-tool search from a plain request (apps.md §9.4).
+Codex session pays. The model found them: 5 of 5 fresh haiku sessions found `find_apps` through
+tool search from a plain request (apps.md §9.4), with no other way open to it.
+
+Since #522 Claude loads `find_apps` and defers the other two. With `ask_project` loaded beside it, a
+question about another project's app went to `ask_project` (or to reading sessions) and never to tool
+search: 0 of 10 runs went on to `attach_app`. Loaded, with `ask_project`'s description ending "For
+another project's apps, use find_apps.", 9 of 10 did (8 of 10 in a second run), for +86 tokens per ordinary Claude request (+75 the
+definition, +11 the pointer: 326 → 412). The variants and their numbers are in
+[tool-cost.md](tool-cost.md) §8. #523 made `app_guide`'s `topic` an enum of its seven topics (the
+reader set is 983 characters with it).
 
 **Measuring it again** (#513). `pnpm measure:tools` measures every profile on both CLIs the same way,
 repeatably: resident tokens (the API's usage, and `count_tokens` with and without Centralu's tools), cache

@@ -196,10 +196,17 @@ export function appGuide(topic: string | undefined, seats: GuideSeats): { text: 
       text: STATIC.overview + '\n\nOther topics: ' + APP_GUIDE_TOPICS.filter((t) => t !== 'overview').join(', '),
     }
   }
-  const t = topic.toLowerCase()
-  if (t === 'orchestrator') return { text: orchestratorTopic(seats) }
-  if ((APP_GUIDE_TOPICS as readonly string[]).includes(t)) {
-    return { text: STATIC[t as Exclude<AppGuideTopic, 'orchestrator'>] }
-  }
+  const t = topic.trim().toLowerCase()
+  const section = (k: AppGuideTopic) => (k === 'orchestrator' ? orchestratorTopic(seats) : STATIC[k])
+  if ((APP_GUIDE_TOPICS as readonly string[]).includes(t)) return { text: section(t as AppGuideTopic) }
+  /*
+   * The schema offers the topics as an enum (#523), but a caller that does not check it (Codex calls MCP tools from
+   * code in its `exec` tool) can still send its own words. One that names a topic, even in the singular ("session
+   * settings", "approval"), gets that topic and the list rather than a failed first call. The last such word wins,
+   * as the head of an English phrase comes last ("session settings" is about settings).
+   */
+  const words = t.split(/[^a-z]+/).filter(Boolean).reverse()
+  const near = words.map((w) => APP_GUIDE_TOPICS.find((k) => w === k || w === k.replace(/s$/, ''))).find((k) => k !== undefined)
+  if (near) return { text: `(Read as "${near}". Topics: ${APP_GUIDE_TOPICS.join(', ')})\n\n${section(near)}` }
   return { text: `No such topic: ${topic}. Available topics: ${APP_GUIDE_TOPICS.join(', ')}`, isError: true }
 }

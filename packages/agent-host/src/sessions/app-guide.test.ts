@@ -9,6 +9,7 @@ import {
   ORCHESTRATOR_TOOLS,
   DELEGATE_TOOLS,
   SCOPED_INSTRUCTIONS,
+  orchestratorToolSchemas,
   profileAllows,
   runOrchestratorTool,
 } from './orchestrator-tools.js'
@@ -89,5 +90,41 @@ describe('the app guide speaks only of tools that exist in the registry', () => 
   it('says nothing of the removed control rail, its tasks or their foremen (#97)', async () => {
     const text = await wholeGuide()
     expect(text).not.toMatch(/control rail|control_|board_read|board_update|foreman|\btasks?\b/i)
+  })
+})
+
+/**
+ * The topic is an enum in the schema the model is handed (#523). As a free string, with the topics
+ * named only in prose (or not at all, in the reader set), the model asked in its own words ("sharing
+ * apps between projects") and the first call failed in 4 of 4 measured runs (docs/tool-cost.md §8).
+ */
+describe("app_guide's topic", () => {
+  it("is offered as exactly the guide's topics, on every seat that has the guide", () => {
+    const seats = (['orchestrator', 'manager', 'scoped', 'reader'] as const).filter((p) => orchestratorToolSchemas(p).some((t) => t.name === 'app_guide'))
+    expect(seats).toContain('reader')
+    expect(seats).toContain('orchestrator')
+    for (const profile of seats) {
+      const schema = orchestratorToolSchemas(profile).find((t) => t.name === 'app_guide')!.inputSchema as {
+        properties: { topic: { enum?: string[] } }
+        required?: string[]
+      }
+      expect(schema.properties.topic.enum, profile).toEqual([...APP_GUIDE_TOPICS])
+      // Still optional: no topic is the overview and the list
+      expect(schema.required ?? [], profile).not.toContain('topic')
+    }
+  })
+
+  it('reads a topic named in other words as that topic, with the list, and refuses one that names none', async () => {
+    const settings = await guide('settings')
+    for (const [asked, topic] of [['Session settings', 'settings'], ['approval', 'approvals'], ['sharing apps between projects', 'apps']] as const) {
+      const r = await runOrchestratorTool(noTools, 'app_guide', { topic: asked })
+      expect(r.isError, asked).toBeFalsy()
+      expect(r.text, asked).toContain(`Read as "${topic}"`)
+      expect(r.text, asked).toContain(APP_GUIDE_TOPICS.join(', '))
+    }
+    expect((await runOrchestratorTool(noTools, 'app_guide', { topic: 'Session settings' })).text).toContain(settings)
+    const none = await runOrchestratorTool(noTools, 'app_guide', { topic: 'keyboard' })
+    expect(none.isError).toBe(true)
+    expect(none.text).toContain(APP_GUIDE_TOPICS.join(', '))
   })
 })

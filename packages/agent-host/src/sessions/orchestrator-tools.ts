@@ -80,10 +80,8 @@ export const ORCHESTRATOR_TOOLS = [
     description:
       'The guide to this app (Centralu) (#30). When the person asks something like "what can I do with this app?," read it from here and answer — do not answer from a guess.',
     schema: z.object({
-      topic: z
-        .string()
-        .optional()
-        .describe(`Topic: ${APP_GUIDE_TOPICS.join(' | ')}. If omitted, returns the overview and the topic list.`),
+      // An enum, not a string the description lists (#523): asked in its own words, the model missed every first call
+      topic: z.enum(APP_GUIDE_TOPICS).optional().describe('If omitted, returns the overview and the topic list.'),
     }),
   },
   {
@@ -298,7 +296,8 @@ export const READER_TOOLS = [
   {
     name: 'app_guide',
     description: "Centralu's user guide. Read it before answering how Centralu works.",
-    schema: z.object({ topic: z.string().optional() }),
+    // An enum (#523): as a free string the model named a topic in its own words and the first call failed (1 of 4 worked on Claude; 15 of 15 since)
+    schema: z.object({ topic: z.enum(APP_GUIDE_TOPICS).optional() }),
     deferred: true,
   },
 ] as const satisfies readonly { name: OrchestratorToolName; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
@@ -312,11 +311,15 @@ export const READER_TOOLS = [
  * Loaded, not deferred: like recall, it answers a request the person makes in words ("have the other project do
  * it"), and a tool the model has to search for first is one it may answer without (#320 measured that for recall).
  * `task` is optional only for waiting: the "still working" answer tells the model to call again without one.
+ *
+ * The last sentence points away from it (#522): asked about another project's app, the model reached for this, the
+ * loaded tool naming "another Centralu project", and never searched for find_apps. With it and find_apps loaded,
+ * 9 of 10 runs went on to attach_app, against 0 of 10 before (docs/tool-cost.md §8).
  */
 export const DELEGATE_TOOLS = [
   {
     name: 'ask_project',
-    description: "Has another Centralu project do a job in its own folder; returns its session's answer.",
+    description: "Has another Centralu project do a job in its own folder; returns its session's answer. For another project's apps, use find_apps.",
     schema: z.object({ project: z.string(), task: z.string().optional() }),
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
@@ -329,17 +332,21 @@ export const DELEGATE_BUDGET_CHARS = 400
  * ordinary session has it, and is counted against its own ceiling below (READER_TOOLS keeps #320's).
  *
  * Three tools rather than one with a mode: each one's schema is a single string, and the model picks a
- * verb by name. They are all deferred behind tool search on Claude (Codex loads them): a session
- * rarely needs another project's app, and the result of each one names the next (`find_apps` says
- * "attach_app", `attach_app` says "detach_app"), so a model that found the first finds the rest. The
- * measurement that this is enough is in docs/apps.md §9.4.
+ * verb by name. On Claude (Codex loads them all) find_apps is loaded and the other two wait behind
+ * tool search: the result of each one names the next (`find_apps` says "attach_app", `attach_app`
+ * says "detach_app"), so a model that found the first finds the rest (docs/apps.md §9.4).
+ *
+ * find_apps was deferred too until #522: asked about another project's app without being told to use
+ * it, haiku never searched for it (0 of 10 runs called attach_app) and called the loaded ask_project.
+ * Loaded, with ask_project's pointer to it, 9 of 10 called attach_app (8 of 10 in a second run); it
+ * costs +75 tokens in every ordinary Claude session's request, the pointer +11. Loading attach_app as
+ * well (+155 in all) did worse, 7 of 10. The comparison of every variant is in docs/tool-cost.md §8.
  */
 export const APP_ACCESS_TOOLS = [
   {
     name: 'find_apps',
     description: "Finds Centralu apps from the person's other projects that this session can attach.",
     schema: z.object({ query: z.string().optional() }),
-    deferred: true,
   },
   {
     name: 'attach_app',
@@ -361,7 +368,8 @@ export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
  * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and
  * schema; the deferred ones included, since Codex loads them). The set is 874 today, of which about
  * 210 per tool is the name and schema envelope rather than words — why it is three short tools and
- * not three explained ones. Claude defers all three, so there it costs the names in tool search only.
+ * not three explained ones. Claude loads find_apps (294 characters, 75 tokens) and defers the other
+ * two, which cost their names in tool search only.
  */
 export const APP_ACCESS_BUDGET_CHARS = 900
 
@@ -371,8 +379,9 @@ export const READER_INSTRUCTIONS = ''
 /**
  * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
  * description and JSON schema, plus the instructions — the deferred app_guide included, since
- * Codex loads it. The set is 897 today (the four candidates in the orchestrator's words were
- * 2,493); the measured tokens are in docs/agent-host.md. Raising it is a decision about every
+ * Codex loads it. The set is 983 today, 86 of them app_guide's topic enum (#523; it was 897 with a
+ * free-string topic; the four candidates in the orchestrator's words were 2,493); the measured
+ * tokens are in docs/agent-host.md. Raising it is a decision about every
  * session's context, not a number to bump when a test fails.
  */
 export const READER_BUDGET_CHARS = 1000

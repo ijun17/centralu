@@ -217,8 +217,9 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
    times an ordinary session's 326.
 4. **A deferred tool can lose to a loaded one.** Asked about another project's app, haiku never searched
    for `find_apps` and reached for the loaded `ask_project` instead (0 of 3); #371's own measurement, with a
-   prompt that said "use it", found it 5 of 5. Deferral is not free for selection.
-5. **A free-string argument fails first try.** `app_guide`'s topic: 0 of 4 first calls worked.
+   prompt that said "use it", found it 5 of 5. Deferral is not free for selection. Fixed in #522 (§8).
+5. **A free-string argument fails first try.** `app_guide`'s topic: 0 of 4 first calls worked. Fixed in #523
+   (§8).
 6. **Codex: a model set before a session's first turn broke it.** The change restarts the thread
    through resume, Codex has no rollout to resume before a first turn, and the next send failed with
    "Could not resume the conversation". The baseline measured such seats on their default model. Fixed in
@@ -276,3 +277,79 @@ then starts a thread again rather than resuming one Codex has nothing written fo
 `sessions/codex-seats.test.ts`). Sessions an older build started and never messaged keep the id they were given
 then, and still fail to wake with "has no record of this conversation"; a new session is the way out for them.
 
+
+## 8. Finding another project's app, and the guide's topic (#522, #523)
+
+Two findings from the baseline (§6.4, §6.5), fixed and measured again: asked about another project's app, Claude
+never searched for the deferred `find_apps` and reached for the loaded `ask_project` (#522); `app_guide`'s first
+call failed because `topic` was free text and only seven topics exist (#523). Claude Code 2.1.289 on haiku 4.5,
+codex-cli 0.160.0 on gpt-6.1-sol, macOS, base commit 27027fb1. Each variant is a `--phases selection` run on the
+same prompts (Claude 5 repetitions, Codex 3); the prompt set gained three prompts for this (`centralu-howto-2`,
+`open-app-named`, `open-app-list`). Every run's summary is kept in
+`baselines/2026-10-12-selection-522-523-live.json`. The runs cost about $4 of Claude usage at list prices.
+
+**The guide's topic** is now an enum of the seven topics in both schemas that offer it (the reader's, and the
+orchestrator's, where the topic list moves from the description into the enum: +3 characters). A topic sent in
+other words that names one of them ("session settings", "approval") is answered with that topic and the list,
+for a caller that does not check the schema; one that names none is still refused with the list.
+
+| `app_guide` first call worked | Before (string) | After (enum) |
+|---|---|---|
+| Claude | **1 of 4** (three asked for "sharing apps between projects") | **15 of 15** (every one a listed topic) |
+| Codex | 1 of 3 | 5 of 6 |
+
+Codex calls MCP tools as code inside its `exec` tool and the host's event carries no arguments, so its one miss
+after the change is not attributed; the close-match answer above came after that run. The reader set grows from
+897 to 983 characters (`READER_BUDGET_CHARS` stays 1,000); on Claude `app_guide` is deferred, so no request
+carries it until it is loaded.
+
+**Another project's app.** The variants, all with the enum, on the two prompts that ask about another project's
+app without naming a tool (`open-app`, `open-app-named`: 10 runs each), the one that asks which apps there are
+(`open-app-list`), and `ask-project`, which must stay with `ask_project`. *First right*: the first Centralu call is
+`find_apps` or `attach_app`. *Attach called*: `attach_app` was called in the turn. The measurement declines every
+consent card (§1), so no attach went through and no run reached the app's own tools; after the refusal some runs
+tried `ask_project`, whose card was declined too. *Resident*: Centralu's own tokens in an ordinary Claude session's
+every request (`count_tokens`, §2), against 326 before.
+
+| Variant | Resident | First right | Attach called | `open-app-list` | `ask-project` |
+|---|---|---|---|---|---|
+| before: `find_apps` deferred, no pointer | 326 | 0/10 | 0/10 | 4/5 | 5/5 |
+| a1: `ask_project` ends "For another project's apps, use find_apps." | 337 (+11) | 3/10 | 5/10 | 5/5 | 5/5 |
+| a2: "… To use another project's app yourself, call find_apps, then attach_app." | not measured | 2/10 | 3/10 | 5/5 | 5/5 |
+| a3: "… Not for its apps: find_apps and attach_app give you their tools." | not measured | 0/10 | 0/10 | 5/5 | 5/5 |
+| a1 + `find_apps`'s result telling it to attach rather than ask | 337 (+11) | 1/10 | 3/10 | 5/5 | 5/5 |
+| b: `find_apps` loaded | 401 (+75) | 5/10 | 1/10 | 5/5 | 5/5 |
+| b + that result hint | 401 (+75) | 6/10 | 6/10 | 5/5 | 5/5 |
+| b2: `find_apps` and `attach_app` loaded | 481 (+155) | 7/10 | 7/10 | 5/5 | 5/5 |
+| **a1 + b (shipped)** | **412 (+86)** | **6/10**, again 7/10 | **9/10**, again 8/10 | 5/5, 5/5 | 5/5, 5/5 |
+
+What the runs show:
+
+- **A pointer alone helps a little.** With `find_apps` deferred, the model reaches it only by searching, and the
+  pointer made it search in some runs (a1); how the pointer is worded mattered more than its length (a3 did
+  nothing).
+- **Loading `find_apps` alone gets it called but not finished.** After `find_apps` answered, the model called the
+  loaded `ask_project` instead of searching for `attach_app` (b: 5 found, 1 called `attach_app`). The result naming
+  `attach_app` was not enough; a hint telling it to attach (b + hint) or loading `attach_app` as well (b2) closed
+  some of that gap.
+- **The pointer and the loaded tool together** did best at less than b2's cost: 9 of 10 called `attach_app`, and on
+  the second run 8 of 10 (open-app 5/5, open-app-named 3/5). Every run that went to `ask_project` first was on the
+  prompt that names the other project ("Use the counter app from the {other} project"); after its declined consent
+  card, 3 of those 6 runs went on to `find_apps` and `attach_app`.
+- **Codex was already right**: `find_apps` first in 6 of 6 before and 6 of 6 after, `attach_app` called in 6 of 6
+  after.
+  Asked which apps there are, it read the guide first (0 of 3 both times), which the verdict counts as wrong.
+- The cost is 86 tokens in every ordinary Claude session's every request, about 0.5% of a 16,500-token first
+  request; Codex's first request does not carry MCP tools (§6.2). Claude's prefix still holds through every event
+  in a dry run (the tool list grows by `find_apps`; nothing else changes).
+
+**Left open.** `centralu-howto-2` ("What does the Speed option under the input box in Centralu do?") never reached
+`app_guide` on Claude in 20 runs across the variants (it called `recall`, or a subagent, or nothing); Codex read the
+guide 6 of 6. The guide is deferred on Claude (#320); the question it answers here is selection, not the topic.
+
+**A prompt to keep out of the set.** A first version of `centralu-howto-2` asked "How do I make Centralu stop
+asking me to approve every command in a session?". Haiku took it as a request: it invoked the person's own
+settings skill and wrote permission rules into the scratch project's `.claude/settings.json` (a selection
+session runs on the `normal` preset, which follows the person's own Claude Code settings). Those runs were
+stopped and discarded; nothing outside the scratch folder changed. Selection prompts ask questions, not for
+changes.

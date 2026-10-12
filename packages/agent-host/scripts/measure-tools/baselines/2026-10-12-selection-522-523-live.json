@@ -1,0 +1,4810 @@
+{
+ "comment": "Tool-selection variants for #522 and #523 (docs/tool-cost.md §8): meta and the selection/resident summaries of each run, no raw records.",
+ "variants": {
+  "base": "String topic, find_apps deferred (the code before #522/#523)",
+  "a": "enum + ask_project pointer a1",
+  "a2": "enum + ask_project pointer a2",
+  "a3": "enum + ask_project pointer a3",
+  "b": "enum + find_apps loaded",
+  "b2": "enum + find_apps and attach_app loaded",
+  "bh": "enum + find_apps loaded + find_apps result hint",
+  "ah": "enum + pointer a1 + find_apps result hint",
+  "ab": "enum + pointer a1 + find_apps loaded (chosen)",
+  "final": "the chosen change as committed (= ab), a second run"
+ },
+ "pointers": {
+  "a1": " For another project's apps, use find_apps.",
+  "a2": " To use another project's app yourself, call find_apps, then attach_app.",
+  "a3": " Not for its apps: find_apps and attach_app give you their tools.",
+  "hint": " Attach it here rather than asking that project: attach_app gives this session the app's tools (load attach_app through tool search if it is not loaded)."
+ },
+ "runs": {
+  "base-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:34:56.857Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "centralu-howto": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "sharing apps between projects"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "sharing apps between projects"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "sharing apps between projects"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "centralu-howto-2": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "read_session",
+         "read_session",
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 21,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 2,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder of this project"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List all files and directories in your top-level folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "read_session"
+        ],
+        "calls": 2,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 4,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "recall",
+         "recall"
+        ],
+        "calls": 4,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "read_session",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "base-codex": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:29:01.085Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 3,
+    "clis": [
+     "codex"
+    ]
+   },
+   "selection": {
+    "codex": {
+     "centralu-howto": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide",
+         "app_guide",
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 6,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 6,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 6,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       }
+      ]
+     },
+     "centralu-howto-2": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 5,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 5,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     },
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "resident-base-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:30:21.735Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 2,
+    "clis": [
+     "claude"
+    ]
+   },
+   "resident": {
+    "claude": {
+     "none": {
+      "runs": [
+       16141,
+       16141
+      ],
+      "median": 16141,
+      "delta": 0,
+      "ours": 0,
+      "centraluChars": 0,
+      "toolsChars": 47361,
+      "systemChars": 137
+     },
+     "reader": {
+      "runs": [
+       16467,
+       16467
+      ],
+      "median": 16467,
+      "delta": 326,
+      "ours": 326,
+      "centraluChars": 866,
+      "toolsChars": 48230,
+      "systemChars": 137
+     },
+     "orchestrator": {
+      "runs": [
+       25678,
+       25678
+      ],
+      "median": 25678,
+      "delta": 9537,
+      "ours": 3240,
+      "centraluChars": 9527,
+      "toolsChars": 56900,
+      "systemChars": 29417
+     },
+     "manager": {
+      "runs": [
+       17612,
+       17612
+      ],
+      "median": 17612,
+      "delta": 1471,
+      "ours": 1471,
+      "centraluChars": 3291,
+      "toolsChars": 50657,
+      "systemChars": 137
+     },
+     "builder": {
+      "runs": [
+       23624,
+       23624
+      ],
+      "median": 23624,
+      "delta": 7483,
+      "ours": 462,
+      "centraluChars": 576,
+      "toolsChars": 47938,
+      "systemChars": 30629
+     }
+    }
+   }
+  },
+  "a-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:36:16.815Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "centralu-howto": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "centralu-howto-2": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "find_apps",
+         "find_apps",
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 12,
+        "verdict": "wrong",
+        "steps": 11,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "overview"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "ask_project",
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 10,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 6,
+        "verdict": "wrong",
+        "steps": 4,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 5,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "resident-a-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:31:56.750Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 2,
+    "clis": [
+     "claude"
+    ]
+   },
+   "resident": {
+    "claude": {
+     "none": {
+      "runs": [
+       16141,
+       16141
+      ],
+      "median": 16141,
+      "delta": 0,
+      "ours": 0,
+      "centraluChars": 0,
+      "toolsChars": 47361,
+      "systemChars": 137
+     },
+     "reader": {
+      "runs": [
+       16478,
+       16478
+      ],
+      "median": 16478,
+      "delta": 337,
+      "ours": 337,
+      "centraluChars": 909,
+      "toolsChars": 48273,
+      "systemChars": 137
+     },
+     "orchestrator": {
+      "runs": [
+       25678,
+       25678
+      ],
+      "median": 25678,
+      "delta": 9537,
+      "ours": 3240,
+      "centraluChars": 9527,
+      "toolsChars": 56900,
+      "systemChars": 29417
+     },
+     "manager": {
+      "runs": [
+       17612,
+       17612
+      ],
+      "median": 17612,
+      "delta": 1471,
+      "ours": 1471,
+      "centraluChars": 3291,
+      "toolsChars": 50657,
+      "systemChars": 137
+     },
+     "builder": {
+      "runs": [
+       23625,
+       23625
+      ],
+      "median": 23625,
+      "delta": 7484,
+      "ours": 462,
+      "centraluChars": 576,
+      "toolsChars": 47938,
+      "systemChars": 30629
+     }
+    }
+   }
+  },
+  "a2-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:40:16.419Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files and folders in your top-level directory"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List all files and directories in the top folder of this project"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "recall",
+         "recall",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 8,
+        "verdict": "wrong",
+        "steps": 6,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "recall"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "a3-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:40:09.466Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files and directories in your top folder (root directory)"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder (current directory) and tell me what you find"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session"
+        ],
+        "calls": 2,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "b-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:35:30.906Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "centralu-howto": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "centralu-howto-2": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "recall",
+         "recall"
+        ],
+        "calls": 5,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "find_apps"
+        ],
+        "calls": 7,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "read_session",
+         "read_session",
+         "read_session",
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 12,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files and directories in the top folder of this project"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter app"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter app"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "resident-b-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:31:04.704Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 2,
+    "clis": [
+     "claude"
+    ]
+   },
+   "resident": {
+    "claude": {
+     "none": {
+      "runs": [
+       16140,
+       16140
+      ],
+      "median": 16140,
+      "delta": 0,
+      "ours": 0,
+      "centraluChars": 0,
+      "toolsChars": 47361,
+      "systemChars": 137
+     },
+     "reader": {
+      "runs": [
+       16541,
+       16541
+      ],
+      "median": 16541,
+      "delta": 401,
+      "ours": 401,
+      "centraluChars": 1126,
+      "toolsChars": 48491,
+      "systemChars": 137
+     },
+     "orchestrator": {
+      "runs": [
+       25676,
+       25676
+      ],
+      "median": 25676,
+      "delta": 9536,
+      "ours": 3240,
+      "centraluChars": 9527,
+      "toolsChars": 56900,
+      "systemChars": 29417
+     },
+     "manager": {
+      "runs": [
+       17611,
+       17611
+      ],
+      "median": 17611,
+      "delta": 1471,
+      "ours": 1471,
+      "centraluChars": 3291,
+      "toolsChars": 50657,
+      "systemChars": 137
+     },
+     "builder": {
+      "runs": [
+       23621,
+       23621
+      ],
+      "median": 23621,
+      "delta": 7481,
+      "ours": 462,
+      "centraluChars": 576,
+      "toolsChars": 47938,
+      "systemChars": 30629
+     }
+    }
+   }
+  },
+  "b2-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:39:50.500Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder of the project"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files and directories in your top folder (current working directory)"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "resident-b2-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:42:13.027Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 2,
+    "clis": [
+     "claude"
+    ]
+   },
+   "resident": {
+    "claude": {
+     "none": {
+      "runs": [
+       16140,
+       16140
+      ],
+      "median": 16140,
+      "delta": 0,
+      "ours": 0,
+      "centraluChars": 0,
+      "toolsChars": 47361,
+      "systemChars": 137
+     },
+     "reader": {
+      "runs": [
+       16621,
+       16621
+      ],
+      "median": 16621,
+      "delta": 481,
+      "ours": 481,
+      "centraluChars": 1389,
+      "toolsChars": 48755,
+      "systemChars": 137
+     },
+     "orchestrator": {
+      "runs": [
+       25676,
+       25676
+      ],
+      "median": 25676,
+      "delta": 9536,
+      "ours": 3240,
+      "centraluChars": 9527,
+      "toolsChars": 56900,
+      "systemChars": 29417
+     },
+     "manager": {
+      "runs": [
+       17611,
+       17611
+      ],
+      "median": 17611,
+      "delta": 1471,
+      "ours": 1471,
+      "centraluChars": 3291,
+      "toolsChars": 50657,
+      "systemChars": 137
+     },
+     "builder": {
+      "runs": [
+       23621,
+       23621
+      ],
+      "median": 23621,
+      "delta": 7481,
+      "ours": 462,
+      "centraluChars": 576,
+      "toolsChars": 47938,
+      "systemChars": 30629
+     }
+    }
+   }
+  },
+  "bh-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:45:05.051Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder (run: ls -la)"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": ""
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "available apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "ah-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:45:24.451Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List all files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 4,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "recall",
+         "recall",
+         "recall",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 9,
+        "verdict": "wrong",
+        "steps": 7,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 4,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "read_session",
+         "ask_project",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "ask_project",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 5,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "ab-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:45:20.923Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in the top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter app"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter app"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter app"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "wrong",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "wrong",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 4,
+        "verdict": "wrong",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "all"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "resident-ab-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T03:43:03.279Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 2,
+    "clis": [
+     "claude"
+    ]
+   },
+   "resident": {
+    "claude": {
+     "none": {
+      "runs": [
+       16141,
+       16141
+      ],
+      "median": 16141,
+      "delta": 0,
+      "ours": 0,
+      "centraluChars": 0,
+      "toolsChars": 47361,
+      "systemChars": 137
+     },
+     "reader": {
+      "runs": [
+       16553,
+       16553
+      ],
+      "median": 16553,
+      "delta": 412,
+      "ours": 412,
+      "centraluChars": 1169,
+      "toolsChars": 48534,
+      "systemChars": 137
+     },
+     "orchestrator": {
+      "runs": [
+       25678,
+       25678
+      ],
+      "median": 25678,
+      "delta": 9537,
+      "ours": 3240,
+      "centraluChars": 9527,
+      "toolsChars": 56900,
+      "systemChars": 29417
+     },
+     "manager": {
+      "runs": [
+       17612,
+       17612
+      ],
+      "median": 17612,
+      "delta": 1471,
+      "ours": 1471,
+      "centraluChars": 3291,
+      "toolsChars": 50657,
+      "systemChars": 137
+     },
+     "builder": {
+      "runs": [
+       23625,
+       23625
+      ],
+      "median": 23625,
+      "delta": 7484,
+      "ours": 462,
+      "centraluChars": 576,
+      "toolsChars": 47938,
+      "systemChars": 30629
+     }
+    }
+   }
+  },
+  "final-claude": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T04:05:52.954Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 5,
+    "clis": [
+     "claude"
+    ]
+   },
+   "selection": {
+    "claude": {
+     "centralu-howto": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "topic": "apps"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "centralu-howto-2": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "recall",
+         "recall"
+        ],
+        "calls": 6,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [],
+        "calls": 1,
+        "verdict": "none",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "ask_project"
+        ],
+        "calls": 12,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "ask_project"
+        ],
+        "calls": 9,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "recall",
+         "recall",
+         "find_apps",
+         "find_apps",
+         "find_apps",
+         "read_session",
+         "ask_project"
+        ],
+        "calls": 20,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       }
+      ]
+     },
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in your top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "List the files in your top folder using `ls -la`"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "project": "ops",
+         "task": "list the files in the top folder"
+        },
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "read_session",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 2,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter app"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter ops"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "wrong",
+        "steps": null,
+        "firstArgsValid": null,
+        "firstArgs": null,
+        "firstOk": null
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app",
+         "ask_project"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "counter"
+        },
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "find_apps"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": true,
+        "firstArgs": {
+         "query": "*"
+        },
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  },
+  "final-codex": {
+   "meta": {
+    "mode": "live",
+    "at": "2026-10-12T04:00:36.825Z",
+    "commit": "27027fb1",
+    "versions": {
+     "claude": "2.1.289 (Claude Code)",
+     "codex": "codex-cli 0.160.0",
+     "node": "v26.9.0"
+    },
+    "reps": 3,
+    "clis": [
+     "codex"
+    ]
+   },
+   "selection": {
+    "codex": {
+     "centralu-howto": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 5,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 5,
+        "verdict": "right",
+        "steps": 4,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     },
+     "centralu-howto-2": {
+      "profile": "reader",
+      "expect": [
+       "app_guide"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide",
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 5,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 4,
+        "verdict": "right",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "app_guide"
+        ],
+        "calls": 5,
+        "verdict": "right",
+        "steps": 4,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     },
+     "ask-project": {
+      "profile": "reader",
+      "expect": [
+       "ask_project"
+      ],
+      "runs": [
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 1,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       },
+       {
+        "called": [
+         "ask_project"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": false
+       }
+      ]
+     },
+     "open-app": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-named": {
+      "profile": "reader",
+      "expect": [
+       "find_apps",
+       "attach_app"
+      ],
+      "runs": [
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 2,
+        "verdict": "right",
+        "steps": 1,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "find_apps",
+         "attach_app"
+        ],
+        "calls": 3,
+        "verdict": "right",
+        "steps": 2,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     },
+     "open-app-list": {
+      "profile": "reader",
+      "expect": [
+       "find_apps"
+      ],
+      "runs": [
+       {
+        "called": [
+         "app_guide",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       },
+       {
+        "called": [
+         "app_guide",
+         "find_apps"
+        ],
+        "calls": 3,
+        "verdict": "wrong",
+        "steps": 3,
+        "firstArgsValid": null,
+        "firstArgs": {},
+        "firstOk": true
+       }
+      ]
+     }
+    }
+   }
+  }
+ },
+ "prompts": {
+  "comment": "The fixed prompt set of scripts/measure-tools.mts (#513). Placeholders: {project} this project's name, {other} the other project's name, {seed} the seeded session's name. A run's JSON keeps the prompts it used; change this file and the two runs no longer compare.",
+  "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "selection": [
+   {
+    "id": "centralu-howto",
+    "profile": "reader",
+    "prompt": "How do I let my other Centralu projects use an app from this project?",
+    "expect": [
+     "app_guide"
+    ]
+   },
+   {
+    "id": "centralu-howto-2",
+    "profile": "reader",
+    "prompt": "What does the Speed option under the input box in Centralu do? Only explain it.",
+    "expect": [
+     "app_guide"
+    ]
+   },
+   {
+    "id": "ask-project",
+    "profile": "reader",
+    "prompt": "Have the {other} project list the files in its top folder, then tell me what it found.",
+    "expect": [
+     "ask_project"
+    ]
+   },
+   {
+    "id": "open-app",
+    "profile": "reader",
+    "prompt": "One of my other Centralu projects shares a counter app. What number is it showing now?",
+    "expect": [
+     "find_apps",
+     "attach_app"
+    ]
+   },
+   {
+    "id": "open-app-named",
+    "profile": "reader",
+    "prompt": "Use the counter app from the {other} project to tell me its current number.",
+    "expect": [
+     "find_apps",
+     "attach_app"
+    ]
+   },
+   {
+    "id": "open-app-list",
+    "profile": "reader",
+    "prompt": "Which apps from my other Centralu projects could this session use?",
+    "expect": [
+     "find_apps"
+    ]
+   }
+  ]
+ }
+}

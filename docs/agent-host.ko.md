@@ -84,8 +84,15 @@ claude.ai 커넥터 끔):
 앱 붙이기 도구(#371 A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4)는 같은 서버에 자기 한도
 `APP_ACCESS_BUDGET_CHARS`(900. 지금 874)로 실린다. 어느 묶음도 다른 쪽의 여유로 자라지 않게 하려는 것이다.
 Claude는 셋 다 미루며, 그 값은 요청마다 +31 토큰이다(같은 측정, 2026-10-05, `ask_project`가 들어오기 전 #320 묶음에서 잼: +192에서 +223). 올려
-두면 +263을 더한다. Codex 세션이 그만큼 낸다. 모델은 여전히 찾는다: 새 haiku 세션 5번 중 5번이 평범한 요청에서
-도구 검색으로 `find_apps`를 찾았다(apps.md §9.4).
+두면 +263을 더한다. Codex 세션이 그만큼 낸다. 모델은 찾았다: 새 haiku 세션 5번 중 5번이 평범한 요청에서
+도구 검색으로 `find_apps`를 찾았다(apps.md §9.4). 다른 길이 열려 있지 않을 때였다.
+
+#522부터 Claude는 `find_apps`를 올려 두고 나머지 둘을 미룬다. 옆에 `ask_project`가 올라와 있으니, 다른 프로젝트의
+앱을 묻는 질문은 `ask_project`로(또는 세션 읽기로) 갔고 도구 검색으로는 한 번도 가지 않았다: 10번 중 0번 `attach_app`에
+이르렀다. 올려 두고 `ask_project`의 설명 끝을 "For another project's apps, use find_apps."로 하니 10번 중 9번(다시 잰
+10번 중 8번)이 이르렀고, 평범한 Claude 요청마다 +86 토큰이 든다(정의 +75, 가리킴 +11: 326 → 412). 변형들과 그
+숫자는 [tool-cost.md](tool-cost.md) §8에 있다. #523은 `app_guide`의 `topic`을 일곱 주제의 enum으로 바꿨다(그것으로
+읽기 묶음은 983자다).
 
 **다시 재기**(#513). `pnpm measure:tools`가 모든 프로필을 두 CLI에서 같은 방식으로, 되풀이할 수 있게
 잰다: 상주 토큰(API의 사용량, 그리고 Centralu 도구를 넣고 뺀 `count_tokens`), 요청마다의 캐시 읽기·쓰기와
