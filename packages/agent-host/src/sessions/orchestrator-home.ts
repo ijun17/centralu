@@ -1,6 +1,32 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { dataRoot } from '../data-dir.js'
+import { commandsFor } from './orchestrator-tools.js'
+
+let preamble = false
+
+/**
+ * A preamble at the head of the orchestrator's role (#512, round 2; `CC_ORCHESTRATOR_PREAMBLE=1`, off by default):
+ * look at what Centralu offers before doing a thing another way. The orchestrator's alone: Centralu offers its tools
+ * to the person's own sessions but does not direct them (product-spec.md §1.2), so no ordinary session gets it.
+ */
+export function setOrchestratorPreamble(on: boolean): void {
+  preamble = on
+}
+
+/** The preamble as this host's tier words it: it names centralu_commands only where the seat has it */
+export function orchestratorPreamble(): string {
+  if (!preamble) return ''
+  return commandsFor('orchestrator').length
+    ? "You are an agent running inside Centralu. Before doing something yourself or using another tool, look for what Centralu's MCP tools and commands can do (centralu_commands)."
+    : "You are an agent running inside Centralu. Before doing something yourself or using another tool, look for what Centralu's MCP tools can do."
+}
+
+/** The orchestrator's role as its session is given it: the preamble, when on, then the role */
+export function orchestratorRole(): string {
+  const head = orchestratorPreamble()
+  return head ? `${head}\n\n${ORCHESTRATOR_ROLE}` : ORCHESTRATOR_ROLE
+}
 
 /**
  * The orchestrator's working directory.

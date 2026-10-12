@@ -126,8 +126,13 @@ runner, so each command keeps its result and its card. `propose_worktree_session
 came out: nothing in the instructions names it, and hidden it was never reached. `app_guide` stays a tool: the person's questions about
 the app come unannounced, and deferred it was found less often (tool-cost.md §8). The setting is read once at
 start, since a session's tool list is its prompt prefix. The three arms are compared in
-[tool-cost.md](tool-cost.md) §9: the tier saved 709 tokens a request on Claude and reached a rare command in 15
+[tool-cost.md](tool-cost.md) §9: the tier saved 709 tokens a request on haiku and reached a rare command in 15
 of 24 runs against 23 of 24 resident, so the default stays; it changes only on numbers, as a separate decision.
+`CC_ORCHESTRATOR_PREAMBLE=1` (off by default) starts the orchestrator's role with a line telling it to look at what
+Centralu's tools and commands can do before doing a thing another way (`orchestratorRole`). The orchestrator's
+alone: Centralu offers tools to the person's own sessions and does not direct them (product-spec.md §1.2). Measured
+in round 2 of §9 (Sonnet and haiku, English and Korean): 33 to 55 tokens a request, no regression, no gain that
+held, so it stays off.
 
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts
 one more node process (about 40 MB resident, idle). The bridge sets

@@ -27,6 +27,7 @@ import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
 import { SessionManager } from './manager.js'
 import { setRareTier } from './orchestrator-tools.js'
+import { orchestratorPreamble, setOrchestratorPreamble } from './orchestrator-home.js'
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
@@ -4208,6 +4209,27 @@ describe('the commands tier through the host (#512)', () => {
     // By its own name the command is no longer a tool of the seat
     await expect(mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'other', content: 'x' })).rejects.toThrow(/Not a tool of this session/)
     expect(mgr.skillProposals().map((p) => p.name)).toEqual(['weekly-report'])
+  })
+
+  /*
+   * The preamble (#512 round 2) is the orchestrator's: Centralu offers its tools to the person's own sessions and
+   * does not direct them (product-spec.md §1.2), so an ordinary session's prompt never carries it.
+   */
+  it("puts the preamble, when on, at the head of the orchestrator's role and nowhere else", async () => {
+    try {
+      setOrchestratorPreamble(true)
+      await mgr.orchestrator()
+      expect(adapter.lastOpts?.systemPromptAppend).toMatch(/^You are an agent running inside Centralu\. .*\(centralu_commands\)\.\n\nYou are the central orchestrator/)
+      const p = await addProject()
+      await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+      expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('running inside Centralu')
+      setRareTier('resident')
+      expect(orchestratorPreamble()).not.toContain('centralu_commands')
+      setOrchestratorPreamble(false)
+      expect(orchestratorPreamble()).toBe('')
+    } finally {
+      setOrchestratorPreamble(false)
+    }
   })
 
   it('refuses a command outside the seat: the worktree manager has no centralu_run, and the orchestrator no manager command', async () => {

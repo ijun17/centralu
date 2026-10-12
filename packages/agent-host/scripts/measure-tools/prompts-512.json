@@ -65,6 +65,13 @@
       "fresh": true,
       "prompt": "Open a new session in {project} called docs-check. Don't give it any task yet.",
       "expect": ["create_session"]
+    },
+    {
+      "id": "core-no-tool",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "What is 17 times 23? Answer with the number only.",
+      "expect": []
     }
   ]
 }

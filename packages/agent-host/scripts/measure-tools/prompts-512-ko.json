@@ -1,0 +1,77 @@
+{
+  "comment": "The Korean version of prompts-512.json (#512 round 2): the same nine asks, written the way a Korean speaker would type them, no tool named. Same ids, so a run compares prompt by prompt with the English set.",
+  "preset": "safe",
+  "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "selection": [
+    {
+      "id": "rare-app-project",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "{project} 프로젝트에서 쓸 화면 있는 작은 도구 하나 만들어 줘. 팀원들이 같이 항목 추가할 수 있는 장보기 목록이면 돼.",
+      "expect": ["create_app"]
+    },
+    {
+      "id": "rare-app-user",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "어느 프로젝트에서든 열어 볼 수 있는 나만의 작은 화면이 있었으면 좋겠어. 하루에 물 몇 잔 마셨는지 기록하는 용도로.",
+      "expect": ["create_app"]
+    },
+    {
+      "id": "rare-skill",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "월요일마다 똑같은 걸 부탁하잖아. 모든 프로젝트 세션 훑어보고 지난주에 뭐가 바뀌었는지 다섯 줄로 정리해 주는 거. 매번 설명 안 해도 되게 그 절차를 기억해 둬.",
+      "expect": ["propose_skill"]
+    },
+    {
+      "id": "rare-browser",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "네가 직접 실제 브라우저로 웹페이지 열고 이것저것 클릭해 볼 수 있으면 좋겠어. 그런 기능 갖출 수 있어?",
+      "expect": ["propose_mcp_server"]
+    },
+    {
+      "id": "rare-branch",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "{project}에서 로그인 버그 수정을 별도 git 브랜치에서 해 보고 싶어. main은 건드리지 않게. 준비해 줘.",
+      "expect": ["propose_worktree_session"]
+    },
+    {
+      "id": "core-overview",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "{project}에 어떤 세션들이 있고 각각 뭐 하고 있어?",
+      "expect": ["list_sessions", "read_session"]
+    },
+    {
+      "id": "core-delegate",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "\"{seed}\" 세션한테 DONE 한 단어로만 답하라고 전해 줘.",
+      "expect": ["send_to_session"]
+    },
+    {
+      "id": "core-recall",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "지난번에 얘기했을 때 데이터베이스 백업 어떻게 하기로 했었지?",
+      "expect": ["recall"]
+    },
+    {
+      "id": "core-new-session",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "{project}에 docs-check라는 이름으로 새 세션 하나 열어 줘. 아직 일은 주지 말고.",
+      "expect": ["create_session"]
+    },
+    {
+      "id": "core-no-tool",
+      "profile": "orchestrator",
+      "fresh": true,
+      "prompt": "17 곱하기 23은 얼마야? 숫자만 답해 줘.",
+      "expect": []
+    }
+  ]
+}

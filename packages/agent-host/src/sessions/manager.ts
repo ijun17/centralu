@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
+import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
@@ -1642,7 +1642,7 @@ export class SessionManager {
             : this.readsOwnProject(info) ? 'reader'
             : undefined,
           systemPromptAppend:
-            info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt()
+            info.kind === 'orchestrator' ? orchestratorRole() + this.skillsPrompt()
             // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
             : (info.roleAppend ?? undefined),
           // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
@@ -2280,7 +2280,7 @@ export class SessionManager {
             m.kind === 'orchestrator'
               ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
                 // (unchanged rule)
-                ORCHESTRATOR_ROLE + this.skillsPrompt() + (resumeId ? '' : this.orchestratorMemory(m.id))
+                orchestratorRole() + this.skillsPrompt() + (resumeId ? '' : this.orchestratorMemory(m.id))
               : // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
                 // for a builder session (C-2) even if the app is broken
                 (m.roleAppend ?? undefined),

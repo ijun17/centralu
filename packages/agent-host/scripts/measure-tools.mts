@@ -15,6 +15,8 @@
  *          --phases resident,cache,results,selection  --prompts <file>  --out <file>  --keep
  *          --rare resident|deferred|commands (#512: how the orchestrator's rare commands are exposed)
  *          --kinds none,reader,orchestrator,manager,builder (the session kinds the resident phase starts)
+ *          --preamble (#512 round 2: the orchestrator's role starts with the preamble, CC_ORCHESTRATOR_PREAMBLE)
+ *          --only <id,id> (run only these prompts of the set)
  *
  * Every host it starts runs on a temporary data folder (`CC_DATA_DIR` and `--db`), never `~/.centralu`.
  * Live runs use the person's own CLI logins, as the earlier probes did.
@@ -45,6 +47,8 @@ const { values: opt, positionals } = parseArgs({
     out: { type: 'string' },
     keep: { type: 'boolean', default: false },
     rare: { type: 'string', default: 'resident' },
+    preamble: { type: 'boolean', default: false },
+    only: { type: 'string' },
     kinds: { type: 'string', default: 'none,reader,orchestrator,manager,builder' },
   },
   allowPositionals: true,
@@ -85,6 +89,10 @@ const PROMPTS = JSON.parse(readFileSync(PROMPTS_FILE, 'utf8')) as {
 const RARE = rareTierFrom(opt.rare)
 if (RARE !== opt.rare) throw new Error(`--rare takes resident, deferred or commands, not ${opt.rare}`)
 setRareTier(RARE)
+if (opt.only) {
+  const only = opt.only.split(',').map((x) => x.trim())
+  PROMPTS.selection = PROMPTS.selection.filter((p) => only.includes(p.id))
+}
 const KINDS = opt.kinds.split(',').map((s) => s.trim())
 const FIXTURE = fileURLToPath(new URL('../src/apps/external/test-fixtures/app.mjs', import.meta.url))
 const OK = 'Reply with the single word OK.'
@@ -140,7 +148,7 @@ async function world(cli: Cli, recorder: ApiRecorder | null) {
       server: { command: process.execPath, args: [FIXTURE, '--mode', 'attach'] },
     }),
   )
-  const env: Record<string, string> = { CC_RARE_COMMANDS: RARE }
+  const env: Record<string, string> = { CC_RARE_COMMANDS: RARE, ...(opt.preamble ? { CC_ORCHESTRATOR_PREAMBLE: '1' } : {}) }
   if (recorder) {
     env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${recorder.port}`
     /*
@@ -468,7 +476,13 @@ function resolveCalls(calls: Call[], runs: { command: string; outcome: string }[
  */
 async function tidy(d: Driver, keep: string[]): Promise<void> {
   const host = d.host
-  for (const s of (await host.rpc('sessions.list', {}).catch(() => [])) as unknown as Json[]) if (!keep.includes(s.id)) await d.remove(s.id)
+  /*
+   * Stopped before they are deleted: a builder create_app stood up and the orchestrator handed work to runs on the
+   * CLI's default model under the person's own settings, and in the first runs one went on working after its turn
+   */
+  const others = ((await host.rpc('sessions.list', {}).catch(() => [])) as unknown as Json[]).filter((s) => !keep.includes(s.id))
+  for (const s of others) await host.rpc('agents.interrupt', { sessionId: s.id }).catch(() => {})
+  for (const s of others) await d.remove(s.id)
   for (const a of (await host.rpc('apps.list', {}).catch(() => [])) as unknown as Json[]) {
     if (a.appId === 'counter') continue
     // A project's app is part of its repository, which the host does not delete: the scratch project's folder goes instead
@@ -607,7 +621,7 @@ printSummary(summary)
 const out = opt.out ?? join(tmpdir(), `measure-tools-${LIVE ? 'live' : 'dry'}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
 writeFileSync(
   out,
-  JSON.stringify({ meta: { mode: LIVE ? 'live' : 'dry', at: new Date().toISOString(), commit, versions, reps: REPS, clis: CLIS, rare: RARE, prompts: PROMPTS }, summary, raw }, null, 1),
+  JSON.stringify({ meta: { mode: LIVE ? 'live' : 'dry', at: new Date().toISOString(), commit, versions, reps: REPS, clis: CLIS, rare: RARE, preamble: opt.preamble, prompts: PROMPTS }, summary, raw }, null, 1),
 )
 console.log(`\nwrote ${out}`)
 process.exit(0)

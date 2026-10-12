@@ -27,10 +27,12 @@ pnpm measure:tools --compare before.json after.json
 | `--keep` | off | Keep the scratch folder (projects, data folder, `host.log`) |
 | `--rare` | `resident` | How the host exposes the orchestrator's rare commands (`CC_RARE_COMMANDS`: `resident`, `deferred`, `commands`; §9) |
 | `--kinds` | all five | The session kinds the resident phase starts |
+| `--preamble` | off | Start the orchestrator's role with the preamble (`CC_ORCHESTRATOR_PREAMBLE`; §9, round 2) |
+| `--only` | every prompt | Run only these prompt ids of the set |
 
 A prompt file may set `preset` (the permission preset of every selection session) and, per orchestrator
 prompt, `fresh` (a new orchestrator every repetition, and what the run made is removed before the next:
-sessions, apps, proposals). `prompts-512.json` does both (§9).
+sessions, apps, proposals). `prompts-512.json` and its Korean twin `prompts-512-ko.json` do both (§9).
 
 What a run starts: per CLI, one host on a fresh temporary data folder (`CC_DATA_DIR` and `--db` both
 inside it, never `~/.centralu`), two trusted scratch git projects, `website` and `ops`, and in `ops` a
@@ -387,8 +389,8 @@ under every preset. Claude Code's auto memory is off (`CLAUDE_CODE_DISABLE_AUTO_
 orchestrator kept the weekly procedure in its memory folder, where every later orchestrator of the run would read it.
 Claude was run twice: a first run with `propose_worktree_session` in the tier too, and, after the findings below,
 the run the tables report. Every run's summary is kept in `baselines/2026-10-12-rare-commands-512-live.json`. The
-runs cost about $3.90 of Claude usage at list prices (883 haiku requests, the builder sessions `create_app` started
-included) and about 45 Codex turns.
+runs cost about $3.90 of Claude usage at haiku's list prices (883 requests, the builder sessions `create_app` started
+included, which run on the CLI's default model; see round 2's spend) and about 45 Codex turns.
 
 ### Resident cost (the orchestrator's first request)
 
@@ -480,17 +482,93 @@ in the record, so a taken id is the likely cause, not a confirmed one.
   prompt starts a new orchestrator and removes what the last one made, and the sessions run under `safe` with auto
   memory off.
 
+### Round 2: Sonnet, Korean, and a preamble (2026-10-12)
+
+The owner asked for the same comparison on a stronger model, in Korean, and with a preamble at the head of the
+orchestrator's role, along the owner's words: "You are an agent running inside Centralu. Before doing something
+yourself or using another tool, look for what Centralu's MCP tools and commands can do (centralu_commands)."
+(`CC_ORCHESTRATOR_PREAMBLE=1`, `--preamble`; where the seat has no commands the last words are "MCP tools can do."
+without the name). It goes in the orchestrator's role only: Centralu offers its tools to the person's own sessions
+and does not direct them (product-spec.md §1.2), so no ordinary session gets it (`orchestratorRole`, tested in
+`manager.test.ts`). Arms: **A** resident, **A'** resident + preamble, **C** commands, **D** commands + preamble.
+
+Claude Code 2.1.289 on `claude-sonnet-5-5` (the CLI's `sonnet`), 3 repetitions, the Korean set
+(`prompts-512-ko.json`: the same nine asks as a Korean speaker would type them, no tool named) and the English set;
+haiku 4.5 for A' and D on the English set, against round 1's A and C. Both sets gained a tenth prompt that needs no
+tool ("What is 17 times 23?"), to catch a preamble that sends the model looking before a simple answer; the runs
+that predate it ran it alone (`--only core-no-tool`). Same harness and rules as above. Summaries:
+`baselines/2026-10-12-rare-commands-512-round2-live.json`.
+
+**What the preamble costs**, every orchestrator request: 143 characters in A', 176 in D (it names
+`centralu_commands`). First request, same model and language: Sonnet A → A' +47 tokens (English) / +44 (Korean),
+C → D +55 / +54; haiku A → A' +33, C → D +40.
+
+**Sonnet** (each cell: English / Korean; rare = the four rare prompts, 12 runs per language):
+
+| | A resident | A' + preamble | C commands | D commands + preamble |
+|---|---|---|---|---|
+| First request (tokens) | 21,438 / 21,439 | 21,485 / 21,483 | 20,603 / 20,603 (−835) | 20,658 / 20,657 |
+| Rare command reached | 12/12 / 12/12 | 12/12 / 12/12 | 12/12 / 12/12 | 12/12 / 12/12 |
+| `propose_worktree_session` (a tool in every arm) | 3/3 / 3/3 | 3/3 / 3/3 | 3/3 / 3/3 | 3/3 / 3/3 |
+| Core commands reached | 12/12 / 12/12 | 12/12 / 12/12 | 12/12 / 12/12 | 12/12 / 12/12 |
+| No tool needed: no Centralu call | 3/3 / 3/3 | 3/3 / 3/3 | 3/3 / 3/3 | 3/3 / 3/3 |
+| Discovery calls on core or no-tool prompts | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| First-try arguments valid (rare) | 12/12 / 12/12 | 12/12 / 12/12 | 12/12 / 12/12 | 12/12 / 12/12 |
+| Steps to the command (median) | 1 / 1 | 1 / 1 | 4 / 3 | 3 / 3 |
+| Discovery calls on the rare prompts | 0 / 0 | 0 / 0 | 24 / 21 | 22 / 23 |
+| Requests per rare turn (median) | 3 / 3 | 3 / 3 | 5 / 5 | 5 / 5 |
+| Input tokens per rare turn (median) | 54,673 / 54,774 | 54,626 / 54,889 | 96,394 / 96,879 | 96,130 / 96,881 |
+| Output tokens per rare turn (median) | 482 / 627 | 458 / 708 | 656 / 893 | 620 / 797 |
+| Rebuilds within a turn | 0 | 0 | 0 | 0 |
+
+**Haiku** (English, 12 rare runs; A and C are round 1's second run above):
+
+| | A | A' | C | D |
+|---|---|---|---|---|
+| First request (tokens) | 22,693 | 22,726 | 21,983 | 22,023 |
+| Rare command reached | 11/12 | **12/12** | 8/12 | 8/12 |
+| ... project app / own app / skill / browser | 2 / 3 / 3 / 3 | 3 / 3 / 3 / 3 | 2 / 3 / 0 / 3 | 1 / 3 / 1 / 3 |
+| `propose_worktree_session` | 3/3 | 3/3 | 3/3 | 3/3 |
+| Core commands reached | 12/12 | 12/12 | 12/12 | 12/12 |
+| No tool needed: no Centralu call | 3/3 | 3/3 | 3/3 | 3/3 |
+| First-try arguments valid (rare) | 11/11 | 12/12 | 8/8 | 7/8 |
+| Requests / input tokens per rare turn (median) | 2 / 46,018 | 3 / 58,075 | 5 / 102,459 | 4 / 90,911 |
+
+What round 2 shows:
+
+- **Sonnet finds a rare command in every arm and both languages**, 96 of 96, with valid arguments first time. C and D
+  reach it by listing and reading help first: two more requests and about 42k more input tokens per rare turn
+  (+77%), and the saving is 835 tokens a request (Sonnet counts the same characters as more tokens than haiku).
+- **Korean and English behave the same** on every row, within a few tokens.
+- **The preamble did not regress anything**: no `centralu_commands` call on a core or no-tool prompt in any run, the
+  same core calls as without it, a simple answer stayed one request. It also changed little that the tier needed:
+  Sonnet was at 12/12 without it, and on haiku D reached as often as C (8/12) and lost `propose_skill` the same way.
+  On haiku A' it took the one rare miss of A (12/12 against 11/12, one run's difference).
+- **Haiku is where the tier costs**, and the preamble does not buy it back.
+
+**Spend.** Round 2 cost $14.52 at list prices (1,609 requests): $7.27 on Sonnet, $1.12 on haiku, and $6.13 on
+`claude-opus-5-5`, the CLI's default model, which the builder sessions `create_app` stands up run on (the
+measurement stops and deletes them after each turn; a builder handed work by the orchestrator spends while the turn
+lasts). Round 1's $3.90 above priced every request at haiku's rates, its builders included, so it was likely higher by
+about the same share (roughly $0.5 a run that made an app); pinning the builder's model is a harness change for a
+next round.
+
 ### Recommendation
 
-**Keep the default (`resident`).** On Claude, C saves 709 tokens a request (22% of Centralu's own, 3% of the
-request) and reaches a rare command in 15 of 24 runs against 23 of 24; B saves more (1,015) and loses less (21 of
-24), but its losses fall on `propose_skill` and its first calls often fail before the tool is loaded. On Codex C
-saves nothing resident, since Codex's first request carries no MCP definitions, and costs a step each time. The
-case #512 still makes for C, a tool list that stays fixed while apps and commands come and go, was not measured
-here, and §4 found Claude's cache holding through attach and detach already. If a cut is wanted, the next arm to
-measure is B for `create_app` and `propose_mcp_server` only (each reached 6 of 6 deferred), with `propose_skill`
-loaded; the switch stays off until then.
+**Keep the default (`resident`), without the preamble.** On haiku, C saves 709 tokens a request (22% of Centralu's
+own, 3% of the request) and reaches a rare command in 15 of 24 runs against 23 of 24; B saves more (1,015) and
+loses less (21 of 24), but its losses fall on `propose_skill` and its first calls often fail before the tool is
+loaded. On Sonnet the tier loses nothing (24 of 24 in each arm, both languages) and saves 835 tokens a request, but
+every use of a rare command costs two more requests, about 42k more input tokens, so it pays only when the
+orchestrator makes some fifty requests per rare command it runs; on haiku it also loses selection. The preamble
+costs 33 to 55 tokens a request, regressed nothing, and moved nothing that was measured beyond one run, so it has
+not earned its place either. On Codex C saves nothing resident, since Codex's first request carries no MCP
+definitions, and costs a step each time. The case #512 still makes for C, a tool list that stays fixed while apps
+and commands come and go, was not measured here, and §4 found Claude's cache holding through attach and detach
+already. If a cut is wanted, the arm to measure next is B for `create_app` and `propose_mcp_server` only (each
+reached 6 of 6 deferred on haiku), with `propose_skill` loaded; the switches stay off until then.
 
-**Not measured.** Other models than haiku and gpt-6.1-sol; a command used late in a long orchestrator conversation;
-app tools behind `app_tools`/`app_call` (#512's app tier); B with `propose_skill` loaded; the proposal cards on screen
-in the real app (the unit tests cover the events the screen reacts to); Windows and the packaged app.
+**Not measured.** Opus as the orchestrator's model; B (deferral) on Sonnet; the Korean set on haiku and on Codex;
+Codex in round 2; a command used late in a long orchestrator conversation; app tools behind `app_tools`/`app_call`
+(#512's app tier); B with `propose_skill` loaded; the proposal cards on screen in the real app (the unit tests cover
+the events the screen reacts to); Windows and the packaged app.
