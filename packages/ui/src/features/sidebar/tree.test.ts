@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { orderAsTree } from './tree.js'
+import { groupProjectAppSessions, orderAsTree } from './tree.js'
 
 const s = (id: string, over: Partial<SessionSummary> = {}) => ({ id, parentSessionId: null, askedBy: null, ...over }) as SessionSummary
 const shape = (list: SessionSummary[]) => orderAsTree(list).map(({ s, nested }) => (nested ? `  ${s.id}` : s.id))
@@ -33,5 +33,22 @@ describe('orderAsTree', () => {
         s('grandchild', { askedBy: 'child' }),
       ]),
     ).toEqual(['asked', 'orphan', 'root', '  child', 'grandchild'])
+  })
+
+  it('puts listed project-app sessions under their app and leaves a removed app in the project tree', () => {
+    const grouped = groupProjectAppSessions(
+      [
+        s('ordinary'),
+        s('builder', { appId: 'notes' }),
+        s('app-agent', { appId: 'notes' }),
+        s('started-agent', { askedBy: 'ordinary' }),
+        s('worktree', { parentSessionId: 'ordinary' }),
+        s('removed-app-agent', { appId: 'gone' }),
+      ],
+      ['notes'],
+    )
+
+    expect(grouped.byApp.get('notes')?.map((session) => session.id)).toEqual(['builder', 'app-agent'])
+    expect(shape(grouped.project)).toEqual(['ordinary', '  started-agent', '  worktree', 'removed-app-agent'])
   })
 })

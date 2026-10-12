@@ -1,5 +1,34 @@
 import type { SessionSummary } from '@cc/core'
 
+export type ProjectAppSessions = {
+  /** Sessions that still belong in the project's ordinary tree. */
+  project: SessionSummary[]
+  /** Listed app id → the sessions that row owns, in the host's order. */
+  byApp: Map<string, SessionSummary[]>
+}
+
+/**
+ * Separates the sessions owned by apps that are still listed in a project from its ordinary
+ * sessions. A removed app deliberately does not claim its old sessions: they return to the
+ * project list instead of disappearing with the app row.
+ *
+ * This happens before `orderAsTree`, so a regular session and the agents or worktrees it started
+ * retain the tree layout they had before app rows were introduced.
+ */
+export function groupProjectAppSessions(
+  sessions: SessionSummary[],
+  appIds: readonly string[],
+): ProjectAppSessions {
+  const byApp = new Map(appIds.map((id) => [id, [] as SessionSummary[]]))
+  const project: SessionSummary[] = []
+  for (const session of sessions) {
+    const owned = session.appId ? byApp.get(session.appId) : undefined
+    if (owned) owned.push(session)
+    else project.push(session)
+  }
+  return { project, byApp }
+}
+
 /**
  * Lays out the session list in tree order: a session immediately followed by the sessions it started (owner decision
  * 2026-10-12 on #561). A child is grouped by who started it, `askedBy` for a start_agent child, whether it runs in its

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
-import { orderAsTree } from './tree.js'
+import { groupProjectAppSessions, orderAsTree } from './tree.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
 import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js'
@@ -25,7 +25,7 @@ import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon, SearchIcon } from '../../components/icons.jsx'
 import { isRemoteUserApp, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
-import { isAway } from '@cc/core'
+import { isAway, isWaiting } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { useRemoteIde } from '../machines/remoteIde.js'
@@ -520,6 +520,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const askingTrust = useStore((s) => s.trustAsk === projectId)
   // This project's apps (M4 B-2) — stand below the sessions, in the same row shape
   const projectApps = useProjectApps(projectId)
+  const groupedSessions = useMemo(() => groupProjectAppSessions(sessions, projectApps.map((app) => app.appId)), [sessions, projectApps])
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)
   /** Where the menu hangs from — the pressed button (not a corner of the sidebar) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
@@ -741,7 +742,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       */}
       {!folded && (
         <ul className="mt-1.5">
-          {orderAsTree(sessions).map(({ s, nested }) => {
+          {orderAsTree(groupedSessions.project).map(({ s, nested }) => {
             const unread = s.lastSeq > s.lastReadSeq
             const focused = focusedSessionId === s.id
             return (
@@ -757,7 +758,14 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                  * and the screen would end up lying.
                  */
                 draggable={renaming !== s.id && !nested}
-                onReorder={(draggedId, before) =>
+                onReorder={(draggedId, before) => {
+                  // App-owned rows can still be dropped on the grid, but their appId — not list position — is their membership.
+                  if (
+                    [...groupedSessions.byApp.values()].some((owned) =>
+                      owned.some((session) => session.id === draggedId),
+                    )
+                  )
+                    return
                   void reorderSessions(
                     projectId,
                     moveTo(
@@ -767,7 +775,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       before,
                     ),
                   )
-                }
+                }}
               >
                 {renaming === s.id ? (
                   <SessionNameInput
@@ -918,7 +926,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           })}
         </ul>
       )}
-      {!folded && <AppRows apps={projectApps} testId={`project-apps-${project.name}`} />}
+      {!folded && <AppRows apps={projectApps} sessionsByApp={groupedSessions.byApp} testId={`project-apps-${project.name}`} />}
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}
@@ -990,27 +998,67 @@ const APP_HINT: Partial<Record<ExternalAppStatus, string>> = {
   unconfirmed: 'not enabled',
 }
 
-function AppRows({ apps, testId }: { apps: ExternalCatalogApp[]; testId: string }) {
+function AppRows({ apps, sessionsByApp, testId }: { apps: ExternalCatalogApp[]; sessionsByApp?: Map<string, SessionSummary[]>; testId: string }) {
   if (apps.length === 0) return null
   return (
     <ul data-testid={testId}>
       {apps.map((a) => (
         <Fragment key={a.key}>
           <AppRow app={a} />
-          {/* A project app's sessions stand in its project's list; a user-folder app has no project to hold them */}
-          {a.projectId === null && <UserAppSessions appId={a.appId} machine={a.info.machine ?? null} />}
+          {a.projectId === null ? (
+            <UserAppSessions appId={a.appId} machine={a.info.machine ?? null} />
+          ) : (
+            <ProjectAppSessions sessions={sessionsByApp?.get(a.appId) ?? []} />
+          )}
         </Fragment>
       ))}
     </ul>
   )
 }
 
+/** A listed project app owns these rows, so they cannot be reordered into the project's session list. */
+function ProjectAppSessions({ sessions }: { sessions: SessionSummary[] }) {
+  const selected = useSelectedSessionId()
+  const focusSession = useStore((s) => s.focusSession)
+  return sessions.map((s) => {
+    const focused = selected === s.id
+    const unread = s.lastSeq > s.lastReadSeq
+    return (
+      <li
+        key={s.id}
+        className="relative ml-4 border-l border-line/60"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(SESSION_MIME, s.id)
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => focusSession(s.id)}
+          data-testid={`app-session-row-${s.id}`}
+          aria-current={focused ? 'page' : undefined}
+          data-unread={(unread && !focused) || undefined}
+          className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-md transition-colors ${
+            focused
+              ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
+              : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
+          }`}
+        >
+          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
+          <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
+        </button>
+      </li>
+    )
+  })
+}
+
 /**
  * The sessions of a user-folder app, indented under its row: its builder and the agents its
  * `run_agent` stood up (both have no project and carry the app's id).
  *
- * This is their one place in the sidebar. A project app's sessions belong to its project and stand
- * in that list; a user-folder app's have no project, and the "No app" list that used to catch every
+ * This is their one place in the sidebar. Project apps use the same nested rows in their project's
+ * app list; user-folder apps have no project, and the "No app" list that used to catch every
  * session with no project is gone (2026-10-05). An agent an app started runs on `safe`, so it can
  * stop at an approval card, and a session waiting on the person must have a row to be found by.
  *
@@ -1077,7 +1125,15 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
   const asking = useStore(
     (s) => !remote && s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId),
   )
-  const hint = asking ? 'asks you' : APP_HINT[app.info.status]
+  const sessionWaiting = useStore(
+    (s) =>
+      !remote &&
+      Object.values(s.sessions).some(
+        (session) => session.projectId === app.projectId && session.appId === app.appId && isWaiting(session.state),
+      ),
+  )
+  const waitsForYou = asking || sessionWaiting
+  const hint = waitsForYou ? 'asks you' : APP_HINT[app.info.status]
   const projectId = app.projectId
   return (
     <li
@@ -1115,9 +1171,9 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         <span className="truncate">{app.title}</span>
         {hint && (
           <span
-            className={`readout ml-auto shrink-0 text-2xs ${asking || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
+            className={`readout ml-auto shrink-0 text-2xs ${waitsForYou || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
             data-testid="app-row-hint"
-            data-asking={asking || undefined}
+            data-asking={waitsForYou || undefined}
           >
             {hint}
           </span>

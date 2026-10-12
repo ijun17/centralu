@@ -238,6 +238,83 @@ export function sidebarSelectionTests(): void {
       await expect(marked(page)).toHaveCount(1)
     })
 
+    test('a project app owns its sessions while removed-app and ordinary session trees stay in the project list', async ({
+      page,
+    }) => {
+      await setup(page, ['/tmp/alpha'])
+      const projectId = await page.evaluate(
+        () =>
+          (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find(
+            (project) => project.name === 'alpha',
+          )!.id,
+      )
+      const ordinary = await newSession(page, 'alpha')
+      const builder = await page.evaluate(
+        async (id) =>
+          (
+            await (window as any).__mock.apps.create({
+              projectId: id,
+              id: 'timer',
+              name: 'Timer',
+              tool: 'claude',
+            })
+          ).builder.id as string,
+        projectId,
+      )
+      const [appAgent, removedAppAgent, startedAgent, worktree] = await page.evaluate(
+        ([id, parent]) => {
+          const mock = (window as any).__mock
+          const base = mock.sessions.get(parent)
+          const plant = (sessionId: string, extra: Record<string, unknown>) => {
+            const session = {
+              ...base,
+              id: sessionId,
+              projectId: id,
+              autoNamed: false,
+              roleAppend: null,
+              ...extra,
+            }
+            mock.sessions.set(sessionId, session)
+            mock.emit({ type: 'session_created', sessionId, session })
+            return sessionId
+          }
+          return [
+            plant('timer-agent-1', {
+              appId: 'timer',
+              name: 'Timer · agent 10:00',
+              state: 'waiting_approval',
+              waitingSince: Date.now(),
+            }),
+            plant('gone-agent-1', { appId: 'gone', name: 'Gone · agent 09:00' }),
+            plant('ordinary-child-1', { appId: null, name: 'Ordinary child', askedBy: parent }),
+            plant('ordinary-worktree-1', { appId: null, name: 'Ordinary worktree', parentSessionId: parent }),
+          ]
+        },
+        [projectId, ordinary],
+      )
+
+      const project = page.getByTestId('project-alpha')
+      const apps = project.getByTestId('project-apps-alpha')
+      await expect(project.getByTestId(`session-row-${builder}`)).toHaveCount(0)
+      await expect(apps.getByTestId(`app-session-row-${builder}`)).toContainText('Timer · builder')
+      await expect(apps.getByTestId(`app-session-row-${appAgent}`)).toContainText('Timer · agent 10:00')
+      await expect(apps.getByTestId(`app-row-${projectId}/timer`).getByTestId('app-row-hint')).toHaveText(
+        'asks you',
+      )
+      await expect(project.getByTestId(`session-row-${removedAppAgent}`)).toContainText('Gone · agent 09:00')
+      await expect(project.getByTestId(`session-row-${startedAgent}`).locator('xpath=..')).toHaveAttribute(
+        'data-nested',
+        'true',
+      )
+      await expect(project.getByTestId(`session-row-${worktree}`).locator('xpath=..')).toHaveAttribute(
+        'data-nested',
+        'true',
+      )
+
+      await apps.getByTestId(`app-session-row-${appAgent}`).click()
+      await expect(apps.getByTestId(`app-session-row-${appAgent}`)).toHaveAttribute('aria-current', 'page')
+    })
+
     test('a folded project that is open still shows its tint, on its name row', async ({ page }) => {
       await setup(page, ['/tmp/alpha', '/tmp/beta'])
       const a = await newSession(page, 'alpha')
