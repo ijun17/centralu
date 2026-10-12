@@ -325,6 +325,39 @@ describe('starting another agent in the same project', () => {
     expect(await waiting).toMatchObject({ ok: true, answer: 'the note answer' })
   })
 
+  it('a deferred model restart keeps queued notes alive and applies at the next turn end without held inputs', async () => {
+    allowProject()
+    const s = await session()
+    const c = await startRunning(s)
+    const h = handleOf(c)!
+    h.externalId = 'fixture-thread'
+    const restart = vi.spyOn(w.mgr, 'restartSession')
+    expect(await w.mgr.updateSettings(c, { model: 'new-model' })).toMatchObject({ applied: 'after_turn' })
+    const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
+    h.answer('original answer', false)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(restart).not.toHaveBeenCalled()
+    expect(handleOf(c)).toBe(h)
+    h.answer('note answer')
+    expect(await waiting).toMatchObject({ ok: true, answer: 'note answer' })
+    await w.mgr.send(c, 'next task')
+    h.answer('next task finished')
+    await w.until(() => restart.mock.calls.length === 1 && handleOf(c) !== h)
+    expect(handleOf(c)!.opts.model).toBe('new-model')
+  })
+
+  it('Stop on the child identifies the person before a synchronous parent-note rejection', async () => {
+    allowProject()
+    const s = await session()
+    const c = await startRunning(s)
+    const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'pending note' })
+    w.mgr.interrupt(c)
+    expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('the person stopped the agent before it finished') })
+    expect(handleOf(c)!.interrupted).toBe(1)
+  })
+
   it('a queued parent note keeps the child awake between turns', async () => {
     allowProject()
     w.adapters.get('claude')!.capabilities.backgroundTasks = true

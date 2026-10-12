@@ -339,7 +339,8 @@ their existing queue), and Claude queues a user message for the query's streamin
 binds a receipt through the input's `clientUserMessageId` / `userMessage.clientId` and the `turn/start` response's
 turn id, even if that response follows its completion notification;
 notes during compact/review can share a later turn. Claude stamps input UUIDs and uses the result's
-`user_message_uuids` to identify consumed notes, including folded batches. At initialization, the adapter
+`user_message_uuids` to identify consumed notes, including folded batches. Receipts complete only by matching
+UUIDs: a sign-in-race retry can reorder delivery, and a capped list never proves an omitted input was consumed. At initialization, the adapter
 requires the verified CLI protocol (2.1.289 or newer) and its `interrupt_receipt_v1` and
 `interrupt_cancel_queued_v1` capabilities before exposing `sendTracked`. Older or unknown producers keep the
 mid-turn refusal: the single `user_message_uuid` names the turn's first input and cannot confirm a folded note.
@@ -347,14 +348,20 @@ Results without input IDs belong to synthetic turns (including background-task n
 complete nor cancel a pending note. Stop cancels pending notes too
 (Claude's SDK `cancelQueued` / control-request `cancel_queued`; Codex removes queued notes and interrupts a turn
 named by an in-flight response after Stop). Claude reports person messages dropped from its local queue or
-listed as cancelled in the SDK interrupt receipt as **not delivered**, asking the person to resend them.
+listed as cancelled in the SDK interrupt receipt as **not delivered**, asking the person to resend them. A turn error instead cancels only parent notes, via the SDK's optional
+`cancelAsyncMessage` / `cancel_async_message`, and preserves the person's local/SDK queue. Without that SDK
+method the CLI queue is left intact; the failed delegation still receives the turn's error. SDK cancellation
+is also skipped while person input is pending: cancelling an already-dequeued representative UUID can drop its
+whole coalesced batch. Only batches without person input are eligible for per-UUID cancellation.
 
 The existing `wait` and report marker follow the whole delegation, so an intermediate turn cannot deliver an
 answer or detach the queued note from its parent. Each completed turn's answer is captured separately: queued
 input was already stored before the earlier answer, so those turns need not have a user row between them.
 The adapters notify the host synchronously **after recording the matched completion**, so later frames in the
 same event batch cannot overwrite that answer. Pending notes also make the child non-idle between turns, so the
-sleeper and CLI replacement cannot discard queued work. A follow-up is framed as a **note about ongoing work**
+sleeper, CLI replacement and deferred settings/instructions restart cannot discard queued work. Deferred
+restart markers remain set while input is held and apply at a later turn end with no held input. The person's
+Stop is marked before calling the adapter, including adapters that reject receipts synchronously. A follow-up is framed as a **note about ongoing work**
 (`agentNoteFrame`), without the initial task/answer frame, and stored and shown with `from`.
 A `send` after the child finishes starts a new delegation and uses the task/return-answer frame (`agentFrame`).
 It is refused on an adapter without this capability, while the child works on something else

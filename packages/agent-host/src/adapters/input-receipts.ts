@@ -20,6 +20,7 @@ export class InputReceipts {
   }
 
   get size(): number { return this.pending.size }
+  get ids(): string[] { return [...this.pending.keys()] }
 
   /** Codex's turn/start response can arrive after that turn's completion notification. */
   bind(receipt: InputReceipt, turn: string): void {
@@ -34,11 +35,9 @@ export class InputReceipts {
     for (const [id, p] of this.pending) if (p.turn === turn) this.finish(id)
   }
 
-  /** Claude consumes the FIFO prompt queue; the last echoed UUID also covers earlier notes in a merged batch. */
-  completeThrough(ids: readonly string[]): void {
-    const pending = [...this.pending.keys()]
-    const last = Math.max(-1, ...ids.map((id) => pending.indexOf(id)))
-    for (const id of pending.slice(0, last + 1)) this.finish(id)
+  /** Retries can reorder inputs; only UUIDs actually reported as consumed have completed. */
+  complete(ids: readonly string[]): void {
+    for (const id of ids) this.finish(id)
   }
 
   failAll(error: Error): string[] {

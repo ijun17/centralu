@@ -2918,7 +2918,7 @@ export class SessionManager {
     // so nothing happens
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
     if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
-    if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId)) {
+    if (endedTurn && e.sessionId && !this.agentRuns.get(e.sessionId)?.waitingForInputs && this.restartAfterTurn.delete(e.sessionId)) {
       // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
       const apps = this.appsRestartAfterTurn.delete(e.sessionId)
       const definitions = this.definitionsRestartAfterTurn.delete(e.sessionId)
@@ -4467,17 +4467,17 @@ export class SessionManager {
   }
 
   interrupt(sessionId: string): void {
-    this.requireHandle(sessionId).interrupt()
+    const handle = this.requireHandle(sessionId)
+    // Receipt failures and ending events may be emitted synchronously by interrupt.
+    const run = this.agentRuns.get(sessionId)
+    if (run) run.stoppedByPerson = true
+    handle.interrupt()
     // Stop on a caller stops what it asked another project to do (#371): the call it is waiting in ends with it
     // A child start_agent started (#561) stops only while the caller is waiting on it: one left running with
     // `wait: false` (or past the bound) is its own session now, with its own Stop
     for (const d of this.delegations.values()) {
       if (d.callerId === sessionId && (!d.agent || (d.waiters ?? 0) > 0)) d.stop('the person stopped the session that asked')
     }
-    // The person stopped an agent an app had asked for (M4 D-1) — this turn's ending is not an answer. The
-    // app is told it was stopped
-    const run = this.agentRuns.get(sessionId)
-    if (run) run.stoppedByPerson = true
   }
 
   /**

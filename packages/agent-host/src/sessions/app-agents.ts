@@ -129,7 +129,7 @@ export class AgentRunWait {
   fail(err: Error): void {
     if (this.settled) return
     this.settled = true
-    this.settle.reject(err)
+    this.settle.reject(this.stoppedByPerson ? new Error('the person stopped the agent before it finished') : err)
   }
 
   private finish(ending: { output?: unknown; answer?: string }): void {

@@ -18,11 +18,12 @@ type Started = {
   closed: boolean
   interrupts: unknown[]
   cancelled: string[]
+  noteCancellations: string[]
   /** What close() does to the stream: by default nothing, as a process mid-turn */
   onClose: () => void
 }
 
-const sdk = vi.hoisted(() => ({ started: [] as Started[], version: '2.1.289', capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'] }))
+const sdk = vi.hoisted(() => ({ started: [] as Started[], version: '2.1.289', canCancel: true, capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'] }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: ({ prompt, options }: { prompt: AsyncIterable<never>; options: Record<string, unknown> }) => {
@@ -46,6 +47,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
       closed: false,
       interrupts: [],
       cancelled: [],
+      noteCancellations: [],
       onClose: () => {},
     }
     sdk.started.push(s)
@@ -59,6 +61,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     return {
       [Symbol.asyncIterator]: () => stream(),
       interrupt: async (options?: unknown) => { s.interrupts.push(options); return { cancelled: s.cancelled, still_queued: [] } },
+      cancelAsyncMessage: sdk.canCancel ? async (uuid: string) => { s.noteCancellations.push(uuid); return true } : undefined,
       close: () => {
         s.closed = true
         s.onClose()
@@ -79,6 +82,7 @@ let exe: string
 beforeEach(() => {
   sdk.started.length = 0
   sdk.version = '2.1.289'
+  sdk.canCancel = true
   sdk.capabilities = ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1']
   dir = mkdtempSync(join(tmpdir(), 'cc-353-'))
   const pkg = join(dir, 'npm', 'node_modules', '@anthropic-ai', 'claude-code')
@@ -139,7 +143,7 @@ describe('where a Windows Claude session starts from (#353)', () => {
     await handle.dispose()
   })
 
-  it('a result completes notes folded into a running turn, including a batch longer than the SDK UUID list cap', async () => {
+  it('a capped result completes only the UUIDs it reports; an omitted note still requires its own receipt', async () => {
     const { handle, cli } = await session(adapter())
     const notes: Promise<void>[] = []
     const ids: string[] = []
@@ -147,7 +151,12 @@ describe('where a Windows Claude session starts from (#353)', () => {
       notes.push(handle.sendTracked!(`note ${n}`))
       ids.push((await cli.input.next()).value!.uuid)
     }
+    let firstDone = false
+    void notes[0]!.then(() => { firstDone = true })
     cli.push({ type: 'result', subtype: 'success', user_message_uuid: ids.at(-1), user_message_uuids: ids.slice(-64) })
+    await Promise.all(notes.slice(1))
+    expect(firstDone).toBe(false)
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: ids[0], user_message_uuids: [ids[0]] })
     await Promise.all(notes)
     cli.end()
     await handle.dispose()
@@ -240,7 +249,7 @@ describe('where a Windows Claude session starts from (#353)', () => {
     await cli.input.next()
     // An old result only echoes the original input; it cannot confirm a folded parent note.
     cli.push({ type: 'result', subtype: 'success', user_message_uuid: original })
-    cli.push({ type: 'system', subtype: 'init', claude_code_version: '2.1.289', capabilities: sdk.capabilities })
+    cli.push({ type: 'system', subtype: 'init', claude_code_version: '2.1.289', canCancel: true, capabilities: sdk.capabilities })
     await tick()
     expect(handle.sendTracked).toBeUndefined()
     expect(cli.interrupts).toEqual([])
@@ -276,6 +285,50 @@ describe('where a Windows Claude session starts from (#353)', () => {
     expect(events.filter((e) => e.type === 'error')).toEqual([
       expect.objectContaining({ error: expect.objectContaining({ message: '1 message(s) were still queued when the turn stopped and were not delivered — please resend' }) }),
     ])
+    cli.end()
+    await handle.dispose()
+  })
+
+  it.each([
+    { queue: 'local', canCancel: true }, { queue: 'SDK', canCancel: true },
+    { queue: 'local', canCancel: false }, { queue: 'SDK', canCancel: false },
+  ])('a turn error cancels only parent notes and preserves the person message ($queue, per-UUID SDK: $canCancel)', async ({ queue, canCancel }) => {
+    sdk.canCancel = canCancel
+    const { handle, cli, events } = await session(adapter())
+    handle.send('original task')
+    const original = (await cli.input.next()).value!.uuid
+    handle.send('person message')
+    let person: string | undefined
+    if (queue === 'SDK') person = (await cli.input.next()).value!.uuid
+    const note = handle.sendTracked!('parent note')
+    let id: string | undefined
+    if (queue === 'SDK') {
+      id = (await cli.input.next()).value!.uuid
+      cli.cancelled = [person!, id!] // A broad cancel_queued interrupt would drop the person message too.
+    }
+    const rejected = expect(note).rejects.toThrow()
+    cli.push({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['turn failed'], user_message_uuids: [original] })
+    await rejected
+    expect(cli.interrupts).toEqual([])
+    // Even a per-UUID API can cancel a coalesced representative's whole batch. Keep mixed SDK queues intact.
+    expect(cli.noteCancellations).toEqual([])
+    if (queue === 'local') expect(text(await cli.input.next())).toBe('person message')
+    expect(events.filter((e) => e.type === 'error').some((e) => e.error.message.includes('not delivered'))).toBe(false)
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('a turn error cancels standalone SDK parent notes individually when no person input can join their batch', async () => {
+    const { handle, cli } = await session(adapter())
+    handle.send('original task')
+    const original = (await cli.input.next()).value!.uuid
+    const note = handle.sendTracked!('standalone parent note')
+    const id = (await cli.input.next()).value!.uuid
+    const rejected = expect(note).rejects.toThrow()
+    cli.push({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['turn failed'], user_message_uuids: [original] })
+    await rejected
+    expect(cli.interrupts).toEqual([])
+    expect(cli.noteCancellations).toEqual([id])
     cli.end()
     await handle.dispose()
   })
@@ -390,6 +443,50 @@ describe('a turn that lost the sign-in refresh race (#353)', () => {
     cli.push({ type: 'result', subtype: 'success', is_error: false, result: 'done', modelUsage: {} })
     await tick()
     expect(events.at(-1)).toMatchObject({ type: 'turn_complete' })
+    await handle.dispose()
+  })
+
+  it('a note sent during the sign-in retry delay completes only its own UUID, before the older note is retried', async () => {
+    const { handle, cli } = await session(adapter({ retryDelay: () => 100 }))
+    vi.useFakeTimers()
+    let olderDone = false
+    const older = handle.sendTracked!('N1').then(() => { olderDone = true })
+    const n1 = (await cli.input.next()).value!.uuid
+    raceTurn(cli)
+    await vi.advanceTimersByTimeAsync(0)
+    const newer = handle.sendTracked!('N2')
+    const n2 = (await cli.input.next()).value!.uuid
+    cli.push({ type: 'result', subtype: 'success', user_message_uuids: [n2] })
+    await newer
+    expect(olderDone).toBe(false)
+    await vi.advanceTimersByTimeAsync(100)
+    expect((await cli.input.next()).value!.uuid).toBe(n1)
+    cli.push({ type: 'result', subtype: 'success', user_message_uuids: [n1] })
+    await older
+    expect(olderDone).toBe(true)
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('a later turn error cancels retry-held parent notes while the person input in that retry is delivered', async () => {
+    const { handle, cli } = await session(adapter({ retryDelay: () => 100 }))
+    vi.useFakeTimers()
+    handle.send('person input held for retry')
+    await cli.input.next()
+    const older = handle.sendTracked!('N1')
+    await cli.input.next()
+    raceTurn(cli)
+    await vi.advanceTimersByTimeAsync(0)
+    const newer = handle.sendTracked!('N2')
+    const n2 = (await cli.input.next()).value!.uuid
+    const rejected = [expect(older).rejects.toThrow(), expect(newer).rejects.toThrow()]
+    cli.push({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['turn failed'], user_message_uuids: [n2] })
+    await Promise.all(rejected)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(text(await cli.input.next())).toBe('person input held for retry')
+    handle.send('fresh input')
+    expect(text(await cli.input.next())).toBe('fresh input')
+    cli.end()
     await handle.dispose()
   })
 

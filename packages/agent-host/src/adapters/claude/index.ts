@@ -16,6 +16,8 @@ type QueryHandle = AsyncIterable<unknown> &
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
     /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
     interrupt(options?: { cancelQueued: boolean }): Promise<unknown>
+    /** Optional on older SDKs; cancel_async_message removes one UUID-stamped queued input. */
+    cancelAsyncMessage?(uuid: string): Promise<boolean>
     /** Stops one background task; a task_notification with status 'stopped' follows (sdk.d.ts, measured — #290). */
     stopTask(taskId: string): Promise<void>
     supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
@@ -785,25 +787,25 @@ class ClaudeSession implements SessionHandle {
           if (m.type === 'result') this.turnOpen = false
           let events = this.stream.push(msg)
           const retrying = m.type === 'result' && this.retryAfterRefreshRace(msg as RaceMsg)
+          if (m.type === 'result' && !retrying) {
+            const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
+            for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
+          }
           let completedInputs: string[] | undefined
           if (m.type === 'result' && !retrying && this.inputReceipts.size && events.some((e) => e.type === 'turn_complete' || e.type === 'error')) {
             const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
             const ids = result.user_message_uuids ?? []
             const failure = events.find((e) => e.type === 'error')
-            if (ids.length && failure?.type === 'error') this.interrupt(true, new Error(failure.error.message))
+            if (ids.length && failure?.type === 'error') this.cancelParentNotes(new Error(failure.error.message))
             else if (ids.length) completedInputs = ids
             // ID-less results belong to synthetic/task-notification turns, not a parent note.
-          }
-          if (m.type === 'result' && !retrying) {
-            const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
-            for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
           }
           // The turn goes again instead of failing: its error marker would end the turn on screen
           if (retrying) events = events.filter((e) => e.type !== 'error')
           for (const e of events) {
             this.emit(e)
             // Capture this result before a later turn's frames can overwrite the host's answer.
-            if (e.type === 'turn_complete' && completedInputs) this.inputReceipts.completeThrough(completedInputs)
+            if (e.type === 'turn_complete' && completedInputs) this.inputReceipts.complete(completedInputs)
           }
           this.armScheduleLook()
           // Once a turn ends, asks what is currently in the context window (FR-14).
@@ -1276,6 +1278,29 @@ class ClaudeSession implements SessionHandle {
     })
 
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+  }
+
+  /** A failed turn is already over. Cancel its parent notes without interrupting the person's next turn. */
+  private cancelParentNotes(reason: Error): void {
+    const ids = this.inputReceipts.ids
+    this.inputReceipts.failAll(reason)
+    this.queue = this.queue.filter((input) => !input.parentNote)
+    if (this.retry) {
+      // The retry timer captured this array; remove notes in place so it cannot requeue cancelled input.
+      const texts = this.retry.texts
+      texts.splice(0, texts.length, ...texts.filter((input) => !input.parentNote))
+      if (!texts.length) this.cancelRetry()
+    }
+    const query = this.query
+    // The CLI can cancel an already-dequeued representative UUID's entire coalesced batch
+    // (SDKControlInterruptResponse). A mixed batch could contain person input, so leave the SDK
+    // queue intact when that race is possible; only local notes have been removed above.
+    if (!query?.cancelAsyncMessage || this.personInputs.size || this.queue.length || this.retry?.texts.length || this.sendGate) return
+    for (const id of ids) void query.cancelAsyncMessage(id).catch((error: Error) => {
+      this.emit({ type: 'error', sessionId: this.sessionId, error: {
+        code: 'internal', message: `Could not cancel the parent note: ${error.message}`, retryable: false,
+      } })
+    })
   }
 
   private reportUndelivered(count: number): void {
