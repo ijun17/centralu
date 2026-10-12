@@ -21,6 +21,7 @@ import type {
   ThemeFileEntry,
   UpdateStatus,
   AgentVersions,
+  SleepPolicy,
   HostActivity,
   MachineInfo,
   MachineProbe,
@@ -974,6 +975,8 @@ export type AppState = {
    * Owned by the host like `update`; null until the host has answered, or when it is too old to know.
    */
   agentVersions: AgentVersions | null
+  /** When this host puts idle sessions to sleep (#568); null until it has answered, or when it is too old to know */
+  sleepPolicy: SleepPolicy | null
   /**
    * The machines this computer's host is linked to (#82, docs/plans/remote-hub.md), by id, in the
    * order the host lists them. Each row is replaced whole by its `machine_status`. Empty with no
@@ -1123,6 +1126,10 @@ export type AppState = {
   checkAgentVersions(force?: boolean): Promise<void>
   /** "Move idle sessions to a newly installed agent CLI" on and off (#297) */
   setAgentAutoApply(enabled: boolean): Promise<void>
+  /** Reads when idle sessions go to sleep (#568). Never throws; an older host leaves it null */
+  loadSleepPolicy(): Promise<void>
+  /** "Put idle sessions to sleep after" (#568); null never */
+  setSleepAfter(afterMinutes: number | null): Promise<void>
   /** Restarts every idle session that runs an older CLI on the installed one (#297) — the header's action */
   applyAgentVersions(machine?: string | null): Promise<void>
   /**
@@ -2770,6 +2777,7 @@ export const useStore = create<AppState>((set, get) => ({
   importDialog: null as { source: string; fromLink: boolean; at: number } | null,
   update: null,
   agentVersions: null,
+  sleepPolicy: null,
   machines: {} as Record<string, MachineInfo>,
   machineAgentVersions: {} as Record<string, AgentVersions>,
   settingsRequest: null as { category: string; at: number } | null,
@@ -3105,24 +3113,11 @@ export const useStore = create<AppState>((set, get) => ({
     set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV })
 
     /*
-     * Wakes sessions parked in the grid ahead of time (dogfooding, the Mea session: reviving a large
-     * codex thread measured at 7-13 seconds, and that cost belongs to codex itself, which we cannot
-     * reduce. A cost that cannot be reduced can still be **moved to a time nobody is waiting on**).
-     * Putting a session on the grid already means it is about to be watched — it needs to already be
-     * alive by the time it is clicked.
-     *
-     * Woken one at a time: each panel brings up its own external process, so waking them all at once
-     * would be a stampede of processes right at startup. `wake()` already skips a session that is
-     * already alive or gone (including a panel focus-restore has already woken), and a failure is
-     * left in that panel's `wakeError` — the same spot as when woken by a click, so no new failure
-     * path is introduced.
+     * The grid's sessions are not woken at startup any more (#568). They used to be, one by one, to move a slow Codex
+     * resume (7-13 s for a large thread) to a moment nobody waited on; but every panel then held its process from the
+     * first second, and the host puts idle sessions to sleep after 15 minutes anyway. A panel wakes when it is used:
+     * its composer taking the keyboard, or a message sent to it.
      */
-    void (async () => {
-      for (const id of gridSessionIds(get().gridPanels)) {
-        if (get().connection !== 'connected') return // Stop if disconnected — the reconnect path picks it back up
-        await get().wake(id)
-      }
-    })()
   },
 
   /**
@@ -3801,7 +3796,11 @@ export const useStore = create<AppState>((set, get) => ({
      * (`mergePage`), it is always safe to read.
      */
     if (!cur.history[id]) void get().loadHistory(id)
-    void get().wake(id)
+    /*
+     * Selecting a session no longer wakes it (#568). Its process starts when the person sends to it or its composer takes
+     * the keyboard: reading an old conversation should not start a 250 MB process that the host puts back to sleep in
+     * 15 minutes. The resume this used to hide costs about 0.7 s (p50) on Claude, and it runs while the person types.
+     */
   },
 
   async loadHistory(sessionId) {
@@ -4088,6 +4087,26 @@ export const useStore = create<AppState>((set, get) => ({
       set({ update: await platform.updates.setAutoApply(enabled) })
     } catch (e) {
       // An older host does not know the setting; say so rather than leave the box ticked
+      set({ toast: `Could not save that: ${(e as Error).message}` })
+    }
+  },
+
+  async loadSleepPolicy() {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ sleepPolicy: await platform.agents.sleepPolicy() })
+    } catch {
+      // An older host does not put sessions to sleep: the setting stays hidden
+    }
+  },
+
+  async setSleepAfter(afterMinutes) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ sleepPolicy: await platform.agents.setSleepPolicy(afterMinutes) })
+    } catch (e) {
       set({ toast: `Could not save that: ${(e as Error).message}` })
     }
   },
@@ -4959,6 +4978,12 @@ export const useStore = create<AppState>((set, get) => ({
         workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
       }
     })
+    /*
+     * A message to a sleeping session wakes it first (#568): the host resumes it before the message goes in. The
+     * session reads as waking meanwhile, the same `resuming` a wake from the composer sets, so its line says so.
+     */
+    const waking = get().sessions[sessionId]?.live === false && !get().resuming[sessionId]
+    if (waking) set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
     try {
       // The bytes already live in a file on the host — the send only carries the path (carrying `data` would double the payload)
       await get().platform!.agents.send(
@@ -5003,6 +5028,8 @@ export const useStore = create<AppState>((set, get) => ({
       // answer forever. The bubble that looks sent is removed and what to do is reported.
       // The host revives a sleeping session on its own before sending — reaching this point means reviving itself failed
       unsend(set, { seq, sessionId, text, attachments, prevState }, e.message)
+    } finally {
+      if (waking) set((st) => ({ resuming: omitKey(st.resuming, sessionId) }))
     }
   },
 

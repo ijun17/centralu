@@ -30,6 +30,8 @@ export type HostParts = {
   commands: { disposeAll(): void; detachAll(): Promise<void> }
   updates: { stop(): void }
   agentVersions: { stop(): void }
+  /** Putting idle sessions to sleep (#568, sessions/sleep.ts) */
+  sleeper: { stop(): void }
   stopActivity: () => void
   links: { stop(): Promise<void> }
   apps: { dispose(): Promise<void> }
@@ -74,6 +76,8 @@ export function stopPlan(mode: LeaveMode, handOver: boolean, p: HostParts): Step
   steps.push(
     { name: 'the update check', run: () => p.updates.stop() },
     { name: 'the agent CLI check', run: () => p.agentVersions.stop() },
+    // Before the sessions are let go of: a sweep now would end a process the next host is meant to take over (#568)
+    { name: 'putting idle sessions to sleep', run: () => p.sleeper.stop() },
     { name: 'the activity report', run: () => p.stopActivity() },
   )
   if (mode === 'detach') {

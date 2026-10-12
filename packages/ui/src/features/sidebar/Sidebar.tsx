@@ -850,7 +850,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         state. A separate dot right next to the mark would read as overlapping the
                         two, and blur both instead.
                       */}
-                      <ToolMark tool={s.tool} state={s.state} />
+                      <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
                       <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
                       {/*
                         Merged (#69) — this branch's work has landed on the trunk. A sign that it
@@ -1083,7 +1083,7 @@ function UserAppSessions({ appId, machine }: { appId: string; machine: string | 
             focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
           }`}
         >
-          <ToolMark tool={s.tool} state={s.state} />
+          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
           <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
         </button>
       </li>
@@ -2158,9 +2158,14 @@ const RING: Record<SessionState, string> = {
   idle: 'transparent',
 }
 
-function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
+/*
+ * Asleep (#568): the session has no process, because the host put it to sleep when idle or nothing has woken it since a
+ * restart. Said quietly: the letter fades further than a stalled one, the border keeps the state, and the tooltip names
+ * it. Using the session (its composer, a message) wakes it.
+ */
+function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: SessionState; asleep?: boolean }) {
   const meta = useToolMeta(tool)
-  const label = `${meta.label} · ${stateLabel(state)}`
+  const label = `${meta.label} · ${stateLabel(state)}${asleep ? ' · asleep' : ''}`
   const stalled = state === 'limited' || state === 'error'
   // Spins at **the same angle** as a grid panel's border (components/orbit.ts)
   useOrbitSync(state === 'working')
@@ -2173,6 +2178,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
       aria-label={label}
       data-testid={`tool-mark-${tool}`}
       data-state={state}
+      data-asleep={asleep || undefined}
     >
       <span
         /*
@@ -2196,7 +2202,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
           would cut into that signal by the same amount.
         */
         className={`readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor text-2xs font-semibold leading-none text-ink ${
-          stalled ? 'opacity-50' : ''
+          asleep ? 'opacity-40' : stalled ? 'opacity-50' : ''
         }`}
       >
         {meta.mark}

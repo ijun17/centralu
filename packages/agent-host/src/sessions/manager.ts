@@ -414,6 +414,8 @@ export class SessionManager {
     string,
     Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   >()
+  /** Session whose process is being ended to put it to sleep (#568) -> that ending; a resume waits for it */
+  private sleeping = new Map<string, Promise<void>>()
   /**
    * Session waiting for a wake to finish so it can be deleted or have its tool switched -> the reason
    * (#163). That wake steps back without placing a handle — the waiting request came first. A send
@@ -2028,6 +2030,9 @@ export class SessionManager {
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     // If it is already being resumed, wait on that same promise — if each caller started its own, two
     // processes would come up
+    // A session going to sleep right now (#568) is resumed once its process is gone, never beside it
+    const going = this.sleeping.get(sessionId)
+    if (going) await going
     const inflight = this.resuming.get(sessionId)
     if (inflight) return inflight
     const p = this.doResumeSession(sessionId, adopt).finally(() => this.resuming.delete(sessionId))
@@ -2353,6 +2358,8 @@ export class SessionManager {
         return { session: m, resumed: false, reason: leaving }
       }
       this.handles.set(sessionId, handle)
+      // Every window learns it is awake, not only the one that asked (#568)
+      this.emit({ type: 'session_live', sessionId, live: true })
       // Why the process came up again, if a restart said so; a wake, a revive or a manual restart otherwise (§6.1)
       this.cacheLedger.note(sessionId, this.restartReasons.get(sessionId) ?? 'new_process')
       this.restartReasons.delete(sessionId)
@@ -4578,6 +4585,46 @@ export class SessionManager {
       running: this.handles.has(sessionId),
       reportsBackground: !!this.adapters.get(m.tool)?.capabilities.backgroundTasks,
     })
+  }
+
+  /**
+   * The sessions whose running work this one waits on (#568, the sleep rule in sleep.ts): a child it started with
+   * `start_agent`, or a session ask_project opened for it, while the turn it gave them runs, and a session that owes
+   * it a report (`reportBack`, `awaitingReport`). Their answer is about to come back to it.
+   */
+  waitsOn(sessionId: string): string[] {
+    const ids = new Set<string>()
+    for (const d of this.delegations.values()) if (d.callerId === sessionId && !d.settled) ids.add(d.sessionId)
+    for (const [child, caller] of this.awaitingReport) if (caller === sessionId && this.meta.has(child)) ids.add(child)
+    return [...ids]
+  }
+
+  /**
+   * Puts an idle session to sleep (#568): its process ends, the session stays, and the next message, or a screen
+   * waking it, resumes the conversation through `resumeSession`. The policy (when) is sleep.ts; this is only the act,
+   * refused unless the session is still fully idle at this moment. The handle leaves the map first, so a message
+   * arriving meanwhile starts a resume, and that resume waits for this process to be gone (`sleeping`).
+   */
+  async sleepSession(sessionId: string): Promise<boolean> {
+    const h = this.handles.get(sessionId)
+    if (!h || this.resuming.has(sessionId) || this.sleeping.has(sessionId) || this.leaving.has(sessionId)) return false
+    if (!this.sessionIdle(sessionId).idle || this.waitsOn(sessionId).length > 0) return false
+    this.handles.delete(sessionId)
+    this.running.delete(sessionId)
+    this.emit({ type: 'session_live', sessionId, live: false, reason: 'asleep' })
+    const going = (async () => {
+      await h.dispose().catch(() => {})
+      // As a restart does: what the process wrote is ours, and its open row closes (restartSession)
+      this.stampExternalSynced(sessionId)
+      this.closeStream(sessionId)
+    })()
+    this.sleeping.set(sessionId, going)
+    try {
+      await going
+    } finally {
+      this.sleeping.delete(sessionId)
+    }
+    return true
   }
 
   interrupt(sessionId: string): void {

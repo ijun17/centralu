@@ -1636,6 +1636,12 @@ export class CodexAdapter implements AgentAdapter {
     exclusiveWriter: true,
     // Child agents, from their threads' status and turns (#290, CodexChildTracker)
     backgroundTasks: true,
+    /*
+     * Not put to sleep (#568). Waking a large thread measured 7-13 s (`thread/resume` scales with the rollout, ~13.5 s for
+     * 550 MB), and its cache on resume is unmeasured. The memory is better won by one shared app-server per account
+     * (#561 E3: 379 MB vs 2,584 MB for ten threads), decided separately.
+     */
+    sleep: false,
   }
 
   /** The installed Codex CLI (#297), from npm's `package.json` where it came from npm, else `codex --version` */

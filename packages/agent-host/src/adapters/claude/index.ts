@@ -1462,6 +1462,13 @@ export class ClaudeAdapter implements AgentAdapter {
     exclusiveWriter: false,
     // background_tasks_changed and the task messages (#290, ClaudeBackgroundTracker)
     backgroundTasks: true,
+    /*
+     * An idle session may be put to sleep (#568): a resumed process read the prompt cache as the live one did (~100% at
+     * 2, 6 and 10 min on the 1 h lifetime, CLI 2.1.29x with haiku, #561) for +0.7 s (p50) / +1.8 s (p95) before the first
+     * token, and ending the process frees all of its memory (240-300 MB after a few turns, growing while idle).
+     * `scripts/probe-resume-cache.mts` re-measures it on a CLI update.
+     */
+    sleep: true,
   }
 
   async detect(): Promise<DetectResult> {

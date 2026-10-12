@@ -20,6 +20,7 @@ import {
   AppReview,
   AppVersions,
   AgentVersions,
+  SleepPolicy,
   CacheStats,
   UsageSnapshot,
   GitFileStatus,
@@ -914,6 +915,13 @@ export const RpcMethods = {
   'agents.applyVersions': {
     params: z.object({ ...machineParam }),
     result: z.object({ restarted: z.array(z.string()).default([]), busy: z.array(z.string()).default([]) }),
+  },
+  /** When idle sessions go to sleep (#568): this host's setting */
+  'agents.sleepPolicy': { params: z.object({ ...machineParam }), result: SleepPolicy },
+  /** "Put idle sessions to sleep after" (#568). `afterMinutes: null` never; 15 by default */
+  'agents.setSleepPolicy': {
+    params: z.object({ afterMinutes: z.number().int().positive().nullable(), ...machineParam }),
+    result: SleepPolicy,
   },
   'git.status': { params: z.object({ projectId: ProjectId }), result: z.array(GitFileStatus) },
   'git.diff': {

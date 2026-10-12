@@ -4307,9 +4307,12 @@ test('When a session cannot be woken, the reason is shown right there with a way
     })
   }, id)
 
-  // Selecting it again attempts to wake it, and the failure reason remains
+  // Selecting it again only shows it (#568); its composer taking the keyboard attempts to wake it, and the failure
+  // reason remains
   await page.getByTestId('project-header-alpha').click()
   await page.getByTestId(`session-row-${id}`).click()
+  await expect(page.getByTestId('dormant-note')).toContainText('Asleep')
+  await page.getByTestId('prompt-input').click()
   await expect(page.getByTestId('dormant-note')).toContainText('Could not resume')
   await expect(page.getByTestId('dormant-note')).toContainText('cannot be resumed')
 

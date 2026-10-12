@@ -1306,14 +1306,13 @@ const Composer = memo(function Composer({
           rows={1}
           value={text}
           /*
-              Focusing here wakes the session, exactly as selecting it in the sidebar does
-              (focusSession → wake). This second call site exists because two paths reach a
-              composer without ever selecting: a grid panel's input, and the session a
-              restart restored into focus. Both sat asleep until send — so the seconds a
-              resume takes ran after the send button instead of during the typing, and the
-              slash list could only answer from the disk cache (which kept serving an
-              uninstalled plugin's commands). wake() dedups and stays quiet, so a second
-              call on an already-live session costs nothing.
+              Focusing here wakes the session, and since #568 this is the one place that does
+              ahead of a send: selecting a session in the sidebar only shows it, and the grid's
+              panels stay asleep until used. Waking here moves the resume (about 0.7 s on Claude)
+              into the typing instead of after the send button, and lets the slash list answer
+              from the live process rather than the disk cache (which kept serving an
+              uninstalled plugin's commands). wake() dedups and stays quiet, so a second call on
+              an already-live session costs nothing.
             */
           onFocus={() => void wake(sessionId)}
           onCompositionStart={() => setComposing(true)}
@@ -1322,6 +1321,13 @@ const Composer = memo(function Composer({
           onChange={(e) => {
             setText(e.target.value)
             setCaret(e.target.selectionStart)
+            /*
+              A composer that kept the keyboard while the host put its session to sleep (#568) wakes
+              on the first key, not only on the next focus. Not after a failed wake: that one waits
+              for its Retry rather than a request per keystroke.
+            */
+            const st = useStore.getState()
+            if (st.sessions[sessionId]?.live === false && !st.wakeError[sessionId]) void wake(sessionId)
           }}
           onKeyDown={(e) => {
             const composing = composingKey(e.nativeEvent)
@@ -2687,6 +2693,10 @@ function AwayNote({ machine }: { machine: string | null }) {
  * pushes a machine-level concern onto the person — all they want is to keep talking, and the
  * means to continue is already something this app has. Now sending a message lets the host
  * resume it on its own. This just quietly says so (so it comes as no surprise).
+ *
+ * Since #568 the usual reason is sleep: the host ends an idle session's process after 15 minutes. The
+ * composer taking the keyboard wakes it (and so does a message), so "type to it" is the whole story;
+ * while it starts the line says "Waking".
  */
 function DormantNote({ sessionId }: { sessionId: string }) {
   const waking = useStore((s) => !!s.resuming[sessionId])
@@ -2733,7 +2743,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
 
   return (
     <p className="border-t border-line px-4 py-1.5 text-xs text-ink-faint" data-testid="dormant-note">
-      {waking ? 'Waking session…' : 'Dormant — sending a message resumes it automatically'}
+      {waking ? 'Waking session…' : 'Asleep — it wakes when you type to it'}
     </p>
   )
 }

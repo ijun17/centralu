@@ -395,3 +395,13 @@ describe('the CLI version a session runs (#297)', () => {
     expect(s.state).toBe('waiting_input')
   })
 })
+
+describe('a session going to sleep and waking (#568)', () => {
+  it('follows the host’s word on whether its process runs, keeping its state', () => {
+    const turn = replay(TURN)
+    const asleep = applyEvent(turn, ev({ type: 'session_live', live: false, reason: 'asleep' }), NOW)
+    expect(asleep.live).toBe(false)
+    expect(asleep.state).toBe(turn.state)
+    expect(applyEvent(asleep, ev({ type: 'session_live', live: true }), NOW).live).toBe(true)
+  })
+})

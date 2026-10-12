@@ -17,6 +17,7 @@ import { ProjectConsentsSection } from './ProjectConsentsSection.jsx'
 import { ThemeSection } from './ThemeSection.jsx'
 import { TypographySection } from './TypographySection.jsx'
 import { AgentCliUpdates, UpdatesSection } from './UpdatesSection.jsx'
+import { SleepSection } from './SleepSection.jsx'
 import { MachinesSection } from './MachinesSection.jsx'
 import type { BackgroundPort } from '@cc/platform/ports'
 
@@ -136,7 +137,9 @@ const CATEGORIES = [
   /*
    * Whether quitting leaves agents running (#280). Its own category because the question people
    * arrive with is "what happens to my agents when I quit?", and the answer is one switch plus
-   * what it costs. Shown only where the platform can do it (the desktop app's keeper).
+   * what it costs. That switch shows only where the platform can do it (the desktop app's keeper);
+   * the category shows everywhere since #568, for "what happens to my agents when I leave them
+   * idle", which every host answers.
    */
   { id: 'background', label: 'Background' },
   /*
@@ -231,7 +234,7 @@ export function Settings() {
             data-testid="settings-nav"
             aria-label="Settings categories"
           >
-            {CATEGORIES.filter((c) => c.id !== 'background' || platform.background).map((c) => (
+            {CATEGORIES.map((c) => (
               <button
                 key={c.id}
                 type="button"
@@ -297,7 +300,12 @@ export function Settings() {
               </section>
             )}
 
-            {category === 'background' && platform.background && <BackgroundSection port={platform.background} />}
+            {category === 'background' && (
+              <>
+                {platform.background && <BackgroundSection port={platform.background} />}
+                <SleepSection first={!platform.background} />
+              </>
+            )}
 
             {category === 'machines' && <MachinesSection onOpenCategory={setCategory} />}
 

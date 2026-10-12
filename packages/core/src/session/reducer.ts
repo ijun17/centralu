@@ -296,6 +296,9 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       return { ...next, backgroundTasks: applyBackgroundTasks(s.backgroundTasks, event) }
     case 'agent_version':
       return { ...next, agentVersion: event.version }
+    // The process went to sleep or came back (#568), whoever caused it
+    case 'session_live':
+      return { ...next, live: event.live }
     case 'session_title':
       if (event.auto !== false) return s.autoNamed ? { ...next, name: event.title } : next
       return { ...next, name: event.title, autoNamed: false }

@@ -203,6 +203,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'background_tasks', sessionId: 's1', live: [], clearEnded: true },
   // The CLI version a session's process runs (#297), and the installed ones (app-wide, defaults filled in)
   { type: 'agent_version', sessionId: 's1', version: '2.1.289' },
+  { type: 'session_live', sessionId: 's1', live: false, reason: 'asleep' },
+  { type: 'session_live', sessionId: 's1', live: true },
   { type: 'agent_versions', status: {} },
   { type: 'agent_versions', status: { installed: { claude: '2.1.290', codex: null }, autoApply: true, checkedAt: 1791182683464 } },
   { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: 'process exited', retryable: true } },

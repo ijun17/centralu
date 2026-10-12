@@ -35,6 +35,7 @@ import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
 import { AgentVersionService } from './agent-versions.js'
+import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSetting } from './sessions/sleep.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
@@ -255,6 +256,8 @@ const events = new Gate<NormalizedEvent>()
  * is not quiet yet. Declared ahead of the manager, whose events can start before the service below exists.
  */
 const versionsRef: { current?: AgentVersionService } = {}
+// Putting idle sessions to sleep (#568) hears every session event too: a session that said anything is not quiet
+const sleeperRef: { current?: SessionSleeper } = {}
 /*
  * The manager is told the host's own address as a function: the bridge of an adapter that cannot
  * attach a tool in-process connects back through it, and the port is only known after listen().
@@ -266,6 +269,7 @@ const mgr = new SessionManager(
   (e) => {
     events.push(e)
     versionsRef.current?.observe(e)
+    sleeperRef.current?.observe(e)
   },
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
@@ -373,6 +377,21 @@ const agentVersions = new AgentVersionService({
 })
 versionsRef.current = agentVersions
 mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
+/*
+ * Idle sessions go to sleep (#568, sessions/sleep.ts): after 15 minutes by default ("Put idle sessions to sleep after",
+ * saved as `agents.sleepAfterMinutes`, `off` for never). `CC_SLEEP_AFTER_MS` sets a shorter quiet period over the
+ * setting, for probes and tests.
+ */
+const SLEEP_AFTER_KEY = 'agents.sleepAfterMinutes'
+const sleeper = new SessionSleeper({
+  sessions: mgr,
+  canSleep: (tool) => !!adapters.get(tool)?.capabilities.sleep,
+  readAfterMinutes: () => parseSleepSetting(store.appSetting(SLEEP_AFTER_KEY)),
+  writeAfterMinutes: (minutes) => store.setAppSetting(SLEEP_AFTER_KEY, storedSleepSetting(minutes)),
+  overrideMs: sleepOverrideFrom(process.env.CC_SLEEP_AFTER_MS),
+})
+sleeperRef.current = sleeper
+if (process.env.CC_SLEEP_AFTER_MS) console.error(`[agent-host] idle sessions sleep after ${sleeper.afterMs() ?? 'never'} ms (CC_SLEEP_AFTER_MS)`)
 // The escape hatch for the origin allow list — the rejection log states exactly the value to put
 // here. An app view's proxy uses the same list too: only a parent able to connect over WebSocket
 // can ever render a view
@@ -481,6 +500,7 @@ const router: Router = new Router({
     terminals,
     updates,
     agentVersions,
+    sleeper,
     commands: commandRuns,
     externalApps,
     views,
@@ -532,6 +552,7 @@ const shutdown = new Shutdown({
       commands: commandRuns,
       updates,
       agentVersions,
+      sleeper,
       stopActivity: () => stopActivity(),
       links,
       apps: externalApps,
@@ -590,6 +611,8 @@ updates.start()
 links.start()
 // The installed agent CLIs are read now and every ten minutes (#297); a window gaining focus asks too
 agentVersions.start()
+// Idle sessions go to sleep from now on (#568); the clock of each starts here for this host
+sleeper.start()
 
 // The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
 if (held) void mgr.adoptKept(held.kept.agents)

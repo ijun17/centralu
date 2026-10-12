@@ -361,6 +361,14 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...base, type: z.literal('turn_complete'), output: z.unknown().optional() }),
   z.object({ ...base, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
+  /**
+   * Whether the session's agent process runs (`SessionInfo.live`) changed outside an answer to the screen's own call
+   * (#568): the host put an idle session to sleep (`reason: 'asleep'`, its process ended, the conversation stays and
+   * the next message resumes it), or a resume brought it back (`live: true`), whoever asked for it. Before this, `live`
+   * only came in lists and in answers to the window that woke a session, so another window, or a session woken by the
+   * orchestrator or an app, kept showing the old value.
+   */
+  z.object({ ...base, type: z.literal('session_live'), live: z.boolean(), reason: z.enum(['asleep']).optional() }),
   z.object({
     ...base,
     type: z.literal('usage_update'),

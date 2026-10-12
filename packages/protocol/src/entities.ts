@@ -916,6 +916,13 @@ export const AdapterCapabilities = z.object({
    * The idle check (#297) needs that difference — a session whose background work is invisible is never called idle.
    */
   backgroundTasks: z.boolean().default(false),
+  /**
+   * Whether an idle session of this tool may be put to sleep (#568): its process ended, the conversation resumed by
+   * the next message. True only where that was measured to lose nothing a person would notice. Claude: a resumed
+   * process reads the prompt cache as a live one does (~100% at 2, 6 and 10 minutes on the 1 h lifetime), for +0.7 s
+   * (p50) before the first token (#561). Absent is false: a tool whose resume is slow or untested keeps its process.
+   */
+  sleep: z.boolean().optional(),
 })
 export type AdapterCapabilities = z.infer<typeof AdapterCapabilities>
 
@@ -1198,6 +1205,19 @@ export const AgentVersions = z.object({
   checkedAt: z.number().nullable().default(null),
 })
 export type AgentVersions = z.infer<typeof AgentVersions>
+
+/**
+ * When the host puts an idle session to sleep (#568, docs/agent-host.md §4.6.1). Each session runs its own agent process
+ * (a Claude process was 240-300 MB after a few turns and kept growing while idle, #561); a session that has been idle
+ * this long has its process ended and stays listed, asleep, until a message or its composer wakes it.
+ *
+ * Owned by the host, like `AgentVersions`: the host decides and ends the processes.
+ */
+export const SleepPolicy = z.object({
+  /** Minutes of quiet before an idle session sleeps; null never. 15 by default (the owner's decision, 2026-10-12) */
+  afterMinutes: z.number().int().positive().nullable().default(15),
+})
+export type SleepPolicy = z.infer<typeof SleepPolicy>
 
 /**
  * Preferences about the screen itself — how this person wants the app to behave, as

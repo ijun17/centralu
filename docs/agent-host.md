@@ -421,6 +421,7 @@ interface AdapterCapabilities {
   verbosities: string[]         // response-length steps; empty = the tool has no such knob (#54)
   exclusiveWriter: boolean      // nobody else can write the conversation while we hold it
   backgroundTasks: boolean      // reports its background work as `background_tasks` (#290)
+  sleep?: boolean               // #568: an idle session may be put to sleep (resume measured to keep the cache); §4.6.1
 }
 ```
 
@@ -548,6 +549,7 @@ explicit list of every vendor name it touches, and a script that re-verifies the
 |---|---|---|---|
 | Codex | `adapters/codex/protocol-contract.json` — every RPC method and notification we send or read, plus approval enum values | `pnpm codex:bindings --check` (regenerates bindings from the installed CLI, greps for our names) | a method/notification leaving the protocol (change axis C4) |
 | Claude | name lists inside `scripts/claude-sdk-drift.mjs` — SDK exports, option keys, response fields — plus one runtime shape check: an omitted `permissionMode` must reach the CLI as no `--permission-mode` flag (the `normal` preset rests on it, #275) | `pnpm drift:claude [version]` (installs `@latest`, or the given version, into a temp dir, never the workspace) | a name leaving the `.d.ts`, or the SDK pinning an omitted mode to `default` again, **before** an upgrade lands it on us |
+| Claude (resume) | that a resumed process reads the prompt cache as a live one (#568, §4.6.1): what makes putting idle sessions to sleep free | `pnpm exec tsx packages/agent-host/scripts/probe-resume-cache.mts` (live, haiku, a temporary data folder; exits 1 when the woken turn reads under 90% from cache) | a CLI whose resume rebuilds the request differently: sessions would still wake, only slower and dearer, and nothing else would say so |
 
 Both are name checks (Claude's one shape check aside), run in both directions: the vendor must still carry every name
 we use, and our source must still use every name listed (so the contract cannot
@@ -1042,6 +1044,39 @@ its background work.
 **The capability check seam** (#270). On every change of an installed CLI's version the service calls
 `capabilityCheck({ tool, from, to })`. #270 proposes re-running the probes for what a tool could not do when its version
 moves; nothing implements that yet, so the default writes one line to host.log saying so. The probes plug in there.
+
+### 4.6.1 Putting idle sessions to sleep (#568)
+
+Every session runs its own agent process, and an idle one keeps its memory: one Claude process was 240-300 MB after a
+few turns and grew while idle (a three-day Opus session was 814 MB, #561). Ending it frees all of it, and resuming the
+conversation later reads the prompt cache as the live process would have. Measured in #561 (CLI 2.1.29x, haiku): the
+next turn read ~100% from cache resumed as live, at 2, 6 and 10 minutes on the 1 h lifetime and at 2 and 4 minutes on a
+forced 5 min one; both expired alike at 6 minutes on 5 min. A wake adds +0.7 s (p50) and +1.8 s (p95) before the first
+token. So the host puts idle sessions to sleep (`sessions/sleep.ts`, `SessionSleeper`), a policy of the host's and not
+of a tool's:
+
+| Rule | Why |
+|---|---|
+| A live session sleeps once it has said nothing (no event of any kind) for the set time: **15 minutes** by default, "Put idle sessions to sleep after" in Settings → Background (`agents.setSleepPolicy`, saved as `agents.sleepAfterMinutes`, `off` for never) | The owner's decision (2026-10-12). Inside the 1 h cache lifetime Claude Code asks for, so the wake still reads the cache |
+| Only a tool whose adapter says so (`capabilities.sleep`): Claude yes, Codex no | Claude's resume was measured to keep the cache. A large Codex thread took 7-13 s to resume and its cache on resume is unmeasured; Codex's memory is better won by one shared app-server per account (#561 E3), decided separately |
+| Never while `sessionIdle` says no: a turn, an approval or a question waiting, background work, or a tool that cannot report its background work | The same rule as moving a session to a new CLI (§4.6): ending the process would end what it holds |
+| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session ask_project opened for it) still in the turn it gave it, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
+| The quiet period counts from host start for a session this host has not heard from | A host that just replaced another (a restart, a swap) does not know what the person was doing a second ago |
+| Sleeping is `SessionManager.sleepSession`: refused unless still idle, the handle leaves the map, `session_live {live: false, reason: 'asleep'}` goes out, the process is disposed. A message arriving meanwhile starts a resume that waits for the dispose (`sleeping`) | Never two processes on one conversation; a send is never lost to a closing handle |
+| Waking is the ordinary `resumeSession`, the path a session takes after a host restart; every resume sends `session_live {live: true}` | One path to keep right. The event tells every window, not only the one that asked |
+| Under the keeper the dispose stops the kept child (stdin closed, signalled). A host that takes over finds nothing to adopt for it, lists it asleep, and wakes it in a new child (`sleep-keeper.test.ts`). The sweep stops before a detach (`stopPlan`) | A sleep in the middle of a swap would end a process the next host is meant to adopt |
+| The screen wakes a session when its composer takes the keyboard or gets its first key, and on send; never on selecting or viewing it, and the grid's panels are not woken at startup | A session looked at is not a session typed to. The resume runs while the person types, so its 0.7 s is mostly hidden. Before #568 selecting woke a session and the grid woke every panel at startup, to hide a slow Codex resume |
+| Asleep shows quietly: the sidebar's tool mark fades and its tooltip says "asleep"; the conversation's line says "Asleep — it wakes when you type to it", then "Waking session…" while it starts | Not a state to act on, so no colour and no badge; but a person who wonders why the first answer is slower can find out |
+
+`CC_SLEEP_AFTER_MS` sets a shorter quiet period over the setting, for probes and tests. `probe-resume-cache.mts`
+re-measures the cache on a woken turn through a real host (§3.1); run it on a Claude Code update. Its first run
+(2026-10-12, haiku, `CC_SLEEP_AFTER_MS=20000`, 120 s more of quiet): asleep after 23 s, the woken turn read 99.7% of
+26,198 input tokens from cache (the warm turn before it 99.2%), and took 4.6 s from send to end against 2.3 s warm, the
+resume and the transcript catch-up included.
+
+Not covered: Claude Code's own scheduled wakeups inside a process (`/loop`, cron tools) are not reported as background
+work, so a session relying on one can be put to sleep; the reconnect recovery still wakes the sessions that were live
+before a host restart without a keeper.
 
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 

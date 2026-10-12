@@ -174,6 +174,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.detect': { kind: 'machine' },
   'agents.versions': { kind: 'machine' },
   'agents.setAutoApplyVersions': { kind: 'machine' },
+  'agents.sleepPolicy': { kind: 'machine' },
+  'agents.setSleepPolicy': { kind: 'machine' },
   'agents.applyVersions': {
     kind: 'machine',
     result: (r, q) => {

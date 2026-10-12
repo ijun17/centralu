@@ -69,6 +69,7 @@ function parts() {
     commands: { disposeAll: rec('commands end'), detachAll: async () => void did.push('commands detach') },
     updates: { stop: rec('updates') },
     agentVersions: { stop: rec('agent versions') },
+    sleeper: { stop: rec('sleeper') },
     stopActivity: rec('activity'),
     links: { stop: async () => void did.push('links') },
     apps: { dispose: async () => void did.push('apps') },
@@ -121,6 +122,16 @@ describe('the stop plan (HO8)', () => {
     f.p.views = { dispose: () => Promise.reject(new Error('a view would not close')) }
     await expect(runSteps(stopPlan('stop', false, f.p), () => {})).rejects.toThrow('a view would not close')
     expect(f.did.slice(-3)).toEqual(['server', 'store', 'children'])
+  })
+
+  it('putting idle sessions to sleep stops before the sessions are let go of, so a sweep cannot end a process the next host takes over (#568)', async () => {
+    for (const mode of ['detach', 'stop'] as const) {
+      const f = parts()
+      f.releaseSessions()
+      await runSteps(stopPlan(mode, false, f.p), () => {})
+      expect(f.did).toContain('sleeper')
+      expect(f.did.indexOf('sleeper')).toBeLessThan(f.did.indexOf(mode === 'detach' ? 'sessions detach' : 'sessions end'))
+    }
   })
 
   it('a planned ending hands the open views over first, before anything closes them', async () => {

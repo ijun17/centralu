@@ -41,6 +41,7 @@ import type {
   UiPreferencesPatch,
   UpdateStatus,
   AgentVersions,
+  SleepPolicy,
   ThemeFileContent,
   ThemeFileEntry,
   MachineInfo,
@@ -366,6 +367,8 @@ export class MockPlatform implements Platform {
         if (event.type === 'conversation_reset') s.context = null
         // The same rule as the real thing (#297): the CLI version the process reports stays on the session
         if (event.type === 'agent_version') s.agentVersion = event.version
+        // The same rule as the real thing (#568): a session put to sleep lists as not live until it is woken
+        if (event.type === 'session_live') s.live = event.live
         /*
          * A switch the agent tool made (#304) — like the host, recorded on the session so the list a reconnect reads
          * shows it too. (The host applies only what differs from what the process was launched with; the mock has no
@@ -1808,7 +1811,7 @@ export class MockPlatform implements Platform {
             },
           )
         }
-        s.live = true
+        await this.wakeUp(sessionId)
       }
       const seq = (this.messages.get(sessionId)?.length ?? 0) + 1
       // The same rule as the real thing: attachments also stay in the payload, and image bytes are re-loaded from "disk" (a map, here)
@@ -2130,10 +2133,11 @@ export class MockPlatform implements Platform {
     resumeSession: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      this.resumeCalls.push(sessionId)
       if (this.unresumable.has(sessionId)) {
         return { session: { ...s }, resumed: false, reason: 'This session cannot be resumed' }
       }
-      s.live = true
+      if (!s.live) await this.wakeUp(sessionId)
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
       return { session: { ...s }, resumed: true }
     },
@@ -2221,6 +2225,12 @@ export class MockPlatform implements Platform {
     detect: async (machine?: MachineRef) => (machine && this.machineDetected[machine]) || this.detected,
     // Like the host (#297): the reading is the host's; this mock never reads a real CLI
     versions: async () => ({ ...this.agentVersions, installed: { ...this.agentVersions.installed } }),
+    // Like the host (#568): the setting is the host's, 15 minutes until changed; the mock puts nothing to sleep itself
+    sleepPolicy: async () => ({ ...this.sleepPolicy }),
+    setSleepPolicy: async (afterMinutes: number | null) => {
+      this.sleepPolicy = { afterMinutes }
+      return { ...this.sleepPolicy }
+    },
     setAutoApplyVersions: async (enabled: boolean) => {
       this.agentVersions = { ...this.agentVersions, autoApply: enabled }
       this.emit({ type: 'agent_versions', status: { ...this.agentVersions } })
@@ -2948,6 +2958,20 @@ export class MockPlatform implements Platform {
 
   /** The installed agent CLIs and the "move idle sessions" setting (#297) — on by default, like the host */
   agentVersions: AgentVersions = { installed: {}, autoApply: true, checkedAt: null }
+  /** Every `resumeSession` call, by session (#568: selecting or viewing a session does not wake it) */
+  resumeCalls: string[] = []
+  /** How long a wake takes, so the screen's "waking" state can be seen (#568); 0 by default */
+  wakeDelayMs = 0
+  /** Wakes a sleeping session the way the host does (#568): after the resume, `live` and its event */
+  private async wakeUp(sessionId: string): Promise<void> {
+    if (this.wakeDelayMs > 0) await new Promise((r) => setTimeout(r, this.wakeDelayMs))
+    const s = this.sessions.get(sessionId)
+    if (!s || s.live) return
+    s.live = true
+    this.emit({ type: 'session_live', sessionId, live: true })
+  }
+  /** "Put idle sessions to sleep after" (#568), as the host keeps it */
+  sleepPolicy: SleepPolicy = { afterMinutes: 15 }
 
   /** Scenario helper (#297): as if the host read these installed versions (used from Playwright) */
   setInstalledVersions(installed: Record<string, string | null>): void {

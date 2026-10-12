@@ -81,6 +81,7 @@ type NormalizedEvent =
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // 배지; codex는 알려 주고, claude는 CLI의 /goal 답과 Stop 훅 피드백에서 읽는다
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: 살아 있는 집합(REPLACE)과 방금 끝난 것
   | { type: 'agent_version';    sessionId, version }            // #297: 이 프로세스가 돌리는 CLI 버전, 프로세스마다 한 번. SessionInfo.agentVersion으로 남는다
+  | { type: 'session_live';     sessionId, live, reason? }      // #568: 세션이 잠들어 프로세스가 끝났거나(reason 'asleep'), 재개가 다시 띄웠다
   | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
   | { type: 'session_deleted';  sessionId }
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
@@ -197,6 +198,7 @@ type ApprovalDetail =
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession`은 세션을 휴지통으로 보낸다 (FR-22) |
 | 백그라운드 작업 | `agents.stopBackgroundTask, agents.clearBackgroundTasks` | #290: 어댑터가 `stoppable`로 표시한 작업 하나를 멈춘다(그 끝은 `background_tasks`로 온다). 끝난 것을 목록에서 걷는다 |
 | 에이전트 CLI 버전 | `agents.versions, agents.setAutoApplyVersions, agents.applyVersions` | #297: 설치된 CLI(`force: false`는 30초 안의 읽기로 답한다 — 창이 포커스를 얻을 때), "새로 설치된 에이전트 CLI로 idle 세션 옮기기"(기본 켜짐), 오래된 CLI를 돌리는 idle 세션을 모두 다시 띄우고 `{ restarted, busy }`로 답한다. 세션이 돌리는 버전은 `SessionInfo.agentVersion`이며 프로세스가 없으면 null이다. 모두 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 아무것도 보이지 않는다([agent-host.ko.md](agent-host.ko.md) §4.6) |
+| 잠드는 유휴 세션 | `agents.sleepPolicy, agents.setSleepPolicy` | #568: "Put idle sessions to sleep after" `{ afterMinutes }`, 기본 15, null은 끄기. 호스트가 재운 세션은 `session_live`(`live: false, reason: 'asleep'`)를 보내고, 모든 재개는 `live: true`를 보낸다. 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 설정을 숨긴다([agent-host.ko.md](agent-host.ko.md) §4.6.1) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search, messages.image` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색; 답장이 적은 로컬 이미지(`![a](/path/shot.png)`). 창은 파일 경로를 직접 읽을 수 없어 세션의 호스트가 읽는다: `{ sessionId, path }`, `path`는 답장에 적힌 그대로. 답은 `{ ok: true, mime, data, file? }` 또는 `{ ok: false, reason, message, file? }`. `reason`은 `not_mentioned`(이 세션의 어느 답장에도 없다. 아무것도 건드리지 않는다), `not_found`, `not_an_image`(바이트로 판단: PNG, JPEG, GIF, WebP만), `too_large`(`IMAGE_PREVIEW_MAX_BYTES`, 10 MB), `unreadable`. `file`은 호스트 기기에서 해석한 경로로, 파일 관리자에서 보여 줄 때 쓴다. 거절은 오류가 아니라 답이다. 추가만 한 것이라 이전 호스트는 "Unknown method"로 답하고, 창은 그것을 이미지 자리에 보인다([security-boundaries.md](security-boundaries.md), "Images a reply names") |
 | machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: 허브가 다른 기기에 거는 링크 (§6). 언제나 허브 자신의 것이고 전달되지 않는다 |
@@ -304,7 +306,8 @@ type ProtocolError = {
 - **라우팅.** 허브는 `sessionId`, `projectId`, `terminalId`가 가리키는 기기로 호출을 보내고, 나머지는
   스스로 답한다. 기기별 질문은 선택적인 `machine` 매개변수를 받는다(없으면 허브): `agents.detect`,
   `agents.capabilities`, `agents.models`, `agents.usage`, `agents.versions`,
-  `agents.setAutoApplyVersions`, `agents.applyVersions`, `projects.add`, `projects.create`,
+  `agents.setAutoApplyVersions`, `agents.applyVersions`, `agents.sleepPolicy`, `agents.setSleepPolicy`(#568),
+  `projects.add`, `projects.create`,
   `projects.createPreview`(#515), `processes.strays`,
   `processes.stop`. UI가 다시 쌓는 목록(`sessions.list`, `projects.list`, `trash.list`,
   `messages.search`, `apps.list`, `approvals.rules`, `projectConsents.list`)은 기기를 가로질러

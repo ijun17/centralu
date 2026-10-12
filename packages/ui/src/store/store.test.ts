@@ -2117,37 +2117,54 @@ describe('restoring written text after a send failure', () => {
 })
 
 /**
- * Warming up grid sessions (dogfooding, the Mea session: reviving a large codex thread measured at
- * 7-13 seconds). A cost that cannot be reduced is moved to a time nobody is waiting on: sessions parked on
- * the grid are woken up in the background as the app comes up. If it fails, the app still comes up,
- * and the failure is left in the same place (`wakeError`) as when woken by a click.
+ * Sleeping sessions are woken by use, not by being seen (#568). The host puts idle sessions to sleep after 15 minutes;
+ * waking every grid panel at startup, or every session the person clicks through, would start processes nobody types
+ * to. Before #568 the grid's panels were woken one by one as the app came up, and selecting a session woke it.
  */
-describe('warming up grid sessions', () => {
-  it('attach wakes sleeping sessions parked on the grid ahead of time', async () => {
+describe('waking a sleeping session (#568)', () => {
+  it('the grid\'s sleeping panels stay asleep when the app comes up', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('warm-a', sessionInfo('warm-a', { live: false }))
     mock.sessions.set('warm-b', sessionInfo('warm-b', { live: false }))
     await mock.agents.setGridView(['warm-a', 'warm-b'].map(sessionGridPanel))
     await useStore.getState().attach(mock)
-
-    await vi.waitFor(() => {
-      expect(useStore.getState().sessions['warm-a']!.live).toBe(true)
-      expect(useStore.getState().sessions['warm-b']!.live).toBe(true)
-    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(mock.resumeCalls).toEqual([])
+    expect(useStore.getState().sessions['warm-a']!.live).toBe(false)
   })
 
-  it('a wake failure is left in that panel\'s wakeError — the app still comes up', async () => {
+  it('selecting a sleeping session shows it without waking it; its composer taking the keyboard does (wake)', async () => {
     const mock = new MockPlatform()
-    mock.sessions.set('warm-c', sessionInfo('warm-c', { live: false }))
-    mock.unresumable.add('warm-c')
-    await mock.agents.setGridView([sessionGridPanel('warm-c')])
+    mock.sessions.set('nap', sessionInfo('nap', { live: false }))
     await useStore.getState().attach(mock)
+    useStore.getState().focusSession('nap')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(mock.resumeCalls).toEqual([])
+    await useStore.getState().wake('nap')
+    expect(mock.resumeCalls).toEqual(['nap'])
+    expect(useStore.getState().sessions['nap']!.live).toBe(true)
+  })
 
-    await vi.waitFor(() => {
-      expect(useStore.getState().wakeError['warm-c']).toBeTruthy()
-    })
-    expect(useStore.getState().connection).toBe('connected')
-    expect(useStore.getState().sessions['warm-c']!.live).toBe(false)
+  it('a message to a sleeping session reads as waking until the host has resumed it, then live', async () => {
+    const mock = new MockPlatform()
+    mock.wakeDelayMs = 60
+    mock.sessions.set('nap', sessionInfo('nap', { live: false }))
+    await useStore.getState().attach(mock)
+    const sent = useStore.getState().send('nap', 'hello again')
+    expect(useStore.getState().resuming['nap']).toBe(true)
+    await sent
+    expect(useStore.getState().resuming['nap']).toBeUndefined()
+    expect(useStore.getState().sessions['nap']!.live).toBe(true)
+  })
+
+  it('the host putting a session to sleep, or waking it for someone else, reaches every window', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('s', sessionInfo('s'))
+    await useStore.getState().attach(mock)
+    mock.emit({ type: 'session_live', sessionId: 's', live: false, reason: 'asleep' })
+    await vi.waitFor(() => expect(useStore.getState().sessions['s']!.live).toBe(false))
+    mock.emit({ type: 'session_live', sessionId: 's', live: true })
+    await vi.waitFor(() => expect(useStore.getState().sessions['s']!.live).toBe(true))
   })
 })
 

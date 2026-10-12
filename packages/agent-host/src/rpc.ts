@@ -18,6 +18,7 @@ const toInfo = (h: TerminalHandle) => ({
 })
 import type { UpdateService } from './updates.js'
 import type { AgentVersionService } from './agent-versions.js'
+import type { SessionSleeper } from './sessions/sleep.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
 import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
@@ -65,6 +66,8 @@ export type RpcServices = {
   themes?: ThemeFiles
   /** The installed agent CLIs, and moving sessions to them (#297, agent-versions.ts) */
   agentVersions?: AgentVersionService
+  /** Putting idle sessions to sleep (#568, sessions/sleep.ts) */
+  sleeper?: SessionSleeper
   /** Linked machines (#82, links/links.ts). Without it this host links to nothing */
   machines?: MachinesPort
   /**
@@ -104,7 +107,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, machines, stopHost, activity }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, activity }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
@@ -130,6 +133,10 @@ export function createRpcHandler(
   const requireAgentVersions = (): AgentVersionService => {
     if (!agentVersions) throw Object.assign(new Error('Agent version checks are unavailable'), { code: 'internal' })
     return agentVersions
+  }
+  const requireSleeper = (): SessionSleeper => {
+    if (!sleeper) throw Object.assign(new Error('Putting sessions to sleep is unavailable on this host'), { code: 'internal' })
+    return sleeper
   }
   const requireMachines = (): MachinesPort => {
     if (!machines) throw Object.assign(new Error('Linked machines are unavailable on this host'), { code: 'internal' })
@@ -244,6 +251,8 @@ export function createRpcHandler(
     'agents.setAutoApplyVersions': async (p) =>
       requireAgentVersions().setAutoApply(RpcMethods['agents.setAutoApplyVersions'].params.parse(p).enabled),
     'agents.applyVersions': async () => requireAgentVersions().applyNow(),
+    'agents.sleepPolicy': async () => requireSleeper().policy(),
+    'agents.setSleepPolicy': async (p) => requireSleeper().setAfterMinutes(RpcMethods['agents.setSleepPolicy'].params.parse(p).afterMinutes),
     'agents.detect': async () =>
       Promise.all(
         [...adapters.values()].map(async (a) => {

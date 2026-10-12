@@ -46,6 +46,7 @@ import type {
   ThemeFileEntry,
   UpdateStatus,
   AgentVersions,
+  SleepPolicy,
   MachineAutostartResult,
   MachineInfo,
   MachineInstallResult,
@@ -237,6 +238,10 @@ export interface AgentPort {
   setAutoApplyVersions(enabled: boolean, machine?: MachineRef): Promise<AgentVersions>
   /** Restarts every idle session that runs an older CLI on the installed one; the busy ones are listed (#297) */
   applyVersions(machine?: MachineRef): Promise<{ restarted: string[]; busy: string[] }>
+  /** When idle sessions go to sleep (#568): this host's setting */
+  sleepPolicy(): Promise<SleepPolicy>
+  /** "Put idle sessions to sleep after" (#568); null never */
+  setSleepPolicy(afterMinutes: number | null): Promise<SleepPolicy>
   /** Event stream — receives events from the moment of subscription onward */
   subscribe(handler: (event: NormalizedEvent) => void): Unsubscribe
   onConnectionChange(handler: (state: ConnectionState) => void): Unsubscribe

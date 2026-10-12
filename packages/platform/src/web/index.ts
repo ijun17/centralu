@@ -231,6 +231,12 @@ class WebAgentPort implements AgentPort {
   applyVersions(machine?: MachineRef) {
     return this.rpc.call('agents.applyVersions', { ...on(machine) })
   }
+  sleepPolicy() {
+    return this.rpc.call('agents.sleepPolicy', {})
+  }
+  setSleepPolicy(afterMinutes: number | null) {
+    return this.rpc.call('agents.setSleepPolicy', { afterMinutes })
+  }
   subscribe(handler: (e: NormalizedEvent) => void): Unsubscribe {
     return this.rpc.onEvent(handler)
   }
