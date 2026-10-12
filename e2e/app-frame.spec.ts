@@ -532,6 +532,33 @@ test('a view that is not open fails with a reason', async ({ page }) => {
 test.describe('after the connection comes back to another host', () => {
   const resync = (page: Page) => page.evaluate(() => (window as any).__mock.setConnectionState('resync_required'))
 
+  test('retries an address read the mock transport drops during a host swap', async ({ page }) => {
+    const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+    await mount(page, 'dropped', { appId: 'fixture', projectId: 'p1', instanceId: id })
+    await page.evaluate(() => {
+      const mock = (window as any).__mock
+      const viewFrame = mock.viewFrameProvider
+      let dropped = false
+      mock.viewFrameProvider = async (appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) => {
+        if (!dropped) {
+          dropped = true
+          mock.setConnectionState('disconnected')
+          throw Object.assign(new Error('Connection lost'), { code: 'connection_lost', retryable: false })
+        }
+        return viewFrame(appId, instanceId, opts)
+      }
+    })
+
+    // The refresh that asks the replacement host for the already-open view is the call the swap drops.
+    await resync(page)
+    await expect(page.getByTestId('frame-dropped').getByTestId('app-frame')).toHaveAttribute('data-phase', 'reconnecting')
+    await expect(page.getByTestId('frame-dropped').getByTestId('app-frame-loading')).toHaveText('Reconnecting…')
+
+    await page.evaluate(() => (window as any).__mock.setConnectionState('connected'))
+    await expect(page.getByTestId('frame-dropped').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await expect(page.getByTestId('frame-dropped').getByTestId('app-frame-error')).toHaveCount(0)
+  })
+
   test('the same address leaves the view alone: no reload, the state it built is still there, and it keeps calling', async ({ page }) => {
     const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
     await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: id, toolInput: { q: 'kept' } })
