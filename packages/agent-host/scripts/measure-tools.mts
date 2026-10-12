@@ -13,7 +13,7 @@
  *
  * Options: --cli claude,codex  --reps 2  --model haiku  --codex-model <id>  --change-model <id|none>
  *          --phases resident,cache,results,selection  --prompts <file>  --out <file>  --keep
- *          --rare resident|deferred|commands (#512: how the orchestrator's rare commands are exposed)
+ *          --rare commands|resident|deferred (#512: how the orchestrator's rare commands are exposed; the host's default)
  *          --kinds none,reader,orchestrator,manager,builder (the session kinds the resident phase starts)
  *          --preamble (#512 round 2: the orchestrator's role starts with the preamble, CC_ORCHESTRATOR_PREAMBLE)
  *          --only <id,id> (run only these prompts of the set)
@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { ORCHESTRATOR_TOOLS, commandsFor, rareTierFrom, setRareTier, toolDefsFor } from '../src/sessions/orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, ORCHESTRATOR_TOOLS, commandsFor, rareTierFrom, setRareTier, toolDefsFor } from '../src/sessions/orchestrator-tools.js'
 import { TOOL_PROFILES, residentCost, type ResidentCost } from '../src/sessions/tool-cost.js'
 import { MeasuredHost, bareName, toolCalls, toolResults, type Call, type Json } from './measure-tools/host.mjs'
 import { ApiRecorder, call, say, type RecordedRequest, type Usage } from './measure-tools/recorder.mjs'
@@ -46,7 +46,7 @@ const { values: opt, positionals } = parseArgs({
     prompts: { type: 'string' },
     out: { type: 'string' },
     keep: { type: 'boolean', default: false },
-    rare: { type: 'string', default: 'resident' },
+    rare: { type: 'string', default: DEFAULT_RARE_TIER },
     preamble: { type: 'boolean', default: false },
     only: { type: 'string' },
     kinds: { type: 'string', default: 'none,reader,orchestrator,manager,builder' },

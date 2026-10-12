@@ -77,6 +77,8 @@ const TYPED = [
   'includePartialMessages',
   'mcpServers',
   'settingSources', // [] is a security decision — orchestrator reads no files
+  'crossSessionInbound', // documented inbound refusal, independent of settings file selection (#569)
+  'disallowedTools', // deny peer discovery while keeping SendMessage for this session's own subagents
   'systemPrompt',
   'resume',
   'canUseTool', // approvals AND AskUserQuestion both ride on this one callback

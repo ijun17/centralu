@@ -156,6 +156,7 @@ type Kind =
   | 'user-folder-app builder'
   | 'project-app agent'
   | 'user-folder-app agent'
+  | 'start_agent child'
 type Files = 'none' | 'user' | 'all'
 type Created = { app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }
 
@@ -169,6 +170,7 @@ const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
   'user-folder-app builder': () => 'all',
   'project-app agent': (t) => (t ? 'all' : 'user'),
   'user-folder-app agent': () => 'user',
+  'start_agent child': (t) => (t ? 'all' : 'user'),
 }
 
 /** Stands up a session of that kind through the same path the product uses — right up through the tool's first launch */
@@ -203,6 +205,15 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
     ((await rpc('apps.create', { projectId: null, id: 'timer', name: 'Timer', tool })) as Created).builder!.id,
   'project-app agent': (tool) => appAgent(tool, projectId, 'notes'),
   'user-folder-app agent': (tool) => appAgent(tool, null, 'timer'),
+  'start_agent child': async (tool) => {
+    await rpc('projects.setTrusted', { projectId, trusted: true })
+    adapters.get(tool)!.detect = async () => ({ tool, installed: true, loggedIn: true, detail: 'test' })
+    store.setProjectConsent(projectId, projectId, 'agents')
+    const caller = await MAKE.worker(tool)
+    const result = await mgr.startAgent(caller, { task: 'look around', tool, wait: false })
+    expect(result.ok).toBe(true)
+    return mgr.listSessions().find((s) => s.askedBy === caller)!.id
+  },
 }
 
 /**
@@ -239,6 +250,11 @@ function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): 
   const head = `trust=${trustedNow() ? 'yes' : 'no'} preset=${preset}`
   if (tool === 'claude') {
     const o = state.claude.at(-1)!
+    // Check the actual query built by the manager for every kind, trust and preset, on start and resume (#569).
+    expect(o.settings).toMatchObject({ crossSessionInbound: 'refuse' })
+    expect(o.disallowedTools).toEqual(expect.arrayContaining(['ListAgents', 'ListPeers']))
+    expect(o.disallowedTools).not.toContain('SendMessage')
+    expect((o.env as Record<string, string>).CLAUDE_CODE_HARBOR_KITE).toBe('0')
     const sources = JSON.stringify(o.settingSources)
     const files = !('settingSources' in o) ? 'all' : sources === '[]' ? 'none' : sources === '["user"]' ? 'user' : sources
     const permission = o.resolvePermissionModeInCli ? 'from-settings' : String(o.permissionMode)
@@ -266,7 +282,8 @@ function expected(tool: ToolName, kind: Kind, t: boolean, preset: PermissionPres
 }
 
 describe.each(['claude', 'codex'] as const)('%s — the session\'s kind decides the setting files (not whether the tool receives them)', (tool) => {
-  it.each(Object.keys(FILES) as Kind[])('%s: at creation, and again on every wake across trust × preset', async (kind) => {
+  const kinds = (Object.keys(FILES) as Kind[]).filter((kind) => tool === 'claude' || kind !== 'start_agent child')
+  it.each(kinds)('%s: at creation, and again on every wake across trust × preset', async (kind) => {
     const id = await MAKE[kind](tool)
     await settle()
     // An agent an app calls stands up as safe — the person's global bypass does not carry over to an app's instruction (runAppAgent)

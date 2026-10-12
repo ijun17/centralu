@@ -83,6 +83,24 @@ async function adoptedSession(openCalls: { callId: string; tool: string }[]) {
 }
 
 describe('claude under the keeper', () => {
+  it('a fresh keeper process receives the peer controls in its query and spawn environment', async () => {
+    const spawned: AgentSpawnSpec[] = []
+    const handle = await new ClaudeAdapter({ executable: () => null, startGapMs: 0 }).createSession(
+      { sessionId: 'fresh', cwd: '/tmp', permissionPreset: 'safe', processSource: { spawn: (spec) => (spawned.push(spec), fakeProcess()) } },
+      () => {},
+    )
+    const options = sdk.state.options!
+    expect(options.settings).toMatchObject({ crossSessionInbound: 'refuse' })
+    expect(options.disallowedTools).toEqual(expect.arrayContaining(['ListAgents', 'ListPeers']))
+    expect(options.disallowedTools).not.toContain('SendMessage')
+    expect((options.env as AgentSpawnSpec['env']).CLAUDE_CODE_HARBOR_KITE).toBe('0')
+    const spawn = options.spawnClaudeCodeProcess as (o: AgentSpawnSpec) => AgentProcess
+    spawn({ command: 'claude', args: [], env: options.env as AgentSpawnSpec['env'] })
+    expect(spawned[0]!.env.CLAUDE_CODE_HARBOR_KITE).toBe('0')
+    await handle.dispose()
+    sdk.end()
+  })
+
   it('the first spawn adopts the running CLI; a later one spawns through the keeper', async () => {
     const { handle, adopted, spawned, spawn } = await adoptedSession([])
     expect(spawn({ command: 'claude', args: ['--resume=conv-1'], env: {} })).toBe(adopted)
