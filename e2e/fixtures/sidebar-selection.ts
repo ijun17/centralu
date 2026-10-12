@@ -242,6 +242,7 @@ export function sidebarSelectionTests(): void {
       page,
     }) => {
       await setup(page, ['/tmp/alpha'])
+      await page.getByTestId('trust-ask-yes-alpha').click()
       const projectId = await page.evaluate(
         () =>
           (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find(
@@ -324,6 +325,7 @@ export function sidebarSelectionTests(): void {
 
     test('a finished project-app session does not mark its app as asking', async ({ page }) => {
       await setup(page, ['/tmp/alpha'])
+      await page.getByTestId('trust-ask-yes-alpha').click()
       const projectId = await page.evaluate(
         () => (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find((project) => project.name === 'alpha')!.id,
       )
@@ -347,6 +349,7 @@ export function sidebarSelectionTests(): void {
         mock.emit({ type: 'session_created', sessionId: session.id, session })
       }, [projectId, builder])
 
+      await expect(page.getByTestId('app-session-row-timer-finished-1')).toContainText('Timer · finished')
       await expect(page.getByTestId(`app-row-${projectId}/timer`).getByTestId('app-row-hint')).toHaveCount(0)
     })
 

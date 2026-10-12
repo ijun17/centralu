@@ -145,10 +145,12 @@ test.describe('C-1: new app', () => {
     const pinned = page.getByTestId(`pinned-app-${pid}/team-notes`)
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     await expect(viewOf(page, `${pid}/team-notes`).locator('li[data-k="tool-result"]')).toHaveText('tool-result {"home":"team-notes"}')
-    // The builder session: belongs to that app, uses the chosen tool, gets the name the person set — shown as a row under that project in the sidebar
+    // The builder belongs to that app and stands under its row, with the chosen tool and name.
     const builders = await sessionsOfApp(page, 'team-notes')
     expect(builders).toEqual([{ id: expect.any(String), name: 'Team Notes · builder', tool: 'codex', projectId: pid }])
-    await expect(page.getByTestId('project-alpha').getByTestId(`session-row-${builders[0]!.id}`)).toContainText('Team Notes · builder')
+    const apps = page.getByTestId('project-alpha').getByTestId('project-apps-alpha')
+    await expect(apps.getByTestId(`app-session-row-${builders[0]!.id}`)).toContainText('Team Notes · builder')
+    await expect(page.getByTestId(`session-row-${builders[0]!.id}`)).toHaveCount(0)
   })
 
   test('when the host refuses, its exact words show and the dialog stays open — a malformed id is not even sent', async ({ page }) => {

@@ -257,12 +257,15 @@ makes the host call the manifest's `home` tool, as a `view` caller, and show the
 the main area. A host calling a tool is within the standard, and the view is still born from a tool
 call.
 
-A project app's sessions (its builder, the agents its `run_agent` started) are sessions of the
-project and stand in its list. A user-folder app's have no project, so they stand indented under
-the app's row in "Your apps", the only row they have: an agent there may be waiting at an approval
-card. A session with no project that no listed app claims (a coordinator the control app left
-behind, #372; a session of a user-folder app since removed) has no sidebar row. Search, the command
-palette and the inbox still reach it. The "No app" list that used to hang under the orchestrator
+A project app's sessions (its builder, the agents its `run_agent` started) belong to the
+project and stand indented under the app's row, with their session menus and badges (#591).
+Sessions of a removed project app return to the project's ordinary session list. A user-folder
+app's sessions have no project and stand indented under its row in "Your apps". An app row says
+"asks you" for an approval or a pending question, including a question from its view; a completed
+turn awaiting another message does not set that mark. A session with no project that no listed
+app claims (a coordinator the control app left behind, #372; a session of a user-folder app since
+removed) has no sidebar row. Search, the command palette and the inbox still reach it. The
+"No app" list that used to hang under the orchestrator
 row and catch all of these is gone (#372 follow-up): nothing stands under the orchestrator.
 
 - `home` must declare a `ui://` view and be visible to `app`. Otherwise opening is refused **before
