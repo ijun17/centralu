@@ -65,16 +65,18 @@ export function switchPlan(b: { keepsAgents?: boolean; busy?: boolean; sameBuild
   if (b.sameBuild === true && b.keeperSameBuild === false) {
     return { confirm: false, loses: 'Nothing stops: agents, terminals and this window carry on.' }
   }
-  const confirm = b.busy !== false
   if (b.keepsAgents === true) {
     return {
-      confirm,
+      // The keeper owns and hands agents over. A working turn or Centralu card is therefore not
+      // a loss; only terminals, commands and an in-process host call remain drain-sensitive.
+      confirm: false,
       loses:
         `Agents keep running and this window reconnects in a moment. A tool call Centralu serves itself ` +
         `(an orchestrator or app tool) that is still running after ${DRAIN_WORDS} is stopped, and the agent ` +
         `is told to try it again.`,
     }
   }
+  const confirm = b.busy !== false
   return {
     confirm,
     loses:

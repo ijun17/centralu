@@ -84,8 +84,8 @@ describe('what switching builds costs (#280 step 3)', () => {
     expect(switchPlan({ keepsAgents: true, busy: false }).confirm).toBe(false)
   })
 
-  it('asks when something is running, or when it cannot tell', () => {
-    expect(switchPlan({ keepsAgents: true, busy: true }).confirm).toBe(true)
+  it('does not ask for a working session or pending card when the keeper hands agents over', () => {
+    expect(switchPlan({ keepsAgents: true, busy: true }).confirm).toBe(false)
     expect(switchPlan({}).confirm).toBe(true)
   })
 
@@ -101,7 +101,7 @@ describe('what switching builds costs (#280 step 3)', () => {
     expect(plan.confirm).toBe(false)
     expect(plan.loses).toContain('Nothing stops')
     // A host of another build still costs what a host swap costs
-    expect(switchPlan({ keepsAgents: true, busy: true, sameBuild: false, keeperSameBuild: false }).confirm).toBe(true)
+    expect(switchPlan({ keepsAgents: true, busy: true, sameBuild: false, keeperSameBuild: false }).confirm).toBe(false)
   })
 
   it('a host that cannot hand agents over yet says turns stop, rather than pretending they survive', () => {
@@ -164,19 +164,19 @@ describe('switching by itself after an update (#352)', () => {
     expect(autoSwitch(quiet)).toBe('switch')
   })
 
-  it('asks at once when something can be lost, since the person just pressed "Apply now"', () => {
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: true } })).toBe('ask')
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: undefined } })).toBe('ask')
+  it('switches through a keeper-held working session or card without asking', () => {
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: true } })).toBe('switch')
+    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: undefined } })).toBe('switch')
   })
 
   it('a keeper alone behind moves without a question, busy or not', () => {
     expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: true, sameBuild: true } })).toBe('switch')
   })
 
-  it('the automatic mode switches when idle and waits while busy, never asking', () => {
+  it('the automatic mode switches through keeper-held agent work too', () => {
     const auto = { ...quiet, autoApply: true, build: { ...quiet.build, relaunched: false } }
     expect(autoSwitch(auto)).toBe('switch')
-    expect(autoSwitch({ ...auto, build: { ...auto.build, busy: true } })).toBe('wait')
+    expect(autoSwitch({ ...auto, build: { ...auto.build, busy: true } })).toBe('switch')
   })
 
   it('a window opened by hand, with the automatic mode off, leaves it to the bar', () => {
