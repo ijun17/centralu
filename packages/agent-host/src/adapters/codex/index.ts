@@ -1688,7 +1688,8 @@ export class CodexAdapter implements AgentAdapter {
   launchSettingsFingerprint(settings: import('../contract.js').LaunchSettings): string {
     // The working directory participates in the sandbox roots. Bump the version when the
     // adapter derives a different sandbox, network or bridge launch policy from these settings.
-    return JSON.stringify({ v: 1, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
+    // v2: #597 changes auto's sandbox to full access. Kept sessions must restart to pick it up.
+    return JSON.stringify({ v: 2, cwd: settings.cwd, permission: settings.permissionPreset, sandbox: permissionOptionsFor(settings.permissionPreset).sandbox, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
   }
 
   /** The installed Codex CLI (#297), from npm's `package.json` where it came from npm, else `codex --version` */

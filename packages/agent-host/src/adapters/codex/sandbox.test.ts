@@ -45,6 +45,22 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 describe('Codex worktree sandbox (#582)', () => {
+  it('the launch fingerprint distinguishes auto from normal and changes from the previous sandbox policy', () => {
+    const adapter = new CodexAdapter()
+    const fingerprints = (['normal', 'auto'] as const).map((permissionPreset) => {
+      const fingerprint = adapter.launchSettingsFingerprint({
+        cwd: worktree, permissionPreset, projectTrusted: true,
+      })
+      expect(JSON.parse(fingerprint)).toMatchObject({ v: 2 })
+      expect(JSON.parse(fingerprint).sandbox).toBe(permissionPreset === 'auto' ? 'danger-full-access' : undefined)
+      expect(fingerprint).not.toBe(JSON.stringify({
+        v: 1, cwd: worktree, permission: permissionPreset, trusted: true, noSettings: false,
+      }))
+      return fingerprint
+    })
+    expect(fingerprints[0]).not.toBe(fingerprints[1])
+  })
+
   for (const preset of ['safe', 'normal', 'auto'] as const) {
     for (const resume of [false, true]) {
       it(`${preset} ${resume ? 'resume' : 'start'}: applies the preset's sandbox and approval policy`, async () => {

@@ -1199,6 +1199,10 @@ the ordinary resume path, waits for a working or approval-waiting process to fin
 for an asleep session with no process. The host never names a CLI or interprets the fingerprint; changing an adapter's
 derived launch policy means changing its own fingerprint.
 
+Codex's fingerprint is version 2 since #597 changes `auto` from workspace-write to full access. It includes
+the adapter's sandbox override (`normal` leaves that mode to the person's settings). Kept sessions restart
+through `launch_settings` so they pick up the changed sandbox.
+
 A missing stored fingerprint is also a mismatch: builds before this check kept processes with unknown
 launch settings. The update that introduces it therefore restarts each retained process once, at the
 same safe boundary, and records the new fingerprint. Later handoffs keep an unchanged process.
