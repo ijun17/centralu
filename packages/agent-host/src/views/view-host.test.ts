@@ -6,13 +6,13 @@
  * `app-views.test.ts`, and whether it actually comes up in a browser is covered by e2e
  * (app-frame.spec.ts).
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { request } from 'node:http'
 import { HostServer } from '../transport/server.js'
 import { OriginPorts, type PortBook } from './origin-ports.js'
 import { DRAG_RELAY_SCRIPT, withDragRelay } from './drag-relay.js'
 import { PROXY_SCRIPT, PROXY_SCRIPT_HASH } from './proxy-page.js'
-import { LEASE_GRACE_MS, MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, type ViewSource } from './view-host.js'
+import { LEASE_GRACE_MS, MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, type ViewFrame, type ViewSource } from './view-host.js'
 import { VIEW_MIME_TYPE } from './view-document.js'
 import { createHash } from 'node:crypto'
 import { connect, createServer, type Server as NetServer } from 'node:net'
@@ -258,6 +258,47 @@ describe('ViewHost — per-app origin', () => {
     const i2 = second.views.open(NOTES, 'ui://notes/board')
     const cfg2 = pageConfig((await get((await second.views.frame({ app: NOTES, instanceId: i2.instanceId, hostOrigin: HOST_ORIGIN })).url)).body)
     expect(cfg2.appOrigin).toBe(cfg1.appOrigin)
+  })
+
+  it('an app put back while its removed origin is still starting keeps one port: the new server waits for the old to close (#392)', async () => {
+    const { source } = fakeSource({ 'notes ui://notes/board': { html: 'x' } }, { notes: 'app' })
+    let present = true
+    let appsChanged = () => {}
+    const { views: v, book } = await start({ ...source, exists: () => present, onAppsChanged: (l) => ((appsChanged = l), () => {}) })
+    // Every port a server for the app came up on. Removed and put back just after the first was asked for, while it binds
+    const served: Promise<number>[] = []
+    let during: (() => void) | null = null
+    const serve = OriginPorts.prototype.serve
+    const spy = vi.spyOn(OriginPorts.prototype, 'serve').mockImplementation(function (this: OriginPorts, key, handler) {
+      const started = serve.call(this, key, handler)
+      served.push(started.then((s) => s.port))
+      const now = during
+      during = null
+      if (now) queueMicrotask(now)
+      return started
+    })
+    try {
+      const first = v.open(NOTES, 'ui://notes/board')
+      let shownAgain: Promise<ViewFrame> | null = null
+      during = () => {
+        v.close(first.instanceId)
+        present = false
+        appsChanged()
+        present = true
+        shownAgain = v.frame({ app: NOTES, instanceId: v.open(NOTES, 'ui://notes/board').instanceId, hostOrigin: HOST_ORIGIN })
+      }
+      await v.frame({ app: NOTES, instanceId: first.instanceId, hostOrigin: HOST_ORIGIN })
+      const cfg = pageConfig((await get((await shownAgain!).url)).body)
+
+      const ports = await Promise.all(served)
+      expect(ports).toHaveLength(2)
+      expect(new Set(ports).size).toBe(1)
+      const saved = JSON.parse(book.raw!) as PortBook
+      expect(cfg.appOrigin).toBe(`http://127.0.0.1:${saved.assigned['p1/notes']}`)
+      expect(saved.retired).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

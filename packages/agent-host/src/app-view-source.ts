@@ -19,5 +19,7 @@ export function runtimeViewSource(apps: ExternalApps): ViewSource {
     readResource: (app, uri) => apps.readResource(app, uri),
     originMode: (app) => apps.viewOrigin(app),
     retain: (app) => apps.retainView(app),
+    exists: (app) => apps.exists(app),
+    onAppsChanged: (listener) => apps.onAppsChanged(listener),
   }
 }

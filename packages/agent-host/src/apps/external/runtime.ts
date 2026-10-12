@@ -1011,6 +1011,11 @@ export class ExternalApps {
     return this.find(ref)?.manifest?.view?.origin ?? 'opaque'
   }
 
+  /** Whether the app is discovered: its folder is there, in a project that is (or the user folder). Trusted or not */
+  exists(ref: AppRef): boolean {
+    return this.find(ref) !== undefined
+  }
+
   /**
    * Lets a stopped app start again (B-6's "Restart"). Clears consecutive failures and backoff, and
    * stops it if running — **never starts it**, the next time it is needed does.

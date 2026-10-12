@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -215,5 +216,62 @@ describe('an open view holds the app open', () => {
     const pid = await servingPid('slider')
     await views.dispose()
     await until(() => alive(pid), (a) => a === false, 3000)
+  })
+})
+
+describe("a removed app's origin server goes with it (#392)", () => {
+  /** Whether something accepts connections on the port: the per-app origin server, while it is up */
+  const listening = (port: number) =>
+    new Promise<boolean>((resolve) => {
+      const s = connect({ host: '127.0.0.1', port })
+      s.once('connect', () => {
+        s.destroy()
+        resolve(true)
+      })
+      s.once('error', () => resolve(false))
+    })
+  const originPort = async (appId: string) => {
+    const { instanceId } = views.open(ref(appId), 'ui://fixture/main')
+    await views.frame({ app: ref(appId), instanceId, hostOrigin: HOST_ORIGIN })
+    return { instanceId, port: book!.assigned[`p1/${appId}`]! }
+  }
+
+  it('closes once the app is removed and its last view is closed; another app keeps its own, and the port stays assigned', async () => {
+    plant('mapper', { view: { origin: 'app' } })
+    plant('atlas', { view: { origin: 'app' } })
+    await start()
+    const mapper = await originPort('mapper')
+    const atlas = await originPort('atlas')
+    expect(await listening(mapper.port)).toBe(true)
+
+    // Removed while its view is open: that view is still served from its origin until the window closes it
+    rmSync(join(appsDir(), 'mapper'), { recursive: true, force: true })
+    rt.refresh()
+    await until(() => rt.exists(ref('mapper')), (e) => e === false)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await listening(mapper.port)).toBe(true)
+
+    views.close(mapper.instanceId)
+    await expect.poll(() => listening(mapper.port), { timeout: 3_000 }).toBe(false)
+    expect(await listening(atlas.port)).toBe(true)
+    expect(book!.assigned['p1/mapper']).toBe(mapper.port)
+  })
+
+  it('closes when the app is removed with no view open, and an app put back is served on its own port again', async () => {
+    plant('mapper', { view: { origin: 'app' } })
+    await start()
+    const first = await originPort('mapper')
+    views.close(first.instanceId)
+    expect(await listening(first.port)).toBe(true)
+
+    rmSync(join(appsDir(), 'mapper'), { recursive: true, force: true })
+    rt.refresh()
+    await expect.poll(() => listening(first.port), { timeout: 3_000 }).toBe(false)
+
+    plant('mapper', { view: { origin: 'app' } })
+    rt.refresh()
+    const again = await originPort('mapper')
+    expect(again.port).toBe(first.port)
+    expect(await listening(again.port)).toBe(true)
   })
 })

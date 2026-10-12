@@ -49,6 +49,10 @@ export interface ViewSource {
    * app never opens.
    */
   retain?(app: AppRef): () => void
+  /** Whether the app is still there (its folder and its project). Absent: every app is, and no origin server is closed early */
+  exists?(app: AppRef): boolean
+  /** Subscribes to changes in the app list (an app removed among them). Returns the unsubscribe */
+  onAppsChanged?(listener: () => void): () => void
 }
 
 export type ViewFrame = {
@@ -101,8 +105,11 @@ type Instance = {
   lease: Lease | null
 }
 
-/** One view as it is about to be served: this host's own instance, or a linked machine's */
-type Shown = { app: AppRef; uri: string; doc: ViewDocument; mode: OriginMode; key: string }
+/** One view as it is about to be served: this host's own instance, or a linked machine's (`own: false`) */
+type Shown = { app: AppRef; uri: string; doc: ViewDocument; mode: OriginMode; key: string; own: boolean }
+
+/** A per-app origin server, started or starting. `app`: the own app it serves; null for a linked machine's */
+type Origin = { app: AppRef | null; pending: Promise<{ port: number; server: Server }> }
 
 export type ViewHostOptions = {
   /** The host port's HTTP secret (transport/http.ts). The per-app origin secret is also derived from this */
@@ -180,7 +187,10 @@ function fail(message: string): never {
 
 export class ViewHost {
   private readonly instances = new Map<string, Instance>()
-  private readonly origins = new Map<string, Promise<{ port: number; server: Server }>>()
+  private readonly origins = new Map<string, Origin>()
+  /** Origin servers being closed, by key: one started again for the same key waits for its port to be free */
+  private readonly closingOrigins = new Map<string, Promise<void>>()
+  private readonly unsubscribeApps: (() => void) | null
   /** Linked machines' documents as last read, by qualified instance id, oldest first (`REMOTE_DOC_TTL_MS`) */
   private readonly remoteDocs = new Map<string, { shown: Shown; at: number }>()
   private readonly allowed: ReadonlySet<string>
@@ -193,6 +203,7 @@ export class ViewHost {
     this.allowed = new Set(opts.allowedOrigins.filter((o) => o !== '' && o !== 'null'))
     this.log = opts.log ?? ((line) => console.error(line))
     this.leaseGraceMs = opts.leaseGraceMs ?? LEASE_GRACE_MS
+    this.unsubscribeApps = opts.source?.onAppsChanged?.(() => this.closeGoneOrigins()) ?? null
   }
 
   /**
@@ -357,7 +368,7 @@ export class ViewHost {
       this.log(`[agent-host] view ${shown.uri} (${shown.key}): CSP entries not allowed: ${csp.dropped.join(', ')}`)
     }
     // Under a per-app origin, that port has to be up **before** the address is given out — the proxy goes straight there
-    if (shown.mode === 'app') await this.originServer(shown.key)
+    if (shown.mode === 'app') await this.originServer(shown)
     return {
       url: `http://127.0.0.1:${port}/${this.opts.secret}/views/${p.instanceId}/?${new URLSearchParams({ host: p.hostOrigin })}`,
       allow: allowAttribute(shown.doc.permissions),
@@ -412,22 +423,13 @@ export class ViewHost {
 
   async dispose(): Promise<void> {
     this.disposed = true
+    this.unsubscribeApps?.()
     if (this.sweepTimer) clearTimeout(this.sweepTimer)
     this.sweepTimer = null
     for (const id of [...this.instances.keys()]) this.drop(id)
     this.remoteDocs.clear()
-    const servers = await Promise.allSettled([...this.origins.values()])
-    this.origins.clear()
-    await Promise.all(
-      servers.map((s) =>
-        s.status === 'fulfilled'
-          ? new Promise<void>((r) => {
-              s.value.server.closeAllConnections()
-              s.value.server.close(() => r())
-            })
-          : undefined,
-      ),
-    )
+    for (const key of [...this.origins.keys()]) this.closeOrigin(key)
+    await Promise.all(this.closingOrigins.values())
   }
 
   /** Deletes the instance and releases the app it held. Calling this twice still releases only once */
@@ -436,6 +438,42 @@ export class ViewHost {
     if (!inst) return
     this.instances.delete(instanceId)
     inst.release?.()
+    // The last view of an app removed while it was open: its origin goes with it
+    if (!this.disposed) this.closeGoneOrigins()
+  }
+
+  /**
+   * Closes the origin servers of own apps that are gone (their folder or their project removed) and have no open view
+   * (#392). Each one held a listening socket for the host's life, one per app ever viewed. Its port stays assigned to
+   * the app (origin-ports.ts): one that comes back gets its own origin again. A linked machine's origin is left: this
+   * host is never told that its app went away.
+   */
+  private closeGoneOrigins(): void {
+    const exists = this.opts.source?.exists
+    if (!exists) return
+    for (const [key, origin] of this.origins) {
+      if (!origin.app || exists(origin.app)) continue
+      if ([...this.instances.values()].some((i) => ViewHost.originKey(i.app) === key)) continue
+      this.closeOrigin(key)
+    }
+  }
+
+  private closeOrigin(key: string): void {
+    const origin = this.origins.get(key)
+    if (!origin) return
+    this.origins.delete(key)
+    const closing = origin.pending.then(
+      ({ server }) =>
+        new Promise<void>((r) => {
+          server.closeAllConnections()
+          server.close(() => r())
+        }),
+      () => {},
+    )
+    this.closingOrigins.set(key, closing)
+    void closing.then(() => {
+      if (this.closingOrigins.get(key) === closing) this.closingOrigins.delete(key)
+    })
   }
 
   private source(): ViewSource {
@@ -454,7 +492,7 @@ export class ViewHost {
   private async localShown(inst: Instance, fresh: boolean): Promise<Shown> {
     const doc = fresh || !inst.doc ? await this.readDocument(inst) : inst.doc
     inst.doc = doc
-    return { app: inst.app, uri: inst.uri, doc, mode: this.originMode(inst.app), key: ViewHost.originKey(inst.app) }
+    return { app: inst.app, uri: inst.uri, doc, mode: this.originMode(inst.app), key: ViewHost.originKey(inst.app), own: true }
   }
 
   /**
@@ -477,6 +515,7 @@ export class ViewHost {
       doc: viewDocumentFromResource(d.resource, d.uri),
       mode: d.origin === 'app' ? 'app' : 'opaque',
       key: ViewHost.remoteOriginKey(machine, app),
+      own: false,
     }
     this.remoteDocs.delete(instanceId)
     this.remoteDocs.set(instanceId, { shown, at: Date.now() })
@@ -508,7 +547,7 @@ export class ViewHost {
     const { doc } = shown
     const allow = allowAttribute(doc.permissions)
     if (shown.mode === 'app') {
-      const { port } = await this.originServer(shown.key)
+      const { port } = await this.originServer(shown)
       const appOrigin = `http://127.0.0.1:${port}`
       return {
         status: 200,
@@ -543,26 +582,34 @@ export class ViewHost {
     return createHmac('sha256', this.opts.secret).update(`view-origin\0${key}`).digest('base64url')
   }
 
-  /** The per-app origin server for a key. Started the first time it is needed (fixed port, origin-ports.ts) */
-  private originServer(key: string): Promise<{ port: number; server: Server }> {
+  /**
+   * The per-app origin server for a view's key. Started the first time it is needed (fixed port, origin-ports.ts), and
+   * closed once its app is gone (`closeGoneOrigins`)
+   */
+  private originServer(shown: Shown): Promise<{ port: number; server: Server }> {
     if (this.disposed) fail('The host is shutting down')
-    let pending = this.origins.get(key)
-    if (!pending) {
-      const handler = createHttpHandler({
-        secret: this.originSecret(key),
-        routes: [
-          {
-            method: 'GET',
-            path: /\/views\/([A-Za-z0-9_.-]+)\/view/,
-            handle: (req) => this.originDocument(key, req.params[0] ?? ''),
-          },
-        ],
-      })
-      pending = this.opts.ports.serve(key, handler)
-      // A failure is not remembered — the next request tries again (the program holding the port may have left)
-      pending.catch(() => this.origins.delete(key))
-      this.origins.set(key, pending)
-    }
+    const key = shown.key
+    const known = this.origins.get(key)
+    if (known) return known.pending
+    const handler = createHttpHandler({
+      secret: this.originSecret(key),
+      routes: [
+        {
+          method: 'GET',
+          path: /\/views\/([A-Za-z0-9_.-]+)\/view/,
+          handle: (req) => this.originDocument(key, req.params[0] ?? ''),
+        },
+      ],
+    })
+    // After a close of the same key has let go of the port: taking it while still held would move the app's origin
+    const closing = this.closingOrigins.get(key) ?? Promise.resolve()
+    const pending = closing.then(() => this.opts.ports.serve(key, handler))
+    const origin: Origin = { app: shown.own ? { ...shown.app } : null, pending }
+    // A failure is not remembered — the next request tries again (the program holding the port may have left)
+    pending.catch(() => {
+      if (this.origins.get(key) === origin) this.origins.delete(key)
+    })
+    this.origins.set(key, origin)
     return pending
   }
 

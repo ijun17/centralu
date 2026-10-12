@@ -354,7 +354,10 @@ A summary; the reasoning is in security-boundaries.md, "App views".
   `allow-same-origin` on `http://127.0.0.1:<port>`, a port fixed for that (project, app) and never
   given to another app, because WebKit keeps storage per origin. It exists for apps that break
   without storage: 5 of 86 public apps in the spike's sample (S-8), including the ext-apps map
-  example.
+  example. The host listens on that port from the app's first view until the app is removed (its
+  folder or its project) and its last view is closed; the port stays the app's, so an app put back
+  gets the same origin (#392). A linked machine's app keeps its port open for the hub's life: the
+  hub is not told when it is removed there.
 - **CSP** comes from the resource's `_meta.ui.csp` (the standard's place) and is stricter than the
   standard's default: no network, no nested frames, no form submission, no `'self'` source, and
   loopback addresses dropped even when declared. `_meta.ui.permissions` passes only what is declared
