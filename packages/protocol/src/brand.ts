@@ -45,6 +45,15 @@ export const CLIENT_INFO = { name: APP_SLUG, title: APP_NAME, version: APP_VERSI
  */
 export const DATA_DIR = '.centralu'
 
+/**
+ * The folder in the home where a new project is made when no other location is given (#515): `~/Centralu`, or
+ * `%USERPROFILE%\Centralu` on Windows. Read by the host that makes it and by the mock that shows where it would go.
+ *
+ * Visible on purpose, unlike the data folder: it holds the person's own work, found in Finder or Explorer, and an
+ * uninstall that removes the data folder must not take it along.
+ */
+export const PROJECTS_DIR = APP_NAME
+
 /** The data folder for a host started in dev mode — kept separate so it does not mix with the packaged app. */
 export const DATA_DIR_DEV = '.centralu-dev'
 

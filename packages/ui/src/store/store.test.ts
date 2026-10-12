@@ -3035,7 +3035,7 @@ describe('new projects', () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().createProject('site')
-    expect(p.path).toBe('/Users/you/Desktop/site')
+    expect(p.path).toBe('/Users/you/Centralu/site')
     expect(useStore.getState().projects[p.id]).toEqual(p)
     expect(useStore.getState().trustAsk).toBe(p.id)
     await expect(useStore.getState().createProject('site')).rejects.toThrow(/already in/)

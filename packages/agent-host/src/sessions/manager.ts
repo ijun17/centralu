@@ -776,27 +776,16 @@ export class SessionManager {
   }
 
   /**
-   * Where a new project goes by default: this machine's Desktop (#515). Unset, there is none and creating without a
-   * parent is refused — main.ts wires the real one in, so a test that forgets to give a folder fails instead of
-   * writing on the Desktop of whoever runs it.
+   * Where a new project goes by default: this machine's `~/Centralu` (#515, `projectsHome`). Unset, there is none and
+   * creating without a parent is refused — main.ts wires the real one in, so a test that forgets to give a folder
+   * fails instead of writing in the home of whoever runs it.
    */
-  private desktop: () => Promise<string> = async () => {
+  private projectsHome: () => string = () => {
     throw Object.assign(new Error('This host has no default location for a new project — give a parent folder'), { code: 'internal' })
   }
-  private desktopAnswer: Promise<string> | null = null
 
-  useDesktop(resolve: () => Promise<string>): void {
-    this.desktop = resolve
-    this.desktopAnswer = null
-  }
-
-  /** The Desktop, asked once (on Windows it is a PowerShell call) and asked again only after a failure */
-  private desktopDir(): Promise<string> {
-    this.desktopAnswer ??= this.desktop().catch((e: unknown) => {
-      this.desktopAnswer = null
-      throw e
-    })
-    return this.desktopAnswer
+  useProjectsHome(resolve: () => string): void {
+    this.projectsHome = resolve
   }
 
   /**
@@ -813,13 +802,13 @@ export class SessionManager {
     }
     const folder = name.trim() || (source ? repoNameOf(source.git) : '')
     if (!folder && source) throw Object.assign(new Error('The repository address gives no name for the folder — give one.'), { code: 'internal' })
-    return projectFolderTarget({ name: folder, parent }, parent?.trim() ? null : await this.desktopDir())
+    return projectFolderTarget({ name: folder, parent }, parent?.trim() ? null : this.projectsHome())
   }
 
   /** Where `projects.create` would make the folder, and why it would refuse (#515) — nothing is made */
   async projectCreatePreview(name: string, parent?: string, source?: GitSource): Promise<{ parent: string; path: string | null; error: string | null }> {
     const given = parent?.trim()
-    const location = given || (await this.desktopDir())
+    const location = given || this.projectsHome()
     if (!name.trim() && !source?.git.trim()) return { parent: location, path: null, error: null }
     try {
       const t = await this.newProjectTarget(name, given, source)
@@ -830,7 +819,7 @@ export class SessionManager {
   }
 
   /**
-   * Makes a new project (#515): a folder named `name` in `parent` (this machine's Desktop when absent), empty, or a
+   * Makes a new project (#515): a folder named `name` in `parent` (this machine's `~/Centralu` when absent), empty, or a
    * clone of `source` made with this machine's git and saved sign-ins, then registers it. Never reuses anything
    * already there (`projectFolderTarget`). A clone that fails leaves nothing behind: the folder this made is removed
    * and no project is registered.

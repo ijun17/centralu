@@ -62,6 +62,7 @@ import {
   formatThemeFile,
   osPathBaseName,
   folderNameError,
+  PROJECTS_DIR,
   gitSourceError,
   repoNameOf,
   sessionLiveDefaults,
@@ -166,13 +167,13 @@ export class MockPlatform implements Platform {
   nextCloneError: string | null = null
 
   /**
-   * Where a new project would go on a machine (#515), as its host would say: the Desktop of this computer, or of a
+   * Where a new project would go on a machine (#515), as its host would say: `~/Centralu` on this computer, or on a
    * linked machine in its own path terms. Refuses what the host refuses — the name rule is the host's own (protocol).
    */
   private newProjectTarget(name: string, parent?: string, machine?: string | null, source?: GitSource): { parent: string; path: string | null; error: string | null } {
     const windows = !!machine && this.machinesList.find((m) => m.id === machine)?.shell === 'powershell'
     const sep = windows ? '\\' : '/'
-    const home = !machine ? '/Users/you/Desktop' : windows ? 'C:\\Users\\you\\Desktop' : '/home/you/Desktop'
+    const home = !machine ? `/Users/you/${PROJECTS_DIR}` : windows ? `C:\\Users\\you\\${PROJECTS_DIR}` : `/home/you/${PROJECTS_DIR}`
     const where = parent?.trim() || home
     const folder = name.trim() || (source ? repoNameOf(source.git) : '')
     if (!name.trim() && !source?.git.trim()) return { parent: where, path: null, error: null }

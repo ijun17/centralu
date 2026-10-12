@@ -239,8 +239,8 @@ export function Sidebar() {
         the list is being read.
       */}
       {/*
-        Two ways in, side by side (#515): an existing folder through the picker, or a new empty one made on the
-        Desktop (the dialog says where). The orchestrator's create_project makes the same folder behind a card.
+        Two ways in, side by side (#515): an existing folder through the picker, or a new empty one made in
+        ~/Centralu (the dialog says where). The orchestrator's create_project makes the same folder behind a card.
       */}
       <div className="flex gap-1.5 px-2 py-2">
         <button
@@ -278,7 +278,7 @@ export function Sidebar() {
           className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
           onClick={() => setCreating(true)}
           data-testid="create-project"
-          title="Create a new, empty folder on this computer's Desktop as a project"
+          title="Create a new, empty folder as a project, in the Centralu folder of your home unless you choose another"
         >
           New folder
         </button>

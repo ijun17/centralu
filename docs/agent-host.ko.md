@@ -205,23 +205,20 @@ project export the sprites again, then tell me where the files are"에 로드하
 | 이름은 폴더 하나: `/`나 `\` 없음, `.`나 `..` 아님, 제어 문자 없음, 255바이트 이하, 어느 머신에서든 Windows 장치 이름(`CON`, `nul.txt`, `COM1`) 금지. Windows에서는 `< > : " \| ? *`와 끝의 점·공백도 금지 | `folderNameError` (protocol, 대화상자·목과 공유) |
 | 이미 있는 것은 다시 쓰지 않는다: 같은 이름의 폴더·파일·깨진 링크가 있으면 거절하고, 폴더 자체는 재귀로 만들지 않으므로 확인 뒤에 생긴 이름도 거절된다 | `projectFolderTarget`, `makeProjectFolder` (`dev-services/project-folder.ts`) |
 | 준 `parent`는 이미 있는 폴더의 전체 경로여야 하고, 만들지 않는다 | 같은 곳 |
-| `parent`가 없으면 그 머신의 바탕화면. 없으면 만든다(WSL 배포판이나 서버에는 없다) | `desktopDir` |
+| `parent`가 없으면 그 머신의 `~/Centralu`. 없으면 만든다 | `projectsHome` |
 
-OS별 바탕화면(`dev-services/project-folder.ts`, 플랫폼 모듈):
+**기본 위치는 모든 머신에서 `~/Centralu`다**: macOS와 Linux(WSL 포함)는 `~/Centralu`, Windows는
+`%USERPROFILE%\Centralu`(`projectsHome`, 플랫폼 모듈. 이름은 protocol의 `PROJECTS_DIR`이고 목도 이것을 보여 준다).
+처음 쓸 때 만든다.
 
-- **macOS**: `~/Desktop`.
-- **Linux(WSL 포함)**: `~/.config/user-dirs.dirs`가 XDG 바탕화면을 정하면 그것(다른 언어의 데스크톱은 그
-  언어로 이름을 붙인다), 아니면 `~/Desktop`.
-- **Windows**: 바탕화면 알려진 폴더 `[Environment]::GetFolderPath('Desktop', 'DoNotVerify')`. OneDrive로
-  옮겨졌거나 현지화된 이름일 수 있다. PowerShell이 답하지 못할 때만 `%USERPROFILE%\Desktop`. 스크립트는
-  `-EncodedCommand`로 보내고, 답은 경로의 UTF-8 바이트를 base64로 받는다. `cmd.exe`를 셸로 쓰는 ssh로 붙은
-  Windows 11 PC에서 측정(2026-10-12): 호출은 거기서 답하고, 콘솔 코드 페이지는 시스템 것(CP949)이라 한국어
-  경로를 글자로 찍으면 깨져서 온다. 답은 호스트가 살아 있는 동안 간직한다.
+| 결정 | 이유 |
+|---|---|
+| 바탕화면이 아니라 `~/Centralu`(오너, 2026-10-12. #515의 첫 빌드는 바탕화면을 썼다) | 권한 창이 없다: macOS에서 바탕화면은 보호된 폴더라, 처음 들여다볼 때(대화상자에 이름을 입력할 때) Centralu 이름으로 접근 권한을 물었다. 홈의 폴더는 보호되지 않는다. 눈에 보인다: 사람이 자기 작업을 찾는 Finder나 탐색기에서 보인다. 어디서나 한 규칙: 바탕화면 알려진 폴더를 찾지 않고(Windows의 PowerShell, Linux의 XDG), 바탕화면이 없는 WSL 배포판이나 서버도 노트북과 같은 폴더를 쓴다 |
+| 데이터 폴더(`~/.centralu`)와 따로 | 데이터 폴더는 앱의 것이라 제거할 때 지워질 수 있다. 프로젝트는 사람의 작업이라 함께 지워지면 안 된다 |
 
-호스트는 `main.ts`가 연결해 줄 때만 바탕화면을 안다(`SessionManager.useDesktop`). 없으면 `parent` 없는 호출은
-거절된다. 그래서 테스트와 linked-hosts e2e(임시 `HOME`의 바탕화면을 준다)는 실행하는 사람의 바탕화면에 손대지
-않는다. macOS에서 바탕화면은 보호된 폴더라, 처음 들여다볼 때(대화상자에 이름을 입력할 때) Centralu 이름으로
-접근 권한을 묻는다.
+호스트는 `main.ts`가 연결해 줄 때만 기본 위치를 안다(`SessionManager.useProjectsHome`). 없으면 `parent` 없는
+호출은 거절된다. 그래서 테스트와 linked-hosts e2e(임시 `HOME`의 `Centralu`를 준다)는 실행하는 사람의 홈에 손대지
+않는다.
 
 **빈 폴더 대신 클론**(`source: { git, branch? }`, #515에 오너가 덧붙인 것). 폴더는 같은 규칙으로 먼저 빈 채로
 만들고, 그 안에 `git clone -- <url> <folder>`를 돌린다(`dev-services/project-clone.ts`):

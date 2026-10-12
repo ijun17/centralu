@@ -8,8 +8,8 @@ import { useStore } from '../../store/store.js'
 type Preview = { parent: string; path: string | null; error: string | null }
 
 /**
- * Making a new project (#515): an empty folder, named here, on the Desktop of the machine it is for unless another
- * location is given. The machine's own host says where that is and whether the name is free, as the person types, so
+ * Making a new project (#515): an empty folder, named here, in `~/Centralu` on the machine it is for unless another
+ * location is given (made on first use). The machine's own host says where that is and whether the name is free, as the person types, so
  * the folder that will be made stands on the form before anything is made. A folder of that name already there is
  * refused, never reused.
  *
@@ -32,7 +32,7 @@ export function CreateProjectForm({
   const platform = usePlatform()
   const createProject = useStore((s) => s.createProject)
   const [name, setName] = useState('')
-  // Null: the machine's Desktop. A typed location is sent as typed; the host says whether it is a folder
+  // Null: the machine's ~/Centralu. A typed location is sent as typed; the host says whether it is a folder
   const [parent, setParent] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)

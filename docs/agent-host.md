@@ -252,24 +252,20 @@ by the host of the machine the project lives on, with that machine's own path ru
 | The name is one folder: no `/` or `\`, not `.` or `..`, no control characters, at most 255 bytes, no Windows device name (`CON`, `nul.txt`, `COM1`) on any machine; on Windows also none of `< > : " \| ? *` and no trailing dot or space | `folderNameError` (protocol, shared with the dialog and the mock) |
 | Nothing there is reused: a folder, a file or a broken link of that name refuses the call, and `mkdir` is never recursive for the folder itself, so a name taken after the check is refused too | `projectFolderTarget`, `makeProjectFolder` (`dev-services/project-folder.ts`) |
 | A given `parent` is a full path to a folder that exists; it is never made | same |
-| No `parent`: the machine's Desktop, made if missing (a WSL distro or a server has none) | `desktopDir` |
+| No `parent`: the machine's `~/Centralu`, made if missing | `projectsHome` |
 
-The Desktop, per OS (`dev-services/project-folder.ts`, a platform module):
+**The default location is `~/Centralu`** on every machine: `~/Centralu` on macOS and Linux (WSL included),
+`%USERPROFILE%\Centralu` on Windows (`projectsHome`, a platform module; the name is `PROJECTS_DIR` in protocol, which
+the mock shows too). It is made on first use.
 
-- **macOS**: `~/Desktop`.
-- **Linux, WSL included**: the XDG Desktop when `~/.config/user-dirs.dirs` sets one (a desktop in
-  another language names it in that language), else `~/Desktop`.
-- **Windows**: the Desktop known folder, `[Environment]::GetFolderPath('Desktop', 'DoNotVerify')`, which
-  may be redirected to OneDrive or carry a localized name; `%USERPROFILE%\Desktop` only when
-  PowerShell cannot answer. The script is sent as `-EncodedCommand` and answers in base64 of the
-  path's UTF-8 bytes. Measured on a Windows 11 PC reached over ssh with `cmd.exe` as the shell
-  (2026-10-12): the call answers there, and the console's code page is the system's (CP949), so a
-  Korean path printed as text would arrive mangled. The answer is kept for the host's life.
+| Decision | Why |
+|---|---|
+| `~/Centralu`, not the Desktop (owner, 2026-10-12; the first build of #515 used the Desktop) | No permission prompt: on macOS the Desktop is a protected folder, and the first look into it (typing a name in the dialog) asked for access in Centralu's name; a folder of the home is not protected. Visible: it is found in Finder or Explorer, where a person looks for their work. One rule everywhere: no Desktop known-folder lookup (PowerShell on Windows, XDG on Linux), and a WSL distro or a server, which have no Desktop, get the same folder as a laptop |
+| Apart from the data folder (`~/.centralu`) | The data folder is the app's and an uninstall may remove it; projects are the person's work and must not go with it |
 
-The host only has a Desktop when `main.ts` wires one in (`SessionManager.useDesktop`); without it a
-call with no `parent` is refused. That is what keeps tests and the linked-hosts e2e (which give a
-temporary `HOME`'s Desktop) off the Desktop of whoever runs them. On macOS the Desktop is a protected
-folder: the first look into it (typing a name in the dialog) asks for access in Centralu's name.
+The host only has a default location when `main.ts` wires one in (`SessionManager.useProjectsHome`); without it a
+call with no `parent` is refused. That is what keeps tests and the linked-hosts e2e (which give a temporary `HOME`'s
+`Centralu`) out of the home of whoever runs them.
 
 **A clone instead of an empty folder** (`source: { git, branch? }`; the owner's addition on #515). The folder is made
 empty first, by the same rules, and then `git clone -- <url> <folder>` runs into it (`dev-services/project-clone.ts`):
@@ -1317,7 +1313,7 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 
 | Where | What it does with the links |
 |---|---|
-| Sidebar | Once there is a linked machine, groups by `machine`: this computer first (with "Your apps"), then each machine with its name and link state (`connected`, `connecting`, `away`, `version mismatch`, …), its projects and its user-folder apps. A project or session of a machine that is not connected stays listed, dimmed (`data-away`), and is never woken. A machine's + adds a folder there by its path (`projects.add {path, machine}`) or makes a new, empty one, on that machine's Desktop by default (`projects.create {name, parent?, machine}`, §1.3); its name opens Settings → Machines |
+| Sidebar | Once there is a linked machine, groups by `machine`: this computer first (with "Your apps"), then each machine with its name and link state (`connected`, `connecting`, `away`, `version mismatch`, …), its projects and its user-folder apps. A project or session of a machine that is not connected stays listed, dimmed (`data-away`), and is never woken. A machine's + adds a folder there by its path (`projects.add {path, machine}`) or makes a new, empty one, in that machine's `~/Centralu` by default (`projects.create {name, parent?, machine}`, §1.3); its name opens Settings → Machines |
 | Settings → Machines | `machines.list/add/remove/reconnect`. Add a machine lists the hosts of this computer's ssh config (`machines.sshHosts`, read again each time it opens), each with what `ssh -G` resolves and "linked as …"; picking one probes it (`machines.probe`) and offers ready rows, "Windows" (with the shell that answers ssh), "WSL (<distro>)" (the default marked) or "Linux or macOS", with a name, the first row not linked yet chosen (`probeChoices` in `@cc/core`). A row already linked through that alias is shown but not offered. A probe that cannot tell says why in one sentence (`probeProblem`), and "Enter a target by hand" keeps the typed fields, prefilled from the host picked; with no hosts in the config, the dialog opens on them. A probe answering after another host was picked is dropped. Each row says the last error as what to do (`machineProblem` in `@cc/core`: a key not loaded, a host key never accepted, Centralu not installed or not serving there), and holds the version prompt. Where the machine offers it, a "Start Centralu when <machine> starts" switch (`machines.autostart`, `autostartRow` in `@cc/core`), with a line where it falls short of boot: a systemd manager that starts only at login, a Windows sign-in |
 | Version prompt | From `MachineInfo.versions`: an older hub gets the existing update path; an older remote gets the exact `npm i -g centralu@<hub version>` to run there (phase 1 cannot update it); "Connect anyway" is `machines.acceptVersions`, offered only on one protocol |
 | New-session dialog, session menu | `agents.detect`, `agents.models`, `agents.capabilities` with the project's `machine` |

@@ -206,7 +206,7 @@ export type OrchestratorTools = {
    */
   proposeSkill(spec: { name: string; content: string; why?: string }): Promise<{ ok: boolean; error?: string }>
   /**
-   * Makes a new project — an empty folder, or a clone of `source`, by default on this computer's Desktop — **only once
+   * Makes a new project — an empty folder, or a clone of `source`, by default in this computer's `~/Centralu` — **only once
    * the person approves the card it raises** (#515). The card stands in the calling session's approval slot with the full path on it, and
    * the call waits for the answer, so the model learns whether the project exists and where. `signal` is the tool
    * call's: aborted, the card is withdrawn and nothing is made.

@@ -46,7 +46,7 @@ import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
 import { storeMirror, storeRegistry } from './links/stored.js'
-import { desktopDir } from './dev-services/project-folder.js'
+import { projectsHome } from './dev-services/project-folder.js'
 
 /**
  * Agent Host entry point.
@@ -259,8 +259,8 @@ const mgr = new SessionManager(
   join(dirname(dbPath), 'worktrees'),
   held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {},
 )
-// A new project's default home is this machine's Desktop (#515); wired here, never in tests
-mgr.useDesktop(() => desktopDir())
+// A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
+mgr.useProjectsHome(() => projectsHome())
 /*
  * The external app runtime (M4 A). Startup **only scans** — an app process starts only the first
  * time it is needed (performance budget: zero app processes at idle, even with 5 apps installed).

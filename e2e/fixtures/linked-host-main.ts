@@ -12,6 +12,7 @@ import { Router } from '../../packages/agent-host/src/links/router.js'
 import { DirectTunnel, SshTunnel, type RemoteSpec } from '../../packages/agent-host/src/links/tunnel.js'
 import { storeMirror, storeRegistry } from '../../packages/agent-host/src/links/stored.js'
 import { scriptedAdapters } from '../../packages/agent-host/src/links/scripted-agent.test-helpers.js'
+import { projectsHome } from '../../packages/agent-host/src/dev-services/project-folder.js'
 import { linkedViews } from '../../packages/agent-host/src/links/linked-views.js'
 import { ExternalApps } from '../../packages/agent-host/src/apps/external/runtime.js'
 import { storeRunLedger } from '../../packages/agent-host/src/app-run-ledger.js'
@@ -51,8 +52,8 @@ const token = values.token!
 const store = new Store(values.db!)
 const adapters = scriptedAdapters()
 const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), () => null, join(dirname(values.db!), 'worktrees'))
-// A new project's Desktop (#515) is the one in this host's temporary HOME, never the Desktop of whoever runs the suite
-mgr.useDesktop(async () => join(process.env.HOME!, 'Desktop'))
+// A new project's ~/Centralu (#515) is the one in this host's temporary HOME, never the home of whoever runs the suite
+mgr.useProjectsHome(() => projectsHome(process.platform, process.env.HOME!))
 let up = false
 const toScreens = (f: Parameters<HostServer['pushTerminal']>[0]) => {
   if (up) server.pushTerminal(f)

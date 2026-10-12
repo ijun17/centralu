@@ -134,11 +134,11 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     })
   })
 
-  it("makes a new project on the machine it is for, which names its own Desktop (#515)", async () => {
+  it("makes a new project on the machine it is for, which names its own ~/Centralu (#515)", async () => {
     const { router, local, m2 } = rig()
-    m2.answers['projects.createPreview'] = { parent: 'C:\\Users\\me\\Desktop', path: 'C:\\Users\\me\\Desktop\\game', error: null }
+    m2.answers['projects.createPreview'] = { parent: 'C:\\Users\\me\\Centralu', path: 'C:\\Users\\me\\Centralu\\game', error: null }
     expect(await router.handle('projects.createPreview', { name: 'game', machine: 'm2' })).toEqual(m2.answers['projects.createPreview'])
-    m2.answers['projects.create'] = { id: 'p6', path: 'C:\\Users\\me\\Desktop\\game', name: 'game' }
+    m2.answers['projects.create'] = { id: 'p6', path: 'C:\\Users\\me\\Centralu\\game', name: 'game' }
     expect(await router.handle('projects.create', { name: 'game', machine: 'm2' })).toMatchObject({ id: 'm2.p6', machine: 'm2' })
     expect(m2.calls).toEqual([
       { method: 'projects.createPreview', params: { name: 'game' } },

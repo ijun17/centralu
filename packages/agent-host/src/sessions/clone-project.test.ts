@@ -92,19 +92,19 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-let desktop: string
+let centralu: string
 let store: Store
 let events: NormalizedEvent[]
 let mgr: SessionManager
 let rpc: (method: string, params: unknown) => Promise<unknown>
 
 beforeEach(() => {
-  desktop = mkdtempSync(join(root, 'Desktop-'))
+  centralu = mkdtempSync(join(root, 'Centralu-'))
   store = new Store()
   events = []
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, (e) => events.push(e))
-  mgr.useDesktop(async () => desktop)
+  mgr.useProjectsHome(() => centralu)
   const handler = createRpcHandler(mgr, agents)
   rpc = (method, params) => handler(method, params)
 })
@@ -125,7 +125,7 @@ describe('projects.create with a git source', () => {
   it('clones over https into a folder named after the repository, and registers it', async () => {
     const info = (await rpc('projects.create', { name: '', source: { git: `${base}/game.git` } })) as { name: string; path: string }
     expect(info.name).toBe('game')
-    expect(info.path).toBe(join(desktop, 'game'))
+    expect(info.path).toBe(join(centralu, 'game'))
     expect(readFileSync(join(info.path, 'README.md'), 'utf8')).toBe('hello\n')
     expect(existsSync(join(info.path, 'dev.txt'))).toBe(false)
     expect(((await rpc('projects.list', {})) as { path: string }[]).map((p) => p.path)).toEqual([info.path])
@@ -134,28 +134,28 @@ describe('projects.create with a git source', () => {
 
   it('checks out the branch asked for, under the name given', async () => {
     const info = (await rpc('projects.create', { name: 'game-dev', source: { git: `${base}/game.git`, branch: 'dev' } })) as { path: string }
-    expect(info.path).toBe(join(desktop, 'game-dev'))
+    expect(info.path).toBe(join(centralu, 'game-dev'))
     expect(readFileSync(join(info.path, 'dev.txt'), 'utf8')).toBe('dev\n')
   }, 30_000)
 
   it('a repository that needs a sign-in fails at once with one sentence, never asking, and leaves nothing', async () => {
     await expect(rpc('projects.create', { name: '', source: { git: `${base}/private/secret.git` } })).rejects.toThrow(/needs a sign-in this machine does not have saved/)
-    expect(readdirSync(desktop)).toEqual([])
+    expect(readdirSync(centralu)).toEqual([])
     expect((await rpc('projects.list', {})) as unknown[]).toEqual([])
   }, 30_000)
 
   it('a failed clone removes the folder it made and registers nothing', async () => {
     await expect(rpc('projects.create', { name: 'gone', source: { git: `${base}/nothing-here.git` } })).rejects.toThrow(/no repository at/)
     await expect(rpc('projects.create', { name: 'nobranch', source: { git: `${base}/game.git`, branch: 'nope' } })).rejects.toThrow()
-    expect(readdirSync(desktop)).toEqual([])
+    expect(readdirSync(centralu)).toEqual([])
     expect((await rpc('projects.list', {})) as unknown[]).toEqual([])
   }, 30_000)
 
   it('never clones into a folder that is there', async () => {
-    mkdirSync(join(desktop, 'game'))
-    writeFileSync(join(desktop, 'game', 'mine.txt'), 'mine')
+    mkdirSync(join(centralu, 'game'))
+    writeFileSync(join(centralu, 'game', 'mine.txt'), 'mine')
     await expect(rpc('projects.create', { name: '', source: { git: `${base}/game.git` } })).rejects.toThrow(/already in/)
-    expect(readdirSync(join(desktop, 'game'))).toEqual(['mine.txt'])
+    expect(readdirSync(join(centralu, 'game'))).toEqual(['mine.txt'])
   })
 
   it('refuses ext::, file://, local paths and a bad branch before anything is made', async () => {
@@ -163,13 +163,13 @@ describe('projects.create with a git source', () => {
       await expect(rpc('projects.create', { name: 'x', source: { git } }), git).rejects.toThrow()
     }
     await expect(rpc('projects.create', { name: 'x', source: { git: `${base}/game.git`, branch: '-x' } })).rejects.toThrow(/not a branch name/)
-    expect(readdirSync(desktop)).toEqual([])
+    expect(readdirSync(centralu)).toEqual([])
   })
 
   it('the preview names the folder after the repository and refuses what create would', async () => {
     expect(await rpc('projects.createPreview', { name: '', source: { git: `${base}/game.git` } })).toEqual({
-      parent: desktop,
-      path: join(desktop, 'game'),
+      parent: centralu,
+      path: join(centralu, 'game'),
       error: null,
     })
     expect(((await rpc('projects.createPreview', { name: '', source: { git: 'ext::sh' } })) as { error: string }).error).toMatch(/ext::/)
@@ -182,14 +182,14 @@ describe('create_project with git (the orchestrator)', () => {
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { git: `${base}/game.git`, branch: 'dev' })
     await until(() => mgr.listSessions().find((s) => s.id === orc.id)?.pendingApproval?.detail.kind === 'project_create')
     const pending = mgr.listSessions().find((s) => s.id === orc.id)!.pendingApproval!
-    expect(pending.detail).toEqual({ kind: 'project_create', name: 'game', path: join(desktop, 'game'), source: { git: `${base}/game.git`, branch: 'dev' } })
-    expect(readdirSync(desktop)).toEqual([])
+    expect(pending.detail).toEqual({ kind: 'project_create', name: 'game', path: join(centralu, 'game'), source: { git: `${base}/game.git`, branch: 'dev' } })
+    expect(readdirSync(centralu)).toEqual([])
 
     mgr.respondApproval(orc.id, pending.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('a clone of')
-    expect(readFileSync(join(desktop, 'game', 'dev.txt'), 'utf8')).toBe('dev\n')
+    expect(readFileSync(join(centralu, 'game', 'dev.txt'), 'utf8')).toBe('dev\n')
     expect(events.some((e) => e.type === 'notice' && e.sessionId === orc.id && /Cloning/.test(e.text))).toBe(true)
   }, 30_000)
 })

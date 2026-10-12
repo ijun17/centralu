@@ -240,7 +240,7 @@ export interface ProjectPort {
   /** `machine`: a folder on that linked machine, the path in its own terms (#82) */
   add(path: string, machine?: MachineRef): Promise<ProjectInfo>
   /**
-   * Makes a new project (#515): an empty folder `name` inside `parent`, or the Desktop of `machine` (this computer
+   * Makes a new project (#515): an empty folder `name` inside `parent`, or the `~/Centralu` of `machine` (this computer
    * when absent), made by that machine's host and registered. Refused with one sentence when anything of that name
    * is already there, or the name is not one folder name. With `source` the folder is a clone of that repository,
    * made by that machine's git with its saved sign-ins; an empty `name` is then the repository's.

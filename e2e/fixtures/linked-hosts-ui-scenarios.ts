@@ -322,17 +322,17 @@ export function linkedHostsUiTests(): void {
         expect(calls.find((c) => c.method === 'projects.add')?.params).toEqual({ path: folder, machine: 'remote-box' })
       })
 
-      await test.step("create a new folder there (#515): that machine's host names its Desktop, makes it if missing, and the folder", async () => {
-        const desktop = join(pair.remoteSide.home, 'Desktop')
+      await test.step("create a new folder there (#515): that machine's host names its ~/Centralu, makes it if missing, and the folder", async () => {
+        const centralu = join(pair.remoteSide.home, 'Centralu')
         await page.getByTestId('add-remote-project-remote-box').click()
         const dialog = page.getByTestId('add-remote-project-dialog')
         await dialog.getByTestId('add-remote-project-mode-new').click()
-        await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText(desktop)
+        await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText(centralu)
         await dialog.getByTestId('create-project-name').fill('fresh')
-        await expect(dialog.getByTestId('create-project-path')).toHaveText(join(desktop, 'fresh'))
+        await expect(dialog.getByTestId('create-project-path')).toHaveText(join(centralu, 'fresh'))
         await dialog.getByTestId('create-project-confirm').click()
         await expect(page.getByTestId('machine-group-remote-box').getByTestId('project-fresh')).toBeVisible()
-        expect(readdirSync(join(desktop, 'fresh'))).toEqual([])
+        expect(readdirSync(join(centralu, 'fresh'))).toEqual([])
         expect(calls.find((c) => c.method === 'projects.create')?.params).toEqual({ name: 'fresh', machine: 'remote-box' })
         // A second one of the same name is refused before anything is made
         await page.getByTestId('add-remote-project-remote-box').click()

@@ -58,8 +58,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     detail: { kind: 'capability', app: { appId: 'notes', projectId: 'p1', name: 'Notes' }, capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' },
   },
   // The orchestrator's create_project card (#515)
-  { type: 'approval_request', sessionId: 's1', requestId: 'mk-1', detail: { kind: 'project_create', name: 'shop', path: '/Users/me/Desktop/shop' } },
-  { type: 'approval_request', sessionId: 's1', requestId: 'mk-2', detail: { kind: 'project_create', name: 'app', path: '/Users/me/Desktop/app', source: { git: 'git@github.com:me/app.git', branch: 'dev' } } },
+  { type: 'approval_request', sessionId: 's1', requestId: 'mk-1', detail: { kind: 'project_create', name: 'shop', path: '/Users/me/Centralu/shop' } },
+  { type: 'approval_request', sessionId: 's1', requestId: 'mk-2', detail: { kind: 'project_create', name: 'app', path: '/Users/me/Centralu/app', source: { git: 'git@github.com:me/app.git', branch: 'dev' } } },
   { type: 'approval_resolved', sessionId: 's1', requestId: 'r1', decision: 'allow' },
   {
     type: 'question_request',

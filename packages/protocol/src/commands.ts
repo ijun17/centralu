@@ -1047,8 +1047,8 @@ export const RpcMethods = {
   'workspace.load': { params: z.object({}), result: z.record(z.string(), z.unknown()).nullable() },
   'projects.add': { params: z.object({ path: z.string(), ...machineParam }), result: ProjectInfo },
   /**
-   * Makes a new project (#515): an **empty** folder named `name` (no git init, no template) inside `parent`, or the
-   * Desktop of the machine the project lives on when `parent` is absent, then registers it as `projects.add` does.
+   * Makes a new project (#515): an **empty** folder named `name` (no git init, no template) inside `parent`, or
+   * `~/Centralu` (`PROJECTS_DIR`) of the machine the project lives on when `parent` is absent, then registers it as `projects.add` does.
    * The machine's own host makes it. Refused with one sentence when the name is not one folder name, when `parent` is
    * not a full path to a folder, or when anything of that name is already there: nothing existing is reused.
    *
@@ -1063,7 +1063,7 @@ export const RpcMethods = {
   },
   /**
    * Where `projects.create` would make the folder, without making anything (#515): the dialog shows it as the person
-   * types. `parent` is the resolved location (the Desktop when none is given). With an empty name, `path` and `error`
+   * types. `parent` is the resolved location (that machine's `~/Centralu` when none is given). With an empty name, `path` and `error`
    * are null; otherwise exactly one of them is set, `error` being the sentence `projects.create` would refuse with.
    */
   'projects.createPreview': {

@@ -54,7 +54,7 @@ anything with an OS name (`=== 'win32'`, `case 'darwin':`) is a lint error outsi
 `locksRunningPrograms`, `pathsOf`, `installedCopyPath`), `env-path.ts` and `tool-launch.ts` (finding and starting a
 tool), `dev-services/kill-tree.ts` (ending a process tree; `hasProcessGroups`), `dev-services/terminal.ts` (the
 shell), `adapters/claude/exe-link.ts` (Claude Code's Windows start; `windowsStart`), `dev-services/project-folder.ts` (a new
-project's Desktop and folder-name rules, #515) and the launcher's `platform.mjs`.
+project's default location, `~/Centralu`, and folder-name rules, #515) and the launcher's `platform.mjs`.
 Code elsewhere asks one of those a question named for what differs, so each OS's answer is written once and a new
 OS is a change to those files. Tests and build scripts are not checked. The Rust side's equivalent for how the host
 starts is `start_plan` ([agent-host.md](agent-host.md) §4.0).

@@ -10,8 +10,8 @@ import { CreateProjectForm } from '../project/CreateProjectDialog.jsx'
  * machine's disk, so the path is typed, in that machine's own terms (`/home/me/app`, `C:\Users\me\app`, or a path
  * inside the WSL distro). The machine's host checks it exists and answers with the project, named as the hub names it.
  *
- * Or a new, empty folder made there (#515): by default on that machine's Desktop, which only its host can name (a
- * Windows Desktop may be redirected to OneDrive or carry a localized name), so the form asks it as the person types.
+ * Or a new, empty folder made there (#515): by default in that machine's `~/Centralu`, which only its host can name
+ * (its home, in its own path terms), so the form asks it as the person types.
  */
 export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; onClose: () => void }) {
   const name = useMachineName(machine) ?? machine

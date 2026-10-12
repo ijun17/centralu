@@ -111,7 +111,7 @@ in front of them can forward to a remote without touching the 6.5k-line session 
 | Merge across hosts | 14 | `sessions.list`, `projects.list`, search, trash… (approval rule ids and pids collide) |
 | Hub only | 26 | layout, grid, prefs, themes, updates, orchestrator, skills |
 | Internal callbacks, never routed | 4 | a remote's own Codex bridge talks to its own host |
-| Needs a machine parameter | 9 | `projects.add`, `agents.models/detect/capabilities/versions/usage`… (additive optional `machine`); since joined by `projects.create` and `projects.createPreview` (#515): a new project's folder is made by the host of its machine, on that machine's Desktop by default, which only that host can name |
+| Needs a machine parameter | 9 | `projects.add`, `agents.models/detect/capabilities/versions/usage`… (additive optional `machine`); since joined by `projects.create` and `projects.createPreview` (#515): a new project's folder is made by the host of its machine, in that machine's `~/Centralu` by default (`%USERPROFILE%\Centralu` on Windows), which only that host can name in its own path terms |
 
 **Events:** 46 session-scoped and per-machine types get their ids rewritten and are re-broadcast
 into the hub's own event log under hub sequence numbers. Hub-only events from a remote

@@ -106,7 +106,7 @@ export const ORCHESTRATOR_TOOLS = [
      */
     name: 'create_project',
     description:
-      "Makes a new project: an empty folder, or a clone of git, on this computer's Desktop or in parent. The person approves it on a card first; " +
+      "Makes a new project: an empty folder, or a clone of git, in ~/Centralu or in parent. The person approves it on a card first; " +
       'the call waits for the answer. An existing folder is never reused.',
     schema: z.object({
       name: z.string().optional().describe("Folder and project name; with git, the repository's if omitted."),
