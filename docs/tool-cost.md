@@ -573,14 +573,14 @@ reached 6 of 6 deferred on haiku), with `propose_skill` loaded; the switches sta
 
 ### Decision (owner, 2026-10-12)
 
-**The commands tier (C) is the orchestrator's default**, without the preamble. Round 2 on Sonnet found no loss in selection or arguments (12 of 12 in every row, English
-and Korean) and 835 fewer tokens a request, and the tier keeps the resident prefix from growing as commands are
-added: the orchestrator was at 11,862 of its 12,000 characters resident, and is at 9,317 in the tier (Codex 9,369
-with the header over its instructions). `RESIDENT_BUDGET_CHARS.orchestrator` follows it down to 9,500, so a command
-that wants to be resident again is a decision rather than headroom. The haiku numbers above stand: a seat on haiku
-reaches a rare command less often through the tier. `CC_RARE_COMMANDS=resident` and `=deferred` stay selectable, and
-`pnpm measure:tools --rare` defaults to the host's default (`commands`), so a run made before this date with no
-`--rare` measured `resident`.
+**The commands tier (C) is the orchestrator's default**, without the preamble. Round 2 on Sonnet found no loss in
+selection or arguments (12 of 12 in every row, English and Korean) and 835 fewer tokens a request, and the tier
+keeps the resident prefix from growing as commands are added: the orchestrator was at 11,862 of its 12,000
+characters resident, and is at 9,317 in the tier (Codex 9,369 with the header over its instructions).
+`RESIDENT_BUDGET_CHARS.orchestrator` follows it down to 9,500, so a command that wants to be resident again is a
+decision rather than headroom. The haiku numbers above stand: a seat on haiku reaches a rare command less often
+through the tier. `CC_RARE_COMMANDS=resident` and `=deferred` stay selectable, and `pnpm measure:tools --rare`
+defaults to the host's default (`commands`), so a run made before this date with no `--rare` measured `resident`.
 
 **Not measured.** Opus as the orchestrator's model; B (deferral) on Sonnet; the Korean set on haiku and on Codex;
 Codex in round 2; a command used late in a long orchestrator conversation; app tools behind `app_tools`/`app_call`
