@@ -82,6 +82,22 @@ export function publicTextProblems(text, words, what = 'The text') {
   return [...englishProblems(text, what), ...privateWordProblems(text, words, what), ...attributionProblems(text, what)]
 }
 
+/**
+ * A bare #N belongs to this repository unless it is written beside an attribution to another one.
+ * This is a warning: prose is ambiguous, but `owner/repo#N` removes the ambiguity before it is
+ * published. The narrow patterns avoid treating ordinary mentions of a repository as a problem.
+ */
+export function foreignBareIssueWarnings(text, repository, what = 'The text') {
+  const own = String(repository ?? '').toLowerCase()
+  const hits = new Set()
+  const named = /(?:\b(?:in|on|from|of|at)\s+)?([\w.-]+\/[\w.-]+)\s+(?:issue\s+|pull request\s+|PR\s+)?#(\d+)\b/gi
+  for (const m of String(text ?? '').matchAll(named)) {
+    if (m[1].toLowerCase() !== own) hits.add(`${m[1]}#${m[2]}`)
+  }
+  if (!hits.size) return []
+  return [`${what} attributes bare ${[...hits].map((x) => `#${x.slice(x.lastIndexOf('#') + 1)}`).join(', ')} to another repository (${[...hits].join(', ')}). Write the reference as owner/repo#N so it cannot link here by mistake.`]
+}
+
 // --- Commit messages (docs/commit-conventions.md) ----------------------------------------------------
 
 /** The rules read from the conventions document; `fallback` names what could not be read. */

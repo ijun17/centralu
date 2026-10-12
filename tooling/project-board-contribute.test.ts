@@ -9,6 +9,7 @@ import {
   commitProblems,
   englishProblems,
   fillTemplate,
+  foreignBareIssueWarnings,
   normalizeWords,
   parseConventions,
   privateWordHits,
@@ -31,6 +32,13 @@ const CONVENTIONS_DOC = readFileSync(join(REPO_ROOT, 'docs/commit-conventions.md
 const CONVENTIONS = parseConventions(CONVENTIONS_DOC)
 
 describe('the rules for public text', () => {
+  it('warns when prose attributes a bare issue number to another repository', () => {
+    expect(foreignBareIssueWarnings('Fixed in other/repo #42.', 'ijun17/centralu', 'The comment')).toEqual([
+      'The comment attributes bare #42 to another repository (other/repo#42). Write the reference as owner/repo#N so it cannot link here by mistake.',
+    ])
+    expect(foreignBareIssueWarnings('Fixed in #42.', 'ijun17/centralu')).toEqual([])
+  })
+
   it('reads English, and lets code, quotes and addresses be in any language', () => {
     expect(englishProblems('Fold it into #406, the smaller change (Δt ≈ 3 µs) 👍')).toEqual([])
     expect(englishProblems('이것은 영어가 아닙니다. Please fold it.', 'The comment')).toEqual([

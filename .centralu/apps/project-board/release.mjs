@@ -158,8 +158,30 @@ async function versionFiles(s, cfg, from, to) {
 async function runsFor(s, cfg, gh) {
   const file = workflowFile(cfg)
   const rehearsals = await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', headSha: s.tip })
-  const release = s.tagged ? (await gh.workflowRuns(s.repo, file, { event: 'push', headSha: s.tagged.sha })).find((r) => r.headBranch === s.tag) ?? null : null
-  return { rehearsal: rehearsals[0] ?? null, release }
+  const candidates = s.tagged ? (await gh.workflowRuns(s.repo, file, { event: 'push', headSha: s.tagged.sha })).filter((r) => r.headBranch === s.tag) : []
+  const active = candidates.filter((r) => r.status !== 'completed')
+  // A run GitHub says is waiting on the release environment is the one a maintainer can act on;
+  // duplicate pushes otherwise leave several active runs for one tag, newest first from the API.
+  let release = active[0] ?? candidates[0] ?? null
+  let waiting = null
+  for (const r of active) {
+    const pending = await gh.pendingDeployments(s.repo, r.id)
+    if (pending.some((p) => p.environment === cfg.environment)) {
+      release = r
+      waiting = pending
+      break
+    }
+  }
+  return { rehearsal: rehearsals[0] ?? null, release, duplicates: release ? candidates.filter((r) => r.id !== release.id) : [], waiting }
+}
+
+async function cancellableDuplicates(repo, duplicates, gh) {
+  const rows = []
+  for (const r of duplicates.filter((x) => x.status !== 'completed')) {
+    const jobs = await gh.runJobs(repo, r.id)
+    rows.push({ run: r, safe: !jobs.some((j) => /publish/i.test(j.name) && j.status === 'completed' && j.conclusion === 'success') })
+  }
+  return rows
 }
 
 const runState = (r) => (r.status === 'completed' ? (r.conclusion === 'success' ? 'succeeded' : `ended ${r.conclusion}`) : r.status === 'waiting' ? 'waiting for approval' : r.status.replace(/_/g, ' '))
@@ -180,6 +202,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
   const local = await checkoutProblems(s)
   lines.push(local.length ? `Checkout: ${local.join(' ')}` : `Checkout: clean, on ${s.main} at ${short(s.tip)}.`)
   const runs = await runsFor(s, cfg, gh)
+  const duplicates = await cancellableDuplicates(repo, runs.duplicates, gh)
   let phase
   let next
   if (s.tagged) {
@@ -188,7 +211,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
       phase = 'tagged'
       next = `No release run for ${s.tag} yet; GitHub starts one on the tag push. Look at ${workflowFile(cfg)} on GitHub if none shows.`
     } else if (r.status !== 'completed') {
-      const pending = await gh.pendingDeployments(repo, r.id)
+      const pending = runs.waiting ?? (await gh.pendingDeployments(repo, r.id))
       const waiting = pending.filter((p) => p.environment === cfg.environment)
       phase = waiting.length ? 'waiting-approval' : 'publishing'
       lines.push(`Release run for ${s.tag}: ${runState(r)}${r.url ? `, ${r.url}` : ''}.`)
@@ -217,11 +240,16 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
           ? 'Wait for the rehearsal; call release_status again.'
           : `Rehearse with release step rehearse (confirm: true), then tag ${s.tag}.`
   }
+  if (duplicates.length) {
+    const safe = duplicates.filter((d) => d.safe)
+    lines.push(`Duplicate release runs for ${s.tag}: ${duplicates.map((d) => d.run.url ?? d.run.id).join(', ')}.`)
+    if (safe.length) lines.push(`Before anything publishes, cancel a duplicate with release step cancel_duplicate (run: ${safe[0].run.id}, confirm: true).`)
+  }
   lines.push(...notesLines(s))
   const summary = `${s.main} at ${short(s.tip)} carries ${s.version}: ${
     { tagged: `tagged ${s.tag}`, 'waiting-approval': `${s.tag} is waiting for approval`, publishing: `${s.tag} is being published`, released: `released as ${s.tag}`, failed: `the ${s.tag} release run failed`, 'ready-to-tag': `not tagged yet (last release ${s.last?.name ?? 'none'})` }[phase]
   }. Next: ${next}`
-  return { summary, lines, phase, version: s.version, tag: s.tag, head: s.tip, notes: s.notes }
+  return { summary, lines, phase, version: s.version, tag: s.tag, head: s.tip, notes: s.notes, duplicates: duplicates.map((d) => ({ id: d.run.id, url: d.run.url, safeToCancel: d.safe })) }
 }
 
 // --- bump ---------------------------------------------------------------------------------------------
@@ -290,11 +318,11 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
 
   const message = `${title}\n\n${wrap(`The version ${s.version} → ${next} in ${vf.named.join(', ')}.`)}\n`
   const changed = Object.entries(vf.counts).map(([p, n]) => `${p}: ${plural(n, 'place')}`)
-  const lines = [`${s.version} → ${next} in ${plural(vf.named.length, 'file')}:`, ...changed.map((c) => `- ${c}`), ...notesLines(s)]
+  const lines = [`${s.version} → ${next} in ${plural(vf.named.length, 'file')}:`, ...changed.map((c) => `- ${c}`)]
   if (!confirm)
     return {
       summary: `Ready to bump ${s.version} → ${next} on ${s.main} at ${short(s.tip)}, as ${branch}; nothing pushed yet. Call again with confirm: true to push the branch and open the pull request.`,
-      lines,
+      lines: [...lines, ...notesLines(s)],
       next,
       pushed: false,
     }
@@ -424,7 +452,9 @@ export async function approveRelease({ repo, dir, cfg, gh, permissions }, { vers
   const tag = `${cfg.tagPrefix}${want}`
   const t = s.tags.find((x) => x.name === tag)
   if (!t) throw new ReleaseRefusal([`${tag} is not tagged; there is no release run to approve.`])
-  const run = (await gh.workflowRuns(repo, workflowFile(cfg), { event: 'push', headSha: t.sha })).find((r) => r.headBranch === tag)
+  const candidates = (await gh.workflowRuns(repo, workflowFile(cfg), { event: 'push', headSha: t.sha })).filter((r) => r.headBranch === tag)
+  let run = candidates.find((r) => r.status !== 'completed') ?? candidates[0]
+  for (const r of candidates.filter((x) => x.status !== 'completed')) if ((await gh.pendingDeployments(repo, r.id)).some((p) => p.environment === cfg.environment)) { run = r; break }
   if (!run) throw new ReleaseRefusal([`GitHub lists no ${workflowFile(cfg)} run for ${tag} (${short(t.sha)}).`])
   if (run.headSha !== t.sha) throw new ReleaseRefusal([`The run for ${tag} is on ${short(run.headSha)}, but ${tag} is ${short(t.sha)}.`])
   if (run.status === 'completed') return { summary: `The release run for ${tag} ${runState(run)}${run.url ? `: ${run.url}` : ''}; nothing waits for approval.`, lines: [], approved: false, run: run.url }
@@ -439,6 +469,28 @@ export async function approveRelease({ repo, dir, cfg, gh, permissions }, { vers
   if (!confirm) return { summary: `${tag}'s release run waits for approval on ${cfg.environment} (${what}); nothing approved yet. Call again with confirm: true to approve, or approve on GitHub: ${run.url}`, lines, approved: false, run: run.url }
   await gh.approveDeployments(repo, run.id, [...new Set(pending.map((p) => p.environmentId))], String(comment ?? '').trim() || `Approved through the project board's release tool for ${tag}.`)
   return { summary: `Approved ${cfg.environment} for ${tag} (${what})${run.url ? `: ${run.url}` : ''}.${last ? '' : ' The shim asks again once every platform job succeeds.'}`, lines, approved: true, run: run.url }
+}
+
+/** Cancel only an extra tag run whose publish job has not succeeded. */
+export async function cancelDuplicateRelease({ repo, dir, cfg, gh, permissions }, { version, run, confirm = false }) {
+  if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
+  const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
+  const want = version !== undefined ? String(version).replace(/^v/, '') : s.version
+  const tag = `${cfg.tagPrefix}${want}`
+  const t = s.tags.find((x) => x.name === tag)
+  if (!t) throw new ReleaseRefusal([`${tag} is not tagged; there is no release run to cancel.`])
+  const runs = (await gh.workflowRuns(repo, workflowFile(cfg), { event: 'push', headSha: t.sha })).filter((r) => r.headBranch === tag && r.status !== 'completed')
+  if (runs.length < 2) throw new ReleaseRefusal([`There is no duplicate active release run for ${tag}.`])
+  let selected = runs[0]
+  for (const r of runs) if ((await gh.pendingDeployments(repo, r.id)).some((p) => p.environment === cfg.environment)) { selected = r; break }
+  const target = runs.find((r) => Number(r.id) === Number(run))
+  if (!target) throw new ReleaseRefusal([`Run ${run} is not an active release run for ${tag}.`])
+  if (target.id === selected.id) throw new ReleaseRefusal([`Run ${target.id} is the release run selected for ${tag}, not a duplicate.`])
+  const jobs = await gh.runJobs(repo, target.id)
+  if (jobs.some((j) => /publish/i.test(j.name) && j.status === 'completed' && j.conclusion === 'success')) throw new ReleaseRefusal([`Run ${target.id} has already published; it is not cancelled.`])
+  if (!confirm) return { summary: `Ready to cancel duplicate run ${target.id} for ${tag}; no publish job succeeded. Call again with confirm: true to cancel it.`, lines: [], cancelled: false, run: target.url }
+  await gh.cancelWorkflowRun(repo, target.id)
+  return { summary: `Cancelled duplicate run ${target.id} for ${tag}${target.url ? `: ${target.url}` : ''}.`, lines: [], cancelled: true, run: target.url }
 }
 
 /** Git failures become refusals: nothing was released. */

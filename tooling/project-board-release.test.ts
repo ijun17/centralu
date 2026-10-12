@@ -132,6 +132,11 @@ if (args[0] === 'api' && args[1] === '-X') {
     save()
     process.exit(0)
   }
+  if (method === 'POST' && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
+    st.cancelled = [...(st.cancelled || []), path]
+    save()
+    process.exit(0)
+  }
   if (method === 'POST' && /\/actions\/runs\/\d+\/pending_deployments$/.test(path)) json([])
 }
 if (args[0] === 'api' && args[1] === '-H') {
@@ -172,6 +177,7 @@ type State = {
   jobs: Record<string, { name: string; status: string; conclusion: string | null }[]>
   pending: Record<string, unknown[]>
   dispatchSha?: string
+  cancelled?: string[]
 }
 
 const ref: AppRef = { projectId: 'p1', appId: 'project-board' }
@@ -353,12 +359,14 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     expect(plan.data.summary).toBe(
       `Ready to bump ${APP_VERSION} → ${NEXT} on main at ${s.tip.slice(0, 7)}, as chore/release-${NEXT}; nothing pushed yet. Call again with confirm: true to push the branch and open the pull request.`,
     )
+    expect(plan.data.lines).toContain(`Merged since v${APP_VERSION} (2):`)
     expect(remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)).toBeNull()
     expect(ghWrites()).toEqual([])
 
     const r = await call('release', { step: 'bump', path: s.work, confirm: true, notes: 'Ship the two changes.', closes: 'Refs #386' })
     expect(r.isError).toBe(false)
     expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Merge it once CI is green (merge_when_green), then rehearse and tag.`)
+    expect(r.data.lines).not.toContain(`Merged since v${APP_VERSION} (2):`)
     const pushed = remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)!
     expect(g(s.origin, 'rev-parse', `${pushed}^`)).toBe(s.tip)
     expect(g(s.origin, 'log', '-1', '--format=%s', pushed)).toBe(`chore(release): ${NEXT}`)
@@ -445,7 +453,7 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     runtime()
     const r = await call('release', { step: 'bump', path: s.work, version: APP_VERSION })
     expect(r.data.problems).toEqual([
-      expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green: main at ${s.tip.slice(0, 7)}: failing\\.`)),
+      expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green: main at ${s.tip.slice(0, 7)}: failing —`)),
       `${NEXT} on main is not released yet (no tag v${NEXT}); release it (release step tag) before bumping past it.`,
       `${APP_VERSION} is not after ${NEXT}, the version on main.`,
       `${APP_VERSION} is not after v${APP_VERSION}, the latest release tag.`,
@@ -528,7 +536,7 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     runtime()
     const r = await call('release', { step: 'tag', path: s.work, version: '9.9.9', confirm: true })
     expect(r.data.problems).toEqual([
-      expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green: main at ${s.tip.slice(0, 7)}: pending\\.`)),
+      expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green: main at ${s.tip.slice(0, 7)}: pending —`)),
       `main at ${s.tip.slice(0, 7)} carries ${NEXT}, not 9.9.9; merge its bump first.`,
     ])
     expect(remoteHas(s.origin, 'refs/tags/v9.9.9')).toBeNull()
@@ -568,6 +576,26 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
         stdin: JSON.stringify({ environment_ids: [7], state: 'approved', comment: `Approved through the project board's release tool for v${NEXT}.` }),
       },
     ])
+  })
+
+  it('selects the duplicate run waiting on the environment and offers a safe cancellation', async () => {
+    const s = repo({ bumped: true })
+    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
+      st.runs.push(run({ id: 62, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'in_progress', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+    })
+    runtime()
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.lines).toContain(`Release run for v${NEXT}: waiting for approval, https://github.com/ijun17/centralu/actions/runs/61.`)
+    expect(status.data.lines).toContain(`Duplicate release runs for v${NEXT}: https://github.com/ijun17/centralu/actions/runs/62.`)
+    expect(status.data.lines).toContain('Before anything publishes, cancel a duplicate with release step cancel_duplicate (run: 62, confirm: true).')
+    const plan = await call('release', { step: 'cancel_duplicate', run: 62, path: s.work })
+    expect(plan.data.summary).toContain('Ready to cancel duplicate run 62')
+    const cancelled = await call('release', { step: 'cancel_duplicate', run: 62, path: s.work, confirm: true })
+    expect(cancelled.data.summary).toContain('Cancelled duplicate run 62')
+    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).cancelled).toEqual(['repos/ijun17/centralu/actions/runs/62/cancel'])
   })
 
   it('refuses to approve a version with no tag, and says so when nothing waits', async () => {

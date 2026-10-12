@@ -30,7 +30,8 @@ length). Those are plain, non-secret values; change them there, not in code.
 - **Writes say what changed.** `set_item_fields` and `add_item` take one `item` or a list of
   `items` (each a reference or `{ item, status?, priority?, area? }`; top-level fields apply to
   entries without their own). Every reference and option name is checked before the first write,
-  so one wrong name changes nothing. Items run in order inside one `oneAtATime` call, one line each
+  so one wrong name changes nothing. `set_item_fields` adds a visible issue or pull request if it
+  is not on the project yet. Items run in order inside one `oneAtATime` call, one line each
   (`#297 Status Needs decision → Ready`); an item that fails is listed under `failed` and the
   batch carries on, unless the failure would repeat for every item (network, login, scope, write
   access), where it stops and names the items not tried. The batch is read back from GitHub once
@@ -113,10 +114,10 @@ intermittent failures (#368), and how long a merge may wait.
   any, else from the jobs of the `ci.workflows` files read from the base branch (so a PR cannot make
   its own checks optional), with `${{ matrix.x }}` names filled in. A job whose check name cannot be
   worked out makes every reported check count. With no set at all, every reported check counts.
-- **`ci_status`** (`pr`, or `ref` and optional `repo`; read-only): the verdict (`green`, `pending`,
-  `failing`, `none`), one line per required check that has not passed, the passed ones on one line,
-  and for each failed job (at most 4 logs) the first failing test line, the error after it, and the
-  #368 quote it matches. Matching is a hint: whether it is that flake is the reader's call.
+- **`ci_status`** (`pr`, or `ref` and optional `repo`; read-only): short by default: the verdict,
+  `passed/total`, and only failed or pending checks. `detail: "full"` also lists passed and
+  non-required checks. Compact output still says when the PR adds required jobs (#445).
+  `read_failed_job` reads at most 40 lines around a job failure, without timestamps or colour codes.
 - **`merge_when_green`** (`pr`, `body?`, `wait?`, `waitMinutes?`, `deleteBranch?`): refuses unless the
   gh account has maintain or admin permission (checked first), the PR is open and not a draft, the
   checks are green and GitHub can merge it. Squash only, with `--match-head-commit`, never `--auto`
@@ -128,6 +129,13 @@ intermittent failures (#368), and how long a merge may wait.
   after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
   "still running" at 240 s and follows the call with `run_status`.
 - **Never call `merge_when_green` against a real PR in a test**; the tests use a fake `gh`.
+
+### Waiting without blocking
+
+Start `node .centralu/apps/project-board/bin/wait-checks.mjs <pr>` in the background instead of
+holding an MCP call open (or give `owner/repo#pr`). It polls until checks settle, prints one line,
+and exits 0 when green or 1 when a check failed. `PROJECT_BOARD_WAIT_POLL_MS` changes its 30-second
+poll only for tests.
 
 ## Public text, pull requests, commits and stacks (#386 step 2)
 
@@ -149,6 +157,9 @@ and refuses with every reason at once, sending nothing.
 - **`comment`** (agents only) is the one way this app posts a comment: English, no private word,
   no attribution line. The owner's own answers are not posted at all: the screen saves them on this
   computer and an agent records them in English (above, "Reading and answering in the view").
+- **Agent reading and editing:** `read_discussion` reads a body and newest comments compactly;
+  `edit_comment` only edits a comment owned by the `gh` login and uses the same public-text checks.
+  A bare `#N` attributed next to another repository warns: write `owner/repo#N` before publishing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
   `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
@@ -220,6 +231,8 @@ step shows on the screen.
     tag's commit), only the configured environment, only what GitHub says this login may approve
     (`current_user_can_approve`); otherwise it names the reviewers and the run's address. Says which
     jobs wait; the shim's approval is the last reversible moment (docs/releasing.md).
+  - With duplicate tag runs, status chooses one waiting on the configured environment (otherwise the
+    newest active run), names the duplicates, and offers `cancel_duplicate` only before publishing.
 - **Never run a `release` step against the real repository in a test**: the tests use a fake `gh`
   and push to a bare repository through `pushurl`.
 - Tests: `tooling/project-board-release.test.ts`. It also holds `versionFiles` to this repository: the

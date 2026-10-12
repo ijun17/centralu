@@ -16,6 +16,7 @@ import {
   createIssue,
   createPr,
   deleteBranch,
+  editComment,
   dispatchWorkflow,
   findContent,
   mergePr,
@@ -41,14 +42,16 @@ import {
   setOption,
   setPrBase,
   workflowRuns,
+  viewerLogin,
+  cancelWorkflowRun,
 } from './github.mjs'
-import { NO_PERMISSION, canMerge, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
+import { NO_PERMISSION, canMerge, cleanLog, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { decisionSummary, renderInline, renderMarkdown } from './markdown.mjs'
-import { DEFAULT_CONVENTIONS, commitProblems, englishProblems, fillTemplate, normalizeWords, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
+import { DEFAULT_CONVENTIONS, commitProblems, englishProblems, fillTemplate, foreignBareIssueWarnings, normalizeWords, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { answerFor, answerKey, commentIdOf, deleteAnswer, markRecorded, saveAnswer, unrecorded } from './answers.mjs'
 import { GitError } from './git.mjs'
 import { StackRefusal, rebaseStack } from './stack.mjs'
-import { ReleaseRefusal, approveRelease, bumpRelease, guarded, rehearseRelease, releaseConfig, releaseStatus, tagRelease } from './release.mjs'
+import { ReleaseRefusal, approveRelease, bumpRelease, cancelDuplicateRelease, guarded, rehearseRelease, releaseConfig, releaseStatus, tagRelease } from './release.mjs'
 import { BUMPS } from './versions.mjs'
 
 const UI = 'ui://project-board/index.html'
@@ -402,16 +405,43 @@ async function setItemFields(args) {
   const rows = []
   const failed = []
   for (const [i, e] of entries.entries()) {
-    const item = items.find(matches(e.want))
+    let item = items.find(matches(e.want))
+    let added = false
     if (!item) {
-      failed.push(`${e.ref} is not in the project ${b.project.title}; add it with add_item.`)
-      continue
+      try {
+        const content = await findContent(e.want.repo, e.want.number)
+        if (!content) {
+          failed.push(`${e.ref} is not an issue or pull request this GitHub login can see. Nothing added.`)
+          continue
+        }
+        const itemId = await addContent(b.project.id, content.id)
+        if (!itemId) throw new GitHubError('github', `GitHub did not return the project item it added for ${e.ref}.`)
+        forget()
+        item = {
+          itemId,
+          type: content.type,
+          number: content.number,
+          title: content.title,
+          url: content.url,
+          state: null,
+          draft: false,
+          repository: e.want.repo,
+          status: null,
+          priority: null,
+          area: null,
+        }
+        items.push(item)
+        added = true
+      } catch (err) {
+        if (fail(failed, entries, i, `${e.ref}: ${reason(err)}`, err)) break
+        continue
+      }
     }
     const row = { itemId: item.itemId, options: e.options, fieldNames: fieldNamesOf(b) }
     try {
       const { done, same } = await writeFields(b, item, e.options)
       row.touched = done.length > 0
-      row.line = done.length ? [`${e.ref} ${done.map(change).join(', ')}`, ...same].join('; ') : `${e.ref} unchanged: ${same.join(', ')}`
+      row.line = done.length ? [`${e.ref}${added ? ' added' : ''} ${done.map(change).join(', ')}`, ...same].join('; ') : `${e.ref}${added ? ' added' : ''} unchanged: ${same.join(', ')}`
       rows.push(row)
     } catch (err) {
       const done = err.done ?? []
@@ -577,23 +607,17 @@ async function failureDetails(repo, checks) {
   return lines
 }
 
-const VERDICT = {
-  green: 'green, every required check reported and passed',
-  failing: 'failing',
-  pending: 'pending',
-  none: 'no checks reported yet, which is not green',
-}
-
 /** The CI part of an answer: a summary, then one line per check that is not passed, then failures. */
-function ciLines(what, sha, req, checks, failures = []) {
+function ciLines(what, sha, req, checks, failures = [], detail = 'compact') {
   const c = checks.counts
-  const parts = [`${c.passed} of ${c.total} passed`, ...(c.failed ? [`${c.failed} failed`] : []), ...(c.pending ? [`${c.pending} pending`] : []), ...(c.missing ? [`${c.missing} not reported yet`] : [])]
-  const summary = `${what} at ${sha7(sha)}: ${VERDICT[checks.verdict]}. Required (${req.source}): ${parts.join(', ')}.`
+  const parts = [`${c.passed}/${c.total} passed`, ...(c.failed ? [`${c.failed} failed`] : []), ...(c.pending ? [`${c.pending} pending`] : []), ...(c.missing ? [`${c.missing} not reported yet`] : [])]
+  const summary = `${what} at ${sha7(sha)}: ${checks.verdict} — ${parts.join(', ')}.`
   const lines = checks.rows.filter((r) => r.state !== 'passed').map((r) => `${r.name}: ${rowState(r)}`)
   const passed = checks.rows.filter((r) => r.state === 'passed').map((r) => r.name)
-  if (passed.length) lines.push(`Passed: ${passed.join(', ')}.`)
+  if (detail === 'full' && passed.length) lines.push(`Passed: ${passed.join(', ')}.`)
+  if (detail === 'full' || req.added > 0) lines.push(`Required: ${req.source}.`)
   if (req.unresolved.length) lines.push(`Could not name the checks of ${req.unresolved.join(', ')}, so every reported check counts as required.`)
-  if (checks.others.length) lines.push(`Not required: ${checks.others.map((r) => `${r.name} ${rowState(r)}`).join(', ')}.`)
+  if (detail === 'full' && checks.others.length) lines.push(`Not required: ${checks.others.map((r) => `${r.name} ${rowState(r)}`).join(', ')}.`)
   return { summary, checks: lines, failures }
 }
 
@@ -608,7 +632,7 @@ async function evaluate(repo, sha, req) {
   return evaluateChecks({ required: req.names, reported: await readChecks(repo, sha), alsoReported: req.unresolved.length > 0 })
 }
 
-async function ciStatus({ pr, ref, repo }) {
+async function ciStatus({ pr, ref, repo, detail = 'compact' }) {
   if ((pr === undefined) === (ref === undefined)) throw new GitHubError('input', 'Give pr (a pull request) or ref (a branch, tag or commit), one of them.')
   let what, sha, base, target
   if (pr !== undefined) {
@@ -627,7 +651,7 @@ async function ciStatus({ pr, ref, repo }) {
   }
   const req = await readRequired(target, base, CI.workflows, workflowCheckNames, pr !== undefined ? sha : undefined)
   const checks = await evaluate(target, sha, req)
-  const ci = ciLines(what, sha, req, checks, await failureDetails(target, checks))
+  const ci = ciLines(what, sha, req, checks, await failureDetails(target, checks), detail)
   return ciAnswer(ci.summary, ci, { verdict: checks.verdict, head: sha })
 }
 
@@ -657,7 +681,7 @@ const MERGEABLE_RETRIES = 3
 const MERGEABLE_WAIT_MS = 2_000
 const span = (ms) => (ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 
-async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranch: del = false }, ctx) {
+async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranch: del = false, detail = 'compact' }, ctx) {
   const want = parseItemRef(pr, config.repository)
   const repo = want.repo
   const what = `PR ${refOf(repo, want.number)}`
@@ -680,20 +704,20 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
     const checks = await evaluate(repo, p.headRefOid, req)
     const d = decideMerge({ permissions, pr: p, checks })
     if (d.action === 'refuse') {
-      const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [])
+      const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [], detail)
       return refused(d.reason, ci, { kind: d.kind, verdict: checks.verdict })
     }
-    if (d.action === 'merge') return doMerge(repo, what, p, body, del, ciLines(what, p.headRefOid, req, checks))
+    if (d.action === 'merge') return doMerge(repo, what, p, body, del, ciLines(what, p.headRefOid, req, checks, [], detail))
     // wait
     let pause = CI.pollMs
     if (d.kind === 'mergeable' && quick < MERGEABLE_RETRIES) {
       quick += 1
       pause = MERGEABLE_WAIT_MS
     } else if (!wait) {
-      const ci = ciLines(what, p.headRefOid, req, checks)
+      const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
       return ciAnswer(`Not merged yet: ${d.reason} Call again later, or with wait: true to wait for them.`, ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
     } else if (Date.now() - started + pause > limitMs) {
-      const ci = ciLines(what, p.headRefOid, req, checks)
+      const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
       return ciAnswer(`Not merged: still not green after ${span(Date.now() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, ci, {
         outcome: 'timeout',
         merged: false,
@@ -843,6 +867,33 @@ async function readItem({ item, refresh, comments }) {
   })
 }
 
+/** A compact thread for agents: raw body, then newest comments first, without view-only HTML. */
+async function readDiscussion({ item, comments }) {
+  const want = parseItemRef(item, config.repository)
+  const t = await thread(want.repo, want.number)
+  const shown = t?.comments.slice(-Math.min(100, Math.max(1, Math.floor(comments ?? 20)))).reverse() ?? []
+  if (!t) throw new GitHubError('not-found', `${refOf(want.repo, want.number)} is not an issue or pull request this GitHub login can see.`)
+  const summary = `${refOf(want.repo, want.number)} ${t.title}: body and ${shown.length} newest of ${t.totalComments} comments.`
+  const body = String(t.body ?? '').trim()
+  const rows = shown.map((c) => `${c.createdAt ?? '?'} ${c.author}: ${c.body}`)
+  return linesAnswer(summary, [['body', 'Body:', body ? [body] : ['(empty)']], ['comments', 'Comments, newest first:', rows]], {
+    item: { ref: refOf(want.repo, want.number), type: t.type, state: t.state, url: t.url },
+    totalComments: t.totalComments,
+  })
+}
+
+/** A failed Actions job's log around its first failure, so agents do not need to fetch a whole run. */
+async function readFailedJob({ job, repo }) {
+  const r = repoOf(repo)
+  const log = await readJobLog(r, job)
+  const lines = cleanLog(log).map((line) => line.replace(/[ \t]+/g, ' '))
+  const at = lines.findIndex((line) => /\b(?:FAIL(?:ED)?|ERROR|Error:|AssertionError|##\[error\])/i.test(line))
+  const start = Math.max(0, (at < 0 ? 0 : at) - 8)
+  const excerpt = lines.slice(start, Math.min(lines.length, start + 40))
+  const summary = `Job ${job}: ${at < 0 ? 'no failure marker found' : `failure near line ${at + 1}`}; ${excerpt.length} log lines shown.`
+  return linesAnswer(summary, [['log', '', excerpt]], { job: Number(job), startLine: start + 1 })
+}
+
 /** Runs `fn` over `list` with at most `n` at a time, answers in order. */
 async function mapLimit(list, n, fn) {
   const out = new Array(list.length)
@@ -888,6 +939,7 @@ async function postItemComment({ item, body }) {
   const ref = refOf(want.repo, want.number)
   const problems = String(body ?? '').trim() ? publicTextProblems(body, await privateWords(), 'The comment') : ['The comment is empty.']
   if (problems.length) throw new GitHubError('input', `Not posted on ${ref}: ${problems.join(' ')}`)
+  const warnings = foreignBareIssueWarnings(body, want.repo, 'The comment')
   let c
   try {
     c = await postComment(want.repo, want.number, body)
@@ -896,11 +948,29 @@ async function postItemComment({ item, body }) {
     forgetThread(want.repo, want.number)
   }
   const base = `https://github.com/${want.repo}/issues/${want.number}`
-  return answer(`Posted a comment on ${ref}${c.url ? `: ${c.url}` : ''}.`, {
+  return linesAnswer(`Posted a comment on ${ref}${c.url ? `: ${c.url}` : ''}.`, [['warnings', 'Warnings:', warnings]], {
     ok: true,
     ref,
     comment: { id: c.id, url: c.url, author: c.author, createdAt: c.createdAt, html: renderMarkdown(c.body, { repo: want.repo, base }) },
+    ...(warnings.length ? { warnings } : {}),
   })
+}
+
+/** Edits only a comment belonging to the account gh is using, after all public-text checks pass. */
+async function editItemComment({ item, url, body }) {
+  const want = parseItemRef(item, config.repository)
+  const ref = refOf(want.repo, want.number)
+  const id = commentIdOf(url, want.repo, want.number)
+  if (id.problem) throw new GitHubError('input', `Not edited: ${id.problem}`)
+  const problems = String(body ?? '').trim() ? publicTextProblems(body, await privateWords(), 'The comment') : ['The comment is empty.']
+  if (problems.length) throw new GitHubError('input', `Not edited on ${ref}: ${problems.join(' ')}`)
+  const [before, me] = await Promise.all([readComment(want.repo, id.id), viewerLogin()])
+  if (!before || before.number !== want.number) throw new GitHubError('input', `Not edited: GitHub has no comment ${id.id} on ${ref}.`)
+  if (String(before.author).toLowerCase() !== String(me).toLowerCase()) throw new GitHubError('input', `Not edited: comment ${id.id} belongs to ${before.author}, not the gh account ${me}.`)
+  const c = await editComment(want.repo, id.id, body)
+  forgetThread(want.repo, want.number)
+  const warnings = foreignBareIssueWarnings(body, want.repo, 'The comment')
+  return linesAnswer(`Edited your comment on ${ref}${c.url ? `: ${c.url}` : ''}.`, [['warnings', 'Warnings:', warnings]], { ok: true, ref, comment: c })
 }
 
 // --- The owner's answers: on this machine, never on GitHub as written --------------------------------
@@ -1108,10 +1178,11 @@ async function fileIssue({ title, body, labels, repo, dryRun }) {
   const r = repoOf(repo)
   const list = await privateWords()
   const problems = [...(String(title ?? '').trim() ? [] : ['The title is empty.']), ...publicTextProblems(title, list, 'The title'), ...publicTextProblems(body, list, 'The body')]
+  const warnings = foreignBareIssueWarnings(body, r, 'The body')
   if (problems.length) return refusal('Not filed:', problems)
-  if (dryRun) return answer(`Ready to file "${title}" on ${r} (dry run, nothing sent).`, { ok: true })
+  if (dryRun) return linesAnswer(`Ready to file "${title}" on ${r} (dry run, nothing sent).`, [['warnings', 'Warnings:', warnings]], { ok: true })
   const issue = await createIssue(r, { title, body, labels })
-  return answer(`Filed ${refOf(r, issue.number)} "${title}": ${issue.url}`, { ok: true, number: issue.number, url: issue.url })
+  return linesAnswer(`Filed ${refOf(r, issue.number)} "${title}": ${issue.url}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: issue.number, url: issue.url })
 }
 
 // The checkout rebase_stack works from by default: the one this app is committed in
@@ -1155,8 +1226,8 @@ async function openPrResult(args) {
   return { ok: !a.isError && s.ok !== false, text: a.content?.[0]?.text ?? s.summary ?? '', number: s.number ?? null, url: s.url ?? null }
 }
 
-const RELEASE_STEPS = { bump: bumpRelease, rehearse: rehearseRelease, tag: tagRelease, approve: approveRelease }
-const RELEASE_GH = { readRepo, prsWithHead, workflowRuns, runJobs, pendingDeployments, approveDeployments, dispatchWorkflow }
+const RELEASE_STEPS = { bump: bumpRelease, rehearse: rehearseRelease, tag: tagRelease, approve: approveRelease, cancel_duplicate: cancelDuplicateRelease }
+const RELEASE_GH = { readRepo, prsWithHead, workflowRuns, runJobs, pendingDeployments, approveDeployments, dispatchWorkflow, cancelWorkflowRun }
 
 async function release(args, step) {
   const repo = config.repository
@@ -1164,7 +1235,7 @@ async function release(args, step) {
   try {
     if (step === 'status') {
       const r = await guarded(() => releaseStatus(ctx))
-      return linesAnswer(r.summary, [['lines', '', r.lines]], { ok: true, phase: r.phase, version: r.version, tag: r.tag, head: r.head })
+      return linesAnswer(r.summary, [['lines', '', r.lines]], { ok: true, phase: r.phase, version: r.version, tag: r.tag, head: r.head, duplicates: r.duplicates })
     }
     // Who is asking comes first, as for merging: a contributor's agent gets no further
     ctx.permissions = (await readRepo(repo)).permissions
@@ -1254,6 +1325,44 @@ serveStdio(() => {
         return await readItem(args)
       } catch (e) {
         return viewFailure(e)
+      }
+    },
+  )
+
+  centralu.tool(
+    server,
+    'read_discussion',
+    {
+      title: 'Read an issue or pull request discussion',
+      description: 'Read the body and latest comments of an issue or pull request. Compact text; comments are newest first.',
+      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), comments: z.number().int().positive().max(100).optional().describe('Newest comments to read; default 20') }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    async (args) => {
+      try {
+        return await readDiscussion(args)
+      } catch (e) {
+        return failure(e)
+      }
+    },
+  )
+
+  centralu.tool(
+    server,
+    'read_failed_job',
+    {
+      title: 'Read a failed Actions job log',
+      description: 'Read a short log excerpt around the first failure in a GitHub Actions job.',
+      inputSchema: z.object({ job: z.number().int().positive().describe('GitHub Actions job id'), repo: z.string().optional().describe("owner/name; default this project's repository") }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    async (args) => {
+      try {
+        return await readFailedJob(args)
+      } catch (e) {
+        return failure(e)
       }
     },
   )
@@ -1380,6 +1489,26 @@ serveStdio(() => {
       oneAtATime(async () => {
         try {
           return await postItemComment(args)
+        } catch (e) {
+          return failure(e)
+        }
+      }),
+  )
+
+  centralu.tool(
+    server,
+    'edit_comment',
+    {
+      title: 'Edit your comment',
+      description: 'Replace a comment only when it belongs to the gh login. Uses the same English, private-word and attribution checks as comment.',
+      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), url: z.string().describe('The comment address on this item'), body: z.string().max(65536).describe('Replacement Markdown') }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await editItemComment(args)
         } catch (e) {
           return failure(e)
         }
@@ -1527,7 +1656,7 @@ serveStdio(() => {
       description:
         "docs/releasing.md as steps, maintainer only (maintain or admin on the repository). Each step checks everything first and refuses with every reason, changing nothing; without confirm: true it only says what it would do. bump: needs a clean checkout on main at GitHub's main, CI green and the current version released; moves every file in project.json release.versionFiles from main's version to version (or the next by bump, default prerelease), refuses when a listed file lacks the version or an unlisted file carries it, commits in a temporary index, pushes chore/release-<version> and opens the pull request from the template with the merged list as the notes draft. rehearse: starts the release workflow on main with its dry-run input. tag: needs a clean checkout on main at GitHub's main, CI green, main's version untagged and after the last tag, and a successful rehearsal on that commit (or skipRehearsal: true); pushes the tag on main's commit and answers the release run. approve: approves the tag's release run on its environment (npm-publish), only what GitHub says this login may approve; the shim's approval is the last reversible moment.",
       inputSchema: z.object({
-        step: z.enum(['bump', 'rehearse', 'tag', 'approve']),
+        step: z.enum(['bump', 'rehearse', 'tag', 'approve', 'cancel_duplicate']),
         confirm: z.boolean().optional().describe('Do it; default false (check and say what it would do)'),
         version: z.string().optional().describe('bump: the new version (default: the next by bump). tag, approve: the version expected (default main\'s)'),
         bump: z.enum(BUMPS).optional().describe('bump: which part to count up when version is not given; default prerelease'),
@@ -1535,6 +1664,7 @@ serveStdio(() => {
         closes: z.string().optional().describe('bump: the pull request\'s Closes line, e.g. "Refs #82"'),
         skipRehearsal: z.boolean().optional().describe('tag: tag without a successful rehearsal on the commit; default false'),
         comment: z.string().max(1000).optional().describe('approve: the comment GitHub keeps with the approval'),
+        run: z.number().int().positive().optional().describe('cancel_duplicate: the duplicate run id to cancel'),
         path: z.string().optional().describe('A checkout of the repository; default the one this app is in'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -1726,6 +1856,7 @@ serveStdio(() => {
         pr: itemRef.optional().describe(`A pull request: ${REF_HELP}`),
         ref: z.string().optional().describe('Instead of pr: a branch, tag or commit sha'),
         repo: z.string().optional().describe('With ref: owner/name; default this project\'s repository'),
+        detail: detailInput.describe('"full" lists passed and non-required checks too'),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
@@ -1752,6 +1883,7 @@ serveStdio(() => {
         wait: z.boolean().optional().describe('Wait for pending checks instead of answering "pending" at once; default false'),
         waitMinutes: z.number().positive().max(60).optional().describe('With wait: how many minutes to wait at most; default 40'),
         deleteBranch: z.boolean().optional().describe('Delete the head branch on GitHub after the merge (never a fork\'s); default false'),
+        detail: detailInput.describe('"full" lists passed and non-required checks too'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },

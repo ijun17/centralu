@@ -404,7 +404,7 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
   }
   if (!found.length && !unresolved.length) return { names: null, unresolved: [], source: 'no required set found, so every reported check counts' }
   const plus = added ? `, plus ${added} job${added === 1 ? '' : 's'} the pull request adds` : ''
-  return { names: [...new Set(found)], unresolved, source: `${read.join(', ')} on ${base}${plus}` }
+  return { names: [...new Set(found)], unresolved, added, source: `${read.join(', ')} on ${base}${plus}` }
 }
 
 /** Every check reported on a commit: check runs (GitHub Actions jobs among them) and commit statuses. */
@@ -634,6 +634,21 @@ export async function postComment(repo, number, body) {
   return { id: c.node_id ?? String(c.id), url: c.html_url ?? null, author: c.user?.login ?? 'ghost', createdAt: c.created_at ?? null, body: c.body ?? body }
 }
 
+/** The login gh is using. Kept separate from a comment so an edit never guesses who "me" is. */
+export async function viewerLogin() {
+  const user = await restJson('user')
+  if (!user?.login) throw new GitHubError('github', 'GitHub did not say which account gh is using.')
+  return user.login
+}
+
+/** Replaces a comment body. The caller first proves that the comment belongs to this account. */
+export async function editComment(repo, id, body) {
+  checkRepo(repo)
+  const c = await restWrite('PATCH', `repos/${repo}/issues/comments/${Number(id)}`, { body }, 'the comment edit')
+  if (!c?.id) throw new GitHubError('github', 'GitHub answered the edited comment with something that is not one.')
+  return { id: c.node_id ?? String(c.id), url: c.html_url ?? null, author: c.user?.login ?? 'ghost', createdAt: c.updated_at ?? c.created_at ?? null, body: c.body ?? body }
+}
+
 /** One issue or pull request comment by its id: the item it is on, its body and author; null when there is none. */
 export async function readComment(repo, id) {
   checkRepo(repo)
@@ -691,6 +706,17 @@ export async function pendingDeployments(repo, runId) {
 export async function approveDeployments(repo, runId, environmentIds, comment) {
   checkRepo(repo)
   await restWrite('POST', `repos/${repo}/actions/runs/${Number(runId)}/pending_deployments`, { environment_ids: environmentIds, state: 'approved', comment }, 'the approval')
+}
+
+/** Cancels an unneeded workflow run. GitHub keeps any jobs that already completed. */
+export async function cancelWorkflowRun(repo, runId) {
+  checkRepo(repo)
+  try {
+    await runGh(['api', '-X', 'POST', `repos/${repo}/actions/runs/${Number(runId)}/cancel`])
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    throw new GitHubError('github', `GitHub refused to cancel run ${runId}: ${firstLine(e)}`)
+  }
 }
 
 /** Starts a workflow_dispatch run of `workflow` on `ref` with `inputs` (strings). GitHub answers nothing. */

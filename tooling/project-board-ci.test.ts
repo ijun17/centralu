@@ -457,11 +457,9 @@ describe.skipIf(process.platform === 'win32')('the project board app: ci_status 
     expect(r.isError).toBe(false)
     expect(r.text).toBe(
       [
-        'PR #77 at c0ffee0: failing. Required (build.yml on main): 1 of 3 passed, 1 failed, 1 not reported yet.',
+        'PR #77 at c0ffee0: failing — 1/3 passed, 1 failed, 1 not reported yet.',
         'windows tests: failed',
         'linux-x64: not reported yet',
-        'Passed: verify.',
-        'Not required: notify passed.',
         'Failures:',
         "windows tests (job 12): FAIL app-runtime packages/agent-host/src/apps/external/lifecycle.test.ts > the shutdown rule (S-5) > even a descendant left by an app that ended cleanly on its own is collected — its entire group is ended | Error: EBUSY: resource busy or locked, rmdir 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\cc-apps-life-Zx81Qa\\proj\\.centralu\\apps\\parent' | known intermittent failure? #368 quotes \"packages/agent-host/src/apps/external/lifecycle.test.ts > the shutdown rule (S-5) > even a descendant left by an app that ended cleanly on its own is collected…\"",
       ].join('\n'),
@@ -469,6 +467,33 @@ describe.skipIf(process.platform === 'win32')('the project board app: ci_status 
     expect(r.data.verdict).toBe('failing')
     // Read-only: nothing merged, nothing deleted
     expect(ghCalls().filter((a) => a[1] === 'merge' || a.includes('DELETE'))).toEqual([])
+  })
+
+  it('keeps green checks to one short line unless detail is full', async () => {
+    runtime(ghState())
+    const short = await call('ci_status', { pr: 77 })
+    expect(short.text.split('\n')).toHaveLength(1)
+    expect(short.text).toBe('PR #77 at c0ffee0: green — 3/3 passed.')
+    expect(short.data.checks).toEqual([])
+    const full = await call('ci_status', { pr: 77, detail: 'full' })
+    expect(full.text).toContain('Passed: verify, windows tests, linux-x64.')
+    expect(full.text).toContain('Required: build.yml on main.')
+    expect(full.text).toContain('Not required: notify passed.')
+  })
+
+  it('reads only the useful part of a failed job log', async () => {
+    const prefix = Array.from({ length: 60 }, () => stamp('setup noise')).join('\n')
+    const suffix = Array.from({ length: 60 }, () => stamp('cleanup noise')).join('\n')
+    runtime(ghState({ logs: { '12': [prefix, VITEST_LOG, suffix].join('\n') } }))
+    const r = await call('read_failed_job', { job: 12 })
+    expect(r.isError).toBe(false)
+    expect(r.data.startLine).toBe(57)
+    expect(r.data.log).toHaveLength(40)
+    expect(r.text).toContain('FAIL app-runtime packages/agent-host/src/apps/external/lifecycle.test.ts')
+    expect(r.text).toContain('Error: EBUSY:')
+    expect(r.text).not.toContain('\u001b')
+    expect(r.text).not.toContain('2026-10-05T')
+    expect(r.text).not.toContain('undefined')
   })
 
   it('refuses to merge for an account without maintain or admin, before reading anything else', async () => {

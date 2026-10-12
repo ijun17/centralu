@@ -295,6 +295,15 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
     expect(mutations()).toHaveLength(2)
   })
 
+  it('adds a referenced issue before setting its fields when it is not on the project', async () => {
+    runtime()
+    const r = await call('set_item_fields', { item: 42, status: 'Ready', priority: 'High' })
+    expect(r.isError).toBe(false)
+    expect(r.text).toBe('Project Centralu on GitHub: 1 changed. Read back from GitHub: as set.\n#42 added Status (none) → Ready, Priority (none) → High')
+    expect(stored('item-42')!.values).toEqual({ Status: 'Ready', Priority: 'High' })
+    expect(mutations().some((q) => q.includes('addProjectV2ItemById'))).toBe(true)
+  })
+
   it('runs writes sent at once in arrival order, so each "from" is true and the last one wins', async () => {
     // A live Claude session sent both halves of a round trip in parallel
     runtime()
@@ -335,7 +344,8 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
   it('carries on past an item that fails, and lists the failures after the lines', async () => {
     runtime()
     patchState({ failItems: ['item-113'] })
-    const r = await call('set_item_fields', { items: [8, 42, 113, 101], status: 'Ready' })
+    // An absent issue still fails; an existing issue outside the project is now added automatically.
+    const r = await call('set_item_fields', { items: [8, 404, 113, 101], status: 'Ready' })
     expect(r.isError).toBe(false)
     expect(r.text).toBe(
       [
@@ -343,7 +353,7 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
         '#8 Status On hold → Ready',
         '#101 Status Needs decision → Ready',
         'Failed:',
-        '#42 is not in the project Centralu; add it with add_item.',
+        '#404 is not an issue or pull request this GitHub login can see. Nothing added.',
         '#113: GitHub answered with an error: UNPROCESSABLE Could not update the item item-113',
       ].join('\n'),
     )
@@ -351,7 +361,7 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
     expect(stored('item-101')!.values.Status).toBe('Ready')
 
     // When every item failed, the answer is an error
-    const none = await call('set_item_fields', { items: [42, 113], status: 'Done' })
+    const none = await call('set_item_fields', { items: [404, 113], status: 'Done' })
     expect(none.isError).toBe(true)
     expect(none.data!.summary).toBe('Project Centralu on GitHub: 2 failed.')
   })

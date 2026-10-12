@@ -252,11 +252,29 @@ if (args[0] === 'api' && args[1] === '-X' && args[2] === 'POST') {
   process.stdout.write(JSON.stringify({ id: c.restId, node_id: c.id, html_url: c.url, body, created_at: c.createdAt, user: { login: 'owner' } }))
   process.exit(0)
 }
+if (args[0] === 'api' && args[1] === '-X' && args[2] === 'PATCH') {
+  const m = /^repos\/([^/]+\/[^/]+)\/issues\/comments\/(\d+)$/.exec(args[3])
+  for (const [key, t] of Object.entries(st.threads)) {
+    const c = m && key.startsWith(m[1] + '#') && t.comments.find((x) => String(x.restId) === m[2])
+    if (c) {
+      c.body = JSON.parse(stdin).body
+      c.createdAt = '2026-10-12T11:00:00Z'
+      save()
+      process.stdout.write(JSON.stringify({ id: c.restId, node_id: c.id, html_url: c.url, body: c.body, updated_at: c.createdAt, user: c.author }))
+      process.exit(0)
+    }
+  }
+  fail('gh: Not Found (HTTP 404)\n', 1, JSON.stringify({ message: 'Not Found' }))
+}
+if (args[0] === 'api' && args[1] === 'user') {
+  process.stdout.write(JSON.stringify({ login: st.viewer ?? 'owner' }))
+  process.exit(0)
+}
 // One comment by its id, as GET repos/{repo}/issues/comments/{id} answers it
 const one = args[0] === 'api' && /^repos\/([^/]+\/[^/]+)\/issues\/comments\/(\d+)$/.exec(args[1])
 if (one) {
   for (const [key, t] of Object.entries(st.threads)) {
-    const c = t.comments.find((x) => String(x.restId) === one[2])
+    const c = key.startsWith(one[1] + '#') && t.comments.find((x) => String(x.restId) === one[2])
     if (c) {
       process.stdout.write(JSON.stringify({ id: c.restId, issue_url: 'https://api.github.com/repos/' + key.replace('#', '/issues/'), html_url: c.url, body: c.body, user: c.author }))
       process.exit(0)
@@ -299,7 +317,7 @@ const content = (number: number, title: string) => ({
   state: 'OPEN',
   repository: { nameWithOwner: 'ijun17/centralu' },
 })
-const comment = (n: number, body = `Comment ${n}`) => ({ id: `IC_${n}`, url: `https://github.com/ijun17/centralu/issues/113#issuecomment-${n}`, body, createdAt: `2026-10-0${1 + (n % 9)}T08:00:00Z`, author: { login: n % 2 ? 'coordinator' : 'someone' } })
+const comment = (n: number, body = `Comment ${n}`) => ({ id: `IC_${n}`, restId: n, url: `https://github.com/ijun17/centralu/issues/113#issuecomment-${n}`, body, createdAt: `2026-10-0${1 + (n % 9)}T08:00:00Z`, author: { login: n % 2 ? 'coordinator' : 'someone' } })
 const thread = (number: number, title: string, comments: unknown[], extra: Record<string, unknown> = {}) => ({
   __typename: 'Issue',
   number,
@@ -452,6 +470,16 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
 
     const missing = await call('read_item', { item: 9999 })
     expect(missing.data).toMatchObject({ ok: false, error: { kind: 'not-found', message: '#9999 is not an issue or pull request this GitHub login can see.' } })
+  })
+
+  it('gives agents a compact body and newest-first discussion', async () => {
+    runtime()
+    const r = await call('read_discussion', { item: 113, comments: 2 }, agent)
+    expect(r.isError).toBe(false)
+    expect(r.text).toContain('Body:')
+    expect(r.data.comments).toHaveLength(2)
+    expect((r.data.comments as string[])[0]).toMatch(/coordinator: Comment 3/)
+    expect((r.data.comments as string[])[1]).toMatch(/someone:.*Decision needed/)
   })
 
   /*
@@ -613,6 +641,27 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
     expect(after.data.comments.map((c: { id: string }) => c.id)).toEqual(['IC_1', 'IC_2', 'IC_3', 'IC_new4'])
     const summaries = await call('decision_summaries')
     expect(summaries.data.items.find((i: { ref: string }) => i.ref === '#113').decision.answered).toBe('2026-10-12T10:00:04Z')
+  })
+
+  it('edits only the gh login\'s comment and applies comment text checks', async () => {
+    runtime()
+    patch((s) => ((s as unknown as { viewer: string }).viewer = 'coordinator'))
+    const url = 'https://github.com/ijun17/centralu/issues/113#issuecomment-1'
+    await call('read_item', { item: 113 })
+    const edited = await call('edit_comment', { item: 113, url, body: 'Clarified in English.' }, agent)
+    expect(edited.isError).toBe(false)
+    expect(edited.text).toBe(`Edited your comment on #113: ${url}.`)
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).threads['ijun17/centralu#113'].comments[0].body).toBe('Clarified in English.')
+    const refreshed = await call('read_item', { item: 113 })
+    expect(refreshed.data.comments[0].html).toContain('Clarified in English.')
+    const other = await call('edit_comment', { item: 113, url: 'https://github.com/ijun17/centralu/issues/113#issuecomment-2', body: 'No.' }, agent)
+    expect(other.isError).toBe(true)
+    expect(other.text).toContain('belongs to someone, not the gh account coordinator')
+    const privateText = await call('edit_comment', { item: 113, url, body: '한국어' }, agent)
+    expect(privateText.isError).toBe(true)
+    expect(ghCalls().filter((c) => c.args.includes('PATCH'))).toEqual([
+      { args: ['api', '-X', 'PATCH', 'repos/ijun17/centralu/issues/comments/1', '--input', '-'], stdin: JSON.stringify({ body: 'Clarified in English.' }) },
+    ])
   })
 
   /*
