@@ -27,7 +27,8 @@ pnpm measure:tools --compare before.json after.json
 | `--keep` | off | Keep the scratch folder (projects, data folder, `host.log`) |
 | `--rare` | `commands` | How the host exposes the orchestrator's rare commands (`CC_RARE_COMMANDS`: `commands`, the host's default since 2026-10-12, `resident`, `deferred`; §9). Runs before that date ran `resident` by default |
 | `--kinds` | all five | The session kinds the resident phase starts |
-| `--preamble` | off | Start the orchestrator's role with the preamble (`CC_ORCHESTRATOR_PREAMBLE`; §9, round 2) |
+| `--preamble` | `on` | `on` or `off`: the orchestrator's role starts with the preamble (`CC_ORCHESTRATOR_PREAMBLE`; §9 round 2, §11). Before #564 a flag, off unless given |
+| `--reader-instructions` | `on` | `on` or `off`: ordinary sessions' tool instructions (`CC_READER_INSTRUCTIONS`; §11) |
 | `--only` | every prompt | Run only these prompt ids of the set |
 
 A prompt file may set `preset` (the permission preset of every selection session) and, per orchestrator
@@ -492,8 +493,8 @@ orchestrator's role, along the owner's words: "You are an agent running inside C
 yourself or using another tool, look for what Centralu's MCP tools and commands can do (centralu_commands)."
 (`CC_ORCHESTRATOR_PREAMBLE=1`, `--preamble`; where the seat has no commands the last words are "MCP tools can do."
 without the name). It goes in the orchestrator's role only: Centralu offers its tools to the person's own sessions
-and does not direct them (product-spec.md §1.2), so no ordinary session gets it (`orchestratorRole`, tested in
-`manager.test.ts`). Arms: **A** resident, **A'** resident + preamble, **C** commands, **D** commands + preamble.
+and does not direct them (product-spec.md §1.2, a principle withdrawn later the same day, §11), so no ordinary session
+gets it (`orchestratorRole`, tested in `manager.test.ts`). Arms: **A** resident, **A'** resident + preamble, **C** commands, **D** commands + preamble.
 
 Claude Code 2.1.289 on `claude-sonnet-5-5` (the CLI's `sonnet`), 3 repetitions, the Korean set
 (`prompts-512-ko.json`: the same nine asks as a Korean speaker would type them, no tool named) and the English set;
@@ -573,10 +574,11 @@ reached 6 of 6 deferred on haiku), with `propose_skill` loaded; the switches sta
 
 ### Decision (owner, 2026-10-12)
 
-**The commands tier (C) is the orchestrator's default**, without the preamble. Round 2 on Sonnet found no loss in
-selection or arguments (12 of 12 in every row, English and Korean) and 835 fewer tokens a request, and the tier
-keeps the resident prefix from growing as commands are added: the orchestrator was at 11,862 of its 12,000
-characters resident, and is at 9,317 in the tier (Codex 9,369 with the header over its instructions).
+**The commands tier (C) is the orchestrator's default**, without the preamble (#564 later turned it on as a product
+rule, §11). Round 2 on Sonnet found no loss in selection or arguments (12 of 12 in every row, English and Korean)
+and 835 fewer tokens a request, and the tier keeps the resident prefix from growing as commands are added: the
+orchestrator was at 11,862 of its 12,000 characters resident, and is at 9,317 in the tier (Codex 9,369 with the
+header over its instructions).
 `RESIDENT_BUDGET_CHARS.orchestrator` follows it down to 9,500, so a command that wants to be resident again is a
 decision rather than headroom. The haiku numbers above stand: a seat on haiku reaches a rare command less often
 through the tier. `CC_RARE_COMMANDS=resident` and `=deferred` stay selectable, and `pnpm measure:tools --rare`
@@ -618,7 +620,7 @@ Naming the tool ("Have Codex …") reaches `start_agent` on Claude every time; "
 CLI's own sub-agents, which the app does not show as sessions, and Codex never chose `start_agent` without being told.
 The descriptions do not say "use this instead of your own sub-agents": Centralu offers the tool and does not direct the
 person's sessions (product-spec.md §1.2). The reader-set instructions #564 adds (Centralu's features first) are where
-that line belongs; this section is the before.
+that line belongs; this section is the before, and §11 the after.
 
 **Not measured.** Opus and Sonnet as the parent; Korean prompts; a Codex parent starting a child live (the bridge
 serves it like every reader tool); the cost of a running child's reports to its parent over a long session.
@@ -628,3 +630,150 @@ above is history (3,479 characters of tools and 2,785 of instructions in every m
 `delete` (the manager's hard-gated clean-up): the agent set is 992 characters (budget 1,000), the reader seat 3,242 on
 Codex. The orchestrator lost `propose_worktree_session`: 10,029 → 9,278 resident characters on both CLIs (counted with
 `residentCost`, not measured live).
+
+## 11. Centralu's features first: instructions for ordinary sessions, and the orchestrator's preamble (#564, 2026-10-12)
+
+The owner replaced the principle that Centralu does not shape the person's workflow with a rule: unless the person
+directly says otherwise, agents running in Centralu use Centralu's own features first (product-spec.md §1.2). Ordinary
+sessions, which had Centralu's tools and no instructions (#320), now get one sentence, and the orchestrator's preamble
+(§9, round 2) is on by default, worded as the rule:
+
+- Ordinary sessions (`READER_INSTRUCTIONS`, 392 characters; Codex: 444 with the header over it): "You are running inside
+  Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: recall for earlier
+  conversations; read_session for this project's other sessions; find_apps to use another project's app; ask_project to
+  have another project do work; start_agent, not your Agent tool, for long work, another CLI or a worktree, or work the
+  person will follow." The last entry came
+  after #561's tools (§10) joined the seat; it was measured on its own (below), the rest of this section without it.
+- The orchestrator (188 characters, at the head of its role): "You are an agent running inside Centralu. Unless the
+  person says otherwise, use Centralu's MCP tools and commands (centralu_commands) before doing something yourself or
+  using another tool."
+
+Claude Code 2.1.289 on haiku 4.5 and `claude-sonnet-5-5` (3 repetitions), codex-cli 0.160.0 on its default
+gpt-6.1-sol (2 repetitions), macOS, base commit 96267a44 (the commands tier default, #512) with this change.
+`pnpm measure:tools --live --phases resident,selection --kinds none,reader,orchestrator --prompts
+packages/agent-host/scripts/measure-tools/prompts-564.json --reader-instructions on|off --preamble on|off`, and the
+Korean twin `prompts-564-ko.json`. Every selection session is an ordinary one under `safe` (the agent's own tools and
+skills raise a card the measurement declines; Centralu's run, and `ask_project`'s and `attach_app`'s consent cards are
+declined too), auto memory off. The prompts name no tool and not Centralu: four where a Centralu tool plainly answers
+(`first-`), four that leave another way open, a shell, the file system or a guess (`tempt-`), and three where no
+Centralu tool fits (`none-`: a product, a file listing of this project, a commit message), to catch over-use. Summaries:
+`baselines/2026-10-12-centralu-first-564-live.json`.
+
+### What it costs, every request
+
+The first request of a session, Centralu's own tokens (`count_tokens`, §2) on Claude, and the difference from a
+session with no Centralu tools in the same run on Codex (whose first request carries no MCP definitions, §6.2):
+
+| | Without | With | Added |
+|---|---|---|---|
+| Ordinary session, Claude haiku | 412 | 511 | **+99** |
+| Ordinary session, Claude Sonnet | 527 | 648 | **+121** |
+| Ordinary session, Codex | +0 | +70 | **+70** (+62 to +78 on the no-tool prompts' requests) |
+| Orchestrator preamble, haiku / Sonnet / Codex (first request against `none`) | | | +42 / +60 / +37 |
+
+Under 0.7% of an ordinary session's first request on every model. These runs predate #561's agent set (§10), so the
+"without" is the seat of §8. `READER_BUDGET_CHARS` goes from 1,000 to 1,400 (the set is 1,375: 983 of tools, 392 of
+instructions with the `start_agent` line), which also raises the reader seat's resident ceiling, the sum of its four
+sets' (`RESIDENT_BUDGET_CHARS.reader`, 3,300 → 3,700; Codex carries 3,686 with the header and #574's `delete`). A line added to
+`READER_FIRST` counts against it, so a tool that joins the seat is a decision about this number too.
+
+**The count had to be fixed first.** Claude Code put the servers' instructions on Sonnet in the same block as the
+agent list, the skill list and the date, and the recorder took Centralu's section out up to the block's end: the
+ordinary session read 7,349 tokens of its own on Sonnet with instructions, and the orchestrator 6,582. The recorder now
+takes our section out by its exact text (`setOurInstructions`) and the frame only when no other server's section is
+left; the figures above are from runs after the fix, and agree with the difference from `none` in the same run. Earlier
+counted Sonnet figures in this document (§9 reports first-request totals there) are not affected; a counted figure of a
+seat that had instructions on Sonnet before this fix would be.
+
+### What it changes (right: the first Centralu call is an expected one; English / Korean)
+
+Without: the first-, none- prompts from round 1's runs without the instructions, the tempt- prompts from a run without
+them beside the shipped wording's. With: the shipped wording, all eleven prompts in one run.
+
+| Prompts | haiku without | haiku with | Sonnet without | Sonnet with | Codex without | Codex with |
+|---|---|---|---|---|---|---|
+| `first-app` (another project's app) | 0/3 / 0/3 | 1/3 / 1/3 | 3/3 / 3/3 | 3/3 / 3/3 | 2/2 / 2/2 | 2/2 / 2/2 |
+| `first-recall`, `-sessions`, `-ask` | 9/9 / 9/9 | 9/9 / 9/9 | 9/9 / 9/9 | 9/9 / 9/9 | 6/6 / 5/6 | 6/6 / 6/6 |
+| `tempt-ask` ("list the files in {other}'s top folder") | 2/3 / 1/3 | 3/3 / 2/3 | 3/3 / 3/3 | 3/3 / 3/3 | 2/2 / 2/2 | 2/2 / 2/2 |
+| `tempt-recall` ("have we already settled ... ? Check first.") | 3/3 / 0/3 | 3/3 / 0/3 | 3/3 / 3/3 | 3/3 / 3/3 | 2/2 / 2/2 | 2/2 / 2/2 |
+| `tempt-sessions` ("is something else running in this project?") | 0/3 / 0/3 | 1/3 / 1/3 | 3/3 / 0/3 | 3/3 / 0/3 | 2/2 / 2/2 | 2/2 / 2/2 |
+| `tempt-app` ("read the counter {other} shares") | 0/3 / 0/3 | 0/3 / 0/3 | **0/3** / 3/3 | **3/3** / 3/3 | 2/2 / 2/2 | 2/2 / 2/2 |
+| **The eight** | **14/24 / 10/24** | **17/24 / 13/24** | **21/24 / 21/24** | **24/24 / 21/24** | **16/16 / 15/16** | **16/16 / 16/16** |
+| `none-` (no Centralu tool fits): no Centralu call | 9/9 / 9/9 | 9/9 / 9/9 | 9/9 / 9/9 | 9/9 / 9/9 | 6/6 / 6/6 | 6/6 / 6/6 |
+
+- **No over-use.** Not one Centralu call on a no-tool prompt in any run, with or without, and those turns took the same
+  number of requests but one: haiku's Korean commit message, 3 → 4 (median), with no Centralu call either way.
+- **Where a model already reached for Centralu, nothing changed**: Sonnet and Codex were at or near every prompt
+  without the instructions. The gains are where a loaded Centralu tool competed with another: Sonnet asked about a
+  counter another project shares went to `ask_project` first (0 of 3) and to `find_apps` first with them (3 of 3); haiku
+  reached `attach_app` on `first-app` in 4 of 6 runs with them against 0 of 6 without, though its first call stayed
+  `ask_project` in most (a Centralu feature too: with the consent card declined, the measurement cannot say whether it
+  would have answered).
+- **Codex spends less per turn with them.** Its turns on the positive prompts read 26% to 44% fewer input tokens
+  (median per turn: `first-app` 96,611 → 70,933, `first-recall` 127,900 → 89,047, `tempt-recall` 117,741 → 71,134),
+  in the same number of requests or fewer; `first-ask`, which names the project to ask, did not change. Named tools spare
+  Codex looking its tools up from `exec` first (§6.2's 7,411-token step); the records do not carry the `exec` code, so
+  that is the likely reason, not a confirmed one. On Claude, haiku called `recall` fewer times per turn (4 → 3
+  requests in English, 4 → 2 in Korean); nothing else moved.
+- **What the instructions did not fix.** Asked whether "something else is running in this project", haiku searched
+  its tools for a process tool and Sonnet in Korean answered without looking; asked in Korean whether a backup was
+  "already settled", haiku looked through the files instead of the conversations, with or without. These read as
+  questions about processes and files, which the sentence does not claim.
+
+**The wording.** The first wording put `ask_project for work in another project` before `find_apps for another
+project's apps` (round 1: 0 of 3 / 2 of 3 first right on haiku's `first-app`, `attach_app` reached 0 / 1 of 3).
+Two others on haiku's `first-app` and `first-ask` (3 repetitions, both languages): `find_apps` first, worded as using
+an app (shipped; `attach_app` reached in 8 of 12 runs over two runs, `first-ask` 12 of 12), and "find_apps then
+attach_app to use another project's app yourself" (4 of 6, and longer). On Sonnet and Codex the first wording already
+did as well as the shipped one. Three repetitions separate none of these firmly.
+
+### The `start_agent` line (after #561)
+
+§10 found that "Hand this to another agent …" never reached `start_agent`: Claude Code used its own `Agent` tool, whose
+subagents Centralu does not show as sessions. `prompts-561.json`'s two start prompts on haiku, 3 repetitions each,
+`safe` not set (as in §10), the consent card declined; base 578db451 (#561's tools and the commands tier on main):
+
+| Arm | Centralu's own tokens, first request | "Have Codex write …" | "Hand this to another agent …" |
+|---|---|---|---|
+| no instructions | 604 | 3/3 | 0/3 (`Agent`) |
+| instructions without a `start_agent` line | 703 (+99) | 3/3 | 0/3 |
+| + "start_agent to hand work to another agent (Claude or Codex)" | 719 (+16) | 3/3 | 0/3 |
+| + "start_agent, not a subagent of your own, to hand work to another agent" | 723 (+20) | 3/3 | 1/3 |
+| + "start_agent, not your Agent tool, to hand work to another agent" | 719 (+16) | 6/6 | 4/6 (two runs) |
+
+Only a line that names the competing tool moved the choice; a line that merely lists `start_agent` did nothing. With
+the last one, on haiku, the no-tool prompts still made no Centralu call (9 of 9) and `first-ask` and `first-sessions`
+stayed 3 of 3 each.
+
+**Option B (owner decision, 2026-10-12).** The CLI's own subagents stay the way to hand off short helper work inside the
+turn; `start_agent` is for work that runs in another CLI or a worktree, runs long, or that the person will watch or
+continue. The line now says so and still names the Agent tool (106 characters, 108 with its separator): "start_agent,
+not your Agent tool, for long work, another CLI or a worktree, or work the person will follow". Measured on
+`prompts-564-agent.json` (`safe`, consent cards declined, 3 repetitions), base 578db451:
+
+| Prompt | Expect | haiku | Sonnet |
+|---|---|---|---|
+| "Have Codex write a one-line shell command …" | `start_agent` | 3/3 | 3/3 |
+| "Hand this to another agent and tell me what it says: summarize …" (short; ambiguous under B) | either | `start_agent` 1/3, `Agent` 2/3 | `start_agent` 3/3 |
+| "Hand off building a CSV-to-JSON converter …, with tests. It is a long job and I want to check on its progress myself later." | `start_agent` | 3/3 (two then tried `Agent` after the declined card) | 3/3 |
+| "Use a helper to search the code here for TODO comments …" | the built-in `Agent`, no Centralu call | `Agent` first 3/3, no Centralu call | `Agent` first 3/3, no Centralu call |
+| The three no-tool prompts | no Centralu call | 9/9 | 9/9 |
+| Centralu's own tokens, first request | | 731 (+28 against no line, +12 against the line before) | 931 |
+
+The short ambiguous hand-off splits on haiku and goes to `start_agent` on Sonnet; the long one and the named CLI reach it
+on both, and the helper search stays with the built-in subagent on both. `Agent` is Claude Code's name; on Codex, whose
+own sub-agents §10 also saw, the line was not measured.
+
+**The orchestrator's preamble** was measured in §9 round 2 (no regression, no gain that held); its new wording was not
+measured on the orchestrator's prompts here, only its cost above.
+
+**Spend.** $10.40 at list prices for 1,901 Claude requests ($6.24 on Sonnet, $4.16 on haiku; the `start_agent` line
+$2.20 of it, option B $1.17; cache writes priced at the one-hour rate, so an upper bound), no builder session (no prompt made an app),
+and about 140 Codex turns on the account's plan.
+
+**Not measured.** Opus as an ordinary session's model; a session that was already running when the change ships
+(a Claude session picks the instructions up when its process next starts, at a one-time cost to its cache; a Codex
+thread keeps what it was started with, agent-host.md §1.1); prompts deep in a long conversation, where the instructions
+are far from the question; the consent cards allowed, so what `ask_project` or `attach_app` would then have answered;
+the orchestrator's new preamble on its own prompts; the `start_agent` line on Codex and in Korean, and with the consent
+card allowed (whether the child then does the long job); Windows and the packaged app.

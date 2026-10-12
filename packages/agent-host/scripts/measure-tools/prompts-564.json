@@ -1,0 +1,93 @@
+{
+  "comment": "#564: ordinary sessions (the reader seat) with and without their tools' instructions. Eight prompts where a Centralu tool is the right answer but no tool, and not Centralu, is named (the tempt- four leave another way open: a shell, the file system, a guess); three where no Centralu tool fits, to catch over-use. Placeholders as in prompts.json. Run under safe: the agent's own tools raise a card the measurement declines, so nothing outside a tool call is carried out. The Korean twin is prompts-564-ko.json.",
+  "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "preset": "safe",
+  "selection": [
+    {
+      "id": "first-app",
+      "profile": "reader",
+      "prompt": "The {other} project has a counter app. What number is it showing right now?",
+      "expect": [
+        "find_apps",
+        "attach_app"
+      ]
+    },
+    {
+      "id": "first-recall",
+      "profile": "reader",
+      "prompt": "What did we decide last time about the database backups?",
+      "expect": [
+        "recall",
+        "read_session"
+      ]
+    },
+    {
+      "id": "first-sessions",
+      "profile": "reader",
+      "prompt": "Is another session working in this repo right now? What is it doing?",
+      "expect": [
+        "read_session"
+      ]
+    },
+    {
+      "id": "first-ask",
+      "profile": "reader",
+      "prompt": "Get the {other} project to tell me what its README says.",
+      "expect": [
+        "ask_project"
+      ]
+    },
+    {
+      "id": "tempt-ask",
+      "profile": "reader",
+      "prompt": "List the files in the {other} project's top folder.",
+      "expect": [
+        "ask_project"
+      ]
+    },
+    {
+      "id": "tempt-recall",
+      "profile": "reader",
+      "prompt": "Before I change anything: have we already settled how the database gets backed up? Check first.",
+      "expect": [
+        "recall",
+        "read_session"
+      ]
+    },
+    {
+      "id": "tempt-sessions",
+      "profile": "reader",
+      "prompt": "Is something else running in this project at the moment?",
+      "expect": [
+        "read_session"
+      ]
+    },
+    {
+      "id": "tempt-app",
+      "profile": "reader",
+      "prompt": "Read the current value of the counter that the {other} project shares.",
+      "expect": [
+        "find_apps",
+        "attach_app"
+      ]
+    },
+    {
+      "id": "none-math",
+      "profile": "reader",
+      "prompt": "What is 17 times 23? Answer with the number only.",
+      "expect": []
+    },
+    {
+      "id": "none-files",
+      "profile": "reader",
+      "prompt": "List the files in this project's top folder.",
+      "expect": []
+    },
+    {
+      "id": "none-commit",
+      "profile": "reader",
+      "prompt": "Write a one-line commit message for a change that fixes a typo in README.md. Reply with the message only.",
+      "expect": []
+    }
+  ]
+}

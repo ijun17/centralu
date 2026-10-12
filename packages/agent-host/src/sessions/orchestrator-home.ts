@@ -3,12 +3,14 @@ import { join } from 'node:path'
 import { dataRoot } from '../data-dir.js'
 import { commandsFor } from './orchestrator-tools.js'
 
-let preamble = false
+let preamble = true
 
 /**
- * A preamble at the head of the orchestrator's role (#512, round 2; `CC_ORCHESTRATOR_PREAMBLE=1`, off by default):
- * look at what Centralu offers before doing a thing another way. The orchestrator's alone: Centralu offers its tools
- * to the person's own sessions but does not direct them (product-spec.md §1.2), so no ordinary session gets it.
+ * A preamble at the head of the orchestrator's role: the product rule (product-spec.md §1.2, #564), unless the person
+ * says otherwise, use what Centralu offers before doing a thing another way. Measured in #512's round 2 (33 to 55
+ * tokens a request, no regression) and on by default since #564; `CC_ORCHESTRATOR_PREAMBLE=0` turns it off for
+ * measurement. Ordinary sessions get the same rule as their tools' instructions (READER_INSTRUCTIONS), not here:
+ * their prompt carries no role.
  */
 export function setOrchestratorPreamble(on: boolean): void {
   preamble = on
@@ -18,8 +20,8 @@ export function setOrchestratorPreamble(on: boolean): void {
 export function orchestratorPreamble(): string {
   if (!preamble) return ''
   return commandsFor('orchestrator').length
-    ? "You are an agent running inside Centralu. Before doing something yourself or using another tool, look for what Centralu's MCP tools and commands can do (centralu_commands)."
-    : "You are an agent running inside Centralu. Before doing something yourself or using another tool, look for what Centralu's MCP tools can do."
+    ? "You are an agent running inside Centralu. Unless the person says otherwise, use Centralu's MCP tools and commands (centralu_commands) before doing something yourself or using another tool."
+    : "You are an agent running inside Centralu. Unless the person says otherwise, use Centralu's MCP tools before doing something yourself or using another tool."
 }
 
 /** The orchestrator's role as its session is given it: the preamble, when on, then the role */

@@ -17,7 +17,7 @@ import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
-import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier } from './sessions/orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
 import { readShared } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
@@ -167,9 +167,14 @@ if (pathResult.source !== 'unchanged') {
  */
 setRareTier(rareTierFrom(process.env.CC_RARE_COMMANDS))
 if (currentRareTier() !== DEFAULT_RARE_TIER) console.error(`[agent-host] rare commands: ${currentRareTier()} (CC_RARE_COMMANDS)`)
-// The orchestrator's preamble (#512 round 2), measured beside the tier; off unless this says otherwise
-setOrchestratorPreamble(process.env.CC_ORCHESTRATOR_PREAMBLE === '1')
-if (process.env.CC_ORCHESTRATOR_PREAMBLE === '1') console.error('[agent-host] orchestrator preamble on (CC_ORCHESTRATOR_PREAMBLE)')
+/*
+ * "Use Centralu's features first unless the person says otherwise" (#564): the orchestrator's preamble and the
+ * ordinary sessions' tool instructions, both on unless these say 0 (kept for measuring them against their absence)
+ */
+setOrchestratorPreamble(process.env.CC_ORCHESTRATOR_PREAMBLE !== '0')
+if (process.env.CC_ORCHESTRATOR_PREAMBLE === '0') console.error('[agent-host] orchestrator preamble off (CC_ORCHESTRATOR_PREAMBLE)')
+setReaderInstructions(process.env.CC_READER_INSTRUCTIONS !== '0')
+if (process.env.CC_READER_INSTRUCTIONS === '0') console.error("[agent-host] ordinary sessions' tool instructions off (CC_READER_INSTRUCTIONS)")
 
 /*
  * A swap's standby (#280 step 3): checks the store without writing to it, reports, and waits here,

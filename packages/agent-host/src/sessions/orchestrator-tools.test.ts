@@ -11,12 +11,16 @@ import {
   ORCHESTRATOR_MCP_NAME,
   ORCHESTRATOR_TOOLS,
   READER_BUDGET_CHARS,
+  READER_FIRST,
+  READER_INSTRUCTIONS,
   READER_TOOLS,
   RESIDENT_BUDGET_CHARS,
+  codexToolInstructionsFor,
   instructionsFor,
   orchestratorToolSchemas,
   profileAllows,
   runOrchestratorTool,
+  setReaderInstructions,
 } from './orchestrator-tools.js'
 import { TOOL_PROFILES, definitionChars, residentCost } from './tool-cost.js'
 
@@ -101,8 +105,26 @@ describe('the reader set', () => {
     for (const t of ORCHESTRATOR_TOOLS) {
       expect(profileAllows('reader', t.name), t.name).toBe(['read_session', 'recall', 'app_guide'].includes(t.name))
     }
-    // No server instructions: they are where a role would creep in
-    expect(instructionsFor('reader')).toBeUndefined()
+    // Its instructions (#564): Centralu's tools first unless the person says otherwise, one need per tool, and no role
+    const text = instructionsFor('reader')!
+    expect(text).toBe(READER_INSTRUCTIONS)
+    expect(text).toContain('Unless the person says otherwise')
+    for (const name of ['recall', 'read_session', 'ask_project', 'find_apps']) expect(text, name).toContain(name)
+    for (const line of READER_FIRST) expect(text).toContain(line)
+    // Every tool it names is one the seat has
+    for (const name of text.match(/\b[a-z]+_[a-z_]+\b/g) ?? []) expect(profileAllows('reader', name), name).toBe(true)
+    expect(text).not.toMatch(/send_to_session|create_session|orchestrat/)
+  })
+
+  it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {
+    try {
+      setReaderInstructions(false)
+      expect(instructionsFor('reader')).toBeUndefined()
+      expect(codexToolInstructionsFor('reader')).toBeUndefined()
+    } finally {
+      setReaderInstructions(true)
+    }
+    expect(codexToolInstructionsFor('reader')).toContain(READER_INSTRUCTIONS)
   })
 
   /*

@@ -31,9 +31,18 @@ The essence of a control tower is **not showing everything, but picking out the 
 
 **Product philosophy — the test every feature decision is put to:**
 
-> **Centralu does not control. It makes control possible.** It does not restrict the agent's autonomy or the user's workflow; it shows precisely what is happening right now and what is waiting on my judgement. **Do not block, make visible.** And the most expensive resource in this system is not tokens, it is **human attention**.
+> **Centralu does not control. It makes control possible.** It shows precisely what is happening right now and what is waiting on my judgement. **Do not block, make visible.** And the most expensive resource in this system is not tokens, it is **human attention**.
+>
+> **Agents running in Centralu use Centralu's own features first, unless the person directly says otherwise.** A session that needs an earlier conversation, another session's work, another project or an app reaches for what Centralu offers before another way of doing the same. The person decides: a direct instruction always wins.
 
-Every time a feature is added or changed, ask against this standard: is this coercion or visibility, does it conserve human attention or waste it?
+~~It does not restrict the agent's autonomy or the user's workflow~~ — **withdrawn 2026-10-12 (#564).** The sentence
+stood between the first two of the paragraph above, and it was read as "Centralu offers tools to the person's sessions
+and does not direct them": ordinary sessions got Centralu's tools with no instructions (#320), and only the
+orchestrator was told to look at Centralu first (#512). The owner replaced it with the rule above, so ordinary
+sessions and the orchestrator now carry it as instructions ([agent-host.md](agent-host.md) §1.1; what it costs in every
+request and what it changes: [tool-cost.md](tool-cost.md) §11). Recorded rather than deleted, as in §1.5.
+
+Every time a feature is added or changed, ask against this standard: does it block the person or make things visible, does it conserve human attention or waste it?
 
 3 core values:
 
@@ -294,9 +303,10 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - **Ordinary sessions get a light, read-only set** (#320, owner decision 2026-10-05, on by default): their
   own project's other sessions and conversations (`read_session`, which lists them when called without an id), a
   search of that project's past conversations (`recall`) and the app guide (`app_guide`). Another project's sessions
-  are out of reach, sending, creating and proposing stay with the orchestrator, and no role-changing instructions go
-  with it. It rides in every session on every turn, so it was measured and cut: the four candidates in the
-  orchestrator's words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
+  are out of reach, sending, creating and proposing stay with the orchestrator, and no role goes with it; since
+  #564 (2026-10-12) one short instruction does, the rule of §1.2 worded as which tool answers which need. It
+  rides in every session on every turn, so it was measured and cut: the four candidates in the orchestrator's
+  words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
   §1.1). Settings → Orchestrator → "Let sessions look at their own project" turns it off.
 - **An ordinary session can ask another project to do a task** (#371 part B, owner decision 2026-10-05):
   `ask_project({ project, task })` starts (or reuses) a visible session in that project, with its folder,

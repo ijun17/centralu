@@ -49,7 +49,7 @@ the Codex bridge.
 | `orchestrator` | the one orchestrator | every session | all but the builder's | role and usage |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320), a former worktree manager included | its own project, read at call time; acts on the agents it started | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
+| `reader` | every other session in a project (#320), a former worktree manager included | its own project, read at call time; acts on the agents it started | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
 
 The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
 server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
@@ -98,7 +98,8 @@ had measured the same for `send_to_session`, which is why its tools are `alwaysL
 `app_guide` was found through tool search 4 times in 5, against 5 in 5 loaded; the miss is an answer
 from a guess about the app, and the orchestrator has the guide loaded. Codex has no deferral and
 gets all three. `orchestrator-tools.test.ts` fails if the serialized set and its instructions pass
-`READER_BUDGET_CHARS` (1,000).
+`READER_BUDGET_CHARS` (1,000 until #564 gave the set its 392 characters of instructions; 1,400 since,
+the set at 1,375).
 
 The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) ride on
 the same server with their own ceiling, `APP_ACCESS_BUDGET_CHARS` (900; the set is 874), so neither
@@ -145,11 +146,20 @@ and reached a rare command less often (15 of 24 against 23 of 24). The owner mad
 numbers and because it keeps the orchestrator's resident prefix from growing as commands are added
 (decision of 2026-10-12, #512): the orchestrator carries 9,317 characters instead of 11,862, and its ceiling
 (`RESIDENT_BUDGET_CHARS`) went from 12,000 to 9,500.
-`CC_ORCHESTRATOR_PREAMBLE=1` (off by default) starts the orchestrator's role with a line telling it to look at what
-Centralu's tools and commands can do before doing a thing another way (`orchestratorRole`). The orchestrator's
-alone: Centralu offers tools to the person's own sessions and does not direct them (product-spec.md §1.2). Measured
-in round 2 of §9 (Sonnet and haiku, English and Korean): 33 to 55 tokens a request, no regression, no gain that
-held, so it stays off.
+**Centralu's features first** (#564, owner decision 2026-10-12, product-spec.md §1.2): unless the person says
+otherwise, agents running in Centralu use Centralu's own features first. Two seats carry it. The orchestrator's role
+starts with a preamble saying so (`orchestratorRole`; it names `centralu_commands` where the seat has the tier), first
+measured in round 2 of tool-cost.md §9 at 33 to 55 tokens a request with no regression and no gain that held, and on
+by default since #564. An ordinary session, which has no role, gets the same rule as its tools' instructions
+(`READER_INSTRUCTIONS`): one sentence naming which tool answers which need (`READER_FIRST`: `recall` for earlier
+conversations, `read_session` for this project's other sessions, `ask_project` for another project's work,
+`find_apps` for another project's apps, and `start_agent`, not the CLI's own Agent tool, for long work, another CLI
+or a worktree, or work the person will follow; the CLI's own subagents stay the way to hand off short helper work
+inside the turn, owner decision of 2026-10-12). A tool that joins the reader seat and answers a need the person states
+in words adds its line there. Before #564 the reader set had no instructions, on the principle that Centralu offered
+tools to the person's sessions and did not direct them; the owner withdrew that principle. `CC_ORCHESTRATOR_PREAMBLE=0`
+and `CC_READER_INSTRUCTIONS=0` (read once at start) turn either off, for measuring them against their absence. What
+they cost and change: [tool-cost.md](tool-cost.md) §11.
 
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts
 one more node process (about 40 MB resident, idle). The bridge sets

@@ -114,14 +114,29 @@ function deferredNames(messages: unknown[]): string[] {
 const ours = (name: string) => name.startsWith('mcp__centralu__') || name.startsWith('mcp__app-')
 
 const INSTRUCTIONS_HEAD = '# MCP Server Instructions'
+const INSTRUCTIONS_FRAME_RE = /\s*# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n(?!\n## )/
+
+/**
+ * The instructions Centralu's server can send, set by the driver (every profile's `instructionsFor`). Claude Code
+ * can put the servers' instructions in the same block as the agent list, the skill list and the date (#564: seen
+ * on Sonnet), so our section is taken out by its exact text rather than up to the block's end.
+ */
+let ourInstructions: string[] = []
+export function setOurInstructions(texts: string[]): void {
+  ourInstructions = [...texts].sort((a, b) => b.length - a.length)
+}
 
 /** A text block with Centralu's traces taken out, or null when nothing of it is left but its frame */
 function stripText(text: string): string | null {
   let t = text
   if (t.includes(DEFERRED_HEAD)) t = t.split('\n').filter((l) => !ours(l.trim())).join('\n')
   if (t.includes(INSTRUCTIONS_HEAD)) {
-    t = t.replace(/\n## centralu\n[\s\S]*?(?=\n## |\n<\/system-reminder>|$)/, '')
-    if (!/\n## /.test(t)) return null
+    const known = ourInstructions.find((x) => t.includes(`\n## centralu\n${x}`))
+    if (known !== undefined) t = t.replace(`\n## centralu\n${known}`, '')
+    else t = t.replace(/\n## centralu\n[\s\S]*?(?=\n## |\n<\/system-reminder>|$)/, '')
+    // The frame goes when no other server's section is left under it, and so does a block left with nothing in it
+    t = t.replace(INSTRUCTIONS_FRAME_RE, '')
+    if (!t.replace(/<\/?system-reminder>/g, '').trim()) return null
   }
   return t
 }

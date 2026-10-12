@@ -1,0 +1,93 @@
+{
+  "comment": "#564: prompts-564.json as a Korean speaker would type the same eleven asks, no tool and not Centralu named.",
+  "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "preset": "safe",
+  "selection": [
+    {
+      "id": "first-app",
+      "profile": "reader",
+      "prompt": "{other} 프로젝트에 카운터 앱이 있어. 지금 몇을 보여 주고 있어?",
+      "expect": [
+        "find_apps",
+        "attach_app"
+      ]
+    },
+    {
+      "id": "first-recall",
+      "profile": "reader",
+      "prompt": "지난번에 데이터베이스 백업을 어떻게 하기로 했었지?",
+      "expect": [
+        "recall",
+        "read_session"
+      ]
+    },
+    {
+      "id": "first-sessions",
+      "profile": "reader",
+      "prompt": "지금 이 저장소에서 다른 세션이 일하고 있어? 뭘 하고 있어?",
+      "expect": [
+        "read_session"
+      ]
+    },
+    {
+      "id": "first-ask",
+      "profile": "reader",
+      "prompt": "{other} 프로젝트한테 자기 README에 뭐라고 쓰여 있는지 알려 달라고 해 줘.",
+      "expect": [
+        "ask_project"
+      ]
+    },
+    {
+      "id": "tempt-ask",
+      "profile": "reader",
+      "prompt": "{other} 프로젝트 최상위 폴더에 있는 파일들을 나열해 줘.",
+      "expect": [
+        "ask_project"
+      ]
+    },
+    {
+      "id": "tempt-recall",
+      "profile": "reader",
+      "prompt": "뭘 바꾸기 전에: 데이터베이스 백업 방법을 이미 정해 둔 게 있어? 먼저 확인해 줘.",
+      "expect": [
+        "recall",
+        "read_session"
+      ]
+    },
+    {
+      "id": "tempt-sessions",
+      "profile": "reader",
+      "prompt": "지금 이 프로젝트에서 다른 무언가가 돌고 있어?",
+      "expect": [
+        "read_session"
+      ]
+    },
+    {
+      "id": "tempt-app",
+      "profile": "reader",
+      "prompt": "{other} 프로젝트가 공유하는 카운터의 지금 값을 읽어 줘.",
+      "expect": [
+        "find_apps",
+        "attach_app"
+      ]
+    },
+    {
+      "id": "none-math",
+      "profile": "reader",
+      "prompt": "17 곱하기 23은? 숫자만 답해.",
+      "expect": []
+    },
+    {
+      "id": "none-files",
+      "profile": "reader",
+      "prompt": "이 프로젝트 최상위 폴더에 있는 파일들을 나열해 줘.",
+      "expect": []
+    },
+    {
+      "id": "none-commit",
+      "profile": "reader",
+      "prompt": "README.md의 오타를 고친 변경에 붙일 한 줄 커밋 메시지를 써 줘. 메시지만.",
+      "expect": []
+    }
+  ]
+}

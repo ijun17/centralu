@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OrchestratorTools } from '../contract.js'
-import { DEFAULT_RARE_TIER, RARE_COMMANDS, SCOPED_INSTRUCTIONS, setRareTier } from '../../sessions/orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, RARE_COMMANDS, READER_INSTRUCTIONS, SCOPED_INSTRUCTIONS, setRareTier } from '../../sessions/orchestrator-tools.js'
 import { orchestratorMcp } from './orchestrator-mcp.js'
 
 /**
@@ -23,7 +23,7 @@ describe('the Claude in-process server', () => {
    * The orchestrator measured that deferral made it never find send_to_session; the reader set
    * measured that it made recall go unused. Only app_guide, the rarely needed one, waits (#320).
    */
-  it('loads the reader set except app_guide, and ask_project and find_apps with it, and sends it no instructions', () => {
+  it('loads the reader set except app_guide, and ask_project and find_apps with it, and sends its instructions (#564)', () => {
     expect(registered('reader')).toEqual({
       tools: {
         read_session: 'loaded',
@@ -38,7 +38,7 @@ describe('the Claude in-process server', () => {
         attach_app: 'deferred',
         detach_app: 'deferred',
       },
-      instructions: undefined,
+      instructions: READER_INSTRUCTIONS,
     })
   })
 

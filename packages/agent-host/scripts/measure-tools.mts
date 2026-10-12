@@ -16,7 +16,8 @@
  *          --rare commands|resident|deferred (#512: how the orchestrator's rare commands are exposed; the host's default)
  *          --kinds none,reader,orchestrator,builder (the session kinds the resident phase starts; the worktree manager
  *          went with its role, #561 part 3)
- *          --preamble (#512 round 2: the orchestrator's role starts with the preamble, CC_ORCHESTRATOR_PREAMBLE)
+ *          --preamble on|off (the orchestrator's role starts with the preamble, CC_ORCHESTRATOR_PREAMBLE; on, the host's default since #564)
+ *          --reader-instructions on|off (ordinary sessions' tool instructions, CC_READER_INSTRUCTIONS; on, the host's default, #564)
  *          --only <id,id> (run only these prompts of the set)
  *
  * Every host it starts runs on a temporary data folder (`CC_DATA_DIR` and `--db`), never `~/.centralu`.
@@ -28,10 +29,10 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { DEFAULT_RARE_TIER, ORCHESTRATOR_TOOLS, commandsFor, rareTierFrom, setRareTier, toolDefsFor } from '../src/sessions/orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, ORCHESTRATOR_TOOLS, commandsFor, instructionsFor, rareTierFrom, setRareTier, setReaderInstructions, toolDefsFor } from '../src/sessions/orchestrator-tools.js'
 import { TOOL_PROFILES, residentCost, type ResidentCost } from '../src/sessions/tool-cost.js'
 import { MeasuredHost, bareName, toolCalls, toolResults, type Call, type Json } from './measure-tools/host.mjs'
-import { ApiRecorder, call, say, type RecordedRequest, type Usage } from './measure-tools/recorder.mjs'
+import { ApiRecorder, call, say, setOurInstructions, type RecordedRequest, type Usage } from './measure-tools/recorder.mjs'
 import { REBUILD_TOKENS, compare, median, printSummary, total, withLoss, type Cli, type RequestRow, type SelectionRun, type Summary } from './measure-tools/report.mjs'
 
 const { values: opt, positionals } = parseArgs({
@@ -48,7 +49,8 @@ const { values: opt, positionals } = parseArgs({
     out: { type: 'string' },
     keep: { type: 'boolean', default: false },
     rare: { type: 'string', default: DEFAULT_RARE_TIER },
-    preamble: { type: 'boolean', default: false },
+    preamble: { type: 'string', default: 'on' },
+    'reader-instructions': { type: 'string', default: 'on' },
     only: { type: 'string' },
     kinds: { type: 'string', default: 'none,reader,orchestrator,builder' },
   },
@@ -90,6 +92,19 @@ const PROMPTS = JSON.parse(readFileSync(PROMPTS_FILE, 'utf8')) as {
 const RARE = rareTierFrom(opt.rare)
 if (RARE !== opt.rare) throw new Error(`--rare takes resident, deferred or commands, not ${opt.rare}`)
 setRareTier(RARE)
+/*
+ * The rule of #564 on its two seats, each on unless turned off: the orchestrator's preamble and the ordinary
+ * sessions' tool instructions. This process counts the definitions the same way the host it starts sends them.
+ */
+const onOff = (name: string, v: string) => {
+  if (v !== 'on' && v !== 'off') throw new Error(`--${name} takes on or off, not ${v}`)
+  return v === 'on'
+}
+const PREAMBLE = onOff('preamble', opt.preamble)
+const READER_INSTRUCTIONS_ON = onOff('reader-instructions', opt['reader-instructions'])
+setReaderInstructions(READER_INSTRUCTIONS_ON)
+// What the recorder takes out of a request to count Centralu's own tokens: the instructions each seat can be sent
+setOurInstructions(TOOL_PROFILES.map((p) => instructionsFor(p)).filter((x): x is string => Boolean(x)))
 if (opt.only) {
   const only = opt.only.split(',').map((x) => x.trim())
   PROMPTS.selection = PROMPTS.selection.filter((p) => only.includes(p.id))
@@ -149,7 +164,7 @@ async function world(cli: Cli, recorder: ApiRecorder | null) {
       server: { command: process.execPath, args: [FIXTURE, '--mode', 'attach'] },
     }),
   )
-  const env: Record<string, string> = { CC_RARE_COMMANDS: RARE, ...(opt.preamble ? { CC_ORCHESTRATOR_PREAMBLE: '1' } : {}) }
+  const env: Record<string, string> = { CC_RARE_COMMANDS: RARE, CC_ORCHESTRATOR_PREAMBLE: PREAMBLE ? '1' : '0', CC_READER_INSTRUCTIONS: READER_INSTRUCTIONS_ON ? '1' : '0' }
   if (recorder) {
     env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${recorder.port}`
     /*
@@ -620,7 +635,7 @@ printSummary(summary)
 const out = opt.out ?? join(tmpdir(), `measure-tools-${LIVE ? 'live' : 'dry'}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
 writeFileSync(
   out,
-  JSON.stringify({ meta: { mode: LIVE ? 'live' : 'dry', at: new Date().toISOString(), commit, versions, reps: REPS, clis: CLIS, rare: RARE, preamble: opt.preamble, prompts: PROMPTS }, summary, raw }, null, 1),
+  JSON.stringify({ meta: { mode: LIVE ? 'live' : 'dry', at: new Date().toISOString(), commit, versions, reps: REPS, clis: CLIS, rare: RARE, preamble: PREAMBLE, readerInstructions: READER_INSTRUCTIONS_ON, prompts: PROMPTS }, summary, raw }, null, 1),
 )
 console.log(`\nwrote ${out}`)
 process.exit(0)

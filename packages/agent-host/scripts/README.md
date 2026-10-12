@@ -37,7 +37,9 @@ pnpm measure:tools       # what Centralu's MCP tools cost (#513): dry by default
 spends nothing (the real Claude CLI talks to a fake API), `--live` measures tokens, cache rebuilds,
 tool selection and result growth, and `--compare a.json b.json` sets two runs side by side. `--rare`
 starts the host with the orchestrator's rare commands behind `centralu_run` (the default), resident or
-deferred (#512, with `measure-tools/prompts-512.json`). How to read it, and the baseline:
+deferred (#512, with `measure-tools/prompts-512.json`); `--reader-instructions` and `--preamble` (`on` or
+`off`) start it with or without the rule of #564 on each seat (with `measure-tools/prompts-564.json`). How to
+read it, and the baseline:
 [docs/tool-cost.md](../../../docs/tool-cost.md).
 
 ## Probes — kept as the basis for a decision

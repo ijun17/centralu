@@ -10,8 +10,8 @@ import { ExternalApps } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
-import { ORCHESTRATOR_ROLE } from './orchestrator-home.js'
-import { instructionsFor } from './orchestrator-tools.js'
+import { ORCHESTRATOR_ROLE, orchestratorRole } from './orchestrator-home.js'
+import { READER_INSTRUCTIONS, codexToolInstructionsFor, instructionsFor } from './orchestrator-tools.js'
 
 /**
  * A Codex session through the real manager and the real adapter, with only the app-server faked, and faked the way
@@ -144,7 +144,9 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
     const o = await mgr.orchestrator()
     await mgr.resumeSession(o.id)
     const text = developerInstructions()
-    expect(text.startsWith(ORCHESTRATOR_ROLE)).toBe(true)
+    // The role as the session is given it: the preamble (on by default, #564), then the role
+    expect(text.startsWith(orchestratorRole())).toBe(true)
+    expect(orchestratorRole().endsWith(ORCHESTRATOR_ROLE)).toBe(true)
     expect(text).toContain(instructionsFor('orchestrator')!)
   })
 
@@ -155,8 +157,9 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
     expect(text.indexOf(instructionsFor('builder')!)).toBeGreaterThan(0)
   })
 
-  it('an ordinary session: the reader set has no instructions, so none are added', async () => {
+  it("an ordinary session: the reader set's instructions alone, since it has no role (#564)", async () => {
     await rpc('agents.createSession', { projectId, cwd: repo, tool: 'codex' })
-    expect(sent('thread/start').at(-1)!.params.developerInstructions).toBeUndefined()
+    expect(sent('thread/start').at(-1)!.params.developerInstructions).toBe(codexToolInstructionsFor('reader'))
+    expect(developerInstructions()).toContain(READER_INSTRUCTIONS)
   })
 })

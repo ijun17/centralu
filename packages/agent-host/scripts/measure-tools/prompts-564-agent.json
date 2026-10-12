@@ -1,0 +1,49 @@
+{
+  "comment": "#564 option B: start_agent for work in another CLI or a worktree, long work, or work the person will follow; the CLI's own subagents for short helper work inside the turn. Placeholders as in prompts.json. Run under safe, consent cards declined, so no child is started and nothing is written. helper-search expects no Centralu call (the built-in Agent tool is the right answer; the run's calls say whether it was used).",
+  "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "preset": "safe",
+  "selection": [
+    {
+      "id": "start-codex",
+      "profile": "reader",
+      "prompt": "Have Codex write a one-line shell command that counts the files in this folder, then tell me what it wrote.",
+      "expect": ["start_agent"]
+    },
+    {
+      "id": "start-agent",
+      "profile": "reader",
+      "prompt": "Hand this to another agent and tell me what it says: summarize what this folder contains in one sentence.",
+      "expect": ["start_agent"]
+    },
+    {
+      "id": "start-long",
+      "profile": "reader",
+      "prompt": "Hand off building a CSV-to-JSON converter for this repo, with tests. It is a long job and I want to check on its progress myself later.",
+      "expect": ["start_agent"]
+    },
+    {
+      "id": "helper-search",
+      "profile": "reader",
+      "prompt": "Use a helper to search the code here for TODO comments and give me the list.",
+      "expect": []
+    },
+    {
+      "id": "none-math",
+      "profile": "reader",
+      "prompt": "What is 17 times 23? Answer with the number only.",
+      "expect": []
+    },
+    {
+      "id": "none-files",
+      "profile": "reader",
+      "prompt": "List the files in this project's top folder.",
+      "expect": []
+    },
+    {
+      "id": "none-commit",
+      "profile": "reader",
+      "prompt": "Write a one-line commit message for a change that fixes a typo in README.md. Reply with the message only.",
+      "expect": []
+    }
+  ]
+}

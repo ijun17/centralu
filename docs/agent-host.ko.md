@@ -44,7 +44,7 @@ claude는 인프로세스, codex는 stdio 다리.
 | `orchestrator` | 하나뿐인 오케스트레이터 | 모든 세션 | 빌더 전용을 뺀 전부 | 역할과 사용법 |
 | `scoped` | 코디네이터(#80). 관제 앱의 작업만 만들었고, 그것은 만들던 RPC와 함께 #372에서 걷어냈다. 저장소에 있는 것은 이 프로필로 깨어난다 | 자기 멤버 | 목록, 읽기, 보내기 | 자기 경계 |
 | `builder` | 앱을 만드는 세션 (M4 C-3) | 자기 앱 | `check` | 만들고 검사하기 |
-| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320), 예전 워크트리 매니저 포함 | 자기 프로젝트, 호출할 때 읽음. 자기가 띄운 에이전트에 손을 댄다 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2); `start_agent`, `agent_session`(#561, §1.2.1). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 없음 |
+| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320), 예전 워크트리 매니저 포함 | 자기 프로젝트, 호출할 때 읽음. 자기가 띄운 에이전트에 손을 댄다 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2); `start_agent`, `agent_session`(#561, §1.2.1). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 사람이 달리 말하지 않는 한 Centralu의 도구를 먼저 (#564) |
 
 지침은 두 CLI 모두에서 모델에 닿지만, 들어가는 문이 다르다. Claude는 프로세스 안 서버의 `instructions`로
 받는다. codex-cli 0.160.0은 서버의 지침을 어떤 모델에게도 보여 주지 않으므로(#525,
@@ -90,7 +90,7 @@ claude.ai 커넥터 끔):
 `alwaysLoad`다). 미룬 `app_guide`는 도구 검색으로 5번 중 4번 찾았다(로드하면 5번 중 5번). 놓친
 한 번은 앱에 대한 추측 답이고, 오케스트레이터는 안내서를 로드해 둔다. Codex에는 미루기가 없어
 셋 다 받는다. `orchestrator-tools.test.ts`는 직렬화한 묶음과 지침이 `READER_BUDGET_CHARS`
-(1,000)를 넘으면 실패한다.
+(#564가 이 묶음에 392자의 지시문을 주기 전까지 1,000, 그 뒤로 1,400. 묶음은 1,375자)를 넘으면 실패한다.
 
 앱 붙이기 도구(#371 A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4)는 같은 서버에 자기 한도
 `APP_ACCESS_BUDGET_CHARS`(900. 지금 874)로 실린다. 어느 묶음도 다른 쪽의 여유로 자라지 않게 하려는 것이다.
@@ -130,10 +130,19 @@ haiku에서는 709토큰을 아꼈고 드문 명령에 덜 닿았다(24번 중 1
 명령이 늘어도 오케스트레이터의 상주 앞부분이 자라지 않는다는 점을 보고 이 층을 기본으로 정했다(2026-10-12 결정,
 #512): 오케스트레이터가 싣는 것은 11,862자에서 9,317자가 되었고, 그 상한(`RESIDENT_BUDGET_CHARS`)은 12,000에서
 9,500이 되었다.
-`CC_ORCHESTRATOR_PREAMBLE=1`(기본은 꺼짐)은 오케스트레이터의 역할 앞에, 다른 방법으로 일하기 전에 Centralu의
-도구와 명령이 할 수 있는 것을 먼저 보라는 한 줄을 붙인다(`orchestratorRole`). 오케스트레이터에만 붙는다: Centralu는
-사람의 세션에 도구를 내줄 뿐 그 세션을 지휘하지 않는다(product-spec.md §1.2). §9의 2차 측정(Sonnet과 haiku,
-영어와 한국어)에서 요청마다 33~55토큰이 들었고, 퇴행은 없었으며, 유지된 이득도 없었다. 그래서 꺼 둔다.
+**Centralu의 기능을 먼저**(#564, 2026-10-12 소유자 결정, product-spec.md §1.2): 사람이 달리 말하지 않는 한,
+Centralu 안에서 도는 에이전트는 Centralu의 기능을 먼저 쓴다. 두 자리가 이것을 싣는다. 오케스트레이터의 역할은 그렇게
+말하는 머리말로 시작한다(`orchestratorRole`. 명령 층이 있는 자리에서는 `centralu_commands`를 이름으로 부른다). 이
+머리말은 tool-cost.md §9의 2차 측정에서 요청마다 33~55토큰이 들었고 퇴행도, 유지된 이득도 없었으며, #564부터 기본으로
+켜진다. 역할이 없는 일반 세션은 같은 규칙을 도구의 지시문으로 받는다(`READER_INSTRUCTIONS`): 어떤 필요에 어떤 도구인지를
+말하는 한 문장이다(`READER_FIRST`: 예전 대화는 `recall`, 이 프로젝트의 다른 세션은 `read_session`, 다른 프로젝트의 일은
+`ask_project`, 다른 프로젝트의 앱은 `find_apps`, 그리고 오래 걸리는 일, 다른 CLI나 워크트리에서 할 일, 사람이
+지켜보거나 이어 갈 일은 CLI 자신의 Agent 도구가 아니라 `start_agent`. 턴 안의 짧은 보조 일은 CLI 자신의 서브에이전트가
+맡는다: 2026-10-12 소유자 결정). 일반 세션 묶음에 들어오면서 사람이 말로 하는 필요에 답하는 도구는
+거기에 한 줄을 더한다. #564 전에는 일반 세션 묶음에 지시문이 없었다: Centralu는 사람의 세션에 도구를 내줄 뿐 그
+세션을 지휘하지 않는다는 원칙 때문이었고, 소유자가 그 원칙을 거두었다. `CC_ORCHESTRATOR_PREAMBLE=0`과
+`CC_READER_INSTRUCTIONS=0`(시작할 때 한 번 읽는다)은 각각을 끈다: 없을 때와 견주어 재기 위한 것이다. 드는 값과
+바뀌는 것: [tool-cost.md](tool-cost.md) §11(영어만).
 
 묶음을 받은 Codex 세션은 stdio 다리를 띄우므로, #320 이후 모든 Codex 세션이 node 프로세스를
 하나 더 띄운다(유휴 시 상주 메모리 약 40 MB). 다리는 `default_tools_approval_mode: 'approve'`를

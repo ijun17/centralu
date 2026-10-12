@@ -37,7 +37,7 @@
 | [spikes/m0-findings.md](spikes/m0-findings.md) | M0: 권한 오버라이드, 이벤트, Codex, 토폴로지 — 넷 다 성립했다 |
 | [spikes/2026-10-memory-heavy-store.md](spikes/2026-10-memory-heavy-store.md) | 주인 스토어 모양의 무거운 스토어에서 창이 쓰는 메모리 (#364): WebKit과 Chromium, 대기·그리드·전환·스트리밍, #393 전후; 최적화 대상 |
 | [spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) | Linux(WSL2 Ubuntu 24.04)에서 키퍼를 실제로 돌려 본 기록: #350의 원인(procps-ng 4.0.4의 `kill`), 키퍼 스크립트, 넘겨주기와 #387 스윕, AppImage 마운트가 사라질 때, 기본값이 되기 전에 남은 것 |
-| [tool-cost.md](tool-cost.md) | Centralu의 MCP 도구가 세션에 드는 값(#513): `pnpm measure:tools`를 돌리고 읽는 법, 그리고 기준선: Claude와 Codex에서 세션 종류별 상주 토큰, 사건별 캐시 재구축, 도구 선택과 첫 시도 인자, 결과가 불어나는 양, 그리고 오케스트레이터의 드문 명령을 상주·미루기·`centralu_run` 뒤에 둘 때(#512) (영어만) |
+| [tool-cost.md](tool-cost.md) | Centralu의 MCP 도구가 세션에 드는 값(#513): `pnpm measure:tools`를 돌리고 읽는 법, 그리고 기준선: Claude와 Codex에서 세션 종류별 상주 토큰, 사건별 캐시 재구축, 도구 선택과 첫 시도 인자, 결과가 불어나는 양, 그리고 오케스트레이터의 드문 명령을 상주·미루기·`centralu_run` 뒤에 둘 때(#512), 일반 세션에 Centralu의 도구를 먼저 쓰라고 할 때(#564) (영어만) |
 | [ux-metrics.md](ux-metrics.md) | 핵심 작업이 키보드·마우스 조작으로 얼마나 드는지 (#518): Keystroke-Level Model과 Fitts의 법칙, 값과 출처, M을 놓는 규칙, 작업을 쓰는 법과 숫자를 읽는 법, 예산, 기준선과 그것이 보여 주는 것 (영어만) |
 | [runtime-lessons.md](runtime-lessons.md) | 프로세스 런타임의 시행착오 기록: 창·셸·키퍼·호스트·에이전트·터미널·원격 `serve`를 OS마다 시작·감독·넘겨주기·업데이트·종료하며 배운 규칙, 각 규칙을 지키는 테스트, 아직 테스트가 없는 규칙의 작업 목록 (영어만) |
 | [plans/m1-plan.md](plans/m1-plan.md) · [m1-result.md](plans/m1-result.md) | M1 계획과 결과: 게이트, 측정된 성능, 구현 중에 내린 결정 |

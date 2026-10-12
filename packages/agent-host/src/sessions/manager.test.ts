@@ -2168,7 +2168,7 @@ describe("an ordinary session's reader set (#320)", () => {
     return { shop, other, orc, a1, a2, b }
   }
 
-  it('is attached at creation and at wake, with no instructions and none of the orchestrator\'s tools', async () => {
+  it('is attached at creation and at wake, with no role and none of the orchestrator\'s tools', async () => {
     const { a1 } = await setup()
     expect(a1.opts.toolProfile).toBe('reader')
     expect(a1.tools).toBeDefined()
@@ -4165,14 +4165,14 @@ describe('the commands tier through the host (#512)', () => {
   })
 
   /*
-   * The preamble (#512 round 2) is the orchestrator's: Centralu offers its tools to the person's own sessions and
-   * does not direct them (product-spec.md §1.2), so an ordinary session's prompt never carries it.
+   * The preamble (#512 round 2, on by default since #564) is the orchestrator's role: an ordinary session has no
+   * role, and gets the same rule as its tools' instructions instead (READER_INSTRUCTIONS), so its prompt never
+   * carries the preamble.
    */
-  it("puts the preamble, when on, at the head of the orchestrator's role and nowhere else", async () => {
+  it("puts the preamble, on by default, at the head of the orchestrator's role and nowhere else", async () => {
     try {
-      setOrchestratorPreamble(true)
       await mgr.orchestrator()
-      expect(adapter.lastOpts?.systemPromptAppend).toMatch(/^You are an agent running inside Centralu\. .*\(centralu_commands\)\.\n\nYou are the central orchestrator/)
+      expect(adapter.lastOpts?.systemPromptAppend).toMatch(/^You are an agent running inside Centralu\. Unless the person says otherwise, .*\(centralu_commands\).*\n\nYou are the central orchestrator/)
       const p = await addProject()
       await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
       expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('running inside Centralu')
@@ -4181,7 +4181,7 @@ describe('the commands tier through the host (#512)', () => {
       setOrchestratorPreamble(false)
       expect(orchestratorPreamble()).toBe('')
     } finally {
-      setOrchestratorPreamble(false)
+      setOrchestratorPreamble(true)
     }
   })
 

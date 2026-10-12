@@ -238,8 +238,10 @@ export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly Orchestr
  *     a session wants nearly every time. `around` goes unexplained: recall's own answer spells
  *     out the call (`read_session(sessionId=…, around=…)`).
  *
- * No instructions go with this set (READER_INSTRUCTIONS is empty): the descriptions are enough to
- * choose a tool, and server instructions are where a role would creep in.
+ * Short instructions go with this set (READER_INSTRUCTIONS, #564): use Centralu's tools first unless the person
+ * says otherwise. Until 2026-10-12 it had none, on the principle that Centralu offers tools to the person's
+ * sessions and does not direct them (product-spec.md §1.2); the owner reversed that. They still carry no role:
+ * the session stays an ordinary session, and they only say which tool answers which need.
  */
 export const READER_TOOLS = [
   {
@@ -369,18 +371,52 @@ export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
  */
 export const APP_ACCESS_BUDGET_CHARS = 900
 
-/** No server instructions for the reader set — see READER_TOOLS */
-export const READER_INSTRUCTIONS = ''
+/**
+ * What an ordinary session reaches for first, one need per entry (#564). A tool that joins the reader seat and
+ * answers a need the person states in words adds its line here. Every entry rides in every ordinary session's
+ * every request, on Claude as the server's instructions and on Codex in the thread's developer instructions
+ * (codexToolInstructionsFor); the cost and the selection with and without them are in docs/tool-cost.md §11.
+ */
+export const READER_FIRST: readonly string[] = [
+  'recall for earlier conversations',
+  "read_session for this project's other sessions",
+  "find_apps to use another project's app",
+  'ask_project to have another project do work',
+  /*
+   * #561's tool. Owner decision (2026-10-12, option B): the CLI's own subagents stay the way to hand off short helper
+   * work inside the turn; start_agent is for work that runs in another CLI or a worktree, runs long, or that the person
+   * will follow. Naming the Agent tool is what moved the choice (docs/tool-cost.md §11).
+   */
+  'start_agent, not your Agent tool, for long work, another CLI or a worktree, or work the person will follow',
+]
+
+/**
+ * The reader set's instructions (#564): the product rule (product-spec.md §1.2), worded as needs rather than as a
+ * role. "Unless the person says otherwise" is the rule's own limit: a direct instruction wins.
+ */
+export const READER_INSTRUCTIONS = `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${READER_FIRST.join('; ')}.`
+
+let readerInstructions = true
+
+/**
+ * `CC_READER_INSTRUCTIONS=0` (read once at start, main.ts): ordinary sessions get their tools without the
+ * instructions, as before #564. For measuring the instructions against their absence; on by default.
+ */
+export function setReaderInstructions(on: boolean): void {
+  readerInstructions = on
+}
 
 /**
  * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
  * description and JSON schema, plus the instructions — the deferred app_guide included, since
- * Codex loads it. The set is 983 today, 86 of them app_guide's topic enum (#523; it was 897 with a
- * free-string topic; the four candidates in the orchestrator's words were 2,493); the measured
- * tokens are in docs/agent-host.md. Raising it is a decision about every
- * session's context, not a number to bump when a test fails.
+ * Codex loads it. The set is 1,375 today: 983 of tools, 86 of them app_guide's topic enum (#523; it was
+ * 897 with a free-string topic; the four candidates in the orchestrator's words were 2,493), and 392 of
+ * instructions (#564, raised from 1,000 for them: +127 tokens a request on haiku with the start_agent line,
+ * +121 on Sonnet and +70 on Codex without it, docs/tool-cost.md §11); the measured tokens of the tools are in
+ * docs/agent-host.md. Raising it is a decision about every session's context, not a number to bump when a test
+ * fails: a line added to READER_FIRST counts here.
  */
-export const READER_BUDGET_CHARS = 1000
+export const READER_BUDGET_CHARS = 1400
 
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
@@ -1106,7 +1142,7 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier)
   switch (profile) {
     case 'scoped': return SCOPED_INSTRUCTIONS
     case 'builder': return BUILDER_INSTRUCTIONS
-    case 'reader': return READER_INSTRUCTIONS || undefined
+    case 'reader': return readerInstructions ? READER_INSTRUCTIONS : undefined
     default: return commandsFor(profile, tier).length ? `${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}` : ORCHESTRATOR_INSTRUCTIONS
   }
 }
