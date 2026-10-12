@@ -28,6 +28,9 @@ function npmLayout(version: string, body: Buffer | string): void {
   writeFileSync(exe, body)
 }
 
+/** A file's id, as a bigint: an NTFS id is above 2^53, and as Numbers two files' ids can come out equal (#368) */
+const fileId = (path: string) => statSync(path, { bigint: true }).ino
+
 const links = (fs: Partial<ExeFs> = {}, platform: NodeJS.Platform = 'win32', log: string[] = []) =>
   new ClaudeLinks({ platform, root: () => root, fs: { ...realExeFs, ...fs }, log: (l) => log.push(l) })
 
@@ -87,7 +90,7 @@ describe('starting Claude from a hard link in the data folder', () => {
     expect(run.key).toBe(`2.1.289-${PROGRAM.length}`)
     expect(run.path).toBe(join(root, 'tools', 'claude', run.key!, 'claude.exe'))
     // The same file under a second name: no copy, no extra disk
-    expect(statSync(run.path).ino).toBe(statSync(exe).ino)
+    expect(fileId(run.path)).toBe(fileId(exe))
     expect(statSync(exe).nlink).toBe(2)
     // No temporary name is left next to it
     expect(readdirSync(join(root, 'tools', 'claude', run.key!))).toEqual(['claude.exe'])
@@ -109,7 +112,7 @@ describe('starting Claude from a hard link in the data folder', () => {
     const l = links({ link: () => { throw Object.assign(new Error(code), { code }) } }, 'win32', log)
     const run = l.prepare(exe)
     expect(run.path).toBe(join(root, 'tools', 'claude', `2.1.289-${PROGRAM.length}`, 'claude.exe'))
-    expect(statSync(run.path).ino).not.toBe(statSync(exe).ino)
+    expect(fileId(run.path)).not.toBe(fileId(exe))
     expect(readFileSync(run.path)).toEqual(PROGRAM)
     expect(log.join('\n')).toContain(code)
   })

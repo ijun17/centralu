@@ -104,7 +104,8 @@ describe('where a Windows Claude session starts from (#353)', () => {
     const { handle, cli } = await session(adapter())
     const path = cli.options.pathToClaudeCodeExecutable as string
     expect(path).toBe(join(dir, 'data', 'tools', 'claude', `2.1.289-${PROGRAM.length}`, 'claude.exe'))
-    expect(statSync(path).ino).toBe(statSync(exe).ino)
+    // bigint ids: as Numbers, two NTFS file ids above 2^53 can come out equal (#368)
+    expect(statSync(path, { bigint: true }).ino).toBe(statSync(exe, { bigint: true }).ino)
     await handle.dispose()
   })
 
