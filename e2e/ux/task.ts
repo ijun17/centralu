@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { analyse, budgetBreaches, type Budget, type Hand, type PendingTask, type Point, type TaskResult } from './klm.js'
+import { analyse, budgetBreaches, type Access, type Budget, type Hand, type PendingTask, type Point, type TaskResult } from './klm.js'
 import { Recorder } from './recorder.js'
 
 /**
@@ -11,7 +11,11 @@ import { Recorder } from './recorder.js'
  * - `run` is the task. Everything in it goes through the recorder.
  * - `goal` checks that the task got where it was going: "the session is running", "the approval
  *   is answered". Its wait is the task's last R.
- * - `budget` is optional: upper bounds that fail the run when exceeded.
+ * - `access` says whether the path is on screen (`discoverable`) or needs a shortcut known
+ *   beforehand (`shortcut`), klm.ts `Access`.
+ * - `budget`: upper bounds that fail the run when exceeded. Only a discoverable path has one
+ *   (owner, 2026-10-12): a shortcut is known only to people who already know it, so how cheap it is
+ *   never stands for the task, and a budget on it would argue the opposite.
  */
 export type UxTask = {
   /** `<task>.<path>`, e.g. `switch-session.keyboard` */
@@ -26,10 +30,9 @@ export type UxTask = {
   start: (page: Page) => Promise<void>
   run: (u: Recorder, page: Page) => Promise<void>
   goal: (page: Page) => Promise<void>
-  budget?: Budget
   /** Anything a reader of the numbers needs to know (what the path leaves out, what it assumes) */
   notes?: string[]
-}
+} & ({ access: Extract<Access, 'discoverable'>; budget: Budget } | { access: Extract<Access, 'shortcut'>; budget?: never })
 
 /** The name the result travels under, from the test to the reporter (reporter.ts) */
 export const UX_ATTACHMENT = 'ux-task'
@@ -42,7 +45,7 @@ export function uxTask(t: UxTask): void {
     await u.begin(t.pointer)
     await t.run(u, page)
     await u.until('goal', () => t.goal(page))
-    const base = analyse({ id: t.id, task: t.task, path: t.path, notes: t.notes }, u.steps(), t.hand ?? 'keyboard')
+    const base = analyse({ id: t.id, task: t.task, path: t.path, access: t.access, notes: t.notes }, u.steps(), t.hand ?? 'keyboard')
     const result: TaskResult = { ...base, notes: [...base.notes, ...u.warnings], breaches: budgetBreaches(base, t.budget) }
     await info.attach(UX_ATTACHMENT, { body: JSON.stringify(result), contentType: 'application/json' })
     expect(result.breaches, `${t.id} went over its budget; the operators were \`${result.operators}\``).toEqual([])

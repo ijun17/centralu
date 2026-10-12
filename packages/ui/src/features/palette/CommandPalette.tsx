@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { nextWaitingSession } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { newSessionProjectOf, useStore } from '../../store/store.js'
+import { isRemoteUserApp, useAppCatalog } from '../../store/app-catalog.js'
 import { computeInbox } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
@@ -13,11 +14,13 @@ type Item =
   | { kind: 'project'; id: string; label: string; sub: string }
   | { kind: 'action'; id: string; label: string; sub: string; run: () => void }
   | { kind: 'message'; id: string; sessionId: string; label: string; sub: string }
+  | { kind: 'app'; id: string; label: string; sub: string; projectId: string | null; appId: string; machine: string | null }
 
 /**
- * Command palette (E-2) — finds projects, sessions, actions and **conversation content** from
+ * Command palette (E-2) — finds projects, sessions, apps, actions and **conversation content** from
  * one search box. Since "where did we talk about that" is the real question in this app, search
- * results are mixed into the same list.
+ * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the Search button at the top of
+ * the sidebar (#529), which is how a person who was never told the key finds it.
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
@@ -33,6 +36,12 @@ export function CommandPalette() {
   const togglePanel = useStore((s) => s.togglePanel)
   const toggleSettings = useStore((s) => s.toggleSettings)
   const toggleInbox = useStore((s) => s.toggleInbox)
+  const openNewSession = useStore((s) => s.openNewSession)
+  const openApp = useStore((s) => s.openApp)
+  const machines = useStore((s) => s.machines)
+  // Where "New session" would start one: named in its row, so the person sees which project before choosing it
+  const newSessionIn = useStore((s) => newSessionProjectOf(s))
+  const catalog = useAppCatalog()
   const platform = usePlatform()
   const sc = useShortcut()
   const nav = useNavShortcut()
@@ -88,7 +97,12 @@ export function CommandPalette() {
     const q = query.trim().toLowerCase()
     const match = (s: string) => !q || s.toLowerCase().includes(q)
 
+    const newIn = newSessionIn ? projects[newSessionIn] : undefined
     const actions: Item[] = [
+      // Starting a session (#529): the dialog the project's + opens, for the project the person is in
+      ...(newIn
+        ? [{ kind: 'action' as const, id: 'new-session', label: 'New session', sub: `in ${newIn.name}`, run: () => openNewSession(newIn.id) }]
+        : []),
       { kind: 'action', id: 'settings', label: 'Open settings', // The window's own categories, in its own order — the palette should not describe a
       // room by a floor plan it no longer has (issue #7)
       sub: 'Notifications · permissions · shortcuts', run: () => toggleSettings(true) },
@@ -134,6 +148,24 @@ export function CommandPalette() {
         .filter((p) => match(p.name))
         .slice(0, 5)
         .map<Item>((p) => ({ kind: 'project', id: p.id, label: p.name, sub: p.path })),
+      /*
+       * Apps (#529), by name — the same rows the sidebar lists, so an app scrolled out of sight or on a folded project
+       * is a few letters away. Only when asked for: with nothing typed, the list stays the sessions and projects it was.
+       */
+      ...(q
+        ? catalog.external
+            .filter((a) => match(a.title))
+            .slice(0, 5)
+            .map<Item>((a) => {
+              const machine = isRemoteUserApp(a.info) ? (a.info.machine ?? null) : null
+              const sub = a.projectId
+                ? (projects[a.projectId]?.name ?? '')
+                : machine
+                  ? (machines[machine]?.name ?? machine)
+                  : 'Your apps'
+              return { kind: 'app', id: a.key, label: a.title, sub, projectId: a.projectId, appId: a.appId, machine }
+            })
+        : []),
       ...actions.filter((a) => match(a.label)),
       ...hits.slice(0, 10).map<Item>((h) => ({
         kind: 'message',
@@ -143,7 +175,23 @@ export function CommandPalette() {
         sub: sessions[h.sessionId]?.name ?? 'Chat',
       })),
     ]
-  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings, toggleInbox, focusSession, sc, nav])
+  }, [
+    query,
+    sessions,
+    projects,
+    hits,
+    catalog,
+    machines,
+    newSessionIn,
+    openNewSession,
+    openGit,
+    togglePanel,
+    toggleSettings,
+    toggleInbox,
+    focusSession,
+    sc,
+    nav,
+  ])
 
   const choose = useCallback(
     (item: Item) => {
@@ -163,10 +211,13 @@ export function CommandPalette() {
         // A project with no session still has to be selectable (#183) — it used to just close the palette and leave the screen unchanged
         if (first) go(first.id)
         else focusProject(item.id)
+      } else if (item.kind === 'app') {
+        // As its sidebar row opens it: only a linked machine's user-folder app names its machine (AppRow)
+        openApp(item.projectId, item.appId, { machine: item.machine })
       } else item.run()
       toggle(false)
     },
-    [focusSession, focusProject, askComposerFocus, sessions, toggle],
+    [focusSession, focusProject, askComposerFocus, openApp, sessions, toggle],
   )
 
   useEffect(() => {
@@ -207,7 +258,7 @@ export function CommandPalette() {
         <input
           ref={inputRef}
           className="w-full border-b border-line bg-transparent px-4 py-3 text-md text-ink placeholder:text-ink-faint focus:outline-none"
-          placeholder="Search sessions, projects, messages"
+          placeholder="Search sessions, projects, apps, messages"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)
@@ -231,7 +282,15 @@ export function CommandPalette() {
                   data-testid={`palette-item-${item.kind}`}
                 >
                   <span className="w-10 shrink-0 text-2xs uppercase text-ink-faint">
-                    {item.kind === 'session' ? 'Session' : item.kind === 'project' ? 'Folder' : item.kind === 'message' ? 'Chat' : 'Action'}
+                    {item.kind === 'session'
+                      ? 'Session'
+                      : item.kind === 'project'
+                        ? 'Folder'
+                        : item.kind === 'message'
+                          ? 'Chat'
+                          : item.kind === 'app'
+                            ? 'App'
+                            : 'Action'}
                   </span>
                   <span className="truncate text-md text-ink">{item.label}</span>
                   <span className="ml-auto shrink-0 truncate text-xs text-ink-faint">{item.sub}</span>

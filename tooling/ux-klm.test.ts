@@ -14,6 +14,8 @@ import {
   SECONDS,
   strokesOf,
   widthAlong,
+  type Access,
+  type Report,
   type Step,
   type TaskResult,
 } from '../e2e/ux/klm.js'
@@ -75,7 +77,7 @@ describe('Hick–Hyman', () => {
   })
 
   it('is a note on the task, never part of its time', () => {
-    const r = analyse({ id: 't', task: 't', path: 'keyboard' }, [press('Enter', { choice: hick(7) })], 'keyboard')
+    const r = analyse({ id: 't', task: 't', path: 'keyboard', access: 'shortcut' }, [press('Enter', { choice: hick(7) })], 'keyboard')
     expect(r.seconds).toBeCloseTo(SECONDS.M + SECONDS.K, 10)
     expect(r.notes).toEqual(['Enter: a choice among 7 (Hick–Hyman 0.45 s, not added)'])
   })
@@ -170,7 +172,7 @@ describe('a task', () => {
     press('Enter'),
     { kind: 'wait', label: 'goal', ms: 30.2 },
   ]
-  const r = analyse({ id: 'send.mouse', task: 'Send', path: 'mouse' }, steps, 'keyboard')
+  const r = analyse({ id: 'send.mouse', task: 'Send', path: 'mouse', access: 'discoverable' }, steps, 'keyboard')
 
   it('sums its operators into KLM time, leaving R out', () => {
     const P = steps.reduce((t, s) => t + (s.kind === 'click' && s.pointing ? s.pointing.seconds : 0), 0)
@@ -209,10 +211,11 @@ describe('budgets', () => {
 })
 
 describe('the report', () => {
-  const task = (id: string, operators: string, seconds: number, K: number): TaskResult => ({
+  const task = (id: string, operators: string, seconds: number, K: number, access: Access = 'shortcut'): TaskResult => ({
     id,
     task: id,
     path: 'keyboard',
+    access,
     operators,
     counts: { K, P: 0, B: 0, H: 0, M: 1, R: 1 },
     seconds,
@@ -224,14 +227,14 @@ describe('the report', () => {
   })
   const before = makeReport('webkit', [task('b.keyboard', 'M K K', 1.91, 2), task('a.keyboard', 'M 3K', 2.19, 3)], [])
   const after = makeReport('webkit', [task('b.keyboard', 'M K', 1.63, 1), task('c.keyboard', 'M K', 1.63, 1)], [
-    { id: 'd.mouse', task: 'd', path: 'mouse', waitingOn: '#1', reason: 'not merged' },
+    { id: 'd.mouse', task: 'd', path: 'mouse', access: 'discoverable', waitingOn: '#1', reason: 'not merged' },
   ])
 
   it('is sorted by task and lists the pending tasks after them', () => {
     expect(before.tasks.map((t) => t.id)).toEqual(['a.keyboard', 'b.keyboard'])
     const text = formatReport(after)
     expect(text).toContain('| b.keyboard | keyboard | `M K` | 1 | 0 | 0 | 0 | 1 | 2 | 1.63 | 0 | 1 (10) |')
-    expect(text).toContain('| d.mouse | mouse | #1 | not merged |')
+    expect(text).toContain('| d.mouse | discoverable | mouse | #1 | not merged |')
   })
 
   it('compares two runs task by task, including tasks only one of them has', () => {
@@ -239,5 +242,31 @@ describe('the report', () => {
     expect(text).toContain('| a.keyboard | 4 → removed | 2.19 → — |')
     expect(text).toContain('| b.keyboard | 3 → 2 | 1.91 → 1.63 | −0.28 | ±0 | `M K` (was `M K K`) |')
     expect(text).toContain('| c.keyboard | added → 2 | — → 1.63 |')
+  })
+
+  /*
+   * Owner, 2026-10-12: a shortcut is known only to people who already know it, so the numbers that
+   * stand for a task are its discoverable path's, and an expert path never sits among them.
+   */
+  const mixed = makeReport('webkit', [task('z.mouse', 'H M P B B', 2.9, 0, 'discoverable'), task('a.keyboard', 'M K K', 1.91, 2)], [])
+
+  it('puts the discoverable paths first and the shortcut paths in a section of their own', () => {
+    const text = formatReport(mixed)
+    const discoverable = text.indexOf('#### Discoverable paths')
+    const expert = text.indexOf('#### Expert paths')
+    expect(discoverable).toBe(0)
+    expect(expert).toBeGreaterThan(discoverable)
+    expect(text.indexOf('| z.mouse |')).toBeGreaterThan(discoverable)
+    expect(text.indexOf('| z.mouse |')).toBeLessThan(expert)
+    expect(text.indexOf('| a.keyboard |')).toBeGreaterThan(expert)
+  })
+
+  it('groups a comparison the same way, taking the tags a version 1 report lacks from the other run', () => {
+    const untagged: Report = { ...mixed, tasks: mixed.tasks.map(({ access: _, ...t }) => t as TaskResult) }
+    const text = compareReports(untagged, mixed)
+    const expert = text.indexOf('#### Expert paths')
+    expect(text.indexOf('#### Discoverable paths')).toBe(0)
+    expect(text.indexOf('| z.mouse |')).toBeLessThan(expert)
+    expect(text.indexOf('| a.keyboard |')).toBeGreaterThan(expert)
   })
 })

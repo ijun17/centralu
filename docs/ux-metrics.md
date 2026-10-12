@@ -10,6 +10,22 @@ The numbers come from Playwright scenarios against the mock (`e2e/ux/*.task.ts`)
 They predict an expert's error-free execution time. They do not measure how easy a task is to
 learn, how long a person spends reading, or how often they get it wrong.
 
+## Discoverable paths first
+
+A task is judged by the path a person can find on screen, not by its shortcut (owner,
+2026-10-12). A shortcut is known only to people who already know it: a task that is cheap by ⌘K
+and three clicks deep by sight is a three-click task for everyone who was never told. So every
+path is tagged with its **access**:
+
+| Access | Means | Counts toward |
+|---|---|---|
+| `discoverable` | Everything the path needs is visible: buttons, menus, rows, a hint printed on screen (the palette's "↵ Open"). The mouse, or the keyboard only on what the screen shows: Tab, Enter on a focused control, typing into a field that has the caret | The headline numbers, the budgets, the baseline |
+| `shortcut` | Needs knowing something the screen does not show: ⌘K, ⌘[, y/n/a, any chord | The **expert** section only, reported apart and never used to argue that a task is cheap |
+
+Every task has a discoverable path, or a pending entry saying that it has none; that gap is the
+finding. A shortcut path is written beside it when one exists, so the report also shows what the
+keys save someone who knows them.
+
 | Need | Run |
 |---|---|
 | The suite, with the table and `test-results/ux-report.json` | `pnpm ux` |
@@ -109,17 +125,18 @@ A task is a named Playwright scenario with a start state and a checked goal, in
 
 ```ts
 uxTask({
-  id: 'approve.keyboard', // <task>.<path>
+  id: 'approve.mouse', // <task>.<path>
   task: 'Answer an approval waiting in another session',
-  path: 'keyboard', // or 'mouse' or 'mixed': how the person moves through the app
+  path: 'mouse', // or 'keyboard' or 'mixed': how the person moves through the app
+  access: 'discoverable', // or 'shortcut' (see "Discoverable paths first")
   start: demo, // the start state, not measured: the mock's handles and the store are fine here
   run: async (u, page) => {
-    await u.press('ControlOrMeta+Shift+a')
+    await u.click(page.getByTestId('session-row-…'))
     await u.until('the approval card', () => expect(page.getByTestId('approval-card')).toBeVisible())
-    await u.press('y')
+    await u.click(page.getByTestId('approve-allow'))
   },
   goal: async (page) => expect(page.getByTestId('approval-card')).toBeHidden(),
-  budget: { operators: 6, M: 2, H: 0, seconds: 4.0 },
+  budget: { operators: 9, M: 2, H: 1, seconds: 5.8 }, // a discoverable path only
 })
 ```
 
@@ -135,15 +152,20 @@ locator directly, or it goes uncounted:
 | `u.point(target)` | P | A hover without a click |
 | `u.until(label, check)` | R | Waits for the app and measures how long |
 
-A task the suite cannot run yet goes in as `uxPending({ id, task, path, waitingOn, reason })`: it
-is listed in the report as pending, so a baseline says what it does not cover. When the feature
-lands, the same pull request replaces it with a `uxTask`. "No keyboard path exists" is listed the
-same way.
+A task the suite cannot run yet goes in as `uxPending({ id, task, path, access, waitingOn, reason })`:
+it is listed in the report as pending, so a baseline says what it does not cover. When the feature
+lands, the same pull request replaces it with a `uxTask`. "No discoverable path exists" is listed
+the same way.
 
-Write both the keyboard path and the mouse path when both exist, and give each the shortest way a
-person who knows the app would take.
+Write the discoverable path of every task, the shortest one the screen shows, and the shortcut path
+beside it when one exists. Only a discoverable path takes a `budget`; the types refuse one on a
+shortcut path (`e2e/ux/task.ts`).
 
 ## Reading the numbers
+
+A report has two tables: **discoverable paths** first, the headline, then **expert paths**, the
+shortcuts. `--compare` groups the same way; a report from before the tags (version 1) takes each
+task's group from the other report.
 
 - **The operator string** (`H M P B B M P B B`) is the task's shape. Runs of three or more are
   written with their count (`25K`). Reading it tells what a change did: a new `H P B B` before a
@@ -160,8 +182,9 @@ time, pointing (D, W, index of difficulty) and wait.
 
 ## Budgets
 
-A task may declare upper bounds: `operators`, any of `K P B H M`, `seconds`, `travelPx`. A run
-over any of them fails. The first budgets are the baseline's numbers: the counts exactly, the KLM
+A discoverable path declares upper bounds: `operators`, any of `K P B H M`, `seconds`, `travelPx`.
+A run over any of them fails. A shortcut path has none: it is measured and reported, but how cheap
+it is never stands for the task. The first budgets are the baseline's numbers: the counts exactly, the KLM
 time with 2% and 0.05 s of headroom rounded up to a tenth, because pointing times follow the
 boxes on screen and fonts differ a little between machines.
 
@@ -173,53 +196,63 @@ cheaper, lower the budget so the gain is kept. Update `e2e/ux/baseline.json` wit
 ## Baseline (2026-10-12)
 
 WebKit on Linux (the CI run), 1280 × 840 (the desktop app's default window), the `?demo` scene.
-On macOS the numbers agree to within 0.01 s and a few pixels of travel. Paths with no
-counterpart are listed under "Pending". Since #528 the composer of a session just created or
-picked in the palette, and the typed Add machine form's first field, take the keyboard: those three
-rows lost their click into the field.
+On macOS the numbers agree to within 0.01 s and a few pixels of travel. Since #528 the composer of
+a session just created or picked in the palette, and the typed Add machine form's first field, take
+the keyboard. Since #529 every core task has a discoverable path, and the paths are split by access
+(see "Discoverable paths first").
+
+**Discoverable paths** (the headline; the budgets are these):
 
 | Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Start a new session and give it its first instruction | mouse | `H M P B B M P B B M P B B H 18K M K` | 19 | 3 | 6 | 2 | 4 | 34 | 15.44 | 1338 |
-| Answer an approval waiting in another session | keyboard | `M 3K M K` | 4 | 0 | 0 | 0 | 2 | 6 | 3.82 | 0 |
-| | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.60 | 767 |
-| | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1049 |
-| Switch back to the session you were just in | keyboard (back) | `M K K` | 2 | 0 | 0 | 0 | 1 | 3 | 1.91 | 0 |
+| Start a new session and give it its first instruction | mouse (the open project's +, #529) | `H M P B B M P B B H 18K M K` | 19 | 2 | 4 | 2 | 3 | 30 | 12.98 | 1194 |
+| Answer an approval waiting in another session | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.57 | 740 |
+|  | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1053 |
+| Switch to another session by name | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 525 |
+| Send a message to another session | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.39 | 1141 |
+| Find a past conversation | mixed (the Search button, #529) | `H M P B B H 4K M K` | 5 | 1 | 2 | 2 | 2 | 12 | 6.26 | 633 |
+| Open an app on another machine | mouse (its sidebar row) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.01 | 544 |
+| Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2242 |
+|  | mouse (typed by hand) | `H M P B B M P B B H 10K H P B B H 13K H M P B B` | 23 | 4 | 8 | 5 | 3 | 43 | 17.71 | 2163 |
+| Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.99 | 566 |
+
+**Expert paths** (shortcuts; never the headline):
+
+| Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Start a new session and give it its first instruction | keyboard (palette, New session) | `M 8K M 19K M K` | 28 | 0 | 0 | 0 | 3 | 31 | 11.89 | 0 |
+| Answer an approval waiting in another session | keyboard (⌘⇧A, y) | `M 3K M K` | 4 | 0 | 0 | 0 | 2 | 6 | 3.82 | 0 |
 | Switch to another session by name | keyboard (palette) | `M 7K M K` | 8 | 0 | 0 | 0 | 2 | 10 | 4.94 | 0 |
-| | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.97 | 532 |
+| Switch back to the session you were just in | keyboard (back) | `M K K` | 2 | 0 | 0 | 0 | 1 | 3 | 1.91 | 0 |
 | Send a message to another session | keyboard (palette) | `M 7K M 26K M K` | 34 | 0 | 0 | 0 | 3 | 37 | 13.57 | 0 |
-| | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.44 | 1175 |
-| Find a past conversation | keyboard | `M 6K M K` | 7 | 0 | 0 | 0 | 2 | 9 | 4.66 | 0 |
-| Open an app on another machine | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.98 | 534 |
-| Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2240 |
-| | mouse (typed by hand) | `H M P B B M P B B H 10K H P B B H 13K H M P B B` | 23 | 4 | 8 | 5 | 3 | 43 | 17.71 | 2161 |
-| Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 521 |
+| Find a past conversation | keyboard (⌘K) | `M 6K M K` | 7 | 0 | 0 | 0 | 2 | 9 | 4.66 | 0 |
+| Open an app on another machine | keyboard (palette, #529) | `M 7K M K` | 8 | 0 | 0 | 0 | 2 | 10 | 4.94 | 0 |
 
 Pending:
 
-| Task | Path | Waiting on |
-|---|---|---|
-| Start a new session | keyboard | No keyboard path: the palette has no "New session" action and no shortcut opens the dialog |
-| Find a past conversation | mouse | No mouse path: the palette is the only search, opened only by ⌘K / Ctrl+K |
-| Open an app on another machine | keyboard | No keyboard path: the palette does not list apps |
-| Create a new project (an empty folder) | mouse | #515 |
+| Task | Access | Path | Waiting on |
+|---|---|---|---|
+| Create a new project (an empty folder) | discoverable | mouse | #515 |
 
-What the first baseline shows:
+What the baseline shows:
 
-- **A new session does not give the composer the keyboard.** After the dialog closes, the first
-  instruction needs a click into the composer (the `P B B` before `H 18K`): about 1.4 s of the
-  task's 16.9.
-- **Switching sessions from the palette leaves the keyboard on the page**, and no key reliably
-  reaches the composer: one Tab does in WebKit on macOS, but not in WebKit on Linux or in Chromium
-  (the Windows app). So the keyboard path of "send a message" takes the mouse for one click
-  (`H P B B H`, 2.2 s) and costs more than the mouse path: 42 operators and 15.8 s against 36 and
-  13.4. With the composer taking the keyboard it would be 37 and 13.6.
-- **Picking a machine from the ssh config (#514) is 7.7 s cheaper than typing it**: 17 operators
-  against 46. The typed form does not focus its first field, and moves the hand between the
-  keyboard and the mouse five times (2 s of H alone).
-- **Answering an approval by keyboard is the cheapest core task after going back** (`⌘⇧A`, `y`:
-  3.8 s); the waiting list, the way the app points to an approval out of sight, costs 8.4 s by
-  mouse.
+- **Starting a session took three clicks behind a button that appears only on hover** (the
+  project's menu, then New session, then Start: 34 operators, 15.4 s). The project the person is in
+  now shows its `+` (#529): two clicks, 30 operators, about 13 s. The palette's New session is no
+  cheaper for someone who knows ⌘K: typing its name costs what the click saves.
+- **Finding a past conversation had no path anyone could see**: the palette, the only search,
+  opened only by ⌘K / Ctrl+K. The Search button at the top of the sidebar (#529) opens it and prints
+  the key, so the button also teaches the shortcut.
+- **Opening an app was already one click** on its sidebar row; the palette now lists apps too, for
+  an app scrolled out of sight or on a folded project.
+- **Switching sessions from the palette used to leave the keyboard on the page** (#528, fixed): the
+  keyboard path of "send a message" took the mouse for one click into the composer.
+- **Picking a machine from the ssh config (#514) is 6.7 s cheaper than typing it**: 17 operators
+  against 43. The typed form moves the hand between the keyboard and the mouse five times (2 s of H
+  alone).
+- **The waiting list, the way the app points to an approval out of sight, costs 8.4 s by mouse**,
+  against 5.6 s for the sidebar row when it is in sight. The keys (`⌘⇧A`, `y`: 3.8 s) are the
+  expert's answer, not the task's.
 
 ## References
 

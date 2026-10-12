@@ -18,10 +18,11 @@ import {
   useToolMeta,
   useTools,
 } from '../../store/selectors.js'
-import { Tooltip, stateLabel } from '../../components/primitives.jsx'
+import { Kbd, Tooltip, stateLabel } from '../../components/primitives.jsx'
+import { useShortcut } from '../../app/shortcut.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
+import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon, SearchIcon } from '../../components/icons.jsx'
 import { isRemoteUserApp, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { isAway } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
@@ -194,6 +195,7 @@ export function Sidebar() {
         onReset={() => setSidebarWidth(SIDEBAR_DEFAULT)}
         testId="sidebar-resize"
       />
+      <SearchButton />
       <OrchestratorButton />
       <GridButton />
       {grouped ? (
@@ -287,6 +289,38 @@ export function Sidebar() {
 }
 
 /**
+ * The door to search (#529): sessions, projects, apps, actions and what was said in past
+ * conversations, all in the command palette.
+ *
+ * The palette used to open only by ⌘K / Ctrl+K, so a person who had not been told the key had no
+ * way to search at all: finding a past conversation had no path anyone could see (the task-cost
+ * baseline, docs/ux-metrics.md). This is that path, at the top of the lane the results land in, and
+ * it says its key out loud, so the shortcut is learned by using the button rather than by being told.
+ *
+ * Field-shaped and faint, like the Add project button: it is a door used now and then, and must not
+ * compete with the rows being read below it.
+ */
+function SearchButton() {
+  const sc = useShortcut()
+  return (
+    <div className="px-2 pt-2">
+      <button
+        className="flex w-full items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
+        onClick={() => useStore.getState().togglePalette(true)}
+        data-testid="search-button"
+        title="Search sessions, projects, apps and past conversations"
+      >
+        <SearchIcon />
+        <span className="truncate">Search</span>
+        <span className="ml-auto shrink-0 text-2xs">
+          <Kbd>{sc('mod', 'K')}</Kbd>
+        </span>
+      </button>
+    </div>
+  )
+}
+
+/**
  * The door to the orchestrator — **directing by talking**.
  *
  * Placed directly above the grid. The two are two ways of looking at the same thing, so they
@@ -319,8 +353,9 @@ function OrchestratorButton() {
   const id = useStore((s) => s.orchestratorId)
   const active = view === 'orchestrator'
 
+  // pt-1.5, the grid's own gap: Search stands above it now (#529) and takes the lane's top margin
   return (
-    <div className="px-2 pt-2">
+    <div className="px-2 pt-1.5">
       <button
         className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors ${
           active
@@ -661,12 +696,30 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           Hidden, but not made unreachable — keyboard focus (focus-within) and a worktree
           proposal (#69) surface the button without hovering. The proposal case especially:
           making a hidden button breathe is useless if nobody can see it.
+
+          **`+` is back, on the project the person is in** (#529). With it folded into the menu,
+          starting a session took three clicks behind a button nobody sees until they hover, and that
+          is the task-cost baseline's most expensive everyday task (docs/ux-metrics.md). The project
+          that is open is where a new session is most often wanted, and only that one shows `+` all
+          the time: one icon on one row, not a row of icons on every project. Elsewhere it appears
+          with the menu, on hover or focus.
         */}
+        <span
+          className={`-my-1 shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
+            summary.length > 0 ? '' : 'ml-auto'
+          } ${open ? 'opacity-100' : 'opacity-0'}`}
+        >
+          <IconButton
+            label={`New session in ${project.name}`}
+            onClick={() => openNewSession(projectId)}
+            testId={`project-new-session-${project.name}`}
+          >
+            <PlusIcon size={14} />
+          </IconButton>
+        </span>
         <span
           ref={menuAnchor}
           className={`-my-1 shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
-            summary.length > 0 ? '' : 'ml-auto'
-          } ${
             menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
           } ${proposalHere ? 'breathe rounded-md text-ink' : ''}`}
           data-testid={`project-actions-${project.name}`}

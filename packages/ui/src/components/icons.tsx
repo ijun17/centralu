@@ -16,6 +16,16 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+/** A magnifier — search (#529) */
+export function SearchIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M10.4 10.4 14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** Three dots — "there is more here". A shape, not a glyph (⋯), so it does not depend on the font */
 export function DotsIcon({ size = 14 }: { size?: number }) {
   return (

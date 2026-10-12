@@ -1041,10 +1041,12 @@ test('The project menu opens below the clicked button, and flips upward when the
 
   /*
     The flip is only visible where opening downward would overflow, and that spot only appears by
-    shrinking the window. At 320px it still fits (menu bottom at 307.5 < 312) — the threshold is
-    set by measurement, not by assuming the flip.
+    shrinking the window. At 356px it still fits (menu bottom at 343.5 < 348) — the threshold is
+    set by measurement, not by assuming the flip. Both heights grew by 36px with the Search button
+    at the top of the sidebar (#529): any shorter and gamma's row is scrolled to the middle of the
+    lane, where the menu has room neither below nor above.
   */
-  await page.setViewportSize({ width: 1200, height: 240 })
+  await page.setViewportSize({ width: 1200, height: 276 })
   const gamma = await geometry('gamma')
   expect(gamma.m.y + gamma.m.height).toBeLessThanOrEqual(gamma.b.y) // It went above the button
   expect(gamma.m.y).toBeGreaterThanOrEqual(0)

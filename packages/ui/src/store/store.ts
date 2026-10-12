@@ -2150,6 +2150,24 @@ export function openProjectOf(
 }
 
 /**
+ * Where "New session" from the command palette starts one (#529): the project the person is in, by the same answer the
+ * sidebar tints (`openProjectOf`); on the grid, the focused panel's session's project; otherwise the project looked at
+ * last, then the first one. null only when there is no project at all, and the palette then does not offer it.
+ */
+export function newSessionProjectOf(
+  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'>,
+): string | null {
+  const known = (pid: string | null | undefined) => (pid && s.projects[pid] ? pid : null)
+  return (
+    openProjectOf(s) ??
+    known(s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null) ??
+    known(s.focusedProjectId) ??
+    Object.keys(s.projects)[0] ??
+    null
+  )
+}
+
+/**
  * The sessions the project screen shows right now: every session of the project the person has not hidden. The
  * trash (#204) needs no rule here — a trashed session is not in `sessions`.
  */

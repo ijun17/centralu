@@ -402,12 +402,16 @@ The whole control loop must turn without a mouse. The v1 default shortcuts:
 | Jump project | `⌘1`~`⌘9` |
 | Move between sessions within a project | `j` / `k` (when the input box is not focused) |
 | Approve allow / deny / always allow | `y` / `n` / `a` (⌥a: project scope) |
-| Command palette (search projects, sessions, actions) | `⌘K` |
+| Command palette (search projects, sessions, apps, actions and past conversations; New session starts one in the project you are in) | `⌘K`, or the Search button at the top of the sidebar, which prints the key (#529) |
 | Back / forward between screens, like a browser (#374) | `⌘[` / `⌘]` (macOS), `Alt+←` / `Alt+→` (elsewhere); both pairs work everywhere, never while typing. Also the mouse's side buttons and the top bar's arrows |
 | Focus / leave the input box | `Enter` / `Esc` |
 | Switch tab (conversation/files/git/viewer) | `⌘⇧1`~`⌘⇧4` |
 
 - Shortcuts are changeable in settings. Conflict detection.
+- Every key here is an extra for someone who knows it, never the only way. Each core task has a path that is
+  visible on screen (owner, 2026-10-12), and the task-cost numbers judge a task by that path
+  (docs/ux-metrics.md, "Discoverable paths first"): the Search button opens the palette, and the project you are in
+  shows its `+` (new session) without hovering (#529).
 
 #### FR-18. Automatic session names
 

@@ -14,6 +14,7 @@ import {
   handoffPrompt,
   inlineViewsFromHistory,
   messagesToChat,
+  newSessionProjectOf,
   PENDING_EVENTS_MAX,
   PENDING_EVENTS_MAX_AGE_MS,
   projectScreenSessions,
@@ -4534,5 +4535,29 @@ describe('composerFocusFor (#528)', () => {
     useStore.getState().askComposerFocus('cf-b')
     useStore.getState().focusSession(null)
     expect(useStore.getState().composerFocusFor).toBeNull()
+  })
+})
+
+/** Where the palette's "New session" starts one (#529): where the person is, then where they were */
+describe('newSessionProjectOf (#529)', () => {
+  const projects = { p1: { id: 'p1' } as never, p2: { id: 'p2' } as never, p3: { id: 'p3' } as never }
+  const sessions = { a: { id: 'a', projectId: 'p2' } as never, orch: { id: 'orch', projectId: null } as never }
+  const base = { view: 'focus' as const, focusedSessionId: null, focusedProjectId: null, focusedApp: null, projects, sessions }
+
+  it("is the open session's project, the project screen's, or the open app's", () => {
+    expect(newSessionProjectOf({ ...base, focusedSessionId: 'a', focusedProjectId: 'p3' })).toBe('p2')
+    expect(newSessionProjectOf({ ...base, focusedProjectId: 'p3' })).toBe('p3')
+    expect(newSessionProjectOf({ ...base, view: 'app', focusedApp: { projectId: 'p3', appId: 'x' } })).toBe('p3')
+  })
+
+  it("on the grid, the focused panel's project; with a coordinator open, the project looked at last", () => {
+    expect(newSessionProjectOf({ ...base, view: 'grid', focusedSessionId: 'a', focusedProjectId: 'p3' })).toBe('p2')
+    expect(newSessionProjectOf({ ...base, view: 'orchestrator', focusedSessionId: 'orch', focusedProjectId: 'p3' })).toBe('p3')
+  })
+
+  it('falls back to the first project, and is null only with none', () => {
+    expect(newSessionProjectOf({ ...base, view: 'orchestrator', focusedSessionId: 'orch' })).toBe('p1')
+    expect(newSessionProjectOf({ ...base, focusedProjectId: 'gone' })).toBe('p1')
+    expect(newSessionProjectOf({ ...base, projects: {} })).toBeNull()
   })
 })

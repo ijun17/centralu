@@ -298,10 +298,25 @@ export type StepReport = {
   waitMs?: number
 }
 
+/**
+ * Whether a person who has never been told anything can take the path (owner, 2026-10-12):
+ *
+ * - `discoverable`: everything the path needs is on screen — buttons, menus, rows, a visible hint
+ *   such as a dialog's "↵ Open". The mouse, or the keyboard only on what the screen shows (Tab,
+ *   Enter on a focused control, typing into a field that has the caret). Budgets and the headline
+ *   numbers are these paths.
+ * - `shortcut`: needs knowing something the screen does not show — ⌘K, ⌘[, y/n/a, any chord. The
+ *   expert's path: reported apart, never used to argue that a task is cheap.
+ */
+export type Access = 'discoverable' | 'shortcut'
+
+export const ACCESS_ORDER: readonly Access[] = ['discoverable', 'shortcut']
+
 export type TaskResult = {
   id: string
   task: string
   path: 'keyboard' | 'mouse' | 'mixed'
+  access: Access
   operators: string
   counts: Counts
   /** KLM execution time: every operator but R, in seconds */
@@ -319,7 +334,7 @@ export type TaskResult = {
 const round = (n: number, digits = 2) => Math.round(n * 10 ** digits) / 10 ** digits
 
 export function analyse(
-  meta: { id: string; task: string; path: TaskResult['path']; notes?: string[] },
+  meta: { id: string; task: string; path: TaskResult['path']; access: Access; notes?: string[] },
   steps: Step[],
   hand: Hand,
 ): Omit<TaskResult, 'breaches'> {
@@ -348,6 +363,7 @@ export function analyse(
     id: meta.id,
     task: meta.task,
     path: meta.path,
+    access: meta.access,
     operators: operatorString(ops.filter((o) => o.op !== 'R')),
     counts,
     seconds: round(seconds),
@@ -383,10 +399,14 @@ export function budgetBreaches(r: Pick<TaskResult, 'seconds' | 'counts' | 'trave
 }
 
 /** A task the suite cannot run yet: its feature is not merged */
-export type PendingTask = { id: string; task: string; path: TaskResult['path']; waitingOn: string; reason: string }
+export type PendingTask = { id: string; task: string; path: TaskResult['path']; access: Access; waitingOn: string; reason: string }
 
+/**
+ * Version 2 tags every task and pending task with its `access`. A version 1 report (before
+ * 2026-10-12) has none; `compareReports` borrows the tag from the other report.
+ */
 export type Report = {
-  version: 1
+  version: 2
   engine: string
   constants: { seconds: typeof SECONDS; fitts: typeof FITTS; hickSecondsPerBit: number }
   tasks: TaskResult[]
@@ -396,7 +416,7 @@ export type Report = {
 export function makeReport(engine: string, tasks: TaskResult[], pending: PendingTask[]): Report {
   const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   return {
-    version: 1,
+    version: 2,
     engine,
     constants: { seconds: SECONDS, fitts: FITTS, hickSecondsPerBit: HICK_BITS_SECONDS },
     tasks: [...tasks].sort(byId),
@@ -407,21 +427,43 @@ export function makeReport(engine: string, tasks: TaskResult[], pending: Pending
 const opsTotal = (c: Counts) => c.K + c.P + c.B + c.H + c.M
 const cell = (s: string) => s.replace(/\|/g, '\\|')
 
-/** The report as a Markdown table, one row per task, then the pending tasks */
+/** What each group of paths is called in a report, discoverable first: those are the headline */
+export const ACCESS_HEADING: Record<Access, string> = {
+  discoverable: 'Discoverable paths: everything needed is on screen (the headline; budgets apply)',
+  shortcut: 'Expert paths: need a shortcut known beforehand (reported apart, never the headline)',
+}
+
+const byAccess = <T extends { access?: Access }>(items: readonly T[], access: Access) =>
+  items.filter((x) => (x.access ?? 'discoverable') === access)
+
+/**
+ * The report as Markdown: the discoverable paths first, then the expert (shortcut) paths, each a
+ * table with one row per task; then the pending tasks and anything over budget.
+ */
 export function formatReport(r: Report): string {
-  const lines = [
-    `| Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px | R (measured ms) |`,
-    `|---|---|---|---|---|---|---|---|---|---|---|---|`,
-  ]
-  for (const t of r.tasks) {
-    const c = t.counts
+  const lines: string[] = []
+  for (const access of ACCESS_ORDER) {
+    const tasks = byAccess(r.tasks, access)
+    if (tasks.length === 0) continue
+    if (lines.length > 0) lines.push('')
     lines.push(
-      `| ${cell(t.id)} | ${t.path} | \`${t.operators}\` | ${c.K} | ${c.P} | ${c.B} | ${c.H} | ${c.M} | ${opsTotal(c)} | ${t.seconds.toFixed(2)} | ${t.travelPx} | ${c.R} (${t.waitMs}) |`,
+      `#### ${ACCESS_HEADING[access]}`,
+      '',
+      `| Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px | R (measured ms) |`,
+      `|---|---|---|---|---|---|---|---|---|---|---|---|`,
     )
+    for (const t of tasks) {
+      const c = t.counts
+      lines.push(
+        `| ${cell(t.id)} | ${t.path} | \`${t.operators}\` | ${c.K} | ${c.P} | ${c.B} | ${c.H} | ${c.M} | ${opsTotal(c)} | ${t.seconds.toFixed(2)} | ${t.travelPx} | ${c.R} (${t.waitMs}) |`,
+      )
+    }
   }
   if (r.pending.length > 0) {
-    lines.push('', '| Pending task | Path | Waiting on | Why |', '|---|---|---|---|')
-    for (const p of r.pending) lines.push(`| ${cell(p.id)} | ${p.path} | ${p.waitingOn} | ${cell(p.reason)} |`)
+    lines.push('', '| Pending task | Access | Path | Waiting on | Why |', '|---|---|---|---|---|')
+    for (const access of ACCESS_ORDER) {
+      for (const p of byAccess(r.pending, access)) lines.push(`| ${cell(p.id)} | ${access} | ${p.path} | ${p.waitingOn} | ${cell(p.reason)} |`)
+    }
   }
   const breached = r.tasks.filter((t) => t.breaches.length > 0)
   if (breached.length > 0) {
@@ -435,24 +477,38 @@ const signed = (n: number, digits = 0) => (n > 0 ? '+' : n < 0 ? '−' : '±') +
 
 /**
  * Two runs side by side: for each task, the operator counts and KLM time before and after, and
- * what changed. A task in only one run is listed as added or removed.
+ * what changed, the discoverable paths first and the expert paths apart. A task in only one run is
+ * listed as added or removed. A task's group is its tag in the later run, or the earlier one's when
+ * it was removed; a version 1 report has no tags and takes them from the other.
  */
 export function compareReports(a: Report, b: Report): string {
   const before = new Map(a.tasks.map((t) => [t.id, t]))
   const after = new Map(b.tasks.map((t) => [t.id, t]))
   const ids = [...new Set([...before.keys(), ...after.keys()])].sort()
-  const lines = [`| Task | Ops before → after | KLM s before → after | Δ s | Travel px Δ | Operators after |`, `|---|---|---|---|---|---|`]
-  for (const id of ids) {
-    const x = before.get(id)
-    const y = after.get(id)
-    if (!x && y) lines.push(`| ${cell(id)} | added → ${opsTotal(y.counts)} | — → ${y.seconds.toFixed(2)} | | | \`${y.operators}\` |`)
-    else if (x && !y) lines.push(`| ${cell(id)} | ${opsTotal(x.counts)} → removed | ${x.seconds.toFixed(2)} → — | | | |`)
-    else if (x && y) {
-      const ds = y.seconds - x.seconds
-      const changed = x.operators !== y.operators ? ` (was \`${x.operators}\`)` : ''
-      lines.push(
-        `| ${cell(id)} | ${opsTotal(x.counts)} → ${opsTotal(y.counts)} | ${x.seconds.toFixed(2)} → ${y.seconds.toFixed(2)} | ${signed(ds, 2)} | ${signed(y.travelPx - x.travelPx)} | \`${y.operators}\`${changed} |`,
-      )
+  const accessOf = (id: string): Access => after.get(id)?.access ?? before.get(id)?.access ?? 'discoverable'
+  const lines: string[] = []
+  for (const access of ACCESS_ORDER) {
+    const mine = ids.filter((id) => accessOf(id) === access)
+    if (mine.length === 0) continue
+    if (lines.length > 0) lines.push('')
+    lines.push(
+      `#### ${ACCESS_HEADING[access]}`,
+      '',
+      `| Task | Ops before → after | KLM s before → after | Δ s | Travel px Δ | Operators after |`,
+      `|---|---|---|---|---|---|`,
+    )
+    for (const id of mine) {
+      const x = before.get(id)
+      const y = after.get(id)
+      if (!x && y) lines.push(`| ${cell(id)} | added → ${opsTotal(y.counts)} | — → ${y.seconds.toFixed(2)} | | | \`${y.operators}\` |`)
+      else if (x && !y) lines.push(`| ${cell(id)} | ${opsTotal(x.counts)} → removed | ${x.seconds.toFixed(2)} → — | | | |`)
+      else if (x && y) {
+        const ds = y.seconds - x.seconds
+        const changed = x.operators !== y.operators ? ` (was \`${x.operators}\`)` : ''
+        lines.push(
+          `| ${cell(id)} | ${opsTotal(x.counts)} → ${opsTotal(y.counts)} | ${x.seconds.toFixed(2)} → ${y.seconds.toFixed(2)} | ${signed(ds, 2)} | ${signed(y.travelPx - x.travelPx)} | \`${y.operators}\`${changed} |`,
+        )
+      }
     }
   }
   return lines.join('\n')

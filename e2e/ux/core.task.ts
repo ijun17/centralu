@@ -4,16 +4,20 @@ import { seedSshConfig } from '../fixtures/ssh-hosts.js'
 import { uxPending, uxTask } from './task.js'
 
 /**
- * The core tasks (#518): what a person does with Centralu most, each by the keyboard and by the
- * mouse where both exist. They start in the `?demo` scene (packages/platform/src/mock/demo.ts):
- * two projects, four sessions, one waiting for approval, one long conversation, and the
- * "Finish the collapsed composer" session open.
+ * The core tasks (#518): what a person does with Centralu most. Each has a **discoverable** path,
+ * everything it needs on screen, and where one exists a **shortcut** path, the expert's (klm.ts
+ * `Access`; owner, 2026-10-12: a shortcut is known only to people who already know it, so a task is
+ * judged by its discoverable path). They start in the `?demo` scene
+ * (packages/platform/src/mock/demo.ts): two projects, four sessions, one waiting for approval, one
+ * long conversation, and the "Finish the collapsed composer" session open.
  *
- * The budgets are the baseline's numbers (docs/ux-metrics.md, "Baseline"), lowered with each change
- * that makes a task cheaper so the gain is kept (#528: the composer and the typed Add machine form
- * take the keyboard): the operator counts exactly, the KLM time with 2% and 0.05 s of headroom, rounded up to a tenth, because the
- * pointing times follow the boxes on screen and fonts differ a little between machines. A change
- * that makes a task cost more fails here; raising a budget is a decision the pull request states.
+ * Only discoverable paths carry budgets. They are the baseline's numbers (docs/ux-metrics.md,
+ * "Baseline"), lowered with each change that makes a task cheaper so the gain is kept (#528: the
+ * composer and the typed Add machine form take the keyboard; #529: the open project's +, the Search
+ * button): the operator counts exactly, the KLM time with 2% and 0.05 s of headroom, rounded up to a
+ * tenth, because the pointing times follow the boxes on screen and fonts differ a little between
+ * machines. A change that makes a task cost more fails here; raising a budget is a decision the pull
+ * request states.
  */
 
 const OPEN = 'Finish the collapsed composer'
@@ -52,33 +56,49 @@ const lastSaid = (page: Page) => page.getByTestId('msg-user').last()
 // ---------------------------------------------------------------------------------------------
 // Start a new session
 
+const startedThere = async (page: Page) => {
+  await expect(page.getByTestId('session-name')).toHaveText('Fix the login bug')
+  await expect(lastSaid(page)).toHaveText('Fix the login bug')
+}
+
 uxTask({
   id: 'new-session.mouse',
   task: 'Start a new session in a project and give it its first instruction',
   path: 'mouse',
+  access: 'discoverable',
+  notes: ["The + on the project the person is in (#529); the project's menu still has New session too"],
   start: demo,
   run: async (u, page) => {
-    await u.click(page.getByTestId('project-menu-centralu'))
-    await u.click(page.getByTestId('new-session-centralu'))
+    await u.click(page.getByTestId('project-new-session-centralu'))
     await u.until('the new-session dialog', () => expect(page.getByTestId('new-session-dialog')).toBeVisible())
     await u.click(page.getByTestId('create-session-confirm'))
     await u.until('the new session', () => expect(page.getByTestId('new-session-dialog')).toBeHidden())
     await u.fill(page.getByTestId('prompt-input'), 'Fix the login bug')
     await u.press('Enter')
   },
-  goal: async (page) => {
-    await expect(page.getByTestId('session-name')).toHaveText('Fix the login bug')
-    await expect(lastSaid(page)).toHaveText('Fix the login bug')
-  },
-  budget: { operators: 34, M: 4, H: 2, seconds: 15.9 },
+  goal: startedThere,
+  budget: { operators: 30, M: 3, H: 2, seconds: 13.3 },
 })
 
-uxPending({
-  id: 'new-session.keyboard',
+uxTask({
+  id: 'new-session.palette',
   task: 'Start a new session in a project and give it its first instruction',
   path: 'keyboard',
-  waitingOn: 'a keyboard path',
-  reason: 'none exists: the palette has no "New session" action and no shortcut opens the dialog',
+  access: 'shortcut',
+  notes: ["⌘K / Ctrl+K, then the palette's New session (#529): it starts one in the project the person is in"],
+  start: demo,
+  run: async (u, page) => {
+    await u.press('ControlOrMeta+k')
+    await u.until('the palette', () => expect(page.getByTestId('palette-input')).toBeFocused())
+    await u.type('new s', { string: 'constant' })
+    await u.press('Enter', { among: page.locator('[data-testid^="palette-item-"]') })
+    await u.until('the new-session dialog', () => expect(page.getByTestId('create-session-confirm')).toBeFocused())
+    await u.press('Enter')
+    await u.until('the new session', () => expect(page.getByTestId('new-session-dialog')).toBeHidden())
+    await u.fill(page.getByTestId('prompt-input'), 'Fix the login bug')
+    await u.press('Enter')
+  },
+  goal: startedThere,
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -88,6 +108,7 @@ uxTask({
   id: 'approve.keyboard',
   task: 'Answer an approval waiting in another session',
   path: 'keyboard',
+  access: 'shortcut',
   start: demo,
   run: async (u, page) => {
     await u.press('ControlOrMeta+Shift+a')
@@ -98,13 +119,13 @@ uxTask({
     await expect(page.getByTestId('session-name')).toHaveText(APPROVING)
     await expect(page.getByTestId('approval-card')).toBeHidden()
   },
-  budget: { operators: 6, M: 2, H: 0, seconds: 4.0 },
 })
 
 uxTask({
   id: 'approve.mouse',
   task: 'Answer an approval waiting in another session',
   path: 'mouse',
+  access: 'discoverable',
   start: demo,
   run: async (u, page) => {
     await clickRow(u, page, APPROVING)
@@ -122,6 +143,7 @@ uxTask({
   id: 'approve.mouse-inbox',
   task: 'Answer an approval waiting in another session',
   path: 'mouse',
+  access: 'discoverable',
   notes: ['Through the waiting list (the top-bar count), the way the app points to it when the session is not in sight'],
   start: demo,
   run: async (u, page) => {
@@ -161,18 +183,33 @@ uxTask({
   id: 'switch-session.keyboard-back',
   task: 'Switch back to the session you were just in',
   path: 'keyboard',
+  access: 'shortcut',
   start: twoSessions,
   run: async (u) => {
     await u.press(BACK)
   },
   goal: backIn,
-  budget: { operators: 3, M: 1, H: 0, seconds: 2.0 },
+})
+
+uxTask({
+  id: 'switch-session.mouse-back',
+  task: 'Switch back to the session you were just in',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ["The top bar's back arrow, beside the session's name (#374)"],
+  start: twoSessions,
+  run: async (u, page) => {
+    await u.click(page.getByTestId('nav-back'))
+  },
+  goal: backIn,
+  budget: { operators: 5, M: 1, H: 1, seconds: 3.4 },
 })
 
 uxTask({
   id: 'switch-session.keyboard-palette',
   task: 'Switch to another session by name',
   path: 'keyboard',
+  access: 'shortcut',
   start: twoSessions,
   run: async (u, page) => {
     await u.press('ControlOrMeta+k')
@@ -181,13 +218,13 @@ uxTask({
     await u.press('Enter', { among: page.locator('[data-testid^="palette-item-"]') })
   },
   goal: backIn,
-  budget: { operators: 10, M: 2, H: 0, seconds: 5.1 },
 })
 
 uxTask({
   id: 'switch-session.mouse',
   task: 'Switch to another session by name',
   path: 'mouse',
+  access: 'discoverable',
   start: twoSessions,
   run: async (u, page) => {
     await clickRow(u, page, DONE)
@@ -210,6 +247,7 @@ uxTask({
   id: 'send-to-session.keyboard',
   task: 'Send a message to another session',
   path: 'keyboard',
+  access: 'shortcut',
   start: demo,
   run: async (u, page) => {
     await u.press('ControlOrMeta+k')
@@ -221,13 +259,13 @@ uxTask({
     await u.press('Enter')
   },
   goal: sentThere,
-  budget: { operators: 37, M: 3, H: 0, seconds: 13.9 },
 })
 
 uxTask({
   id: 'send-to-session.mouse',
   task: 'Send a message to another session',
   path: 'mouse',
+  access: 'discoverable',
   start: demo,
   run: async (u, page) => {
     await clickRow(u, page, DONE)
@@ -261,6 +299,7 @@ uxTask({
   id: 'find-conversation.keyboard',
   task: 'Find a past conversation by something said in it',
   path: 'keyboard',
+  access: 'shortcut',
   start: searchable,
   run: async (u, page) => {
     await u.press('ControlOrMeta+k')
@@ -270,15 +309,24 @@ uxTask({
     await u.press('Enter', { among: page.locator('[data-testid^="palette-item-"]') })
   },
   goal: async (page) => expect(page.getByTestId('session-name')).toHaveText(OPEN),
-  budget: { operators: 9, M: 2, H: 0, seconds: 4.9 },
 })
 
-uxPending({
-  id: 'find-conversation.mouse',
+uxTask({
+  id: 'find-conversation.search',
   task: 'Find a past conversation by something said in it',
-  path: 'mouse',
-  waitingOn: 'a mouse path',
-  reason: 'none exists: the palette is the only search, and only ⌘K / Ctrl+K opens it',
+  path: 'mixed',
+  access: 'discoverable',
+  notes: ["The Search button at the top of the sidebar (#529); Enter opens the highlighted hit, as the palette's footer says"],
+  start: searchable,
+  run: async (u, page) => {
+    await u.click(page.getByTestId('search-button'))
+    await u.until('the palette', () => expect(page.getByTestId('palette-input')).toBeFocused())
+    await u.type('ring')
+    await u.until('the conversation hits', () => expect(page.getByTestId('palette-item-message')).toBeVisible())
+    await u.press('Enter', { among: page.locator('[data-testid^="palette-item-"]') })
+  },
+  goal: async (page) => expect(page.getByTestId('session-name')).toHaveText(OPEN),
+  budget: { operators: 12, M: 2, H: 2, seconds: 6.5 },
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -312,27 +360,39 @@ async function linkedMachine(page: Page): Promise<void> {
   await expect(page.getByTestId(`app-row-${NOTES}`)).toBeVisible()
 }
 
+const openedNotes = async (page: Page) => {
+  await expect(page.getByTestId(`pinned-app-${NOTES}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.openedViews)).toContainEqual({ appId: 'notes', projectId: null, machine: 'box' })
+}
+
 uxTask({
   id: 'open-remote-app.mouse',
   task: "Open an app that lives on another machine",
   path: 'mouse',
+  access: 'discoverable',
   start: linkedMachine,
   run: async (u, page) => {
     await u.click(page.getByTestId(`app-row-${NOTES}`))
   },
-  goal: async (page) => {
-    await expect(page.getByTestId(`pinned-app-${NOTES}`)).toBeVisible()
-    expect(await page.evaluate(() => (window as any).__mock.openedViews)).toContainEqual({ appId: 'notes', projectId: null, machine: 'box' })
-  },
+  goal: openedNotes,
   budget: { operators: 5, M: 1, H: 1, seconds: 3.1 },
 })
 
-uxPending({
-  id: 'open-remote-app.keyboard',
+uxTask({
+  id: 'open-remote-app.palette',
   task: 'Open an app that lives on another machine',
   path: 'keyboard',
-  waitingOn: 'a keyboard path',
-  reason: 'none exists: the palette does not list apps',
+  access: 'shortcut',
+  notes: ["⌘K / Ctrl+K and the app's name: the palette lists apps (#529)"],
+  start: linkedMachine,
+  run: async (u, page) => {
+    await u.press('ControlOrMeta+k')
+    await u.until('the palette', () => expect(page.getByTestId('palette-input')).toBeFocused())
+    await u.type('notes')
+    await u.until('the app', () => expect(page.getByTestId('palette-item-app')).toBeVisible())
+    await u.press('Enter', { among: page.locator('[data-testid^="palette-item-"]') })
+  },
+  goal: openedNotes,
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -342,6 +402,7 @@ uxTask({
   id: 'add-machine.mouse-manual',
   task: 'Link another machine by typing its name and ssh target',
   path: 'mouse',
+  access: 'discoverable',
   notes: ['The typed form, as the dialog opens when ~/.ssh/config has no hosts'],
   start: demo,
   run: async (u, page) => {
@@ -361,6 +422,7 @@ uxTask({
   id: 'add-machine.ssh-config',
   task: 'Link another machine picked from the ssh config',
   path: 'mouse',
+  access: 'discoverable',
   notes: ['Picking the host probes it and fills the shell and the name (#514)'],
   start: async (page) => {
     await demo(page)
@@ -386,6 +448,7 @@ uxTask({
   id: 'add-project.mouse',
   task: 'Add an existing folder as a project',
   path: 'mouse',
+  access: 'discoverable',
   notes: ["The folder picker is the system's: what the person does in it is not counted"],
   start: async (page) => {
     await demo(page)
@@ -404,6 +467,7 @@ uxPending({
   id: 'create-project.mouse',
   task: 'Create a new project (an empty folder)',
   path: 'mouse',
+  access: 'discoverable',
   waitingOn: '#515',
   reason: 'creating a project folder from the dialog is not merged yet',
 })
