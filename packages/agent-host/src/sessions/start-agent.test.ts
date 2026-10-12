@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, agentBranch, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentFrame, presetWithin } from './start-agent.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -14,6 +14,10 @@ import { AGENT_CEILING, agentBranch, presetWithin } from './start-agent.js'
  */
 
 describe('the preset rule', () => {
+  it('tells children to use Chromium for local e2e and leave WebKit to CI', () => {
+    expect(agentFrame('parent', 'test it')).toContain('For local e2e, use E2E_BROWSER=chromium; CI runs WebKit.')
+  })
+
   it('a child may have the parent\'s preset or less, never more', () => {
     const order: PermissionPreset[] = ['safe', 'normal', 'auto']
     for (const [i, parent] of order.entries()) {

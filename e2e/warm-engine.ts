@@ -1,4 +1,5 @@
 import { chromium, webkit, type BrowserType, type FullConfig } from '@playwright/test'
+import { assertBrowserSandbox } from './browser-sandbox.js'
 
 /**
  * Opens the app once in the engine the run uses, before any test starts (playwright.config.ts `globalSetup`, which
@@ -15,9 +16,13 @@ import { chromium, webkit, type BrowserType, type FullConfig } from '@playwright
 export default async function warmEngine(
   config: FullConfig,
   engines: Record<'chromium' | 'webkit', Pick<BrowserType, 'launch'>> = { chromium, webkit },
+  runtime: { platform: NodeJS.Platform; env: NodeJS.ProcessEnv } = { platform: process.platform, env: process.env },
 ): Promise<void> {
   const use = config.projects[0]?.use ?? {}
   const name = use.browserName === 'webkit' ? 'webkit' : 'chromium'
+  assertBrowserSandbox(config.metadata?.e2eBrowser ?? name, runtime.platform, runtime.env)
+  // A project may select WebKit even when the suite's metadata says Chromium.
+  assertBrowserSandbox(name, runtime.platform, runtime.env)
   const browser = await engines[name].launch()
   try {
     const context = await browser.newContext()

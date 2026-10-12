@@ -150,6 +150,11 @@ one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed t
 leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
 something in WebKit goes in the shared fixture and skips itself in other engines.
 
+Inside Codex's macOS seatbelt sandbox, run local e2e with `E2E_BROWSER=chromium` only and leave
+WebKit to CI. macOS strips `DYLD_*` from sandboxed launches, so Playwright's WebKit loads the
+system framework and crashes with a dialog. The runner refuses WebKit and mixed runs before
+launching a browser when `CODEX_SANDBOX=seatbelt` on macOS; `CI=1` does not bypass this check.
+
 **A change to how a task is done is measured in operations.** `pnpm ux` runs the core tasks
 (`e2e/ux/*.task.ts`) and prices each in keyboard and mouse operations with the Keystroke-Level
 Model; CI's `ux tasks` job fails when a task goes over its budget. A new feature a person does

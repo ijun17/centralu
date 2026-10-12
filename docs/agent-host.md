@@ -273,6 +273,9 @@ What one `start_agent` call does (`SessionManager.startAgent`):
    back: "Started by …"), under **the caller's permission preset**:
    never more, and no argument or tool of the caller changes it. The task goes in a frame (`agentFrame`: who asks,
    and that the final message is the answer) recorded as sent by the caller (`from`).
+   The frame tells children to use `E2E_BROWSER=chromium` for local e2e and leave WebKit to CI
+   (#592): macOS strips Playwright's `DYLD_*` paths inside Codex's seatbelt sandbox. The e2e
+   warm-up refuses WebKit and mixed runs there before launching a browser, without trusting `CI=1`.
 6. **The answer.** Waited for like ask_project's, up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
    (`awaitingReport` → `deliverReport`, which reaches the model as an untrusted-source notice it reads with

@@ -30,7 +30,7 @@ function fakeEngine(log: string[], name: string) {
 const run = async (browserName: string | undefined) => {
   const log: string[] = []
   const full = { projects: [{ use: { browserName, baseURL: 'http://127.0.0.1:5174' } }] } as unknown as FullConfig
-  await warmEngine(full, { chromium: fakeEngine(log, 'chromium'), webkit: fakeEngine(log, 'webkit') })
+  await warmEngine(full, { chromium: fakeEngine(log, 'chromium'), webkit: fakeEngine(log, 'webkit') }, { platform: 'linux', env: {} })
   return log
 }
 

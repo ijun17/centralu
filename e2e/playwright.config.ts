@@ -54,6 +54,8 @@ const WEBKIT_ONLY = /grid-ring\.spec\.ts/
 const leftOut = ENGINE === 'webkit' ? [WEBKIT_TWIN] : ENGINE === 'chromium' ? [WEBKIT_TWIN, WEBKIT_ONLY] : []
 
 export default defineConfig({
+  // The warm-up must guard mixed runs too: individual twins override the default browser.
+  metadata: { e2eBrowser: ENGINE ?? 'mixed' },
   testDir: '.',
   // Keep security-diff.spec.ts in the default `pnpm e2e` suite; the separate config is only for isolated local reruns.
   testMatch: /.*\.spec\.ts/,
