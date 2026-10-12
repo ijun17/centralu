@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   goalStatus: 'active' as string,
   /** If true, that status stays even after clearing and setting again — the "still does not come back" case */
   goalSetSticky: false,
+  turnStartReply: null as null | (() => Promise<unknown>),
 }))
 
 vi.mock('./client.js', () => ({
@@ -30,6 +31,7 @@ vi.mock('./client.js', () => ({
       state.requests.push({ method, params })
       if (state.failMethods.has(method)) return Promise.reject(new Error(`${method} failed (test)`))
       if (method === 'thread/start') return Promise.resolve({ thread: { id: 't1' } })
+      if (method === 'turn/start' && state.turnStartReply) return state.turnStartReply()
       if (method === 'thread/goal/set') {
         const status = state.goalStatus
         // The second set comes back active because it follows a clear — the mock follows the same flow as the real thing
@@ -59,6 +61,7 @@ beforeEach(() => {
   state.failMethods.clear()
   state.goalStatus = 'active'
   state.goalSetSticky = false
+  state.turnStartReply = null
 })
 
 async function session(emit: (e: unknown) => void = () => {}) {
@@ -71,6 +74,102 @@ async function session(emit: (e: unknown) => void = () => {}) {
 }
 
 describe('codex /compact — runs as a function', () => {
+  it('a tracked note joined to the current turn completes with that turn', async () => {
+    state.turnStartReply = async () => ({ turn: { id: 'turn-1' } })
+    const h = await session()
+    h.send('long job')
+    await tick()
+    let done = false
+    const note = h.sendTracked!('parent note').then(() => { done = true })
+    await tick()
+    expect(done).toBe(false)
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'turn-1' } } })
+    await note
+    expect(done).toBe(true)
+    await h.dispose()
+  })
+
+  it('notes queued during compaction finish with their new turn, including a coalesced batch', async () => {
+    const h = await session()
+    h.send('/compact')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'compact-1' } } })
+    let completed = 0
+    const notes = [h.sendTracked!('first'), h.sendTracked!('second')].map((p) => p.then(() => { completed++ }))
+    state.turnStartReply = async () => ({ turn: { id: 'notes-2' } })
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'compact-1' } } })
+    await tick()
+    expect(completed).toBe(0)
+    expect(state.requests.filter((r) => r.method === 'turn/start').at(-1)?.params?.input).toEqual([{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }])
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'notes-2' } } })
+    await Promise.all(notes)
+    expect(completed).toBe(2)
+    await h.dispose()
+  })
+
+  it('a late turn/start response binds a note to its own already-ended turn, not the earlier completion', async () => {
+    const h = await session()
+    let reply!: (v: unknown) => void
+    state.turnStartReply = () => new Promise((resolve) => { reply = resolve })
+    let done = false
+    const note = h.sendTracked!('just as a turn ends').then(() => { done = true })
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'old' } } })
+    await tick()
+    expect(done).toBe(false)
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'new' } } })
+    expect(done).toBe(false)
+    reply({ turn: { id: 'new' } })
+    await note
+    await h.dispose()
+  })
+
+  it('a userMessage receipt finishes the note before later turns, even while its RPC response is delayed', async () => {
+    const events: string[] = []
+    const h = await session((e) => events.push((e as { type: string }).type))
+    let reply!: (v: unknown) => void
+    state.turnStartReply = () => new Promise((resolve) => { reply = resolve })
+    const note = h.sendTracked!('parent note', { complete: () => events.push('note complete'), fail: () => {} })
+    await tick()
+    const id = state.requests.find((r) => r.method === 'turn/start')!.params!.clientUserMessageId
+    state.handlers!.onNotification({ method: 'item/started', params: { threadId: 't1', turnId: 'note-turn', item: { type: 'userMessage', clientId: id, content: [] } } })
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'note-turn' } } })
+    expect(events.slice(-2)).toEqual(['turn_complete', 'note complete'])
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'person-turn' } } })
+    reply({ turn: { id: 'note-turn' } })
+    await note
+    await tick()
+    h.interrupt()
+    expect(state.requests.filter((r) => r.method === 'turn/interrupt').at(-1)?.params?.turnId).toBe('person-turn')
+    await h.dispose()
+  })
+
+  it('stop drops a compact-queued note and stops a note whose turn/start was still in flight', async () => {
+    const h = await session()
+    h.send('/compact')
+    await tick()
+    const queued = h.sendTracked!('queued')
+    const rejected = expect(queued).rejects.toThrow('stopped')
+    h.interrupt()
+    await rejected
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'compact' } } })
+    await tick()
+    expect(methods()).not.toContain('turn/start')
+
+    let reply!: (v: unknown) => void
+    state.turnStartReply = () => new Promise((resolve) => { reply = resolve })
+    const flight = h.sendTracked!('in flight')
+    const failed = expect(flight).rejects.toThrow('stopped')
+    await tick()
+    h.interrupt()
+    await failed
+    reply({ turn: { id: 'late-turn' } })
+    await tick()
+    expect(state.requests).toContainEqual({ method: 'turn/interrupt', params: { threadId: 't1', turnId: 'late-turn' } })
+    await h.dispose()
+  })
+
   it('mid-turn input uses the same turn/start steering path as the person\'s messages, without interrupting or completing the turn', async () => {
     const events: unknown[] = []
     expect(new CodexAdapter().capabilities.midTurnInput).toBe(true)

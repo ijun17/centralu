@@ -12,7 +12,7 @@ import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHos
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, underGrant } from './ask-project.js'
-import { AGENT_CEILING, agentBranch, agentFrame, agentName, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentFrame, agentNoteFrame, agentName, presetWithin } from './start-agent.js'
 import { builderRole } from './app-builder.js'
 import { remember } from './folder-cache.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
@@ -2900,6 +2900,9 @@ export class SessionManager {
     }
     // An event that gets recorded carries its assigned in-session seq along with it — the basis for the UI's
     // unread tracking
+    // Capture the answer before an event subscriber can send more input into this conversation.
+    const run = e.sessionId ? this.agentRuns.get(e.sessionId) : undefined
+    run?.onEvent(e)
     this.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
     /*
      * Reporting happens **no matter how the turn ends** (#166). It used to only consume the marker on
@@ -2907,10 +2910,7 @@ export class SessionManager {
      * too would end the state as "awaiting input" and hide the failure). So a failed run was never
      * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
      */
-    if (endedTurn && e.sessionId) void this.reportBackIfAwaited(e.sessionId, e)
-    // A session an app is waiting on an answer from (M4 D-1) — notified **after** the save: the waiting side
-    // reads the final answer from the store
-    if (e.sessionId) this.agentRuns.get(e.sessionId)?.onEvent(e)
+    if (endedTurn && e.sessionId && !run?.tracksInputs) void this.reportBackIfAwaited(e.sessionId, e, run?.completedAnswer)
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.raiseHostAsks(e.sessionId)
@@ -2941,7 +2941,7 @@ export class SessionManager {
    *  - Once notified, the marker is cleared. Otherwise that session would wake the orchestrator on
    *    every turn it runs on its own afterward — which would become a loop of waking each other
    */
-  private async reportBackIfAwaited(sessionId: string, ending: NormalizedEvent): Promise<void> {
+  private async reportBackIfAwaited(sessionId: string, ending: NormalizedEvent, answer?: string): Promise<void> {
     const orchestratorId = this.awaitingReport.get(sessionId)
     if (!orchestratorId) return
     this.awaitingReport.delete(sessionId)
@@ -2958,7 +2958,7 @@ export class SessionManager {
     const project = target.projectId
       ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(project no longer exists)')
       : '(none)'
-    await this.deliverReport(orchestratorId, sessionId, target.name, project, previewOf(this.store, sessionId, 600), ending)
+    await this.deliverReport(orchestratorId, sessionId, target.name, project, answer?.slice(0, 600) ?? previewOf(this.store, sessionId, 600), ending)
   }
 
   /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */
@@ -3420,6 +3420,7 @@ export class SessionManager {
      * a different header (`appMessageFrame`)
      */
     fromAppVia: AppMessageVia = 'inline',
+    sendInput?: (handle: SessionHandle, text: string) => void,
   ): Promise<void> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
@@ -3494,7 +3495,8 @@ export class SessionManager {
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
           : text
-    h.send(adapterText)
+    if (sendInput) sendInput(h, adapterText)
+    else h.send(adapterText)
   }
 
   /**
@@ -4409,6 +4411,7 @@ export class SessionManager {
   sessionIdle(sessionId: string): SessionIdle {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (this.agentRuns.get(sessionId)?.waitingForInputs) return { idle: false, reason: 'turn' }
     return sessionIdle(m, {
       running: this.handles.has(sessionId),
       reportsBackground: !!this.adapters.get(m.tool)?.capabilities.backgroundTasks,
@@ -5444,32 +5447,41 @@ export class SessionManager {
   /** Registers the wait on the delegated session's turn (the same watcher an app's agent uses, `AgentRunWait`) */
   private startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false): Delegation {
     let notice: string | undefined
-    const wait = new AgentRunWait((message) => (notice = message), () => this.meta.get(sessionId)?.name ?? 'the session')
+    let answerAfter = this.meta.get(sessionId)?.lastSeq ?? 0
+    const wait = new AgentRunWait((message) => (notice = message), () => this.meta.get(sessionId)?.name ?? 'the session', undefined, () => {
+      // Queued turns have no new stored user row: their input was recorded before the previous answer.
+      const answer = finalAnswer(this.store.loadMessages(sessionId, 50).filter((m) => m.seq > answerAfter))
+      answerAfter = this.meta.get(sessionId)?.lastSeq ?? answerAfter
+      return answer
+    })
     const d: Delegation = {
       callerId,
       sessionId,
       target,
       wait,
-      settled: false,
+      get settled() { return wait.finished },
       notice: () => notice,
       outcome: wait.done.then(
-        () => ({ ok: true as const }),
+        (r) => ({ ok: true as const, answer: r.answer }),
         (e: Error) => ({ ok: false as const, error: e.message }),
       ),
       stop: (why) => {
         if (d.settled) return
+        wait.fail(new Error(`${why}, so the delegated turn was stopped`))
         try {
           this.handles.get(sessionId)?.interrupt()
         } catch {
           // The session has already gone down — there is nothing left to stop
         }
-        wait.fail(new Error(`${why}, so the delegated turn was stopped`))
       },
       ...(agent ? { agent: true } : {}),
     }
-    void d.outcome.then(() => {
-      d.settled = true
+    void d.outcome.then((r) => {
       if (this.agentRuns.get(sessionId) === wait) this.agentRuns.delete(sessionId)
+      // Queued notes can finish after the original turn. Report only the whole delegation's ending.
+      if (agent) void this.reportBackIfAwaited(sessionId, r.ok
+        ? { type: 'turn_complete', sessionId }
+        : { type: 'error', sessionId, error: { code: 'internal', message: r.error, retryable: false } }, r.ok ? r.answer : undefined)
     })
     this.agentRuns.set(sessionId, wait)
     this.delegations.set(key, d)
@@ -5507,7 +5519,7 @@ export class SessionManager {
           error: `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
         }
       }
-      const answer = finalAnswer(this.store.loadMessages(d.sessionId, 50))
+      const answer = r.answer ?? finalAnswer(this.store.loadMessages(d.sessionId, 50))
       const { granted, outside } = readableGrants(pathsIn(answer), d.target.path)
       if (granted.length) {
         const set = this.readGrants.get(d.callerId) ?? new Set<string>()
@@ -5680,20 +5692,25 @@ export class SessionManager {
           }
         }
         const from = { sessionId: callerId, name: labelOf(this.store, caller) }
-        const text = agentFrame(from.name, opts.text ?? '')
+        const text = agentNoteFrame(from.name, opts.text ?? '')
         if (d && !d.settled) {
-          if (!this.adapters.get(child.tool)?.capabilities.midTurnInput) {
+          if (!this.adapters.get(child.tool)?.capabilities.midTurnInput || !this.handles.get(child.id)?.sendTracked) {
             return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
           }
+          const release = d.wait.holdInput()
           try {
-            await this.deliver(child.id, text, undefined, from, false)
+            await this.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input) => {
+              const fail = (e: Error) => { d.wait.fail(e); release() }
+              void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
+            })
           } catch (e) {
+            release()
             return { ok: false, error: `Could not send it: ${(e as Error).message}` }
           }
           // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
           return this.agentWorking(d, false)
         }
-        if (child.state === 'working' || child.state === 'waiting_approval' || this.agentRuns.has(child.id)) {
+        if (child.state === 'working' || child.state === 'waiting_approval' || (this.agentRuns.has(child.id) && !this.agentRuns.get(child.id)!.finished)) {
           return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
         }
         // An answer the caller never came back for gives way to the new message
@@ -5911,7 +5928,7 @@ export class SessionManager {
       if (r === 'bound') return this.agentWorking(d)
       if (this.delegations.get(key) === d) this.delegations.delete(key)
       if (!r.ok) return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
-      const answer = finalAnswer(this.store.loadMessages(d.sessionId, 50))
+      const answer = r.answer ?? finalAnswer(this.store.loadMessages(d.sessionId, 50))
       // Paths it names in its folder become readable to the caller, as ask_project's do: a child in another
       // folder (a worktree, #561 part 2) is outside the caller's own
       const { granted, outside } = readableGrants(pathsIn(answer), d.target.path)
@@ -6963,8 +6980,8 @@ type Delegation = {
   target: { id: string; name: string; path: string }
   wait: AgentRunWait
   /** The turn's outcome, never rejecting */
-  outcome: Promise<{ ok: true } | { ok: false; error: string }>
-  settled: boolean
+  outcome: Promise<{ ok: true; answer?: string } | { ok: false; error: string }>
+  readonly settled: boolean
   /** What the delegated session waits on, when it waits on the person */
   notice(): string | undefined
   /** Stops the delegated turn and ends the wait with the reason */

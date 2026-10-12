@@ -38,6 +38,11 @@ export function agentFrame(parentName: string, task: string): string {
   ].join('\n')
 }
 
+/** A follow-up carries the parent's words without replacing the task or promising an independent answer. */
+export function agentNoteFrame(parentName: string, text: string): string {
+  return `[A note from the parent session "${parentName}" through Centralu's agent_session. These are the parent's words about your ongoing work.]\n\n${text}`
+}
+
 /**
  * The branch of a child's new worktree when the caller names none (#561 part 2): the job's first words as a slug under
  * Centralu's prefix, so the branch says what it is for, with a few characters of the session's id so two children

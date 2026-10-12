@@ -6,7 +6,7 @@ import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, agentBranch, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentNoteFrame, presetWithin } from './start-agent.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -15,6 +15,13 @@ import { AGENT_CEILING, agentBranch, presetWithin } from './start-agent.js'
  */
 
 describe('the preset rule', () => {
+  it('a parent follow-up is a note about ongoing work, without the new-task/answer frame', () => {
+    const frame = agentNoteFrame('parent', 'use Chromium')
+    expect(frame).toContain('A note from the parent session "parent"')
+    expect(frame).toContain('use Chromium')
+    expect(frame).not.toContain('gives you this task')
+    expect(frame).not.toContain('Your final message goes back')
+  })
   it('a child may have the parent\'s preset or less, never more', () => {
     const order: PermissionPreset[] = ['safe', 'normal', 'auto']
     for (const [i, parent] of order.entries()) {
@@ -248,7 +255,7 @@ describe('starting another agent in the same project', () => {
     const result = await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'Use Chromium for e2e.' })
     expect(result).toMatchObject({ ok: true, state: 'working', sessionId: c, reported: false })
     expect(h.sent).toHaveLength(2)
-    expect(h.sent[1]).toContain('Another session in this project')
+    expect(h.sent[1]).toContain('A note from the parent session')
     expect(h.sent[1]).toContain('Use Chromium for e2e.')
     expect(h.interrupted).toBe(0)
     const message = w.store.loadMessages(c, 10).filter((m) => m.role === 'user').at(-1)!
@@ -257,6 +264,102 @@ describe('starting another agent in the same project', () => {
     h.answer('Done with Chromium.')
     expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'Done with Chromium.' })
     expect(handleOf(s)?.sent ?? []).toEqual([])
+  })
+
+  it.each(['claude', 'codex'] as const)('%s: queued notes retain the delegation across results; the existing wait gets the last note answer once', async (tool) => {
+    allowProject()
+    const s = await session()
+    const started = await w.mgr.startAgent(s, { task: 'original task', tool, wait: false })
+    const c = started.ok ? started.sessionId : ''
+    const h = handleOf(c)!
+    let answered = false
+    const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' }).then((r) => { answered = true; return r })
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'first queued note' })
+    h.answer('Answer BEFORE the note', false)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(answered).toBe(false)
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'status' })).toMatchObject({ ok: true, state: 'working' })
+    // A note can be sent during the queued note's new turn, or in the gap before it starts.
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'second queued note' })).toMatchObject({ ok: true, state: 'working' })
+    h.event({ type: 'state_change', sessionId: c, state: 'working' })
+    h.answer('First note answered', false)
+    h.receipts.shift()!.resolve()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(answered).toBe(false)
+    expect(handleOf(s)?.sent ?? []).toEqual([])
+    h.event({ type: 'state_change', sessionId: c, state: 'working' })
+    h.answer('LAST note answered')
+    expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'LAST note answered' })
+    expect(handleOf(s)?.sent ?? []).toEqual([])
+  })
+
+  it('a send in the completion microtask gap starts a live delegation instead of attaching to an already-resolved wait', async () => {
+    allowProject()
+    const s = await session()
+    const c = await startRunning(s)
+    const h = handleOf(c)!
+    h.answer('original done')
+    let settled = false
+    const next = w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'arrived just after completion' }).then((r) => { settled = true; return r })
+    await w.until(() => h.sent.length === 2)
+    expect(settled).toBe(false)
+    h.answer('new answer')
+    expect(await next).toMatchObject({ ok: true, state: 'done', answer: 'new answer' })
+  })
+
+  it('a later unrelated turn in the same event batch cannot overwrite the completed note answer', async () => {
+    allowProject()
+    const s = await session()
+    const c = await startRunning(s)
+    const h = handleOf(c)!
+    const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'parent note' })
+    h.answer('before note', false)
+    h.event({ type: 'state_change', sessionId: c, state: 'working' })
+    h.answer('the note answer')
+    h.event({ type: 'state_change', sessionId: c, state: 'working' })
+    h.answer('unrelated later answer')
+    expect(await waiting).toMatchObject({ ok: true, answer: 'the note answer' })
+  })
+
+  it('a queued parent note keeps the child awake between turns', async () => {
+    allowProject()
+    w.adapters.get('claude')!.capabilities.backgroundTasks = true
+    const s = await session()
+    const c = await startRunning(s)
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
+    handleOf(c)!.answer('old turn ended', false)
+    expect(w.mgr.sessionIdle(c)).toEqual({ idle: false, reason: 'turn' })
+    expect(await w.mgr.sleepSession(c)).toBe(false)
+    expect(w.mgr.isLive(c)).toBe(true)
+    handleOf(c)!.answer('note answer')
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, answer: 'note answer' })
+  })
+
+  it.each(['claude', 'codex'] as const)('%s: a queued note gets one final report, and stop owns its new turn', async (tool) => {
+    allowProject()
+    const s = await session()
+    const started = await w.mgr.startAgent(s, { task: 'original task', tool, wait: false })
+    const c = started.ok ? started.sessionId : ''
+    const h = handleOf(c)!
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
+    h.answer('Old answer', false)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(handleOf(s)?.sent ?? []).toEqual([])
+    h.event({ type: 'state_change', sessionId: c, state: 'working' })
+    h.answer('Note answer')
+    await w.until(() => (handleOf(s)?.sent ?? []).some((t) => t.includes(`sourceSessionId: ${c}`)))
+    expect(handleOf(s)!.sent).toHaveLength(1)
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, answer: 'Note answer' })
+
+    const next = w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'another task' })
+    await w.until(() => h.sent.length === 3)
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'another queued note' })
+    h.answer('Before the queued note', false)
+    h.event({ type: 'state_change', sessionId: c, state: 'working' })
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'stop' })).toMatchObject({ ok: true, state: 'stopped' })
+    expect(h.interrupted).toBe(1)
+    expect(await next).toMatchObject({ ok: false })
   })
 
   it('mid-turn send preserves the permission gate and requires adapter support, without stopping or losing the wait', async () => {

@@ -12,10 +12,11 @@ type Started = {
   at: number
   options: Record<string, unknown>
   /** The messages the adapter feeds the CLI */
-  input: AsyncIterator<{ message: { content: { text: string }[] } }>
+  input: AsyncIterator<{ uuid: string; message: { content: { text: string }[] } }>
   push(m: unknown): void
   end(): void
   closed: boolean
+  interrupts: unknown[]
   /** What close() does to the stream: by default nothing, as a process mid-turn */
   onClose: () => void
 }
@@ -42,6 +43,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
         wake = null
       },
       closed: false,
+      interrupts: [],
       onClose: () => {},
     }
     sdk.started.push(s)
@@ -54,7 +56,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     }
     return {
       [Symbol.asyncIterator]: () => stream(),
-      interrupt: async () => {},
+      interrupt: async (options?: unknown) => { s.interrupts.push(options) },
       close: () => {
         s.closed = true
         s.onClose()
@@ -100,6 +102,120 @@ const text = (m: IteratorResult<{ message: { content: { text: string }[] } }>) =
 const tick = () => new Promise((r) => setTimeout(r, 5))
 
 describe('where a Windows Claude session starts from (#353)', () => {
+  it('a queued parent note is completed by its own result UUID, rather than the preceding result', async () => {
+    const { handle, cli } = await session(adapter())
+    handle.send('original task')
+    const original = (await cli.input.next()).value!
+    let done = false
+    const note = handle.sendTracked!('parent note').then(() => { done = true })
+    const input = (await cli.input.next()).value!
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original.uuid })
+    await tick()
+    expect(done).toBe(false)
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: input.uuid })
+    await note
+    expect(done).toBe(true)
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('notifies the host after the note result is recorded, before the next SDK frame', async () => {
+    const { handle, cli, events } = await session(adapter())
+    const observed: string[] = []
+    const note = handle.sendTracked!('note', {
+      complete: () => { expect(events.at(-1)?.type).toBe('turn_complete'); observed.push('complete') },
+      fail: () => {},
+    })
+    const id = (await cli.input.next()).value!.uuid
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: id })
+    cli.push({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'next turn' } } })
+    await note
+    expect(observed).toEqual(['complete'])
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('a result completes notes folded into a running turn, including a batch longer than the SDK UUID list cap', async () => {
+    const { handle, cli } = await session(adapter())
+    const notes: Promise<void>[] = []
+    const ids: string[] = []
+    for (let n = 0; n < 65; n++) {
+      notes.push(handle.sendTracked!(`note ${n}`))
+      ids.push((await cli.input.next()).value!.uuid)
+    }
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: ids.at(-1), user_message_uuids: ids.slice(-64) })
+    await Promise.all(notes)
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('stop cancels SDK-queued notes as well as the running turn', async () => {
+    const { handle, cli } = await session(adapter())
+    const note = handle.sendTracked!('queued note')
+    await cli.input.next()
+    const rejected = expect(note).rejects.toThrow('stopped')
+    handle.interrupt()
+    await rejected
+    expect(cli.interrupts).toEqual([{ cancelQueued: true }])
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('the next note turn becomes working and an intentional stop does not turn its result into a failure', async () => {
+    const { handle, cli, events } = await session(adapter())
+    handle.send('original')
+    const original = (await cli.input.next()).value!.uuid
+    const note = handle.sendTracked!('next turn')
+    const id = (await cli.input.next()).value!.uuid
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original })
+    await tick()
+    cli.push({ type: 'stream_event', parent_tool_use_id: null, user_message_uuid: id, event: { type: 'message_start', message: { id: 'note-reply' } } })
+    await tick()
+    expect(events.at(-1)).toMatchObject({ type: 'state_change', state: 'working' })
+    const rejected = expect(note).rejects.toThrow('stopped')
+    handle.interrupt()
+    cli.push({ type: 'result', subtype: 'error_during_execution', is_error: true, user_message_uuid: id })
+    await rejected
+    await tick()
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('a parent note does not replace a pending approval with a working state', async () => {
+    const events: NormalizedEvent[] = []
+    const a = adapter()
+    const handle = await a.createSession({ sessionId: 's1', cwd: dir, permissionPreset: 'normal' }, (e) => events.push(e))
+    const cli = sdk.started.at(-1)!
+    handle.send('original')
+    await cli.input.next()
+    const canUse = cli.options.canUseTool as (tool: string, input: unknown, context: unknown) => Promise<unknown>
+    const approval = canUse('Bash', { command: 'write result.txt' }, { toolUseID: 'call-1', signal: new AbortController().signal })
+    await tick()
+    const card = events.find((e) => e.type === 'approval_request')!
+    expect(card.type).toBe('approval_request')
+    const before = events.length
+    const note = handle.sendTracked!('keep the approval open')
+    expect(events.slice(before).filter((e) => e.type === 'state_change')).toEqual([])
+    handle.respondApproval((card as Extract<NormalizedEvent, { type: 'approval_request' }>).requestId, 'deny')
+    await approval
+    cli.end()
+    await handle.dispose()
+    await expect(note).rejects.toThrow('closed')
+  })
+
+  it('a result without input correlation fails explicitly and cancels pending notes', async () => {
+    const { handle, cli } = await session(adapter())
+    const note = handle.sendTracked!('cannot identify this note')
+    await cli.input.next()
+    const rejected = expect(note).rejects.toThrow('did not identify the input')
+    cli.push({ type: 'result', subtype: 'success' })
+    await rejected
+    expect(cli.interrupts).toEqual([{ cancelQueued: true }])
+    cli.end()
+    await handle.dispose()
+  })
+
   it('accepts another user message through the prompt iterator during a turn, without ending or interrupting it', async () => {
     const a = adapter()
     expect(a.capabilities.midTurnInput).toBe(true)

@@ -35,7 +35,10 @@ same files under the same or a lower preset), but they multiply what runs, so:
   the caller's deletion. Its task is recorded as sent by the caller (`from`), not by the person.
   Mid-turn follow-ups keep that provenance and are framed as the parent's words, through the same message path
   the person uses. They do not interrupt the child or replace the turn an existing wait follows; only a turn
-  delegated by this parent accepts them, and the preset check still applies on every send (#592).
+  delegated by this parent accepts them, and the preset check still applies on every send (#592). If a note runs
+  as a new turn after the earlier result, its completion receipt keeps that turn in the parent's delegation:
+  send, stop and wait still apply. Intermediate results cannot consume the report marker; the last note's
+  answer is delivered once through a wait or a report. Follow-ups use a note frame, not the initial task frame.
 - **Not from an untrusted project** (#382's rule).
 
 Worktree children (#582) keep the same preset as their parent. **Every Codex session under `auto` runs

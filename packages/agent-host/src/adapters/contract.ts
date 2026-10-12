@@ -695,12 +695,16 @@ export type EventSink = (event: NormalizedEvent) => void
  * A session handle. Its adapter reports the running CLI's version once per process as an
  * `agent_version` event (#297), from what the tool itself says when it starts.
  */
+export type InputObserver = { complete(): void; fail(error: Error): void }
+
 export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
   /** Limits the parent should know before delegating more work; decided by the adapter's effective settings. */
   delegationNotice?(): string | undefined
   send(text: string): void
+  /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
+  sendTracked?(text: string, observer?: InputObserver): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**
    * The approval response. **Returns whether it reached anything** (false = no such request exists).

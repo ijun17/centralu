@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process'
+import { InputReceipts, type InputReceipt } from '../input-receipts.js'
+import type { InputObserver } from '../contract.js'
 import { bridgePath } from './bridge-path.js'
 /** Name of our MCP server attached via the bridge — elicitation acceptance judges by this name (defined in one place, #93) */
 import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor } from '../../sessions/orchestrator-tools.js'
@@ -312,7 +314,9 @@ class CodexSession implements SessionHandle {
    * that is running, so we just send it as usual. So we only queue here during compact/review
    * **that we ourselves started**, and flush the queue as a single turn once that turn ends.
    */
-  private pendingInputs: string[] = []
+  private pendingInputs: { text: string; receipt?: InputReceipt }[] = []
+  private inputReceipts = new InputReceipts()
+  private inputGroups = new Map<string, InputReceipt[]>()
   /** An unsteerable turn (compact/review) is running — we know because we are the ones who started it */
   private blockingTurn = false
   /**
@@ -834,6 +838,16 @@ class CodexSession implements SessionHandle {
     }
 
     this.noteAppCall(n)
+    if (n.method === 'item/started' || n.method === 'item/completed') {
+      const p = (n.params ?? {}) as { turnId?: string; item?: { type?: string; clientId?: string } }
+      if (p.item?.type === 'userMessage' && p.item.clientId && p.turnId) {
+        const group = this.inputGroups.get(p.item.clientId)
+        if (group) {
+          this.inputGroups.delete(p.item.clientId)
+          this.takeInputTurn({ turn: { id: p.turnId } }, group)
+        }
+      }
+    }
 
     // Where compact/review ends — if messages piled up during it, they go out now
     if (n.method === 'turn/completed' && this.blockingTurn) {
@@ -853,6 +867,7 @@ class CodexSession implements SessionHandle {
     }
     if (n.method === 'mcpServer/startupStatus/updated' && !this.firstMcpFailure(n.params)) return
     for (const e of normalizeNotification(this.sessionId, n)) {
+      if (e.type === 'error' && this.inputReceipts.size) this.interrupt(new Error(e.error.message))
       /*
        * An image that arrived carrying only a path gets its bytes filled in here (#40). normalize
        * is a pure function and cannot read files — IO is the adapter's job. The read is async,
@@ -878,6 +893,10 @@ class CodexSession implements SessionHandle {
         else this.activityBefore = e.activity
       }
       this.emit(e)
+      if (e.type === 'turn_complete') {
+        const ended = turnIdOf(n.params)
+        if (ended) this.inputReceipts.endTurn(ended)
+      }
     }
     this.noteSpawn(n)
     if (n.method === 'turn/completed' && this.unlinked.size > 0) {
@@ -1121,12 +1140,20 @@ class CodexSession implements SessionHandle {
     this.alwaysAllow.addAll(matchers)
   }
 
-  send(text: string): void {
+  sendTracked(text: string, observer?: InputObserver): Promise<void> {
+    const receipt = this.inputReceipts.create(observer)
+    this.sendInput(text, receipt)
+    return receipt.done
+  }
+
+  send(text: string): void { this.sendInput(text) }
+
+  private sendInput(text: string, receipt?: InputReceipt): void {
     const nth = ++this.sendsIssued
     void this.ready
       .then(() => {
         // A Stop pressed before the thread was up already reclaimed this message (sendsStopped) — do not send it
-        if (nth <= this.sendsStopped) return
+        if (nth <= this.sendsStopped || receipt?.cancelled) return
         if (!this.threadId) throw new Error('Thread is not ready')
         /*
          * While compact/review is running, we do not send but queue instead — the measurement in
@@ -1135,7 +1162,7 @@ class CodexSession implements SessionHandle {
          * delivered as literal text, but /compact during a compact is meaningless anyway.
          */
         if (this.blockingTurn) {
-          this.pendingInputs.push(text)
+          this.pendingInputs.push({ text, receipt })
           return
         }
         /*
@@ -1250,10 +1277,12 @@ class CodexSession implements SessionHandle {
             say(status === 'active' ? `Goal set: ${arg}` : `Goal set (${status}): ${arg}`)
           })
         }
+        if (receipt) this.inputGroups.set(receipt.id, [receipt])
         return (
           this.client
             .request('turn/start', {
               threadId: this.threadId,
+              ...(receipt ? { clientUserMessageId: receipt.id } : {}),
               input: [{ type: 'text', text }],
               /*
                * Reasoning effort is passed per turn — this is the slot codex documents as applying
@@ -1264,10 +1293,13 @@ class CodexSession implements SessionHandle {
               ...this.outputSchemaParam(),
             })
             // The turn also rides along on the response — this covers the case where it arrives before the notification (the target of stop)
-            .then((res) => this.takeStartedTurn(turnIdOf(res)))
+            .then((res) => this.takeInputTurn(res, receipt ? [receipt] : []))
         )
       })
       .catch((e: Error) => {
+        if (receipt) this.inputGroups.delete(receipt.id)
+        if (receipt?.cancelled || receipt?.completed) return
+        if (receipt) this.interrupt(e)
         // The thread never came up — watchBackgroundStart says so once, counting this message (#168, item 5)
         if (this.startFailed) return
         this.emit({
@@ -1281,23 +1313,48 @@ class CodexSession implements SessionHandle {
   /** Sends the messages that were queued out as one turn — each message as its own input item (does not blur the boundary) */
   private flushPending(): void {
     if (this.pendingInputs.length === 0 || !this.threadId) return
-    const input = this.pendingInputs.map((text) => ({ type: 'text', text }))
+    const pending = this.pendingInputs
+    const receipts = pending.flatMap((p) => p.receipt ? [p.receipt] : [])
+    const clientId = receipts[0]?.id
+    if (clientId) this.inputGroups.set(clientId, receipts)
+    const input = pending.map(({ text }) => ({ type: 'text', text }))
     this.pendingInputs = []
     void this.client
       .request('turn/start', {
         threadId: this.threadId,
+        ...(clientId ? { clientUserMessageId: clientId } : {}),
         input,
         ...(this.opts.effort ? { effort: this.opts.effort } : {}),
         ...this.outputSchemaParam(),
       })
-      .then((res) => this.takeStartedTurn(turnIdOf(res)))
+      .then((res) => this.takeInputTurn(res, receipts))
       .catch((e: Error) => {
+        if (clientId) this.inputGroups.delete(clientId)
+        if (receipts.length && receipts.every((r) => r.cancelled || r.completed)) return
+        if (this.inputReceipts.size) this.interrupt(e)
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
           error: { code: 'internal', message: e.message, retryable: true },
         })
       })
+  }
+
+  private takeInputTurn(res: unknown, receipts: InputReceipt[]): void {
+    if (receipts.length && receipts.every((r) => r.completed)) return
+    const id = turnIdOf(res)
+    if (!receipts.length) { this.takeStartedTurn(id); return }
+    if (!id) {
+      this.interrupt(new Error('Codex did not identify the turn accepting the parent note'))
+      return
+    }
+    // Stop can arrive while turn/start is in flight, before the next turn is named.
+    if (receipts.some((r) => r.cancelled) && !this.endedTurns.includes(id)) {
+      void this.client.request('turn/interrupt', { threadId: this.threadId, turnId: id }).catch(() => {})
+    }
+    if (receipts.some((r) => r.cancelled)) return
+    this.takeStartedTurn(id)
+    for (const receipt of receipts) this.inputReceipts.bind(receipt, id)
   }
 
   /**
@@ -1390,7 +1447,13 @@ class CodexSession implements SessionHandle {
     return out
   }
 
-  interrupt(): void {
+  interrupt(reason = new Error('The parent note was stopped before it finished')): void {
+    const turns = this.inputReceipts.failAll(reason)
+    this.pendingInputs = this.pendingInputs.filter((p) => !p.receipt)
+    for (const turnId of turns) {
+      if (!this.threadId || turnId === this.turnId || this.endedTurns.includes(turnId)) continue
+      void this.client.request('turn/interrupt', { threadId: this.threadId, turnId }).catch(() => {})
+    }
     /*
      * Stops app calls made by this session (M4 A-5) — **even without a turn.** A call that had
      * already returned early past 240 seconds keeps running even after the turn ends. Work from a
@@ -1447,6 +1510,8 @@ class CodexSession implements SessionHandle {
 
   /** The app-server is gone, and the child threads with it — each still listed ends as stopped. */
   private releaseChildren(): void {
+    this.inputGroups.clear()
+    this.inputReceipts.failAll(new Error('The session process ended before the parent note finished'))
     for (const e of this.children.release('Ended with the session process')) this.emit(e)
   }
 

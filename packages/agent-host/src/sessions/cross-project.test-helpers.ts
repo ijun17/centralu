@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, InputObserver, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 
@@ -16,6 +16,7 @@ export class CrossHandle implements SessionHandle {
   externalId: string | null = null
   sent: string[] = []
   interrupted = 0
+  receipts: { resolve(): void; reject(e: Error): void }[] = []
   constructor(
     readonly sessionId: string,
     readonly opts: CreateSessionOpts,
@@ -25,16 +26,26 @@ export class CrossHandle implements SessionHandle {
     this.sent.push(text)
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
   }
+  sendTracked(text: string, observer?: InputObserver): Promise<void> {
+    const done = new Promise<void>((resolve, reject) => this.receipts.push({
+      resolve: () => { observer?.complete(); resolve() },
+      reject: (e) => { observer?.fail(e); reject(e) },
+    }))
+    this.send(text)
+    return done
+  }
   respondApproval() {
     return false
   }
   interrupt() {
     this.interrupted++
+    for (const receipt of this.receipts.splice(0)) receipt.reject(new Error('Stopped'))
   }
   /** The turn ends with this as its final text */
-  answer(text: string) {
+  answer(text: string, completeInputs = true) {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    if (completeInputs) for (const receipt of this.receipts.splice(0)) receipt.resolve()
   }
   event(e: NormalizedEvent) {
     this.emit(e)

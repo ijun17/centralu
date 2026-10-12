@@ -58,14 +58,36 @@ export class AgentRunWait {
   stoppedByPerson = false
   /** The person deleted that session — there is no session left to conclude */
   deleted = false
-  readonly done: Promise<{ output?: unknown }>
-  private settle!: { resolve: (v: { output?: unknown }) => void; reject: (e: Error) => void }
+  readonly done: Promise<{ output?: unknown; answer?: string }>
+  private settle!: { resolve: (v: { output?: unknown; answer?: string }) => void; reject: (e: Error) => void }
   private settled = false
+  private inputs = 0
+  private trackedInputs = false
+  private ending?: { output?: unknown; answer?: string }
+
+  get waitingForInputs(): boolean { return this.inputs > 0 }
+  get finished(): boolean { return this.settled }
+  get tracksInputs(): boolean { return this.trackedInputs }
+  get completedAnswer(): string | undefined { return this.ending?.answer }
+
+  /** A parent's note may join this turn or run after it. Hold before send, since adapters can emit synchronously. */
+  holdInput(): () => void {
+    this.trackedInputs = true
+    this.inputs++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.inputs--
+      if (!this.inputs && this.ending) this.finish(this.ending)
+    }
+  }
 
   constructor(
     private notify: (message: string) => void,
     private sessionName: () => string,
     private onUsage: (tokens: { input: number; output: number }) => void = () => {},
+    private readAnswer?: () => string,
   ) {
     this.done = new Promise((resolve, reject) => (this.settle = { resolve, reject }))
     // So a failure before anyone is waiting does not leak as an unhandled rejection
@@ -86,11 +108,13 @@ export class AgentRunWait {
       return this.onUsage({ input: t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens, output: t.outputTokens })
     }
     if (this.settled) return
+    if (e.type === 'message_delta' || (e.type === 'state_change' && e.state === 'working')) this.ending = undefined
     switch (e.type) {
       case 'turn_complete':
         if (this.stoppedByPerson) return this.fail(new Error('the person stopped the agent before it finished'))
-        this.settled = true
-        return this.settle.resolve(e.output === undefined ? {} : { output: e.output })
+        this.ending = { ...(e.output === undefined ? {} : { output: e.output }), ...(this.readAnswer ? { answer: this.readAnswer() } : {}) }
+        if (this.inputs) return
+        return this.finish(this.ending)
       case 'error':
         return this.fail(new Error(this.stoppedByPerson ? 'the person stopped the agent before it finished' : `the agent's turn failed: ${e.error.message}`))
       case 'limit_reached':
@@ -106,5 +130,11 @@ export class AgentRunWait {
     if (this.settled) return
     this.settled = true
     this.settle.reject(err)
+  }
+
+  private finish(ending: { output?: unknown; answer?: string }): void {
+    if (this.settled) return
+    this.settled = true
+    this.settle.resolve(ending)
   }
 }

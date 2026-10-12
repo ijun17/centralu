@@ -331,12 +331,27 @@ or network gap. A sandbox in the person's own Claude settings can still restrict
 not widen it here. Dependency preparation above applies to both adapters.
 
 `agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` during the caller's turn
-uses the adapter's ordinary message path when it declares `capabilities.midTurnInput`: Codex 0.160 `turn/start`
+uses the adapter's ordinary message path when it declares `capabilities.midTurnInput` and provides `sendTracked`:
+Codex 0.160 `turn/start`
 steers an already-active regular turn (confirmed by `TurnStartParams.turnTrigger`; compact/review messages keep
 their existing queue), and Claude queues a user message for the query's streaming prompt iterator. It returns
-`working` immediately, keeps the original delegation and any `wait` in progress, and does not re-arm a report that
-would duplicate that wait's answer. Every follow-up is framed as the parent's words (`agentFrame`) and stored and
-shown with `from`. It is refused on an adapter without this capability, while the child works on something else
+`working` immediately and holds the original delegation until every note's completion receipt finishes. Codex
+binds a receipt through the input's `clientUserMessageId` / `userMessage.clientId` and the `turn/start` response's
+turn id, even if that response follows its completion notification;
+notes during compact/review can share a later turn. Claude stamps input UUIDs and uses the result's
+`user_message_uuid` / `user_message_uuids` to identify consumed notes, including folded batches. A result without
+correlation fails the note explicitly rather than handing back an earlier answer. Stop cancels pending notes too
+(Claude's SDK `cancelQueued` / control-request `cancel_queued`; Codex removes queued notes and interrupts a turn
+named by an in-flight response after Stop).
+
+The existing `wait` and report marker follow the whole delegation, so an intermediate turn cannot deliver an
+answer or detach the queued note from its parent. Each completed turn's answer is captured separately: queued
+input was already stored before the earlier answer, so those turns need not have a user row between them.
+The adapters notify the host synchronously **after recording the matched completion**, so later frames in the
+same event batch cannot overwrite that answer. Pending notes also make the child non-idle between turns, so the
+sleeper and CLI replacement cannot discard queued work. A follow-up is framed as a **note about ongoing work**
+(`agentNoteFrame`), without the initial task/answer frame, and stored and shown with `from`.
+It is refused on an adapter without this capability, while the child works on something else
 (the person may be using it), or when the person has since raised its preset above the caller's (`presetWithin`).
 `stop` ends the turn the caller gave it; a turn the person started there is theirs.
 
@@ -491,6 +506,7 @@ interface AgentAdapter {
 interface SessionHandle {
   readonly externalId: string
   send(input: UserInput): void
+  sendTracked?(text: string, observer?: InputObserver): Promise<void> // host-only completion receipt (#592)
   respondApproval(requestId: string, decision: Decision, scope?: Scope): void
   interrupt(): void
   stopBackgroundTask?(taskId: string): Promise<void>  // #290: stop one background task alone

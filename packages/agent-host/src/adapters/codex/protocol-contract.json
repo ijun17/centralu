@@ -32,6 +32,7 @@
       "type": "TurnStartParams",
       "send": [
         "threadId",
+        "clientUserMessageId",
         "input",
         "effort",
         "outputSchema"
@@ -103,6 +104,15 @@
     "`userAgent` carries the app-server's version (#297); without it no Codex session is ever moved to a newer CLI."
   ],
   "responseFields": {
+    "ItemStartedNotification": [
+      "turnId"
+    ],
+    "ThreadItem": [
+      "clientId"
+    ],
+    "TurnStartResponse": [
+      "turn"
+    ],
     "ThreadStartResponse": [
       "sandbox"
     ],
