@@ -1432,6 +1432,7 @@ const WINDOWS_START_GAP_MS = 1500
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
+  readonly toolDefinitions = 'claude' as const
   private readonly launch: ClaudeLaunch
 
   constructor(options: ClaudeAdapterOptions = {}) {

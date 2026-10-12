@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { DEFAULT_AGENT_CLI, residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
@@ -429,6 +430,8 @@ export class SessionManager {
    * app-server), even though the screen said "starting next turn".
    */
   private restartAfterTurn = new Set<string>()
+  /** A new host served a different Centralu tool prefix; replace the old agent at its safe boundary. */
+  private definitionsRestartAfterTurn = new Set<string>()
   private updates: UpdateService | null = null
   /** Sessions allowed to update once per host; an "always" answer adds this session only. */
   private updateConsents = new Set<string>()
@@ -1520,6 +1523,7 @@ export class SessionManager {
 
     this.meta.set(id, info)
     this.store.upsertSession(info)
+    this.rememberToolPrefix(id)
     this.store.setSessionCwd(id, cwd)
     /*
      * Lets the UI learn about this session **through an event too** (#69).
@@ -2178,6 +2182,7 @@ export class SessionManager {
         return { session: m, resumed: false, reason: leaving }
       }
       this.handles.set(sessionId, handle)
+      if (!adopt) this.rememberToolPrefix(sessionId)
       // Every window learns it is awake, not only the one that asked (#568)
       this.emit({ type: 'session_live', sessionId, live: true })
       // Why the process came up again, if a restart said so; a wake, a revive or a manual restart otherwise (§6.1)
@@ -2902,8 +2907,9 @@ export class SessionManager {
     if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId)) {
       // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
       const apps = this.appsRestartAfterTurn.delete(e.sessionId)
-      if ((apps || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
-        void this.restartSession(e.sessionId, apps ? 'thread_restart' : this.restartCause(e.sessionId)).catch(() => {})
+      const definitions = this.definitionsRestartAfterTurn.delete(e.sessionId)
+      if ((apps || definitions || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
+        void this.restartSession(e.sessionId, apps ? 'thread_restart' : definitions ? 'instructions' : this.restartCause(e.sessionId)).catch(() => {})
       }
     }
   }
@@ -4467,6 +4473,7 @@ export class SessionManager {
     // Applying a deferred settings change (#164) is also done by this same restart, and so is an app set's (#371)
     this.restartAfterTurn.delete(sessionId)
     this.appsRestartAfterTurn.delete(sessionId)
+    this.definitionsRestartAfterTurn.delete(sessionId)
     const h = this.handles.get(sessionId)
     if (h) {
       await h.dispose().catch(() => {})
@@ -4484,6 +4491,48 @@ export class SessionManager {
       this.closeStream(sessionId)
     }
     return this.resumeSession(sessionId)
+  }
+
+  /** The persisted prefix a process was started with. It is separate from SessionInfo: a screen never needs it. */
+  private toolPrefixKey(sessionId: string): string {
+    return `tool_prefix:${sessionId}`
+  }
+
+  private toolPrefixHash(sessionId: string): string | null {
+    const profile = this.toolProfileOf(sessionId)
+    const m = this.meta.get(sessionId)
+    if (!profile || !m) return null
+    const adapter = this.adapters.get(m.tool)
+    if (!adapter) return null
+    return residentCost(profile, adapter.toolDefinitions ?? DEFAULT_AGENT_CLI).prefixHash
+  }
+
+  private rememberToolPrefix(sessionId: string): void {
+    const hash = this.toolPrefixHash(sessionId)
+    if (hash) this.store.setAppSetting(this.toolPrefixKey(sessionId), hash)
+  }
+
+  /**
+   * A keeper preserves agent processes over a host swap. That also preserves the Centralu MCP
+   * definitions they started with, so compare the exact served prefix rather than assuming a new
+   * host means a new thread. Sleeping sessions have no process and therefore pick it up on wake;
+   * live idle sessions restart now, while a turn or card finishes before its restart.
+   */
+  async refreshToolDefinitions(): Promise<void> {
+    for (const session of this.meta.values()) {
+      const next = this.toolPrefixHash(session.id)
+      if (!next || this.store.appSetting(this.toolPrefixKey(session.id)) === next) continue
+      if (!this.handles.has(session.id)) {
+        this.store.setAppSetting(this.toolPrefixKey(session.id), next)
+        continue
+      }
+      if (inTurn(session.state)) {
+        this.restartAfterTurn.add(session.id)
+        this.definitionsRestartAfterTurn.add(session.id)
+        continue
+      }
+      await this.restartSession(session.id, 'instructions').catch(() => {})
+    }
   }
 
   /**

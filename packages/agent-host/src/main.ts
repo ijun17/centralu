@@ -621,7 +621,8 @@ agentVersions.start()
 sleeper.start()
 
 // The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
-if (held) void mgr.adoptKept(held.kept.agents)
+if (held) void mgr.adoptKept(held.kept.agents).then(() => mgr.refreshToolDefinitions())
+else void mgr.refreshToolDefinitions()
 
 /*
  * The activity report the keeper's idle rule reads (#280, keeper-link.ts). Only under a keeper:

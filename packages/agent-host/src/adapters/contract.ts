@@ -754,6 +754,8 @@ export interface SessionHandle {
 export interface AgentAdapter {
   readonly tool: ToolName
   readonly capabilities: AdapterCapabilities
+  /** Host-only serving format for Centralu's tool prefix; never part of the wire capabilities. */
+  readonly toolDefinitions?: 'claude' | 'codex'
   /**
    * Who this tool is, for the screens that draw a row per tool.
    *

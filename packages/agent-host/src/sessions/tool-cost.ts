@@ -13,6 +13,9 @@ import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor, instructionsFor, toolD
 
 export type AgentCli = 'claude' | 'codex'
 
+/** Older adapters and test doubles predate the declaration; their historical serving form was Claude's. */
+export const DEFAULT_AGENT_CLI: AgentCli = 'claude'
+
 /** Every profile, in the order tables list them */
 export const TOOL_PROFILES = ['orchestrator', 'scoped', 'builder', 'reader'] as const satisfies readonly ToolProfile[]
 

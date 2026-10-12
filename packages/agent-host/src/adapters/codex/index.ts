@@ -1623,6 +1623,7 @@ void _allVerbositiesListed
 
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
+  readonly toolDefinitions = 'codex' as const
 
   readonly descriptor: ToolDescriptor = {
     name: 'codex',

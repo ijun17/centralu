@@ -1128,6 +1128,17 @@ its background work.
 | The conversation gets one line from Centralu, "Claude Code restarted on 2.1.290 (was 2.1.282). The conversation continues." | A process restarted by itself is never silent |
 | The installed versions last seen are kept (`agents.versionsSeen`) | An update made while the app was closed still counts as a change |
 
+**Tool definitions after a host switch (#581).**
+
+The keeper can preserve an agent process across a Centralu update, but that process also preserves the Centralu MCP
+definitions it was started with. `SessionManager.refreshToolDefinitions()` compares the profile's served definitions
+and instructions using `residentCost(...).prefixHash`; the adapter declares the serving form in
+the host-only `AgentAdapter.toolDefinitions`, rather than in protocol capabilities or the manager naming a CLI.
+The hash is kept in an app setting per session.
+On a changed hash, a live idle session restarts through the same resume path as #297; a working or approval-waiting
+session restarts after its turn; a sleeping session has no process and records the new hash for its next wake. Thus the
+conversation continues while the next process sees the new tools.
+
 **The capability check seam** (#270). On every change of an installed CLI's version the service calls
 `capabilityCheck({ tool, from, to })`. #270 proposes re-running the probes for what a tool could not do when its version
 moves; nothing implements that yet, so the default writes one line to host.log saying so. The probes plug in there.

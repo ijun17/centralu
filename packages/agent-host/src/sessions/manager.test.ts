@@ -188,6 +188,46 @@ beforeEach(() => {
 
 const addProject = () => rpc('projects.add', { path: tmpdir() }) as Promise<{ id: string; path: string }>
 
+describe('tool definitions after a host switch (#581)', () => {
+  it('restarts a live idle session when its served prefix hash changed', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    store.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
+    await mgr.refreshToolDefinitions()
+    expect(old.disposed).toBe(true)
+    expect(adapter.handleOf(session.id)).not.toBe(old)
+  })
+
+  it('keeps a process whose served prefix is unchanged', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    await mgr.refreshToolDefinitions()
+    expect(old.disposed).toBe(false)
+    expect(adapter.handleOf(session.id)).toBe(old)
+  })
+
+  it('lets a working turn and its approval finish before refreshing the definitions', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    await rpc('agents.send', { sessionId: session.id, text: 'work' })
+    const restart = vi.spyOn(mgr, 'restartSession')
+    old.emitApproval('held-card')
+    store.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
+    await mgr.refreshToolDefinitions()
+    expect(old.disposed).toBe(false)
+    await rpc('agents.respondApproval', { sessionId: session.id, requestId: 'held-card', decision: 'allow' })
+    expect(old.disposed).toBe(false)
+    old.finishTurn()
+    await vi.waitFor(() => expect(adapter.handleOf(session.id)).not.toBe(old))
+    expect(old.disposed).toBe(true)
+    expect(adapter.lastOpts?.resumeExternalId).toBe('ext-1')
+    expect(restart).toHaveBeenCalledWith(session.id, 'instructions')
+  })
+})
+
 describe('ordinary session update consent (#581)', () => {
   it('blocks denial, asks again after allow once, and keeps always within the calling session', async () => {
     const fetchLatest = vi.fn(async () => ({ ok: true as const, version: '9999.0.0' }))
