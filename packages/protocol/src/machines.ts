@@ -205,6 +205,42 @@ export const HostActivity = z.object({
 })
 export type HostActivity = z.infer<typeof HostActivity>
 
+/*
+ * What a hub's orchestrator reads about a linked machine's sessions (docs/plans/remote-hub.md §12, phase 4 step 1).
+ * The machine answers with the orchestrator's own code, in its own terms (its ids, its project names), over the view
+ * the hub's window has: every session but its orchestrator and coordinators. The hub qualifies the ids and names the
+ * machine. Text fields are the machine's words; the hub fences them before a model reads them
+ */
+
+/** One session, as `list_sessions` shows it (`host.sessions`) */
+export const HostSessionRow = z.object({
+  sessionId: z.string(),
+  name: z.string(),
+  project: z.string(),
+  state: z.string(),
+  tool: z.string(),
+  merged: z.boolean().optional(),
+  pr: z.object({ number: z.number(), state: z.string() }).optional(),
+  preview: z.string().default(''),
+  lastActive: z.string().optional(),
+})
+export type HostSessionRow = z.infer<typeof HostSessionRow>
+
+/** One session's conversation, as `read_session` shows it (`host.readSession`): one JSON line per message */
+export const HostReadSessionResult = z.object({ state: z.string(), lines: z.array(z.string()) })
+export type HostReadSessionResult = z.infer<typeof HostReadSessionResult>
+
+/** One search hit, as `recall` shows it (`host.recall`); `seq` goes back as `host.readSession`'s `around` */
+export const HostRecallHit = z.object({
+  sessionId: z.string(),
+  session: z.string(),
+  project: z.string(),
+  snippet: z.string(),
+  seq: z.number(),
+  at: z.string().optional(),
+})
+export type HostRecallHit = z.infer<typeof HostRecallHit>
+
 /**
  * One concrete `Host` alias from the ssh config of the computer the hub runs on (#514): what
  * `machines.sshHosts` lists so the person picks a machine instead of typing it, as VS Code's

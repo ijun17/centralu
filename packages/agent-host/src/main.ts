@@ -42,6 +42,7 @@ import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
+import { linkedSessions } from './links/linked-sessions.js'
 import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
@@ -442,6 +443,8 @@ const links = new Links({
 mgr.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
 mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
+// The orchestrator reads every linked machine's sessions too, each asked of its own machine (#82 phase 4)
+mgr.useLinkedReader(linkedSessions(() => links.all()))
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity

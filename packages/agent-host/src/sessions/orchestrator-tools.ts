@@ -4,8 +4,12 @@ import type { AskProjectResult, OrchestratorTools } from '../adapters/contract.j
 import { ORCHESTRATOR_MCP_NAME, type ToolCaller, type ToolOutput, type ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
-function trustedJsonText(value: string): string {
-  return JSON.stringify(value)
+/**
+ * Someone else's text as one JSON string on one line (#121). JSON.stringify escapes every control character but
+ * leaves U+2028 and U+2029, which a reader may take for line breaks; they are escaped too.
+ */
+export function trustedJsonText(value: string): string {
+  return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
 /*
@@ -494,7 +498,9 @@ async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): P
     text: list
       .map(
         (s) =>
-          `- ${s.name} [${s.sessionId}] · project ${s.project} · ${s.tool} · ${s.state}` +
+          // A linked machine's session says where it runs (#82 phase 4), and why the row is only what was last known
+          `- ${s.name} [${s.sessionId}] · project ${s.project}${s.machine ? ` on ${s.machine}` : ''} · ${s.tool} · ${s.state}` +
+          (s.away ? ` · ${s.away}` : '') +
           // If merge status is not shown, the manager keeps assigning work to a finished branch (#69, dogfooding)
           (s.merged ? ' · merged' : '') +
           // PR status (#76 stage 3) — assigning new work to a branch awaiting review pollutes the PR
@@ -556,7 +562,9 @@ export async function runOrchestratorTool(
   if (name === 'recall') {
     const query = String(args.query ?? '')
     const r = await tools.recall(query, args.limit as number | undefined)
-    if (r.hits.length === 0) return { text: `Nothing was found for "${query}". Try a different word.` }
+    // A machine that is off says it could not be searched, rather than finding nothing (#82, decided 2026-10-03)
+    const unsearched = r.notSearched?.length ? `\nNot searched: ${r.notSearched.join('; ')}.` : ''
+    if (r.hits.length === 0) return { text: `Nothing was found for "${query}". Try a different word.${unsearched}` }
     /*
      * The seq is included with each hit — this is the link that meshes recall with read_session.
      * Without it, the model finds something but has nowhere to go, and has to pull up the whole
@@ -566,11 +574,11 @@ export async function runOrchestratorTool(
       text: r.hits
         .map(
           (h) =>
-            `- [${h.project}] ${h.session}${h.at ? ` · ${h.at}` : ''}\n` +
+            `- [${h.project}${h.machine ? ` on ${h.machine}` : ''}] ${h.session}${h.at ? ` · ${h.at}` : ''}\n` +
             `    snippet(JSON): ${trustedJsonText(h.snippet)}\n` +
             `    → read_session(sessionId="${h.sessionId}", around=${h.seq})`,
         )
-        .join('\n'),
+        .join('\n') + unsearched,
     }
   }
 

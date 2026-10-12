@@ -44,7 +44,7 @@ import {
   GitSource,
 } from './entities.js'
 import { ThemeFileContent, ThemeFileEntry, ThemeId } from './theme.js'
-import { HostActivity, MachineAutostartResult, MachineId, MachineInfo, MachineInstallResult, MachineProbe, MachineUninstallResult, RemoteShell, SshHostList } from './machines.js'
+import { HostActivity, HostReadSessionResult, HostRecallHit, HostSessionRow, MachineAutostartResult, MachineId, MachineInfo, MachineInstallResult, MachineProbe, MachineUninstallResult, RemoteShell, SshHostList } from './machines.js'
 import { parseTolerant } from './tolerant.js'
 
 /** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
@@ -2105,6 +2105,25 @@ export const RpcMethods = {
   'machines.activity': { params: z.object({ machineId: MachineId }), result: z.object({ activity: HostActivity.nullable() }) },
   /** What would stop if this host stopped now (the `hostBusy` rule); for a hub's `machines.activity` */
   'host.activity': { params: z.object({}), result: HostActivity },
+  /**
+   * What a hub's orchestrator reads about this host's sessions (docs/plans/remote-hub.md §12): the sessions a hub's
+   * window shows (not this host's orchestrator or coordinators), one conversation, and a search over them. Asked of a
+   * linked machine by the hub directly, never routed; this host's own window has no use for them. A read is capped at
+   * 200 lines and a search at 50 hits
+   */
+  'host.sessions': { params: z.object({}), result: z.array(HostSessionRow) },
+  'host.readSession': {
+    params: z.object({
+      sessionId: SessionId,
+      limit: z.number().int().positive().optional(),
+      /** A `seq` `host.recall` gave: reads around it rather than the end */
+      around: z.number().int().optional(),
+      /** Tool calls in full rather than one line each */
+      tools: z.boolean().optional(),
+    }),
+    result: HostReadSessionResult,
+  },
+  'host.recall': { params: z.object({ query: z.string(), limit: z.number().int().positive().optional() }), result: z.array(HostRecallHit) },
   /**
    * Stops this host the way a signal would: agents, terminals, command runs and app processes
    * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host.md

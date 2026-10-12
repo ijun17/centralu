@@ -1306,6 +1306,17 @@ show are dropped, and session events keep the mirror's names and states current 
 frame for a host to call its client, and `RemoteClient` drops anything shaped like a request without dispatching it
 (`remote-client.test.ts`), so a compromised remote cannot reach the hub through the link.
 
+**The orchestrator reads every machine** (phase 4 step 1, [plans/remote-hub.md](plans/remote-hub.md) §12.3;
+`linked-sessions.ts`). The hub's central orchestrator's `list_sessions`, `read_session` and `recall` include each linked
+machine's sessions, asked of that machine with `host.sessions`, `host.readSession` and `host.recall` (additive), which
+it answers with the orchestrator's own code over the view the hub's window has (`SessionManager.hostReader`: no
+orchestrator or coordinator; at most 200 lines and 50 hits per call). The hub qualifies the ids, names the machine on
+each row and hit (`project api on Ubuntu box`), lists a machine it cannot ask from the headers mirror with why, and says
+which machines it could not search. What a machine answers is fenced as a worker's text is (#121): names on one line,
+ids that are not ids dropped, a conversation line that is not one line quoted. A manager, a lead and an ordinary
+session keep their own machine's view. `send_to_session` and the other acting tools refuse a machine's session with
+a reason until step 2.
+
 **Measured through the hub** (probe 3, 2026-10-05; a MacBook on Wi-Fi, the remote a Windows 11 laptop on the same
 LAN; `centralu serve` of main in WSL2 and of beta.10 on Windows):
 

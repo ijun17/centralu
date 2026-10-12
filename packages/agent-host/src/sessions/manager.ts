@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
-import { dedupeNearbyHits, windowAround } from './snippet.js'
+import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
@@ -68,7 +68,7 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, AskProjectResult, CreateSessionOpts, EventSink, OrchestratorTools, HistoryMessage, ProcessSource, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, AskProjectResult, CreateSessionOpts, EventSink, LinkedSessionsReader, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -292,6 +292,14 @@ const inTurn = (state: SessionState): boolean => state === 'working' || state ==
 /** Length of the conversation list received from the tool before waking — receiving this many may
  * mean the list was truncated (externalGone) */
 const EXTERNAL_LIST_LIMIT = 200
+
+/**
+ * The most a hub's orchestrator reads of this host in one call (`hostReader`, #82 phase 4): lines of one conversation
+ * and hits of one search. Five times the tools' defaults (40 and 12), so no read a model makes is cut, while one call
+ * cannot ask for a whole store over the link
+ */
+const HOST_READ_MAX_LINES = 200
+const HOST_RECALL_MAX_HITS = 50
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
 const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
@@ -1168,6 +1176,36 @@ export class SessionManager {
 
   useLinkedApps(lookup: { linked(machine: string): boolean; projectMachine(projectId: string): string | null }): void {
     this.linkedApps = lookup
+  }
+
+  /** The linked machines' sessions, for the central orchestrator's reading tools (#82 phase 4). None without links */
+  private linkedReader: LinkedSessionsReader | null = null
+
+  useLinkedReader(reader: LinkedSessionsReader): void {
+    this.linkedReader = reader
+  }
+
+  /**
+   * What this host answers a hub's orchestrator about its own sessions (`host.sessions`, `host.readSession`,
+   * `host.recall`; docs/plans/remote-hub.md §12). The orchestrator's own code, over the view a hub's window has of this
+   * host: no calling session, and this host's orchestrator and coordinators left out (§3.4), so the hub's orchestrator
+   * reads what the hub shows and no more. Bounded per call, since the caller is another machine.
+   */
+  hostReader(): {
+    sessions(): Promise<OrchestratedSession[]>
+    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean }): Promise<{ state: string; lines: string[] }>
+    recall(query: string, limit?: number): Promise<RecallHit[]>
+  } {
+    const view = this.orchestratorToolsFor('', undefined, undefined, undefined, true)
+    return {
+      sessions: () => view.listSessions(),
+      read: async (sessionId, limit, opts) => {
+        const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)
+        if (!r.ok) throw Object.assign(new Error(r.error ?? 'Could not read it'), { code: 'internal' })
+        return { state: r.state ?? 'idle', lines: r.lines ?? [] }
+      },
+      recall: async (query, limit) => (await view.recall(query, Math.min(limit ?? 12, HOST_RECALL_MAX_HITS))).hits,
+    }
   }
 
   async listProjects(): Promise<ProjectInfo[]> {
@@ -4484,8 +4522,28 @@ export class SessionManager {
    * files, or a project directory — not because a blocking rule was written for it, but because that
    * is the entire extent of what it can see.
    */
-  private orchestratorToolsFor(orchestratorId: string, childrenOf?: string, scopeIds?: string[], ownProject?: boolean): OrchestratorTools {
+  private orchestratorToolsFor(
+    orchestratorId: string,
+    childrenOf?: string,
+    scopeIds?: string[],
+    ownProject?: boolean,
+    /** A hub's view of this host (`hostReader`, #82 phase 4): what its window shows, with no calling session */
+    hubView?: boolean,
+  ): OrchestratorTools {
     const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+    /*
+     * The central orchestrator alone reads the linked machines too (#82 phase 4): a manager, a lead and an ordinary
+     * session each have a view inside one machine. Asked when the call runs, as the links are wired after a session
+     * may already have started.
+     */
+    const central = childrenOf === undefined && scopeIds === undefined && !ownProject && !hubView
+    const linked = () => (central ? this.linkedReader : null)
+    const elsewhere = (id: string): string | null => {
+      const machine = linked()?.machineOf(id)
+      return machine
+        ? `${id} is a session on ${machine}: read it with read_session; directing a session on another machine is not available yet`
+        : null
+    }
     /**
      * There are only two possible views. The **central orchestrator** sees everything, and a
      * **worktree manager** (#69) sees only its own children. The set of children is evaluated at
@@ -4505,17 +4563,20 @@ export class SessionManager {
       // Coordinator session (#80, #81): the allow list is its entire view
       : scopeIds !== undefined ? scopeIds.includes(s.id)
       : ownProject ? (ownProjectId() !== null && s.projectId === ownProjectId())
+      // What a hub's window shows of this host: never its orchestrator or coordinators (remote-hub.md §3.4)
+      : hubView ? s.kind !== 'orchestrator' && s.kind !== 'coordinator'
       : true
     const scopeError = (id: string) =>
       childrenOf !== undefined ? `Not a worktree session of this manager: ${id}`
       : scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
       : ownProject ? `Not a session in this project: ${id}`
-      : `Not a session this app manages: ${id}`
+      : hubView ? `Not a session this machine shares: ${id}`
+      : (elsewhere(id) ?? `Not a session this app manages: ${id}`)
 
     return {
       listSessions: async () => {
         const byId = projects()
-        return [...this.meta.values()]
+        const mine: OrchestratedSession[] = [...this.meta.values()]
           // Excludes itself — instructing itself would create a loop
           .filter((s) => s.id !== orchestratorId && inScope(s))
           .map((s) => ({
@@ -4531,6 +4592,8 @@ export class SessionManager {
             preview: previewOf(this.store, s.id),
             lastActive: lastActiveOf(this.store, s.id),
           }))
+        const reader = linked()
+        return reader ? [...mine, ...(await reader.list())] : mine
       },
 
       updateSessionSettings: async (sessionId, s) => {
@@ -4604,14 +4667,9 @@ export class SessionManager {
           // an echo
           return s && s.id !== orchestratorId && inScope(s)
         })
-        const out: {
-          sessionId: string
-          session: string
-          project: string
-          snippet: string
-          seq: number
-          at?: string
-        }[] = []
+        const out: RecallHit[] = []
+        // Asked at once, while this host's own search runs: each machine is a round trip
+        const remote = linked()?.recall(query, limit)
         for (const h of dedupeNearbyHits(mine)) {
           const s = this.meta.get(h.sessionId)!
           out.push({
@@ -4626,12 +4684,21 @@ export class SessionManager {
           })
           if (out.length >= limit) break
         }
-        return { hits: out }
+        if (!remote) return { hits: out }
+        /*
+         * Each machine's hits in its own rank, taken in turns with this host's (#82 phase 4): ranks from two stores
+         * do not compare, and appending would let the first source fill the limit before another is heard
+         */
+        const { hits, notSearched } = await remote
+        return { hits: takeInTurns([out, ...hits], limit), ...(notSearched.length ? { notSearched } : {}) }
       },
 
       readSession: async (sessionId, limit = 40, opts) => {
         // The scope check follows the same rule as sendToSession — only a session within its own scope
         if (sessionId === orchestratorId) return { ok: false, error: 'Does not read itself' }
+        // A linked machine's session is read there, by the machine that holds it (#82 phase 4)
+        const reader = linked()
+        if (reader?.machineOf(sessionId)) return reader.read(sessionId, limit, opts)
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
 

@@ -47,12 +47,49 @@ export type OrchestratedSession = {
   /** Whether the worktree branch has landed on trunk (#69) — how the manager decides "finished" on its own */
   merged?: boolean
   /** The PR for this branch (#76 stage 3) — measured via gh. Distinguishes "waiting on review" from "just in progress" */
-  pr?: { number: number; state: 'open' | 'merged' | 'closed' }
-  tool: ToolName
+  pr?: { number: number; state: string }
+  /** A `ToolName` for the hub's own sessions; a linked machine's is whatever that build calls its tool */
+  tool: ToolName | (string & {})
   /** One line describing what last happened */
   preview: string
   /** When it last moved — decides which session is the "current conversation" */
   lastActive?: string
+  /** The linked machine it runs on, by the name the person gave it (#82 phase 4); absent for this computer's own */
+  machine?: string
+  /** Why that machine could not be asked just now, so the row is what the hub last knew of it */
+  away?: string
+}
+
+/** One `recall` hit: where it was said, and the seq that opens it with read_session */
+export type RecallHit = {
+  sessionId: string
+  session: string
+  project: string
+  snippet: string
+  /** Pass this as read_session's around to jump straight to that passage */
+  seq: number
+  at?: string
+  /** The linked machine it was said on (#82 phase 4); absent for this computer's own */
+  machine?: string
+}
+
+/**
+ * The sessions of the machines this host links to, read for its orchestrator (#82, docs/plans/remote-hub.md §12;
+ * links/linked-sessions.ts). Every id it gives and takes is machine-qualified (`<machine>.<id>`). Only the hub's
+ * central orchestrator reads through it: a manager, a lead and an ordinary session keep their own machine's view
+ */
+export type LinkedSessionsReader = {
+  /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */
+  list(): Promise<OrchestratedSession[]>
+  /** The name of the linked machine a qualified id names, or null for an id of this host */
+  machineOf(sessionId: string): string | null
+  read(
+    sessionId: string,
+    limit?: number,
+    opts?: { around?: number; tools?: boolean },
+  ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
+  /** Each machine's hits in its own rank order, one list per machine, and the machines that could not be searched, as `<name> (<why>)` */
+  recall(query: string, limit: number): Promise<{ hits: RecallHit[][]; notSearched: string[] }>
 }
 
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
@@ -173,15 +210,9 @@ export type OrchestratorTools = {
     query: string,
     limit?: number,
   ): Promise<{
-    hits: {
-      sessionId: string
-      session: string
-      project: string
-      snippet: string
-      /** Pass this as read_session's around to jump straight to that passage */
-      seq: number
-      at?: string
-    }[]
+    hits: RecallHit[]
+    /** Linked machines that could not be searched just now, each with why (#82: one that is off says so instead of finding nothing) */
+    notSearched?: string[]
   }>
   /**
    * **Proposes to the person** that an MCP server be installed (a dogfooding request — wanting to

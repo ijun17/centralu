@@ -281,6 +281,10 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.activity': HUB,
   // The hub's own answer; a hub asks a remote's through `machines.activity`
   'host.activity': HUB,
+  // The hub's own sessions; the hub's orchestrator asks each machine's directly (links/linked-sessions.ts, plan §12)
+  'host.sessions': HUB,
+  'host.readSession': HUB,
+  'host.recall': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,
