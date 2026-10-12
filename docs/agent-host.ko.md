@@ -103,18 +103,22 @@ Claude는 셋 다 미루며, 그 값은 요청마다 +31 토큰이다(같은 측
 MCP 도구를 요청에 미리 싣지 않았다: codex-cli 0.160.0은 자기 `exec` 도구 안에서 그 도구들에 닿는다. 그래서
 위의 "Codex에는 미루기가 없다"는 위 숫자를 잰 CLI의 이야기다.
 
-**오케스트레이터의 드문 명령**(#512, `CC_RARE_COMMANDS` 뒤의 시제품, 기본은 꺼짐). `create_app`,
-`propose_skill`, `propose_mcp_server`는 오케스트레이터가 싣는 것의 3분의 1이면서 가장 적게 부르는 것이다. `CC_RARE_COMMANDS=deferred`는 이들을 Claude의 도구 검색 뒤로 미루고(그때 서버는
-읽기 묶음처럼 도구마다 올린다), `CC_RARE_COMMANDS=commands`는 도구 목록에서 빼고 그 자리에 고정 도구 셋을
-준다: `centralu_commands`(한 줄씩), `centralu_help`(명령 하나의 스키마), `centralu_run`(호스트가 그 스키마로
+**오케스트레이터의 드문 명령**(#512, `CC_RARE_COMMANDS`, 2026-10-12부터 기본은 명령 층). `create_app`,
+`propose_skill`, `propose_mcp_server`는 오케스트레이터가 싣는 것의 3분의 1이면서 가장 적게 부르는 것이다. 기본값(`CC_RARE_COMMANDS`를 두지 않거나
+`commands`)에서 호스트는 이들을 도구 목록에서 빼고 그 자리에 고정 도구 셋을 준다: `centralu_commands`(한 줄씩), `centralu_help`(명령 하나의 스키마), `centralu_run`(호스트가 그 스키마로
 엄격하게 확인하고, 틀린 호출에는 스키마로 답한다). 지시문에는 이들이 있다는 한 줄이 붙는다. 프로필 규칙은
 같다(`commandsFor`는 `profileAllows`가 그 자리에 준 것만 보여 주고 실행한다). 실행은 같은 실행기를 지나므로
 명령마다 결과와 카드가 그대로다. `propose_worktree_session`은 처음에 이 층에 있다가 빠졌다: 지시문 어디에도
 그 이름이 없어서, 숨겨 두자 한 번도 닿지 않았다. `app_guide`는 도구로 남는다: 사람이 앱에 대해 묻는 일은 예고 없이 오고,
 미뤄 두면 덜 찾았다(tool-cost.md §8). 설정은 시작할 때 한 번 읽는다: 세션의 도구 목록이 곧 프롬프트
-앞부분이기 때문이다. 세 갈래의 비교는 [tool-cost.md](tool-cost.md) §9(영어만)에 있다: 이 층은 haiku에서 요청마다 709토큰을
-아꼈고, 드문 명령에 24번 중 15번 닿았다(상주는 23번). 그래서 기본값은 그대로이고, 숫자를 보고 따로 결정할
-때만 바뀐다.
+앞부분이기 때문이다. 나머지 둘은 측정용으로 남는다: `CC_RARE_COMMANDS=resident`는 예전처럼 모든 명령을
+도구로 주고, `CC_RARE_COMMANDS=deferred`는 셋을 Claude의 도구 검색 뒤로 미룬다(그때 서버는 읽기 묶음처럼
+도구마다 올린다). 세 갈래의 비교는 [tool-cost.md](tool-cost.md) §9(영어만)에 있다. Sonnet에서 이 층은 잃은 것이
+없었고(드문 명령에 모두 닿았고, 첫 인자가 모두 맞았으며, 영어와 한국어 모두) 요청마다 835토큰을 아꼈다.
+haiku에서는 709토큰을 아꼈고 드문 명령에 덜 닿았다(24번 중 15번, 상주는 23번). 소유자는 Sonnet의 숫자와,
+명령이 늘어도 오케스트레이터의 상주 앞부분이 자라지 않는다는 점을 보고 이 층을 기본으로 정했다(2026-10-12 결정,
+#512): 오케스트레이터가 싣는 것은 11,862자에서 9,317자가 되었고, 그 상한(`RESIDENT_BUDGET_CHARS`)은 12,000에서
+9,500이 되었다.
 `CC_ORCHESTRATOR_PREAMBLE=1`(기본은 꺼짐)은 오케스트레이터의 역할 앞에, 다른 방법으로 일하기 전에 Centralu의
 도구와 명령이 할 수 있는 것을 먼저 보라는 한 줄을 붙인다(`orchestratorRole`). 오케스트레이터에만 붙는다: Centralu는
 사람의 세션에 도구를 내줄 뿐 그 세션을 지휘하지 않는다(product-spec.md §1.2). §9의 2차 측정(Sonnet과 haiku,

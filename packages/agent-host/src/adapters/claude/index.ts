@@ -51,6 +51,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Det
 import { LocalAgentProcess, spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
+import { withoutCrossSessionMessaging } from './cross-session.js'
 
 const exec = promisify(execFile)
 
@@ -483,7 +484,7 @@ class ClaudeSession implements SessionHandle {
     // Usage is a property of the account, but the SDK only exposes the method on a Query — this borrows a live query for it (liveQueries).
     const q: QueryHandle = (this.query = query({
       prompt: input(),
-      options: {
+      options: withoutCrossSessionMessaging({
         cwd: this.opts.cwd,
         model: this.opts.model,
         /**
@@ -698,7 +699,7 @@ class ClaudeSession implements SessionHandle {
             self.releaseOnCancel(requestId, options?.signal)
           })
         },
-      },
+      }),
     }))
     ClaudeAdapter.liveQueries.add(q)
     ClaudeAdapter.querySessions.set(q, this.sessionId)

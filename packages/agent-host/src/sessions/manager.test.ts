@@ -26,7 +26,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, Orches
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
 import { SessionManager } from './manager.js'
-import { setRareTier } from './orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
 import { orchestratorPreamble, setOrchestratorPreamble } from './orchestrator-home.js'
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
@@ -4182,6 +4182,9 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
  * having none."
  */
 describe('orchestrator skills — propose -> approve -> load into prompt (#71)', () => {
+  // propose_skill by its own name, as a tool (the `resident` tier); the default tier's door is below (#512)
+  beforeAll(() => setRareTier('resident'))
+  afterAll(() => setRareTier(DEFAULT_RARE_TIER))
   it('only an approved skill is loaded into the role prompt, and deleting removes it immediately', async () => {
     const orc = await mgr.orchestrator()
     await mgr.runOrchestratorTool(orc.id, 'propose_skill', {
@@ -4229,7 +4232,7 @@ describe('orchestrator skills — propose -> approve -> load into prompt (#71)',
  */
 describe('the commands tier through the host (#512)', () => {
   beforeEach(() => setRareTier('commands'))
-  afterEach(() => setRareTier('resident'))
+  afterEach(() => setRareTier(DEFAULT_RARE_TIER))
 
   it("keeps each proposal's card: the run saves what the card lists, and approving it is still the person's", async () => {
     const orc = await mgr.orchestrator()

@@ -73,6 +73,36 @@ JSON framing prevents ambiguous transcript-line assembly; it does **not** make t
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
 remain the deterministic authorization boundaries.
 
+### Claude's independent-session messaging (#569)
+
+Claude Code can discover other Claude processes on the same machine through
+`~/.claude/sessions/<pid>.json` and send messages over per-process Unix sockets
+(named pipes on Windows). Its default inbound policy delivers messages between sessions in
+the same permission-mode class, including two `safe` sessions. That path does not pass through
+Centralu's `ask_project` consent card.
+
+Every Claude query Centralu builds applies inline SDK `settings.crossSessionInbound: 'refuse'`
+to drop inbound peer messages and adds `ListAgents` and its alias `ListPeers` to
+`disallowedTools`. It also forces `CLAUDE_CODE_HARBOR_KITE=0` in the child environment: in the
+inspected CLI versions 2.1.263–2.1.289 this undocumented gate disables peer listing,
+cross-session sends and inbox binding. `SendMessage` remains available because it also
+continues the session's own background subagents. Existing settings, denies and environment
+are merged, and settings-file selection remains governed by project trust and session kind.
+
+These controls cover workers, orchestrators, coordinators, worktree managers, builders, app
+agents, `start_agent` children and resumed sessions, including fresh keeper processes. A host
+handover that adopts an existing CLI cannot retroactively change its startup flags or
+environment; processes started before this fix must be restarted.
+
+Limits: the environment gate is version-sensitive. The documented inbound refusal and
+discovery denies remain even if that gate stops working, but they alone do not prove outbound
+isolation when a peer address is already known and `SendMessage` stays enabled. Re-run
+`packages/agent-host/scripts/probe-cross-session.mts` before SDK/CLI upgrades to check discovery,
+delivery to a second session and own-subagent messaging. Unit tests check constructed options;
+the live probe supplies bounded runtime evidence. This is a provider-messaging boundary,
+not OS isolation: commands with the user's permissions can still access same-user files and
+sockets, and processes started outside Centralu are not configured by this adapter.
+
 ## What each session's tools can do (#382)
 
 One place for what each kind of session can call and when the person is asked. Each piece was
@@ -132,8 +162,9 @@ A reader's `read_session` without an id lists its project's sessions; that is wh
 `list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)`), and
 the object behind them refuses every acting call (`readerToolsFor`).
 
-**The rare-commands switch** (#512, a prototype, off by default). The matrix is the default
-(`CC_RARE_COMMANDS` unset). With `CC_RARE_COMMANDS=commands` the host takes the orchestrator's
+**The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn for
+`CC_RARE_COMMANDS=resident`, where every command is a tool. By default (`CC_RARE_COMMANDS` unset, or
+`commands`) the host takes the orchestrator's
 `create_app`, `propose_skill` and `propose_mcp_server` out of its tool list
 and gives it `centralu_commands`, `centralu_help` and `centralu_run` instead; no other seat changes. Who
 may run what does not change: `centralu_run` lists and runs only the commands `profileAllows` gives the

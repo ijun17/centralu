@@ -114,10 +114,9 @@ and the baseline: [tool-cost.md](tool-cost.md). That baseline (2026-10-12) found
 MCP tools in the request up front: codex-cli 0.160.0 reaches them from its own `exec` tool, so "Codex has no
 deferral" above describes the CLI the numbers above were taken with.
 
-**The orchestrator's rare commands** (#512, a prototype behind `CC_RARE_COMMANDS`, off by default).
+**The orchestrator's rare commands** (#512; `CC_RARE_COMMANDS`, the commands tier by default since 2026-10-12).
 `create_app`, `propose_skill` and `propose_mcp_server` are a third of what the orchestrator carries and the
-least of what it calls. `CC_RARE_COMMANDS=deferred` defers them behind Claude's
-tool search (the server is then loaded tool by tool, as the reader's is); `CC_RARE_COMMANDS=commands` takes
+least of what it calls. By default (`CC_RARE_COMMANDS` unset, or `commands`) the host takes
 them out of the tool list and serves three fixed tools in their place, `centralu_commands` (one line each),
 `centralu_help` (one command's schema) and `centralu_run` (checked on the host against that schema, strictly;
 a wrong call answers with it), plus one line in the instructions saying they exist. The profile rule is the
@@ -125,9 +124,15 @@ same (`commandsFor` lists and runs only what `profileAllows` gives the seat), an
 runner, so each command keeps its result and its card. `propose_worktree_session` was in the tier at first and
 came out: nothing in the instructions names it, and hidden it was never reached. `app_guide` stays a tool: the person's questions about
 the app come unannounced, and deferred it was found less often (tool-cost.md §8). The setting is read once at
-start, since a session's tool list is its prompt prefix. The three arms are compared in
-[tool-cost.md](tool-cost.md) §9: the tier saved 709 tokens a request on haiku and reached a rare command in 15
-of 24 runs against 23 of 24 resident, so the default stays; it changes only on numbers, as a separate decision.
+start, since a session's tool list is its prompt prefix. The other two stay selectable for measurement:
+`CC_RARE_COMMANDS=resident` serves every command as a tool, as before, and `CC_RARE_COMMANDS=deferred` defers
+the three behind Claude's tool search (the server is then loaded tool by tool, as the reader's is). The three
+arms are compared in [tool-cost.md](tool-cost.md) §9. On Sonnet the tier lost nothing (every rare command
+reached, first-try arguments valid, English and Korean) and saved 835 tokens a request; on haiku it saved 709
+and reached a rare command less often (15 of 24 against 23 of 24). The owner made it the default on the Sonnet
+numbers and because it keeps the orchestrator's resident prefix from growing as commands are added
+(decision of 2026-10-12, #512): the orchestrator carries 9,317 characters instead of 11,862, and its ceiling
+(`RESIDENT_BUDGET_CHARS`) went from 12,000 to 9,500.
 `CC_ORCHESTRATOR_PREAMBLE=1` (off by default) starts the orchestrator's role with a line telling it to look at what
 Centralu's tools and commands can do before doing a thing another way (`orchestratorRole`). The orchestrator's
 alone: Centralu offers tools to the person's own sessions and does not direct them (product-spec.md §1.2). Measured
@@ -512,6 +517,36 @@ Implementation rules:
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
+
+### 2.1 Claude query options and independent-session messaging (#569)
+
+`ClaudeSession.start` is the single SDK `query({ options })` construction site. Both
+`SessionManager.createSession` and the resume/wake path use it, for ordinary sessions,
+orchestrators, coordinators, worktree managers, builders, app agents and `start_agent` children.
+Its `spawnClaudeCodeProcess` callback sends the SDK's flags and environment to either the local
+spawn or the keeper; a fresh keeper replacement therefore receives the same options.
+
+`withoutCrossSessionMessaging` wraps the existing options. It merges inline SDK flag settings
+with `crossSessionInbound: 'refuse'`, appends discovery denies `ListAgents` and `ListPeers`,
+and merges `process.env` and any explicit environment with `CLAUDE_CODE_HARBOR_KITE: '0'` last.
+The adapter previously selected settings files only through `settingSources`; inline `settings`
+are a separate layer and do not replace that selection, permission options, MCP servers or
+resume IDs. `SendMessage` is deliberately left available for this query's own subagents.
+
+The environment gate disables peer discovery, cross-session sends and inbox binding in the
+inspected CLI versions 2.1.263–2.1.289. It is undocumented and version-sensitive, so the
+documented refusal and discovery denies stay as additional controls. They do not alone block
+every outbound send to a known peer if the gate changes. A keeper adoption attaches to an
+already-running process and cannot apply new startup controls; restart processes created by
+an older host to pick up this fix. See [security-boundaries.md](security-boundaries.md).
+
+The regression matrix in `sessions/setting-files.test.ts` checks the options for each kind on
+start and resume across trust and permission presets; adapter tests check merging and the keeper
+spawn path. For runtime validation before SDK/CLI upgrades, run
+`pnpm exec tsx packages/agent-host/scripts/probe-cross-session.mts`: two Haiku sessions in
+temporary folders, with Centralu's shared controls, test discovery, delivery and `SendMessage`
+to its own background subagent. This is a manual billable probe; it requires sockets and Claude sign-in,
+sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
 
 ## 3. Procedure for adding a new tool (C3 — the reason this document exists)
 

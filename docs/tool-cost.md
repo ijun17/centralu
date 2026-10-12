@@ -25,7 +25,7 @@ pnpm measure:tools --compare before.json after.json
 | `--prompts` | `scripts/measure-tools/prompts.json` | The fixed prompt set |
 | `--out` | a file in the system temp folder | Where the JSON goes (meta, summary, and the raw records) |
 | `--keep` | off | Keep the scratch folder (projects, data folder, `host.log`) |
-| `--rare` | `resident` | How the host exposes the orchestrator's rare commands (`CC_RARE_COMMANDS`: `resident`, `deferred`, `commands`; §9) |
+| `--rare` | `commands` | How the host exposes the orchestrator's rare commands (`CC_RARE_COMMANDS`: `commands`, the host's default since 2026-10-12, `resident`, `deferred`; §9). Runs before that date ran `resident` by default |
 | `--kinds` | all five | The session kinds the resident phase starts |
 | `--preamble` | off | Start the orchestrator's role with the preamble (`CC_ORCHESTRATOR_PREAMBLE`; §9, round 2) |
 | `--only` | every prompt | Run only these prompt ids of the set |
@@ -367,7 +367,8 @@ changes.
 The orchestrator carries about 3,200 tokens of its own in every request, and three tools it rarely calls
 (`create_app`, `propose_skill`, `propose_mcp_server`) are a third of the characters. #512 asked whether a seat
 should discover such commands like a CLI rather than carry them. A prototype behind `CC_RARE_COMMANDS`
-(agent-host.md §1.1, security-boundaries.md) gives three arms on the same prompts:
+(agent-host.md §1.1, security-boundaries.md; C became the default, see the decision at the end of this section)
+gives three arms on the same prompts:
 
 - **A** `resident`: today.
 - **B** `deferred`: the rare tools behind Claude's tool search (Claude only: Codex reaches every MCP tool through
@@ -569,6 +570,17 @@ definitions, and costs a step each time. The case #512 still makes for C, a tool
 and commands come and go, was not measured here, and §4 found Claude's cache holding through attach and detach
 already. If a cut is wanted, the arm to measure next is B for `create_app` and `propose_mcp_server` only (each
 reached 6 of 6 deferred on haiku), with `propose_skill` loaded; the switches stay off until then.
+
+### Decision (owner, 2026-10-12)
+
+**The commands tier (C) is the orchestrator's default**, without the preamble. Round 2 on Sonnet found no loss in
+selection or arguments (12 of 12 in every row, English and Korean) and 835 fewer tokens a request, and the tier
+keeps the resident prefix from growing as commands are added: the orchestrator was at 11,862 of its 12,000
+characters resident, and is at 9,317 in the tier (Codex 9,369 with the header over its instructions).
+`RESIDENT_BUDGET_CHARS.orchestrator` follows it down to 9,500, so a command that wants to be resident again is a
+decision rather than headroom. The haiku numbers above stand: a seat on haiku reaches a rare command less often
+through the tier. `CC_RARE_COMMANDS=resident` and `=deferred` stay selectable, and `pnpm measure:tools --rare`
+defaults to the host's default (`commands`), so a run made before this date with no `--rare` measured `resident`.
 
 **Not measured.** Opus as the orchestrator's model; B (deferral) on Sonnet; the Korean set on haiku and on Codex;
 Codex in round 2; a command used late in a long orchestrator conversation; app tools behind `app_tools`/`app_call`

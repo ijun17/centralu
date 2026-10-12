@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { storeRunLedger } from '../app-run-ledger.js'
@@ -12,6 +12,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { FIXTURE_APP } from './session-apps.test-helpers.js'
+import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
 
 /**
  * An MCP server a person approved becomes a headless app in the user folder (M4 A-7, decision 8).
@@ -113,6 +114,13 @@ async function proposeAndApprove(name: string, server = SERVER, why?: string) {
   expect(r.isError).toBeFalsy()
   return { orc, resolved: await mgr.resolveMcpProposal(name, true) }
 }
+
+/*
+ * These call the orchestrator's rare commands by their own names, as tools: the `resident` tier (#512). The
+ * default tier serves them through centralu_run, to the same runners; command-tier.test.ts covers that door.
+ */
+beforeAll(() => setRareTier('resident'))
+afterAll(() => setRareTier(DEFAULT_RARE_TIER))
 
 describe('an approved MCP server becomes a user-folder app (A-7)', () => {
   it('a proposal creates nothing; approval creates the app and restarts the orchestrator, and the tool is recorded going through the intermediary', async () => {
