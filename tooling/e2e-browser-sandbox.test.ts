@@ -4,7 +4,7 @@ import { assertBrowserSandbox } from '../e2e/browser-sandbox.js'
 import warmEngine from '../e2e/warm-engine.js'
 import config from '../e2e/playwright.config.js'
 
-const message = 'WebKit cannot run in this sandbox; run E2E_BROWSER=chromium, CI runs WebKit'
+const message = 'WebKit cannot run in this sandbox; run E2E_BROWSER=chromium with pnpm e2e, pnpm ux or pnpm perf; CI runs WebKit'
 const sandbox = { platform: 'darwin' as const, env: { CODEX_SANDBOX: 'seatbelt', CI: '1' } }
 
 describe('WebKit in the macOS Codex sandbox (#592)', () => {
@@ -31,7 +31,7 @@ describe('WebKit in the macOS Codex sandbox (#592)', () => {
   })
 
   it('catches the style snapshot override even in a Chromium run', () => {
-    expect(() => assertBrowserSandbox('chromium', 'darwin', { ...sandbox.env, STYLE_SNAPSHOT_BROWSER: 'webkit' })).toThrow(message)
+    expect(() => assertBrowserSandbox('chromium', 'darwin', { ...sandbox.env, STYLE_SNAPSHOT_BROWSER: 'webkit' })).toThrow('unset STYLE_SNAPSHOT_BROWSER=webkit')
   })
 
   it.each(['darwin', 'linux', 'win32'] as const)('allows Chromium on %s with or without a sandbox', (platform) => {

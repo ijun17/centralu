@@ -150,10 +150,15 @@ one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed t
 leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
 something in WebKit goes in the shared fixture and skips itself in other engines.
 
-Inside Codex's macOS seatbelt sandbox, run local e2e with `E2E_BROWSER=chromium` only and leave
-WebKit to CI. macOS strips `DYLD_*` from sandboxed launches, so Playwright's WebKit loads the
+Inside Codex's macOS seatbelt sandbox, run local `pnpm e2e`, `pnpm ux` and `pnpm perf` with
+`E2E_BROWSER=chromium` only and leave WebKit to CI. Unset `STYLE_SNAPSHOT_BROWSER=webkit`
+if present: that override selects WebKit even in a Chromium run. The perf specs respect
+`E2E_BROWSER=chromium`; their default remains WebKit. macOS strips `DYLD_*` from sandboxed
+launches, so Playwright's WebKit loads the
 system framework and crashes with a dialog. The runner refuses WebKit and mixed runs before
-launching a browser when `CODEX_SANDBOX=seatbelt` on macOS; `CI=1` does not bypass this check.
+launching a browser when `CODEX_SANDBOX=seatbelt` on macOS; the UX config checks at load time,
+before starting its server. `CI=1` does not bypass either check. This repository's `AGENTS.md`
+carries the local runner instructions; Centralu's child frame stays independent of the repository.
 
 **A change to how a task is done is measured in operations.** `pnpm ux` runs the core tasks
 (`e2e/ux/*.task.ts`) and prices each in keyboard and mouse operations with the Keystroke-Level

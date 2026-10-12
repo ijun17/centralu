@@ -22,19 +22,20 @@ import { expect, test, type Page } from '@playwright/test'
  *   pnpm perf
  */
 
-test.use({ browserName: 'webkit' })
+const engine = process.env.E2E_BROWSER === 'chromium' ? 'chromium' : 'webkit'
+test.use({ browserName: engine })
 test.describe.configure({ mode: 'serial' })
 
 test.beforeEach(() => {
   test.skip(!process.env.PERF, 'Only when PERF=1 — `pnpm perf`')
 })
 
-/** Every WebKit process under ms-playwright (UIProcess, WebContent, GPU, Networking) */
-function webkitPids(): number[] {
+/** Every process of the selected engine under ms-playwright, including its helpers. */
+function browserPids(): number[] {
   const out = execSync('ps -Ao pid,command').toString()
   return out
     .split('\n')
-    .filter((l) => l.includes('ms-playwright') && /[Ww]eb[Kk]it|Playwright/.test(l))
+    .filter((l) => l.includes('ms-playwright') && (engine === 'webkit' ? /[Ww]eb[Kk]it|Playwright/ : /[Cc]hrom(?:e|ium)/).test(l))
     .map((l) => Number(l.trim().split(/\s+/)[0]))
     .filter((n) => Number.isFinite(n))
 }
@@ -64,7 +65,7 @@ type Sample = { commits: number; perSec: number; animations: number; cpu: number
 
 /** Counts commits over the interval, and measures CPU for that same interval from outside */
 async function measure(page: Page, seconds: number): Promise<Sample> {
-  const pids = webkitPids()
+  const pids = browserPids()
   await page.evaluate(() => {
     ;(window as never as { __commits: number }).__commits = 0
   })

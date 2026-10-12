@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test'
+import { assertBrowserSandbox } from '../browser-sandbox.js'
 
 /**
  * The task-cost suite (#518, docs/ux-metrics.md): `pnpm ux`.
@@ -12,6 +13,7 @@ import { defineConfig } from '@playwright/test'
  */
 const port = Number(process.env.UX_PORT ?? '5196')
 const engine = process.env.E2E_BROWSER === 'chromium' ? 'chromium' : 'webkit'
+assertBrowserSandbox(engine)
 
 export default defineConfig({
   testDir: '.',

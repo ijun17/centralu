@@ -23,7 +23,7 @@ import { expect, test, type Page } from '@playwright/test'
  *
  * Measured on WebKit — the real app is WKWebView.
  */
-test.use({ browserName: 'webkit' })
+test.use({ browserName: process.env.E2E_BROWSER === 'chromium' ? 'chromium' : 'webkit' })
 test.describe.configure({ mode: 'serial' })
 
 test.beforeEach(() => {

@@ -34,8 +34,6 @@ export function agentFrame(parentName: string, task: string): string {
     `[Another session in this project, "${parentName}", gives you this task through Centralu's start_agent. ` +
       'Your final message goes back to it as the answer: keep it short, and name the files it should read by their absolute paths.]',
     '',
-    'For local e2e, use E2E_BROWSER=chromium; CI runs WebKit.',
-    '',
     task,
   ].join('\n')
 }

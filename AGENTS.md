@@ -26,6 +26,10 @@ behind each line live in the linked documents.
 | Rust shell and keeper | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` (run `pnpm bundle:host` first if `resources/host` is missing) |
 | The UI without a host | `pnpm dev`, then `?mock=1` (empty) or `?demo` / `?demo=grid` (a seeded scene) |
 
+Inside Codex's macOS sandbox, run local `pnpm e2e`, `pnpm ux` and `pnpm perf` with
+`E2E_BROWSER=chromium` only; CI runs WebKit. Unset `STYLE_SNAPSHOT_BROWSER=webkit` too.
+The runners refuse WebKit there before launch, since it crashes and raises an OS dialog.
+
 A change to `packages/agent-host` or `packages/protocol` only reaches a running app after a
 restart; `packages/ui` and `packages/platform` reload live under `pnpm app:dev`. Do not run
 `tauri build` / `pnpm app` unless asked: it rewrites the bundle a running app may be using.
