@@ -52,6 +52,12 @@ export function ApprovalCard({
         e.preventDefault()
         return
       }
+      // An update grant is deliberately per-session only; it must not become an app-wide setting.
+      if (detail.kind === 'centralu_update') {
+        void respond(sessionId, requestId, action.decision)
+        e.preventDefault()
+        return
+      }
       // The "always allow" toast is shown using the matcher the store sent back (#170)
       void respond(sessionId, requestId, action.decision, action.scope)
       e.preventDefault()
@@ -134,11 +140,11 @@ export function ApprovalCard({
           label="Always allow"
           testId="approve-always"
           disabled={busy}
-          title={`Hold ${sc('alt')} and click to apply to the whole project`}
-          onClick={(alt) => void respond(sessionId, requestId, 'always', alt ? 'project' : 'session')}
+          title={detail.kind === 'centralu_update' ? 'Allow Centralu updates from this session while it is running' : `Hold ${sc('alt')} and click to apply to the whole project`}
+          onClick={(alt) => void respond(sessionId, requestId, 'always', detail.kind === 'centralu_update' ? 'session' : alt ? 'project' : 'session')}
         />
         {/* Project scope is ⌥a, a letter: from the composer it stays a click with ⌥ held (the button's title says so) */}
-        {!inComposer && (
+        {!inComposer && detail.kind !== 'centralu_update' && (
           <span className="ml-auto text-2xs text-ink-faint">
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>
@@ -557,6 +563,6 @@ export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'project_access') return projectAccessQuestion(d)
   if (d.kind === 'project_create') return projectCreateQuestion(d)
   if (d.kind === 'agent_start') return agentStartQuestion(d)
+  if (d.kind === 'centralu_update') return `Allow this session to ${d.action === 'check' ? 'check for' : 'install'} a Centralu update?`
   return d.raw
 }
-

@@ -278,6 +278,8 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
                       ? projectCreateQuestion(e.detail)
                       : e.detail.kind === 'agent_start'
                         ? agentStartQuestion(e.detail)
+                        : e.detail.kind === 'centralu_update'
+                          ? `Allow this session to ${e.detail.action === 'check' ? 'check for' : 'install'} a Centralu update?`
                         : e.detail.raw,
         },
       ]

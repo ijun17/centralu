@@ -22,7 +22,7 @@ import {
   runOrchestratorTool,
   setReaderInstructions,
 } from './orchestrator-tools.js'
-import { TOOL_PROFILES, definitionChars, residentCost } from './tool-cost.js'
+import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions } from './tool-cost.js'
 
 /**
  * Text a worker wrote arrives at the orchestrator as a **tool result** (#121).
@@ -89,6 +89,17 @@ describe('the JSON fence around an orchestrator tool result', () => {
   })
 })
 
+describe('Centralu update tool', () => {
+  it('uses the shared update method and never exposes a setting-changing action', async () => {
+    const updateCentralu = async (action: 'check' | 'install') => ({ ok: true, status: { current: '0.1.0', latest: '0.1.1', newer: true, auto: true, autoApply: false, phase: action === 'check' ? 'idle' as const : 'updating' as const, error: null, checkedAt: null } })
+    const check = await runOrchestratorTool(toolsWith({ updateCentralu }), 'update_centralu', { action: 'check' }, { sessionId: 's', profile: 'reader' })
+    const install = await runOrchestratorTool(toolsWith({ updateCentralu }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
+    expect(check.text).toContain('0.1.1')
+    expect(install.text).toContain('automatic-update setting was not changed')
+    expect((await runOrchestratorTool(toolsWith({ updateCentralu }), 'update_centralu', { action: 'auto' }, { sessionId: 's', profile: 'reader' })).isError).toBe(true)
+  })
+})
+
 /** What the model is sent for a set of tools, in characters: each one's full name, description and JSON schema */
 function sentChars(defs: readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape> }[]): number {
   return defs.reduce((n, t) => n + definitionChars(`mcp__${ORCHESTRATOR_MCP_NAME}__${t.name}`, t.description, z.toJSONSchema(t.schema)), 0)
@@ -99,11 +110,11 @@ function sentChars(defs: readonly { name: string; description: string; schema: z
  * and how big it is are pinned here.
  */
 describe('the reader set', () => {
-  it('holds the reading tools, ask_project and the app-access set — nothing of the orchestrator\'s that sends, creates, changes or proposes', () => {
+  it('holds reading, consented updates, delegation and app access without the orchestrator\'s directing tools', () => {
     // The app-access set (#371 part A) changes only the calling session's own tools
-    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
+    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
     for (const t of ORCHESTRATOR_TOOLS) {
-      expect(profileAllows('reader', t.name), t.name).toBe(['read_session', 'recall', 'app_guide'].includes(t.name))
+      expect(profileAllows('reader', t.name), t.name).toBe(['update_centralu', 'read_session', 'recall', 'app_guide'].includes(t.name))
     }
     // Its instructions (#564): Centralu's tools first unless the person says otherwise, one need per tool, and no role
     const text = instructionsFor('reader')!
@@ -114,6 +125,16 @@ describe('the reader set', () => {
     // Every tool it names is one the seat has
     for (const name of text.match(/\b[a-z]+_[a-z_]+\b/g) ?? []) expect(profileAllows('reader', name), name).toBe(true)
     expect(text).not.toMatch(/send_to_session|create_session|orchestrat/)
+  })
+
+  it('defers the rare guide and update definitions on Claude and offers both on Codex', () => {
+    for (const name of ['app_guide', 'update_centralu']) {
+      expect(servedDefinitions('reader', 'claude').find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(false)
+      expect(servedDefinitions('reader', 'codex').find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(true)
+    }
+    // #581 adds only its pointer to Claude's every-request cost; the definition must stay deferred.
+    const claude = residentCost('reader', 'claude')
+    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2300)
   })
 
   it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {
@@ -129,7 +150,7 @@ describe('the reader set', () => {
 
   /*
    * The budget. What is counted is what the model is sent: each tool's full name, description and
-   * JSON schema (the deferred app_guide included — Codex loads it), plus the instructions.
+   * JSON schema (including the deferred guide and update tool — Codex can load them), plus instructions.
    */
   it(`stays within ${READER_BUDGET_CHARS} characters`, () => {
     expect(sentChars(READER_TOOLS) + (instructionsFor('reader') ?? '').length).toBeLessThanOrEqual(READER_BUDGET_CHARS)

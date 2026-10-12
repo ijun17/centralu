@@ -309,7 +309,7 @@ for a caller that does not check the schema; one that names none is still refuse
 
 Codex calls MCP tools as code inside its `exec` tool and the host's event carries no arguments, so its one miss
 after the change is not attributed; the close-match answer above came after that run. The reader set grows from
-897 to 983 characters (`READER_BUDGET_CHARS` stays 1,000); on Claude `app_guide` is deferred, so no request
+897 to 983 characters (`READER_BUDGET_CHARS` then stayed 1,000); on Claude `app_guide` is deferred, so no request
 carries it until it is loaded.
 
 **Another project's app.** The variants, all with the enum, on the two prompts that ask about another project's
@@ -676,6 +676,23 @@ Under 0.7% of an ordinary session's first request on every model. These runs pre
 instructions with the `start_agent` line), which also raises the reader seat's resident ceiling, the sum of its four
 sets' (`RESIDENT_BUDGET_CHARS.reader`, 3,300 → 3,700; Codex carries 3,686 with the header and #574's `delete`). A line added to
 `READER_FIRST` counts against it, so a tool that joins the seat is a decision about this number too.
+
+**The rare update tool (#581).** `update_centralu` joins the ordinary session with a minimal
+`check | install` schema and a pointer in `READER_FIRST`. Updating Centralu is rare, so Claude defers
+its definition behind tool search, like `app_guide`. Codex is offered the full set without a deferral
+flag; its CLI decides what to load (§6.2). Measured with `definitionChars` and `residentCost` after
+#576's instructions: the update definition is 298 characters, its pointer adds 36, and the reader
+set is 1,709 (983 existing definitions + 298 update + 428 instructions). `READER_BUDGET_CHARS`
+rises from 1,400 to 1,750, and the reader resident ceiling from 3,700 to 4,050.
+
+| Reader profile, characters | Resident definitions | Deferred definitions | Instructions | Resident total |
+|---|---|---|---|---|
+| Claude | 1,867 | 1,673 | 428 | 2,295 |
+| Codex, all offered tools loaded | 3,540 | 0 | 480 | 4,020 |
+
+Claude's resident definitions stay unchanged; only the 36-character pointer joins every request.
+The resident test also caps Claude at 2,300 characters to guard that deferral. These are serialized
+character counts, not a new live token or tool-selection measurement.
 
 **The count had to be fixed first.** Claude Code put the servers' instructions on Sonnet in the same block as the
 agent list, the skill list and the date, and the recorder took Centralu's section out up to the block's end: the

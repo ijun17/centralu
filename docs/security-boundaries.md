@@ -140,6 +140,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 <!-- tool-matrix:start -->
 | Tool | orchestrator | scoped | builder | reader | none |
 |---|---|---|---|---|---|
+| `update_centralu` | yes | — | — | yes | — |
 | `list_sessions` | yes | yes | — | — | — |
 | `read_session` | yes | yes | — | yes | — |
 | `send_to_session` | yes | yes | — | — | — |
@@ -162,7 +163,12 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 
 A reader's `read_session` without an id lists its project's sessions; that is why it has no
 `list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)`), and
-the object behind them refuses every acting call (`readerToolsFor`).
+the object behind them refuses directing calls (`readerToolsFor`).
+
+An ordinary reader's `update_centralu` reaches the host's existing update service only after a host-owned consent card. “Always”
+lasts for that session while this host runs; it is not a project grant and it never changes the person's
+automatic-update preference. In the commands tier the orchestrator reaches it through `centralu_run`, while the
+reader is offered its compact definition, deferred behind tool search on Claude because updates are rare.
 
 **The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn for
 `CC_RARE_COMMANDS=resident`, where every command is a tool. By default (`CC_RARE_COMMANDS` unset, or

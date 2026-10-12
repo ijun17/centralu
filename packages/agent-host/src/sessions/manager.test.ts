@@ -31,6 +31,7 @@ import { orchestratorPreamble, setOrchestratorPreamble } from './orchestrator-ho
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
+import { UpdateService } from '../updates.js'
 
 class FakeHandle implements SessionHandle {
   externalId: string | null = 'ext-1'
@@ -186,6 +187,53 @@ beforeEach(() => {
 })
 
 const addProject = () => rpc('projects.add', { path: tmpdir() }) as Promise<{ id: string; path: string }>
+
+describe('ordinary session update consent (#581)', () => {
+  it('blocks denial, asks again after allow once, and keeps always within the calling session', async () => {
+    const fetchLatest = vi.fn(async () => ({ ok: true as const, version: '9999.0.0' }))
+    const updates = new UpdateService(() => {}, { fetchLatest, run: async () => {}, installedCopy: () => null })
+    const apply = vi.spyOn(updates, 'apply')
+    const setAutoApply = vi.spyOn(updates, 'setAutoApply')
+    mgr.useUpdates(updates)
+    const project = await addProject()
+    const first = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const second = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const answer = async (sessionId: string, decision: 'deny' | 'allow' | 'always') => {
+      let requestId = ''
+      await vi.waitFor(() => {
+        const pending = mgr.listSessions().find((s) => s.id === sessionId)?.pendingApproval
+        expect(pending?.detail.kind).toBe('centralu_update')
+        requestId = pending!.requestId
+      })
+      // Even a project-scoped answer must remain session-only for updating Centralu.
+      await rpc('agents.respondApproval', { sessionId, requestId, decision, scope: 'project' })
+    }
+
+    const denied = mgr.runOrchestratorTool(first.id, 'update_centralu', { action: 'check' })
+    expect(fetchLatest).not.toHaveBeenCalled()
+    await answer(first.id, 'deny')
+    expect((await denied).isError).toBe(true)
+    expect(fetchLatest).not.toHaveBeenCalled()
+
+    const once = mgr.runOrchestratorTool(first.id, 'update_centralu', { action: 'check' })
+    await answer(first.id, 'allow')
+    expect((await once).isError).toBeUndefined()
+    expect(fetchLatest).toHaveBeenCalledTimes(1)
+
+    const always = mgr.runOrchestratorTool(first.id, 'update_centralu', { action: 'check' })
+    await answer(first.id, 'always')
+    await always
+    await mgr.runOrchestratorTool(first.id, 'update_centralu', { action: 'install' })
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(setAutoApply).not.toHaveBeenCalled()
+    expect(updates.current().autoApply).toBe(false)
+    expect(store.listProjectConsents()).toEqual([])
+
+    const other = mgr.runOrchestratorTool(second.id, 'update_centralu', { action: 'check' })
+    await answer(second.id, 'deny')
+    expect((await other).isError).toBe(true)
+  })
+})
 
 describe('projects', () => {
   it('registers and shows up in the list', async () => {
@@ -2168,7 +2216,7 @@ describe("an ordinary session's reader set (#320)", () => {
     return { shop, other, orc, a1, a2, b }
   }
 
-  it('is attached at creation and at wake, with no role and none of the orchestrator\'s tools', async () => {
+  it('attaches reading and consented update tools at creation and wake, with no directing role', async () => {
     const { a1 } = await setup()
     expect(a1.opts.toolProfile).toBe('reader')
     expect(a1.tools).toBeDefined()
@@ -2183,7 +2231,7 @@ describe("an ordinary session's reader set (#320)", () => {
 
     // What the bridge (Codex) is offered: exactly the reader set, asking another project, starting agents here (#561) and attaching apps (#371)
     const offered = ((await rpc('orchestrator.tools', { sessionId: a1.id })) as { name: string }[]).map((t) => t.name)
-    expect(offered).toEqual(['read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
+    expect(offered).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
   })
 
   it('lists, reads and recalls only its own project — another project\'s session cannot be reached', async () => {

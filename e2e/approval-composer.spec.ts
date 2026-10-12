@@ -27,6 +27,30 @@ const raise = (page: Page, sessionId: string, requestId: string) =>
     [sessionId, requestId] as const,
   )
 
+test('Centralu update consent offers session-only always by keyboard and click (#581)', async ({ page }) => {
+  const sid = await sessionTyping(page)
+  const card = page.getByTestId('approval-card')
+  const update = (requestId: string) => page.evaluate(
+    ([sessionId, id]) => (window as any).__mock.requestApproval(sessionId, { kind: 'centralu_update', action: 'install' }, id),
+    [sid, requestId] as const,
+  )
+  await page.keyboard.type('continue after updating')
+  await update('up-key')
+  await expect(page.getByTestId('approval-detail')).toContainText('install a Centralu update')
+  await expect(card).not.toContainText('whole project')
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await expect(card).toHaveAttribute('data-keys', 'bare')
+  await page.keyboard.press('Alt+a')
+  await expect.poll(() => answers(page)).toEqual([{ sessionId: sid, requestId: 'up-key', decision: 'always' }])
+  expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual([null])
+  await expect(page.getByTestId('prompt-input')).toHaveValue('continue after updating')
+
+  await update('up-click')
+  await page.getByTestId('approve-always').click({ modifiers: ['Alt'] })
+  await expect.poll(() => answers(page)).toHaveLength(2)
+  expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual([null, 'session'])
+})
+
 test('in the composer, y/n/a are typed and mod+⇧Y / mod+⇧D / mod+⇧L answer the card, which shows them', async ({ page }) => {
   const sid = await sessionTyping(page)
   const input = page.getByTestId('prompt-input')

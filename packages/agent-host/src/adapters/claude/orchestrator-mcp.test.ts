@@ -21,11 +21,12 @@ function registered(profile: Parameters<typeof orchestratorMcp>[1]) {
 describe('the Claude in-process server', () => {
   /*
    * The orchestrator measured that deferral made it never find send_to_session; the reader set
-   * measured that it made recall go unused. Only app_guide, the rarely needed one, waits (#320).
+   * measured that it made recall go unused. The rarely needed app_guide and update_centralu wait (#320, #581).
    */
-  it('loads the reader set except app_guide, and ask_project and find_apps with it, and sends its instructions (#564)', () => {
+  it('defers the guide and update tool, loads reading, delegation and app discovery, and sends instructions', () => {
     expect(registered('reader')).toEqual({
       tools: {
+        update_centralu: 'deferred',
         read_session: 'loaded',
         recall: 'loaded',
         app_guide: 'deferred',

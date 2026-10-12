@@ -12,6 +12,7 @@ import type {
   SessionGoal,
   ToolName,
   ToolDescriptor,
+  UpdateStatus,
 } from '@cc/protocol'
 import type { Readable, Writable } from 'node:stream'
 import type { ToolProfile } from '../apps/contract.js'
@@ -174,6 +175,8 @@ export type StartAgentOpts = { task: string; tool?: string; model?: string; effo
 export type AgentSessionOpts = { sessionId: string; action: 'status' | 'send' | 'wait' | 'stop' | 'delete'; text?: string }
 
 export type OrchestratorTools = {
+  /** Checks or starts installing Centralu itself. Ordinary sessions need the person's consent first. */
+  updateCentralu?(action: 'check' | 'install'): Promise<{ ok: boolean; error?: string; status?: UpdateStatus }>
   /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions) */
   listSessions(): Promise<OrchestratedSession[]>
   /**

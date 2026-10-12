@@ -34,6 +34,11 @@ export { ORCHESTRATOR_MCP_NAME, mcpServerNameError, proposedMcpServerNameError }
 
 export const ORCHESTRATOR_TOOLS = [
   {
+    name: 'update_centralu',
+    description: 'Checks for or installs a Centralu update. Installing never changes the person\'s automatic-update setting.',
+    schema: z.object({ action: z.enum(['check', 'install']) }),
+  },
+  {
     name: 'list_sessions',
     description:
       'The list of sessions this app manages (project, state, last line). The calling session itself is left out, and a seat with a narrow view (a lead) sees only the sessions within its own view.',
@@ -245,6 +250,13 @@ export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly Orchestr
  */
 export const READER_TOOLS = [
   {
+    name: 'update_centralu',
+    description: 'Updates Centralu with consent.',
+    schema: z.object({ action: z.enum(['check', 'install']) }),
+    // Updates are rare (#581); keep the definition behind Claude's tool search like app_guide.
+    deferred: true,
+  },
+  {
     name: 'read_session',
     description: "Reads one of this project's other Centralu sessions. No sessionId: lists them.",
     schema: z.object({ sessionId: z.string().optional(), around: z.number().optional() }),
@@ -381,6 +393,7 @@ export const READER_FIRST: readonly string[] = [
   'recall for earlier conversations',
   "read_session for this project's other sessions",
   "find_apps to use another project's app",
+  'update_centralu to update Centralu',
   'ask_project to have another project do work',
   /*
    * #561's tool. Owner decision (2026-10-12, option B): the CLI's own subagents stay the way to hand off short helper
@@ -408,15 +421,15 @@ export function setReaderInstructions(on: boolean): void {
 
 /**
  * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
- * description and JSON schema, plus the instructions — the deferred app_guide included, since
- * Codex loads it. The set is 1,375 today: 983 of tools, 86 of them app_guide's topic enum (#523; it was
- * 897 with a free-string topic; the four candidates in the orchestrator's words were 2,493), and 392 of
- * instructions (#564, raised from 1,000 for them: +127 tokens a request on haiku with the start_agent line,
- * +121 on Sonnet and +70 on Codex without it, docs/tool-cost.md §11); the measured tokens of the tools are in
- * docs/agent-host.md. Raising it is a decision about every session's context, not a number to bump when a test
- * fails: a line added to READER_FIRST counts here.
+ * description and JSON schema, plus the instructions, including the deferred guide and update
+ * definitions since Codex can load them. Measured for #581: 1,709 = 983 existing tool characters
+ * + 298 for update_centralu + 428 instructions (392 before its 36-character pointer).
+ * The ceiling rises from 1,400 to 1,750 for that addition. On Claude the update definition is
+ * deferred: only the pointer rides in every request. The tokens measured for the earlier
+ * instructions remain in docs/tool-cost.md §11; these new figures count characters, not tokens.
+ * Raising it is a decision about every session's context: a line added to READER_FIRST counts here.
  */
-export const READER_BUDGET_CHARS = 1400
+export const READER_BUDGET_CHARS = 1750
 
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
@@ -426,8 +439,11 @@ export const READER_BUDGET_CHARS = 1400
  * scoped 2,267, builder 1,432; the tokens they cost are in docs/tool-cost.md.
  * Codex carries the same plus the 52-character
  * header its developer instructions put over them (#525, codexToolInstructionsFor), which is what moved scoped
- * from 2,300 and builder from 1,450. The reader is the sum of its four sets' ceilings (#561 added the agent set), since Codex loads all of
- * them. Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request. The worktree manager's
+ * from 2,300 and builder from 1,450. The reader is the sum of its four sets' ceilings (#561 added the agent set).
+ * Measured for #581: Claude 2,295 resident (1,867 definitions + 428 instructions), with 1,673 deferred;
+ * Codex's possible loaded set 4,020 (3,540 definitions + 480 instructions), with none marked deferred.
+ * Its ceiling rises from 3,700 to 4,050, covering the loaded set including Codex's header.
+ * Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request. The worktree manager's
  * seat went with the role (#561 part 3).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
@@ -569,6 +585,16 @@ export async function runOrchestratorTool(
   /** The tool call's own signal, where the path has one (Claude's in-process MCP) — ask_project stops the delegated turn on it */
   signal?: AbortSignal,
 ): Promise<ToolOutput> {
+  if (name === 'update_centralu') {
+    const action = args.action
+    if (action !== 'check' && action !== 'install') return { text: 'Give action: check or install.', isError: true }
+    const r = tools.updateCentralu ? await tools.updateCentralu(action) : { ok: false, error: 'Update checks are unavailable' }
+    if (!r.ok) return { text: `Centralu update did not start: ${r.error ?? 'unavailable'}`, isError: true }
+    const s = r.status
+    if (!s) return { text: 'Centralu update is unavailable.', isError: true }
+    if (action === 'check') return { text: s.newer && s.latest ? `Centralu ${s.latest} is available.` : s.error ?? 'Centralu is up to date.' }
+    return { text: s.phase === 'failed' ? `Centralu update failed: ${s.error}` : `Installing Centralu ${s.latest ?? ''}. The person applies the installed build from Centralu; their automatic-update setting was not changed.` }
+  }
   if (name === 'list_sessions') return listSessionsText(tools, caller)
 
   if (name === 'centralu_commands' || name === 'centralu_help' || name === 'centralu_run') return runCommandTool(tools, name, args, caller, signal)
@@ -1043,7 +1069,7 @@ export function currentRareTier(): RareTier {
  * a session or a project).
  */
 export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly OrchestratorToolName[]>> = {
-  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server'],
+  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu'],
 }
 
 /**
@@ -1103,6 +1129,7 @@ export function profileAllows(profile: ToolProfile, name: string, tier: RareTier
 function baseAllows(profile: ToolProfile, name: string): boolean {
   if (profile === 'reader') {
     return (
+      name === 'update_centralu' ||
       READER_TOOLS.some((t) => t.name === name) ||
       DELEGATE_TOOLS.some((t) => t.name === name) ||
       AGENT_TOOLS.some((t) => t.name === name) ||

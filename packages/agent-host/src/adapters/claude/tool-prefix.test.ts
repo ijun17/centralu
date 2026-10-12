@@ -141,7 +141,13 @@ describe('the resident tool prefix of a Claude session', () => {
     await start()
     const prefix = JSON.parse(await residentPrefix(initial())) as { name: string }[]
     // find_apps joined the loaded tools in #522: deferred, it lost to ask_project
+    // The guide and update tool stay behind tool search; neither belongs in this resident prefix.
     expect(prefix.map((t) => t.name)).toEqual(['mcp__centralu__read_session', 'mcp__centralu__recall', 'mcp__centralu__ask_project', 'mcp__centralu__start_agent', 'mcp__centralu__find_apps'])
+    const offered = await listTools(initial()['centralu'] as ServerConfig)
+    for (const name of ['app_guide', 'update_centralu']) {
+      expect(offered.find((t) => t.name === name), name).toBeDefined()
+      expect(offered.find((t) => t.name === name)?._meta?.['anthropic/alwaysLoad'], name).not.toBe(true)
+    }
   })
 
   it('stays byte-identical when an app is attached and detached, even an app that asks to stay loaded', async () => {

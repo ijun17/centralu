@@ -54,7 +54,7 @@ describe('the switch', () => {
     for (const p of PROFILES) {
       if (p === 'orchestrator') continue
       expect(toolDefsFor(p).map((t) => t.name), p).toEqual(toolDefsFor(p, 'resident').map((t) => t.name))
-      expect(toolDefsFor(p).some((t) => t.name.startsWith('centralu_')), p).toBe(false)
+      expect(toolDefsFor(p).some((t) => ['centralu_commands', 'centralu_help', 'centralu_run'].includes(t.name)), p).toBe(false)
       expect(instructionsFor(p), p).toBe(instructionsFor(p, 'resident'))
     }
     expect(toolDefsFor('orchestrator').map((t) => t.name)).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run']))

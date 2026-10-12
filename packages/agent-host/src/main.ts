@@ -356,6 +356,7 @@ const updates = new UpdateService((status) => events.push({ type: 'update_status
   readAutoApply: () => store.appSetting(AUTO_APPLY_UPDATES_KEY) === 'true',
   writeAutoApply: (enabled) => store.setAppSetting(AUTO_APPLY_UPDATES_KEY, String(enabled)),
 })
+mgr.useUpdates(updates)
 /*
  * The installed agent CLIs, and moving idle sessions onto them (#297). "Move idle sessions to a newly installed agent
  * CLI" is on unless the person turned it off (the owner's decision, 2026-10-05): a restart only happens when nothing in

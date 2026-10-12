@@ -72,8 +72,9 @@ orchestrator reaches that session with `send_to_session`. Existing data: store v
 sessions `askedBy` = their parent, so it owns them as the agents it started; `worktrees.createManager` is refused with
 the reason (the protocol keeps it for an older window), and the slot's column stays until a later contract step.
 
-The `reader` set is read-only: its tools object refuses sending, creating and settings outright,
-not only by name. It is never given to an agent session an app stood up (M4 D-1), whose answer goes
+The reader's session access is read-only: its tools object refuses directing other sessions and changing
+settings outright, not only by name. Its update tool requires consent (§4.5). It is never given to an agent
+session an app stood up (M4 D-1), whose answer goes
 back to the app. Settings → Orchestrator turns it off (`sessionTools`, on by default): a new session
 then gets no bundle, and a live one's calls are refused at once. For provenance (#90) a reader is
 still an ordinary worker — `directs()` counts every profile but `reader`.
@@ -99,7 +100,9 @@ had measured the same for `send_to_session`, which is why its tools are `alwaysL
 from a guess about the app, and the orchestrator has the guide loaded. Codex has no deferral and
 gets all three. `orchestrator-tools.test.ts` fails if the serialized set and its instructions pass
 `READER_BUDGET_CHARS` (1,000 until #564 gave the set its 392 characters of instructions; 1,400 since,
-the set at 1,375).
+the set at 1,375). #581 adds the consented update tool, deferred on Claude like the guide, and its
+instructions pointer: 1,709 characters against a 1,750 ceiling. The full reader profile's resident
+and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11.
 
 The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) ride on
 the same server with their own ceiling, `APP_ACCESS_BUDGET_CHARS` (900; the set is 874), so neither
@@ -1044,12 +1047,20 @@ edge it installs from. On npm's narrow `ETARGET`/`notarget` response only, the h
 attempts. Other failures still fail at once; a bounded propagation wait must not hide a credential, disk or package
 error.
 
+**Agent updates (#581).** `update_centralu(action: "check" | "install")` reaches the same `UpdateService`
+methods as the window. In the commands tier it is discovered and run through `centralu_commands`, `centralu_help`
+and `centralu_run`; an ordinary session gets a minimal definition, deferred behind Claude's tool search
+like `app_guide` because updates are rare (Codex is offered it without a deferral flag). Its first call raises a consent card:
+allow once, or always for that session until the host restarts. It never calls `updates.setAutoApply`, so an agent
+cannot change the person's automatic-apply preference. An install starts the normal host install; the window still
+performs its own safe relaunch/switch step.
+
 **On Windows**, measured on Windows 11 on 2026-10-08 with a temporary npm prefix and a stand-in holding the same
 handles as the running app (an exe started from the folder, the host's `better-sqlite3` and `node-pty` modules mapped):
 
 | Step | What happens |
 |---|---|
-| `npm i -g --prefer-online centralu@<v>` | Succeeds while the app runs, from the installed copy or from inside the npm package |
+| `npm i -g centralu@<v>` | Succeeds while the app runs, from the installed copy or from inside the npm package |
 | `centralu install` | Renames `%LOCALAPPDATA%\Programs\Centralu` aside to `Centralu.old-<time>` and the assembled `Centralu.new` into its place. NTFS allows the rename with the exe and the native modules in use; it refuses only while some process's working directory is inside. The app moves its working directory out of its own folder at start (`leave_app_folder` in `src-tauri/src/lib.rs`), since File Explorer starts an exe in its folder and the host inherits it. The aside copy cannot be deleted while the old app runs; the next install sweeps every `Centralu.old-*` it can |
 | The running app | Keeps the files it has open. Windows still reports the exe at its original path, so anything opened by path afterwards is the new copy's, a host restarted by the old window included (inferred from that path, not run) |
 | "Apply now" | Not offered: there is no keeper, so a relaunch would stop every agent (`relaunch_info`). The line says "Restart Centralu to finish updating to <v>"; quitting and opening it again from the Start menu or `centralu` starts the new copy |

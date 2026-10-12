@@ -89,6 +89,7 @@ export type AgentProcessHost = {
  */
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
 import { Store } from '../dev-services/store.js'
+import type { UpdateService } from '../updates.js'
 import { sessionIdle, type SessionIdle } from '../idle.js'
 import {
   gitSummary,
@@ -428,6 +429,9 @@ export class SessionManager {
    * app-server), even though the screen said "starting next turn".
    */
   private restartAfterTurn = new Set<string>()
+  private updates: UpdateService | null = null
+  /** Sessions allowed to update once per host; an "always" answer adds this session only. */
+  private updateConsents = new Set<string>()
   /**
    * Where external apps are attached to a session (M4 A-5). It is null on a host with no runtime
    * (most tests), and in that case the session accepts no apps — it is optional, like any other
@@ -3583,7 +3587,7 @@ export class SessionManager {
     if (ask && ask.sessionId === sessionId) {
       this.hostAsks.delete(requestId)
       // A new project (#515) has nothing to remember either: "always" makes this one, as allow does
-      const keepsAlways = ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start'
+      const keepsAlways = ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || ask.detail.kind === 'centralu_update'
       const answer = !keepsAlways && decision === 'always' ? 'allow' : decision
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
       // Starting agents (#561) has two always: this session (the card's default) or the whole project (⌥)
@@ -4502,6 +4506,7 @@ export class SessionManager {
     const off = () => !this.uiPreferences().sessionTools
     const offError = 'Turned off in Settings'
     return {
+      updateCentralu: async (action) => (off() ? { ok: false, error: offError } : this.updateCentraluAsked(sessionId, action)),
       listSessions: async () => (off() ? [] : view.listSessions()),
       readSession: async (...a) => (off() ? { ok: false, error: offError } : view.readSession(...a)),
       recall: async (...a) => (off() ? { hits: [] } : view.recall(...a)),
@@ -4572,6 +4577,7 @@ export class SessionManager {
       : `Not a session this app manages: ${id}`
 
     return {
+      updateCentralu: async (action) => this.updateCentraluAsked(orchestratorId, action),
       listSessions: async () => {
         const byId = projects()
         const mine: OrchestratedSession[] = [...this.meta.values()]
@@ -5156,7 +5162,7 @@ export class SessionManager {
   private askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal): Promise<HostAskAnswer> {
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
-      const requestId = `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : 'mk'}-${randomUUID()}`
+      const requestId = `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' ? 'up' : 'mk'}-${randomUUID()}`
       this.hostAsks.set(requestId, { requestId, sessionId, detail, shown: false, resolve })
       signal?.addEventListener('abort', () => {
         if (!this.hostAsks.delete(requestId)) return
@@ -5667,6 +5673,18 @@ export class SessionManager {
     return null
   }
 
+  /** Update grants last only for the calling session on this host; they never change automatic application. */
+  private async updateCentraluAsked(sessionId: string, action: 'check' | 'install'): Promise<{ ok: boolean; error?: string; status?: import('@cc/protocol').UpdateStatus }> {
+    const updates = this.updates
+    if (!updates) return { ok: false, error: 'Update checks are unavailable' }
+    if (this.toolProfileOf(sessionId) === 'reader' && !this.updateConsents.has(sessionId)) {
+      const decision = await this.askHost(sessionId, { kind: 'centralu_update', action })
+      if (decision === 'always') this.updateConsents.add(sessionId)
+      else if (decision !== 'allow') return { ok: false, error: 'The person did not allow this Centralu update. Do not ask again unless they tell you to.' }
+    }
+    return { ok: true, status: action === 'check' ? await updates.check(true) : updates.apply() }
+  }
+
   /**
    * The person's consent for a session to start agents (#561), the first time it does: a card in the caller's approval
    * slot. "Always" is kept for this session while this host serves it; with ⌥ (scope `project`) it is remembered as the
@@ -6163,6 +6181,11 @@ export class SessionManager {
   /** Where the installed CLI versions come from (#297) — wired by the host, like the app runtime */
   useVersionHint(hint: (tool: ToolName) => string | null): void {
     this.versionHint = hint
+  }
+
+  /** The same service the window calls; this tool never writes the automatic-apply preference. */
+  useUpdates(updates: UpdateService): void {
+    this.updates = updates
   }
 
   /**
@@ -6788,7 +6811,7 @@ type HostAskAnswer = 'allow' | 'always' | 'always_project' | 'deny' | null
 type HostAsk = {
   requestId: string
   sessionId: string
-  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'agent_start' }>
+  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'agent_start' | 'centralu_update' }>
   shown: boolean
   resolve: (d: HostAskAnswer) => void
 }
