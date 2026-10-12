@@ -38,7 +38,7 @@ export const BUMPS = ['prerelease', 'patch', 'minor', 'major']
 
 /**
  * The version after `current`. `prerelease` counts up the last number of the prerelease
- * (`0.1.0-beta.16` → `0.1.0-beta.17`); the others leave the prerelease behind (`patch` of a
+ * (`1.2.0-beta.3` → `1.2.0-beta.4`); the others leave the prerelease behind (`patch` of a
  * prerelease is its release, as semver has it). Throws a sentence when there is no such version.
  */
 export function nextVersion(current, bump = 'prerelease') {
@@ -67,10 +67,10 @@ export function declaredVersion(text, pattern) {
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
- * Where a file carries `version`: the exact version as a whole quoted string, `"0.1.0-beta.16"` or
- * `'0.1.0-beta.16'`. That is how every file of this repository writes it (package.json, Cargo.toml,
+ * Where a file carries `version`: the exact version as a whole quoted string, `"1.2.0-beta.3"` or
+ * `'1.2.0-beta.3'`. That is how every file of this repository writes it (package.json, Cargo.toml,
  * Cargo.lock, tauri.conf.json, brand.ts), and it leaves the version alone in prose ("released in
- * 0.1.0-beta.16") and inside longer versions (`0.1.0-beta.160`).
+ * 1.2.0-beta.3") and inside longer versions (`1.2.0-beta.30`).
  */
 export const versionPattern = (version) => new RegExp(`(["'])${escape(version)}\\1`, 'g')
 

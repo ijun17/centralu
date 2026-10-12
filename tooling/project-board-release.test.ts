@@ -42,11 +42,11 @@ const NEXT = nextVersion(APP_VERSION) as string
 
 describe('the version rules', () => {
   it('counts up the prerelease, or moves to the next patch, minor or major', () => {
-    expect(nextVersion('0.1.0-beta.16')).toBe('0.1.0-beta.17')
+    expect(nextVersion('2.3.0-beta.16')).toBe('2.3.0-beta.17')
     expect(nextVersion('0.1.0-beta.9')).toBe('0.1.0-beta.10')
     expect(nextVersion('1.0.0-rc.1.2')).toBe('1.0.0-rc.1.3')
-    expect(nextVersion('0.1.0-beta.16', 'patch')).toBe('0.1.0')
-    expect(nextVersion('0.1.0-beta.16', 'minor')).toBe('0.1.0')
+    expect(nextVersion('2.3.0-beta.16', 'patch')).toBe('2.3.0')
+    expect(nextVersion('2.3.0-beta.16', 'minor')).toBe('2.3.0')
     expect(nextVersion('0.1.0', 'minor')).toBe('0.2.0')
     expect(nextVersion('0.1.3', 'major')).toBe('1.0.0')
     expect(() => nextVersion('1.0.0')).toThrow(/no prerelease part to count up/)
@@ -55,17 +55,17 @@ describe('the version rules', () => {
 
   it('orders versions as semver does, prereleases before their release and numbers by value', () => {
     expect(compareVersions('0.1.0-beta.9', '0.1.0-beta.10')).toBeLessThan(0)
-    expect(compareVersions('0.1.0-beta.16', '0.1.0')).toBeLessThan(0)
+    expect(compareVersions('2.3.0-beta.16', '2.3.0')).toBeLessThan(0)
     expect(compareVersions('0.1.0-beta', '0.1.0-beta.1')).toBeLessThan(0)
     expect(compareVersions('0.1.0-alpha.3', '0.1.0-beta.1')).toBeLessThan(0)
     expect(compareVersions('0.2.0', '0.1.9')).toBeGreaterThan(0)
-    expect(compareVersions('0.1.0-beta.16', '0.1.0-beta.16')).toBe(0)
+    expect(compareVersions('2.3.0-beta.16', '2.3.0-beta.16')).toBe(0)
   })
 
   it('bumps the version where it is a quoted string, and leaves prose and longer versions alone', () => {
-    const text = `version = "0.1.0-beta.16"\nconst V = '0.1.0-beta.16'\n"x": "0.1.0-beta.160"\nremoved in 0.1.0-beta.16 (#461)\n`
-    expect(bumpText(text, '0.1.0-beta.16', '0.1.0-beta.17')).toEqual({
-      text: `version = "0.1.0-beta.17"\nconst V = '0.1.0-beta.17'\n"x": "0.1.0-beta.160"\nremoved in 0.1.0-beta.16 (#461)\n`,
+    const text = `version = "2.3.0-beta.16"\nconst V = '2.3.0-beta.16'\n"x": "2.3.0-beta.160"\nremoved in 2.3.0-beta.16 (#461)\n`
+    expect(bumpText(text, '2.3.0-beta.16', '2.3.0-beta.17')).toEqual({
+      text: `version = "2.3.0-beta.17"\nconst V = '2.3.0-beta.17'\n"x": "2.3.0-beta.160"\nremoved in 2.3.0-beta.16 (#461)\n`,
       count: 2,
     })
   })
@@ -79,7 +79,7 @@ describe('the version rules', () => {
   })
 
   it('drafts the notes from what merged, without the release commits', () => {
-    expect(releaseNotes(['feat(ui): one (#10)', 'chore(release): 0.1.0-beta.16 (#541)', '', 'fix: two (#11)'])).toEqual(['feat(ui): one (#10)', 'fix: two (#11)'])
+    expect(releaseNotes(['feat(ui): one (#10)', 'chore(release): 2.3.0-beta.16 (#541)', '', 'fix: two (#11)'])).toEqual(['feat(ui): one (#10)', 'fix: two (#11)'])
   })
 
   it('reads the version from its one declaration in this repository', () => {
