@@ -205,16 +205,17 @@ the keyboard. Since #529 every core task has a discoverable path, and the paths 
 
 | Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Start a new session and give it its first instruction | mouse (the open project's +, #529) | `H M P B B M P B B H 18K M K` | 19 | 2 | 4 | 2 | 3 | 30 | 12.98 | 1194 |
-| Answer an approval waiting in another session | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.57 | 740 |
-|  | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1053 |
+| Start a new session and give it its first instruction | mouse (the open project's +, #529) | `H M P B B M P B B H 18K M K` | 19 | 2 | 4 | 2 | 3 | 30 | 12.98 | 1198 |
+| Answer an approval waiting in another session | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.56 | 741 |
+|  | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1050 |
 | Switch to another session by name | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 525 |
+| Switch back to the session you were just in | mouse (the top bar's back arrow) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.21 | 663 |
 | Send a message to another session | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.39 | 1141 |
 | Find a past conversation | mixed (the Search button, #529) | `H M P B B H 4K M K` | 5 | 1 | 2 | 2 | 2 | 12 | 6.26 | 633 |
 | Open an app on another machine | mouse (its sidebar row) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.01 | 544 |
-| Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2242 |
-|  | mouse (typed by hand) | `H M P B B M P B B H 10K H P B B H 13K H M P B B` | 23 | 4 | 8 | 5 | 3 | 43 | 17.71 | 2163 |
-| Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.99 | 566 |
+| Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2240 |
+|  | mouse (typed by hand) | `H M P B B M P B B H 10K H P B B H 13K H M P B B` | 23 | 4 | 8 | 5 | 3 | 43 | 17.71 | 2161 |
+| Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.99 | 567 |
 
 **Expert paths** (shortcuts; never the headline):
 
@@ -238,8 +239,9 @@ What the baseline shows:
 
 - **Starting a session took three clicks behind a button that appears only on hover** (the
   project's menu, then New session, then Start: 34 operators, 15.4 s). The project the person is in
-  now shows its `+` (#529): two clicks, 30 operators, about 13 s. The palette's New session is no
-  cheaper for someone who knows ⌘K: typing its name costs what the click saves.
+  now shows its `+` (#529): two clicks, 30 operators, about 13 s. For someone who knows ⌘K, the
+  palette's New session saves about a second more, an expert's number that does not stand for the
+  task.
 - **Finding a past conversation had no path anyone could see**: the palette, the only search,
   opened only by ⌘K / Ctrl+K. The Search button at the top of the sidebar (#529) opens it and prints
   the key, so the button also teaches the shortcut.
