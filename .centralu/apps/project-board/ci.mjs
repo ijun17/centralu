@@ -279,6 +279,12 @@ export function decideMerge({ permissions, pr, checks }) {
 
 const ATTRIBUTION = [/^\s*co-authored-by\s*:/i, /^[^\p{L}\p{N}]*generated (?:with|by)\b/iu]
 
+/** The attribution lines in a text (Co-Authored-By trailers, "Generated with …" footers), as written. */
+export const attributionLines = (text) =>
+  String(text ?? '')
+    .split(/\r?\n/)
+    .filter((l) => ATTRIBUTION.some((re) => re.test(l)))
+
 /** Drops attribution lines (Co-Authored-By trailers, "Generated with …" footers); docs/commit-conventions.md. */
 export function stripAttribution(text) {
   return String(text ?? '')

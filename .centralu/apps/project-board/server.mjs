@@ -30,7 +30,7 @@ import {
   sameRepo,
   setOption,
 } from './github.mjs'
-import { NO_PERMISSION, canMerge, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
+import { NO_PERMISSION, attributionLines, canMerge, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { decisionSummary, renderInline, renderMarkdown } from './markdown.mjs'
 
 const UI = 'ui://project-board/index.html'
@@ -856,11 +856,15 @@ async function decisionSummaries({ refresh }) {
   return answer(summary, { ok: true, decisionStatus: decision, items: rows, fetchedAt: b.fetchedAt })
 }
 
-/** Checks a comment before it goes out. Answers the problems, in words for the person; none: it may go. */
+/**
+ * Checks the owner's answer before it goes out: not empty, no attribution line. Not its language:
+ * the owner answers decisions in their own language, and the English rule is for what agents write
+ * (their tool checks it). Answers the problems, in words for the person; none: it may go.
+ */
 function commentProblems(body) {
-  const problems = []
-  if (!String(body ?? '').trim()) problems.push('The comment is empty.')
-  return problems
+  if (!String(body ?? '').trim()) return ['The comment is empty.']
+  const lines = attributionLines(body)
+  return lines.length ? [`The comment carries attribution lines (${lines.map((l) => `"${l.trim()}"`).join(', ')}). Remove them.`] : []
 }
 
 async function previewComment({ item, body }) {
@@ -995,10 +999,10 @@ serveStdio(() => {
 
   centralu.tool(
     server,
-    'preview_comment',
+    'preview_answer',
     {
-      title: 'Preview a comment',
-      description: 'A comment as it will read on GitHub, and what would stop it from being posted. Posts nothing.',
+      title: "Preview the owner's answer",
+      description: 'An answer from the screen as it will read on GitHub, and what would stop it from being posted. Posts nothing.',
       inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536) }),
       annotations: { readOnlyHint: true },
       _meta: { ui: { visibility: ['app'] } },
@@ -1014,10 +1018,11 @@ serveStdio(() => {
 
   centralu.tool(
     server,
-    'comment',
+    'post_answer',
     {
-      title: 'Comment on an issue or pull request',
-      description: 'Post a comment on an issue or pull request on GitHub, as the gh login. Answers the comment as GitHub stored it.',
+      title: "Post the owner's answer",
+      description:
+        "Post the person's answer from the screen as a comment on an issue or pull request, as the gh login. Screen-only: the person writes in their own language, so the language is not checked here (agents comment through their own tool, which holds them to English). Answers the comment as GitHub stored it.",
       // GitHub's own limit for a comment body
       inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536).describe('The comment, in Markdown') }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },

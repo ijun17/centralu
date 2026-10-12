@@ -112,9 +112,9 @@ async function showBoard(page: Page, { failPosts = 0 } = {}) {
         if (tool === 'show') return { content: [{ type: 'text', text: 'board' }], structuredContent: board }
         if (tool === 'read_item') return threads[args.item] ?? { content: [{ type: 'text', text: 'missing' }], structuredContent: { ok: false, error: { kind: 'not-found', message: `${args.item} is not there.` } } }
         if (tool === 'decision_summaries') return summaries
-        if (tool === 'preview_comment')
+        if (tool === 'preview_answer')
           return { content: [{ type: 'text', text: 'ok' }], structuredContent: { ok: true, ref: '#113', problems: [], html: `<p>${args.body.replace(/[<>&]/g, '')}</p>` } }
-        if (tool === 'comment') {
+        if (tool === 'post_answer') {
           if (failures-- > 0) return { isError: true, content: [{ type: 'text', text: 'GitHub refused the comment: it is locked.' }], structuredContent: { summary: 'x', error: { kind: 'github', message: 'GitHub refused the comment: it is locked.' } } }
           return {
             content: [{ type: 'text', text: 'Posted' }],
@@ -250,7 +250,7 @@ export function boardReaderTests(): void {
       await page.keyboard.press('Control+Enter')
       await expect(v.locator('#answer-confirm')).toBeVisible()
       await expect(v.locator('#answer-preview p')).toHaveText(`**Decision (owner, ${today()}):** A, fold it into #406.`)
-      expect(await callsTo(page, 'comment')).toEqual([])
+      expect(await callsTo(page, 'post_answer')).toEqual([])
       await expect(v.locator('#answer-post')).toBeFocused()
 
       // Esc steps back to editing, with the reader still open and the keyboard in the answer
@@ -268,7 +268,7 @@ export function boardReaderTests(): void {
         el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }))
       })
       await expect(v.locator('#answer-confirm')).toBeHidden()
-      expect(await callsTo(page, 'preview_comment')).toHaveLength(1)
+      expect(await callsTo(page, 'preview_answer')).toHaveLength(1)
 
       // A post GitHub refuses says why and keeps the answer; the second goes through
       await v.locator('#answer-review').click()
@@ -279,11 +279,11 @@ export function boardReaderTests(): void {
       const posted = v.locator('.post.posted')
       await expect(posted).toContainText('A, fold it into #406. Thanks.')
       await expect(posted).toBeFocused()
-      expect(await callsTo(page, 'comment')).toEqual([
+      expect(await callsTo(page, 'post_answer')).toEqual([
         { item: `${REPO}#113`, body },
         { item: `${REPO}#113`, body },
       ])
-      expect(await callsTo(page, 'preview_comment')).toEqual([
+      expect(await callsTo(page, 'preview_answer')).toEqual([
         { item: `${REPO}#113`, body: `${prefill}A, fold it into #406.` },
         { item: `${REPO}#113`, body },
       ])

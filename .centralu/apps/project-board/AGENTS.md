@@ -74,8 +74,11 @@ The owner reads an issue or pull request in the board instead of the browser, an
   `decision_summaries` in server.mjs).
 - **The answer box** shows under an item whose Status is the decision status. It starts with
   `**Decision (owner, YYYY-MM-DD):** ` (CONTRIBUTING.md's form for a decision), "Review answer"
-  (or ⌘/Ctrl+Enter) shows it rendered by `preview_comment`, and only "Post comment" there posts it
-  with `comment` (`gh api … /issues/N/comments --input -`, the text on stdin). Esc in the
+  (or ⌘/Ctrl+Enter) shows it rendered by `preview_answer`, and only "Post comment" there posts it
+  with `post_answer` (`gh api … /issues/N/comments --input -`, the text on stdin). Both are
+  screen-only, and **the answer's language is not checked**: the owner answers decisions in their
+  own language, and the English rule is for what agents write (decided 2026-10-12). An empty
+  answer or an attribution line is refused, and the preview says so before the confirmation. Esc in the
   confirmation goes back to editing. The posted comment shows in the thread and takes the keyboard;
   a refused one says why and keeps the text. Drafts live in the screen's memory only.
 - **Input methods.** An Enter or Esc the input method took (ending or cancelling a Korean syllable)

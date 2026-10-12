@@ -1033,7 +1033,7 @@
         $('answer-review').disabled = true
         let r
         try {
-          r = await app.callServerTool({ name: 'preview_comment', arguments: { item: key, body } })
+          r = await app.callServerTool({ name: 'preview_answer', arguments: { item: key, body } })
         } catch (e) {
           r = { content: [{ type: 'text', text: String(e?.message ?? e) }] }
         } finally {
@@ -1070,7 +1070,7 @@
         $('answer-error').textContent = ''
         let r
         try {
-          r = await app.callServerTool({ name: 'comment', arguments: { item: key, body } })
+          r = await app.callServerTool({ name: 'post_answer', arguments: { item: key, body } })
         } catch (e) {
           r = { isError: true, content: [{ type: 'text', text: String(e?.message ?? e) }] }
         } finally {

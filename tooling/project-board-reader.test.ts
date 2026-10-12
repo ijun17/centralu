@@ -366,7 +366,7 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
   it('passes check, and its screen declares GitHub image hosts, and only those, in the CSP Centralu reads', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
-    for (const line of ['read_item — reads, app', 'decision_summaries — reads, app', 'preview_comment — reads, app', 'comment — changes, app']) expect(r.text).toContain(line)
+    for (const line of ['read_item — reads, app', 'decision_summaries — reads, app', 'preview_answer — reads, app', 'post_answer — changes, app']) expect(r.text).toContain(line)
     const doc = (await rt!.readResource(ref, 'ui://project-board/index.html')).contents[0] as { text: string; _meta?: { ui?: { csp?: Record<string, string[]> } } }
     expect(doc.text).toContain('McpApp')
     expect(doc._meta?.ui?.csp).toEqual({ resourceDomains: ['https://github.com', 'https://*.githubusercontent.com'] })
@@ -453,23 +453,37 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
 
   it('previews a comment without posting it, and refuses an empty one before reaching GitHub', async () => {
     runtime()
-    const p = await call('preview_comment', { item: 113, body: '**Decision (owner, 2026-10-12):** A, see #406' })
+    const p = await call('preview_answer', { item: 113, body: '**Decision (owner, 2026-10-12):** A, see #406' })
     expect(p.data).toMatchObject({ ok: true, ref: '#113', problems: [] })
     expect(p.data.html).toBe(
       '<p><strong>Decision (owner, 2026-10-12):</strong> A, see <a href="https://github.com/ijun17/centralu/issues/406" class="ref" data-item="ijun17/centralu#406">#406</a></p>',
     )
-    expect((await call('preview_comment', { item: 113, body: '  \n ' })).data).toMatchObject({ ok: false, problems: ['The comment is empty.'] })
-    const empty = await call('comment', { item: 113, body: ' ' })
+    expect((await call('preview_answer', { item: 113, body: '  \n ' })).data).toMatchObject({ ok: false, problems: ['The comment is empty.'] })
+    const empty = await call('post_answer', { item: 113, body: ' ' })
     expect(empty.isError).toBe(true)
     expect(empty.text).toBe('Not posted on #113: The comment is empty.')
+    const signed = await call('preview_answer', { item: 113, body: 'A.\n\nCo-Authored-By: Someone <a@b.c>' })
+    expect(signed.data).toMatchObject({ ok: false, problems: ['The comment carries attribution lines ("Co-Authored-By: Someone <a@b.c>"). Remove them.'] })
+    expect((await call('post_answer', { item: 113, body: 'A.\n\nCo-Authored-By: Someone <a@b.c>' })).isError).toBe(true)
     expect(posts()).toEqual([])
+  })
+
+  // The owner answers decisions in their own language; the English rule is for what agents write
+  it("takes the owner's answer in Korean: the preview finds nothing to stop it, and it is posted as written", async () => {
+    runtime()
+    const body = '**Decision (owner, 2026-10-12):** A로 갑니다. #406에 합칩니다.'
+    const preview = await call('preview_answer', { item: 113, body })
+    expect(preview.data).toMatchObject({ ok: true, problems: [] })
+    const posted = await call('post_answer', { item: 113, body })
+    expect(posted.isError).toBe(false)
+    expect(posts()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/issues/113/comments', '--input', '-'], stdin: JSON.stringify({ body }) }])
   })
 
   it('posts an answer as a comment on the item, answers it rendered, and the next read shows it', async () => {
     runtime()
     await call('read_item', { item: 113 }) // cached without the answer
     const body = '**Decision (owner, 2026-10-12):** A.\n\nFold it into #406.'
-    const r = await call('comment', { item: '#113', body })
+    const r = await call('post_answer', { item: '#113', body })
     expect(r.isError).toBe(false)
     expect(r.text).toBe('Posted a comment on #113: https://github.com/ijun17/centralu/issues/113#issuecomment-new4.')
     expect(r.data.comment).toMatchObject({ id: 'IC_new4', author: 'owner' })
@@ -494,7 +508,7 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
     // The slow read is under way (its gh call is logged) before the post goes out
     await expect.poll(() => threadReads().length, { timeout: 10_000 }).toBe(1)
     patch((s) => ((s as unknown as { threadDelayMs: number }).threadDelayMs = 0))
-    expect((await call('comment', { item: 113, body: 'An answer.' })).isError).toBe(false)
+    expect((await call('post_answer', { item: 113, body: 'An answer.' })).isError).toBe(false)
     const stale = await slow
     expect(stale.data.comments.map((c: { id: string }) => c.id)).toEqual(['IC_1', 'IC_2', 'IC_3'])
     const fresh = await call('read_item', { item: 113 })
@@ -504,13 +518,13 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
   it('says why a comment was not posted, and that an interrupted one may have been', async () => {
     runtime()
     patch((s) => ((s as unknown as { lockedPost: boolean }).lockedPost = true))
-    const locked = await call('comment', { item: 113, body: 'An answer.' })
+    const locked = await call('post_answer', { item: 113, body: 'An answer.' })
     expect(locked.isError).toBe(true)
     expect(locked.text).toBe('GitHub refused the comment on ijun17/centralu#113: Unable to create comment because issue is locked. (HTTP 403). Nothing was posted.')
-    const gone = await call('comment', { item: 9999, body: 'An answer.' })
+    const gone = await call('post_answer', { item: 9999, body: 'An answer.' })
     expect(gone.text).toBe('ijun17/centralu#9999 is not an issue or pull request this GitHub login can see. Nothing was posted.')
     patch((s) => (s.mode = 'offline'))
-    const offline = await call('comment', { item: 113, body: 'An answer.' })
+    const offline = await call('post_answer', { item: 113, body: 'An answer.' })
     expect(offline.isError).toBe(true)
     expect(offline.text).toContain('GitHub could not be reached')
     expect(offline.text).toContain('The comment may have been posted anyway: read the item again before posting it a second time.')
