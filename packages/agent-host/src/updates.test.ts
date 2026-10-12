@@ -20,6 +20,8 @@ function make(
     run?: (file: string, args: string[]) => Promise<void>
     autoApply?: boolean
     installedCopy?: string | null
+    wait?: (ms: number) => Promise<void>
+    now?: () => number
   } = {},
 ) {
   const published: UpdateStatus[] = []
@@ -39,6 +41,8 @@ function make(
     installedCopy: () => opts.installedCopy ?? null,
     readAutoApply: () => opts.autoApply ?? false,
     writeAutoApply: (enabled) => saved.push(enabled),
+    wait: opts.wait,
+    now: opts.now,
   })
   return {
     svc,
@@ -134,7 +138,7 @@ describe('UpdateService', () => {
     await h.svc.check(true)
     expect(h.svc.apply().phase).toBe('updating')
     await settle()
-    expect(h.calls[0]).toEqual(['npm', ['i', '-g', 'centralu@9999.0.0']])
+    expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']])
     expect(h.svc.current().phase).toBe('restart_required')
   })
 
@@ -158,7 +162,7 @@ describe('UpdateService', () => {
     h.svc.apply()
     await settle()
     expect(h.calls).toEqual([
-      ['npm', ['i', '-g', 'centralu@9999.0.0']],
+      ['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']],
       ['centralu', ['install']],
     ])
     expect(h.svc.current().phase).toBe('restart_required')
@@ -189,6 +193,55 @@ describe('UpdateService', () => {
     const s = h.svc.apply()
     expect(s.phase).toBe('failed')
     expect(h.calls).toEqual([])
+  })
+
+  it('waits for npm to serve a just-published version, then installs that exact version', async () => {
+    let tries = 0
+    const h = make({
+      registry: '9999.0.0',
+      run: async (file) => {
+        if (file === 'npm' && ++tries === 1) throw new Error('npm error code ETARGET\nnpm error notarget No matching version found')
+      },
+      wait: async () => {},
+    })
+    await h.svc.check(true)
+    h.svc.apply()
+    await settle()
+    expect(h.calls.filter(([file]) => file === 'npm')).toHaveLength(2)
+    expect(h.published.some((s) => s.phase === 'waiting_for_npm' && s.error === 'Waiting for npm to serve 9999.0.0')).toBe(true)
+    expect(h.svc.current().phase).toBe('restart_required')
+  })
+
+  it('ends the npm propagation wait at ten minutes instead of retrying forever', async () => {
+    let elapsed = 0
+    const h = make({
+      registry: '9999.0.0',
+      run: async () => { throw new Error('npm error code ETARGET') },
+      now: () => elapsed,
+      wait: async (ms) => { elapsed += ms },
+    })
+    await h.svc.check(true)
+    h.svc.apply()
+    await settle()
+    expect(elapsed).toBe(10 * 60 * 1000)
+    expect(h.calls).toHaveLength(21)
+    expect(h.svc.current().phase).toBe('failed')
+    expect(h.svc.current().error).toContain('ETARGET')
+  })
+
+  it('fails non-propagation errors immediately without waiting or retrying', async () => {
+    const waits: number[] = []
+    const h = make({
+      registry: '9999.0.0',
+      run: async () => { throw new Error('npm error code EACCES') },
+      wait: async (ms) => { waits.push(ms) },
+    })
+    await h.svc.check(true)
+    h.svc.apply()
+    await settle()
+    expect(h.calls).toHaveLength(1)
+    expect(waits).toEqual([])
+    expect(h.svc.current().phase).toBe('failed')
   })
 
   /**
@@ -224,7 +277,7 @@ describe('UpdateService', () => {
       const h = make({ registry: '9999.0.0', autoApply: true })
       expect((await h.svc.check(true)).phase).toBe('updating')
       await settle()
-      expect(h.calls[0]).toEqual(['npm', ['i', '-g', 'centralu@9999.0.0']])
+      expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']])
       expect(h.svc.current().phase).toBe('restart_required')
     })
 

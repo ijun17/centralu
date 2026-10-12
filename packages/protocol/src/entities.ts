@@ -1159,7 +1159,7 @@ export const UpdateStatus = z.object({
    * with `autoApply`, it does so by itself once no session is working or waiting and no
    * terminal or command is running — never mid-turn.
    */
-  phase: z.enum(['idle', 'checking', 'updating', 'restart_required', 'failed']).default('idle'),
+  phase: z.enum(['idle', 'checking', 'updating', 'waiting_for_npm', 'restart_required', 'failed']).default('idle'),
   /**
    * Why the last check or update did not work, or null when nothing went wrong.
    *

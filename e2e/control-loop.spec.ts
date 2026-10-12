@@ -8015,6 +8015,21 @@ test('returning to the window re-reads every project (#41)', async ({ page }) =>
  * than replacing itself out from under the person. Driven entirely through the mock —
  * `npm i -g` is never run by a test.
  */
+test('A pending npm release is shown as a wait and disables duplicate update actions (#581)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.offerUpdate('9.9.9')
+    const store = (window as any).__store
+    store.setState({ update: { ...store.getState().update, phase: 'waiting_for_npm', error: 'Waiting for npm to serve 9.9.9' } })
+  })
+  await expect(page.getByTestId('update-line')).toHaveText('Waiting for npm to serve 9.9.9')
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  await page.getByTestId('settings-tab-updates').click()
+  await expect(page.getByTestId('update-state')).toHaveText('Waiting for npm to serve 9.9.9')
+  await expect(page.getByTestId('update-check-now')).toBeDisabled()
+  await expect(page.getByTestId('update-apply')).toBeDisabled()
+})
+
 test('A quiet line appears when a new version exists, and installing requires a click (#43)', async ({
   page,
 }) => {

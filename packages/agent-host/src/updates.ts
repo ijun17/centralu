@@ -49,6 +49,10 @@ const FORCED_TIMEOUT_MS = 8_000
 /** `npm i -g` on a cold cache is slow, but not this slow — past here something is stuck */
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000
 
+/** npm can publish the dist-tag before every registry edge has the tarball. Wait for propagation, not a person. */
+const NPM_RETRY_DELAY_MS = 30_000
+const NPM_RETRY_WINDOW_MS = 10 * 60 * 1000
+
 /**
  * The registry's answer. Failure is returned as a value too — throwing would force the caller to
  * stop the app.
@@ -76,6 +80,8 @@ export type UpdateDeps = {
   /** Where "Apply updates automatically when idle" lives across restarts (#352) */
   readAutoApply?: () => boolean
   writeAutoApply?: (enabled: boolean) => void
+  /** Test seam for the bounded registry-propagation wait. */
+  wait?: (ms: number) => Promise<void>
 }
 
 /** Where `centralu install` would have put the app on this platform: a platform module's answer (`os.ts`). */
@@ -183,6 +189,7 @@ export class UpdateService {
       // Off unless saved on: installing by itself is something a person has to ask for (#352)
       readAutoApply: deps.readAutoApply ?? (() => false),
       writeAutoApply: deps.writeAutoApply ?? (() => {}),
+      wait: deps.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
     }
     this.status = {
       /*
@@ -312,7 +319,7 @@ export class UpdateService {
      * replace "restart to finish" with it. The person is then told to update again,
      * having already done so.
      */
-    if (this.status.phase === 'updating' || this.status.phase === 'restart_required') return this.current()
+    if (this.status.phase === 'updating' || this.status.phase === 'waiting_for_npm' || this.status.phase === 'restart_required') return this.current()
 
     this.status = { ...this.status, phase: 'checking' }
     this.emit()
@@ -361,7 +368,7 @@ export class UpdateService {
    * rest of the story arrives as `update_status` events.
    */
   apply(): UpdateStatus {
-    if (this.status.phase === 'updating') return this.current()
+    if (this.status.phase === 'updating' || this.status.phase === 'waiting_for_npm') return this.current()
     const latest = this.status.latest
     if (!this.status.newer || !latest) {
       // Refusing out loud rather than shrugging: this can only be reached from a button
@@ -388,7 +395,7 @@ export class UpdateService {
        * one may be the copy whose compare says every beta is already the newest (#42).
        * Naming the version we found does not consult it.
        */
-      await this.deps.run('npm', ['i', '-g', `${APP_SLUG}@${version}`])
+      await this.installPackage(version)
       packageInstalled = true
       /*
        * Refresh the copy that gets launched.
@@ -432,6 +439,29 @@ export class UpdateService {
     this.emit()
   }
 
+  /**
+   * A just-published release can be visible from `latest` before its package is on the npm edge
+   * this machine reaches. `notarget`/ETARGET are that narrow condition; credentials, disk and
+   * package errors still fail immediately. The ten minute cap makes this a wait with an end, not
+   * a hidden retry loop. `--prefer-online` makes npm revalidate instead of trusting its stale cache.
+   */
+  private async installPackage(version: string): Promise<void> {
+    const started = this.deps.now()
+    for (;;) {
+      try {
+        await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${version}`])
+        return
+      } catch (err) {
+        if (!npmHasNotServedVersion(err) || this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw err
+        this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}` }
+        this.emit()
+        await this.deps.wait(NPM_RETRY_DELAY_MS)
+        this.status = { ...this.status, phase: 'updating', error: null }
+        this.emit()
+      }
+    }
+  }
+
   /** The scheduled check is due; a `force: false` caller in between reuses the last answer */
   private isDue(): boolean {
     return this.deps.now() - (this.status.checkedAt ?? 0) >= CHECK_INTERVAL_MS
@@ -440,4 +470,8 @@ export class UpdateService {
   private emit(): void {
     this.publish(this.current())
   }
+}
+
+function npmHasNotServedVersion(err: unknown): boolean {
+  return /(?:\bETARGET\b|\bnotarget\b)/i.test(err instanceof Error ? err.message : String(err))
 }

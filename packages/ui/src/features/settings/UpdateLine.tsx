@@ -39,6 +39,10 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
     )
   }
 
+  if (update.phase === 'waiting_for_npm') {
+    return <span className={`${tone} text-ink-faint`} data-testid="update-line" role="status">{update.error ?? 'Waiting for npm…'}</span>
+  }
+
   if (update.phase === 'restart_required') {
     const offer = applyOffer(update, APP_VERSION, relaunch)
     // This window is the new build already; the build bar carries the rest (the switch)

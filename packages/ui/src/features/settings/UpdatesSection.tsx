@@ -36,7 +36,7 @@ export function UpdatesSection() {
    * cannot be read either.
    */
   const current = update?.current ?? APP_VERSION
-  const busy = update?.phase === 'checking' || update?.phase === 'updating'
+  const busy = update?.phase === 'checking' || update?.phase === 'updating' || update?.phase === 'waiting_for_npm'
 
   return (
     <section>

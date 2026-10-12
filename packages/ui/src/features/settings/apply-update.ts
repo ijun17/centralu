@@ -177,6 +177,7 @@ export function updateStateText(u: UpdateStatus | null, offer: ApplyOffer | null
   if (!u) return 'Not checked yet'
   if (u.phase === 'checking') return 'Checking…'
   if (u.phase === 'updating') return `Installing ${u.latest ?? 'the new version'}…`
+  if (u.phase === 'waiting_for_npm') return u.error ?? `Waiting for npm to serve ${u.latest ?? 'the new version'}…`
   if (u.phase === 'restart_required') {
     const v = u.latest ?? 'the new version'
     if (offer?.kind === 'current') return `This window runs ${v}. The agent host switches to it from the bar above.`

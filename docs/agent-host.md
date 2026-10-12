@@ -1023,7 +1023,7 @@ door, the host's switch to the new copy, and the old version's folder removed on
 
 The design is in [architecture.md](architecture.md) §4.5. The host's part is the install and one rule.
 
-**The install** (`updates.ts`). `updates.apply` runs `npm i -g centralu@<v>` and, when the installed app exists,
+**The install** (`updates.ts`). `updates.apply` runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
 `centralu install`, then reports `restart_required`; it never restarts anything. With `autoApply` on ("Apply updates
 automatically when idle", `updates.setAutoApply`, saved as `updates.autoApply` in the store's app settings, off by
 default) a check that finds a newer version starts the same install by itself, and turning the setting on with a newer
@@ -1038,12 +1038,18 @@ launcher's `installedPaths()[0]` per platform (a test holds the two together). A
 own last line (not its pointer to the log), or, when npm worked and only the copy did not, the launcher's first line,
 the copy's path and `centralu install` to finish by hand.
 
+**A release arriving at npm.** The `latest` tag can reach this host before the package version has reached the npm
+edge it installs from. On npm's narrow `ETARGET`/`notarget` response only, the host retries the exact install with
+`--prefer-online` for up to ten minutes, reporting `waiting_for_npm` and “Waiting for npm to serve <version>” between
+attempts. Other failures still fail at once; a bounded propagation wait must not hide a credential, disk or package
+error.
+
 **On Windows**, measured on Windows 11 on 2026-10-08 with a temporary npm prefix and a stand-in holding the same
 handles as the running app (an exe started from the folder, the host's `better-sqlite3` and `node-pty` modules mapped):
 
 | Step | What happens |
 |---|---|
-| `npm i -g centralu@<v>` | Succeeds while the app runs, from the installed copy or from inside the npm package |
+| `npm i -g --prefer-online centralu@<v>` | Succeeds while the app runs, from the installed copy or from inside the npm package |
 | `centralu install` | Renames `%LOCALAPPDATA%\Programs\Centralu` aside to `Centralu.old-<time>` and the assembled `Centralu.new` into its place. NTFS allows the rename with the exe and the native modules in use; it refuses only while some process's working directory is inside. The app moves its working directory out of its own folder at start (`leave_app_folder` in `src-tauri/src/lib.rs`), since File Explorer starts an exe in its folder and the host inherits it. The aside copy cannot be deleted while the old app runs; the next install sweeps every `Centralu.old-*` it can |
 | The running app | Keeps the files it has open. Windows still reports the exe at its original path, so anything opened by path afterwards is the new copy's, a host restarted by the old window included (inferred from that path, not run) |
 | "Apply now" | Not offered: there is no keeper, so a relaunch would stop every agent (`relaunch_info`). The line says "Restart Centralu to finish updating to <v>"; quitting and opening it again from the Start menu or `centralu` starts the new copy |
