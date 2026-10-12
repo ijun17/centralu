@@ -93,6 +93,18 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
   return out
 }
 
+/**
+ * The last `last` messages of a conversation as the SDK reads its transcript (`type` and the API `message`), for a
+ * process adopted from a previous host to recover what it was told only on that host's stream: the timers it holds
+ * (#568, `ClaudeSchedules`). Empty when the SDK cannot read it.
+ */
+export async function readClaudeTranscriptTail(externalId: string, cwd: string, last: number): Promise<{ type?: unknown; message?: unknown }[]> {
+  const sdk = await sessionApi()
+  if (!sdk?.getSessionMessages) return []
+  const rows = await sdk.getSessionMessages(externalId, { dir: cwd }).catch(() => [])
+  return Array.isArray(rows) ? rows.slice(-last) : []
+}
+
 export async function readClaudeHistory(
   externalId: string,
   cwd: string,

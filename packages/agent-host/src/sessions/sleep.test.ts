@@ -5,6 +5,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
 import { Store } from '../dev-services/store.js'
 import type { SessionIdle } from '../idle.js'
 import { createRpcHandler } from '../rpc.js'
+import { ClaudeStreamNormalizer } from '../adapters/claude/normalize.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
 import {
@@ -261,6 +262,29 @@ describe('a session put to sleep, on the manager', () => {
     expect(await mgr.sleepSession(id)).toBe(false)
     expect(h.disposed).toBe(false)
     h.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ id: 't1', kind: 'shell', description: 'npm run dev', status: 'completed' }] })
+    expect(await mgr.sleepSession(id)).toBe(true)
+  })
+
+  it('a session whose /loop has scheduled its next wake-up stays awake until it is due, as the Claude adapter reports it', async () => {
+    const id = await idleSession()
+    const h = adapter.last
+    // What the Claude adapter's stream makes of a /loop turn that ends by scheduling the next one
+    const stream = new ClaudeStreamNormalizer(id)
+    const turn = [
+      { type: 'assistant', parent_tool_use_id: null, message: { id: 'm1', role: 'assistant', content: [{ type: 'tool_use', id: 'w1', name: 'ScheduleWakeup', input: { delaySeconds: 1200, reason: 'poll CI', prompt: '/loop poll CI' } }] } },
+      { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w1', content: 'ok' }] }, tool_use_result: { scheduledFor: Date.now() + 1_200_000 } },
+    ]
+    for (const m of turn) for (const e of stream.push(m)) h.emit(e)
+    h.emit({ type: 'turn_complete', sessionId: id })
+    expect(mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background' })
+    expect(await mgr.sleepSession(id)).toBe(false)
+    expect(h.disposed).toBe(false)
+    // The loop stopped: it may sleep
+    for (const m of [
+      { type: 'assistant', parent_tool_use_id: null, message: { id: 'm2', role: 'assistant', content: [{ type: 'tool_use', id: 'w2', name: 'ScheduleWakeup', input: { stop: true } }] } },
+      { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w2', content: 'stopped' }] }, tool_use_result: { stopped: true } },
+    ]) for (const e of stream.push(m)) h.emit(e)
+    h.emit({ type: 'turn_complete', sessionId: id })
     expect(await mgr.sleepSession(id)).toBe(true)
   })
 

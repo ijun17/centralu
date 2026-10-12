@@ -1059,7 +1059,7 @@ of a tool's:
 |---|---|
 | A live session sleeps once it has said nothing (no event of any kind) for the set time: **15 minutes** by default, "Put idle sessions to sleep after" in Settings → Background (`agents.setSleepPolicy`, saved as `agents.sleepAfterMinutes`, `off` for never) | The owner's decision (2026-10-12). Inside the 1 h cache lifetime Claude Code asks for, so the wake still reads the cache |
 | Only a tool whose adapter says so (`capabilities.sleep`): Claude yes, Codex no | Claude's resume was measured to keep the cache. A large Codex thread took 7-13 s to resume and its cache on resume is unmeasured; Codex's memory is better won by one shared app-server per account (#561 E3), decided separately |
-| Never while `sessionIdle` says no: a turn, an approval or a question waiting, background work, or a tool that cannot report its background work | The same rule as moving a session to a new CLI (§4.6): ending the process would end what it holds |
+| Never while `sessionIdle` says no: a turn, an approval or a question waiting, background work (the CLI's own timers included, below), or a tool that cannot report its background work | The same rule as moving a session to a new CLI (§4.6): ending the process would end what it holds |
 | Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session ask_project opened for it) still in the turn it gave it, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
 | The quiet period counts from host start for a session this host has not heard from | A host that just replaced another (a restart, a swap) does not know what the person was doing a second ago |
 | Sleeping is `SessionManager.sleepSession`: refused unless still idle, the handle leaves the map, `session_live {live: false, reason: 'asleep'}` goes out, the process is disposed. A message arriving meanwhile starts a resume that waits for the dispose (`sleeping`) | Never two processes on one conversation; a send is never lost to a closing handle |
@@ -1074,9 +1074,19 @@ re-measures the cache on a woken turn through a real host (§3.1); run it on a C
 26,198 input tokens from cache (the warm turn before it 99.2%), and took 4.6 s from send to end against 2.3 s warm, the
 resume and the transcript catch-up included.
 
-Not covered: Claude Code's own scheduled wakeups inside a process (`/loop`, cron tools) are not reported as background
-work, so a session relying on one can be put to sleep; the reconnect recovery still wakes the sessions that were live
-before a host restart without a keeper.
+**The CLI's own timers count as background work.** `/loop` and scheduled prompts are timers inside the Claude process
+(`ScheduleWakeup`, `CronCreate`), which the CLI does not report as tasks; a process put to sleep or restarted loses
+them silently. The Claude adapter reads them off the calls and their structured results (`ClaudeSchedules` in
+`adapters/claude/normalize.ts`) and lists each pending one with the session's background tasks (kind `other`, not
+stoppable on its own), so `sessionIdle` says `background`. A wake-up is pending until its `scheduledFor` (else the
+asked delay, else the runtime's one-hour maximum), or until `ScheduleWakeup {stop: true}`; a cron job until
+`CronDelete` names it, a `CronList` answer omits it, or it auto-expires after seven days (a one-shot job is kept as
+long, conservatively). The adapter looks again a second after the next one is due. A process adopted from a previous
+host reads them back from its conversation's last 400 messages (the transcript has no structured results, so a
+wake-up counts its asked delay from the adoption). The background mark's tooltip lists them and says the session stays
+awake until they end. A Codex session is never put to sleep, so its own scheduling needs nothing here.
+
+Not covered: the reconnect recovery still wakes the sessions that were live before a host restart without a keeper.
 
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 

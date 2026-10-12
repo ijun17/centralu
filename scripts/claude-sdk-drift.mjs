@@ -118,6 +118,13 @@ const TYPED = [
   'message_start',
   'active_goal',
   'last_reason',
+  // the CLI's timers (#568, normalize.ts ClaudeSchedules): a session holding one is not put to sleep. The fields of
+  // ScheduleWakeup's and CronCreate's input and structured result (sdk-tools.d.ts); the tool names themselves are the
+  // CLI's and sit in the same file's Input types
+  'tool_use_result',
+  'scheduledFor',
+  'delaySeconds',
+  'humanSchedule',
 ]
 
 /**

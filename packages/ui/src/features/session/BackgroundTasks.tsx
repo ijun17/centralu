@@ -246,11 +246,17 @@ function BackgroundTaskRow({
 export function BackgroundMark({ tasks, testId }: { tasks: readonly BackgroundTask[]; testId: string }) {
   const n = backgroundCount(tasks)
   if (n === 0) return null
+  /*
+   * The tooltip names what runs, and that it keeps the session awake (#568): a session whose process holds work, a
+   * `/loop` wake-up or a scheduled prompt among it, is not put to sleep, and a person who wonders why it still holds
+   * its process finds the answer here.
+   */
+  const running = tasks.filter((t) => t.status === 'running' && !t.ambient).map((t) => `· ${t.description}`)
   return (
     <span
       className="readout shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint"
       data-testid={testId}
-      title={`${n} background task${n === 1 ? '' : 's'} running`}
+      title={`${n} background task${n === 1 ? '' : 's'} running; the session stays awake until ${n === 1 ? 'it ends' : 'they end'}\n${running.join('\n')}`}
     >
       {n} bg
     </span>

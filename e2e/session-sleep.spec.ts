@@ -60,6 +60,24 @@ test('a message to a sleeping session reads as waking, then goes through', async
   expect(await resumeCalls(page)).toEqual([id])
 })
 
+test('a session kept awake by a /loop wake-up says why on its background mark', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  const id = await newSession(page, 'alpha')
+  // What the Claude adapter reports for a pending ScheduleWakeup (normalize.ts, ClaudeSchedules)
+  await page.evaluate(
+    (sid) =>
+      (window as any).__mock.emit({
+        type: 'background_tasks',
+        sessionId: sid,
+        live: [{ id: 'schedule-wakeup-w1', kind: 'other', description: 'Wakes itself at 14:05 (/loop): poll CI', stoppable: false, status: 'running' }],
+      }),
+    id,
+  )
+  const mark = page.getByTestId(`background-mark-${id}`)
+  await expect(mark).toHaveText('1 bg')
+  await expect(mark).toHaveAttribute('title', /stays awake until it ends\n· Wakes itself at 14:05 \(\/loop\): poll CI/)
+})
+
 test('"Put idle sessions to sleep after" is 15 minutes by default, and saves through the host', async ({ page }) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
