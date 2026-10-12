@@ -1,3 +1,4 @@
+/* eslint-disable agent/agent-adapter-checks -- The seeded demo depicts named CLIs, including their sessions and usage fixtures. */
 import type { CacheStats, NormalizedEvent } from '@cc/protocol'
 import type { MockPlatform } from './index.js'
 

@@ -1,33 +1,50 @@
-/**
- * `local/agent-adapter-checks`: an agent CLI's identity belongs to its adapter.
- *
- * Host policy asks an adapter capability (for example `instructionChannel` or `sleep`) instead
- * of comparing a tool name. The registry is the one place that enrols the adapters a build ships.
- */
+/** `agent/agent-adapter-checks`: an agent CLI's identity belongs to its adapter. */
+import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 
-const AGENT_CLI_NAMES = new Set(['claude', 'codex'])
-
-const isAgentCliName = (node) => node?.type === 'Literal' && typeof node.value === 'string' && AGENT_CLI_NAMES.has(node.value)
+// Read the identities from the adapters enrolled by the registry, without loading adapters
+// (and their SDKs/native modules) into ESLint or keeping a second vendor list here.
+const registryUrl = new URL('../packages/agent-host/src/adapters/registry.ts', import.meta.url)
+const sourceOf = (url) => ts.createSourceFile(url.pathname, readFileSync(url, 'utf8'), ts.ScriptTarget.Latest, true)
+const AGENT_CLI_NAMES = new Set()
+for (const statement of sourceOf(registryUrl).statements) {
+  if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly) continue
+  const adapterUrl = new URL(statement.moduleSpecifier.text.replace(/\.js$/, '.ts'), registryUrl)
+  for (const declaration of sourceOf(adapterUrl).statements) {
+    if (!ts.isClassDeclaration(declaration)) continue
+    for (const member of declaration.members) {
+      if (!ts.isPropertyDeclaration(member) || member.name.getText() !== 'tool') continue
+      let value = member.initializer
+      while (value && (ts.isAsExpression(value) || ts.isParenthesizedExpression(value))) value = value.expression
+      if (value && ts.isStringLiteralLike(value)) AGENT_CLI_NAMES.add(value.text)
+    }
+  }
+}
 
 export const agentAdapterChecks = {
   meta: {
     type: 'problem',
-    docs: { description: 'compares an agent CLI name only inside its adapter or the adapter registry' },
+    docs: { description: 'keeps agent CLI identities inside adapters and the registry' },
     messages: {
-      compare: "a comparison with agent CLI '{{name}}' belongs in its adapter or the registry; ask a capability named for what differs (docs/architecture.md §2)",
+      identity: "agent CLI '{{name}}' belongs in its adapter or the registry; ask a capability named for what differs (docs/architecture.md §2)",
     },
     schema: [],
   },
   create(context) {
-    const report = (node, name) => context.report({ node, messageId: 'compare', data: { name } })
+    const report = (node, name) => {
+      if (AGENT_CLI_NAMES.has(name)) context.report({ node, messageId: 'identity', data: { name } })
+    }
     return {
-      BinaryExpression(node) {
-        if (!['===', '!==', '==', '!='].includes(node.operator)) return
-        const literal = isAgentCliName(node.left) ? node.left : isAgentCliName(node.right) ? node.right : null
-        if (literal) report(node, literal.value)
+      Literal(node) {
+        if (typeof node.value === 'string') report(node, node.value)
+        // An exact-name regexp is the same identity check as a string comparison.
+        else if (node.regex) report(node, node.regex.pattern.replace(/^\^|\$$/g, ''))
       },
-      SwitchCase(node) {
-        if (isAgentCliName(node.test)) report(node, node.test.value)
+      TemplateLiteral(node) {
+        if (node.expressions.length === 0) report(node, node.quasis[0].value.cooked)
+      },
+      Property(node) {
+        if (!node.computed && node.key.type === 'Identifier') report(node.key, node.key.name)
       },
     }
   },

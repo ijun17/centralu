@@ -213,8 +213,12 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 
 | 도구 | 인자 → 돌아오는 것 |
 |---|---|
-| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait?, worktree?, branch? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working` |
+| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working` |
 | `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → 같은 상태들, 더해서 `at_rest`(부른 세션이 준 일이 돌지 않음, 마지막 답), `stopped`, `deleted`(병합되고 깨끗한 워크트리 자식을 치움, 3부) |
+
+선택 인자 `tool`은 레지스트리 이름이다. 스키마는 문자열을 받고, 호출할 때 현재 레지스트리에
+있는지 확인한다. 모르는 이름이면 설치된 도구 목록을 담은 오류를 반환하므로, 어댑터를 추가해도
+이 스키마를 고칠 필요가 없다.
 
 `start_agent` 한 번(`SessionManager.startAgent`):
 
@@ -252,7 +256,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 턴도 멈춘다. 계속 돌게 둔 자식(`wait: false`, 또는 한도를 넘긴 것)은 자기 세션이라 부모의 멈춤이 닿지 않고 자기
 멈춤 버튼이 있다. 부르는 세션을 지우면 기다림과 세션 동의는 사라지고, 자식은 턴과 링크를 지킨다.
 
-**크기.** 두 정의는 992자(`AGENT_BUDGET_CHARS` 1,000. 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
+**크기.** 두 정의는 956자(`AGENT_BUDGET_CHARS` 1,000. 레지스트리 이름 스키마 전에는 992자, 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
 (`start_agent`의 모든 답이 그 이름을 댄다). 잰 값은 tool-cost.md에 있다.
 
 **stdout은 예약되어 있다.** `main.ts`가 딱 한 줄을 찍는다: Tauri 수퍼바이저가 포트와 인증
@@ -954,6 +958,22 @@ exe, 매핑된 호스트의 `better-sqlite3`·`node-pty` 모듈)으로 측정했
 | 대화에 Centralu의 줄 하나가 들어간다: "Claude Code restarted on 2.1.290 (was 2.1.282). The conversation continues." | 스스로 다시 띄운 프로세스는 결코 조용하지 않다 |
 | 마지막으로 본 설치 버전을 적어 둔다(`agents.versionsSeen`) | 앱이 닫혀 있는 동안 한 업데이트도 바뀐 것으로 친다 |
 
+**호스트 교체 뒤 시작 설정 (#589).**
+
+키퍼가 보존한 프로세스는 이전 어댑터 정책으로 시작했을 수 있다. 어댑터의 버전이 있는
+`launchSettingsFingerprint(settings)`를 세션별 앱 설정에 저장하고, 키퍼의 프로세스를
+이어받은 뒤 비교한다. 값이 다르면 유휴 프로세스는 resume으로 다시 띄우고, 작업이나 승인을
+기다리는 프로세스는 턴이 끝난 뒤 다시 띄운다. 잠든 세션은 프로세스가 없으므로 새 값만
+기록한다. 호스트는 CLI 이름이나 지문의 내용을 해석하지 않으며, 시작 정책을 바꾸는 어댑터가
+자기 지문을 바꾼다.
+
+저장된 지문이 없는 경우도 불일치다. 이전 빌드가 보존한 프로세스의 시작 설정은 알 수 없으므로,
+이 검사를 도입하는 업데이트에서는 각 보존 프로세스를 같은 안전한 경계에서 한 번 다시 띄우고
+새 지문을 기록한다. 그 뒤 설정이 같으면 호스트 교체 때 다시 띄우지 않는다. 변경되거나 이전에
+기록되지 않은 시작 설정은 캐시 재구축 원인 `launch_settings`("launch settings changed")로
+보고하며, 재시작 로그는 "launch settings changed or previously unrecorded"라고 밝힌다.
+`instructions`("tools changed")와 별개의 원인이다.
+
 **능력 검사 자리** (#270). 설치된 CLI의 버전이 바뀔 때마다 서비스는 `capabilityCheck({ tool, from, to })`를 부른다.
 #270은 버전이 바뀌면 도구가 못 하던 것에 대한 탐침을 다시 돌리자고 제안한다. 아직 구현한 것이 없으므로 기본값은
 host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
@@ -1376,6 +1396,7 @@ change · 1 compaction · 1 unknown")과, 이름을 올린 세션마다 그 아�
 | `compaction` 압축 | `compaction` 이벤트, 또는 `conversation_reset`(Claude Code의 /clear): 다음 요청은 캐시가 본 적 없는 요약이나 빈 대화로 시작한다 |
 | `thread_restart` 스레드 재시작 | 붙이거나 뗀 앱을 받으려고 Codex의 스레드가 다시 시작했다(`sessionAppsChanged`, 바로 또는 턴이 끝날 때) |
 | `instructions` 도구 변경 | Claude가 붙이거나 뗀 앱을 바로 받았다(도구 목록은 프롬프트의 일부다), 또는 스킬이나 MCP 변경으로 오케스트레이터가 다시 시작했다 |
+| `launch_settings` 시작 설정 변경 | 키퍼가 보존한 프로세스의 어댑터 시작 지문이 바뀌었거나 이전 빌드가 지문을 기록하지 않아 다시 띄웠다(#589). 유휴 프로세스는 바로, 작업 중인 프로세스는 턴이 끝난 뒤 다시 띄운다 |
 | `expired` 캐시 만료 | 이 줄의 마지막 쓰기에 대해 API가 알린 수명보다 오래 쉬었다(Claude의 `cache_creation` 내역: `ephemeral_1h_input_tokens` 또는 `ephemeral_5m_input_tokens`) |
 | `probably_expired` 아마 만료 | 알린 수명이 없을 때 5분 넘게 쉬었다(Codex는 알리지 않는다. 아직 쓴 적 없는 Claude 줄도) |
 | `unknown` 모름 | 위의 어느 것도 아니다. 알린 수명보다 짧게 쉰 경우도 |

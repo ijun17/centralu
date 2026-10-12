@@ -313,10 +313,10 @@ export const DELEGATE_BUDGET_CHARS = 400
 export const AGENT_TOOLS = [
   {
     name: 'start_agent',
-    description: 'Has a new Claude or Codex session in this project do a job; returns its answer.',
+    description: 'Has a new agent session in this project do a job; returns its answer.',
     schema: z.object({
       task: z.string(),
-      tool: z.enum(['claude', 'codex']).optional(),
+      tool: z.string().optional(),
       model: z.string().optional(),
       effort: z.string().optional(),
       wait: z.boolean().optional().describe('false: do not wait; you are told when it ends.'),

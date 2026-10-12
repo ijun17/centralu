@@ -250,8 +250,12 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 
 | Tool | Arguments → what comes back |
 |---|---|
-| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working` |
+| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working` |
 | `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (a merged, clean worktree child cleaned up, part 3) |
+
+The optional `tool` is a registry name, accepted as a string by the schema and checked against the
+current registry at call time. An unknown name returns an error listing the installed tools; adding
+an adapter does not require changing this schema.
 
 What one `start_agent` call does (`SessionManager.startAgent`):
 
@@ -330,7 +334,7 @@ a child, stops that child's turn. A child left running (`wait: false`, or past t
 caller's Stop does not reach it, it has its own Stop. Deleting the caller drops its waits and its session consent;
 the children keep their turns and their link.
 
-**Size.** The two definitions are 992 characters (`AGENT_BUDGET_CHARS` 1,000; 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 956 characters (`AGENT_BUDGET_CHARS` 1,000; 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
 `start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
 is named from its task and the person renames it.
@@ -1189,6 +1193,13 @@ the ordinary resume path, waits for a working or approval-waiting process to fin
 for an asleep session with no process. The host never names a CLI or interprets the fingerprint; changing an adapter's
 derived launch policy means changing its own fingerprint.
 
+A missing stored fingerprint is also a mismatch: builds before this check kept processes with unknown
+launch settings. The update that introduces it therefore restarts each retained process once, at the
+same safe boundary, and records the new fingerprint. Later handoffs keep an unchanged process.
+Both changed and previously unrecorded launch settings use the `launch_settings` cache rebuild cause
+("launch settings changed"); the restart log says "launch settings changed or previously unrecorded".
+This is separate from `instructions` ("tools changed").
+
 **The capability check seam** (#270). On every change of an installed CLI's version the service calls
 `capabilityCheck({ tool, from, to })`. #270 proposes re-running the probes for what a tool could not do when its version
 moves; nothing implements that yet, so the default writes one line to host.log saying so. The probes plug in there.
@@ -1820,6 +1831,7 @@ report from the API, and the screen's Rebuilds tooltip says so.
 | `compaction` compaction | A `compaction` event, or `conversation_reset` (Claude Code's /clear): the next request begins with a summary or nothing the cache has seen |
 | `thread_restart` thread restart | Codex's thread restarted so it takes an attached or detached app (`sessionAppsChanged`, at once or when the turn ends) |
 | `instructions` tools changed | Claude took an attached or detached app at once (its tool list is part of the prompt), or the orchestrator restarted for a skill or MCP change |
+| `launch_settings` launch settings changed | A keeper-retained process restarted because its adapter launch fingerprint changed or the previous build had not recorded one (#589); an idle process restarts now, a working process after its turn |
 | `expired` cache expired | Idle longer than the lifetime the API reported for this lane's last write (Claude's `cache_creation` split: `ephemeral_1h_input_tokens` or `ephemeral_5m_input_tokens`) |
 | `probably_expired` probably expired | Idle more than 5 minutes when no lifetime was reported (Codex never reports one; a Claude lane that has not written yet) |
 | `unknown` | None of these, including idle shorter than the reported lifetime |

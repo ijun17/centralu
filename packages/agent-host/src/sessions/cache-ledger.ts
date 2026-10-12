@@ -49,7 +49,7 @@ const FIVE_HOURS_MS = 5 * 60 * 60_000
  * The causes the host is told about between two requests (`note`), strongest evidence first. Which of them is named
  * for a rebuild is the first one present; the time gap and "unknown" are judged only when none is.
  */
-const NOTED: readonly RebuildCause[] = ['cold_start', 'new_process', 'model_change', 'compaction', 'thread_restart', 'instructions']
+const NOTED: readonly RebuildCause[] = ['cold_start', 'new_process', 'model_change', 'compaction', 'thread_restart', 'instructions', 'launch_settings']
 
 type Entry = {
   at: number

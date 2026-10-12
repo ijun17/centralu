@@ -2924,7 +2924,7 @@ export class SessionManager {
       const definitions = this.definitionsRestartAfterTurn.delete(e.sessionId)
       const launchSettings = this.launchSettingsRestartAfterTurn.delete(e.sessionId)
       if ((apps || definitions || launchSettings || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
-        void this.restartSession(e.sessionId, apps ? 'thread_restart' : (definitions || launchSettings) ? 'instructions' : this.restartCause(e.sessionId)).catch(() => {})
+        void this.restartSession(e.sessionId, launchSettings ? 'launch_settings' : apps ? 'thread_restart' : definitions ? 'instructions' : this.restartCause(e.sessionId)).catch(() => {})
       }
     }
   }
@@ -4487,7 +4487,10 @@ export class SessionManager {
     /** What made the restart, for the cache's rebuild cause (§6.1); a plain new process when absent */
     cause?: RebuildCause,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    if (cause) this.restartReasons.set(sessionId, cause)
+    if (cause) {
+      this.restartReasons.set(sessionId, cause)
+      if (cause === 'launch_settings') console.error(`[sessions] restarting ${sessionId}: launch settings changed or previously unrecorded`)
+    }
     // Applying a deferred settings change (#164) is also done by this same restart, and so is an app set's (#371)
     this.restartAfterTurn.delete(sessionId)
     this.appsRestartAfterTurn.delete(sessionId)
@@ -4567,6 +4570,8 @@ export class SessionManager {
    * live idle sessions restart now, while a turn or card finishes before its restart.
    */
   async refreshToolDefinitions(): Promise<void> {
+    // Apply unknown/changed launch policy first: the same restart also refreshes tool definitions.
+    await this.refreshLaunchSettings()
     for (const session of this.meta.values()) {
       const next = this.toolPrefixHash(session.id)
       if (!next || this.store.appSetting(this.toolPrefixKey(session.id)) === next) continue
@@ -4581,7 +4586,6 @@ export class SessionManager {
       }
       await this.restartSession(session.id, 'instructions').catch(() => {})
     }
-    await this.refreshLaunchSettings()
   }
 
   /**
@@ -4594,6 +4598,7 @@ export class SessionManager {
       const cwd = this.store.sessionCwd(session.id)
       if (!cwd) continue
       const next = this.launchSettingsFingerprint(session, cwd)
+      // Earlier builds did not record launch settings: a kept process's policy is unknown.
       if (!next || this.store.appSetting(this.launchSettingsKey(session.id)) === next) continue
       if (!this.handles.has(session.id)) {
         this.store.setAppSetting(this.launchSettingsKey(session.id), next)
@@ -4604,7 +4609,7 @@ export class SessionManager {
         this.launchSettingsRestartAfterTurn.add(session.id)
         continue
       }
-      await this.restartSession(session.id, 'instructions').catch(() => {})
+      await this.restartSession(session.id, 'launch_settings').catch(() => {})
     }
   }
 
@@ -5553,7 +5558,7 @@ export class SessionManager {
     const tool = opts.tool ?? this.firstTool(project.defaultTool)
     if (!tool) return { ok: false, error: 'No agent adapter is available. Install and configure an agent CLI before starting an agent.' }
     const adapter = this.adapters.get(tool)
-    if (!adapter) return { ok: false, error: `No agent named "${tool}" here. The agents are: ${[...this.adapters.keys()].join(', ')}.` }
+    if (!adapter) return { ok: false, error: `No agent named "${tool}" here. Installed tools: ${[...this.adapters.keys()].join(', ') || 'none'}.` }
     const full = this.agentCeilingError(project.id)
     if (full) return { ok: false, error: full }
     // The project's remembered choice for that tool (#107), as a session the person opens there gets. A remembered

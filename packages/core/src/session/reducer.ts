@@ -150,14 +150,14 @@ export type SessionSummary = {
   unreachable?: boolean
 }
 
-export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
+export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name' | 'tool'> & Partial<SessionSummary>): SessionSummary {
   return {
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
     permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, pr: null, goal: null, backgroundTasks: [], agentVersion: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
     appId: null,
-    tool: 'claude' as const, ...init,
+    ...init,
   }
 }
 

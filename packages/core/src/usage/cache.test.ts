@@ -3,6 +3,10 @@ import type { CacheStats, CacheWindowStats } from '@cc/protocol'
 import { cacheHitRate, cacheTooltipLine, cacheWindowName, percentOf, rebuildBreakdown } from './cache.js'
 
 describe('rebuildBreakdown', () => {
+  it('labels launch policy restarts separately from changed tools', () => {
+    expect(rebuildBreakdown({ launch_settings: 1 })).toBe('1 launch settings changed')
+  })
+
   const MIN = 60_000
 
   it('lists the causes in one line, most first, ties in the order of evidence', () => {

@@ -47,7 +47,7 @@ function figures(here: string) {
     cacheReadTokens: read,
     cacheCreationTokens: 1_940_000,
     rebuilds,
-    rebuildCauses: rebuilds === 6 ? { expired: 3, model_change: 1, compaction: 1, unknown: 1 } : { expired: 6, model_change: 3 },
+    rebuildCauses: rebuilds === 6 ? { expired: 3, model_change: 1, compaction: 1, launch_settings: 1 } : { expired: 6, model_change: 3 },
     expiredIdleMs: { min: 64 * 60_000, max: 64 * 60_000 },
     sessions: [
       { sessionId: here, name: 'Cached work', requests: 9, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 1_120_000, rebuilds: 3, rebuildCauses: { expired: 2, model_change: 1 } },
@@ -139,7 +139,7 @@ test('the gauge says the cache hit rate on hover, and its dropdown breaks it dow
     await expect(page.getByTestId('usage-cache-uncached')).toContainText('18k')
     await expect(page.getByTestId('usage-cache-rebuilds')).toContainText('6 of 412 requests')
     await expect(page.getByTestId('usage-cache-causes')).toHaveText(
-      '6 rebuilds: 3 cache expired (idle 64 min) · 1 model change · 1 compaction · 1 unknown',
+      '6 rebuilds: 3 cache expired (idle 64 min) · 1 model change · 1 compaction · 1 launch settings changed',
     )
     await expect(page.getByTestId(`usage-cache-session-causes-${cached}`)).toHaveText('2 cache expired · 1 model change')
     await expect(page.getByTestId('usage-cache-sessions')).toContainText('Most cache writes')

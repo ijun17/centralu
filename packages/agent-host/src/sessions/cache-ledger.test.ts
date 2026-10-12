@@ -139,7 +139,7 @@ describe('CacheLedger rebuild causes', () => {
   })
 
   it('takes the strongest evidence when several things happened, in the documented order', () => {
-    const order = ['new_process', 'model_change', 'compaction', 'thread_restart', 'instructions'] as const
+    const order = ['new_process', 'model_change', 'compaction', 'thread_restart', 'instructions', 'launch_settings'] as const
     for (let i = 0; i < order.length; i++) {
       const l = new CacheLedger(NOW - HOUR)
       l.record('claude', 'a', ordinary, NOW - 20 * MIN)

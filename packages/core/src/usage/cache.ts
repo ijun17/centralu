@@ -52,6 +52,7 @@ export const REBUILD_CAUSE_LABEL: Readonly<Record<string, string>> = {
   compaction: 'compaction',
   thread_restart: 'thread restart',
   instructions: 'tools changed',
+  launch_settings: 'launch settings changed',
   expired: 'cache expired',
   probably_expired: 'probably expired',
   unknown: 'unknown',

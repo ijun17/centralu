@@ -796,6 +796,7 @@ export type RequestInput = z.infer<typeof RequestInput>
  *   compaction         the conversation was compacted or cleared
  *   thread_restart     Codex's thread was restarted for its apps or settings
  *   instructions       the session's tools or instructions changed (apps attached, the orchestrator's skills)
+ *   launch_settings    retained launch settings changed or were not recorded by the previous build
  *   expired            idle longer than the cache lifetime the API reported
  *   probably_expired   idle more than 5 minutes, the lifetime unknown
  *   unknown            none of these
@@ -808,6 +809,7 @@ export const RebuildCause = z.enum([
   'compaction',
   'thread_restart',
   'instructions',
+  'launch_settings',
   'expired',
   'probably_expired',
   'unknown',

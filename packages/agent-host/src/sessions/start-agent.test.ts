@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
+import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
-import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { AGENT_CEILING, agentBranch, presetWithin } from './start-agent.js'
 
 /**
@@ -58,6 +59,25 @@ describe('starting another agent in the same project', () => {
     await w.until(() => childrenOf(s).length === before + 1)
     return r.ok ? r.sessionId : ''
   }
+
+  it('accepts a third registered CLI through the served schema and rejects unknown tools at call time', async () => {
+    const third = new CrossAdapter('fixture-agent')
+    w.adapters.set(third.tool, third)
+    const s = await session()
+    allowProject()
+    const args = AGENT_TOOLS[0].schema.parse({ task: 'check', tool: third.tool, wait: false })
+    const startAgent = (opts: Parameters<typeof w.mgr.startAgent>[1]) => w.mgr.startAgent(s, opts)
+    const result = await runOrchestratorTool({ startAgent } as import('../adapters/contract.js').OrchestratorTools, 'start_agent', args, { sessionId: s, profile: 'reader' })
+    expect(result.isError).not.toBe(true)
+    expect(childrenOf(s)).toEqual([expect.objectContaining({ tool: third.tool })])
+    expect(third.handles.size).toBe(1)
+
+    const bad = AGENT_TOOLS[0].schema.parse({ task: 'check', tool: 'missing-cli' })
+    expect(await runOrchestratorTool({ startAgent } as import('../adapters/contract.js').OrchestratorTools, 'start_agent', bad, { sessionId: s, profile: 'reader' })).toMatchObject({
+      isError: true, text: 'No agent named "missing-cli" here. Installed tools: claude, codex, fixture-agent.',
+    })
+    expect(childrenOf(s)).toHaveLength(1)
+  })
 
   it('asks the person first; denied, nothing is started and the model reads a refusal', async () => {
     const s = await session()

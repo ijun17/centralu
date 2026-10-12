@@ -3,7 +3,7 @@ import type { NormalizedEvent } from '@cc/protocol'
 import { applyEvent, detectFileConflicts, initialSession, markRead, rename } from './reducer.js'
 
 const NOW = 1_000_000
-const s0 = () => initialSession({ id: 's1', projectId: 'p1', name: 'new session' })
+const s0 = () => initialSession({ tool: 'claude', id: 's1', projectId: 'p1', name: 'new session' })
 const ev = (e: Record<string, unknown>) => ({ sessionId: 's1', ...e }) as NormalizedEvent
 
 /** The event sequence of one real turn (in the order observed in the spike) */
@@ -337,8 +337,8 @@ describe('read position', () => {
 
 describe('file conflict detection (FR-2 data loss)', () => {
   it('detects two sessions touching the same file', () => {
-    const a = applyEvent(initialSession({ id: 'a', projectId: 'p1', name: 'a' }), ev({ type: 'files_touched', paths: ['src/x.ts', 'src/a.ts'] }), NOW)
-    const b = applyEvent(initialSession({ id: 'b', projectId: 'p1', name: 'b' }), { ...ev({ type: 'files_touched', paths: ['src/x.ts'] }), sessionId: 'b' } as NormalizedEvent, NOW)
+    const a = applyEvent(initialSession({ tool: 'claude', id: 'a', projectId: 'p1', name: 'a' }), ev({ type: 'files_touched', paths: ['src/x.ts', 'src/a.ts'] }), NOW)
+    const b = applyEvent(initialSession({ tool: 'claude', id: 'b', projectId: 'p1', name: 'b' }), { ...ev({ type: 'files_touched', paths: ['src/x.ts'] }), sessionId: 'b' } as NormalizedEvent, NOW)
     expect(detectFileConflicts([a, b])).toEqual([{ path: 'src/x.ts', sessionIds: ['a', 'b'] }])
   })
 

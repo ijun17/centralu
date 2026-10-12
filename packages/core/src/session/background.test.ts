@@ -33,7 +33,7 @@ describe('what Stop says about background work (#290)', () => {
 
 describe('the reducer keeps the list (#290)', () => {
   it('applies background_tasks the way the host does, and the event does not change the session\'s state', () => {
-    const s0 = initialSession({ id: 's1', projectId: 'p1', name: 's' })
+    const s0 = initialSession({ tool: 'claude', id: 's1', projectId: 'p1', name: 's' })
     const e = (x: Record<string, unknown>) => ({ type: 'background_tasks', sessionId: 's1', ...x }) as NormalizedEvent
     let s = applyEvent(s0, e({ live: [task('a'), task('b')] }), 1)
     s = applyEvent(s, e({ live: [task('b')], ended: [task('a', { status: 'stopped' })] }), 2)

@@ -225,8 +225,8 @@ export default tseslint.config(
     rules: { 'local/platform-checks': 'error' },
   },
   {
-    files: ['packages/*/src/**/*.{ts,tsx,mts,mjs}', 'apps/*/src/**/*.{ts,tsx}', 'packaging/**/*.mjs'],
-    ignores: ['**/*.test.{ts,tsx}', '**/*test-helpers.ts', 'packages/agent-host/src/adapters/**'],
+    files: ['packages/*/src/**/*.{ts,tsx,mts,mjs}', 'apps/*/src/**/*.{ts,tsx,mts,mjs}', 'packaging/**/*.mjs'],
+    ignores: ['**/*.test.{ts,tsx,mts,mjs}', '**/*test-helpers.ts', 'packages/agent-host/src/adapters/**'],
     plugins: { agent: agentAdapterChecks },
     rules: { 'agent/agent-adapter-checks': 'error' },
   },

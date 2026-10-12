@@ -246,6 +246,40 @@ describe('adapter launch settings after a host switch (#589)', () => {
     expect(store.appSetting(`launch_settings:${session.id}`)).toContain('v2')
   })
 
+  it.each(['idle', 'working'] as const)('restarts a kept %s process with unrecorded launch settings once and reports its own cause', async (state) => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    // A request before the handoff consumes the newly-created session's cold-start note.
+    old.emitEvent({ type: 'usage_update', sessionId: session.id, tokens: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 30_000, cacheCreationTokens: 0 }, request: { inputTokens: 5, cacheReadTokens: 30_000, cacheCreationTokens: 0 } })
+    store.deleteAppSetting(`launch_settings:${session.id}`)
+    store.deleteAppSetting(`tool_prefix:${session.id}`)
+    if (state === 'working') await rpc('agents.send', { sessionId: session.id, text: 'work' })
+    const restart = vi.spyOn(mgr, 'restartSession')
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await mgr.refreshToolDefinitions()
+    if (state === 'working') {
+      expect(old.disposed).toBe(false)
+      old.finishTurn()
+      await vi.waitFor(() => expect(adapter.handleOf(session.id)).not.toBe(old))
+    }
+    expect(old.disposed).toBe(true)
+    expect(restart).toHaveBeenCalledWith(session.id, 'launch_settings')
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('launch settings changed or previously unrecorded'))
+    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('v1')
+    const current = adapter.handleOf(session.id)!
+    current.emitEvent({ type: 'usage_update', sessionId: session.id, tokens: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 30_000 }, request: { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000 } })
+    const usage = await rpc('agents.usage', { tool: 'claude' }) as { cache: { windows: { rebuildCauses: Record<string, number> }[] } }
+    expect(usage.cache.windows[0]!.rebuildCauses).toEqual({ launch_settings: 1 })
+
+    await mgr.refreshToolDefinitions()
+    expect(adapter.handleOf(session.id)).toBe(current)
+    expect(restart).toHaveBeenCalledTimes(1)
+    restart.mockRestore()
+    log.mockRestore()
+  })
+
   it('keeps a retained process when its adapter launch fingerprint is unchanged', async () => {
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
