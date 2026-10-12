@@ -113,6 +113,13 @@ async function showBoard(page: Page, { failPosts = 0 } = {}) {
       w.__mock.appToolHandler = async (_app: string, tool: string, args: any) => {
         if (tool === 'show') return { content: [{ type: 'text', text: 'board' }], structuredContent: board }
         if (tool === 'private_words') return wordList()
+        // Where the release stands, a step further on each read (an agent tagged in between)
+        if (tool === 'release_status') {
+          w.__releaseReads = (w.__releaseReads ?? 0) + 1
+          return w.__releaseReads === 1
+            ? { content: [{ type: 'text', text: 'x' }], structuredContent: { ok: true, phase: 'ready-to-tag', summary: 'main at abc1234 carries 0.1.0-beta.17: not tagged yet (last release v0.1.0-beta.16). Next: Tag v0.1.0-beta.17.', lines: ['CI on main at abc1234: green.', 'Merged since v0.1.0-beta.16 (1):', '- fix: two (#11)'] } }
+            : { content: [{ type: 'text', text: 'x' }], structuredContent: { ok: true, phase: 'waiting-approval', summary: 'main at abc1234 carries 0.1.0-beta.17: v0.1.0-beta.17 is waiting for approval.', lines: ['Waiting for approval on npm-publish: linux-x64, darwin-arm64.'] } }
+        }
         if (tool === 'edit_private_words') {
           words = [...words.filter((x) => !(args.remove ?? []).includes(x)), ...(args.add ?? [])].sort()
           return wordList()
@@ -363,6 +370,21 @@ export function boardReaderTests(): void {
       await expect(v.locator('#words-status')).toContainText('Removed "Moonbase".')
       await page.keyboard.press('Escape')
       await expect(v.locator('dialog#words')).toBeHidden()
+      await expect(opener).toBeFocused()
+    })
+
+    test('the release dialog shows where the release stands, reads again on demand, and Esc gives the keyboard back', async ({ page }) => {
+      const v = await showBoard(page)
+      const opener = v.locator('#release-open')
+      await opener.click()
+      await expect(v.locator('dialog#release')).toBeVisible()
+      await expect(v.locator('#release-summary')).toHaveText('main at abc1234 carries 0.1.0-beta.17: not tagged yet (last release v0.1.0-beta.16). Next: Tag v0.1.0-beta.17.')
+      await expect(v.locator('#release-lines li')).toHaveText(['CI on main at abc1234: green.', 'Merged since v0.1.0-beta.16 (1):', '- fix: two (#11)'])
+      await v.locator('#release-refresh').click()
+      await expect(v.locator('#release-lines li')).toHaveText(['Waiting for approval on npm-publish: linux-x64, darwin-arm64.'])
+      expect(await callsTo(page, 'release_status')).toEqual([{}, {}])
+      await page.keyboard.press('Escape')
+      await expect(v.locator('dialog#release')).toBeHidden()
       await expect(opener).toBeFocused()
     })
 

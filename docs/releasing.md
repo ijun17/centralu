@@ -88,10 +88,21 @@ the tag is for.
 
 ## Releasing a version
 
-1. Bump `APP_VERSION` in `packages/protocol/src/brand.ts`, and the same version in
-   `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` and
-   `apps/desktop/package.json`. `tooling/brand.test.ts` fails if any of them disagree.
-   Commit and push — the release script refuses to run on a dirty tree, so that what ships
+The project board app (`.centralu/apps/project-board`) carries these steps as tools (#386):
+`release_status` says where the release stands and what is next, and `release` takes `step`
+`bump`, `rehearse`, `tag` or `approve`. Each step is for a login with maintain or admin
+permission, checks everything first (a clean checkout on main at GitHub's main, CI green on main,
+the version untagged, a successful rehearsal before the tag) and refuses with every reason, and
+does nothing without `confirm: true`. The board's "Release" dialog shows the same state. The
+steps by hand:
+
+1. Bump `APP_VERSION` in `packages/protocol/src/brand.ts`, and the same version in every
+   file listed under `release.versionFiles` in `.centralu/apps/project-board/project.json`:
+   `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (and
+   `Cargo.lock`), `apps/desktop/package.json` and every `packaging/npm/*/package.json`
+   (including the shim's pins). `tooling/brand.test.ts` fails if any of them disagree, and
+   `tooling/project-board-release.test.ts` if a file carries the version without being on that
+   list. Commit and push — the release script refuses to run on a dirty tree, so that what ships
    and what is in git cannot differ.
 
 2. **Rehearse.** Actions → `release` → Run workflow, `dry_run` left checked. It builds every

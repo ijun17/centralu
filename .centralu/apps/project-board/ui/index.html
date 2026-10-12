@@ -287,6 +287,10 @@
       .word-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
       .word-list li { display: flex; align-items: center; gap: 8px; padding: 3px 0 3px 8px; border: var(--border) solid var(--edge); border-radius: var(--radius-md); }
       .word-list li span { flex: 1; overflow-wrap: anywhere; }
+      #release-summary { margin: 0; overflow-wrap: anywhere; }
+      #release-summary.error { color: var(--danger); white-space: pre-wrap; }
+      .release-lines { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; color: var(--ink-2); }
+      .release-lines li { overflow-wrap: anywhere; }
 
       @media (max-width: 520px) {
         dialog.reader { width: 100vw; height: 100vh; margin: 0; border: none; border-radius: 0; }
@@ -403,6 +407,7 @@
       <span class="stamp" id="stamp"></span>
       <button id="refresh" type="button">Refresh</button>
       <button id="words-open" type="button" tabindex="0" title="Words that must not appear in public text">Private words</button>
+      <button id="release-open" type="button" tabindex="0" title="Where the release stands">Release</button>
     </header>
     <div id="notice" hidden></div>
     <nav class="tabs" id="tabs" aria-label="Statuses"></nav>
@@ -466,6 +471,22 @@
         </form>
         <p class="r-status" id="words-status" role="status"></p>
         <ul class="word-list" id="words-list" aria-label="Private words"></ul>
+      </div>
+    </dialog>
+
+    <!-- The release: where it stands, read by release_status. The steps are the agent's (the release tool); this shows them. -->
+    <dialog class="reader words" id="release" aria-labelledby="release-title">
+      <div class="r-head">
+        <div class="r-titles">
+          <h2 id="release-title">Release</h2>
+          <div class="r-kicker">Bump, rehearse, tag and approve are done by an agent with the release tool; each step shows here.</div>
+        </div>
+        <button class="r-close" id="release-refresh" type="button" tabindex="0">Read again</button>
+        <button class="r-close" id="release-close" type="button" tabindex="0">Close</button>
+      </div>
+      <div class="r-scroll">
+        <p id="release-summary" role="status"></p>
+        <ul class="release-lines" id="release-lines" aria-label="Release state"></ul>
       </div>
     </dialog>
 
@@ -1289,6 +1310,41 @@
         true,
       )
 
+      // --- The release ---------------------------------------------------------------------------
+      const releaseDlg = $('release')
+      let releaseOpener = null
+
+      async function loadRelease() {
+        $('release-refresh').disabled = true
+        let r
+        try {
+          r = await app.callServerTool({ name: 'release_status', arguments: {} })
+        } catch (e) {
+          r = { isError: true, content: [{ type: 'text', text: String(e?.message ?? e) }] }
+        } finally {
+          $('release-refresh').disabled = false
+        }
+        const sc = r?.structuredContent
+        const failed = r?.isError || !sc?.summary
+        $('release-summary').className = failed ? 'error' : ''
+        $('release-summary').textContent = failed ? sc?.summary ?? (textOf(r) || 'The app gave no answer.') : sc.summary
+        $('release-lines').replaceChildren(...[...(sc?.lines ?? []), ...(sc?.problems ?? [])].map((l) => el('li', {}, l)))
+      }
+
+      $('release-open').addEventListener('click', (e) => {
+        releaseOpener = e.currentTarget
+        $('release-summary').className = ''
+        $('release-summary').textContent = 'Reading where the release stands…'
+        $('release-lines').replaceChildren()
+        releaseDlg.showModal()
+        $('release-close').focus()
+        loadRelease()
+      })
+      $('release-refresh').addEventListener('click', loadRelease)
+      $('release-close').addEventListener('click', () => releaseDlg.close())
+      releaseDlg.addEventListener('close', () => (releaseOpener?.isConnected ? releaseOpener : $('release-open')).focus())
+      releaseDlg.addEventListener('click', (e) => e.target === releaseDlg && releaseDlg.close())
+
       function show(result) {
         const sc = result?.structuredContent
         if (!sc) {
@@ -1335,7 +1391,8 @@
       app.fallbackNotificationHandler = async (n) => {
         if (n.method !== 'centralu/notifications/changed') return
         // Someone moved an item or commented: the board, the decisions and an open item read again
-        await Promise.all([load(false), mode === 'decisions' ? loadDecisions(false) : null, dlg.open ? loadReader({ quiet: true }) : null])
+        // A release step (the release tool) shows in the open release dialog too
+        await Promise.all([load(false), mode === 'decisions' ? loadDecisions(false) : null, dlg.open ? loadReader({ quiet: true }) : null, releaseDlg.open ? loadRelease() : null])
       }
       $('refresh').onclick = () => (load(true), mode === 'decisions' ? loadDecisions(true) : null)
       $('area').onchange = render

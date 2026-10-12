@@ -633,3 +633,66 @@ export async function postComment(repo, number, body) {
   if (!c?.id) throw new GitHubError('github', 'GitHub answered the comment with something that is not one. Look at the item on GitHub before posting again.')
   return { id: c.node_id ?? String(c.id), url: c.html_url ?? null, author: c.user?.login ?? 'ghost', createdAt: c.created_at ?? null, body: c.body ?? body }
 }
+
+// --- The release (release.mjs) -----------------------------------------------------------------------
+// The release workflow's runs, their jobs and the environment approvals they wait on. `workflow` is the
+// file name (`release.yml`), which GitHub's REST paths take in place of the workflow's id.
+
+const WORKFLOW = /^[\w.-]+\.ya?ml$/
+
+const runOf = (w) => ({
+  id: w.id,
+  status: w.status,
+  conclusion: w.conclusion ?? null,
+  event: w.event,
+  headBranch: w.head_branch ?? null,
+  headSha: w.head_sha,
+  url: w.html_url ?? null,
+  createdAt: w.created_at ?? null,
+})
+
+/** The workflow's latest runs, newest first, for one event and commit when given. */
+export async function workflowRuns(repo, workflow, { event, headSha } = {}) {
+  checkRepo(repo)
+  if (!WORKFLOW.test(String(workflow))) throw new GitHubError('input', `"${workflow}" is not a workflow file name.`)
+  const q = new URLSearchParams({ per_page: '30', ...(event ? { event } : {}), ...(headSha ? { head_sha: headSha } : {}) })
+  const r = await restJson(`repos/${repo}/actions/workflows/${workflow}/runs?${q}`, { missing: [404] })
+  return (r?.workflow_runs ?? []).map(runOf)
+}
+
+/** A run's jobs: name, status (`waiting` while an environment holds it) and conclusion. */
+export async function runJobs(repo, runId) {
+  checkRepo(repo)
+  const r = await restJson(`repos/${repo}/actions/runs/${Number(runId)}/jobs?per_page=100`)
+  return (r?.jobs ?? []).map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion ?? null, url: j.html_url ?? null }))
+}
+
+/** The environments a run waits on for approval, and whether this login may give it. */
+export async function pendingDeployments(repo, runId) {
+  checkRepo(repo)
+  const r = await restJson(`repos/${repo}/actions/runs/${Number(runId)}/pending_deployments`)
+  return (Array.isArray(r) ? r : []).map((d) => ({
+    environmentId: d.environment?.id,
+    environment: d.environment?.name ?? '?',
+    canApprove: d.current_user_can_approve === true,
+    reviewers: (d.reviewers ?? []).map((x) => x?.reviewer?.login ?? x?.reviewer?.name).filter(Boolean),
+  }))
+}
+
+/** Approves a run's waiting environments, with a comment GitHub keeps beside the approval. */
+export async function approveDeployments(repo, runId, environmentIds, comment) {
+  checkRepo(repo)
+  await restWrite('POST', `repos/${repo}/actions/runs/${Number(runId)}/pending_deployments`, { environment_ids: environmentIds, state: 'approved', comment }, 'the approval')
+}
+
+/** Starts a workflow_dispatch run of `workflow` on `ref` with `inputs` (strings). GitHub answers nothing. */
+export async function dispatchWorkflow(repo, workflow, ref, inputs) {
+  checkRepo(repo)
+  if (!WORKFLOW.test(String(workflow))) throw new GitHubError('input', `"${workflow}" is not a workflow file name.`)
+  try {
+    await runGh(['api', '-X', 'POST', `repos/${repo}/actions/workflows/${workflow}/dispatches`, '--input', '-'], { input: JSON.stringify({ ref, inputs }) })
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    throw new GitHubError('github', `GitHub refused to start ${workflow}: ${firstLine(e)}`)
+  }
+}
