@@ -26,6 +26,7 @@
 | [state-management.ko.md](state-management.ko.md) | 프런트엔드 상태: 이벤트 → store → selector, 영속화와 복원 | architecture, protocol |
 | [releasing.ko.md](releasing.ko.md) | 버전이 사용자에게 도달하는 방법: npm 패키지 구성, CI, 배포 절차 | — |
 | [commit-conventions.ko.md](commit-conventions.ko.md) | Conventional Commit 형식, 허용 타입, 커밋 경계 | — |
+| [usability.ko.md](usability.ko.md) | 화면을 판단하는 법: 목표, 원칙과 결정(보이는 경로 먼저, 포커스, IME), 화면을 바꾸는 PR이 보여 줄 것, 방법 요약, 아직 재지 않는 것 | ux-metrics |
 
 ## 측정한 것의 기록
 

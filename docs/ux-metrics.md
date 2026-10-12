@@ -10,6 +10,8 @@ The numbers come from Playwright scenarios against the mock (`e2e/ux/*.task.ts`)
 They predict an expert's error-free execution time. They do not measure how easy a task is to
 learn, how long a person spends reading, or how often they get it wrong.
 
+The principles these numbers serve, and what a pull request shows with them: [usability.md](usability.md).
+
 ## Discoverable paths first
 
 A task is judged by the path a person can find on screen, not by its shortcut (owner,

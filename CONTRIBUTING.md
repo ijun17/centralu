@@ -156,6 +156,8 @@ Model; CI's `ux tasks` job fails when a task goes over its budget. A new feature
 often gets a task, by the keyboard and by the mouse where both exist; a change that makes a task
 cost more raises its budget in the same pull request and says why. How to write one and read the
 numbers: [docs/ux-metrics.md](docs/ux-metrics.md).
+The principles behind those numbers (judge the path a person can see, not its shortcut) and what
+a pull request's **Usability** field holds: [docs/usability.md](docs/usability.md).
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
@@ -219,7 +221,7 @@ inherits PATH from your terminal, so it will never reproduce that class of bug.
 - Commit messages follow [docs/commit-conventions.md](docs/commit-conventions.md):
   Conventional Commits, `<type>(<scope>): <description>`, with a body when the reason does not
   fit the subject.
-- Pull requests use the template (Why / What changed / Verified / Not exercised / Closes).
+- Pull requests use the template (Why / What changed / Verified / Usability / Not exercised / Closes).
   **Not exercised** names the surfaces you did not run: the packaged app, another platform, a
   live model session, a logged-out tool.
 

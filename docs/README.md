@@ -32,6 +32,7 @@ Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-
 | [state-management.md](state-management.md) | Front-end state: event → store → selector, persistence and restore | architecture, protocol |
 | [releasing.md](releasing.md) | How a version reaches users: npm package layout, CI, publish procedure | — |
 | [commit-conventions.md](commit-conventions.md) | Conventional Commit format, allowed types, and commit boundaries | — |
+| [usability.md](usability.md) | How the screen is judged: the goal, the principles and decisions (the discoverable path first, focus, IME), what a pull request that changes the screen shows, the methods in brief, and what is not measured yet | ux-metrics |
 
 ## Record of what was measured
 

@@ -16,6 +16,15 @@
 <!-- What you actually ran, and what it said. Numbers if you measured something:
      "9.4ms -> 0.275ms, 7-sample median" beats "faster". -->
 
+## Usability
+
+<!--
+  If this changes something on screen: the discoverable paths' numbers before and after
+  (`pnpm ux:report --compare <before.json> <after.json>`), and why for any budget raised.
+  Otherwise write n/a and keep the heading, so a reviewer sees it was considered.
+  How it is judged: docs/usability.md.
+-->
+
 ## Not exercised
 
 <!--
