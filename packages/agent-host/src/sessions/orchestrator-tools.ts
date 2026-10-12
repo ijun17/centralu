@@ -115,6 +115,8 @@ export const ORCHESTRATOR_TOOLS = [
       parent: z.string().optional().describe('Full path of the folder to make it in.'),
       git: z.string().optional().describe('Repository to clone: https, ssh or user@host:path.'),
       branch: z.string().optional(),
+      // A linked machine (#82 phase 4), by the name list_sessions shows after "on"
+      machine: z.string().optional().describe('A linked machine to make it on; this computer if omitted.'),
     }),
   },
   {
@@ -393,7 +395,7 @@ export const READER_BUDGET_CHARS = 1000
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
  * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts). Measured
- * 2026-10-12 on Claude: orchestrator 11,798 (9,954 + 1,844), manager 6,264 (3,479 + 2,785), scoped 2,267,
+ * 2026-10-12 on Claude: orchestrator 11,862 (10,029 + 1,833, with create_project's `machine`, #82), manager 6,264 (3,479 + 2,785), scoped 2,267,
  * builder 1,432; the tokens they cost are in docs/tool-cost.md. Codex carries the same plus the 52-character
  * header its developer instructions put over them (#525, codexToolInstructionsFor), which is what moved scoped
  * from 2,300 and builder from 1,450. The reader is the sum of its three sets' ceilings, since Codex loads all of
@@ -619,11 +621,13 @@ export async function runOrchestratorTool(
     const parent = typeof args.parent === 'string' && args.parent.trim() ? args.parent.trim() : undefined
     const branch = git && typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined
     const source = git ? { git, ...(branch ? { branch } : {}) } : undefined
-    const r = await tools.createProject({ name: folder, ...(parent ? { parent } : {}), ...(source ? { source } : {}) }, signal)
+    const machine = typeof args.machine === 'string' && args.machine.trim() ? args.machine.trim() : undefined
+    const r = await tools.createProject({ name: folder, ...(parent ? { parent } : {}), ...(source ? { source } : {}), ...(machine ? { machine } : {}) }, signal)
     if (!r.ok) return { text: `No project was made: ${r.error}`, isError: true }
     return {
       text:
-        `Made the project ${trustedJsonText(r.name)} [${r.projectId}], ${git ? `a clone of ${trustedJsonText(git)}` : 'an empty folder'} at ${trustedJsonText(r.path)}. ` +
+        `Made the project ${trustedJsonText(r.name)} [${r.projectId}], ${git ? `a clone of ${trustedJsonText(git)}` : 'an empty folder'} at ${trustedJsonText(r.path)}` +
+        `${r.machine ? ` on ${r.machine}` : ''}. ` +
         'Start work in it with create_session (project = that id).',
     }
   }

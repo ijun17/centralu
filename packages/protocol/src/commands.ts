@@ -2125,6 +2125,15 @@ export const RpcMethods = {
   },
   'host.recall': { params: z.object({ query: z.string(), limit: z.number().int().positive().optional() }), result: z.array(HostRecallHit) },
   /**
+   * An instruction from a hub's orchestrator to one of this host's sessions (docs/plans/remote-hub.md §12, phase 4
+   * step 2): delivered as the orchestrator's `send_to_session` is here, recorded as sent by `from.name`. Only a session
+   * a hub is shown (not this host's orchestrator or coordinators). Asked by the hub directly, never routed
+   */
+  'host.send': {
+    params: z.object({ sessionId: SessionId, text: z.string(), from: z.object({ name: z.string() }) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * Stops this host the way a signal would: agents, terminals, command runs and app processes
    * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host.md
    * §4.7): on Windows a launcher can only be killed, and killing it ends the host without its

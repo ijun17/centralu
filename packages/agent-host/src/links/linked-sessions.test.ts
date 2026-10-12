@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { sessionLiveDefaults } from '@cc/protocol'
+import { Store } from '../dev-services/store.js'
+import { SessionManager } from '../sessions/manager.js'
 import { runOrchestratorTool } from '../sessions/orchestrator-tools.js'
 import { takeInTurns } from '../sessions/snippet.js'
-import type { OrchestratorTools } from '../adapters/contract.js'
+import type { LinkedSessions, OrchestratorTools } from '../adapters/contract.js'
+import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { linkedSessions } from './linked-sessions.js'
 import { Qualifier } from './qualifier.js'
 import type { RoutedMachine } from './router.js'
@@ -93,9 +97,9 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   it('names a machine whose Centralu predates reading it, wherever it is asked', async () => {
     const old = machine({}, { mirror: { sessions: [{ id: 'w1', name: 'Worker', projectId: 'p1', state: 'idle', tool: 'codex', kind: 'worker' }], projects: [{ id: 'p1', name: 'api' }] } })
     const reader = linkedSessions(() => [old])
-    expect(await listText(old)).toBe('- Worker [m1.w1] · project api on Box · codex · idle · Box runs a Centralu too old to be read from here; update it there')
-    expect(await reader.read('m1.w1')).toEqual({ ok: false, error: 'Box runs a Centralu too old to be read from here; update it there' })
-    expect((await reader.recall('x', 12)).notSearched).toEqual(['Box (Box runs a Centralu too old to be read from here; update it there)'])
+    expect(await listText(old)).toBe('- Worker [m1.w1] · project api on Box · codex · idle · Box runs a Centralu too old for the orchestrator to reach; update it there')
+    expect(await reader.read('m1.w1')).toEqual({ ok: false, error: 'Box runs a Centralu too old for the orchestrator to reach; update it there' })
+    expect((await reader.recall('x', 12)).notSearched).toEqual(['Box (Box runs a Centralu too old for the orchestrator to reach; update it there)'])
   })
 
   it('lists an away machine from the mirror without its orchestrator, and does not ask it', async () => {
@@ -152,5 +156,81 @@ describe('takeInTurns', () => {
   it('handles no lists and empty lists', () => {
     expect(takeInTurns([], 5)).toEqual([])
     expect(takeInTurns([[], [], []], 5)).toEqual([])
+  })
+})
+
+describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
+  /** A hub with its orchestrator, and links that accept every send and say the session finished with "all done" */
+  async function hub() {
+    const store = new Store()
+    store.upsertSession({
+      id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
+      state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
+      roleAppend: null, appId: null, ...sessionLiveDefaults(),
+    })
+    const mgr = new SessionManager(store, scriptedAdapters(), () => {})
+    let failSend = false
+    const links = {
+      machineOf: (id: string) => (id.startsWith('m1.') ? 'Box' : null),
+      send: async () => (failSend ? { ok: false as const, error: 'Box is not reachable right now' } : { ok: true as const }),
+      describe: () => ({ name: 'Worker', project: 'api on Box' }),
+      lastWords: async () => 'all done',
+    } as unknown as LinkedSessions
+    mgr.useLinkedReader(links)
+    const reports = () => store.loadMessages('orch', 50).map((m) => String((m.payload as { text?: string }).text ?? '')).filter((t) => t.startsWith('[Centralu]'))
+    const settle = async (n: number) => {
+      const t0 = Date.now()
+      while (reports().length < n && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10))
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    const send = (reportBack: boolean) => mgr.runOrchestratorTool('orch', 'send_to_session', { sessionId: 'm1.w1', text: 'go', reportBack })
+    cleanup.push(() => mgr.disposeAll())
+    return { mgr, reports, settle, send, failNext: () => (failSend = true) }
+  }
+  const cleanup: (() => Promise<void>)[] = []
+
+  it('does not take the session waking before its turn for the end of it', async () => {
+    const h = await hub()
+    await h.send(true)
+    h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'idle' })
+    await h.settle(0)
+    expect(h.reports()).toEqual([])
+    h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+    h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'idle' })
+    await h.settle(1)
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work stopped before finishing.')])
+    expect(h.reports()[0]).toContain('id: m1.w1')
+    expect(h.reports()[0]).toContain('Project: api on Box')
+    expect(h.reports()[0]).toContain('all done')
+    await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
+  it('says how the turn ended, reports once, and only what was asked for', async () => {
+    const h = await hub()
+    await h.send(true)
+    h.mgr.observeLinked({ type: 'error', sessionId: 'm1.w1', error: { message: 'the CLI crashed' } })
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await h.settle(1)
+    expect(h.reports()).toEqual([expect.stringMatching(/^\[Centralu\] The assigned work failed\.[\s\S]*Error: the CLI crashed/)])
+    // Asked again without a report: the next end is nobody's business
+    await h.send(false)
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    // Another session's end, and an event of no session, wake nothing
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.other' })
+    h.mgr.observeLinked({ type: 'machine_status' })
+    await h.settle(1)
+    expect(h.reports()).toHaveLength(1)
+    await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
+  it('a send that did not go waits for no report', async () => {
+    const h = await hub()
+    h.failNext()
+    expect(await h.send(true)).toMatchObject({ isError: true, text: expect.stringContaining('Box is not reachable right now') })
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await h.settle(0)
+    expect(h.reports()).toEqual([])
+    await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 })

@@ -1314,8 +1314,15 @@ orchestrator or coordinator; at most 200 lines and 50 hits per call). The hub qu
 each row and hit (`project api on Ubuntu box`), lists a machine it cannot ask from the headers mirror with why, and says
 which machines it could not search. What a machine answers is fenced as a worker's text is (#121): names on one line,
 ids that are not ids dropped, a conversation line that is not one line quoted. A manager, a lead and an ordinary
-session keep their own machine's view. `send_to_session` and the other acting tools refuse a machine's session with
-a reason until step 2.
+session keep their own machine's view.
+
+**And directs them** (phase 4 step 2, plan §12.4). `send_to_session` goes to the machine as `host.send` (additive),
+delivered there as an instruction from `<orchestrator> on <this computer>`; with `reportBack`, `observeLinked` watches
+the machine's relayed events for the end of that turn and reports it as for a session here.
+`update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
+`agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
+refused with the ids. `create_project { machine }` raises the same card, naming the machine (`project_create`'s
+`machine`, additive), with the path that machine's `projects.createPreview` gives, and has that machine make it.
 
 **Measured through the hub** (probe 3, 2026-10-05; a MacBook on Wi-Fi, the remote a Windows 11 laptop on the same
 LAN; `centralu serve` of main in WSL2 and of beta.10 on Windows):

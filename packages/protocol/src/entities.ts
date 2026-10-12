@@ -644,6 +644,11 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     path: z.string(),
     /** The repository the folder is a clone of (#515), when it is not made empty */
     source: GitSource.optional(),
+    /**
+     * The linked machine the folder is made on, by the name the person gave it (#82, remote-hub.md §12): absent for
+     * this computer. The card and its question name it, since `path` alone does not say whose disk it is
+     */
+    machine: z.string().optional(),
   }),
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>

@@ -98,6 +98,8 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
  * the sentence wherever the question stands: the card, the conversation row, a notification.
  */
 export function projectCreateQuestion(d: Extract<ApprovalDetail, { kind: 'project_create' }>): string {
-  if (d.source) return `Clone ${d.source.git}${d.source.branch ? ` (${d.source.branch})` : ''} into ${d.path} and add it as the project ${d.name}?`
-  return `Make the empty folder ${d.path} and add it as the project ${d.name}?`
+  // On a linked machine (#82) the path is that machine's: the sentence says whose disk it is
+  const where = d.machine ? `${d.path} on ${d.machine}` : d.path
+  if (d.source) return `Clone ${d.source.git}${d.source.branch ? ` (${d.source.branch})` : ''} into ${where} and add it as the project ${d.name}?`
+  return `Make the empty folder ${where} and add it as the project ${d.name}?`
 }

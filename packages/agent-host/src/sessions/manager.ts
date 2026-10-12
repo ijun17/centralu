@@ -68,7 +68,7 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, AskProjectResult, CreateSessionOpts, EventSink, LinkedSessionsReader, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, AskProjectResult, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -300,6 +300,12 @@ const EXTERNAL_LIST_LIMIT = 200
  */
 const HOST_READ_MAX_LINES = 200
 const HOST_RECALL_MAX_HITS = 50
+
+/**
+ * The sender a hub's orchestrator's instruction is recorded under (`sendFromHub`). Not a session of this host: no id
+ * this host makes starts with `_`. The window shows only the sender's name; the id is what the injection gate reads
+ */
+const HUB_SENDER = '_hub-orchestrator'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
 const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
@@ -889,6 +895,34 @@ export class SessionManager {
   }
 
   /**
+   * The orchestrator's create_project on a linked machine (#82 phase 4): the same card as here, naming the machine,
+   * with the path that machine would make (`projects.createPreview` there, in its own path terms); on Create, the
+   * machine makes and registers it (`projects.create` there). Nothing is made on either machine before the answer.
+   */
+  private async createProjectOnMachine(
+    sessionId: string,
+    reader: LinkedSessions,
+    machine: { id: string; name: string },
+    spec: { name: string; parent?: string; source?: GitSource },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }> {
+    const preview = await reader.previewProject(machine.id, spec)
+    if (!preview.ok) return preview
+    const decision = await this.askHost(
+      sessionId,
+      { kind: 'project_create', name: preview.name, path: preview.path, ...(spec.source ? { source: spec.source } : {}), machine: machine.name },
+      signal,
+    )
+    if (decision === 'deny') return { ok: false, error: 'The person did not approve it. Do not ask again unless they tell you to.' }
+    if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so nothing was made.' }
+    if (spec.source) {
+      this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${spec.source.git} into ${preview.path} on ${machine.name}…` })
+    }
+    const made = await reader.createProject(machine.id, spec)
+    return made.ok ? { ...made, machine: machine.name } : made
+  }
+
+  /**
    * Deletes a project (this is a **delete**, not an unregister).
    *
    * Files are left untouched — removing a folder only ever happens through the OS trash, and that
@@ -1179,10 +1213,46 @@ export class SessionManager {
   }
 
   /** The linked machines' sessions, for the central orchestrator's reading tools (#82 phase 4). None without links */
-  private linkedReader: LinkedSessionsReader | null = null
+  private linkedReader: LinkedSessions | null = null
 
-  useLinkedReader(reader: LinkedSessionsReader): void {
+  useLinkedReader(reader: LinkedSessions): void {
     this.linkedReader = reader
+  }
+
+  /**
+   * A linked machine's sessions whose turn the orchestrator asked to hear about (`reportBack`, #82 phase 4), by
+   * qualified id. `busy` is whether that turn was seen working yet, so a state the machine reports before the turn
+   * starts (the session waking) is not taken for its end.
+   */
+  private linkedReports = new Map<string, { orchestratorId: string; busy: boolean }>()
+
+  /**
+   * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). The end of a turn the
+   * orchestrator is waiting on becomes its report, as `reportBackIfAwaited` does for this host's sessions: on
+   * however the turn ended (#166), once, and then the watch is cleared.
+   */
+  observeLinked(e: { type: string; sessionId?: unknown; state?: unknown; error?: { message?: string } }): void {
+    if (typeof e.sessionId !== 'string') return
+    const wait = this.linkedReports.get(e.sessionId)
+    if (!wait) return
+    const busy = e.state === 'working' || e.state === 'waiting_approval'
+    if (e.type === 'message_delta' || e.type === 'tool_call' || e.type === 'approval_request' || (e.type === 'state_change' && busy)) {
+      wait.busy = true
+      return
+    }
+    const ended =
+      e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || (e.type === 'state_change' && wait.busy && !busy)
+    if (!ended) return
+    this.linkedReports.delete(e.sessionId)
+    void this.reportLinked(e.sessionId, wait.orchestratorId, e)
+  }
+
+  private async reportLinked(sessionId: string, orchestratorId: string, ending: { type: string; error?: { message?: string } }): Promise<void> {
+    const reader = this.linkedReader
+    if (!reader || !this.meta.has(orchestratorId)) return
+    const about = reader.describe(sessionId) ?? { name: sessionId, project: '(unknown)' }
+    const preview = await reader.lastWords(sessionId, 600).catch(() => '')
+    await this.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>)
   }
 
   /**
@@ -1191,6 +1261,22 @@ export class SessionManager {
    * host: no calling session, and this host's orchestrator and coordinators left out (§3.4), so the hub's orchestrator
    * reads what the hub shows and no more. Bounded per call, since the caller is another machine.
    */
+  /**
+   * A hub's orchestrator's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
+   * `send_to_session` delivers one here, recorded as sent by `fromName`, to a session a hub is shown and no other.
+   *
+   * It stays an instruction, not someone else's words (#120): the hub holds this host's token, so it could send the
+   * same text as the person; marking it as a relay would only hide the words from a manager it was meant for.
+   */
+  async sendFromHub(sessionId: string, text: string, fromName: string): Promise<void> {
+    const target = this.meta.get(sessionId)
+    if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
+      throw Object.assign(new Error(`Not a session this machine shares: ${sessionId}`), { code: 'session_not_found' })
+    }
+    const name = fromName.replace(/\s+/g, ' ').trim().slice(0, 120) || 'Orchestrator on a linked computer'
+    await this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
+  }
+
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
     read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean }): Promise<{ state: string; lines: string[] }>
@@ -3010,7 +3096,18 @@ export class SessionManager {
     const project = target.projectId
       ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(project no longer exists)')
       : '(none)'
-    const preview = previewOf(this.store, sessionId, 600)
+    await this.deliverReport(orchestratorId, sessionId, target.name, project, previewOf(this.store, sessionId, 600), ending)
+  }
+
+  /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */
+  private async deliverReport(
+    orchestratorId: string,
+    sessionId: string,
+    name: string,
+    project: string,
+    preview: string,
+    ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
+  ): Promise<void> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
      * both the person and the orchestrator read it as a success. On failure, the error message is
@@ -3021,12 +3118,12 @@ export class SessionManager {
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
       : `[Centralu] The assigned work stopped before finishing.\n`
-    const failure = ending.type === 'error' ? `Error: ${ending.error.message.slice(0, 600)}\n\n` : ''
+    const failure = ending.type === 'error' ? `Error: ${String(ending.error?.message ?? '').slice(0, 600)}\n\n` : ''
     try {
       await this.deliver(
         orchestratorId,
         outcome +
-          `Session: ${frameField(target.name)}\n` +
+          `Session: ${frameField(name)}\n` +
           `id: ${sessionId}\n` +
           `Project: ${frameField(project)}\n\n` +
           failure +
@@ -3035,7 +3132,7 @@ export class SessionManager {
         undefined,
         // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
         // source
-        { sessionId, name: target.name },
+        { sessionId, name },
         true,
       )
     } catch {
@@ -3521,7 +3618,8 @@ export class SessionManager {
      */
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
-      : from && (relayed || (this.directs(sessionId) && !this.directs(from.sessionId)))
+      // A hub's orchestrator directs as this host's own does (`sendFromHub`)
+      : from && (relayed || (this.directs(sessionId) && !this.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
@@ -4538,11 +4636,10 @@ export class SessionManager {
      */
     const central = childrenOf === undefined && scopeIds === undefined && !ownProject && !hubView
     const linked = () => (central ? this.linkedReader : null)
-    const elsewhere = (id: string): string | null => {
-      const machine = linked()?.machineOf(id)
-      return machine
-        ? `${id} is a session on ${machine}: read it with read_session; directing a session on another machine is not available yet`
-        : null
+    /** The links, when this id names a linked machine's session and this seat reaches the machines */
+    const remoteOf = (id: string) => {
+      const reader = linked()
+      return reader?.machineOf(id) ? reader : null
     }
     /**
      * There are only two possible views. The **central orchestrator** sees everything, and a
@@ -4571,7 +4668,7 @@ export class SessionManager {
       : scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
       : ownProject ? `Not a session in this project: ${id}`
       : hubView ? `Not a session this machine shares: ${id}`
-      : (elsewhere(id) ?? `Not a session this app manages: ${id}`)
+      : `Not a session this app manages: ${id}`
 
     return {
       listSessions: async () => {
@@ -4601,6 +4698,14 @@ export class SessionManager {
           // Changing its own settings restarts its own process — that would be suicide in the middle of a
           // tool call
           return { ok: false, error: 'The person changes its own settings' }
+        }
+        const remote = remoteOf(sessionId)
+        if (remote) {
+          // Changed there, through the router, as the window's own call would (#82 phase 4); the trace is the same
+          const r = await remote.updateSettings(sessionId, s)
+          if (!r.ok) return r
+          this.emit({ type: 'settings_changed', sessionId, model: r.info.model, effort: r.info.effort, verbosity: r.info.verbosity, serviceTier: r.info.serviceTier })
+          return { ok: true, ...(r.info.applied === 'after_turn' ? { deferred: true } : {}) }
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
@@ -4634,7 +4739,28 @@ export class SessionManager {
 
       createSession: async (opts) => {
         const all = this.store.listProjects()
-        const project = all.find((p) => p.id === opts.project || p.name === opts.project)
+        const local = all.filter((p) => p.id === opts.project || p.name === opts.project)
+        // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist
+        const reader = linked()
+        const remote = reader && opts.project ? await reader.findProjects(opts.project) : []
+        if (local.length + remote.length > 1) {
+          // One name on two machines: guessing would start the work on the wrong disk
+          const named = [
+            ...local.map((p) => `${p.name} [${p.id}] on this computer`),
+            ...remote.map((p) => `${p.name} [${p.id}] on ${p.machine}`),
+          ]
+          return { ok: false, error: `More than one project is called that; give its id: ${named.join('; ')}` }
+        }
+        if (reader && remote[0]) {
+          const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name })
+          if (!r.ok) return r
+          if (opts.firstMessage) {
+            const sent = await reader.send(r.sessionId, opts.firstMessage, this.meta.get(orchestratorId)?.name ?? 'Orchestrator')
+            if (!sent.ok) return { ok: false, error: `Created ${r.sessionId} on ${remote[0].machine}, but the first instruction did not go: ${sent.error}` }
+          }
+          return { ok: true, sessionId: r.sessionId, name: r.name }
+        }
+        const project = local[0]
         if (!project) {
           return {
             ok: false,
@@ -4785,6 +4911,25 @@ export class SessionManager {
         if (sessionId === orchestratorId) {
           return { ok: false, error: 'Cannot send to itself' }
         }
+        const remote = remoteOf(sessionId)
+        if (remote) {
+          /*
+           * A linked machine's session (#82 phase 4): delivered there as an instruction from this orchestrator, under
+           * that session's own approval settings. The report is watched for before the send, since the machine's first
+           * events can reach this hub before its answer does.
+           */
+          const earlier = this.linkedReports.get(sessionId)
+          if (reportBack) this.linkedReports.set(sessionId, { orchestratorId, busy: false })
+          const r = await remote.send(sessionId, text, this.meta.get(orchestratorId)?.name ?? 'Orchestrator')
+          if (!r.ok) {
+            if (earlier) this.linkedReports.set(sessionId, earlier)
+            else this.linkedReports.delete(sessionId)
+            return r
+          }
+          // As here (#166): a new instruction without a report replaces this orchestrator's earlier request
+          if (!reportBack && earlier?.orchestratorId === orchestratorId) this.linkedReports.delete(sessionId)
+          return { ok: true }
+        }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
 
@@ -4896,7 +5041,17 @@ export class SessionManager {
       proposeSkill: async (spec) => this.proposals.proposeSkill(spec),
 
       // A new project (#515) — made only once the person approves the card this raises in the orchestrator's own slot
-      createProject: async (spec, signal) => this.createProjectAsked(orchestratorId, { name: spec.name, parent: spec.parent, source: spec.source }, signal),
+      createProject: async (spec, signal) => {
+        const reader = linked()
+        if (spec.machine && reader) {
+          const machine = reader.machineNamed(spec.machine)
+          if (machine) return this.createProjectOnMachine(orchestratorId, reader, machine, { name: spec.name, parent: spec.parent, source: spec.source }, signal)
+          if (!/^this computer$/i.test(spec.machine.trim())) return { ok: false, error: `No linked machine is called ${spec.machine}; leave machine out for this computer` }
+        } else if (spec.machine && !/^this computer$/i.test(spec.machine.trim())) {
+          return { ok: false, error: 'No machine is linked to this computer; leave machine out' }
+        }
+        return this.createProjectAsked(orchestratorId, { name: spec.name, parent: spec.parent, source: spec.source }, signal)
+      },
 
       // Checks its own app (C-3) — which app it is is decided by the calling session. Refused if it is not a
       // builder session (the directory has changed)

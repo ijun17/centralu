@@ -1,8 +1,14 @@
 import { HostReadSessionResult, HostRecallHit, HostSessionRow, SessionId } from '@cc/protocol'
-import type { LinkedSessionsReader, OrchestratedSession, RecallHit } from '../adapters/contract.js'
+import type { SessionInfo } from '@cc/protocol'
+import type { LinkedProject, LinkedSessions, OrchestratedSession, RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { splitQualified } from './machine-ids.js'
-import type { RoutedMachine } from './router.js'
+import type { RoutedMachine, RpcHandler } from './router.js'
+
+/** Without a router (the reading tests), nothing that acts is reachable */
+const notRouted: RpcHandler = async (method) => {
+  throw Object.assign(new Error(`${method} cannot reach a linked machine here`), { code: 'internal' })
+}
 
 /**
  * The linked machines' sessions as the hub's orchestrator reads them (#82 phase 4, docs/plans/remote-hub.md §12).
@@ -42,16 +48,51 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 function cause(m: RoutedMachine, err: unknown): string {
   const message = err instanceof Error ? err.message : String(err)
   // A machine on a Centralu from before phase 4 (connected anyway, on one protocol)
-  if (message.startsWith('Unknown method: host.')) return `${m.name} runs a Centralu too old to be read from here; update it there`
+  if (message.startsWith('Unknown method: host.')) return `${m.name} runs a Centralu too old for the orchestrator to reach; update it there`
   return oneLine(message, 300)
 }
 
-export function linkedSessions(machines: () => Iterable<RoutedMachine>): LinkedSessionsReader {
+/**
+ * `route` is the hub's router (`router.ts`): a call in the hub's terms, sent to the machine its ids name and answered
+ * qualified. The reads and `host.send` go to each machine directly; acting on a session or a project goes through the
+ * router, so it is the same call, with the same rewriting, that the hub's window makes.
+ */
+export function linkedSessions(
+  machines: () => Iterable<RoutedMachine>,
+  route: RpcHandler = notRouted,
+  /** This computer, as a machine names who sent an instruction (`host.send`): the orchestrator is not that machine's own */
+  hubName?: string,
+): LinkedSessions {
   const owner = (sessionId: string): RoutedMachine | null => {
     const split = splitQualified(sessionId)
     if (!split) return null
     for (const m of machines()) if (m.id === split.machine) return m
     return null
+  }
+  const machineById = (id: string): RoutedMachine | null => {
+    for (const m of machines()) if (m.id === id) return m
+    return null
+  }
+  /** The router's call, its refusal as the sentence the model reads */
+  const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {
+    if (!m.reachable) return { ok: false, error: `${m.name} is not reachable right now; try again once its link is back` }
+    try {
+      return { ok: true, ...(await run()) }
+    } catch (err) {
+      return { ok: false, error: cause(m, err) }
+    }
+  }
+  /** A project row a machine answered, in the hub's terms; null when it is not a project row */
+  const projectOf = (m: RoutedMachine, raw: unknown): LinkedProject | null => {
+    const p = m.q.project(raw)
+    if (!isObj(p) || typeof p.id !== 'string' || typeof p.path !== 'string' || !SessionId.safeParse(p.id).success) return null
+    return {
+      id: p.id,
+      name: oneLine(p.name),
+      path: oneLine(p.path, 4096),
+      defaultTool: p.defaultTool === 'codex' ? 'codex' : 'claude',
+      machine: m.name,
+    }
   }
 
   /** The machine's rows as it answered them, in the hub's terms. A row that does not parse, or whose id is not an id, is left out */
@@ -103,6 +144,103 @@ export function linkedSessions(machines: () => Iterable<RoutedMachine>): LinkedS
   }
 
   return {
+    async send(sessionId, text, fromName) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      return attempt(m, async () => {
+        await m.call('host.send', { sessionId: m.q.strip(sessionId, 'The session'), text, from: { name: hubName ? `${fromName} on ${hubName}` : fromName } })
+        return {}
+      })
+    },
+
+    async updateSettings(sessionId, s) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      return attempt(m, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s })) as SessionInfo & { applied?: string } }))
+    },
+
+    async findProjects(ref) {
+      const wanted = ref.trim()
+      const found = await Promise.all(
+        [...machines()].map(async (m) => {
+          if (!m.reachable) return []
+          try {
+            const list = await m.call('projects.list', {})
+            return (Array.isArray(list) ? list : [])
+              .map((raw) => projectOf(m, raw))
+              .filter((p): p is LinkedProject => p !== null && (p.id === wanted || p.name === wanted))
+          } catch {
+            return []
+          }
+        }),
+      )
+      return found.flat()
+    },
+
+    async createSession(project, opts) {
+      const m = owner(project.id)
+      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
+      return attempt(m, async () => {
+        const info = (await route('agents.createSession', {
+          projectId: project.id,
+          cwd: project.path,
+          tool: opts.tool ?? project.defaultTool,
+          permissionPreset: 'normal',
+        })) as { id: string; name: string }
+        if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
+        return { sessionId: info.id, name: opts.name ?? info.name }
+      })
+    },
+
+    machineNamed(ref) {
+      const wanted = ref.trim().toLowerCase()
+      for (const m of machines()) if (m.id === wanted || m.name.toLowerCase() === wanted) return { id: m.id, name: m.name }
+      return null
+    },
+
+    async previewProject(machineId, spec) {
+      const m = machineById(machineId)
+      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
+      const r = await attempt(m, async () => ({ preview: (await route('projects.createPreview', { ...spec, machine: m.id })) as { path: string | null; error: string | null } }))
+      if (!r.ok) return r
+      if (r.preview.error || !r.preview.path) return { ok: false, error: oneLine(r.preview.error ?? 'Give a name for the folder', 300) }
+      const path = oneLine(r.preview.path, 4096)
+      // A clone named by its repository: the folder the machine would make names it
+      return { ok: true, name: spec.name.trim() || (path.split(/[\\/]/).pop() ?? path), path }
+    },
+
+    async createProject(machineId, spec) {
+      const m = machineById(machineId)
+      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
+      return attempt(m, async () => {
+        const p = (await route('projects.create', { ...spec, machine: m.id })) as { id: string; name: string; path: string }
+        return { projectId: p.id, name: oneLine(p.name), path: oneLine(p.path, 4096) }
+      })
+    },
+
+    describe(sessionId) {
+      const m = owner(sessionId)
+      const split = splitQualified(sessionId)
+      if (!m || !split) return null
+      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === split.id)
+      if (!isObj(s)) return null
+      const p = (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId)
+      return { name: oneLine(s.name), project: `${isObj(p) ? oneLine(p.name) : '(none)'} on ${m.name}` }
+    },
+
+    async lastWords(sessionId, maxChars) {
+      const r = await this.read(sessionId, 8)
+      for (const line of [...(r.lines ?? [])].reverse()) {
+        try {
+          const parsed = JSON.parse(line) as { role?: unknown; text?: unknown }
+          if (parsed.role === 'assistant' && typeof parsed.text === 'string') return parsed.text.slice(-maxChars)
+        } catch {
+          // A line that is not the machine's JSON says nothing to report
+        }
+      }
+      return ''
+    },
+
     async list() {
       const perMachine = await Promise.all(
         [...machines()].map(async (m) => {

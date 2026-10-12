@@ -787,6 +787,11 @@ export function createRpcHandler(
       const { query, limit } = RpcMethods['host.recall'].params.parse(p)
       return mgr.hostReader().recall(query, limit)
     },
+    'host.send': async (p) => {
+      const { sessionId, text, from } = RpcMethods['host.send'].params.parse(p)
+      await mgr.sendFromHub(sessionId, text, from.name)
+      return { ok: true as const }
+    },
     'machines.acceptVersions': async (p) =>
       requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),

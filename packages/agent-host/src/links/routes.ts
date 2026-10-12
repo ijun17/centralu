@@ -285,6 +285,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.sessions': HUB,
   'host.readSession': HUB,
   'host.recall': HUB,
+  'host.send': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,

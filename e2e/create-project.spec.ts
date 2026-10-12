@@ -191,6 +191,25 @@ test('New folder: clone a repository — named after it, refused addresses said 
   })
 })
 
+test('create_project on a linked machine: the card names the machine whose disk the path is on (#82 phase 4)', async ({ page }) => {
+  await start(page)
+  await page.getByTestId('suggest-create-project').click()
+  await expect(page.getByTestId('msg-user').first()).toBeVisible()
+  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  await page.evaluate(
+    (sid) =>
+      (window as any).__mock.requestApproval(sid, { kind: 'project_create', name: 'api', path: '/home/me/Centralu/api', machine: 'Ubuntu box' }, 'mk-4'),
+    orc,
+  )
+  const card = page.getByTestId('approval-card')
+  await expect(card.getByTestId('approval-detail')).toHaveText('Make a new project api on Ubuntu box?')
+  await expect(card.getByTestId('approval-machine')).toHaveText('Ubuntu box')
+  await expect(card.getByTestId('approval-path')).toHaveText('/home/me/Centralu/api')
+  // The conversation keeps the question with the machine in it, after the card is answered
+  await card.getByTestId('approve-deny').click()
+  await expect(page.getByText('Make the empty folder /home/me/Centralu/api on Ubuntu box and add it as the project api?')).toBeVisible()
+})
+
 test('create_project with git: the card names the repository, its branch and where it goes', async ({ page }) => {
   await start(page)
   await page.getByTestId('suggest-create-project').click()
