@@ -33,7 +33,8 @@ beforeEach(() => {
   state.requests.length = 0
   state.sandbox = undefined
   state.config = {}
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-codex-sandbox-')))
+  // .native: on Windows it expands 8.3 short names (RUNNER~1), as git's own paths are
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-codex-sandbox-')))
   main = join(root, 'main')
   worktree = join(root, 'child')
   mkdirSync(main)
