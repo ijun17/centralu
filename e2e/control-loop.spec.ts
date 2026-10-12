@@ -8194,10 +8194,10 @@ test('Focusing the composer wakes a dormant session', async ({ page }) => {
     })
   }, id)
 
-  // Since the helper leaves focus in the composer, this leaves and comes back once —
-  // waking is wired to the focus 'event', so if it is already focused, focus() fires nothing
+  // Since the helper leaves focus in the composer, this leaves and comes back once. The person's press wakes it;
+  // a focus the app gives does not (#590), so this clicks rather than calling focus()
   await page.getByTestId('prompt-input').blur()
-  await page.getByTestId('prompt-input').focus()
+  await page.getByTestId('prompt-input').click()
   await expect
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid].live, id))
     .toBe(true)

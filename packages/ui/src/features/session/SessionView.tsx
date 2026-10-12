@@ -120,6 +120,17 @@ function mountedRows(scroller: HTMLElement): LaidOutRow[] {
  * copy would leave the other side holding a stale value whenever a model or permission changed
  * on one side. This only decides what to show and hands off the actual rendering.
  */
+/** When the person last pressed Tab: a focus that follows it is theirs (#590) */
+let lastTabAt = 0
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') lastTabAt = performance.now()
+  }, true)
+}
+function tabbedRecently(): boolean {
+  return performance.now() - lastTabAt < 500
+}
+
 export function SessionView() {
   const session = useFocusedSession()
 
@@ -898,6 +909,8 @@ const Composer = memo(function Composer({
    */
   const [composing, setComposing] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  /** The person pressed the composer, so the focus that follows is theirs (#590) */
+  const pressed = useRef(false)
   const fileRef = useRef<HTMLInputElement>(null)
   /*
    * Takes the keyboard when asked to (#528): the session was just picked in the palette or created,
@@ -921,7 +934,10 @@ const Composer = memo(function Composer({
       input,
     })
     if (answer === 'wait') return
-    if (answer === 'take') input?.focus({ preventScroll: true })
+    if (answer === 'take') {
+      // The app gives the keyboard here, the person did not ask to type yet: this focus does not wake (#590)
+      input?.focus({ preventScroll: true })
+    }
     if (useStore.getState().composerFocusFor === sessionId) useStore.getState().askComposerFocus(null)
   }, [sessionId, focusAsked, focusCovered, focusApproval])
   const attachFile = useStore((s) => s.attachFile)
@@ -1314,7 +1330,19 @@ const Composer = memo(function Composer({
               uninstalled plugin's commands). wake() dedups and stays quiet, so a second call on
               an already-live session costs nothing.
             */
-          onFocus={() => void wake(sessionId)}
+          onPointerDown={() => {
+            pressed.current = true
+          }}
+          onFocus={() => {
+            /*
+              Only the person's focus wakes it, a press on the composer or a Tab to it (#590). The app also moves the
+              keyboard here, when a session is opened from the sidebar or a search hit (#528) and when a closing
+              palette or dialog returns focus (focusReturn.ts); an asleep session that is only being looked at stays
+              asleep. A focus the app gave is caught by the first key instead (onChange below).
+            */
+            if (pressed.current || tabbedRecently()) void wake(sessionId)
+            pressed.current = false
+          }}
           onCompositionStart={() => setComposing(true)}
           onCompositionEnd={() => setComposing(false)}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
@@ -1622,6 +1650,8 @@ function ChatStream({
   // A position other than the bottom is remembered as a row (seq) (#61) — it has to be a row,
   // not a pixel, to survive re-measurement
   const setScrollAnchor = useStore((s) => s.setScrollAnchor)
+  const searchTarget = useStore((s) => s.searchTargets[sessionId] ?? null)
+  const clearSearchTarget = useStore((s) => s.clearSearchTarget)
 
   /*
    * A row rendering an in-conversation app view is never detached (M4 B-1). The virtual
@@ -1820,6 +1850,14 @@ function ChatStream({
      * the next arrival straight back to it.
      */
     if (!stillLanding.current) anchor.current = anchorAt(el.scrollTop, virtualizer.measurementsCache, chat)
+    // A search landing remains marked while new events or a host catch-up change the list. The
+    // next scroll belongs to the reader, so it is the point where the marker is spent.
+    if (
+      searchTarget &&
+      !stillLanding.current &&
+      personIsScrolling({ now: performance.now(), lastInputAt: lastInputAt.current, held: held.current })
+    )
+      clearSearchTarget(sessionId, searchTarget.at)
     syncSticky()
     scheduleStickyOverlap.current()
   }
@@ -1836,6 +1874,7 @@ function ChatStream({
   const landed = useRef(false)
   const landing = useRef(0)
   const stillLanding = useRef(false)
+  const landedSearchAt = useRef<number | null>(null)
 
   /*
    * The cleanup function has to see the conversation and measurements **from the moment of
@@ -1892,6 +1931,7 @@ function ChatStream({
     wasAtBottom.current = stickToBottom.current
     lastTop.current = el?.scrollTop ?? 0
     landed.current = false
+    landedSearchAt.current = null
     // The position held for the previous session is released here — without this, the next
     // departure would record it for the wrong session
     anchor.current = null
@@ -1984,7 +2024,43 @@ function ChatStream({
    * that scrolls without a gesture to announce it.
    */
   useEffect(() => {
+    if (searchTarget && landedSearchAt.current !== searchTarget.at) {
+      landed.current = false
+      landedSearchAt.current = searchTarget.at
+    }
     if (landed.current || chat.length === 0) return
+    if (searchTarget) {
+      const index = chat.findIndex((c) => c.storedSeq === searchTarget.seq)
+      // The history request is still on its way. Do not spend this landing: the effect runs
+      // again when that page arrives.
+      if (index < 0) return
+      landed.current = true
+      stickToBottom.current = false
+      wasAtBottom.current = false
+      let frames = 0
+      let prev = -1
+      stillLanding.current = true
+      setSettling(true)
+      const seek = () => {
+        const el = scrollRef.current
+        if (!el) return
+        const targetIndex = chatRef.current.findIndex((c) => c.storedSeq === searchTarget.seq)
+        const m = targetIndex < 0 ? undefined : virtRef.current.measurementsCache[targetIndex]
+        if (!m) return
+        const target = Math.max(0, m.start - Math.max(0, (el.clientHeight - m.size) / 2))
+        el.scrollTop = target
+        lastTop.current = el.scrollTop
+        if (Math.abs(target - prev) <= 1 && laidOutAsMeasured(mountedRows(el), targetIndex, m.start)) setSettling(false)
+        prev = target
+        if (++frames < LANDING_FRAMES) landing.current = requestAnimationFrame(seek)
+        else {
+          stillLanding.current = false
+          setSettling(false)
+        }
+      }
+      landing.current = requestAnimationFrame(seek)
+      return
+    }
     landed.current = true
 
     /*
@@ -2070,7 +2146,7 @@ function ChatStream({
     // cancelling from there threw the landing away whenever a message arrived first (it
     // did, under load — the panel simply stayed at the top). The frame is cancelled where
     // it actually stops being wanted: when the session changes or the panel goes.
-  }, [sessionId, chat.length, scrollRef])
+  }, [sessionId, chat, searchTarget, scrollRef])
 
   // When content grows, the reference point changes even without a scroll
   useEffect(syncSticky, [syncSticky, chat.length])
@@ -2238,11 +2314,12 @@ function ChatStream({
       */
       onWheel={(e) => {
         endLanding()
-        if (e.deltaY < 0) noteInput()
+        if (e.deltaY !== 0) noteInput()
       }}
       onPointerDown={() => {
         endLanding()
         held.current = true
+        noteInput()
       }}
       onTouchStart={() => {
         held.current = true
@@ -2405,7 +2482,10 @@ function ChatStream({
             */
             className={`absolute left-0 w-full min-w-0 ${
               chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : 'pb-3'
-            } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
+            } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
+              chat[v.index]?.storedSeq === searchTarget?.seq ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70' : ''
+            }`}
+            data-search-hit={chat[v.index]?.storedSeq === searchTarget?.seq ? 'true' : undefined}
             /*
               Placed with `top`, not `transform` (#364). A transform makes every row a stacking
               context, and once a code block in one row scrolls sideways (a composited scroller

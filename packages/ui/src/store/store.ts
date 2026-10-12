@@ -1043,7 +1043,13 @@ export type AppState = {
    * session's project, so the row it lands on is visible; see `focusSession` for the two
    * callers that pass it.
    */
-  focusSession(id: string | null, opts?: { preferGrid?: boolean; reveal?: boolean }): void
+  focusSession(id: string | null, opts?: { preferGrid?: boolean; reveal?: boolean; targetSeq?: number }): void
+  /** Opens a search result at its stored conversation row. */
+  openSearchHit(sessionId: string, seq: number): void
+  /** The search result the conversation is currently holding in sight, by session. */
+  searchTargets: Record<string, { seq: number; at: number }>
+  /** A reader moved away from a search result, so it no longer needs emphasis. */
+  clearSearchTarget(sessionId: string, at: number): void
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
   /**
@@ -1063,6 +1069,8 @@ export type AppState = {
    * a page's range, history is always the source of truth.
    */
   loadHistory(sessionId: string): Promise<void>
+  /** Reads the page containing a search result instead of only the newest history page. */
+  loadHistoryAt(sessionId: string, seq: number): Promise<void>
   /** Prepends older conversation (the way to read conversation from before a compaction) */
   loadOlder(sessionId: string): Promise<void>
   saveWorkspace(): void
@@ -1582,6 +1590,7 @@ function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<AppStat
     subagentSteps: keep(s.subagentSteps),
     drafts: keep(s.drafts),
     stickToBottom: keep(s.stickToBottom),
+    searchTargets: keep(s.searchTargets),
     wakeError: keep(s.wakeError),
     wakeLocked: keep(s.wakeLocked),
     focusedSessionId: s.focusedSessionId && gone.has(s.focusedSessionId) ? null : s.focusedSessionId,
@@ -2403,6 +2412,9 @@ function toBase64(bytes: Uint8Array): string {
  */
 const HISTORY_PAGE = 100
 
+/** Makes a second search for the same row a new navigation request. */
+let searchTargetAt = 0
+
 /** How many recent messages a non-focused session keeps — reopening it loads more from the store */
 const WINDOW_SIZE = 50
 
@@ -2704,6 +2716,7 @@ export const useStore = create<AppState>((set, get) => ({
   drafts: {},
   stickToBottom: {},
   scrollAnchor: {},
+  searchTargets: {},
   workingSince: {},
   expandedDirs: {},
   showIgnored: true,
@@ -3685,6 +3698,19 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
+  openSearchHit(sessionId, seq) {
+    const at = ++searchTargetAt
+    set((s) => ({ searchTargets: { ...s.searchTargets, [sessionId]: { seq, at } } }))
+    get().focusSession(sessionId, { targetSeq: seq })
+  },
+
+  clearSearchTarget(sessionId, at) {
+    set((s) => {
+      if (s.searchTargets[sessionId]?.at !== at) return {}
+      return { searchTargets: omitKey(s.searchTargets, sessionId) }
+    })
+  },
+
   focusSession(id, opts) {
     const prev = get().focusedSessionId
     const projectId = id ? get().sessions[id]?.projectId : undefined
@@ -3793,7 +3819,13 @@ export const useStore = create<AppState>((set, get) => ({
      * missing. Now that `loadHistory` merges with history rather than clearing the screen's rows
      * (`mergePage`), it is always safe to read.
      */
-    if (!cur.history[id]) void get().loadHistory(id)
+    if (opts?.targetSeq !== undefined) {
+      // Mark the cursor as loading before the pane observes this session. Otherwise its ordinary
+      // first-open read races this targeted page and lands us back at the newest message.
+      const targetSeq = opts.targetSeq
+      set((s) => ({ history: { ...s.history, [id]: { oldestSeq: targetSeq, more: false, loading: true } } }))
+      void get().loadHistoryAt(id, targetSeq)
+    } else if (!cur.history[id]) void get().loadHistory(id)
     /*
      * Selecting a session no longer wakes it (#568). Its process starts when the person sends to it or its composer takes
      * the keyboard: reading an old conversation should not start a 250 MB process that the host puts back to sleep in
@@ -3865,6 +3897,39 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
     await syncInlineViews(get, set, sessionId)
+  },
+
+  async loadHistoryAt(sessionId, seq) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      // `beforeSeq` is exclusive. The first page ends on the row search named; the second
+      // extends the window past it. Together they avoid walking every page from a long
+      // conversation's newest message while still leaving context after the matched line.
+      const [before, after] = await Promise.all([
+        platform.agents.loadMessages(sessionId, HISTORY_PAGE, seq + 1),
+        platform.agents.loadMessages(sessionId, HISTORY_PAGE, seq + HISTORY_PAGE + 1),
+      ])
+      const msgs = [...new Map([...before, ...after].map((m) => [m.seq, m])).values()].sort((a, b) => a.seq - b.seq)
+      if (get().searchTargets[sessionId]?.seq !== seq) return
+      const items = messagesToChat(msgs)
+      bumpChatKeysAbove(items)
+      set((s) => {
+        const merged = mergePage(s.chat[sessionId] ?? [], items, msgs)
+        return {
+          chat: { ...s.chat, [sessionId]: merged },
+          inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
+          history: {
+            ...s.history,
+            [sessionId]: { oldestSeq: msgs[0]?.seq ?? 0, more: msgs.length >= HISTORY_PAGE, loading: false },
+          },
+        }
+      })
+      await syncInlineViews(get, set, sessionId)
+    } catch {
+      // Remove the temporary cursor so the ordinary first-open read can recover the view.
+      set((s) => ({ history: omitKey(s.history, sessionId) }))
+    }
   },
 
   async loadOlder(sessionId) {

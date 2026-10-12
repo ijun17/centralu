@@ -13,7 +13,7 @@ type Item =
   | { kind: 'session'; id: string; label: string; sub: string }
   | { kind: 'project'; id: string; label: string; sub: string }
   | { kind: 'action'; id: string; label: string; sub: string; run: () => void }
-  | { kind: 'message'; id: string; sessionId: string; label: string; sub: string }
+  | { kind: 'message'; id: string; sessionId: string; seq: number; label: string; sub: string }
   | { kind: 'app'; id: string; label: string; sub: string; projectId: string | null; appId: string; machine: string | null }
 
 /**
@@ -30,6 +30,7 @@ export function CommandPalette() {
   const sessions = useStore((s) => s.sessions)
   const projects = useStore((s) => s.projects)
   const focusSession = useStore((s) => s.focusSession)
+  const openSearchHit = useStore((s) => s.openSearchHit)
   const focusProject = useStore((s) => s.focusProject)
   const askComposerFocus = useStore((s) => s.askComposerFocus)
   const openGit = useStore((s) => s.openGit)
@@ -171,6 +172,7 @@ export function CommandPalette() {
         kind: 'message',
         id: `${h.sessionId}-${h.seq}`,
         sessionId: h.sessionId,
+        seq: h.seq,
         label: h.snippet.trim().slice(0, 80),
         sub: sessions[h.sessionId]?.name ?? 'Chat',
       })),
@@ -204,8 +206,10 @@ export function CommandPalette() {
         focusSession(id)
         askComposerFocus(id)
       }
-      if (item.kind === 'session' || item.kind === 'message') {
-        go(item.kind === 'session' ? item.id : item.sessionId)
+      if (item.kind === 'session') {
+        go(item.id)
+      } else if (item.kind === 'message') {
+        openSearchHit(item.sessionId, item.seq)
       } else if (item.kind === 'project') {
         const first = Object.values(sessions).find((s) => s.projectId === item.id)
         // A project with no session still has to be selectable (#183) — it used to just close the palette and leave the screen unchanged
@@ -217,7 +221,7 @@ export function CommandPalette() {
       } else item.run()
       toggle(false)
     },
-    [focusSession, focusProject, askComposerFocus, openApp, sessions, toggle],
+    [focusSession, focusProject, askComposerFocus, openSearchHit, openApp, sessions, toggle],
   )
 
   useEffect(() => {

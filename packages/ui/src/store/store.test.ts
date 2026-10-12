@@ -95,6 +95,7 @@ beforeEach(() => {
     chat: {},
     drafts: {},
     stickToBottom: {},
+    searchTargets: {},
     workingSince: {},
     expandedDirs: {},
     showIgnored: true,
@@ -674,6 +675,21 @@ describe('history cursor', () => {
     await useStore.getState().focusSession('h3')
 
     expect(await readAll('h3')).toEqual([...Array.from({ length: 120 }, (_, i) => `line ${i + 1}`), 'message that arrived first'])
+  })
+
+  it('opens a search hit outside the newest page with context on both sides (#590)', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('h590', sessionInfo('h590', { live: false }))
+    mock.messages.set('h590', many('h590', 260))
+    await useStore.getState().attach(mock)
+
+    useStore.getState().openSearchHit('h590', 40)
+
+    await vi.waitFor(() => expect(useStore.getState().chat.h590?.some((row) => row.storedSeq === 40)).toBe(true))
+    const rows = useStore.getState().chat.h590!
+    expect(rows.map((row) => row.storedSeq)).toEqual(Array.from({ length: 140 }, (_, i) => i + 1))
+    expect(useStore.getState().searchTargets.h590).toMatchObject({ seq: 40 })
+    expect(mock.resumeCalls).toEqual([])
   })
 })
 
