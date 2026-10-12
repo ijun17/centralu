@@ -149,11 +149,15 @@ export function CreateProjectForm({
       />
       <div className="mt-2 text-xs leading-body text-ink-muted">
         {parent === null ? (
-          <p>
-            In <span className="readout break-all text-ink" data-testid="create-project-parent-shown">{preview?.parent ?? '…'}</span>{' '}
+          // Change sits at the row's end, not after the text: the location arrives a moment after the dialog opens,
+          // and a button that followed it moved under a click aimed at it as the form opened
+          <p className="flex items-baseline gap-2">
+            <span className="min-w-0 flex-1">
+              In <span className="readout break-all text-ink" data-testid="create-project-parent-shown">{preview?.parent ?? '…'}</span>
+            </span>
             <button
               type="button"
-              className="text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+              className="shrink-0 text-ink-faint underline-offset-2 hover:text-ink hover:underline"
               onClick={() => setParent(preview?.parent ?? '')}
               data-testid="create-project-change-parent"
             >
