@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
-import { groupProjectAppSessions, orderAsTree } from './tree.js'
+import { appSessionsNeedAttention, groupProjectAppSessions, orderAsTree } from './tree.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
 import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js'
@@ -25,7 +25,7 @@ import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon, SearchIcon } from '../../components/icons.jsx'
 import { isRemoteUserApp, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
-import { isAway, isWaiting } from '@cc/core'
+import { isAway } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { useRemoteIde } from '../machines/remoteIde.js'
@@ -103,14 +103,15 @@ function SessionRow({
    * vertical guide line — hierarchy lives only in the sidebar (the grid is flat, a design
    * decision).
    */
-  nested?: boolean
+  nested?: boolean | number
   children: ReactNode
 }) {
+  const depth = nested === true ? 1 : typeof nested === 'number' ? nested : 0
   const drop = useDropLine(SESSION_MIME, onReorder)
   return (
     <li
-      data-nested={nested || undefined}
-      className={`group/row relative ${nested ? 'ml-4 border-l border-line/60' : ''} ${dropLine(drop.edge)}`}
+      data-nested={nested === true ? true : depth || undefined}
+      className={`group/row relative ${depth ? `${depth === 1 ? 'ml-4' : 'ml-8'} border-l border-line/60` : ''} ${dropLine(drop.edge)}`}
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(SESSION_MIME, id)
@@ -1008,7 +1009,7 @@ function AppRows({ apps, sessionsByApp, testId }: { apps: ExternalCatalogApp[]; 
           {a.projectId === null ? (
             <UserAppSessions appId={a.appId} machine={a.info.machine ?? null} />
           ) : (
-            <ProjectAppSessions sessions={sessionsByApp?.get(a.appId) ?? []} />
+            <ProjectAppSessions sessions={sessionsByApp?.get(a.appId) ?? []} projectId={a.projectId} />
           )}
         </Fragment>
       ))}
@@ -1017,40 +1018,127 @@ function AppRows({ apps, sessionsByApp, testId }: { apps: ExternalCatalogApp[]; 
 }
 
 /** A listed project app owns these rows, so they cannot be reordered into the project's session list. */
-function ProjectAppSessions({ sessions }: { sessions: SessionSummary[] }) {
+function ProjectAppSessions({ sessions, projectId }: { sessions: SessionSummary[]; projectId: string }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
-  return sessions.map((s) => {
+  const renameSession = useStore((s) => s.rename)
+  const deleteSession = useStore((s) => s.deleteSession)
+  const handoffSession = useStore((s) => s.handoffSession)
+  const defaultTool = useStore((s) => s.projects[projectId]?.defaultTool ?? '')
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [handingOff, setHandingOff] = useState<string | null>(null)
+  const [sessionMenu, setSessionMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  return (
+    <>
+      {orderAsTree(sessions).map(({ s, nested }) => {
     const focused = selected === s.id
     const unread = s.lastSeq > s.lastReadSeq
     return (
-      <li
+      <SessionRow
         key={s.id}
-        className="relative ml-4 border-l border-line/60"
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData(SESSION_MIME, s.id)
-          e.dataTransfer.effectAllowed = 'move'
-        }}
+        id={s.id}
+        projectId={projectId}
+        nested={nested ? 2 : 1}
+        draggable={renaming !== s.id && !nested}
+        onReorder={() => {}}
       >
-        <button
-          type="button"
-          onClick={() => focusSession(s.id)}
-          data-testid={`app-session-row-${s.id}`}
-          aria-current={focused ? 'page' : undefined}
-          data-unread={(unread && !focused) || undefined}
-          className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-md transition-colors ${
-            focused
-              ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
-              : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
-          }`}
-        >
-          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
-          <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
-        </button>
-      </li>
+        {renaming === s.id ? (
+          <SessionNameInput
+            id={s.id}
+            initial={s.name}
+            onDone={(name) => {
+              setRenaming(null)
+              if (name && name !== s.name) void renameSession(s.id, name)
+            }}
+          />
+        ) : (
+          <>
+            <button
+              onClick={() => focusSession(s.id)}
+              onDoubleClick={() => setRenaming(s.id)}
+              data-testid={`app-session-row-${s.id}`}
+              aria-current={focused ? 'page' : undefined}
+              data-unread={(unread && !focused) || undefined}
+              className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-md transition-colors ${
+                focused
+                  ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
+                  : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
+              }`}
+            >
+              <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
+              <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
+              {s.merged && <span className="shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint" data-testid={`merged-badge-${s.id}`}>merged</span>}
+              {s.pr && !s.merged && <span className="shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint" data-testid={`pr-badge-${s.id}`} title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}>PR #{s.pr.number}{s.pr.state === 'closed' ? ' ✕' : ''}</span>}
+              <BackgroundMark tasks={s.backgroundTasks} testId={`background-mark-${s.id}`} />
+            </button>
+            <span
+              className={`absolute right-3 top-1/2 flex -translate-y-1/2 items-center transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 ${
+                sessionMenu?.id === s.id ? 'opacity-100' : 'opacity-0'
+              }`}
+              data-testid={`session-actions-${s.id}`}
+            >
+              <button
+                type="button"
+                aria-label={`Actions for ${s.name}`}
+                onClick={(e) => {
+                  const el = e.currentTarget
+                  setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
+                }}
+                data-testid={`session-menu-${s.id}`}
+                className="flex items-center justify-center rounded-md p-1 text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
+              >
+                <DotsIcon size={14} />
+              </button>
+            </span>
+            {sessionMenu?.id === s.id && (
+              <SessionMenu
+                session={s}
+                anchorEl={sessionMenu.el}
+                onClose={() => setSessionMenu(null)}
+                onRename={() => setRenaming(s.id)}
+                onHandoff={() => setHandingOff(s.id)}
+                onDelete={() => setConfirming(s.id)}
+              />
+            )}
+          </>
+        )}
+      </SessionRow>
     )
-  })
+      })}
+      {confirming && (
+        <ConfirmDelete
+          sessionId={confirming}
+          name={sessions.find((s) => s.id === confirming)?.name ?? 'Session'}
+          tool={sessions.find((s) => s.id === confirming)?.tool ?? defaultTool}
+          onCancel={() => setConfirming(null)}
+          onConfirm={(deleteWorktree, deleteExternal) => {
+            void deleteSession(confirming, deleteWorktree, deleteExternal)
+            setConfirming(null)
+          }}
+        />
+      )}
+      {handingOff && (
+        <ConfirmHandoff
+          name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
+          tool={sessions.find((s) => s.id === handingOff)?.tool ?? defaultTool}
+          dead={(() => {
+            const s = sessions.find((x) => x.id === handingOff)
+            return s ? s.state === 'error' || !!s.limit : false
+          })()}
+          blocked={(() => {
+            const s = sessions.find((x) => x.id === handingOff)
+            return s ? handoffBlockedBy(s) : null
+          })()}
+          onCancel={() => setHandingOff(null)}
+          onConfirm={(tool, deleteOld, mode) => {
+            void handoffSession(handingOff, { tool, deleteOld, mode })
+            setHandingOff(null)
+          }}
+        />
+      )}
+    </>
+  )
 }
 
 /**
@@ -1128,8 +1216,8 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
   const sessionWaiting = useStore(
     (s) =>
       !remote &&
-      Object.values(s.sessions).some(
-        (session) => session.projectId === app.projectId && session.appId === app.appId && isWaiting(session.state),
+      appSessionsNeedAttention(
+        Object.values(s.sessions).filter((session) => session.projectId === app.projectId && session.appId === app.appId),
       ),
   )
   const waitsForYou = asking || sessionWaiting

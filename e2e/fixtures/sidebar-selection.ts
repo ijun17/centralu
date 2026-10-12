@@ -261,8 +261,8 @@ export function sidebarSelectionTests(): void {
           ).builder.id as string,
         projectId,
       )
-      const [appAgent, removedAppAgent, startedAgent, worktree] = await page.evaluate(
-        ([id, parent]) => {
+      const [appAgent, removedAppAgent, startedAgent, worktree, builderChild] = await page.evaluate(
+        ([id, parent, builder]) => {
           const mock = (window as any).__mock
           const base = mock.sessions.get(parent)
           const plant = (sessionId: string, extra: Record<string, unknown>) => {
@@ -288,9 +288,10 @@ export function sidebarSelectionTests(): void {
             plant('gone-agent-1', { appId: 'gone', name: 'Gone · agent 09:00' }),
             plant('ordinary-child-1', { appId: null, name: 'Ordinary child', askedBy: parent }),
             plant('ordinary-worktree-1', { appId: null, name: 'Ordinary worktree', parentSessionId: parent }),
+            plant('timer-child-1', { appId: 'timer', name: 'Timer · child', askedBy: builder }),
           ]
         },
-        [projectId, ordinary],
+        [projectId, ordinary, builder],
       )
 
       const project = page.getByTestId('project-alpha')
@@ -310,9 +311,43 @@ export function sidebarSelectionTests(): void {
         'data-nested',
         'true',
       )
+      await expect(apps.getByTestId(`app-session-row-${builderChild}`).locator('xpath=..')).toHaveAttribute(
+        'data-nested',
+        '2',
+      )
 
       await apps.getByTestId(`app-session-row-${appAgent}`).click()
       await expect(apps.getByTestId(`app-session-row-${appAgent}`)).toHaveAttribute('aria-current', 'page')
+      await apps.getByTestId(`session-menu-${appAgent}`).click()
+      await expect(page.getByTestId(`session-menu-open-${appAgent}`)).toContainText('Delete session…')
+    })
+
+    test('a finished project-app session does not mark its app as asking', async ({ page }) => {
+      await setup(page, ['/tmp/alpha'])
+      const projectId = await page.evaluate(
+        () => (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find((project) => project.name === 'alpha')!.id,
+      )
+      const builder = await page.evaluate(
+        async (id) => (await (window as any).__mock.apps.create({ projectId: id, id: 'timer', name: 'Timer', tool: 'claude' })).builder.id as string,
+        projectId,
+      )
+      await page.evaluate(([id, base]) => {
+        const mock = (window as any).__mock
+        const session = {
+          ...mock.sessions.get(base),
+          id: 'timer-finished-1',
+          projectId: id,
+          appId: 'timer',
+          name: 'Timer · finished',
+          state: 'waiting_input',
+          pendingQuestions: [],
+          pendingApproval: null,
+        }
+        mock.sessions.set(session.id, session)
+        mock.emit({ type: 'session_created', sessionId: session.id, session })
+      }, [projectId, builder])
+
+      await expect(page.getByTestId(`app-row-${projectId}/timer`).getByTestId('app-row-hint')).toHaveCount(0)
     })
 
     test('a folded project that is open still shows its tint, on its name row', async ({ page }) => {

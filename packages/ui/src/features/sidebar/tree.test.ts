@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { groupProjectAppSessions, orderAsTree } from './tree.js'
+import { appSessionsNeedAttention, groupProjectAppSessions, orderAsTree } from './tree.js'
 
 const s = (id: string, over: Partial<SessionSummary> = {}) => ({ id, parentSessionId: null, askedBy: null, ...over }) as SessionSummary
 const shape = (list: SessionSummary[]) => orderAsTree(list).map(({ s, nested }) => (nested ? `  ${s.id}` : s.id))
@@ -40,6 +40,7 @@ describe('orderAsTree', () => {
       [
         s('ordinary'),
         s('builder', { appId: 'notes' }),
+        s('builder-child', { appId: 'notes', askedBy: 'builder' }),
         s('app-agent', { appId: 'notes' }),
         s('started-agent', { askedBy: 'ordinary' }),
         s('worktree', { parentSessionId: 'ordinary' }),
@@ -48,7 +49,14 @@ describe('orderAsTree', () => {
       ['notes'],
     )
 
-    expect(grouped.byApp.get('notes')?.map((session) => session.id)).toEqual(['builder', 'app-agent'])
+    expect(grouped.byApp.get('notes')?.map((session) => session.id)).toEqual(['builder', 'builder-child', 'app-agent'])
+    expect(shape(grouped.byApp.get('notes') ?? [])).toEqual(['builder', '  builder-child', 'app-agent'])
     expect(shape(grouped.project)).toEqual(['ordinary', '  started-agent', '  worktree', 'removed-app-agent'])
+  })
+
+  it('marks only an approval or pending question as an app session waiting on the person', () => {
+    expect(appSessionsNeedAttention([s('finished', { state: 'waiting_input', pendingQuestions: [] })])).toBe(false)
+    expect(appSessionsNeedAttention([s('approval', { state: 'waiting_approval', pendingQuestions: [] })])).toBe(true)
+    expect(appSessionsNeedAttention([s('question', { state: 'idle', pendingQuestions: [{ requestId: 'question', questions: [] }] })])).toBe(true)
   })
 })

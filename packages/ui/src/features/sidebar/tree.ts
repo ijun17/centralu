@@ -29,6 +29,11 @@ export function groupProjectAppSessions(
   return { project, byApp }
 }
 
+/** A completed turn is not an app waiting on the person; approvals and pending questions are. */
+export function appSessionsNeedAttention(sessions: SessionSummary[]): boolean {
+  return sessions.some((session) => session.state === 'waiting_approval' || session.pendingQuestions.length > 0)
+}
+
 /**
  * Lays out the session list in tree order: a session immediately followed by the sessions it started (owner decision
  * 2026-10-12 on #561). A child is grouped by who started it, `askedBy` for a start_agent child, whether it runs in its
