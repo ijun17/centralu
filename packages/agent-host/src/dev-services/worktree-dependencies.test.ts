@@ -36,7 +36,8 @@ it.each(['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.loc
     const path = join(child, 'node_modules', 'dep', 'index.js')
     expect(await readFile(path, 'utf8')).toBe('original')
     expect((await lstat(join(child, 'node_modules'))).isSymbolicLink()).toBe(false)
-    expect(await readlink(join(child, 'node_modules', 'dep'))).toBe('.store/dep')
+    // Windows reports the link target with its own separator
+    expect((await readlink(join(child, 'node_modules', 'dep'))).replaceAll('\\', '/')).toBe('.store/dep')
     await writeFile(path, 'child change')
     expect(await readFile(join(main, 'node_modules', 'dep', 'index.js'), 'utf8')).toBe('original')
   },
