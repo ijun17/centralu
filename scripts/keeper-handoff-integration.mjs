@@ -4,7 +4,7 @@
  * binaries, the real host, a real claude and a real codex.
  *
  *   node scripts/keeper-handoff-integration.mjs [--no-build] [--no-codex] [--no-claude]
- *     [--old-keeper <exe>] [--handoff-via window|keeper]
+ *     [--old-keeper <exe>]
  *
  * Builds like the other keeper scripts (`cargo build` into a target folder under /tmp, never
  * `tauri build`; `pnpm bundle:host`), then makes three "builds" A, B and C under /tmp: each is its
@@ -22,12 +22,15 @@
  * (#368).
  *
  * Checked:
- *   - keeper A is started the way every earlier build started its keeper, as the window's executable
- *     with `--keeper`, and becomes build A's `centralu-keeper` (same pid);
- *   - the handoff to B is asked (by default) with B's *window* executable, the command line a keeper of
- *     0.1.0-beta.11 or earlier writes (`centralu --keeper --take-over-fd 3 ...`), and B runs as B's
- *     `centralu-keeper` with the handoff channel intact; the later handoffs are asked with the keeper
- *     executable, as a window of this build asks, and run it;
+ *   - keeper A is build A's `centralu-keeper`, started as the window starts it;
+ *   - B's *window* executable started the way a keeper of 0.1.0-beta.11 or earlier starts its
+ *     successor (`centralu --keeper --take-over-fd 3 ...`, the channel at descriptor 3, from a
+ *     stand-in for that keeper) says nothing on the channel and exits at once with 64, opening no
+ *     window: the old keeper never sees `ready`, its commit point, and rolls back (#461);
+ *   - a handoff asked with B's window executable (what a window from before #440 names) is refused,
+ *     and keeper A serves on as before; with `--old-keeper`, a real old keeper starts that executable,
+ *     meets the refusal and rolls back;
+ *   - every handoff after that is asked with the keeper executable, as a window of this build asks;
  *   - keeper A (build A) with its host, a terminal printing a counter, a dev server, a claude turn
  *     mid-tool-call and a codex turn, hands over to keeper B (`upgrade`): same host pid, same child
  *     pids, the counter and the dev server's ticks continuous (nothing lost or doubled), each
@@ -47,10 +50,12 @@
  *   - stop ends the keeper, the host and every child.
  *
  * `--old-keeper <exe>` makes build A's window executable that file (an earlier release's
- * `Contents/MacOS/centralu`, copied, with no keeper beside it), so keeper A is a real old keeper and
- * the handoff to B is the update an installed one goes through. `--handoff-via keeper` asks that
- * first handoff with B's `centralu-keeper` rather than B's window executable: what a window of this
- * build sends an old keeper after an update. Neither runs in CI (they need that release).
+ * `Contents/MacOS/centralu`, copied, with no keeper beside it, started as `centralu --keeper`), so
+ * keeper A is a real old keeper and the handoffs to B are the update an installed one goes through:
+ * through B's window executable, refused and rolled back; through B's `centralu-keeper`, what a
+ * window of this build sends an old keeper after an update, carried out for 0.1.0-beta.12 and later,
+ * refused and rolled back for older keepers, whose snapshot lacks a field this build requires (#461).
+ * Not run in CI (it needs that release: `npm pack @centralu/darwin-arm64@<version>` has it).
  *
  * `--no-claude --no-codex` leaves the parts that need no model and no network: everything above
  * except the two agent turns. CI runs exactly that (the `keeper` job in
@@ -76,8 +81,8 @@ const argValue = (flag) => {
   return i === -1 ? null : process.argv[i + 1]
 }
 const OLD_KEEPER = argValue('--old-keeper')
-const HANDOFF_VIA = argValue('--handoff-via') ?? 'window'
-if (!['window', 'keeper'].includes(HANDOFF_VIA)) throw new Error(`--handoff-via is window or keeper, not ${HANDOFF_VIA}`)
+/** `keeper::exe::EXIT_NOT_A_KEEPER`: `centralu --keeper` refusing (#461) */
+const EXIT_NOT_A_KEEPER = 64
 const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
 const WITH_CLAUDE = !process.argv.includes('--no-claude')
 const WITH_CODEX = !process.argv.includes('--no-codex')
@@ -212,11 +217,12 @@ const fetchStatus = (url) => fetch(url).then((r) => r.status).catch((e) => Strin
 
 const sourceOf = (b) => ({ commit: b.commit, hostDir: b.host, bundlePath: b.bundle, version: '0.0.0-test' })
 
+/** As the window starts a keeper; an old release's window executable needs `--keeper` first */
 function startKeeper(b, data, extraEnv = {}) {
   const logFd = openSync(join(data, 'keeper.log'), 'a')
   const child = spawn(
-    b.exe,
-    ['--keeper', '--data-dir', data, '--host-source', b.host, '--bundle-path', b.bundle, '--app-version', '0.0.0-test'],
+    b.keeper ?? b.exe,
+    [...(b.keeper ? [] : ['--keeper']), '--data-dir', data, '--host-source', b.host, '--bundle-path', b.bundle, '--app-version', '0.0.0-test'],
     {
       detached: true,
       stdio: ['ignore', logFd, logFd],
@@ -364,7 +370,7 @@ function continuous(ns) {
 
 /** A third keeper on the same folder: refused (exit 3) while someone holds the lock and answers */
 function thirdKeeperRefused(b, data) {
-  const r = spawnSync(b.exe, ['--keeper', '--data-dir', data, '--host-source', b.host], {
+  const r = spawnSync(b.keeper, ['--data-dir', data, '--host-source', b.host], {
     env: { ...process.env, CC_DATA_DIR: data },
     timeout: 20_000,
     encoding: 'utf8',
@@ -393,7 +399,7 @@ async function scenario() {
   if (!check(view, 'keeper A brings the host up', existsSync(join(data, 'keeper.log')) ? keeperLog().slice(-2000) : '')) return
   check(view.keeper.build?.commit === 'handoff-A', 'keeper A says it is build A', JSON.stringify(view.keeper.build))
   if (A.keeper) {
-    check(view.keeper.pid === keeperA.pid, 'keeper A is the process started as `centralu --keeper`', `${keeperA.pid} -> ${view.keeper.pid}`)
+    check(view.keeper.pid === keeperA.pid, 'keeper A is the process the window started', `${keeperA.pid} -> ${view.keeper.pid}`)
     check(exeOf(keeperA.pid) === A.keeper, "and it runs build A's centralu-keeper", exeOf(keeperA.pid))
   } else {
     check(exeOf(keeperA.pid) === A.exe, `keeper A is the old keeper (${OLD_KEEPER})`, exeOf(keeperA.pid))
@@ -452,24 +458,76 @@ async function scenario() {
   await sleep(500)
   check(alive(keeperA.pid) && (await status(sock).catch(() => null))?.keeper?.pid === keeperA.pid, 'keeper A keeps running and answering from its unlinked executable')
 
-  // ---- the handoff A -> B, asked by default with B's window executable: what a keeper of
-  // 0.1.0-beta.11 or earlier starts (`centralu --keeper --take-over-fd 3 ...`) from the path older
-  // windows report. `--handoff-via keeper` asks with B's keeper executable instead, which is what a
-  // window of this build sends an old keeper after an update.
-  const via = HANDOFF_VIA === 'keeper' ? B.keeper : B.exe
-  log(`\nhanding keeper A over to keeper B, through B's ${HANDOFF_VIA} executable`)
-  const up = await request(sock, { op: 'upgrade', exe: via, source: sourceOf(B) })
+  // ---- #461: B's window executable, started as a keeper of 0.1.0-beta.11 or earlier starts its
+  // successor, by a stand-in for that keeper: the channel at descriptor 3, the same arguments
+  log("\na stand-in old keeper handing over to B's window executable")
+  {
+    const t = Date.now()
+    const b = spawn(B.exe, ['--keeper', '--take-over-fd', '3', '--data-dir', data, '--host-source', B.host, '--bundle-path', B.bundle, '--app-version', '0.0.0-test'], {
+      stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CC_DATA_DIR: data },
+    })
+    started.add(b.pid)
+    let said = ''
+    let stderr = ''
+    b.stdio[3].on('data', (d) => (said += d))
+    b.stderr.on('data', (d) => (stderr += d))
+    const channelClosed = new Promise((r) => b.stdio[3].on('close', r))
+    const code = await waitFor(() => b.exitCode ?? b.signalCode, 20_000, 50)
+    await Promise.race([channelClosed, sleep(2000)])
+    check(code === EXIT_NOT_A_KEEPER, `it exits with ${EXIT_NOT_A_KEEPER} (opening no window)`, `${code}; ${stderr.slice(-400)}`)
+    check(Date.now() - t < 20_000, 'at once', `${Date.now() - t} ms`)
+    check(said === '', 'it says nothing on the channel: no hello, so the old keeper never reaches ready and rolls back', JSON.stringify(said.slice(0, 200)))
+    check(/no longer starts a keeper/.test(stderr), 'and says why', stderr.slice(-400))
+    const v = await status(sock)
+    check(v?.keeper?.pid === keeperA.pid && v?.hostPid === hostPid, 'keeper A and its host are untouched', JSON.stringify(v?.keeper))
+  }
+
+  // ---- a handoff asked with B's window executable, as a window from before #440 asks: refused (a
+  // real old keeper started with --old-keeper starts it, meets the refusal above and rolls back)
+  log("\nasking keeper A to hand over to B's window executable")
+  {
+    const up = await request(sock, { op: 'upgrade', exe: B.exe, source: sourceOf(B) })
+    const failed = await waitFor(async () => {
+      const v = await status(sock)
+      return v?.swap?.phase === 'failed' && v
+    }, 40_000, 100)
+    for (const pid of successorsInLog(data)) started.add(pid)
+    check(up.ok === true || /centralu-keeper/.test(up.error ?? ''), 'the request is answered', JSON.stringify(up))
+    check(failed, 'the handoff fails', keeperLog().slice(-1500))
+    check(failed && failed.keeper.pid === keeperA.pid, 'keeper A is still the keeper', JSON.stringify(failed?.keeper))
+    check(failed && failed.hostPid === hostPid && alive(hostPid), 'with the same host', String(failed?.hostPid))
+    const held = await heldChildren(data)
+    check(livePids.filter(alive).every((pid) => held.some((c) => c.pid === pid)), 'and every child it held')
+    const counted = numbers(host.screen(term.terminalId), 'C').length
+    check(await waitFor(() => numbers(host.screen(term.terminalId), 'C').length > counted, 5000), 'the terminal still counts')
+  }
+
+  // ---- the handoff A -> B through B's keeper executable, as a window of this build asks
+  log("\nhanding keeper A over to keeper B, through B's centralu-keeper")
+  const rollbacks = () => keeperLog().split('handoff: rolled back').length
+  const rolledBackBefore = rollbacks()
+  const up = await request(sock, { op: 'upgrade', exe: B.keeper, source: sourceOf(B) })
   check(up.ok, 'the upgrade is accepted', JSON.stringify(up))
   const t0 = Date.now()
   view = await waitFor(async () => {
     const v = await status(sock)
+    if (OLD_KEEPER && v?.keeper?.pid === keeperA.pid && rollbacks() > rolledBackBefore) return v
     return v?.keeper?.pid !== keeperA.pid && v?.keeper?.build?.commit === 'handoff-B' && v
   }, 30_000, 100)
   for (const pid of successorsInLog(data)) started.add(pid)
+  // A keeper older than #435 (0.1.0-beta.11 and earlier) writes a child table without `sweeps`,
+  // which this build refuses since #461: it rolls back, and "Restart completely" is its way forward
+  if (OLD_KEEPER && view?.keeper?.pid === keeperA.pid) {
+    check(/missing field `sweeps`/.test(keeperLog()), 'the old keeper is older than #435: keeper B refuses its snapshot', keeperLog().slice(-1500))
+    check(view.hostPid === hostPid && alive(hostPid), 'and the old keeper rolls back and serves on, with the same host', String(view.hostPid))
+    log('  (the rest needs a keeper this build takes over; stopping here)')
+    return
+  }
   if (!check(view, 'keeper B answers on the same socket', keeperLog().slice(-2500))) return
   log(`  (handoff took ${Date.now() - t0} ms including the ${HOLD_MS} ms hold)`)
   const keeperB = view.keeper.pid
-  check(exeOf(keeperB) === B.keeper, `keeper B runs build B's centralu-keeper (started as ${via})`, exeOf(keeperB))
+  check(exeOf(keeperB) === B.keeper, "keeper B runs build B's centralu-keeper", exeOf(keeperB))
   check(await waitFor(() => !alive(keeperA.pid), 10_000), 'keeper A has exited')
   check(view.hostPid === hostPid, 'the host is the same process', `${hostPid} -> ${view.hostPid}`)
   check(alive(hostPid), 'and it is still running')

@@ -115,7 +115,7 @@ traffic lights, trash, `code`) is not runtime and stays where it is.
 | `KeeperInProcess` | a debug window that opts into the keeper |
 | `Direct` | development, the browser, `CC_HOST_CMD` |
 
-`KeeperInWindowExe` and the `centralu --keeper` rows go with #461. `serve --detach` asks the same plan with
+`KeeperInWindowExe` and the `centralu --keeper` rows went with #461. `serve --detach` asks the same plan with
 `Who::Serve`. A test (like `tooling/platform-checks.test.ts` for TypeScript) fails when a start site decides anything
 the plan does not.
 
@@ -190,7 +190,7 @@ Estimates are agent work.
 | 8 | the host's own child spawning: `dev-services/kill-tree.ts`, the direct paths of `terminal.ts`, `commands.ts`, `adapters/local-process.ts`, `keeper/held-children.ts`' fallback | one `ChildService` interface the host always calls; implemented by the keeper's `children.sock`, and in development by an in-process service with the same semantics | KL1–KL20, CH5–CH15; rows 36–41, 44–46 | 3–4 days |
 | 9 | Windows: no keeper | `keeper/src/os/windows.rs` (§3.3), `keeper e2e (windows)` CI, `StartMode::Keeper` on Windows | §5 W1–W5 first; ST12–ST14, PA7–PA15, SU5, KL11–KL18, FI11, FI12; rows 13, 14, 48 | 6–10 days |
 | 10 | `centralu serve` without a keeper | the headless keeper on remotes, started by `serve --detach`; `serve --stop` asks the keeper; the update is a switch to the installed version's content | RE1–RE14, SW8; rows 71–75 | 3–5 days |
-| 11 | compatibility paths | removed in 0.1.0-beta.16, row by row (#461) | ST7, HD6 | 1–2 days |
+| 11 | compatibility paths | (done) removed after 0.1.0-beta.16 (#461): `centralu --keeper` refuses, `KeeperInWindowExe`, a switch naming the window's executable, the keeper without a build, the `host.lock` check; the snapshot and child-table fields required. The pre-rename data folder move stays until 1.0 | ST7, HD6 | 1–2 days |
 | 12 | `StartMode::Direct` in releases | gone: releases have `Attach`, `ThroughShell`, `Keeper` only; the Rust allow-list of step 1 is empty | all | 0.5 day |
 
 About 30–45 agent days in all, of which step 9 is the largest and the least certain.

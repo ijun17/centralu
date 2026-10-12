@@ -121,7 +121,7 @@ function startKeeper(data) {
   const logFd = openSync(join(data, 'keeper.log'), 'a')
   const child = spawn(
     BIN,
-    ['--keeper', '--data-dir', data, '--host-source', HOST_SRC, '--bundle-path', FAKE_BUNDLE, '--app-version', '0.0.0-test'],
+    ['--data-dir', data, '--host-source', HOST_SRC, '--bundle-path', FAKE_BUNDLE, '--app-version', '0.0.0-test'],
     { detached: true, stdio: ['ignore', logFd, logFd], env: { ...process.env, CC_DATA_DIR: data } },
   )
   started.add(child.pid)

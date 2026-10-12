@@ -152,7 +152,7 @@ function startKeeper(data, { env = {}, hostSource = HOST_SRC, bin = BIN, extra =
   const logFd = openSync(join(data, 'keeper.log'), 'a')
   const child = spawn(
     bin,
-    ['--keeper', '--data-dir', data, '--host-source', hostSource, '--bundle-path', FAKE_BUNDLE, '--app-version', '0.0.0-test'],
+    ['--data-dir', data, '--host-source', hostSource, '--bundle-path', FAKE_BUNDLE, '--app-version', '0.0.0-test'],
     {
       // The app starts the keeper in a session of its own; so does this.
       detached: true,

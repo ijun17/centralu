@@ -13,29 +13,25 @@ import { hasPs } from '../os.js'
  * duplicate-session incident traces back to exactly this shape. SQLite's own lock contention
  * comes on top of that.
  *
- * So this is blocked with a single lock file, and the reason for the block is stated plainly.
- *
- * **The lock file records the pid together with that process's start time** (#184). The lock is
- * only released on the `exit` event, so it is left behind after a SIGKILL (when the host does not
- * finish within 3 seconds of the app quitting) or a power loss. Recording only the pid would
- * reject startup the moment some process unrelated to Centralu reuses that number, and with no
- * window to close, the person would have no way to know how to get unstuck. The same pid with a
- * different start time belongs to someone else.
+ * So the start is refused, and the reason for the refusal is stated plainly.
  *
  * **Ownership itself is an exclusive SQLite lock held for the host's whole lifetime (#82).** The
  * lock file alone was check-then-write: two hosts could both read "no live owner" and both write.
  * Measured on main: 8 hosts started at once on one folder produced 2 owners; a second acquire in
  * the same process succeeded; and while an owner was alive, a missing `host.lock` let a second
- * owner in. Now the owner opens `host-ownership.sqlite` and holds `BEGIN EXCLUSIVE` on it until it
+ * owner in. A file left behind by a SIGKILL or a power loss also refused every later start once
+ * an unrelated process reused its pid, unless the start time recorded next to it told the two
+ * apart (#184). Now the owner opens `host-ownership.sqlite` and holds `BEGIN EXCLUSIVE` on it until it
  * exits. Taking that lock is atomic, a second taker gets SQLITE_BUSY at once, and the operating
  * system releases it when the process dies however it dies (SIGKILL, a crash, a power cut leaves
  * no process to hold it), so there is nothing stale to clean up. Based on the approach in #91.
  *
- * `host.lock` stays, for two reasons: it names the owner (pid and start time) in the conflict
- * message, and an older host, which knows only the file, must still be kept out — and must still
- * keep us out (a live, matching `host.lock` refuses the start even when the SQLite lock was free).
- * This is local, single-machine ownership: not a distributed lease, and not meant for a data folder
- * on a network filesystem, where advisory locks are not reliable.
+ * `host.lock` stays as a description only: it names the owner (pid and start time) in the conflict
+ * message. Until 0.1.0-beta.16 a live, matching `host.lock` also refused the start, for hosts from
+ * before #82 that knew only the file; that check went with #461, so a host that old is no longer
+ * kept out by this one (nor this one by it). This is local, single-machine ownership: not a
+ * distributed lease, and not meant for a data folder on a network filesystem, where advisory locks
+ * are not reliable.
  */
 
 export type LockResult = { ok: true; release: () => void } | { ok: false; heldByPid: number | null; lockPath: string }
@@ -51,18 +47,6 @@ const held = new Set<Database.Database>()
 
 /** The lock file's contents. A file an older host wrote is just a bare pid number */
 type Holder = { pid: number; started: string | null }
-
-/** Whether that pid is still alive (signal 0 only confirms existence) */
-export function alive(pid: number, kill: (pid: number, signal: 0) => void = (p, s) => void process.kill(p, s)): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    kill(pid, 0)
-    return true
-  } catch (err) {
-    // EPERM means it belongs to someone else, but it is **alive** — this must not read as dead
-    return (err as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
 
 /**
  * That pid's start time. null if it is unknown.
@@ -101,31 +85,12 @@ function parseHolder(raw: string): Holder {
 }
 
 /**
- * Whether the recorded owner is still that process.
- *
- * If a start time was recorded and that pid's current start time can be read, the two are
- * compared. If either side is unknown (an old file, ps failing), only whether it is alive is
- * checked — when in doubt, blocking is safer than stealing the lock.
- */
-function stillHeld(holder: Holder, startOf: (pid: number) => string | null): boolean {
-  if (!alive(holder.pid) || holder.pid === process.pid) return false
-  if (holder.started === null) return true
-  const now = startOf(holder.pid)
-  return now === null || now === holder.started
-}
-
-/**
- * `legacyFile`: whether a live owner named in `host.lock` refuses the start, for hosts from before
- * #82 that know only that file. **Off on Windows (#14)**: no Windows host ever predates #82, so
- * there is nobody the check protects, and Windows cannot read a start time to tell a reused pid
- * from the owner (`processStartTime` is null there). Windows reuses pids quickly, so a `host.lock`
- * left by a host that was hard-killed would name a live, unrelated process soon enough and refuse
- * every start, while the ownership lock itself was free.
+ * Takes ownership of the data folder `dbPath` is in, or says who holds it. `startOf` reads a pid's
+ * start time, which `host.lock` records next to the pid.
  */
 export function acquireInstanceLock(
   dbPath: string,
   startOf: (pid: number) => string | null = processStartTime,
-  legacyFile: boolean = hasPs(),
 ): LockResult {
   // an in-memory database is never shared
   if (dbPath === ':memory:') return { ok: true, release: () => {} }
@@ -146,13 +111,7 @@ export function acquireInstanceLock(
     return { ok: false, heldByPid: holder && Number.isInteger(holder.pid) && holder.pid > 0 ? holder.pid : null, lockPath }
   }
 
-  const holder = readHolder()
-  // An older host that knows only the file. A file left by a dead owner (or someone else who just shares the number) is simply taken over (when the app was force-quit)
-  if (legacyFile && holder && stillHeld(holder, startOf)) {
-    giveUp(owner)
-    return { ok: false, heldByPid: holder.pid, lockPath }
-  }
-
+  // Whatever the file says, its writer no longer holds the folder: the file is overwritten
   writeFileSync(lockPath, JSON.stringify({ pid: process.pid, started: startOf(process.pid) }))
   let released = false
   return {

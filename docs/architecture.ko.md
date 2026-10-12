@@ -226,7 +226,7 @@ macOS와 Linux에서 pid와 디스크립터를 지키지만 Windows에는 그에
 
 ```
 키퍼 A (도는 빌드)                                   키퍼 B (새 빌드, 자기 번들에서)
- 1  B를 띄운다: centralu-keeper --keeper           ──▶  hello
+ 1  B를 띄운다: centralu-keeper                    ──▶  hello
             --take-over-fd 3
  2  얼린다: 받지 않고, 모든 중계를 세우고,
     호스트 stdout을 멈추고, 자식 표를 얼리고,

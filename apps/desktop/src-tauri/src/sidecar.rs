@@ -397,6 +397,35 @@ mod link {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
+    /**
+     * Whether the keeper the window is attached to is of the window's build, from the build the
+     * keeper reports for itself (`keeper.build`, #280 step 4).
+     *
+     * A keeper that reports none is older than step 4: it cannot hand itself over, and ignores the
+     * `keeper` a switch names. Until #461 the window could not tell such a keeper's build and left it
+     * alone; now it counts as another build, so after the host moves the window offers "Restart
+     * completely", which starts a keeper of its own build.
+     */
+    pub(crate) fn keeper_same_build(keeper: Option<&BuildSource>, app: &BuildSource) -> bool {
+        keeper.is_some_and(|b| b.same_build(app))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// #461: a keeper that cannot say its build (older than #280 step 4) is another build, never
+        /// "can't tell", so the window offers to restart it rather than leaving it be.
+        #[test]
+        fn a_keeper_that_reports_no_build_is_of_another_build() {
+            let build = |commit: &str| BuildSource { commit: commit.into(), ..Default::default() };
+            let app = build("aaaaaaa");
+            assert!(keeper_same_build(Some(&build("aaaaaaa")), &app));
+            assert!(!keeper_same_build(Some(&build("bbbbbbb")), &app));
+            assert!(!keeper_same_build(None, &app));
+        }
+    }
+
     #[derive(Default)]
     struct LinkState {
         info: Option<HostInfo>,
@@ -461,17 +490,10 @@ mod link {
             }
         }
 
-        /// The start plan now: whether a keeper answers, whether the shell already fell back, and
-        /// whether a `centralu-keeper` is beside this executable.
+        /// The start plan now: whether a keeper answers, and whether the shell already fell back.
         fn plan(&self, keeper_answering: bool) -> StartMode {
             let shell_off = self.state.lock().map(|s| s.shell_off).unwrap_or(true);
-            let keeper_beside = std::env::current_exe().map(|me| keeper_exe::keeper_beside(&me)).unwrap_or(false);
-            let facts = Facts {
-                keeper_answering,
-                shell: if shell_off { Shell::FellBack } else { Shell::Untried },
-                keeper_beside,
-                ..self.facts
-            };
+            let facts = Facts { keeper_answering, shell: if shell_off { Shell::FellBack } else { Shell::Untried }, ..self.facts };
             start_plan::plan(&facts).mode
         }
 
@@ -491,7 +513,7 @@ mod link {
                 host: st.view.as_ref().and_then(|v| v.source.clone()),
                 same_build: st.view.as_ref().and_then(|v| v.source.as_ref()).map(|s| s.same_build(&self.app_build)).or(st.same_build),
                 keeper: st.view.as_ref().and_then(|v| v.keeper.build.clone()),
-                keeper_same_build: st.view.as_ref().and_then(|v| v.keeper.build.as_ref()).map(|b| b.same_build(&self.app_build)),
+                keeper_same_build: st.view.as_ref().map(|v| keeper_same_build(v.keeper.build.as_ref(), &self.app_build)),
                 background: st.view.as_ref().map(|v| v.background),
                 swap: st.view.as_ref().and_then(|v| v.swap.clone()),
                 keeps_agents: st.view.as_ref().and_then(|v| v.keeps_agents),
@@ -523,13 +545,7 @@ mod link {
         }
 
         pub fn announce_relaunch(&self) -> Result<u64, String> {
-            let v = client::request(&self.sock, &json!({ "op": "relaunching" }), Duration::from_secs(5)).map_err(|e| {
-                if e.contains("unknown op") {
-                    "the background keeper is from an older build and cannot hold the agents through a relaunch".to_string()
-                } else {
-                    e
-                }
-            })?;
+            let v = client::request(&self.sock, &json!({ "op": "relaunching" }), Duration::from_secs(5))?;
             Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
         }
 
@@ -549,9 +565,9 @@ mod link {
                 }
                 m => m,
             };
-            // The keeper executable next to this one (#440), or this one with `--keeper` when there is
-            // none. A debug build always runs it in its own executable: `tauri dev` does not rebuild
-            // `centralu-keeper`, so the one beside it may be older code (keeper::exe).
+            // The keeper executable next to this one (#440). A debug build always runs it in its own
+            // executable: `tauri dev` does not rebuild `centralu-keeper`, so the one beside it may be
+            // older code (keeper::exe).
             let mut copy = None;
             let (exe, in_process) = match mode {
                 // From the copy of what this window carries, so that nothing long-lived runs from
@@ -565,11 +581,17 @@ mod link {
                     }
                     None => (keeper_exe::beside(&me), false),
                 },
-                StartMode::KeeperBeside => (keeper_exe::beside(&me), false),
-                StartMode::KeeperInProcess => (me, true),
-                // KeeperInWindowExe: `--keeper` then runs the keeper in this executable
-                _ => (me, false),
+                StartMode::KeeperInProcess => (me.clone(), true),
+                // KeeperBeside, and a mode that never reaches here (Direct, Attach)
+                _ => (keeper_exe::beside(&me), false),
             };
+            // Until #461 the window's own executable ran the keeper when none was beside it
+            if !in_process && !exe.is_file() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("this bundle has no {} beside {}; reinstall Centralu", keeper_exe::KEEPER_EXE, me.display()),
+                ));
+            }
             let mut start = self.keeper_start(in_process);
             if let Some(dir) = copy {
                 start.host_source = Some(dir.join(crate::keeper::content::HOST_DIR));
@@ -790,9 +812,10 @@ mod link {
         /// Switches to this window's build. The keeper is handed this build's keeper executable, inside
         /// its bundle (#440), so that a keeper of another build first hands itself over to this build's
         /// keeper (#280 step 4): the program the bundle shipped, never a copy (#220). A keeper older than
-        /// step 4 ignores the field and swaps only the host.
+        /// step 4 ignores the field and swaps only the host; the window then offers "Restart
+        /// completely" for it (`keeper_same_build`).
         pub fn switch_build(&self) -> Result<(), String> {
-            let mut exe = std::env::current_exe().ok().map(|me| keeper_exe::to_start(&me));
+            let mut exe = std::env::current_exe().ok().map(|me| keeper_exe::beside(&me));
             let mut source = self.app_build.clone();
             // A Linux window names its copy, not its AppImage's mount, which goes when it quits
             // (FI4). A keeper answers and may run from that version's folder: never replaced here.

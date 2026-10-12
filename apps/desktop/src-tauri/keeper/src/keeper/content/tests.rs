@@ -193,8 +193,8 @@ fn a_host_in_verified_content_is_found_by_its_version_folder() {
 fn the_new_bundle_content_is_found_from_the_executable_the_window_names() {
     let want = Some(PathBuf::from("/Applications/Centralu.app/Contents/Resources/content"));
     assert_eq!(bundle_content_of_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu-keeper")), want);
-    // A window from before #440 names its own executable, beside it
-    assert_eq!(bundle_content_of_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), want);
+    // A window from before #440 named its own executable, beside it: no longer a keeper (#461)
+    assert_eq!(bundle_content_of_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), None);
     assert_eq!(bundle_content_of_exe(Path::new("/tmp/build/centralu-keeper")), None, "not in a bundle");
     assert_eq!(bundle_content_of_bundle(Path::new("/Applications/Centralu.app")), want.unwrap());
 }

@@ -443,16 +443,22 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 
 이 설계 덕분에 FR-10의 절반(재시작 시 복원)은 평범한 재연결과 같은 코드 경로다 — 특별한 경우가 아니라 기본 동작이다. 커서·재생 예산·전송 한도의 규칙은 [protocol.ko.md](protocol.ko.md) §1에 있다.
 
-**데이터 폴더 하나에 호스트 하나** (`dev-services/instance-lock.ts`). 한 폴더에 호스트가 둘이면 각자 제 세션 목록을 들고 같은 `store.db`에 쓴다. 소유권은 호스트가 살아 있는 내내 쥐는 배타적 SQLite 트랜잭션이다(`host-ownership.sqlite`에 `BEGIN EXCLUSIVE`, DELETE 저널 모드) (#82). 잡는 일은 원자적이고, 두 번째 호스트는 곧바로 거절되며, 호스트가 어떻게 죽든 운영체제가 풀어 주므로 크래시가 낡은 흔적을 남기지 않는다. `host.lock`(pid와 시작 시각)은 충돌 메시지에 주인을 적는 설명으로, 그리고 그 파일만 아는 옛 호스트를 위해 남는다: 살아 있고 맞아떨어지는 `host.lock`은 여전히 시작을 거절한다. #82 전에는 파일 하나를 확인하고 나서 쓰는 방식이라, 동시에 띄운 호스트 8개에서 주인이 2개 나왔다. 한 기계 안의 소유권이다 — 분산 임대가 아니고, 네트워크 파일시스템 위의 데이터 폴더용도 아니다.
+**데이터 폴더 하나에 호스트 하나** (`dev-services/instance-lock.ts`). 한 폴더에 호스트가 둘이면 각자 제 세션 목록을 들고 같은 `store.db`에 쓴다. 소유권은 호스트가 살아 있는 내내 쥐는 배타적 SQLite 트랜잭션이다(`host-ownership.sqlite`에 `BEGIN EXCLUSIVE`, DELETE 저널 모드) (#82). 잡는 일은 원자적이고, 두 번째 호스트는 곧바로 거절되며, 호스트가 어떻게 죽든 운영체제가 풀어 주므로 크래시가 낡은 흔적을 남기지 않는다. `host.lock`(pid와 시작 시각)은 충돌 메시지에 주인을 적는 설명으로만 남는다: #461 전까지는 그 파일만 아는 #82 이전 호스트를 위해 살아 있고 맞아떨어지는 `host.lock`도 시작을 거절했다. #82 전에는 파일 하나를 확인하고 나서 쓰는 방식이라, 동시에 띄운 호스트 8개에서 주인이 2개 나왔다. 한 기계 안의 소유권이다 — 분산 임대가 아니고, 네트워크 파일시스템 위의 데이터 폴더용도 아니다.
 
 ### 4.0 플랫폼별로 호스트가 뜨는 방식
 
 목록은 여기 하나다. 창은 키퍼 크레이트의 순수 함수 하나, `start_plan::plan`
 (`apps/desktop/src-tauri/keeper/src/start_plan.rs`)에서 아는 것으로 정한다: OS, 디버그인지 릴리스인지, 아래 변수들,
-리소스에 번들된 호스트가 있는지, `<data>/keeper.sock`에 키퍼가 답하는지, 이 창이 사는 동안 셸이 이미 한 번 물러났는지,
-실행 파일 옆에 `centralu-keeper`가 있는지. 모든 시작 지점이 이것에 묻는다: 창의 첫 시작과 재시도, 키퍼를 띄울 때마다,
-그리고 `centralu --keeper`. 아래 각 행은 표 테스트(`every_row_of_the_start_table`)의 한 행이고, 두 번째 테스트는 그
-사실들의 모든 조합을 이 함수가 대신한 코드와 맞대 본다.
+리소스에 번들된 호스트가 있는지, `<data>/keeper.sock`에 키퍼가 답하는지, 이 창이 사는 동안 셸이 이미 한 번 물러났는지.
+모든 시작 지점이 이것에 묻는다: 창의 첫 시작과 재시도, 그리고 키퍼를 띄울 때마다. 아래 각 행은 표 테스트
+(`every_row_of_the_start_table`)의 한 행이고, 두 번째 테스트는 그 사실들의 모든 조합을 이 함수가 대신한 코드와 맞대 본다.
+
+`centralu --keeper`는 이제 시작 지점이 아니다(#461). 창의 실행 파일은 디버그 창이 `CC_KEEPER_IN_PROCESS`와 함께 띄웠을
+때만 키퍼를 돈다(`KeeperInProcess` 행). 다른 누가 그렇게 띄우면 창을 열지 않고 곧바로 64로 끝난다
+(`keeper::exe::run_from_window`). 0.1.0-beta.16까지는 옆의 `centralu-keeper`로 `exec`했다: 새 빌드의 창 실행 파일을
+`centralu --keeper --take-over-fd 3 ...`로 띄워 넘겨주는 0.1.0-beta.11 이하의 키퍼와 #440 이전의 창 때문이었다. 그런
+키퍼는 이제 `ready`를 듣지 못해 되돌아가고, 창은 "완전히 다시 시작"을 내놓는다. 창 옆에 `centralu-keeper`가 없는
+번들(손으로 조립한 것)은 창의 실행 파일 안에서 키퍼를 돌렸지만, 이제는 키퍼를 띄우지 못하고 그렇다고 말한다.
 
 | 어디서 | 변수 | 방식 | 무엇이 도는가 | 이유 |
 |---|---|---|---|---|
@@ -461,7 +467,6 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 | macOS 릴리스, 셸이 물러남(거절, 안 실림, 고정 안 됨, 설치 실패, 열리지 않음, 보고 없음) | 없음 | `KeeperBeside` | 창이 자기 실행 파일 옆의 `centralu-keeper`를 띄우고, 호스트는 `<data>/hosts/<key>/`에서 돈다 | 에이전트는 계속 돌아야 한다. 창이 사는 동안 계속 이렇게 한다 |
 | macOS 릴리스 | `CC_KEEPER_HOST_SOURCE`(값 무관) | `KeeperBeside` | 창 옆의 키퍼가 그 폴더를 돌린다(빈 값이면 번들된 호스트) | 키퍼 스크립트가 호스트를 지정하는 방법이고, 셸은 그 호스트를 돌리지 않는다 |
 | 번들된 호스트가 없는 macOS 릴리스(`cargo run --release`) | 없음 | `KeeperBeside` | 창 옆의 키퍼, 소스 호스트, 개발용 데이터 폴더 | 셸이 검증할 것이 없다 |
-| 창 옆에 `centralu-keeper`가 없을 때 키퍼를 띄우는 모든 릴리스 | | `KeeperInWindowExe` | `centralu --keeper`로 뜬 창의 실행 파일이 직접 키퍼를 돈다 | 손으로 조립한 번들 |
 | 키퍼가 이미 답함 | | `Attach` | 아무것도 띄우지 않고 붙는다 | 데이터 폴더 하나에 키퍼 하나 |
 | macOS 디버그(`pnpm app:dev`) | 없음 | `Direct` | 창이 tsx로 소스 호스트를 돌린다, `CC_DEV=1` | 키퍼 이전처럼 앱이 호스트의 부모다. `target/debug`에 남은 번들 호스트는 무시한다 |
 | macOS나 Linux 디버그 | `CC_USE_KEEPER=1` | `KeeperInProcess` | 창이 `CC_KEEPER_IN_PROCESS=1`과 함께 자신을 `centralu --keeper`로 띄우고, 키퍼는 소스 호스트를 돌린다 | `tauri dev`는 창만 빌드하므로 옆의 `centralu-keeper`가 더 오래된 코드일 수 있다([architecture.md](architecture.md) §4.1) |
@@ -470,16 +475,13 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 | Linux 디버그 | 없음 | `Direct` | tsx로 소스 호스트 | 위와 같다 |
 | Linux 릴리스 | `CC_USE_KEEPER=1` | `KeeperBeside` | 창 옆의 키퍼(AppImage의 `usr/bin/`) | macOS 밖에는 셸이 없다 |
 | Windows, 릴리스와 디버그 | `CC_USE_KEEPER`는 무시 | `Direct` | 번들된 호스트(릴리스)나 소스 호스트(디버그), 콘솔 창 없이(§1) | 키퍼는 unix 소켓, 디스크립터 전달, `flock` 위에 지어졌다 |
-| `centralu --keeper` | `CC_KEEPER_IN_PROCESS` | `KeeperInProcess` | 창의 실행 파일 안에서 키퍼가 돈다 | 디버그 창이 요청했다 |
-| `centralu --keeper`, 옆에 `centralu-keeper` 있음 | 없음 | `KeeperBeside` | `centralu-keeper`로 `exec`한다: 같은 pid, 인자, 디스크립터 | 0.1.0-beta.11 이하의 키퍼가 넘겨줄 때와 #440 이전의 창이 창의 실행 파일을 이렇게 띄운다 |
-| `centralu --keeper`, 옆에 아무것도 없음 | 없음 | `KeeperInWindowExe` | 창의 실행 파일 안에서 키퍼가 돈다 | |
 
 창이 정하지 않는 것, 각자 제자리에서:
 
 | 무엇 | 어디서 정하는가 |
 |---|---|
 | 열린 셸이 하는 일: 설치할지 둘지, 고정됐는지, 검증, 복사, 거절 이유 | 창의 `shell::prepare`, `shell::install::plan`, `shell::start::start`, 그리고 셸 크레이트([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
-| 직접 띄운 키퍼의 넘겨주기(§4.4): 창이 지정한 실행 파일로. #444부터는 `centralu-keeper`, #440 이전에는 창의 실행 파일(그러면 위의 `centralu --keeper` 행) | `server::switch`, `server::upgrade` |
+| 직접 띄운 키퍼의 넘겨주기(§4.4): 창이 지정한 `centralu-keeper`로(#444부터). 다른 이름의 실행 파일(#440 이전의 창은 제 실행 파일을 지정한다)은 거절되고 키퍼는 제 빌드에 남는다(#461) | `server::switch`, `server::upgrade`, `handoff::give` |
 | 검증된 콘텐츠에서 뜬 키퍼의 넘겨주기: 새 콘텐츠를 검증하고 복사한 뒤 `<data>/content/<new>/centralu-keeper`로 넘겨준다 | `server::content_route`(§4.4) |
 | 원격의 `centralu serve`: npm 런처가 시스템 Node로 번들된 호스트를 돌린다. 창도 키퍼도 없다 | `packaging/npm/centralu/bin/serve.mjs`(§4.7) |
 | `pnpm dev`와 e2e: `pnpm host`가 소스 호스트를 돌린다. 창도 키퍼도 없다 | `CONTRIBUTING.md` |
@@ -535,7 +537,7 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다. `relaunched`: 이 창이 알린 다시 띄우기로 뜬 창이다(§4.5) |
 | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — 앱이 업데이트를 적용하려고 곧 스스로를 다시 띄운다(#352): `n`초(기본 60, 최대 300) 동안은 붙은 창이 없어도 키퍼가 멈추지 않는다, 백그라운드 모드가 무엇이든. 다음 attach가 이것을 써 버린다 |
 | `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit completely", 그리고 창이 이어서 자기 빌드의 키퍼를 띄우는 "Restart completely") |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. `keeper`가 있고(앱은 자기 실행 파일을 보낸다) 키퍼가 다른 빌드면, 키퍼가 먼저 그 빌드의 키퍼에게 스스로를 넘기고([architecture.ko.md](architecture.ko.md) §4.4) 그 키퍼가 교체를 한다. 검증된 콘텐츠에서 도는 키퍼는 번들에서 아무것도 띄우지 않는다: 번들의 서명된 콘텐츠를 검증해 복사하고 그 사본 안의 키퍼에게 넘긴다(§4.4). 거절되면 교체는 `refused`가 채워진 `failed`로 끝난다. 교체 중의 두 번째 `switch`는 거절한다 |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. `keeper`가 있고(앱은 제 빌드의 `centralu-keeper`를 보낸다. #440 이전의 앱이 보내던 제 실행 파일은 #461부터 거절되고 키퍼는 제 빌드에 남는다) 키퍼가 다른 빌드면, 키퍼가 먼저 그 빌드의 키퍼에게 스스로를 넘기고([architecture.ko.md](architecture.ko.md) §4.4) 그 키퍼가 교체를 한다. 검증된 콘텐츠에서 도는 키퍼는 번들에서 아무것도 띄우지 않는다: 번들의 서명된 콘텐츠를 검증해 복사하고 그 사본 안의 키퍼에게 넘긴다(§4.4). 거절되면 교체는 `refused`가 채워진 `failed`로 끝난다. 교체 중의 두 번째 `switch`는 거절한다 |
 | `{"op":"upgrade","exe":…,"source":…}` | 호스트는 그대로 두고, 키퍼를 `exe`에 있는 `source` 빌드의 키퍼에게 넘긴다(§4.4). 검증된 콘텐츠에서 돌면 `exe`가 든 번들의 콘텐츠를 검증한 사본 안의 키퍼에게 넘긴다 |
 | `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry (교체 중에는 거절) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |

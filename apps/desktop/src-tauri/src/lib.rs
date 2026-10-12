@@ -22,8 +22,8 @@ use sidecar::{HostBuild, HostInfo, RelaunchInfo, Supervisor};
 
 /// Whether this process was started as the keeper (`centralu --keeper`, #280). `main()` asks
 /// before anything else, so keeper mode never builds the Tauri app. Since #440 the keeper is
-/// `centralu-keeper`; this form stays for keepers and windows of earlier builds that start the
-/// window's executable this way.
+/// `centralu-keeper`; this form is a debug window's keeper in its own executable, and anything else
+/// is refused (#461).
 pub fn is_keeper(args: &[String]) -> bool {
     #[cfg(unix)]
     {
@@ -36,9 +36,8 @@ pub fn is_keeper(args: &[String]) -> bool {
     }
 }
 
-/// Becomes the keeper: `exec`s the `centralu-keeper` next to this executable with the same
-/// arguments and descriptors, or runs the keeper here when there is none. Returns the exit code of
-/// a keeper run here.
+/// Runs the keeper here for a debug window that asked (`CC_KEEPER_IN_PROCESS`), or refuses at once
+/// (#461). Returns the exit code.
 pub fn run_keeper(args: &[String]) -> i32 {
     #[cfg(unix)]
     {

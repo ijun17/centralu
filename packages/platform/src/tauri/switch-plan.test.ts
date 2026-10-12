@@ -265,7 +265,7 @@ describe('a keeper that stays on its build while the host runs this one (#387)',
   }
   /** ...and on the first click, when the host swap went ahead under it */
   const firstTry: SwapView = { phase: 'done', target: app, from: { commit: 'daf4ecf5' }, keeperMessage: tooLong, startedAt: 1 }
-  const behindKeeper = { mode: 'keeper' as const, app, sameBuild: true, keeperSameBuild: false }
+  const behindKeeper = { mode: 'keeper' as const, app, keeper: { commit: 'daf4ecf5' }, sameBuild: true, keeperSameBuild: false }
   const input = (swap: SwapView | undefined, over: Partial<BuildBarInput> = {}): BuildBarInput => ({
     build: { ...behindKeeper, ...(swap ? { swap } : {}) },
     dismissed: false,
@@ -313,6 +313,22 @@ describe('a keeper that stays on its build while the host runs this one (#387)',
 
   it('"Dismiss" hides the note until the window is no longer behind', () => {
     expect(buildBar(input(secondTry, { dismissed: true }))).toEqual({ kind: 'none' })
+  })
+
+  /*
+   * #461: a keeper older than #280 step 4 says no build of its own. It ignores the keeper a switch
+   * names, so "Switch to this build" would swap the host and leave it behind on every try. The
+   * window counts it as another build, and the bar offers the full restart from the start.
+   */
+  it('a keeper that says no build of its own is offered the full restart, never the switch', () => {
+    const { keeper: _, ...noBuild } = behindKeeper
+    expect(keeperStaysBehind(noBuild)).toBe(true)
+    expect(buildBar({ build: noBuild, dismissed: false, dismissedSwap: null })).toEqual({ kind: 'keeper_later', text: KEEPER_LATER_TEXT })
+    expect(autoSwitch({ build: { ...noBuild, keepsAgents: true, busy: false, relaunched: true }, autoApply: true, tried: false, dismissed: false })).toBe(
+      'none',
+    )
+    // While the host is still on another build, the host switch is offered first
+    expect(buildBar({ build: { ...noBuild, sameBuild: false }, dismissed: false, dismissedSwap: null })).toEqual({ kind: 'other', who: 'host' })
   })
 })
 

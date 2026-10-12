@@ -510,3 +510,15 @@ fn stop_all_ends_the_helpers_of_agents_that_exited_during_the_stop() {
     assert!(gone(pid), "the CLI is gone");
     assert!(gone_within(helper, Duration::from_millis(1000)), "its helper {helper} outlived the stop");
 }
+
+/// #461: the child table's fields are required. A table without `sweeps` (written by a keeper older
+/// than #435) is refused, so the handoff rolls back instead of losing the sweeps it holds.
+#[test]
+fn a_child_table_without_its_sweeps_is_refused() {
+    let table = serde_json::json!({ "listener": 0, "next_child": 1, "next_conn": 1, "children": [], "conns": [] });
+    let err = serde_json::from_value::<ReactorState>(table.clone()).err().expect("refused");
+    assert!(err.to_string().contains("sweeps"), "{err}");
+    let mut full = table;
+    full["sweeps"] = serde_json::json!([]);
+    assert!(serde_json::from_value::<ReactorState>(full).is_ok());
+}

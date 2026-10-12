@@ -106,19 +106,23 @@ Platforms: macOS, Linux.
 Happened: `tauri dev` and `cargo run` build only the binary they run, so a `centralu-keeper` in `target/debug` may be
 older code, and the link order of two binaries is not fixed, so file times cannot tell (#444).
 Rule: debug with `CC_USE_KEEPER=1` starts the window's own executable with `--keeper` and `CC_KEEPER_IN_PROCESS=1`;
-release starts the `centralu-keeper` beside the window.
-Guard: `keeper/keeper/exe.rs` `a_debug_window_keeps_the_keeper_in_its_own_executable`.
-Platforms: macOS, Linux.
+release starts the `centralu-keeper` beside the window, and never runs the keeper in the window's executable (#461).
+Guard: `keeper/keeper/exe.rs` `only_a_debug_window_that_asked_runs_the_keeper_in_its_own_executable`;
+`keeper/start_plan/tests.rs` `every_row_of_the_start_table`.
+Platforms: macOS, Linux. *Changed by #461.*
 
 **ST7. `--keeper` is decided before anything graphical exists.**
 Happened: keepers of beta.11 and earlier hand over by starting the new build's *window* executable as
 `centralu --keeper --take-over-fd 3`; that process must never open a window (#444).
-Rule: `main()` checks for `--keeper` first and then `exec`s the `centralu-keeper` beside it, keeping pid, arguments
-and descriptor 3; `centralu-keeper` accepts and ignores `--keeper`. Scheduled for removal in 0.1.0-beta.16 (#461), when
-`centralu --keeper` must exit with an error at once, still without a window.
+Rule: `main()` checks for `--keeper` first. Unless a debug window asked (ST6), it exits at once with 64, saying
+nothing on descriptor 3, so such a keeper never hears `ready` and rolls back (#461; until then it `exec`ed the
+`centralu-keeper` beside it). `centralu-keeper` accepts and ignores `--keeper`: shell v1, whose bytes are pinned, still
+passes it.
 Guard: `keeper/keeper/mod.rs` `only_the_keeper_flag_selects_keeper_mode`; `keeper/keeper/exe.rs`
-`exec_keeps_the_arguments_and_the_handoff_descriptor`.
-Platforms: macOS, Linux.
+`an_old_keeper_handing_over_to_the_window_executable_gets_no_hello`; `scripts/keeper-handoff-integration.mjs` check
+"it says nothing on the channel: no hello, so the old keeper never reaches ready and rolls back"; by hand, the same script
+with `--old-keeper` against a real 0.1.0-beta.11, which rolls back.
+Platforms: macOS, Linux. *Changed by #461.*
 
 **ST8. The keeper starts detached and outlives the window.**
 Happened: the keeper's whole point is that quitting, crashing or replacing the window sends it nothing (#280).
@@ -550,22 +554,20 @@ Platforms: all.
 **LK3. A pid is not an identity.**
 Happened: after a SIGKILL or a power loss, a pid in `host.lock` reused by an unrelated process blocked every start
 with no window to close (#184). A Korean-locale writer and a C-locale reader read the same start time differently.
-Rule: record pid and start time; same pid, other start time means reused; an unreadable start time blocks; `ps` runs
-with `LC_ALL=C`; `kill(pid, 0)` failing with EPERM means alive.
-Guard: `host/dev-services/instance-lock.test.ts` "even with a living pid, a different start time means the number was
-reused by someone else — it is taken over"; `host/dev-services/instance-lock.test.ts` "blocked when that pid's current
-start time cannot be read — stealing the lock when in doubt is the riskier choice"; `host/dev-services/instance-lock.test.ts`
-"ps runs in the C locale whatever the host was started with" and "EPERM means alive; only a process that is not there
-is dead". *Changed by step 3.*
+Rule: record pid and start time in `host.lock`, with `ps` run with `LC_ALL=C`. Since #461 the file is only read for the
+conflict message, so neither a reused pid nor an unreadable start time can refuse a start any more (LK4).
+Guard: `host/dev-services/instance-lock.test.ts` "ps runs in the C locale whatever the host was started with".
+*Changed by step 3, and by #461.*
 Platforms: macOS, Linux.
 
-**LK4. On Windows a pid in `host.lock` refuses nothing.**
+**LK4. A pid in `host.lock` refuses nothing.**
 Happened: Windows has no start time and reuses pids quickly, so a stale file named a live, unrelated process and
-refused every start while the real lock was free (979edf00, #14).
-Rule: the legacy check is off on Windows; ownership is the SQLite lock alone.
-Guard: `host/dev-services/instance-lock.test.ts` "on Windows a live pid left in host.lock does not refuse a host that
+refused every start while the real lock was free (979edf00, #14). Elsewhere the check stayed only for hosts from
+before #82, which knew nothing else.
+Rule: ownership is the SQLite lock alone, on every OS; the check of the file went with #461.
+Guard: `host/dev-services/instance-lock.test.ts` "a live, matching owner left in host.lock does not refuse a host that
 holds ownership".
-Platforms: Windows.
+Platforms: all. *Changed by #461.*
 
 **LK5. Release only your own lock.**
 Rule: on release, unlink `host.lock` only if its pid is ours; the conflict message names the lock path.
@@ -1149,20 +1151,25 @@ Guard: `keeper/os/unix/handles.rs` `received_descriptors_are_close_on_exec`; `ke
 room made for them (macOS keeps the sent length in `cmsg_len`) and close them; the count is now capped.
 Platforms: macOS, Linux.
 
-**HD5. The channel survives `exec`, and nothing else inherits it.**
-Happened: older keepers start the window executable, which `exec`s `centralu-keeper` (ST7).
-Rule: `dup2` to descriptor 3 and clear `FD_CLOEXEC` before `exec`; clear it once more in `exe::exec`; the incoming
-keeper sets close-on-exec on the channel at once.
-Guard: `keeper/keeper/exe.rs` `exec_keeps_the_arguments_and_the_handoff_descriptor`;
-`scripts/keeper-handoff-integration.mjs` check "keeper A is the process started as `centralu --keeper`".
-Platforms: macOS, Linux.
+**HD5. The channel reaches the incoming keeper, and nothing else inherits it.**
+Happened: until #461 older keepers started the window executable, which `exec`ed `centralu-keeper` (ST7); a keeper
+hands over only to a `centralu-keeper` now.
+Rule: `dup2` to descriptor 3 and clear `FD_CLOEXEC` before `exec`; the incoming keeper sets close-on-exec on the channel
+at once. An executable not named `centralu-keeper` is refused before anything starts (`handoff::give`): a window's
+executable started without `--keeper` would open a window.
+Guard: `scripts/keeper-handoff-integration.mjs` (every handoff runs through the channel); `keeper/keeper/exe.rs`
+`only_centralu_keeper_is_a_keeper_executable`; `scripts/keeper-handoff-integration.mjs` check "the handoff fails" (asked
+with B's window executable).
+Platforms: macOS, Linux. *Changed by #461.*
 
 **HD6. The snapshot only grows, and the newer side reads the older.**
 Happened: the outgoing keeper is always the older build in an update.
-Rule: `HANDOFF_PROTOCOL` is checked both ways; new snapshot and child-table fields have defaults. (#461 proposes
-requiring them after beta.16, so an old snapshot rolls back instead.)
-Guard: *Manual*: `scripts/keeper-handoff-integration.mjs --old-keeper` against a real 0.1.0-beta.11; no CI job runs an
-old keeper: **UNGUARDED** in CI.
+Rule: `HANDOFF_PROTOCOL` is checked both ways; fields are only added. Since #461 every snapshot and child-table field
+is required: a snapshot without one is refused and the handoff rolls back. A keeper of 0.1.0-beta.11 or earlier wrote no
+`sweeps` (#435) and rolls back; 0.1.0-beta.12 and later hand over.
+Guard: `keeper/keeper/children/tests.rs` `a_child_table_without_its_sweeps_is_refused`. *Manual*:
+`scripts/keeper-handoff-integration.mjs --old-keeper` against a real 0.1.0-beta.16 (hands over) and 0.1.0-beta.11 (rolls
+back); no CI job runs an old keeper: **UNGUARDED** in CI. *Changed by #461.*
 Platforms: macOS, Linux.
 
 **HD7. A rollback says how the incoming keeper ended.**

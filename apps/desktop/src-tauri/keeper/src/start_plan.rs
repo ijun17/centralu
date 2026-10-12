@@ -5,7 +5,11 @@
 //! Before this module the decision was spread over `use_keeper()` and `shell_resources()` in the
 //! window, the keeper executable's `exec_target`, `debug_assertions` at several sites and five
 //! environment variables read where they were used. Now every start site reads its facts
-//! (`Facts::window`, `Facts::keeper_flag`), asks `plan`, and does what the answer says.
+//! (`Facts::window`), asks `plan`, and does what the answer says.
+//!
+//! `centralu --keeper` is no longer a start site of its own (#461): the window's executable runs
+//! the keeper only for a debug window that asked (`StartMode::KeeperInProcess`), and otherwise
+//! refuses at once (`keeper::exe::run_from_window`).
 //!
 //! What it does not decide, because each is already its own table-tested decision and is the
 //! outcome of an attempt rather than a fact known beforehand:
@@ -91,8 +95,6 @@ pub struct Env {
     pub keeper_host_source: Var,
     /// `CC_SHELL_UNPINNED=1`: open a shell the window carries unpinned anyway (`shell` module docs).
     pub shell_unpinned: bool,
-    /// `CC_KEEPER_IN_PROCESS` (any value): set by a debug window on the keeper it starts.
-    pub keeper_in_process: bool,
 }
 
 /// Names of the variables `Env` reads, for the sites that set them on a child.
@@ -100,6 +102,7 @@ pub const HOST_CMD_ENV: &str = "CC_HOST_CMD";
 pub const USE_KEEPER_ENV: &str = "CC_USE_KEEPER";
 pub const KEEPER_HOST_SOURCE_ENV: &str = "CC_KEEPER_HOST_SOURCE";
 pub const SHELL_UNPINNED_ENV: &str = "CC_SHELL_UNPINNED";
+/// Set by a debug window on the keeper it starts in its own executable (`StartMode::KeeperInProcess`).
 pub const KEEPER_IN_PROCESS_ENV: &str = "CC_KEEPER_IN_PROCESS";
 
 impl Env {
@@ -109,7 +112,6 @@ impl Env {
             use_keeper: std::env::var(USE_KEEPER_ENV).as_deref() == Ok("1"),
             keeper_host_source: os_var(KEEPER_HOST_SOURCE_ENV),
             shell_unpinned: std::env::var(SHELL_UNPINNED_ENV).as_deref() == Ok("1"),
-            keeper_in_process: std::env::var_os(KEEPER_IN_PROCESS_ENV).is_some(),
         }
     }
 }
@@ -132,17 +134,6 @@ fn os_var(name: &str) -> Var {
     }
 }
 
-/// Which process is deciding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Who {
-    /// The window (`centralu`), starting its host or the keeper that holds it.
-    Window,
-    /// The window's executable started as `centralu --keeper ...`: by a debug window, by a window
-    /// whose bundle has no `centralu-keeper`, or by a keeper of 0.1.0-beta.11 or earlier handing
-    /// itself over to this build (and a window of before #440 starting its keeper).
-    KeeperFlag,
-}
-
 /// The shell, as far as this window has seen it (macOS release builds).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Shell {
@@ -156,7 +147,6 @@ pub enum Shell {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Facts {
-    pub who: Who,
     pub os: Os,
     pub build: Build,
     pub env: Env,
@@ -166,31 +156,18 @@ pub struct Facts {
     /// A keeper answers on `<data>/keeper.sock`.
     pub keeper_answering: bool,
     pub shell: Shell,
-    /// `centralu-keeper` is next to the window's executable (and is not that executable).
-    pub keeper_beside: bool,
 }
 
 impl Facts {
     /// The window's facts on this platform and build, before it has looked for a keeper.
     pub fn window(env: Env, bundled_host: bool) -> Facts {
         Facts {
-            who: Who::Window,
             os: Os::current(),
             build: Build::current(),
             env,
             bundled_host,
             keeper_answering: false,
             shell: Shell::Untried,
-            keeper_beside: false,
-        }
-    }
-
-    /// The facts of `centralu --keeper` on this platform and build.
-    pub fn keeper_flag(keeper_in_process: bool, keeper_beside: bool) -> Facts {
-        Facts {
-            who: Who::KeeperFlag,
-            keeper_beside,
-            ..Facts::window(Env { keeper_in_process, ..Env::default() }, false)
         }
     }
 }
@@ -208,17 +185,14 @@ pub enum StartMode {
         /// `CC_SHELL_UNPINNED=1`: open a shell the window carries unpinned anyway.
         allow_unpinned: bool,
     },
-    /// The window starts `centralu-keeper` next to its own executable (from the `centralu --keeper`
-    /// side: `exec`s into it, same pid, arguments and descriptors).
+    /// The window starts `centralu-keeper` next to its own executable. A bundle without one (assembled
+    /// by hand) fails to start it, and says so (#461).
     KeeperBeside,
     /// The window copies the `centralu-keeper` beside it and its bundled host into
     /// `<data>/content/<version>/` and starts the keeper from the copy, so nothing long-lived runs
     /// from the AppImage's mount (lesson FI4; Linux releases). Not verified: the release signs no
     /// Linux content yet. A copy that fails falls back to `KeeperBeside`.
     Keeper,
-    /// The window's own executable runs the keeper (`centralu --keeper`), because no
-    /// `centralu-keeper` is beside it: a bundle someone assembled by hand.
-    KeeperInWindowExe,
     /// A debug window starts its own executable with `--keeper` and `CC_KEEPER_IN_PROCESS=1`, which
     /// then runs the keeper itself rather than `exec` a `centralu-keeper` that may be older code.
     KeeperInProcess,
@@ -258,10 +232,7 @@ pub enum Reason {
     HostSourceNamed,
     NoBundledHost,
     NoShellHere,
-    NoKeeperBeside,
     DebugKeeper,
-    InProcessAsked,
-    ExecBeside,
 }
 
 impl Reason {
@@ -282,10 +253,7 @@ impl Reason {
             Reason::HostSourceNamed => "CC_KEEPER_HOST_SOURCE is set (the keeper scripts name a host with it), and the shell would not run that host",
             Reason::NoBundledHost => "this release build carries no bundled host, so it runs the source host like a debug build",
             Reason::NoShellHere => "only macOS has a shell; elsewhere the window starts the keeper",
-            Reason::NoKeeperBeside => "no centralu-keeper next to the window's executable",
             Reason::DebugKeeper => "tauri dev builds only the window, so a centralu-keeper beside it may be older code",
-            Reason::InProcessAsked => "CC_KEEPER_IN_PROCESS: a debug window asked for the keeper in its own executable",
-            Reason::ExecBeside => "the window's executable turns into the centralu-keeper beside it",
         }
     }
 }
@@ -294,7 +262,7 @@ impl Reason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Plan {
     pub mode: StartMode,
-    /// The host the window's build runs. `None` for `centralu --keeper`, whose command line names it.
+    /// The host the window's build runs.
     pub host: Option<Host>,
     /// The dev data folder and `CC_DEV=1`: a debug build, or a release with no bundled host.
     pub dev: bool,
@@ -308,16 +276,6 @@ pub fn plan(f: &Facts) -> Plan {
     // target/debug/, and once a release build has been made a bundled host stays copied there too. A
     // debug build that ran it would miss source edits and take the release app's data folder.
     let dev = !(release && f.bundled_host);
-    if f.who == Who::KeeperFlag {
-        let (mode, reason) = if f.env.keeper_in_process {
-            (StartMode::KeeperInProcess, Reason::InProcessAsked)
-        } else if f.keeper_beside {
-            (StartMode::KeeperBeside, Reason::ExecBeside)
-        } else {
-            (StartMode::KeeperInWindowExe, Reason::NoKeeperBeside)
-        };
-        return Plan { mode, host: None, dev, reason };
-    }
 
     let direct = |reason| {
         let host = if f.env.host_cmd == Var::Set {
@@ -369,12 +327,10 @@ pub fn plan(f: &Facts) -> Plan {
     };
     if !release {
         keeper(StartMode::KeeperInProcess, Reason::DebugKeeper)
-    } else if f.keeper_beside && f.os == Os::Linux {
+    } else if f.os == Os::Linux {
         keeper(StartMode::Keeper, why)
-    } else if f.keeper_beside {
-        keeper(StartMode::KeeperBeside, why)
     } else {
-        keeper(StartMode::KeeperInWindowExe, Reason::NoKeeperBeside)
+        keeper(StartMode::KeeperBeside, why)
     }
 }
 

@@ -512,17 +512,24 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 
 Thanks to this design, half of FR-10 (restore on restart) is the same code path as an ordinary reconnect — it is the default behaviour, not a special case. The rules for the cursor, the replay budget and the transport bounds are in [protocol.md](protocol.md) §1.
 
-**One host per data folder** (`dev-services/instance-lock.ts`). Two hosts on one folder would each hold their own session list and write to the same `store.db`. Ownership is an exclusive SQLite transaction (`BEGIN EXCLUSIVE` on `host-ownership.sqlite`, DELETE journal mode) that the host holds for its whole lifetime (#82): taking it is atomic, a second host is refused at once, and the operating system releases it when the host dies, however it dies, so a crash leaves nothing stale. `host.lock` (pid and start time) remains as the description of the owner in the conflict message, and for older hosts that know only that file: a live, matching `host.lock` still refuses the start. Before #82 ownership was the file alone, checked and then written: 8 hosts started at once produced 2 owners. This is single-machine ownership — not a distributed lease, and not for a data folder on a network filesystem.
+**One host per data folder** (`dev-services/instance-lock.ts`). Two hosts on one folder would each hold their own session list and write to the same `store.db`. Ownership is an exclusive SQLite transaction (`BEGIN EXCLUSIVE` on `host-ownership.sqlite`, DELETE journal mode) that the host holds for its whole lifetime (#82): taking it is atomic, a second host is refused at once, and the operating system releases it when the host dies, however it dies, so a crash leaves nothing stale. `host.lock` (pid and start time) remains as the description of the owner in the conflict message, and nothing more: until #461 a live, matching `host.lock` also refused the start, for hosts from before #82 that knew only that file. Before #82 ownership was the file alone, checked and then written: 8 hosts started at once produced 2 owners. This is single-machine ownership — not a distributed lease, and not for a data folder on a network filesystem.
 
 ### 4.0 How the host starts, on each platform
 
 This is the one list. The window decides in one pure function, `start_plan::plan` in the keeper crate
 (`apps/desktop/src-tauri/keeper/src/start_plan.rs`), from what it knows: the OS, debug or release, the variables
 below, whether a bundled host is in its resources, whether a keeper answers on `<data>/keeper.sock`, whether the shell
-already fell back once in this window's life, and whether `centralu-keeper` is next to its executable. Every start site
-asks it: the window's first start and its retries, each keeper start, and `centralu --keeper`. Each row below is a row
-of its table test (`every_row_of_the_start_table`), and a second test checks every combination of those facts against
-the code the plan replaced.
+already fell back once in this window's life. Every start site asks it: the window's first start and its retries, and
+each keeper start. Each row below is a row of its table test (`every_row_of_the_start_table`), and a second test checks
+every combination of those facts against the code the plan replaced.
+
+`centralu --keeper` is not a start site any more (#461). The window's executable runs the keeper only when a debug window
+started it with `CC_KEEPER_IN_PROCESS` (the `KeeperInProcess` row); started that way by anything else, it exits at once
+with 64 and opens no window (`keeper::exe::run_from_window`). Until 0.1.0-beta.16 it `exec`ed the `centralu-keeper`
+beside it, for keepers of 0.1.0-beta.11 and earlier, which hand over by starting the new build's window executable as
+`centralu --keeper --take-over-fd 3 ...`, and for windows from before #440; such a keeper now never hears `ready` and
+rolls back, and the window offers "Restart completely". A bundle with no `centralu-keeper` beside the window (assembled
+by hand) used to run the keeper in the window's executable; it now fails to start its keeper and says so.
 
 | Where | Variables | Mode | What runs | Why |
 |---|---|---|---|---|
@@ -531,7 +538,6 @@ the code the plan replaced.
 | macOS release, the shell fell back (refused, not carried, unpinned, not installable, not opened, no report) | none | `KeeperBeside` | the window starts the `centralu-keeper` next to its own executable; the host runs from `<data>/hosts/<key>/` | agents must keep working; the window does so for the rest of its life |
 | macOS release | `CC_KEEPER_HOST_SOURCE` (any value) | `KeeperBeside` | the keeper beside the window, running the named folder (a blank value: the bundled host) | the keeper scripts' way of naming a host, which the shell would not run |
 | macOS release with no bundled host (`cargo run --release`) | none | `KeeperBeside` | the keeper beside the window, the source host, the dev data folder | there is nothing for the shell to verify |
-| any release starting a keeper with no `centralu-keeper` beside the window | | `KeeperInWindowExe` | the window's executable as `centralu --keeper` runs the keeper itself | a bundle assembled by hand |
 | a keeper already answers | | `Attach` | nothing is started; the window attaches | one keeper per data folder |
 | macOS debug (`pnpm app:dev`) | none | `Direct` | the window runs the source host through tsx, `CC_DEV=1` | the app is the host's parent, as before the keeper; a bundled host left in `target/debug` is ignored |
 | macOS or Linux debug | `CC_USE_KEEPER=1` | `KeeperInProcess` | the window starts itself as `centralu --keeper` with `CC_KEEPER_IN_PROCESS=1`; the keeper runs the source host | `tauri dev` builds only the window, so a `centralu-keeper` beside it may be older code ([architecture.md](architecture.md) §4.1) |
@@ -540,16 +546,13 @@ the code the plan replaced.
 | Linux debug | none | `Direct` | the source host through tsx | as above |
 | Linux release | `CC_USE_KEEPER=1` | `Keeper` | the window copies the keeper beside it (`usr/bin/` in the AppImage) and its bundled host into `<data>/content/<version>/` (`keeper/carried.rs`: hashed, renamed into place, read-only; not signed) and starts the keeper from the copy, which runs the host from it; a copy that fails falls back to the keeper beside the window | nothing long-lived may run from the AppImage's mount, which goes when its window quits (runtime-lessons FI4); no shell off macOS |
 | Windows, release or debug | `CC_USE_KEEPER` is ignored | `Direct` | the bundled host (release) or the source host (debug), no console window (§1) | the keeper is built on unix sockets, descriptor passing and `flock` |
-| `centralu --keeper` | `CC_KEEPER_IN_PROCESS` | `KeeperInProcess` | the keeper runs in the window's executable | a debug window asked |
-| `centralu --keeper`, `centralu-keeper` beside it | none | `KeeperBeside` | `exec`s into `centralu-keeper`: same pid, arguments and descriptors | a keeper of 0.1.0-beta.11 or earlier handing over, and windows from before #440, start the window's executable this way |
-| `centralu --keeper`, nothing beside it | none | `KeeperInWindowExe` | the keeper runs in the window's executable | |
 
 Not decided by the window, each in its own place:
 
 | What | Where it is decided |
 |---|---|
 | What the shell does once opened: install or keep, pinned or not, verify, copy, and the reasons it refuses | `shell::prepare`, `shell::install::plan`, `shell::start::start` in the window; the shell crate ([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
-| A keeper started directly handing itself over (§4.4): to the executable the window names, `centralu-keeper` since #444 or the window's executable before #440 (then the `centralu --keeper` rows above) | `server::switch`, `server::upgrade` |
+| A keeper started directly handing itself over (§4.4): to the `centralu-keeper` the window names (since #444). An executable of any other name (a window from before #440 names its own) is refused and the keeper stays on its build (#461) | `server::switch`, `server::upgrade`, `handoff::give` |
 | A keeper from verified content handing itself over: verifies and copies the new content, then hands over to `<data>/content/<new>/centralu-keeper` | `server::content_route` (§4.4) |
 | `centralu serve` on a remote: the npm launcher runs the bundled host on the system Node; no window, no keeper | `packaging/npm/centralu/bin/serve.mjs` (§4.7) |
 | `pnpm dev` and e2e: `pnpm host` runs the source host; no window, no keeper | `CONTRIBUTING.md` |
@@ -605,11 +608,11 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 
 | request | answer |
 |---|---|
-| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and token (§4.2), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4) |
+| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and token (§4.2), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4; a window counts a keeper without one as another build, which only "Restart completely" moves, #461) |
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. `relaunched`: this window is the one an announced relaunch started (§4.5) |
 | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is about to relaunch itself to apply an update (#352): for `n` s (60 by default, at most 300) no window attached does not stop the keeper, whatever background mode says. The next attach spends it |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit completely", and "Restart completely", after which the window starts a keeper of its own build) |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sends its own executable, which turns into the keeper beside it) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sent its own executable, which is refused since #461, the keeper staying on its build) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
 | `{"op":"upgrade","exe":…,"source":…}` | hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
 | `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |

@@ -21,8 +21,8 @@ use super::*;
 const PLATFORM: &str = "test-platform";
 
 /// A stand-in keeper: writes where it runs from and its arguments into `<data>/fake-keeper.out`
-/// (the data folder is its third argument, after `--keeper --data-dir`), then marks itself ready.
-const READY_KEEPER: &str = "#!/bin/sh\nprintf '%s\\n' \"$0\" \"$@\" > \"$3/fake-keeper.out\"\necho \"keeper output\"\n: > \"$3/fake-ready\"\nexec sleep 2\n";
+/// (the data folder is its second argument, after `--data-dir`), then marks itself ready.
+const READY_KEEPER: &str = "#!/bin/sh\nprintf '%s\\n' \"$0\" \"$@\" > \"$2/fake-keeper.out\"\necho \"keeper output\"\n: > \"$2/fake-ready\"\nexec sleep 2\n";
 
 fn key() -> SigningKey {
     let mut seed = [0u8; 32];
@@ -154,7 +154,7 @@ fn starts_the_keeper_from_the_verified_copy_with_the_windows_command_line() {
     let host = dest.join("host").to_string_lossy().to_string();
     assert_eq!(
         ran[1..],
-        ["--keeper", "--data-dir", &data, "--host-source", &host, "--bundle-path", "/Applications/Centralu.app", "--app-version", "0.2.0"]
+        ["--data-dir", &data, "--host-source", &host, "--bundle-path", "/Applications/Centralu.app", "--app-version", "0.2.0"]
     );
     // Its output went to keeper.log, after the shell's own lines.
     let log = fs::read_to_string(c.data().join("keeper.log")).unwrap();
@@ -347,7 +347,7 @@ fn a_keeper_that_cannot_start_exits_or_never_answers_is_refused() {
     let cases: [(&str, Reason, u64); 3] = [
         ("#!/nonexistent/interpreter\n", Reason::KeeperStart, 20),
         ("#!/bin/sh\necho 'no store' >&2\nexit 1\n", Reason::KeeperExited, 20),
-        ("#!/bin/sh\necho $$ > \"$3/fake-pid\"\nexec sleep 30\n", Reason::KeeperTimeout, 1),
+        ("#!/bin/sh\necho $$ > \"$2/fake-pid\"\nexec sleep 30\n", Reason::KeeperTimeout, 1),
     ];
     for (script, reason, timeout) in cases {
         let c = Case::new("keeper");

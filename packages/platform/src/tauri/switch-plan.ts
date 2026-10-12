@@ -241,15 +241,23 @@ export function swapProgressText(s: SwapView | undefined): string | null {
  * So: the host is on this window's build, the keeper is not, and the last swap was to this build
  * and says why the keeper stayed (`keeperMessage`). Nothing is wrong that a switch could fix; the
  * keeper moves when it next starts, which a full restart does now.
+ *
+ * A keeper that does not say its build at all (`keeper` absent: older than #280 step 4) cannot hand
+ * itself over either, and ignores the keeper a switch names, so it stays behind from the start.
+ * Until #461 the window could not tell such a keeper's build and left it alone; now the window
+ * reports it as another build (`keeperSameBuild: false`) and this offers the full restart.
  */
 export function keeperStaysBehind(b: {
   app?: SwapBuild
   sameBuild?: boolean
+  keeper?: SwapBuild
   keeperSameBuild?: boolean
   swap?: SwapView
 }): boolean {
   const s = b.swap
-  if (b.sameBuild !== true || b.keeperSameBuild !== false || !s?.keeperMessage) return false
+  if (b.sameBuild !== true || b.keeperSameBuild !== false) return false
+  if (!b.keeper) return true
+  if (!s?.keeperMessage) return false
   if (s.phase !== 'done' && s.phase !== 'failed') return false
   return !b.app || sameBuildKey(s.target, b.app)
 }

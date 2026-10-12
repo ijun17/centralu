@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { OWNERSHIP_FILE, acquireInstanceLock, alive, lockConflictMessage, processStartTime } from './instance-lock.js'
+import { OWNERSHIP_FILE, acquireInstanceLock, lockConflictMessage, processStartTime } from './instance-lock.js'
 
 /**
  * If two hosts use the same data folder, each carries a different session list while writing to
@@ -32,25 +32,18 @@ describe('single-instance lock for the host', () => {
     if (r.ok) r.release()
   })
 
-  it('blocked when a living process still holds it', () => {
-    const db = dbIn()
-    // A pid guaranteed to be alive: the parent (the process that launched this test)
-    writeFileSync(join(db, '..', 'host.lock'), String(process.ppid))
-    const r = acquireInstanceLock(db, processStartTime, true)
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.heldByPid).toBe(process.ppid)
-  })
-
   /*
-   * Windows (#14): no host older than #82 ever ran there, so the file is only a description, and
-   * a start time cannot be read to tell a reused pid apart. A file naming a live, unrelated process
-   * (Windows reuses pids quickly) must not refuse a host that holds the ownership lock.
+   * Until #461 a live owner named in host.lock refused the start, for hosts from before #82 that
+   * knew only the file. Now the file is a description: a host that holds the ownership lock starts
+   * whatever the file says, so a pid reused by an unrelated process (Windows reuses them quickly,
+   * #14) or a start time that cannot be read never refuses one.
    */
-  it('on Windows a live pid left in host.lock does not refuse a host that holds ownership', () => {
+  it('a live, matching owner left in host.lock does not refuse a host that holds ownership', () => {
     const db = dbIn()
-    writeFileSync(join(db, '..', 'host.lock'), String(process.ppid))
-    const r = acquireInstanceLock(db, () => null, false)
+    writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: process.ppid, started: processStartTime(process.ppid) }))
+    const r = acquireInstanceLock(db)
     expect(r.ok).toBe(true)
+    expect(JSON.parse(readFileSync(join(db, '..', 'host.lock'), 'utf8')).pid).toBe(process.pid)
     if (r.ok) r.release()
   })
 
@@ -65,37 +58,6 @@ describe('single-instance lock for the host', () => {
       started: processStartTime(process.pid),
     })
     if (r.ok) r.release()
-  })
-
-  /*
-   * The lock is only released on the exit event — it is left behind after a SIGKILL or a power
-   * loss. If the leftover pid is reused by a process unrelated to Centralu, pid alone could not
-   * tell the difference, startup was rejected, and with no window to close there was no way to
-   * get unstuck (#184). A different start time means it belongs to someone else.
-   */
-  it('even with a living pid, a different start time means the number was reused by someone else — it is taken over', () => {
-    const db = dbIn()
-    writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: process.ppid, started: 'Thu Jan  1 00:00:00 1970' }))
-    const r = acquireInstanceLock(db, () => 'Sun Sep 27 00:21:23 2026')
-    expect(r.ok).toBe(true)
-    expect(JSON.parse(readFileSync(join(db, '..', 'host.lock'), 'utf8')).pid).toBe(process.pid)
-    if (r.ok) r.release()
-  })
-
-  // `ps` reads the start time; Windows has neither, and skips the file check (above)
-  it.skipIf(process.platform === 'win32')('blocked when both pid and start time match, and reports the lock file\'s location', () => {
-    const db = dbIn()
-    const started = processStartTime(process.ppid)
-    expect(started).not.toBeNull()
-    writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: process.ppid, started }))
-    const r = acquireInstanceLock(db)
-    expect(r).toEqual({ ok: false, heldByPid: process.ppid, lockPath: join(db, '..', 'host.lock') })
-  })
-
-  it('blocked when that pid\'s current start time cannot be read — stealing the lock when in doubt is the riskier choice', () => {
-    const db = dbIn()
-    writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: process.ppid, started: 'Thu Jan  1 00:00:00 1970' }))
-    expect(acquireInstanceLock(db, () => null, true).ok).toBe(false)
   })
 
   it('releasing it removes the lock file, and the next host can acquire it', () => {
@@ -273,8 +235,7 @@ process.exit(0)
 /*
  * LK3: a pid is not an identity, and reading it must not depend on the reader. `ps -o lstart=`
  * follows the locale, so a Korean-locale writer and a C-locale reader read the same start time
- * differently and stole a live lock; and `kill(pid, 0)` failing with EPERM is someone else's
- * process, alive.
+ * differently and stole a live lock (the start time is still recorded in `host.lock`).
  */
 describe('reading another process (LK3)', () => {
   it.skipIf(process.platform === 'win32')('ps runs in the C locale whatever the host was started with', () => {
@@ -291,14 +252,5 @@ describe('reading another process (LK3)', () => {
       if (saved.LC_ALL === undefined) delete process.env.LC_ALL
       else process.env.LC_ALL = saved.LC_ALL
     }
-  })
-
-  it('EPERM means alive; only a process that is not there is dead', () => {
-    const failing = (code: string) => () => {
-      throw Object.assign(new Error(code), { code })
-    }
-    expect(alive(4242, failing('EPERM'))).toBe(true)
-    expect(alive(4242, failing('ESRCH'))).toBe(false)
-    expect(alive(4242, () => {})).toBe(true)
   })
 })

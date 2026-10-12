@@ -64,9 +64,9 @@ use swap::SwapView;
 /// rather than guessing at its answers.
 pub const KEEPER_PROTOCOL: u32 = 1;
 
-/// The flag the window's `main()` looks for. Every keeper start still passes it, so that the same
-/// command line works whether it names `centralu-keeper` (which ignores it) or, from an older window
-/// or keeper, the window's executable (which turns into the keeper on seeing it, `exe.rs`).
+/// The flag the window's `main()` looks for before anything graphical exists. Only a debug window
+/// passes it, to run the keeper in its own executable; anything else that passes it to the window's
+/// executable is refused there (`exe::run_from_window`, #461). `centralu-keeper` ignores it.
 pub const KEEPER_FLAG: &str = "--keeper";
 
 /// Exit code of a keeper that found another one already holding the data folder.

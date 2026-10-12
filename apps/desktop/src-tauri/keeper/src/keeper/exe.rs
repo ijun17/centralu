@@ -1,37 +1,38 @@
-//! Which executable runs as the keeper, and how the window's executable turns into it (#440).
+//! Which executable runs as the keeper (#440), and what the window's executable does when started as
+//! one.
 //!
 //! The keeper is its own executable, `centralu-keeper`, shipped next to the window's
 //! (`Contents/MacOS/` in the macOS bundle, `usr/bin/` in the AppImage). It links no Tauri and no
-//! webview, so a later step can start it from verified content outside the bundle (thin-shell
-//! plan §5).
+//! webview, so it can be started from verified content outside the bundle (thin-shell plan §5).
 //!
-//! **The window's executable still answers `--keeper`.** Keepers already installed (0.1.0-beta.11
-//! and earlier) hand themselves over by starting the new build's *window* executable as
-//! `centralu --keeper --take-over-fd 3 ...` (the path the window gave them), and an older window
-//! starts its keeper the same way. So `centralu --keeper` replaces itself with the keeper next to
-//! it through `exec`: same pid (the outgoing keeper is waiting on that child), same arguments,
-//! same environment, and every descriptor that is not close-on-exec, which is how the handoff
-//! channel at descriptor 3 and the `keeper.log` at stdout and stderr reach the real keeper.
-//!
-//! When there is no keeper next to it (a bundle someone assembled by hand), the window's
-//! executable runs the keeper itself, as every build before this one did. Nothing a person sees
-//! changes either way.
+//! **`centralu --keeper` refuses** (#461), at once and before anything graphical exists
+//! (`run_from_window`). Until 0.1.0-beta.16 it `exec`ed the `centralu-keeper` beside it, for keepers
+//! of 0.1.0-beta.11 and earlier, which hand themselves over by starting the new build's *window*
+//! executable as `centralu --keeper --take-over-fd 3 ...`, and for windows from before #440, which
+//! started their keeper that way. Such a keeper now never hears its successor say `hello` or
+//! `ready` (the handoff's commit point), so it rolls back and serves on; the window then offers
+//! "Restart completely", which starts a keeper of its own build. Opening a window instead would put
+//! a second window on screen from a background keeper, so the refusal is an exit, not a fallthrough.
 //!
 //! **Debug builds run the keeper in the window's executable** (`IN_PROCESS_ENV`). `tauri dev` and
 //! `cargo run` build only the binary they run, so a `centralu-keeper` in `target/debug` is whatever
 //! an earlier `cargo build` left there: older code than the window's, with nothing to tell the two
 //! apart (the two binaries of one `cargo build` are linked in no fixed order, so their times say
 //! nothing either). A debug window that opts into the keeper (`CC_USE_KEEPER=1`) therefore starts
-//! its own executable with `--keeper` and this variable, as it did before #440.
+//! its own executable with `--keeper` and this variable. That is the only `--keeper` left.
 
 use std::path::{Path, PathBuf};
 
 /// The keeper executable's file name.
 pub const KEEPER_EXE: &str = "centralu-keeper";
 
-/// Set by a debug window on the keeper it starts: run the keeper in the window's executable, do not
-/// `exec` the `centralu-keeper` next to it. Removed again before the keeper starts anything.
+/// Set by a debug window on the keeper it starts: run the keeper in the window's executable. Removed
+/// again before the keeper starts anything.
 pub const IN_PROCESS_ENV: &str = crate::start_plan::KEEPER_IN_PROCESS_ENV;
+
+/// Exit code of `centralu --keeper` refusing to be a keeper (#461). `EX_USAGE`: the command line
+/// names a way of starting the keeper this build no longer has.
+pub const EXIT_NOT_A_KEEPER: i32 = 64;
 
 /**
  * How a keeper is started: its arguments, the environment it gets on top of the starter's, and
@@ -49,15 +50,22 @@ pub struct Start {
     pub app_version: String,
     /// A debug build's keeper: the dev data folder and the source host (`CC_DEV=1`).
     pub dev: bool,
-    /// Run the keeper in the window's executable rather than `exec` the one beside it (`IN_PROCESS_ENV`).
+    /// Run the keeper in the window's executable, which a debug window starts as `centralu --keeper`
+    /// (`IN_PROCESS_ENV`).
     pub in_process: bool,
 }
 
 impl Start {
-    /// `--keeper` comes first so the same command line works for `centralu-keeper` (which ignores it)
-    /// and for the window's executable (which turns into the keeper on seeing it).
+    /// `--keeper` only for a keeper in the window's executable, the one place it still means
+    /// something. `centralu-keeper` ignores it (`server::parse_args`): shell v1, whose bytes are
+    /// pinned, still passes it, as every start did until #461.
     pub fn args(&self) -> Vec<String> {
-        let mut args = vec![super::KEEPER_FLAG.to_string(), "--data-dir".into(), self.data_dir.to_string_lossy().to_string()];
+        let mut args = Vec::new();
+        if self.in_process {
+            args.push(super::KEEPER_FLAG.to_string());
+        }
+        args.push("--data-dir".into());
+        args.push(self.data_dir.to_string_lossy().to_string());
         if let Some(dir) = &self.host_source {
             args.push("--host-source".into());
             args.push(dir.to_string_lossy().to_string());
@@ -96,97 +104,51 @@ pub fn beside(window_exe: &Path) -> PathBuf {
     window_exe.with_file_name(KEEPER_EXE)
 }
 
-/// What to start as the keeper, given the window's own executable: the keeper next to it when
-/// there is one, else the window's executable itself (`--keeper` then runs the keeper in it).
-pub fn to_start(window_exe: &Path) -> PathBuf {
-    let keeper = beside(window_exe);
-    if keeper.is_file() {
-        keeper
-    } else {
-        window_exe.to_path_buf()
-    }
+/// Whether `exe` is a keeper executable by its name. A keeper hands itself over only to one
+/// (`handoff::give`): a window from before #440 names its own executable instead, which no longer
+/// answers `--keeper` and must never be started without it.
+pub fn is_keeper_exe(exe: &Path) -> bool {
+    exe.file_name().is_some_and(|n| n == KEEPER_EXE)
 }
 
-/// Whether a `centralu-keeper` other than `window_exe` itself is next to `window_exe`.
-pub fn keeper_beside(window_exe: &Path) -> bool {
-    let keeper = beside(window_exe);
-    keeper.is_file() && keeper != window_exe
-}
-
-/// What `centralu --keeper` should `exec`, if anything: the keeper next to it, unless asked to run
-/// in-process or there is none (or this already is it). The start plan decides (`Who::KeeperFlag`).
-pub fn exec_target(window_exe: &Path, in_process: bool) -> Option<PathBuf> {
-    use crate::start_plan::{plan, Facts, StartMode};
-    let facts = Facts::keeper_flag(in_process, keeper_beside(window_exe));
-    (plan(&facts).mode == StartMode::KeeperBeside).then(|| beside(window_exe))
-}
-
-/// The descriptor a handoff passes (`--take-over-fd N`), if the arguments name one.
-fn take_over_fd(args: &[String]) -> Option<i32> {
-    let i = args.iter().position(|a| a == "--take-over-fd")?;
-    args.get(i + 1)?.parse().ok()
+/// Whether `centralu --keeper` may run the keeper in this process: only a debug build, and only when
+/// the debug window that started it asked (`IN_PROCESS_ENV`).
+pub fn runs_in_process(asked: bool, build: crate::start_plan::Build) -> bool {
+    asked && build == crate::start_plan::Build::Debug
 }
 
 /**
- * Replaces this process with `keeper`, passing `args` after the program name unchanged. Returns
- * only when the `exec` failed.
- *
- * The handoff channel must survive the `exec`. The outgoing keeper already cleared its
- * close-on-exec flag when it put it at descriptor 3 (`handoff::spawn_successor`); it is cleared
- * again here so that nothing the window's executable loaded before `main` can have set it.
- */
-pub fn exec(keeper: &Path, args: &[String]) -> std::io::Error {
-    use std::os::unix::process::CommandExt;
-    if let Some(fd) = take_over_fd(args) {
-        // SAFETY: fcntl on a descriptor number only changes its flags; a number that is not open
-        // fails with EBADF, and the incoming keeper then reports the missing channel itself.
-        unsafe {
-            let fl = libc::fcntl(fd, libc::F_GETFD);
-            if fl != -1 {
-                libc::fcntl(fd, libc::F_SETFD, fl & !libc::FD_CLOEXEC);
-            }
-        }
-    }
-    std::process::Command::new(keeper).args(args.iter().skip(1)).exec()
-}
-
-/**
- * `centralu --keeper ...`: becomes the keeper next to this executable, or, with none there, runs
- * the keeper in this process. Returns the exit code of an in-process keeper.
+ * `centralu --keeper ...`: runs the keeper in this process for a debug window that asked, and
+ * otherwise exits at once with `EXIT_NOT_A_KEEPER` (module docs). Returns the exit code.
  */
 pub fn run_from_window(args: &[String]) -> i32 {
-    let in_process = std::env::var_os(IN_PROCESS_ENV).is_some();
+    let asked = std::env::var_os(IN_PROCESS_ENV).is_some();
     // Not passed on to the host and its children, nor to the next keeper of a handoff.
     std::env::remove_var(IN_PROCESS_ENV);
-    if let Ok(me) = std::env::current_exe() {
-        if let Some(keeper) = exec_target(&me, in_process) {
-            let err = exec(&keeper, args);
-            eprintln!("[keeper] could not start {} ({err}); running the keeper in {}", keeper.display(), me.display());
-        }
+    if runs_in_process(asked, crate::start_plan::Build::current()) {
+        return super::server::run(args);
     }
-    super::server::run(args)
+    eprintln!(
+        "[keeper] `centralu --keeper` no longer starts a keeper (#461): the keeper is the {KEEPER_EXE} \
+         executable beside this one. A keeper of 0.1.0-beta.11 or earlier asked for this; it rolls back, and \
+         \"Restart completely\" in the window starts a keeper of the new build."
+    );
+    EXIT_NOT_A_KEEPER
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::start_plan::Build;
     use std::io::Read;
     use std::os::fd::AsRawFd;
-    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixStream;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
-    fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("cc-keeper-exe-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    /// The command line every keeper start has used since #280, now written in one place for the
-    /// window and the shell. `server::parse_args` reads it back.
+    /// The command line every keeper start uses, written in one place for the window and the shell.
+    /// `server::parse_args` reads it back.
     #[test]
     fn a_keeper_start_writes_the_command_line_the_keeper_reads() {
         let start = Start {
@@ -199,7 +161,8 @@ mod tests {
         };
         assert_eq!(
             start.args(),
-            ["--keeper", "--data-dir", "/d ata", "--host-source", "/c/0.1.0/host", "--bundle-path", "/Applications/Centralu.app", "--app-version", "0.1.0"]
+            ["--data-dir", "/d ata", "--host-source", "/c/0.1.0/host", "--bundle-path", "/Applications/Centralu.app", "--app-version", "0.1.0"],
+            "no --keeper for centralu-keeper (#461)"
         );
         assert!(start.env().is_empty(), "a release start adds nothing to the environment");
         assert_eq!(start.log_path(), PathBuf::from("/d ata/keeper.log"));
@@ -210,9 +173,20 @@ mod tests {
         assert_eq!(o.bundle_path.as_deref(), Some("/Applications/Centralu.app"));
         assert_eq!(o.app_version.as_deref(), Some("0.1.0"));
 
+        // A debug window's keeper in its own executable: the one start that still needs `--keeper`
         let dev = Start { host_source: None, bundle_path: None, dev: true, in_process: true, ..start };
         assert_eq!(dev.args(), ["--keeper", "--data-dir", "/d ata", "--app-version", "0.1.0"]);
         assert_eq!(dev.env(), [("CC_DEV".to_string(), "1".to_string()), (IN_PROCESS_ENV.to_string(), "1".to_string())]);
+    }
+
+    /// Shell v1's pinned bytes still pass `--keeper` first; the keeper reads the rest as before.
+    #[test]
+    fn a_keeper_still_reads_a_command_line_that_starts_with_keeper() {
+        let argv: Vec<String> =
+            ["centralu-keeper", "--keeper", "--data-dir", "/d", "--app-version", "0.1.0"].iter().map(|s| s.to_string()).collect();
+        let o = super::super::server::parse_args(&argv);
+        assert_eq!(o.data_dir.as_deref(), Some(Path::new("/d")));
+        assert_eq!(o.app_version.as_deref(), Some("0.1.0"));
     }
 
     #[test]
@@ -225,68 +199,54 @@ mod tests {
     }
 
     #[test]
-    fn the_keeper_next_to_the_window_is_started_when_it_is_there() {
-        let d = temp("present");
-        let window = d.join("centralu");
-        std::fs::write(&window, "w").unwrap();
-        assert_eq!(to_start(&window), window, "no keeper beside it: the window's own executable");
-        assert_eq!(exec_target(&window, false), None, "and `--keeper` runs the keeper in it");
-        std::fs::write(d.join(KEEPER_EXE), "k").unwrap();
-        assert_eq!(to_start(&window), d.join(KEEPER_EXE));
-        assert_eq!(exec_target(&window, false), Some(d.join(KEEPER_EXE)));
-        assert_eq!(exec_target(&d.join(KEEPER_EXE), false), None, "the keeper never execs itself");
-        let _ = std::fs::remove_dir_all(&d);
+    fn only_centralu_keeper_is_a_keeper_executable() {
+        assert!(is_keeper_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu-keeper")));
+        assert!(is_keeper_exe(Path::new("/d/content/0.1.0/centralu-keeper")));
+        assert!(!is_keeper_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), "a window from before #440 names this");
+        assert!(!is_keeper_exe(Path::new("/tmp/centralu-keeper-old")));
+        assert!(!is_keeper_exe(Path::new("/")));
     }
 
-    /// `tauri dev` relinks only the window; a keeper from an earlier `cargo build` is older code.
+    /// `tauri dev` relinks only the window; a keeper from an earlier `cargo build` is older code. A
+    /// release never runs one in the window's executable, whatever the environment says.
     #[test]
-    fn a_debug_window_keeps_the_keeper_in_its_own_executable() {
-        let d = temp("inproc");
-        let window = d.join("centralu");
-        std::fs::write(&window, "w").unwrap();
-        std::fs::write(d.join(KEEPER_EXE), "k").unwrap();
-        assert_eq!(exec_target(&window, true), None);
-        let _ = std::fs::remove_dir_all(&d);
+    fn only_a_debug_window_that_asked_runs_the_keeper_in_its_own_executable() {
+        assert!(runs_in_process(true, Build::Debug));
+        assert!(!runs_in_process(false, Build::Debug), "a debug `centralu --keeper` nobody asked for refuses too");
+        assert!(!runs_in_process(true, Build::Release));
+        assert!(!runs_in_process(false, Build::Release));
     }
 
+    /// The child half of `an_old_keeper_handing_over_to_the_window_executable_gets_no_hello`: run in a
+    /// process of its own (the test binary started again), it is `centralu --keeper` as a keeper of
+    /// 0.1.0-beta.11 or earlier starts it.
     #[test]
-    fn the_handoff_descriptor_is_read_from_the_arguments() {
-        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(take_over_fd(&args(&["centralu", "--keeper", "--take-over-fd", "3", "--data-dir", "/d"])), Some(3));
-        assert_eq!(take_over_fd(&args(&["centralu", "--keeper", "--data-dir", "/d"])), None);
-    }
-
-    /// The child half of `exec_keeps_the_arguments_and_the_handoff_descriptor`: run in a process of
-    /// its own (the test binary started again), it execs into the stand-in keeper the parent names.
-    #[test]
-    fn exec_child() {
-        let Ok(target) = std::env::var("CC_TEST_EXEC_TARGET") else { return };
-        // As if something loaded before `main` had marked the channel close-on-exec.
-        unsafe { libc::fcntl(3, libc::F_SETFD, libc::FD_CLOEXEC) };
-        let args: Vec<String> = ["centralu", "--keeper", "--take-over-fd", "3", "--data-dir", "/some dir"].iter().map(|s| s.to_string()).collect();
-        let err = exec(Path::new(&target), &args);
-        panic!("exec failed: {err}");
+    fn refusing_child() {
+        if std::env::var_os("CC_TEST_REFUSING_CHILD").is_none() {
+            return;
+        }
+        let args: Vec<String> =
+            ["centralu", "--keeper", "--take-over-fd", "3", "--data-dir", "/nonexistent/cc-461"].iter().map(|s| s.to_string()).collect();
+        std::process::exit(run_from_window(&args));
     }
 
     /**
-     * What an installed beta.11 keeper relies on: it starts the new build's window executable as
-     * `centralu --keeper --take-over-fd 3 ...` with the handoff channel at descriptor 3, and that
-     * process has to become the keeper with the same arguments and the channel still open.
+     * #461: what a keeper of 0.1.0-beta.11 or earlier meets when it hands itself over to this build's
+     * window executable (`centralu --keeper --take-over-fd 3 ...`, the handoff channel at descriptor
+     * 3). It must see the channel close with nothing said, so it never reaches `ready`, its commit
+     * point, and rolls back; and the process must end at once rather than go on to open a window.
      */
     #[test]
-    fn exec_keeps_the_arguments_and_the_handoff_descriptor() {
-        let d = temp("exec");
-        let keeper = d.join(KEEPER_EXE);
-        // A stand-in keeper: writes its arguments down the channel at descriptor 3.
-        std::fs::write(&keeper, "#!/bin/sh\nprintf '%s|' \"$@\" >&3\n").unwrap();
-        std::fs::set_permissions(&keeper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fn an_old_keeper_handing_over_to_the_window_executable_gets_no_hello() {
         let (mut ours, theirs) = UnixStream::pair().unwrap();
         let fd = theirs.as_raw_fd();
         let mut cmd = Command::new(std::env::current_exe().unwrap());
-        cmd.args(["--exact", "keeper::exe::tests::exec_child", "--test-threads", "1", "--nocapture"])
-            .env("CC_TEST_EXEC_TARGET", &keeper)
+        cmd.args(["--exact", "keeper::exe::tests::refusing_child", "--test-threads", "1", "--nocapture"])
+            .env("CC_TEST_REFUSING_CHILD", "1")
+            .env_remove(IN_PROCESS_ENV)
             .stdin(Stdio::null())
-            .stdout(Stdio::null());
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         // SAFETY: dup2 and fcntl are async-signal-safe (the same as handoff::spawn_successor).
         unsafe {
             cmd.pre_exec(move || {
@@ -298,14 +258,16 @@ mod tests {
                 Ok(())
             });
         }
+        let started = Instant::now();
         let mut child = cmd.spawn().unwrap();
         drop(theirs);
         ours.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
-        let mut got = String::new();
-        let _ = ours.read_to_string(&mut got);
+        let mut got = Vec::new();
+        let read = ours.read_to_end(&mut got);
         let status = child.wait().unwrap();
-        let _ = std::fs::remove_dir_all(&d);
-        assert_eq!(got, "--keeper|--take-over-fd|3|--data-dir|/some dir|", "the keeper got the channel and every argument");
-        assert!(status.success(), "the stand-in keeper exited cleanly: {status}");
+        assert!(read.is_ok(), "the channel closed rather than timing out: {read:?}");
+        assert!(got.is_empty(), "nothing was said on the channel, so no hello and no ready: {got:?}");
+        assert_eq!(status.code(), Some(EXIT_NOT_A_KEEPER), "it refused: {status}");
+        assert!(started.elapsed() < Duration::from_secs(20), "at once: {:?}", started.elapsed());
     }
 }

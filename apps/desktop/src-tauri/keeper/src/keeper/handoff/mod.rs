@@ -6,12 +6,12 @@
 //! the new keeper, pass it every handle, let the old one exit** (#280, "The keeper's own upgrade").
 //!
 //! **Who starts whom.** The outgoing keeper (A) starts the incoming one (B) from the executable the
-//! attaching window names: the new build's `centralu-keeper` **inside its bundle** (`exe::to_start`,
-//! #440), as `centralu-keeper --keeper --take-over-fd 3 ...`. A window from before #440 names its own
-//! executable instead, and keepers from before #440 start whatever they are given with the same
-//! arguments; the window's executable answers `--keeper` by `exec`ing the `centralu-keeper` next to
-//! it with the channel still at descriptor 3 (`exe.rs`), so every pairing of old and new meets in
-//! the same B. The bundle being replaced later does not disturb B: `tauri build` and
+//! attaching window names: the new build's `centralu-keeper` **inside its bundle** (`exe::beside`,
+//! #440), as `centralu-keeper --take-over-fd 3 ...`. A names nothing else: an executable of another
+//! name (a window from before #440 named its own) is refused before anything starts, and the keeper
+//! stays on its build (#461). Keepers of 0.1.0-beta.11 and earlier start the window's executable as
+//! `centralu --keeper --take-over-fd 3 ...`; it refuses at once (`exe::run_from_window`), so they
+//! never see `ready` and roll back. The bundle being replaced later does not disturb B: `tauri build` and
 //! `centralu install` both delete the old bundle and write a new one (new inodes), and a running
 //! executable whose file was unlinked keeps running.
 //!
@@ -80,12 +80,15 @@ use super::front_door::{DoorFreeze, FrontDoor};
 use super::server::{self, Keeper, Options, State};
 use super::source::{self, BuildSource};
 use super::swap::{Phase, SwapView};
-use super::{KeeperInfo, KEEPER_FLAG, KEEPER_PROTOCOL};
+use super::{KeeperInfo, KEEPER_PROTOCOL};
 use crate::os;
 use crate::host_proc::{ForeignAdopt, HostInfo, HostStatus, Supervisor};
 
 /// The snapshot format. A newer keeper reads an older keeper's snapshot (the outgoing keeper is
-/// the older build in an update), so fields are only ever added, with defaults.
+/// the older build in an update), so fields are only ever added. Every field is required (#461):
+/// a snapshot that lacks one is refused, so the handoff rolls back rather than guessing at it. A new
+/// field therefore makes the handoff from the build before it roll back, unless it is an `Option`
+/// (which reads as `None` when absent) or carries a default until the builds without it are gone.
 pub const HANDOFF_PROTOCOL: u32 = 1;
 
 /// Exit code of an incoming keeper whose handoff was aborted: it served nothing.
@@ -191,6 +194,15 @@ fn thaw(k: &Keeper, f: &Frozen) {
  * rolling everything back; on success the process exits.
  */
 pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switch: Option<BuildSource>) -> Result<(), String> {
+    // A window from before #440 names its own executable. Since #461 that executable no longer
+    // turns into the keeper beside it, and started without `--keeper` it would open a window.
+    if !super::exe::is_keeper_exe(exe) {
+        return Err(format!(
+            "{} is not a {} executable; a window this old cannot move the keeper, \"Restart completely\" can",
+            exe.display(),
+            super::exe::KEEPER_EXE
+        ));
+    }
     if !exe.is_file() {
         return Err(format!("the new build's executable is not at {}", exe.display()));
     }
@@ -415,7 +427,7 @@ fn pack_door(pack: &mut Pack, d: DoorFreeze, token: &str) -> Result<DoorSnap, St
 fn spawn_successor(k: &Keeper, exe: &Path, target: &BuildSource) -> std::io::Result<(Child, UnixStream)> {
     let (ours, theirs) = UnixStream::pair()?;
     let mut cmd = Command::new(exe);
-    cmd.arg(KEEPER_FLAG).arg("--take-over-fd").arg("3").arg("--data-dir").arg(&k.data);
+    cmd.arg("--take-over-fd").arg("3").arg("--data-dir").arg(&k.data);
     if let Some(dir) = &target.host_dir {
         cmd.arg("--host-source").arg(dir);
     }

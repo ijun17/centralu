@@ -457,9 +457,9 @@ struct ReactorState {
     next_conn: u64,
     children: Vec<ChildState>,
     conns: Vec<ConnState>,
-    /// Absent from an older keeper's table, and ignored by one: a sweep handed to it is lost, which
-    /// is no worse than that keeper never sweeping.
-    #[serde(default)]
+    /// Required since #461: a table from a keeper older than #435, which had none, is refused, and
+    /// the handoff rolls back. Ignored by a keeper that old: a sweep handed to it is lost, which is
+    /// no worse than that keeper never sweeping.
     sweeps: Vec<SweepState>,
 }
 

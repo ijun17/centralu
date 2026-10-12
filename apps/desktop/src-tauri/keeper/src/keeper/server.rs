@@ -1,4 +1,4 @@
-//! The keeper process: `centralu --keeper`.
+//! The keeper process: `centralu-keeper`.
 //!
 //! Control socket protocol (`<data>/keeper.sock`, newline-delimited JSON, one request per
 //! connection except `attach`):
@@ -77,6 +77,8 @@ pub fn parse_args(args: &[String]) -> Options {
             "--bundle-path" => o.bundle_path = it.next().cloned(),
             "--app-version" => o.app_version = it.next().cloned(),
             "--take-over-fd" => o.take_over_fd = it.next().and_then(|s| s.parse().ok()),
+            // Ignored, like anything unknown. `--keeper` among them: every start passed it until
+            // #461, and shell v1, whose bytes are pinned, still does.
             _ => {}
         }
     }
@@ -1310,8 +1312,8 @@ mod tests {
     }
 
     /// Step 5: only a keeper running from verified content takes the new build's content; one
-    /// started directly hands over to the executable it is given, exactly as before (a debug build,
-    /// Linux, the window's fallback, a keeper of beta.11 or #444).
+    /// started directly hands over to the `centralu-keeper` it is given, exactly as before (a debug
+    /// build, Linux, the window's fallback, a keeper of #444).
     #[test]
     fn a_switch_takes_signed_content_only_from_a_keeper_in_verified_content() {
         let content = content::Origin::Content { dir: PathBuf::from("/d/content/0.2.0"), version: "0.2.0".into(), signed: true };
@@ -1327,8 +1329,11 @@ mod tests {
         assert_eq!(content_route(&content::Origin::Direct, Some(exe), Some("/Applications/Centralu.app")), None);
         assert_eq!(content_route(&content::Origin::Direct, None, None), None);
         assert_eq!(content_route(&content, Some(exe), None), Some(Some(carried.clone())));
-        // A window from before #440 names its own executable, in the same folder
-        assert_eq!(content_route(&content, Some(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), None), Some(Some(carried.clone())));
+        // A window from before #440 named its own executable: that names no content (#461), only
+        // the bundle path it sends with it does
+        let window = Path::new("/Applications/Centralu.app/Contents/MacOS/centralu");
+        assert_eq!(content_route(&content, Some(window), None), Some(None));
+        assert_eq!(content_route(&content, Some(window), Some("/Applications/Centralu.app")), Some(Some(carried.clone())));
         // A window that names no executable: its bundle
         assert_eq!(content_route(&content, None, Some("/Applications/Centralu.app")), Some(Some(carried)));
         // Nothing to take content from: refused later, never a direct handoff

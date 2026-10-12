@@ -162,7 +162,11 @@ export type HostBuild = {
   sameBuild?: boolean
   /** The build of the keeper itself (#280 step 4); absent for a keeper older than step 4 */
   keeper?: BuildSource
-  /** False when the keeper is from another build than this window; switching moves it too */
+  /**
+   * False when the keeper is from another build than this window; switching moves it too. A keeper
+   * older than step 4 (no `keeper`) counts as another build (#461), one only a full restart moves.
+   * Absent when not attached to a keeper.
+   */
   keeperSameBuild?: boolean
   background?: boolean
   /** The current or last blue-green swap (#280 step 3) */

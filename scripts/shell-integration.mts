@@ -213,7 +213,7 @@ async function main(): Promise<void> {
       check(!real(k.script).startsWith(real(src)), 'the keeper never ran from the content the shell was given')
       check(
         JSON.stringify(k.args) ===
-          JSON.stringify(['--keeper', '--data-dir', data, '--host-source', join(copy, 'host'), '--bundle-path', '/Applications/Centralu.app', '--app-version', '0.2.0']),
+          JSON.stringify(['--data-dir', data, '--host-source', join(copy, 'host'), '--bundle-path', '/Applications/Centralu.app', '--app-version', '0.2.0']),
         "with the window's command line",
         JSON.stringify(k.args),
       )

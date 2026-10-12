@@ -140,9 +140,13 @@ pub fn version_dir_of(data: &Path, host_dir: &Path) -> Option<PathBuf> {
 }
 
 /// The signed content a window's bundle carries, found from the executable the window named as its
-/// keeper: `<bundle>/Contents/MacOS/<exe>` gives `<bundle>/Contents/Resources/content`. Windows from
-/// #444 on name `centralu-keeper`, older ones their own `centralu`; both sit in `Contents/MacOS/`.
+/// keeper: `<bundle>/Contents/MacOS/centralu-keeper` gives `<bundle>/Contents/Resources/content`.
+/// Windows from before #440 named their own `centralu` instead; since #461 that names no content,
+/// and the bundle path the window sends with it is used, as for a window that named no executable.
 pub fn bundle_content_of_exe(exe: &Path) -> Option<PathBuf> {
+    if !super::exe::is_keeper_exe(exe) {
+        return None;
+    }
     let macos = exe.parent()?;
     if macos.file_name()? != "MacOS" {
         return None;
