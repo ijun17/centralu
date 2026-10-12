@@ -166,7 +166,7 @@ export class AppHandover {
     const dir = join(ensureDirInside(this.host.dataRoot, ['apps']), id)
     renameSync(s.appDir, dir)
     this.book.mark(id, dir, s.review.source)
-    if (opts.enable) this.book.confirm(id, manifest)
+    if (opts.enable) this.book.confirm(id, dir, manifest)
     // Captures the state it arrived in as the first version (E-1) — so even if a building session breaks it while editing, it can be restored to the imported version
     this.snapshot(id, dir, 'imported')
     this.cancel(token)
@@ -219,7 +219,7 @@ export class AppHandover {
     if (!app.manifest) throw new ImportRefused("This app's manifest is invalid; fix it before enabling it")
     if (!this.book.get(appId, app.dir)) throw new ImportRefused('This app was not imported, so it needs no enabling')
     if (reviewKey(app.manifest) !== key) throw new ImportRefused('This app changed since you reviewed it. Review it again')
-    this.book.confirm(appId, app.manifest)
+    this.book.confirm(appId, app.dir, app.manifest)
     this.host.changed()
   }
 

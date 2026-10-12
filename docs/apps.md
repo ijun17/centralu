@@ -942,9 +942,16 @@ says where it came from and offers "Review and enable…".
 **The confirmation is the host's.** It is kept in `<data folder>/app-imports.json` (0600), outside
 the app folder, so the app's own code cannot write "confirmed" and an archive cannot arrive with
 it. It is bound to the folder's inode, so a different folder later created with the same id is not
-covered, and removing the app forgets it. It records a hash of the manifest's `server` (command and
-arguments) and `uses`; the runtime compares it at every call, start and status. If either changes
-later (an editor, the builder, a restored version), the app is `unconfirmed` again ("Needs
+covered, and removing the app forgets it. Bigint stat supplies the exact file id, persisted as the
+decimal string `inoExact`. The numeric `ino` remains `Number(fileId)` so older hosts retain their
+existing comparison during swaps and rollbacks; it can be removed only in a later release under
+the "add first, remove later" rule. The new host compares `inoExact` when present. Without it,
+legacy numeric ids below 2^53 still match exactly; unsafe numeric ids retain the import mark but
+are treated as unconfirmed. Lookups do not change stored records. Importing or confirming writes
+both fields, upgrading a legacy record to the current exact id when the person reviews it again.
+The mark records a hash of the manifest's `server` (command and arguments) and `uses`; the runtime
+compares it at every call, start and status. If either changes later (an editor, the builder, a
+restored version), the app is `unconfirmed` again ("Needs
 review"), and the review shows what it ran and asked for when it was enabled. Other fields, and the
 code itself, do not ask again: the confirmation is about what runs and what it may ask for, not a
 review of every edit.
