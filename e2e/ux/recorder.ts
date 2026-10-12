@@ -100,6 +100,30 @@ export class Recorder {
   }
 
   /**
+   * Drags `source` onto `target`: P to the source, press, P to the drop point, release. The drop
+   * point is the target's centre, or `at` (relative to the target's box) where the place matters,
+   * such as the top half of a row to drop before it.
+   */
+  async drag(source: Locator, target: Locator, opts: { at?: Point; label?: string } = {}): Promise<void> {
+    const from = await this.boxOf(source)
+    const grab = pointing(this.at, from)
+    const grabbed = { x: from.x + from.width / 2, y: from.y + from.height / 2 }
+    const to = await this.boxOf(target)
+    const offset = opts.at ?? { x: to.width / 2, y: to.height / 2 }
+    const dropped = { x: to.x + offset.x, y: to.y + offset.y }
+    // Priced against a box the size of the target around the drop point, so `at` moves the aim without shrinking the target
+    const drop = pointing(grabbed, { x: dropped.x - to.width / 2, y: dropped.y - to.height / 2, width: to.width, height: to.height })
+    // Real pointer events in steps, as fixtures/grid-apps.ts drags: the drop target needs moves over it before the release
+    await this.page.mouse.move(grabbed.x, grabbed.y)
+    await this.page.mouse.down()
+    await this.page.mouse.move(dropped.x + 20, dropped.y, { steps: 8 })
+    await this.page.mouse.move(dropped.x, dropped.y, { steps: 4 })
+    await this.page.mouse.up()
+    this.at = dropped
+    this.log.push({ kind: 'drag', label: opts.label ?? `${describe(source)} → ${describe(target)}`, grab, drop })
+  }
+
+  /**
    * The person waits for the app (R): runs the check and records how long it took. Every place a
    * person would have to look and wait before going on is one of these, and the task's goal check
    * is the last.

@@ -153,6 +153,21 @@ describe("placing M (Card, Moran & Newell's rules)", () => {
   it('places the M after the hand arrives, before the operator it prepares', () => {
     expect(ops([type('a'), click()])).toBe('K H M P B B')
   })
+
+  it('a drag is one command: one M, then pointing at the thing, press, carrying it, release', () => {
+    const drag: Step = {
+      kind: 'drag',
+      label: 'row → grid',
+      grab: pointing(at(0, 0), box),
+      drop: pointing(at(120, 110), { x: 400, y: 300, width: 600, height: 400 }),
+    }
+    expect(ops([drag])).toBe('H M P B P B')
+    // Already on the thing: no first pointing, and the M stays because nothing before anticipates it
+    expect(ops([{ ...drag, grab: null }], 'mouse')).toBe('M B P B')
+    const r = analyse({ id: 'd', task: 'd', path: 'mouse', access: 'discoverable' }, [drag], 'mouse')
+    expect(r.travelPx).toBe(Math.round(drag.grab!.D + drag.drop!.D))
+    expect(r.seconds).toBeCloseTo(SECONDS.M + 2 * SECONDS.B + drag.grab!.seconds + drag.drop!.seconds, 2)
+  })
 })
 
 describe('the operator string', () => {

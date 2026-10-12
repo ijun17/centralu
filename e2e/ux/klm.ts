@@ -71,6 +71,8 @@ export type Choice = { n: number; bits: number; seconds: number }
  * - `click`: point and click, P B B. `role` says whether the click selects a command (it gets an M)
  *   or an argument (placing the caret in a field: no M), Rule 0.
  * - `point`: point without clicking (hover to reveal), P.
+ * - `drag`: point at the thing, press, carry it to where it goes, release: P B P B. A command, so
+ *   one M before it (Rule 0); none between its parts (Rule 1).
  * - `wait`: the person waits for the app, R, measured.
  */
 export type Step =
@@ -87,6 +89,7 @@ export type Step =
   | { kind: 'type'; label: string; text: string; strokes: number; string: 'constant' | 'variable' }
   | { kind: 'click'; label: string; role: 'command' | 'argument'; continues?: boolean; pointing: Pointing | null; choice?: Choice }
   | { kind: 'point'; label: string; pointing: Pointing | null }
+  | { kind: 'drag'; label: string; grab: Pointing | null; drop: Pointing | null }
   | { kind: 'wait'; label: string; ms: number }
 
 /** An operator with its price, the step it came from, and why it is there */
@@ -199,6 +202,14 @@ function physical(steps: Step[], hand: Hand): Candidate[] {
     } else if (s.kind === 'point') {
       reach('mouse', i)
       if (s.pointing) out.push({ op: 'P', seconds: s.pointing.seconds, step: i })
+    } else if (s.kind === 'drag') {
+      reach('mouse', i)
+      out.push({ op: 'M', seconds: SECONDS.M, step: i, rule: 'rule1?' })
+      if (s.grab) out.push({ op: 'P', seconds: s.grab.seconds, step: i })
+      out.push({ op: 'B', seconds: SECONDS.B, step: i })
+      // Priced as a pointing: Fitts's law holds for dragging too, with a steeper slope (MacKenzie, Sellen & Buxton 1991) the model does not add
+      if (s.drop) out.push({ op: 'P', seconds: s.drop.seconds, step: i })
+      out.push({ op: 'B', seconds: SECONDS.B, step: i })
     } else {
       out.push({ op: 'R', seconds: 0, step: i })
     }
@@ -342,7 +353,10 @@ export function analyse(
   const counts = countOps(ops)
   const seconds = ops.reduce((t, o) => t + o.seconds, 0)
   const waitMs = steps.reduce((t, s) => t + (s.kind === 'wait' ? s.ms : 0), 0)
-  const travelPx = steps.reduce((t, s) => t + ((s.kind === 'click' || s.kind === 'point') && s.pointing ? s.pointing.D : 0), 0)
+  const travelPx = steps.reduce(
+    (t, s) => t + ((s.kind === 'click' || s.kind === 'point') && s.pointing ? s.pointing.D : s.kind === 'drag' ? (s.grab?.D ?? 0) + (s.drop?.D ?? 0) : 0),
+    0,
+  )
   const notes = [...(meta.notes ?? [])]
   const reports = steps.map<StepReport>((s, i) => {
     const mine = ops.filter((o) => o.step === i)
@@ -350,6 +364,7 @@ export function analyse(
     if ((s.kind === 'click' || s.kind === 'point') && s.pointing) {
       r.pointer = { D: Math.round(s.pointing.D), W: Math.round(s.pointing.W), ID: round(s.pointing.ID) }
     }
+    if (s.kind === 'drag' && s.drop) r.pointer = { D: Math.round(s.drop.D), W: Math.round(s.drop.W), ID: round(s.drop.ID) }
     if ((s.kind === 'press' || s.kind === 'click') && s.choice) {
       r.choice = { n: s.choice.n, bits: round(s.choice.bits), seconds: round(s.choice.seconds) }
     }
