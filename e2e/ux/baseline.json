@@ -30,7 +30,7 @@
         "R": 3
       },
       "seconds": 17.71,
-      "waitMs": 404,
+      "waitMs": 325,
       "travelPx": 2161,
       "steps": [
         {
@@ -49,7 +49,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 386
+          "waitMs": 315
         },
         {
           "kind": "click",
@@ -67,7 +67,7 @@
           "label": "the form",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 5
         },
         {
           "kind": "type",
@@ -108,7 +108,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 12
+          "waitMs": 5
         }
       ],
       "notes": [
@@ -131,7 +131,7 @@
         "R": 4
       },
       "seconds": 11.05,
-      "waitMs": 443,
+      "waitMs": 365,
       "travelPx": 2240,
       "steps": [
         {
@@ -150,7 +150,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 396
+          "waitMs": 319
         },
         {
           "kind": "click",
@@ -168,7 +168,7 @@
           "label": "the hosts",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 21
+          "waitMs": 31
         },
         {
           "kind": "click",
@@ -191,7 +191,7 @@
           "label": "the probe",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 11
+          "waitMs": 10
         },
         {
           "kind": "click",
@@ -209,7 +209,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 15
+          "waitMs": 5
         }
       ],
       "notes": [
@@ -233,7 +233,7 @@
         "R": 1
       },
       "seconds": 2.99,
-      "waitMs": 21,
+      "waitMs": 4,
       "travelPx": 567,
       "steps": [
         {
@@ -252,11 +252,153 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 21
+          "waitMs": 4
         }
       ],
       "notes": [
         "The folder picker is the system's: what the person does in it is not counted"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "add-remote-project.mouse",
+      "task": "Add a folder on a linked machine as a project",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B H 12K H M P B B",
+      "counts": {
+        "K": 12,
+        "P": 2,
+        "B": 4,
+        "H": 3,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 9.98,
+      "waitMs": 15,
+      "travelPx": 996,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "add-remote-project-box",
+          "operators": "H M P B B",
+          "seconds": 3.19,
+          "pointer": {
+            "D": 426,
+            "W": 21,
+            "ID": 4.4
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the dialog",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        },
+        {
+          "kind": "type",
+          "label": "\"/home/me/api\"",
+          "operators": "H 12K",
+          "seconds": 3.76
+        },
+        {
+          "kind": "click",
+          "label": "add-remote-project-confirm",
+          "operators": "H M P B B",
+          "seconds": 3.03,
+          "pointer": {
+            "D": 570,
+            "W": 95,
+            "ID": 2.81
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        }
+      ],
+      "notes": [
+        "The machine group's \"Add project on…\"; the path is typed, there is no picker for the other machine"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "answer-question.mouse",
+      "task": "Answer a question an agent asked in another session",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 6,
+        "H": 1,
+        "M": 3,
+        "R": 2
+      },
+      "seconds": 8.04,
+      "waitMs": 7,
+      "travelPx": 1332,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "session row \"Pick the hero copy\"",
+          "operators": "H M P B B",
+          "seconds": 2.96,
+          "pointer": {
+            "D": 531,
+            "W": 162,
+            "ID": 2.1
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the question",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        },
+        {
+          "kind": "click",
+          "label": "question-option",
+          "operators": "M P B B",
+          "seconds": 2.46,
+          "pointer": {
+            "D": 475,
+            "W": 404,
+            "ID": 1.12
+          },
+          "choice": {
+            "n": 2,
+            "bits": 1.58,
+            "seconds": 0.24
+          }
+        },
+        {
+          "kind": "click",
+          "label": "question-submit",
+          "operators": "M P B B",
+          "seconds": 2.62,
+          "pointer": {
+            "D": 327,
+            "W": 60,
+            "ID": 2.68
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 3
+        }
+      ],
+      "notes": [
+        "question-option: a choice among 2 (Hick–Hyman 0.24 s, not added)"
       ],
       "breaches": []
     },
@@ -275,7 +417,7 @@
         "R": 2
       },
       "seconds": 3.82,
-      "waitMs": 109,
+      "waitMs": 242,
       "travelPx": 0,
       "steps": [
         {
@@ -289,7 +431,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 99
+          "waitMs": 234
         },
         {
           "kind": "press",
@@ -302,7 +444,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 10
+          "waitMs": 8
         }
       ],
       "notes": [],
@@ -323,7 +465,7 @@
         "R": 2
       },
       "seconds": 5.56,
-      "waitMs": 15,
+      "waitMs": 25,
       "travelPx": 741,
       "steps": [
         {
@@ -360,7 +502,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 11
+          "waitMs": 22
         }
       ],
       "notes": [],
@@ -381,8 +523,8 @@
         "R": 3
       },
       "seconds": 8.35,
-      "waitMs": 31,
-      "travelPx": 1050,
+      "waitMs": 33,
+      "travelPx": 1049,
       "steps": [
         {
           "kind": "click",
@@ -400,17 +542,17 @@
           "label": "the waiting list",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 16
         },
         {
           "kind": "click",
           "label": "waiting-list row \"Clean up leftover processes\"",
           "operators": "M P B B",
-          "seconds": 2.5,
+          "seconds": 2.51,
           "pointer": {
-            "D": 229,
-            "W": 121,
-            "ID": 1.53
+            "D": 230,
+            "W": 119,
+            "ID": 1.56
           },
           "choice": {
             "n": 3,
@@ -423,7 +565,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 4
         },
         {
           "kind": "click",
@@ -431,9 +573,9 @@
           "operators": "M P B B",
           "seconds": 2.65,
           "pointer": {
-            "D": 243,
+            "D": 241,
             "W": 34,
-            "ID": 3.02
+            "ID": 3.01
           }
         },
         {
@@ -441,12 +583,281 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 14
+          "waitMs": 12
         }
       ],
       "notes": [
         "Through the waiting list (the top-bar count), the way the app points to it when the session is not in sight",
         "waiting-list row \"Clean up leftover processes\": a choice among 3 (Hick–Hyman 0.3 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "attach-file.mouse",
+      "task": "Attach a file to a message",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.16,
+      "waitMs": 79,
+      "travelPx": 426,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "attach-open",
+          "operators": "H M P B B",
+          "seconds": 3.16,
+          "pointer": {
+            "D": 426,
+            "W": 27,
+            "ID": 4.05
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 79
+        }
+      ],
+      "notes": [
+        "The composer's +; the file picker is the system's, and what the person does in it is not counted"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "change-model.mouse",
+      "task": "Change a session's model",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 2,
+        "B": 4,
+        "H": 1,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 5.83,
+      "waitMs": 14,
+      "travelPx": 707,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "settings-open",
+          "operators": "H M P B B",
+          "seconds": 3.17,
+          "pointer": {
+            "D": 513,
+            "W": 29,
+            "ID": 4.22
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the menu",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        },
+        {
+          "kind": "click",
+          "label": "settings-model-opus",
+          "operators": "M P B B",
+          "seconds": 2.65,
+          "pointer": {
+            "D": 195,
+            "W": 27,
+            "ID": 3.04
+          },
+          "choice": {
+            "n": 5,
+            "bits": 2.58,
+            "seconds": 0.39
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        }
+      ],
+      "notes": [
+        "The model and permission chip under the composer (\"Default · Normal\")",
+        "settings-model-opus: a choice among 5 (Hick–Hyman 0.39 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "change-theme.mouse",
+      "task": "Switch to the light theme",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 6,
+        "H": 1,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 8.44,
+      "waitMs": 367,
+      "travelPx": 1791,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "open-settings",
+          "operators": "H M P B B",
+          "seconds": 3.16,
+          "pointer": {
+            "D": 717,
+            "W": 44,
+            "ID": 4.12
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "settings",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 346
+        },
+        {
+          "kind": "click",
+          "label": "settings-tab-appearance",
+          "operators": "M P B B",
+          "seconds": 2.69,
+          "pointer": {
+            "D": 885,
+            "W": 90,
+            "ID": 3.43
+          },
+          "choice": {
+            "n": 10,
+            "bits": 3.46,
+            "seconds": 0.52
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "appearance",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 16
+        },
+        {
+          "kind": "click",
+          "label": "settings-theme-mode-light",
+          "operators": "M P B B",
+          "seconds": 2.58,
+          "pointer": {
+            "D": 189,
+            "W": 47,
+            "ID": 2.33
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        }
+      ],
+      "notes": [
+        "Settings, Appearance, Light; closing settings afterwards is not counted",
+        "settings-tab-appearance: a choice among 10 (Hick–Hyman 0.52 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "commit.mouse",
+      "task": "Commit the session's changes with a message",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B P B B H 30K H M P B B",
+      "counts": {
+        "K": 30,
+        "P": 3,
+        "B": 6,
+        "H": 3,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 16.33,
+      "waitMs": 11,
+      "travelPx": 1398,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "evidence-stage-all",
+          "operators": "H M P B B",
+          "seconds": 3.19,
+          "pointer": {
+            "D": 677,
+            "W": 34,
+            "ID": 4.4
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "staged",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 3
+        },
+        {
+          "kind": "click",
+          "label": "evidence-commit-message (focus)",
+          "operators": "P B B",
+          "seconds": 1.47,
+          "pointer": {
+            "D": 680,
+            "W": 27,
+            "ID": 4.71
+          }
+        },
+        {
+          "kind": "type",
+          "label": "\"Raise the ring above the card\"",
+          "operators": "H 30K",
+          "seconds": 8.8
+        },
+        {
+          "kind": "click",
+          "label": "evidence-commit",
+          "operators": "H M P B B",
+          "seconds": 2.87,
+          "pointer": {
+            "D": 41,
+            "W": 33,
+            "ID": 1.15
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        }
+      ],
+      "notes": [
+        "The commit box under the changes in the evidence panel; Commit stays disabled until something is staged"
       ],
       "breaches": []
     },
@@ -465,7 +876,7 @@
         "R": 3
       },
       "seconds": 7.55,
-      "waitMs": 260,
+      "waitMs": 340,
       "travelPx": 1048,
       "steps": [
         {
@@ -484,7 +895,7 @@
           "label": "the create-project dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 4
         },
         {
           "kind": "type",
@@ -497,7 +908,7 @@
           "label": "the folder it will make",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 238
+          "waitMs": 311
         },
         {
           "kind": "click",
@@ -515,11 +926,105 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 14
+          "waitMs": 26
         }
       ],
       "notes": [
         "The folder goes where the dialog says, ~/Centralu by default (#515); choosing another location is not counted"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "delete-session.mouse",
+      "task": "Delete a session (to the trash)",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H P M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 4,
+        "B": 6,
+        "H": 1,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 9.17,
+      "waitMs": 23,
+      "travelPx": 1401,
+      "steps": [
+        {
+          "kind": "point",
+          "label": "session row \"Optimize images\" (hover reveals ⋯)",
+          "operators": "H P",
+          "seconds": 1.37,
+          "pointer": {
+            "D": 525,
+            "W": 231,
+            "ID": 1.71
+          }
+        },
+        {
+          "kind": "click",
+          "label": "⋯ of \"Optimize images\"",
+          "operators": "M P B B",
+          "seconds": 2.59,
+          "pointer": {
+            "D": 97,
+            "W": 22,
+            "ID": 2.43
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the menu",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 6
+        },
+        {
+          "kind": "click",
+          "label": "delete-session-mock-session-6",
+          "operators": "M P B B",
+          "seconds": 2.58,
+          "pointer": {
+            "D": 149,
+            "W": 37,
+            "ID": 2.34
+          },
+          "choice": {
+            "n": 0,
+            "bits": 0,
+            "seconds": 0
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the confirmation",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 5
+        },
+        {
+          "kind": "click",
+          "label": "confirm-delete-yes",
+          "operators": "M P B B",
+          "seconds": 2.63,
+          "pointer": {
+            "D": 630,
+            "W": 109,
+            "ID": 2.76
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 12
+        }
+      ],
+      "notes": [
+        "delete-session-mock-session-6: a choice among 0 (Hick–Hyman 0 s, not added)"
       ],
       "breaches": []
     },
@@ -538,7 +1043,7 @@
         "R": 3
       },
       "seconds": 4.66,
-      "waitMs": 234,
+      "waitMs": 201,
       "travelPx": 0,
       "steps": [
         {
@@ -552,7 +1057,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 17
         },
         {
           "kind": "type",
@@ -565,7 +1070,7 @@
           "label": "the conversation hits",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 224
+          "waitMs": 165
         },
         {
           "kind": "press",
@@ -583,7 +1088,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 18
         }
       ],
       "notes": [
@@ -606,7 +1111,7 @@
         "R": 3
       },
       "seconds": 6.26,
-      "waitMs": 263,
+      "waitMs": 202,
       "travelPx": 633,
       "steps": [
         {
@@ -625,7 +1130,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 21
         },
         {
           "kind": "type",
@@ -638,7 +1143,7 @@
           "label": "the conversation hits",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 246
+          "waitMs": 155
         },
         {
           "kind": "press",
@@ -656,12 +1161,241 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 14
+          "waitMs": 27
         }
       ],
       "notes": [
         "The Search button at the top of the sidebar (#529); Enter opens the highlighted hit, as the palette's footer says",
         "Enter: a choice among 1 (Hick–Hyman 0.15 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "grid-app.mouse",
+      "task": "Put an app on the grid",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B P B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 4,
+        "H": 1,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 6.63,
+      "waitMs": 15,
+      "travelPx": 1524,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "grid-button",
+          "operators": "H M P B B",
+          "seconds": 3.08,
+          "pointer": {
+            "D": 593,
+            "W": 67,
+            "ID": 3.3
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the grid",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        },
+        {
+          "kind": "drag",
+          "label": "app-row-_user/slider → grid",
+          "operators": "M P B P B",
+          "seconds": 3.55,
+          "pointer": {
+            "D": 641,
+            "W": 1040,
+            "ID": 0.69
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        }
+      ],
+      "notes": [
+        "Open the grid, then drag the app's sidebar row onto it, as the empty grid says (\"Drag sessions and apps here from the sidebar\")"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "grid-session.mouse",
+      "task": "Put a session on the grid beside the others",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B P B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 4,
+        "H": 1,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 6.59,
+      "waitMs": 17,
+      "travelPx": 1452,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "grid-button",
+          "operators": "H M P B B",
+          "seconds": 3.08,
+          "pointer": {
+            "D": 593,
+            "W": 67,
+            "ID": 3.3
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the grid",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 6
+        },
+        {
+          "kind": "drag",
+          "label": "session row \"Optimize images\" → grid",
+          "operators": "M P B P B",
+          "seconds": 3.51,
+          "pointer": {
+            "D": 647,
+            "W": 1050,
+            "ID": 0.69
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 11
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "handoff.mouse",
+      "task": "Continue a session in the other tool (hand off from Codex to Claude Code)",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H P M P B B M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 5,
+        "B": 8,
+        "H": 1,
+        "M": 4,
+        "R": 3
+      },
+      "seconds": 11.66,
+      "waitMs": 2407,
+      "travelPx": 1436,
+      "steps": [
+        {
+          "kind": "point",
+          "label": "session row \"Optimize images\" (hover reveals ⋯)",
+          "operators": "H P",
+          "seconds": 1.37,
+          "pointer": {
+            "D": 525,
+            "W": 231,
+            "ID": 1.71
+          }
+        },
+        {
+          "kind": "click",
+          "label": "⋯ of \"Optimize images\"",
+          "operators": "M P B B",
+          "seconds": 2.59,
+          "pointer": {
+            "D": 97,
+            "W": 22,
+            "ID": 2.43
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the menu",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 6
+        },
+        {
+          "kind": "click",
+          "label": "handoff-session-mock-session-6",
+          "operators": "M P B B",
+          "seconds": 2.48,
+          "pointer": {
+            "D": 113,
+            "W": 73,
+            "ID": 1.35
+          },
+          "choice": {
+            "n": 0,
+            "bits": 0,
+            "seconds": 0
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the hand-off dialog",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        },
+        {
+          "kind": "click",
+          "label": "handoff-tool-claude",
+          "operators": "M P B B",
+          "seconds": 2.58,
+          "pointer": {
+            "D": 375,
+            "W": 98,
+            "ID": 2.27
+          },
+          "choice": {
+            "n": 2,
+            "bits": 1.58,
+            "seconds": 0.24
+          }
+        },
+        {
+          "kind": "click",
+          "label": "confirm-handoff-yes",
+          "operators": "M P B B",
+          "seconds": 2.63,
+          "pointer": {
+            "D": 327,
+            "W": 53,
+            "ID": 2.83
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 2396
+        }
+      ],
+      "notes": [
+        "handoff-session-mock-session-6: a choice among 0 (Hick–Hyman 0 s, not added)",
+        "handoff-tool-claude: a choice among 2 (Hick–Hyman 0.24 s, not added)"
       ],
       "breaches": []
     },
@@ -699,7 +1433,7 @@
           "label": "the new-session dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 7
         },
         {
           "kind": "click",
@@ -717,7 +1451,7 @@
           "label": "the new session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 12
         },
         {
           "kind": "type",
@@ -736,7 +1470,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 13
+          "waitMs": 8
         }
       ],
       "notes": [
@@ -773,7 +1507,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 14
+          "waitMs": 8
         },
         {
           "kind": "type",
@@ -797,7 +1531,7 @@
           "label": "the new-session dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 7
         },
         {
           "kind": "press",
@@ -829,12 +1563,252 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 8
         }
       ],
       "notes": [
         "⌘K / Ctrl+K, then the palette's New session (#529): it starts one in the project the person is in",
         "Enter: a choice among 1 (Hick–Hyman 0.15 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "open-diff.mouse",
+      "task": "See what the agent changed in a file",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.1,
+      "waitMs": 327,
+      "travelPx": 546,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "evidence-file-packages/ui/src/features/session/SessionView.tsx",
+          "operators": "H M P B B",
+          "seconds": 3.1,
+          "pointer": {
+            "D": 546,
+            "W": 51,
+            "ID": 3.54
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 327
+        }
+      ],
+      "notes": [
+        "The changed file's row in the evidence panel's Git tab, open by default"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "open-file.mouse-link",
+      "task": "Open a file the agent named",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.08,
+      "waitMs": 337,
+      "travelPx": 211,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "file-link",
+          "operators": "H M P B B",
+          "seconds": 3.08,
+          "pointer": {
+            "D": 211,
+            "W": 25,
+            "ID": 3.25
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 337
+        }
+      ],
+      "notes": [
+        "A backticked path in the reply is a link (#39); the path in a tool card (\"Read packages/…\") is not"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "open-file.mouse-tree",
+      "task": "Open a file the agent named",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B B M P B B M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 6,
+        "B": 12,
+        "H": 1,
+        "M": 6,
+        "R": 6
+      },
+      "seconds": 15.83,
+      "waitMs": 465,
+      "travelPx": 890,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "evidence-tab-files",
+          "operators": "H M P B B",
+          "seconds": 3.15,
+          "pointer": {
+            "D": 538,
+            "W": 36,
+            "ID": 4
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the folder packages",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 7
+        },
+        {
+          "kind": "click",
+          "label": "dir-packages",
+          "operators": "M P B B",
+          "seconds": 2.56,
+          "pointer": {
+            "D": 87,
+            "W": 26,
+            "ID": 2.14
+          },
+          "choice": {
+            "n": 5,
+            "bits": 2.58,
+            "seconds": 0.39
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the folder packages/ui",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 3
+        },
+        {
+          "kind": "click",
+          "label": "dir-packages/ui",
+          "operators": "M P B B",
+          "seconds": 2.61,
+          "pointer": {
+            "D": 110,
+            "W": 22,
+            "ID": 2.58
+          },
+          "choice": {
+            "n": 5,
+            "bits": 2.58,
+            "seconds": 0.39
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the folder packages/ui/src",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 18
+        },
+        {
+          "kind": "click",
+          "label": "dir-packages/ui/src",
+          "operators": "M P B B",
+          "seconds": 2.45,
+          "pointer": {
+            "D": 22,
+            "W": 22,
+            "ID": 1
+          },
+          "choice": {
+            "n": 2,
+            "bits": 1.58,
+            "seconds": 0.24
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the folder packages/ui/src/styles",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 3
+        },
+        {
+          "kind": "click",
+          "label": "dir-packages/ui/src/styles",
+          "operators": "M P B B",
+          "seconds": 2.61,
+          "pointer": {
+            "D": 110,
+            "W": 22,
+            "ID": 2.58
+          },
+          "choice": {
+            "n": 5,
+            "bits": 2.58,
+            "seconds": 0.39
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the file",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        },
+        {
+          "kind": "click",
+          "label": "file-packages/ui/src/styles/index.css",
+          "operators": "M P B B",
+          "seconds": 2.45,
+          "pointer": {
+            "D": 22,
+            "W": 22,
+            "ID": 1
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 429
+        }
+      ],
+      "notes": [
+        "Through the Files tab, folder by folder: what a person does when the path is in a tool card, not a link",
+        "dir-packages: a choice among 5 (Hick–Hyman 0.39 s, not added)",
+        "dir-packages/ui: a choice among 5 (Hick–Hyman 0.39 s, not added)",
+        "dir-packages/ui/src: a choice among 2 (Hick–Hyman 0.24 s, not added)",
+        "dir-packages/ui/src/styles: a choice among 5 (Hick–Hyman 0.39 s, not added)"
       ],
       "breaches": []
     },
@@ -853,7 +1827,7 @@
         "R": 1
       },
       "seconds": 3.01,
-      "waitMs": 128,
+      "waitMs": 48,
       "travelPx": 544,
       "steps": [
         {
@@ -872,7 +1846,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 128
+          "waitMs": 48
         }
       ],
       "notes": [],
@@ -893,7 +1867,7 @@
         "R": 3
       },
       "seconds": 4.94,
-      "waitMs": 52,
+      "waitMs": 116,
       "travelPx": 0,
       "steps": [
         {
@@ -907,7 +1881,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 8
         },
         {
           "kind": "type",
@@ -920,7 +1894,7 @@
           "label": "the app",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 9
         },
         {
           "kind": "press",
@@ -938,12 +1912,345 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 44
+          "waitMs": 99
         }
       ],
       "notes": [
         "⌘K / Ctrl+K and the app's name: the palette lists apps (#529)",
         "Enter: a choice among 1 (Hick–Hyman 0.15 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "open-terminal.mouse",
+      "task": "Open a terminal in the session's project",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.15,
+      "waitMs": 490,
+      "travelPx": 584,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "evidence-tab-terminal",
+          "operators": "H M P B B",
+          "seconds": 3.15,
+          "pointer": {
+            "D": 584,
+            "W": 39,
+            "ID": 4
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 490
+        }
+      ],
+      "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "rename-session.mouse",
+      "task": "Rename a session",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H P M P B B M P B B H 20K M K",
+      "counts": {
+        "K": 21,
+        "P": 3,
+        "B": 4,
+        "H": 2,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 14.06,
+      "waitMs": 42,
+      "travelPx": 714,
+      "steps": [
+        {
+          "kind": "point",
+          "label": "session row \"Optimize images\" (hover reveals ⋯)",
+          "operators": "H P",
+          "seconds": 1.37,
+          "pointer": {
+            "D": 525,
+            "W": 231,
+            "ID": 1.71
+          }
+        },
+        {
+          "kind": "click",
+          "label": "⋯ of \"Optimize images\"",
+          "operators": "M P B B",
+          "seconds": 2.59,
+          "pointer": {
+            "D": 97,
+            "W": 22,
+            "ID": 2.43
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the menu",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 5
+        },
+        {
+          "kind": "click",
+          "label": "rename-session-mock-session-6",
+          "operators": "M P B B",
+          "seconds": 2.46,
+          "pointer": {
+            "D": 92,
+            "W": 79,
+            "ID": 1.12
+          },
+          "choice": {
+            "n": 0,
+            "bits": 0,
+            "seconds": 0
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the name field",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 9
+        },
+        {
+          "kind": "type",
+          "label": "\"Compress the images\"",
+          "operators": "H 20K",
+          "seconds": 6
+        },
+        {
+          "kind": "press",
+          "label": "Enter",
+          "operators": "M K",
+          "seconds": 1.63
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 28
+        }
+      ],
+      "notes": [
+        "The row's ⋯ menu, Rename; double-clicking the name also renames, but nothing on screen says so",
+        "rename-session-mock-session-6: a choice among 0 (Hick–Hyman 0 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "reorder-projects.mouse",
+      "task": "Move a project to the top of the sidebar",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B P B",
+      "counts": {
+        "K": 0,
+        "P": 2,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.98,
+      "waitMs": 9,
+      "travelPx": 724,
+      "steps": [
+        {
+          "kind": "drag",
+          "label": "project-header-landing-site → project-centralu",
+          "operators": "H M P B P B",
+          "seconds": 3.98,
+          "pointer": {
+            "D": 143,
+            "W": 123,
+            "ID": 1.11
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 9
+        }
+      ],
+      "notes": [
+        "Dragging the project by its name; nothing on screen says the list can be reordered"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "restore-session.mouse",
+      "task": "Bring back a session deleted by mistake",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 6,
+        "H": 1,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 8.47,
+      "waitMs": 423,
+      "travelPx": 1789,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "open-settings",
+          "operators": "H M P B B",
+          "seconds": 3.16,
+          "pointer": {
+            "D": 717,
+            "W": 44,
+            "ID": 4.12
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "settings",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 379
+        },
+        {
+          "kind": "click",
+          "label": "settings-tab-trash",
+          "operators": "M P B B",
+          "seconds": 2.72,
+          "pointer": {
+            "D": 903,
+            "W": 75,
+            "ID": 3.7
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the trash",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 37
+        },
+        {
+          "kind": "click",
+          "label": "trash-restore",
+          "operators": "M P B B",
+          "seconds": 2.59,
+          "pointer": {
+            "D": 169,
+            "W": 40,
+            "ID": 2.39
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 6
+        }
+      ],
+      "notes": [
+        "Settings, then Trash: the delete dialog and its toast say where it went"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "run-command.mouse",
+      "task": "Run one of the project's saved commands",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 6,
+        "H": 1,
+        "M": 3,
+        "R": 2
+      },
+      "seconds": 8.25,
+      "waitMs": 355,
+      "travelPx": 964,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "run-open",
+          "operators": "H M P B B",
+          "seconds": 3.16,
+          "pointer": {
+            "D": 438,
+            "W": 28,
+            "ID": 4.07
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the commands",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 350
+        },
+        {
+          "kind": "click",
+          "label": "run-command-0",
+          "operators": "M P B B",
+          "seconds": 2.49,
+          "pointer": {
+            "D": 279,
+            "W": 177,
+            "ID": 1.36
+          },
+          "choice": {
+            "n": 2,
+            "bits": 1.58,
+            "seconds": 0.24
+          }
+        },
+        {
+          "kind": "click",
+          "label": "run-exec",
+          "operators": "M P B B",
+          "seconds": 2.61,
+          "pointer": {
+            "D": 247,
+            "W": 49,
+            "ID": 2.59
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 5
+        }
+      ],
+      "notes": [
+        "The ▶ in the session header lists the saved commands; picking one selects it, and Run runs it (#60)",
+        "run-command-0: a choice among 2 (Hick–Hyman 0.24 s, not added)"
       ],
       "breaches": []
     },
@@ -962,7 +2269,7 @@
         "R": 3
       },
       "seconds": 13.57,
-      "waitMs": 18,
+      "waitMs": 61,
       "travelPx": 0,
       "steps": [
         {
@@ -976,7 +2283,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 49
         },
         {
           "kind": "type",
@@ -1000,7 +2307,7 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 3
         },
         {
           "kind": "type",
@@ -1042,7 +2349,7 @@
         "R": 2
       },
       "seconds": 13.39,
-      "waitMs": 20,
+      "waitMs": 44,
       "travelPx": 1141,
       "steps": [
         {
@@ -1061,7 +2368,7 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 11
+          "waitMs": 3
         },
         {
           "kind": "click",
@@ -1091,10 +2398,52 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 40
         }
       ],
       "notes": [],
+      "breaches": []
+    },
+    {
+      "id": "stop-session.mouse",
+      "task": "Stop a session that is working",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.12,
+      "waitMs": 8,
+      "travelPx": 384,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "activity-interrupt",
+          "operators": "H M P B B",
+          "seconds": 3.12,
+          "pointer": {
+            "D": 384,
+            "W": 32,
+            "ID": 3.7
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        }
+      ],
+      "notes": [
+        "The Stop beside \"Waiting for response\" at the end of the conversation"
+      ],
       "breaches": []
     },
     {
@@ -1112,7 +2461,7 @@
         "R": 1
       },
       "seconds": 1.91,
-      "waitMs": 11,
+      "waitMs": 6,
       "travelPx": 0,
       "steps": [
         {
@@ -1126,7 +2475,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 11
+          "waitMs": 6
         }
       ],
       "notes": [],
@@ -1147,7 +2496,7 @@
         "R": 2
       },
       "seconds": 4.94,
-      "waitMs": 25,
+      "waitMs": 13,
       "travelPx": 0,
       "steps": [
         {
@@ -1161,7 +2510,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 20
+          "waitMs": 6
         },
         {
           "kind": "type",
@@ -1185,7 +2534,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 7
         }
       ],
       "notes": [
@@ -1208,7 +2557,7 @@
         "R": 1
       },
       "seconds": 2.92,
-      "waitMs": 9,
+      "waitMs": 4,
       "travelPx": 525,
       "steps": [
         {
@@ -1227,7 +2576,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 4
         }
       ],
       "notes": [],
@@ -1248,7 +2597,7 @@
         "R": 1
       },
       "seconds": 3.21,
-      "waitMs": 6,
+      "waitMs": 4,
       "travelPx": 663,
       "steps": [
         {
@@ -1267,11 +2616,186 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 4
         }
       ],
       "notes": [
         "The top bar's back arrow, beside the session's name (#374)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "update-app.mouse",
+      "task": "Update the app when a new version is out",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 4,
+        "H": 1,
+        "M": 2,
+        "R": 2
+      },
+      "seconds": 4.75,
+      "waitMs": 18,
+      "travelPx": 589,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "update-line",
+          "operators": "H M P B B",
+          "seconds": 3.2,
+          "pointer": {
+            "D": 589,
+            "W": 28,
+            "ID": 4.47
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "installed",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 10
+        },
+        {
+          "kind": "click",
+          "label": "update-apply-now",
+          "operators": "M B B",
+          "seconds": 1.55
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        }
+      ],
+      "notes": [
+        "The \"Update to …\" line in the top bar installs; \"Apply now\" relaunches into it (#352)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "view-usage.mouse",
+      "task": "See how much of the weekly limit is used",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.18,
+      "waitMs": 4,
+      "travelPx": 647,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "usage-donut-claude",
+          "operators": "H M P B B",
+          "seconds": 3.18,
+          "pointer": {
+            "D": 647,
+            "W": 36,
+            "ID": 4.26
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 4
+        }
+      ],
+      "notes": [
+        "The ring shows the percentage at a glance; the click opens the windows and the daily use"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "worktree-session.mouse",
+      "task": "Start a session in its own git worktree",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B M P B B M P B B",
+      "counts": {
+        "K": 0,
+        "P": 3,
+        "B": 6,
+        "H": 1,
+        "M": 3,
+        "R": 3
+      },
+      "seconds": 8.5,
+      "waitMs": 33,
+      "travelPx": 1364,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "project-new-session-centralu",
+          "operators": "H M P B B",
+          "seconds": 3.19,
+          "pointer": {
+            "D": 517,
+            "W": 25,
+            "ID": 4.44
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the new-session dialog",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 12
+        },
+        {
+          "kind": "click",
+          "label": "worktree-toggle",
+          "operators": "M P B B",
+          "seconds": 2.6,
+          "pointer": {
+            "D": 479,
+            "W": 103,
+            "ID": 2.5
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the worktree options",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 13
+        },
+        {
+          "kind": "click",
+          "label": "create-session-confirm",
+          "operators": "M P B B",
+          "seconds": 2.71,
+          "pointer": {
+            "D": 368,
+            "W": 33,
+            "ID": 3.6
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        }
+      ],
+      "notes": [
+        "The project's +, then the dialog's worktree box; the branch left blank takes the default name"
       ],
       "breaches": []
     }

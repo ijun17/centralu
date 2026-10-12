@@ -268,8 +268,8 @@ What the baseline shows:
 The core tasks cover what a person does most; this audit measures the next twenty or so frequent
 flows (`e2e/ux/flows.task.ts`, #518) on their discoverable paths, then ranks what could be cheaper
 across every task, old and new. Nothing here is changed yet: the candidates are for the owner to
-pick. WebKit on macOS, 1280 × 840, the `?demo` scene; the CI run on Linux agrees to within a few
-hundredths of a second.
+pick. WebKit on Linux (the CI run, now in `e2e/ux/baseline.json`), 1280 × 840, the `?demo` scene;
+on macOS the operators are the same and the times agree to within a few hundredths of a second.
 
 The new tasks carry looser budgets than the core ones (two operators to spare, the M's exactly,
 the time plus 10%), enough to fail a change that adds a decision or a step and not one that moves a
@@ -278,27 +278,27 @@ pixel. A pull request that makes one cheaper tightens it.
 | Task | Id | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
 |---|---|---|---|---|---|---|---|---|---|---|
 | See what the agent changed in a file | `open-diff.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.10 | 546 |
-| Open a file the agent named: its link in the reply | `open-file.mouse-link` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.11 | 272 |
-| Open a file the agent named: the Files tab, folder by folder | `open-file.mouse-tree` | `H M P B B M P B B M P B B M P B B M P B B M P B B` | 0 | 6 | 12 | 1 | 6 | 25 | 15.83 | 889 |
+| Open a file the agent named: its link in the reply | `open-file.mouse-link` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.08 | 211 |
+| Open a file the agent named: the Files tab, folder by folder | `open-file.mouse-tree` | `H M P B B M P B B M P B B M P B B M P B B M P B B` | 0 | 6 | 12 | 1 | 6 | 25 | 15.83 | 890 |
 | Attach a file to a message | `attach-file.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.16 | 426 |
-| Commit the session's changes with a message | `commit.mouse` | `H M P B B P B B H 30K H M P B B` | 30 | 3 | 6 | 3 | 2 | 44 | 16.33 | 1399 |
+| Commit the session's changes with a message | `commit.mouse` | `H M P B B P B B H 30K H M P B B` | 30 | 3 | 6 | 3 | 2 | 44 | 16.33 | 1398 |
 | Stop a session that is working | `stop-session.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.12 | 384 |
 | Rename a session | `rename-session.mouse` | `H P M P B B M P B B H 20K M K` | 21 | 3 | 4 | 2 | 3 | 33 | 14.06 | 714 |
-| Delete a session (to the trash) | `delete-session.mouse` | `H P M P B B M P B B M P B B` | 0 | 4 | 6 | 1 | 3 | 14 | 9.16 | 1390 |
+| Delete a session (to the trash) | `delete-session.mouse` | `H P M P B B M P B B M P B B` | 0 | 4 | 6 | 1 | 3 | 14 | 9.17 | 1401 |
 | Bring back a session deleted by mistake | `restore-session.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.47 | 1789 |
-| Start a session in its own git worktree | `worktree-session.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.58 | 1354 |
-| Answer a question an agent asked in another session | `answer-question.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.04 | 1333 |
-| Continue a session in the other tool (hand off) | `handoff.mouse` | `H P M P B B M P B B M P B B M P B B` | 0 | 5 | 8 | 1 | 4 | 18 | 11.68 | 1423 |
-| Change a session's model | `change-model.mouse` | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.82 | 708 |
+| Start a session in its own git worktree | `worktree-session.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.50 | 1364 |
+| Answer a question an agent asked in another session | `answer-question.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.04 | 1332 |
+| Continue a session in the other tool (hand off) | `handoff.mouse` | `H P M P B B M P B B M P B B M P B B` | 0 | 5 | 8 | 1 | 4 | 18 | 11.66 | 1436 |
+| Change a session's model | `change-model.mouse` | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.83 | 707 |
 | Run one of the project's saved commands | `run-command.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.25 | 964 |
-| Open a terminal in the session's project | `open-terminal.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.15 | 580 |
+| Open a terminal in the session's project | `open-terminal.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.15 | 584 |
 | Put an app on the grid | `grid-app.mouse` | `H M P B B M P B P B` | 0 | 3 | 4 | 1 | 2 | 10 | 6.63 | 1524 |
 | Put a session on the grid | `grid-session.mouse` | `H M P B B M P B P B` | 0 | 3 | 4 | 1 | 2 | 10 | 6.59 | 1452 |
-| Move a project to the top of the sidebar | `reorder-projects.mouse` | `H M P B P B` | 0 | 2 | 2 | 1 | 1 | 6 | 3.98 | 725 |
-| Add a folder on a linked machine as a project | `add-remote-project.mouse` | `H M P B B H 12K H M P B B` | 12 | 2 | 4 | 3 | 2 | 23 | 9.99 | 998 |
-| Update the app when a new version is out | `update-app.mouse` | `H M P B B M B B` | 0 | 1 | 4 | 1 | 2 | 8 | 4.75 | 592 |
-| See how much of the weekly limit is used | `view-usage.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.18 | 649 |
-| Switch to the light theme | `change-theme.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.44 | 1790 |
+| Move a project to the top of the sidebar | `reorder-projects.mouse` | `H M P B P B` | 0 | 2 | 2 | 1 | 1 | 6 | 3.98 | 724 |
+| Add a folder on a linked machine as a project | `add-remote-project.mouse` | `H M P B B H 12K H M P B B` | 12 | 2 | 4 | 3 | 2 | 23 | 9.98 | 996 |
+| Update the app when a new version is out | `update-app.mouse` | `H M P B B M B B` | 0 | 1 | 4 | 1 | 2 | 8 | 4.75 | 589 |
+| See how much of the weekly limit is used | `view-usage.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.18 | 647 |
+| Switch to the light theme | `change-theme.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.44 | 1791 |
 
 What they show:
 
@@ -322,25 +322,28 @@ task (a judgement, marked H, M or L; nobody has counted yet). "After" is compute
 values as the suite: a step a change removes is taken out with its measured operators, and a target
 that changes is re-priced by Fitts's law. Each is a proposal, not a decision.
 
-| Rank | Task (path) | Now: ops · KLM s · M · travel px | What costs | Proposed change | After: ops · KLM s (Δ) | Often |
-|---|---|---|---|---|---|---|
-| 1 | Answer an approval (`approve.mouse-inbox`) | 13 · 8.35 · 3 · 1050 | The waiting list only navigates: open the list, pick the row, then find Allow in the card (`M P B B` three times) | Allow and Deny on each waiting-list row, with the command it asks about shown in the row | 9 · 5.85 (−2.50) | H |
-| 2 | Answer an approval (`approve.mouse`) | 9 · 5.56 · 2 · 741 | The sidebar row only opens the session; Allow is a second pointing across the window | An Allow / Deny pair on a waiting row in the sidebar (only while it waits), the command in its tooltip | 5 · ~3.1 (−2.4) | H |
-| 3 | Start a new session (`new-session.mouse`) | 30 · 12.98 · 3 · 1198 | The `+` opens a dialog whose only step in the common case is Start (`M P B B`, 2.72 s) | One click on `+` starts a session with the last-used tool and no worktree; the dialog moves behind a "…" beside it (partly done: #529 made the `+` visible) | 26 · 10.26 (−2.72) | H |
-| 4 | Send a message to another session (`send-to-session.mouse`) | 36 · 13.39 · 2 · 1141 | Clicking a session's row leaves the keyboard on the row: a `P B B` into the composer before typing | A click on a row (not arrowing through rows) gives the composer the keyboard, as the palette does since #528 | 33 · 11.95 (−1.44) | H |
-| 5 | Answer a question (`answer-question.mouse`) | 13 · 8.04 · 3 · 1333 | Picking the option is the decision; Answer is a second one (`M P B B`, 2.62 s) | For a single question with one choice, clicking an option answers; Answer stays for several questions, multiple choice and "Other" | 9 · 5.42 (−2.62) | H |
-| 6 | Open a file the agent named (`open-file.mouse-tree`) | 25 · 15.83 · 6 · 889 | A path in a tool card is not a link; the tree costs one `M P B B` per folder | Paths in tool cards (Read, Edit, Write) open the file like a reply's link; an Edit opens its diff | 5 · 3.11 (−12.72) | M |
-| 7 | Commit the changes (`commit.mouse`) | 44 · 16.33 · 2 · 1399 | Commit is disabled until something is staged, a git idea people who are not developers do not have | With nothing staged, the button reads "Commit all" and stages everything; Stage all stays for those who stage | 40 · 13.54 (−2.79) | M |
-| 8 | Link another machine (`add-machine.ssh-config`, `.mouse-manual`) | 17 · 11.05 · 4 · 2240 | Two levels into Settings (Settings, then Machines) while the machines are listed in the sidebar | An "Add machine" entry in the sidebar's machine group (and beside "Add project" before there is a group) opens the same form | 13 · 8.37 (−2.68); typed: 39 · 15.03 | L (first run) |
-| 9 | Link another machine (`add-machine.ssh-config`) | 17 · 11.05 · 4 · 2240 | When the probe finds one shell there is nothing to choose, yet Link still waits for a click | Link at once when the probe finds exactly one shell; the choice appears only when there are several | 13 · 8.34 (−2.71); with 8: 9 · 5.66 | L (first run) |
-| 10 | Rename a session (`rename-session.mouse`) | 33 · 14.06 · 3 · 714 | Hover to reveal ⋯, ⋯, Rename: 6.4 s before the first key; the double-click is invisible | Click the open session's name in its header to rename it (an edit cursor on hover) | 28 · ~10.6 (−3.5) | M |
-| 11 | Delete, and bring back (`delete-session.mouse`, `restore-session.mouse`) | 14 · 9.16 · 3 · 1390; 13 · 8.47 · 3 · 1789 | A confirmation for something the trash makes reversible; bringing it back is two levels into Settings | Delete moves to the trash at once; the toast says "Moved to the trash · Undo" | 10 · 6.53 (−2.63); restore from the toast: 5 · ~3.2 (−5.3) | M |
-| 12 | Hand off to the other tool (`handoff.mouse`) | 18 · 11.68 · 4 · 1423 | The dialog defaults to the same tool, so continuing in the other one is one more pick | Two menu items, "Hand off to Claude Code…" and "Hand off to Codex…", each opening the dialog with its tool chosen | 14 · 9.10 (−2.58) | L |
-| 13 | Run a saved command (`run-command.mouse`) | 13 · 8.25 · 3 · 964 | Picking a command selects it; Run is a second decision (#60 chose this so a click can read a log) | A ▶ on each command's row runs it; clicking the row still selects | 9 · ~5.8 (−2.5) | M |
-| 14 | Start a worktree session (`worktree-session.mouse`) | 13 · 8.58 · 3 · 1354 | Dialog, box, Start | With 3: the "…" beside `+` offers "New session in a worktree", which starts at once on the default branch name | 9 · ~5.9 (−2.7) | M |
-| 15 | Any session menu (rename, delete, hand off) | e.g. 14 · 9.16 · 3 for delete | The ⋯ shows only under the pointer: a `P` to the row before the `P` to the ⋯, and nothing tells a newcomer a menu exists | Keep the open session's ⋯ visible, and open the same menu on a right-click of any row | −1 P each, about −0.75 s | M |
-| 16 | Add a folder on a linked machine (`add-remote-project.mouse`) | 23 · 9.99 · 2 · 998 | The whole path is typed; there is no picker on the other machine | Prefill the machine's home folder, and list its recent or likely folders under the field | 14 · ~7.5 (−2.5) | L |
-| 17 | Update the app (`update-app.mouse`) | 8 · 4.75 · 2 · 592 | Install, then Apply now | When nothing is running, one click installs and applies | 5 · 3.20 (−1.55) | L |
+| Rank | Task (path) | Now: ops · KLM s · M · travel px | What costs | Proposed change | After: ops · KLM s (Δ) | Often | Work |
+|---|---|---|---|---|---|---|---|
+| 1 | Answer an approval (`approve.mouse-inbox`) | 13 · 8.35 · 3 · 1050 | The waiting list only navigates: open the list, pick the row, then find Allow in the card (`M P B B` three times) | Allow and Deny on each waiting-list row, with the command it asks about shown in the row | 9 · 5.85 (−2.50) | H | UI only (the waiting session already carries its approval) |
+| 2 | Answer an approval (`approve.mouse`) | 9 · 5.56 · 2 · 741 | The sidebar row only opens the session; Allow is a second pointing across the window | An Allow / Deny pair on a waiting row in the sidebar (only while it waits), the command in its tooltip | 5 · ~3.1 (−2.4) | H | UI only |
+| 3 | Start a new session (`new-session.mouse`) | 30 · 12.98 · 3 · 1198 | The `+` opens a dialog whose only step in the common case is Start (`M P B B`, 2.72 s) | One click on `+` starts a session with the last-used tool and no worktree; the dialog moves behind a "…" beside it (partly done: #529 made the `+` visible) | 26 · 10.26 (−2.72) | H | UI only (the tool from the project's last session) |
+| 4 | Send a message to another session (`send-to-session.mouse`) | 36 · 13.39 · 2 · 1141 | Clicking a session's row leaves the keyboard on the row: a `P B B` into the composer before typing | A click on a row (not arrowing through rows) gives the composer the keyboard, as the palette does since #528 | 33 · 11.95 (−1.44) | H | UI only |
+| 5 | Answer a question (`answer-question.mouse`) | 13 · 8.04 · 3 · 1332 | Picking the option is the decision; Answer is a second one (`M P B B`, 2.62 s) | For a single question with one choice, clicking an option answers; Answer stays for several questions, multiple choice and "Other" | 9 · 5.42 (−2.62) | H | UI only |
+| 6 | Open a file the agent named (`open-file.mouse-tree`) | 25 · 15.83 · 6 · 889 | A path in a tool card is not a link; the tree costs one `M P B B` per folder | Paths in tool cards (Read, Edit, Write) open the file like a reply's link; an Edit opens its diff | 5 · 3.08 (−12.75) | M | UI only (`openFile` exists) |
+| 7 | Commit the changes (`commit.mouse`) | 44 · 16.33 · 2 · 1398 | Commit is disabled until something is staged, a git idea people who are not developers do not have | With nothing staged, the button reads "Commit all" and stages everything; Stage all stays for those who stage | 40 · 13.54 (−2.79) | M | UI only (stage all, then commit: both exist) |
+| 8 | Link another machine (`add-machine.ssh-config`, `.mouse-manual`) | 17 · 11.05 · 4 · 2240 | Two levels into Settings (Settings, then Machines) while the machines are listed in the sidebar | An "Add machine" entry in the sidebar's machine group (and beside "Add project" before there is a group) opens the same form | 13 · 8.37 (−2.68); typed: 39 · 15.03 | L (first run) | UI only |
+| 9 | Link another machine (`add-machine.ssh-config`) | 17 · 11.05 · 4 · 2240 | When the probe finds one shell there is nothing to choose, yet Link still waits for a click | Link at once when the probe finds exactly one shell; the choice appears only when there are several | 13 · 8.34 (−2.71); with 8: 9 · 5.66 | L (first run) | UI only (the probe already returns the shells) |
+| 10 | Rename a session (`rename-session.mouse`) | 33 · 14.06 · 3 · 714 | Hover to reveal ⋯, ⋯, Rename: 6.4 s before the first key; the double-click is invisible | Click the open session's name in its header to rename it (an edit cursor on hover) | 28 · ~10.6 (−3.5) | M | UI only |
+| 11 | Delete, and bring back (`delete-session.mouse`, `restore-session.mouse`) | 14 · 9.17 · 3 · 1401; 13 · 8.47 · 3 · 1789 | A confirmation for something the trash makes reversible; bringing it back is two levels into Settings | Delete moves to the trash at once; the toast says "Moved to the trash · Undo" | 10 · 6.54 (−2.63); restore from the toast: 5 · ~3.2 (−5.3) | M | UI only (restore exists) |
+| 12 | Hand off to the other tool (`handoff.mouse`) | 18 · 11.66 · 4 · 1436 | The dialog defaults to the same tool, so continuing in the other one is one more pick | Two menu items, "Hand off to Claude Code…" and "Hand off to Codex…", each opening the dialog with its tool chosen | 14 · 9.08 (−2.58) | L | UI only |
+| 13 | Run a saved command (`run-command.mouse`) | 13 · 8.25 · 3 · 964 | Picking a command selects it; Run is a second decision (#60 chose this so a click can read a log) | A ▶ on each command's row runs it; clicking the row still selects | 9 · ~5.8 (−2.5) | M | UI only |
+| 14 | Start a worktree session (`worktree-session.mouse`) | 13 · 8.50 · 3 · 1364 | Dialog, box, Start | With 3: the "…" beside `+` offers "New session in a worktree", which starts at once on the default branch name | 9 · ~5.8 (−2.7) | M | UI only |
+| 15 | Any session menu (rename, delete, hand off) | e.g. 14 · 9.17 · 3 for delete | The ⋯ shows only under the pointer: a `P` to the row before the `P` to the ⋯, and nothing tells a newcomer a menu exists | Keep the open session's ⋯ visible, and open the same menu on a right-click of any row | −1 P each, about −0.75 s | M | UI only |
+| 16 | Add a folder on a linked machine (`add-remote-project.mouse`) | 23 · 9.98 · 2 · 996 | The whole path is typed; there is no picker on the other machine | Prefill the machine's home folder, and list its recent or likely folders under the field | 14 · ~7.5 (−2.5) | L | Prefill: UI only (the host's New-folder preview already names a folder there). Listing folders: host (a directory listing on the linked machine) |
+| 17 | Update the app (`update-app.mouse`) | 8 · 4.75 · 2 · 589 | Install, then Apply now | When nothing is running, one click installs and applies | 5 · 3.20 (−1.55) | L | UI only (the keeper's busy report exists) |
+
+"Work" says whether a candidate is a change to the screen alone (`packages/ui`, through ports that
+exist) or needs the host or the protocol too. All but the folder list in 16 are the screen alone.
 
 Not candidates: the one-click tasks, the grid (6.6 s, and the empty grid says how), and the theme
 (8.4 s, but done once).
