@@ -512,6 +512,36 @@ Implementation rules:
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
 
+### 2.1 Claude query options and independent-session messaging (#569)
+
+`ClaudeSession.start` is the single SDK `query({ options })` construction site. Both
+`SessionManager.createSession` and the resume/wake path use it, for ordinary sessions,
+orchestrators, coordinators, worktree managers, builders, app agents and `start_agent` children.
+Its `spawnClaudeCodeProcess` callback sends the SDK's flags and environment to either the local
+spawn or the keeper; a fresh keeper replacement therefore receives the same options.
+
+`withoutCrossSessionMessaging` wraps the existing options. It merges inline SDK flag settings
+with `crossSessionInbound: 'refuse'`, appends discovery denies `ListAgents` and `ListPeers`,
+and merges `process.env` and any explicit environment with `CLAUDE_CODE_HARBOR_KITE: '0'` last.
+The adapter previously selected settings files only through `settingSources`; inline `settings`
+are a separate layer and do not replace that selection, permission options, MCP servers or
+resume IDs. `SendMessage` is deliberately left available for this query's own subagents.
+
+The environment gate disables peer discovery, cross-session sends and inbox binding in the
+inspected CLI versions 2.1.263–2.1.289. It is undocumented and version-sensitive, so the
+documented refusal and discovery denies stay as additional controls. They do not alone block
+every outbound send to a known peer if the gate changes. A keeper adoption attaches to an
+already-running process and cannot apply new startup controls; restart processes created by
+an older host to pick up this fix. See [security-boundaries.md](security-boundaries.md).
+
+The regression matrix in `sessions/setting-files.test.ts` checks the options for each kind on
+start and resume across trust and permission presets; adapter tests check merging and the keeper
+spawn path. For runtime validation before SDK/CLI upgrades, run
+`pnpm exec tsx packages/agent-host/scripts/probe-cross-session.mts`: two Haiku sessions in
+temporary folders, with Centralu's shared controls, test discovery, delivery and `SendMessage`
+to its own background subagent. This is a manual billable probe; it requires sockets and Claude sign-in,
+sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
+
 ## 3. Procedure for adding a new tool (C3 — the reason this document exists)
 
 1. Create `adapters/<tool>/` and implement `AgentAdapter` (event conversion + detect + capability).
