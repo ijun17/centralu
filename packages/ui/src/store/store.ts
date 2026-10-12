@@ -6365,8 +6365,12 @@ async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => P
     const cur = get().inlineViews[sessionId]?.[k.callId]
     if (cur && cur.state !== 'parked' && cur.instanceId === k.instanceId) continue
     // Between two reads of history (before an earlier close has reached the host), the same instance is never closed twice — an instance id is never reused
-    releasedOrphans.add(k.instanceId)
-    void platform.apps.closeView(k.instanceId).catch(() => {})
+    const id = k.instanceId
+    releasedOrphans.add(id)
+    void platform.apps
+      .closeView(id)
+      .catch(() => {})
+      .finally(() => releasedOrphans.delete(id))
   }
 }
 
@@ -6401,7 +6405,11 @@ async function holdPinnedViews(get: () => AppState, set: (fn: (s: AppState) => P
   }))
 }
 
-/** An instance left open that a reopened UI has closed (`syncInlineViews`) */
+/**
+ * An instance left open that a reopened UI is closing (`syncInlineViews`). Held only while its close is on its way:
+ * once the host has answered, it no longer lists the instance, and one it still lists is open and closed again. Kept
+ * for good, this grew by one id per orphan for the life of the window (#392).
+ */
 const releasedOrphans = new Set<string>()
 
 /**

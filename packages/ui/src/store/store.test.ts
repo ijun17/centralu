@@ -4516,6 +4516,32 @@ describe('a parked in-conversation view lets go of its call (#392)', () => {
   })
 })
 
+describe('an orphaned in-conversation view is remembered only while its close is on its way (#392)', () => {
+  it('is closed once while the close is pending, and again if the host still holds it afterwards', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('orph392', sessionInfo('orph392'))
+    await useStore.getState().attach(mock)
+    // The host holds a view this window is not drawing (the window reloaded)
+    vi.spyOn(mock.apps, 'inlineViews').mockResolvedValue([
+      { callId: 'c1', appId: 'viewer', projectId: 'p1', tool: 'show', kept: true, instanceId: 'orphan-392' },
+    ])
+    let fail: (e: Error) => void = () => {}
+    const close = vi.spyOn(mock.apps, 'closeView').mockImplementationOnce(() => new Promise<void>((_, reject) => (fail = reject)))
+
+    // Two reads while the first close is still on its way: one close
+    await useStore.getState().loadHistory('orph392')
+    await useStore.getState().loadHistory('orph392')
+    expect(close).toHaveBeenCalledTimes(1)
+
+    // That close never reached the host, which still holds the view: the next read closes it again
+    fail(new Error('disconnected'))
+    await vi.waitFor(async () => {
+      await useStore.getState().loadHistory('orph392')
+      expect(close).toHaveBeenCalledTimes(2)
+    })
+  })
+})
+
 /**
  * A composer asked to take the keyboard (#528) belongs to the session asked for: showing another
  * session withdraws the request, so it never lands later in a session the person has left.
