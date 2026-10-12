@@ -840,9 +840,9 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(told(hub).filter((t) => t.startsWith('[Centralu]'))).toHaveLength(1)
   })
 
-  it('reaches a machine’s worktree manager as an instruction, not as someone else’s words (step 2)', async () => {
+  it('reaches a machine’s session that has children (a former worktree manager, #561) as an instruction, not as someone else’s words (step 2)', async () => {
     const { tool, remote } = await rig({ worktreeChild: true })
-    expect(remote.mgr.toolProfileOf('w1')).toBe('manager')
+    expect(remote.mgr.toolProfileOf('w1')).toBe('reader')
     await tool('send_to_session', { sessionId: 'm1.w1', text: 'merge the branch' })
     await until(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
   })

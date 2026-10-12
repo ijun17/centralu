@@ -46,19 +46,31 @@ the Codex bridge.
 
 | Profile | Who | View | Tools | Instructions |
 |---|---|---|---|---|
-| `orchestrator` | the one orchestrator | every session | all but the manager's and builder's | role and usage |
-| `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
+| `orchestrator` | the one orchestrator | every session | all but the builder's | role and usage |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
+| `reader` | every other session in a project (#320), a former worktree manager included | its own project, read at call time; acts on the agents it started | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
 
 The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
 server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
 `scripts/probe-codex-mcp-instructions.mts`), so the Codex bridge sends none and the same text rides in the
 thread's developer instructions, after the seat's role, under a one-line header. Codex reads those at
 `thread/start` only and ignores them on `thread/resume`, so a Codex thread keeps the instructions it was started
-with: one that changes profile while its thread lives on (a session promoted to worktree manager when a child is
-linked to it) has its new tools without their instructions until it starts a new thread.
+with: one that changes profile while its thread lives on has its new tools without their instructions until it starts a
+new thread.
+
+**The worktree manager** (`manager`, #69/#76) was folded into ordinary sessions (#561 part 3, owner 2026-10-12). It was
+a project's seat that watched its worktree sessions, proposed new ones (`propose_worktree_session`, which the person
+then created) and deleted a merged one behind a hard gate (`delete_worktree_session`). Now a session starts worktree
+agents itself (`start_agent` with `worktree`, §1.2.1), works with them (`agent_session`) and cleans up a merged, clean
+one with `agent_session` `delete`, behind the same gate (`cleanUpWorktreeChild`). What stayed: the person's own worktree
+sessions (the new-session window's option; they now stand alone instead of under a manager made for them), merge and
+pull-request detection on every worktree session, and the project's trunk (`worktrees.setTrunk`, the project menu's
+"Worktree trunk", kept in the former slot's row). The orchestrator gets no replacement for `propose_worktree_session`:
+making a branch and a folder in the person's repository now goes through a project session's consent card, and the
+orchestrator reaches that session with `send_to_session`. Existing data: store v48 gives a former manager's worktree
+sessions `askedBy` = their parent, so it owns them as the agents it started; `worktrees.createManager` is refused with
+the reason (the protocol keeps it for an older window), and the slot's column stays until a later contract step.
 
 The `reader` set is read-only: its tools object refuses sending, creating and settings outright,
 not only by name. It is never given to an agent session an app stood up (M4 D-1), whose answer goes
@@ -226,7 +238,7 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working` |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer) and `stopped` |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (a merged, clean worktree child cleaned up, part 3) |
 
 What one `start_agent` call does (`SessionManager.startAgent`):
 
@@ -262,9 +274,8 @@ when the caller is itself a worktree session, so the child starts from the calle
 project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
 worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
-either alone says what is meant. Until the worktree manager is folded into ordinary sessions (#561 part 3), a
-worktree child also hangs under the project's manager slot in the sidebar, which `createSession` opens if there is
-none.
+either alone says what is meant. A worktree child hangs under the session that started it in the sidebar
+(`parentSessionId`).
 
 `agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` is refused while a turn
 the caller gave it runs, while it works on something else (the person may be using it), and when the person has
@@ -276,7 +287,7 @@ a child, stops that child's turn. A child left running (`wait: false`, or past t
 caller's Stop does not reach it, it has its own Stop. Deleting the caller drops its waits and its session consent;
 the children keep their turns and their link.
 
-**Size.** The two definitions are 974 characters (`AGENT_BUDGET_CHARS` 1,000; 918 before the worktree arguments). Claude loads `start_agent` (a request
+**Size.** The two definitions are 992 characters (`AGENT_BUDGET_CHARS` 1,000; 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
 `start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
 is named from its task and the person renames it.
@@ -1107,7 +1118,7 @@ of a tool's:
 | A live session sleeps once it has said nothing (no event of any kind) for the set time: **15 minutes** by default, "Put idle sessions to sleep after" in Settings → Background (`agents.setSleepPolicy`, saved as `agents.sleepAfterMinutes`, `off` for never) | The owner's decision (2026-10-12). Inside the 1 h cache lifetime Claude Code asks for, so the wake still reads the cache |
 | Only a tool whose adapter says so (`capabilities.sleep`): Claude yes, Codex no | Claude's resume was measured to keep the cache. A large Codex thread took 7-13 s to resume and its cache on resume is unmeasured; Codex's memory is better won by one shared app-server per account (#561 E3), decided separately |
 | Never while `sessionIdle` says no: a turn, an approval or a question waiting, background work (the CLI's own timers included, below), or a tool that cannot report its background work | The same rule as moving a session to a new CLI (§4.6): ending the process would end what it holds |
-| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session ask_project opened for it) still in the turn it gave it, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
+| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session ask_project opened for it) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
 | The quiet period counts from host start for a session this host has not heard from | A host that just replaced another (a restart, a swap) does not know what the person was doing a second ago |
 | Sleeping is `SessionManager.sleepSession`: refused unless still idle, the handle leaves the map, `session_live {live: false, reason: 'asleep'}` goes out, the process is disposed. A message arriving meanwhile starts a resume that waits for the dispose (`sleeping`) | Never two processes on one conversation; a send is never lost to a closing handle |
 | Waking is the ordinary `resumeSession`, the path a session takes after a host restart; every resume sends `session_live {live: true}` | One path to keep right. The event tells every window, not only the one that asked |
@@ -1600,7 +1611,7 @@ step against:
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | add a column | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
-| 21, 26, 29, 35 | rewrite data one way (21 rewrites every message: heavy) | reads it, cannot be undone |
+| 21, 26, 29, 35, 48 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561) | reads it, cannot be undone |
 | **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |
 
 A step that changes the schema regenerates [generated/schema.md](generated/schema.md) (`pnpm docs:schema`) in the

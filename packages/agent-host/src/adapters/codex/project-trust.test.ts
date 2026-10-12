@@ -126,9 +126,9 @@ describe('do files in the repository reach a Codex thread (#92)', () => {
    * to load `project_doc_max_bytes: 0` whenever the bridge was present, so the manager and the
    * session that creates the worktree lost AGENTS.md even in a trusted project.
    */
-  it('a project session that receives the bridge (manager, session that creates it) follows trust just like a worker — both start and resume', async () => {
+  it('a project session that receives the bridge (the reader set of an ordinary session, the session that builds an app) follows trust just like a worker — both start and resume', async () => {
     const seen: string[] = []
-    for (const toolProfile of ['manager', 'builder'] as const) {
+    for (const toolProfile of ['reader', 'builder'] as const) {
       for (const projectTrusted of [true, false]) {
         for (const resumeExternalId of [undefined, 'ext-1']) {
           state.requests.length = 0
@@ -140,10 +140,10 @@ describe('do files in the repository reach a Codex thread (#92)', () => {
       }
     }
     expect(seen).toEqual([
-      'manager trusted=true start: doc=read projects=untouched',
-      'manager trusted=true resume: doc=read projects=untouched',
-      'manager trusted=false start: doc=0 projects=untrusted',
-      'manager trusted=false resume: doc=0 projects=untrusted',
+      'reader trusted=true start: doc=read projects=untouched',
+      'reader trusted=true resume: doc=read projects=untouched',
+      'reader trusted=false start: doc=0 projects=untrusted',
+      'reader trusted=false resume: doc=0 projects=untrusted',
       'builder trusted=true start: doc=read projects=untouched',
       'builder trusted=true resume: doc=read projects=untouched',
       'builder trusted=false start: doc=0 projects=untrusted',

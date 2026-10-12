@@ -527,8 +527,8 @@ with no way back.
   when the trash is emptied. The project's own rows (project-scope rules, usage totals, answers given
   to its apps) go with the project as before.
 - **Nobody but the person deletes for good.** The trash is reached only through the UI's RPC; the
-  agents' tools and the apps' broker have no verb for it. An agent can put a session in the trash (the
-  worktree manager's cleanup of a proven-merged worktree does), never take one out of it.
+  agents' tools and the apps' broker have no verb for it. An agent can put a session in the trash (a session's
+  cleanup of a proven-merged worktree agent it started, `agent_session` `delete`, does), never take one out of it.
 - Schema v39 adds `sessions.deleted_at` (NULL for a live session) and `sessions.trash` (JSON: where it
   came from, and what to remove when it is deleted for good). A trashed session has no `project_id`;
   its project is in `trash`, which is what lets its project be deleted without the foreign key taking

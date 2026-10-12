@@ -14,7 +14,7 @@ import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor, instructionsFor, toolD
 export type AgentCli = 'claude' | 'codex'
 
 /** Every profile, in the order tables list them */
-export const TOOL_PROFILES = ['orchestrator', 'manager', 'scoped', 'builder', 'reader'] as const satisfies readonly ToolProfile[]
+export const TOOL_PROFILES = ['orchestrator', 'scoped', 'builder', 'reader'] as const satisfies readonly ToolProfile[]
 
 export type ServedDefinition = {
   /** The name the model sees: `mcp__<server>__<tool>` on both CLIs */

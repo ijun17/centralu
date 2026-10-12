@@ -129,6 +129,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'projects.setWorktreeSetup': project(),
   'projects.gitStatus': project((r, q) => q.project(r)),
   'worktrees.createManager': project(sessionInfo),
+  'worktrees.setTrunk': project(),
   'git.status': project(),
   'git.diff': project(),
   'git.log': project(),

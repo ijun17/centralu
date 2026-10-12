@@ -193,7 +193,7 @@ describe('ask_project', () => {
     const tools = toolsWith({ askProject: async () => ({ ok: false, error: 'The person did not allow it' }) })
     const r = await runOrchestratorTool(tools, 'ask_project', { project: 'toolkit', task: 'x' }, { sessionId: 's1', profile: 'reader' })
     expect(r).toEqual({ text: 'The person did not allow it', isError: true })
-    for (const profile of ['orchestrator', 'manager', 'scoped', 'builder'] as const) {
+    for (const profile of ['orchestrator', 'scoped', 'builder'] as const) {
       expect(profileAllows(profile, 'ask_project'), profile).toBe(false)
       const asOther = await runOrchestratorTool(tools, 'ask_project', { project: 'toolkit', task: 'x' }, { sessionId: 'o', profile })
       expect(asOther.isError, profile).toBe(true)
@@ -224,7 +224,7 @@ describe('the agent set', () => {
 
   it('is no tool of any directing seat', async () => {
     const tools = toolsWith({ startAgent: async () => ({ ok: false, error: 'x' }) })
-    for (const profile of ['orchestrator', 'manager', 'scoped', 'builder'] as const) {
+    for (const profile of ['orchestrator', 'scoped', 'builder'] as const) {
       for (const name of ['start_agent', 'agent_session']) {
         expect(profileAllows(profile, name), `${profile} ${name}`).toBe(false)
         expect((await runOrchestratorTool(tools, name, { task: 'x', sessionId: 'c', action: 'status' }, { sessionId: 'o', profile })).isError).toBe(true)

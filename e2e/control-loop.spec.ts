@@ -7275,19 +7275,9 @@ test('Deleting a worktree session asks first, and deletion requires opting in', 
     ;(window as any).__mock.mockWorktreeDirty = true
   })
 
-  /*
-   * Worktree sessions are now drawn nested under a manager (#69) — the first row in the list is
-   * the manager. Grabbing `.first()` would click the manager's own delete, so this picks the
-   * nested row instead.
-   */
-  await page
-    .locator('li[data-nested]')
-    .getByTestId(/^session-menu-/)
-    .click()
-  await page
-    .locator('li[data-nested]')
-    .getByTestId(/^delete-session-/)
-    .click()
+  // A worktree session the person makes stands on its own (#561 part 3): it is the project's only row
+  await page.getByTestId('sidebar').getByTestId(/^session-menu-/).first().click()
+  await page.getByTestId(/^delete-session-/).click()
 
   const panel = page.getByTestId('delete-worktree')
   await expect(panel).toBeVisible()
@@ -8232,108 +8222,68 @@ test('Closing and restarting from the grid returns to the grid', async ({ page }
 })
 
 /**
- * The session tree (#69): worktree sessions are drawn nested under a manager.
- *
- * The hierarchy lives only in the sidebar — the manager is an ordinary session with children,
- * and creating a worktree session adds a manager row even to a project that had none (only a
- * row, no process).
+ * The session tree (#69, #561): a worktree session the person makes stands on its own, and one a session started
+ * (start_agent) is drawn nested under that session. The worktree manager the tree used to hang from was folded into
+ * ordinary sessions (#561 part 3), so making a worktree session adds no manager row.
  */
-test('Worktree sessions sit nested under the manager in the sidebar', async ({ page }) => {
+test('A worktree session the person makes stands on its own; one a session started sits under that session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
-
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // A manager row was created, and the worktree session is drawn nested under it
-  const manager = page.getByText('Worktree manager', { exact: true })
-  await expect(manager).toBeVisible()
-  const nested = page.locator('li[data-nested]')
-  await expect(nested).toHaveCount(1)
+  const sidebar = page.getByTestId('sidebar')
+  await expect(sidebar.getByText('Worktree manager', { exact: true })).toHaveCount(0)
+  await expect(page.locator('li[data-nested]')).toHaveCount(0)
 
-  // It lives in the manager row's ⋯ menu — clicking it opens a new session dialog with the
-  // worktree already on
-  const mgrRow = page.locator('li', { has: manager })
-  await mgrRow.locator('[data-testid^="session-menu-"]').click()
-  await mgrRow.locator('[data-testid^="new-worktree-session-"]').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeVisible()
-  await expect(page.getByTestId('worktree-toggle').locator('input')).toBeChecked()
-
-  // Creating one more through that dialog places it under the same manager — one manager per
-  // project is enough
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  await expect(page.locator('li[data-nested]')).toHaveCount(2)
-  await expect(page.getByText('Worktree manager', { exact: true })).toHaveCount(1)
+  // The host opens a worktree child started by that session (start_agent), linked to it
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const parent = [...m.sessions.values()][0]
+    m.emit({
+      type: 'session_created',
+      sessionId: 'child-1',
+      session: {
+        ...parent,
+        id: 'child-1',
+        name: 'centralu/write-the-parser-1a2b',
+        worktree: { path: '/tmp/wt/child-1', branch: 'centralu/write-the-parser-1a2b' },
+        parentSessionId: parent.id,
+        askedBy: parent.id,
+      },
+    })
+  })
+  await expect(page.locator('li[data-nested]')).toHaveCount(1)
+  await expect(page.locator('li[data-nested]').getByText('centralu/write-the-parser-1a2b')).toBeVisible()
 })
 
 /**
- * Creating the manager **first** (#76).
- *
- * What is checked here is the order: the slot gets created with zero children, and a worktree
- * created afterward goes into that slot. And once the slot exists, the "create manager" button
- * disappears — there must never be two doors doing the same thing.
+ * The project's worktree trunk (#76): chosen from the project menu, which says the trunk it has. It was chosen when
+ * starting the worktree manager before #561 part 3; the trunk stayed, as the project's own setting.
  */
-test('Creating the worktree manager first places later worktrees under it', async ({ page }) => {
+test('The project menu sets the worktree trunk and says which it is', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('start-worktree-manager-alpha').click()
-  // The trunk field is filled with the current branch — the guess is put in front of the person
-  // for confirmation
+  await expect(page.getByTestId('worktree-trunk-alpha')).toHaveText('Set worktree trunk…')
+  await page.getByTestId('worktree-trunk-alpha').click()
+  // The field is filled with the current branch — the guess is put in front of the person for confirmation
   await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
-  await page.getByTestId('worktree-manager-confirm').click()
-  await expect(page.getByTestId('worktree-manager-dialog')).toBeHidden()
+  await page.getByTestId('worktree-trunk-input').fill('develop')
+  await page.getByTestId('worktree-trunk-confirm').click()
+  await expect(page.getByTestId('worktree-trunk-dialog')).toBeHidden()
 
-  /*
-    The slot exists — with zero children. And the moment it is created, it opens right up: the
-    reason to create it is to talk to the thing just created, so merely adding a row to the list
-    and stopping there is only half the job.
-  */
-  // Scope the count to the sidebar — with the manager open, the same name also appears in the
-  // conversation header
-  const sidebar = page.getByTestId('sidebar')
-  await expect(sidebar.getByText('Worktree manager', { exact: true })).toHaveCount(1)
-  await expect(page.getByTestId('session-name')).toHaveText('Worktree manager')
-  await expect(page.locator('li[data-nested]')).toHaveCount(0)
-  // Now that the slot exists, the "create" door closes — that row is gone even with the menu open
   await page.getByTestId('project-menu-alpha').click()
-  await expect(page.getByTestId('start-worktree-manager-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('worktree-trunk-alpha')).toHaveText('Worktree trunk: develop…')
   await page.keyboard.press('Escape')
-
-  // The worktree created now goes under the slot that already exists — no second manager is created
+  // A new worktree session forks from it by default
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  await expect(page.locator('li[data-nested]')).toHaveCount(1)
-  await expect(sidebar.getByText('Worktree manager', { exact: true })).toHaveCount(1)
-})
-
-test('Opening via the project header + still leaves the worktree off — only the manager row + pre-warms it', async ({
-  page,
-}) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-
-  // First open once via the manager row's + and close it — the pre-warmed state must not leak
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('worktree-toggle').locator('input').check()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  const manager = page.getByText('Worktree manager', { exact: true })
-  await page.locator('li', { has: manager }).locator('[data-testid^="session-menu-"]').click()
-  await page.locator('li', { has: manager }).locator('[data-testid^="new-worktree-session-"]').click()
-  await page.keyboard.press('Escape')
-
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
-  await expect(page.getByTestId('worktree-toggle').locator('input')).not.toBeChecked()
+  await expect(page.getByTestId('worktree-base-input')).toHaveValue('develop')
 })
 
 test('Naming the worktree branch becomes the session name', async ({ page }) => {
@@ -8350,8 +8300,8 @@ test('Naming the worktree branch becomes the session name', async ({ page }) => 
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // Session name = branch name — that name appears on the nested row in the sidebar
-  await expect(page.locator('li[data-nested]').getByText('feat/login-fix')).toBeVisible()
+  // Session name = branch name — that name appears on its row in the sidebar
+  await expect(page.getByTestId('sidebar').getByText('feat/login-fix')).toBeVisible()
 })
 
 /**
@@ -8405,19 +8355,18 @@ test('Worktree proposal: a line stays in the conversation, + lights up, and the 
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  // Create a manager and a child (the manager session is picked by name, not by list index 0)
+  // A session whose conversation holds a proposal (the worktree manager made them before #561 part 3)
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // Open the manager session and simulate the manager proposing — the branch name arrives in the
-  // title
-  await page.getByText('Worktree manager', { exact: true }).click()
+  // Open the session and replay a proposal in it — the branch name arrives in the title
   await page.evaluate(() => {
     const m = (window as any).__mock
-    const manager = [...m.sessions.values()].find((s: any) => s.name === 'Worktree manager')
+    const manager = [...m.sessions.values()][0]
+    ;(window as any).__store.getState().focusSession(manager.id)
     m.emit({
       type: 'tool_call',
       sessionId: manager.id,
@@ -8657,7 +8606,7 @@ test('Two worktree proposals fill in order across two dialog openings', async ({
 
   await page.evaluate(() => {
     const m = (window as any).__mock
-    const manager = [...m.sessions.values()].find((s: any) => s.name === 'Worktree manager')
+    const manager = [...m.sessions.values()][0]
     for (const branch of ['feat/first', 'feat/second']) {
       m.emit({
         type: 'tool_call',
@@ -9195,19 +9144,19 @@ test("Turning on ⌘Enter to send also keeps the orchestrator's first composer f
   expect(await page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBeNull()
 })
 
-test('If the worktree manager cannot be created, the dialog stays open and states why (#180)', async ({
+test('If the worktree trunk cannot be set, the dialog stays open and states why (#180)', async ({
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
-    ;(window as any).__mock.projects.createWorktreeManager = async () => {
+    ;(window as any).__mock.projects.setWorktreeTrunk = async () => {
       throw new Error('not a git repository')
     }
   })
   await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('start-worktree-manager-alpha').click()
-  await page.getByTestId('worktree-manager-confirm').click()
-  await expect(page.getByTestId('worktree-manager-dialog')).toContainText('not a git repository')
+  await page.getByTestId('worktree-trunk-alpha').click()
+  await page.getByTestId('worktree-trunk-confirm').click()
+  await expect(page.getByTestId('worktree-trunk-dialog')).toContainText('not a git repository')
   await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
 })
 

@@ -1773,6 +1773,29 @@ export class Store {
           if (!cols.has('app_machine')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN app_machine TEXT`)
         },
       },
+      {
+        to: 48,
+        breaksOlderReaders: false,
+        /**
+         * The worktree manager folded into ordinary sessions (#561 part 3): a former manager now owns the worktree
+         * sessions it held as the agents it started, so `agent_session` reaches them and they cannot start agents of
+         * their own (depth one). `asked_by_session_id` is set to `parent_session_id` on every worktree session that has a
+         * parent and no `askedBy` yet; `parent_session_id` stays, so the sidebar still hangs them under it.
+         *
+         * **Expand only (#292's rule).** A one-way data rewrite into a column v45 added: an older host reads it and shows
+         * the child's "asked by" mark. `projects.worktree_manager` stays: it still holds the project's trunk, and an
+         * older host still finds its manager there; dropping it is a later, breaking step.
+         */
+        run: () => {
+          // A store an older step's test built by hand may lack a column: there is then nothing to rewrite
+          const cols = new Set((this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name))
+          if (!['asked_by_session_id', 'parent_session_id', 'worktree_path'].every((c) => cols.has(c))) return
+          this.db.exec(`
+            UPDATE sessions SET asked_by_session_id = parent_session_id
+             WHERE asked_by_session_id IS NULL AND parent_session_id IS NOT NULL AND worktree_path IS NOT NULL
+          `)
+        },
+      },
     ]
   }
 
@@ -2134,6 +2157,30 @@ export class Store {
     } catch {
       return null
     }
+  }
+
+  /**
+   * The project's worktree trunk (#76), from the same row as the former manager slot (#561 part 3): read whatever the
+   * slot's session, since the trunk is the project's and no longer a manager's. Empty or unreadable: none.
+   */
+  worktreeTrunk(projectId: string): string | null {
+    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
+      { worktree_manager: string | null } | undefined
+    if (!row?.worktree_manager) return null
+    try {
+      const parsed = JSON.parse(row.worktree_manager) as { baseBranch?: unknown }
+      return typeof parsed.baseBranch === 'string' && parsed.baseBranch ? parsed.baseBranch : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Sets the trunk, keeping the slot's session id when there is one, so an older build still finds the manager it made
+   * there (agent-host.md §5.1: the shape is expanded, not changed)
+   */
+  setWorktreeTrunk(projectId: string, baseBranch: string): void {
+    this.setWorktreeManager(projectId, { sessionId: this.worktreeManager(projectId)?.sessionId ?? '', baseBranch })
   }
 
   setWorktreeManager(projectId: string, manager: { sessionId: string; baseBranch: string } | null): void {

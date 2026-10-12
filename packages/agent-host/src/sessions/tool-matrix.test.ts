@@ -23,7 +23,7 @@ function matrix(): { profiles: string[]; rows: Map<string, string[]> } {
   return { profiles: header!.slice(1), rows }
 }
 
-const PROFILES: ToolProfile[] = ['orchestrator', 'manager', 'scoped', 'builder', 'reader']
+const PROFILES: ToolProfile[] = ['orchestrator', 'scoped', 'builder', 'reader']
 const ALL_TOOLS = [...new Set([...ORCHESTRATOR_TOOLS, ...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name))]
 
 describe('the tool matrix in docs/security-boundaries.md (#382)', () => {

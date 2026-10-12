@@ -14,7 +14,8 @@
  * Options: --cli claude,codex  --reps 2  --model haiku  --codex-model <id>  --change-model <id|none>
  *          --phases resident,cache,results,selection  --prompts <file>  --out <file>  --keep
  *          --rare commands|resident|deferred (#512: how the orchestrator's rare commands are exposed; the host's default)
- *          --kinds none,reader,orchestrator,manager,builder (the session kinds the resident phase starts)
+ *          --kinds none,reader,orchestrator,builder (the session kinds the resident phase starts; the worktree manager
+ *          went with its role, #561 part 3)
  *          --preamble (#512 round 2: the orchestrator's role starts with the preamble, CC_ORCHESTRATOR_PREAMBLE)
  *          --only <id,id> (run only these prompts of the set)
  *
@@ -49,7 +50,7 @@ const { values: opt, positionals } = parseArgs({
     rare: { type: 'string', default: DEFAULT_RARE_TIER },
     preamble: { type: 'boolean', default: false },
     only: { type: 'string' },
-    kinds: { type: 'string', default: 'none,reader,orchestrator,manager,builder' },
+    kinds: { type: 'string', default: 'none,reader,orchestrator,builder' },
   },
   allowPositionals: true,
 })
@@ -205,14 +206,12 @@ class Driver {
     return this.w.host
   }
 
-  async session(kind: 'none' | 'reader' | 'orchestrator' | 'manager' | 'builder'): Promise<Json> {
+  async session(kind: 'none' | 'reader' | 'orchestrator' | 'builder'): Promise<Json> {
     const { host, pHere, pThere, here } = this.w
     let s: Json
     if (kind === 'orchestrator') {
       await host.rpc('orchestrator.configure', { tool: this.cli })
       s = await host.rpc('orchestrator.get', {})
-    } else if (kind === 'manager') {
-      s = await host.rpc('worktrees.createManager', { projectId: pHere.id, baseBranch: 'main' })
     } else if (kind === 'builder') {
       s = await host.rpc('apps.createBuilder', { appId: 'counter', projectId: pThere.id, tool: this.cli })
     } else {
@@ -303,7 +302,7 @@ function rowOf(r: RecordedRequest): RequestRow {
 
 /** Resident context: a fresh session of each kind, one short turn, its first request */
 async function residentPhase(d: Driver): Promise<void> {
-  const kinds = (['none', 'reader', 'orchestrator', 'manager', 'builder'] as const).filter((k) => KINDS.includes(k))
+  const kinds = (['none', 'reader', 'orchestrator', 'builder'] as const).filter((k) => KINDS.includes(k))
   const out: NonNullable<Summary['resident']>[Cli] = {}
   const walk: RequestRow[] = []
   for (const kind of kinds) {

@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22, v23 and v24 broke the same six assertions one after another: if the version is written
  * six times, every migration bills six small chores.
  */
-const LATEST_SCHEMA = 47
+const LATEST_SCHEMA = 48
 
 function seeded() {
   const s = new Store()
@@ -2021,6 +2021,39 @@ describe('migration v45 — a delegated session remembers who asked', () => {
     s.upsertSession({ ...plain!, id: 's2', askedBy: 's1' })
     expect(s.listSessions().find((x) => x.id === 's2')!.askedBy).toBe('s1')
     s.close()
+  })
+})
+
+/** v48: a former worktree manager owns its worktree sessions as the agents it started (#561 part 3) */
+describe('migration v48 — worktree sessions become their former manager\'s started agents', () => {
+  it('sets askedBy from parentSessionId on worktree sessions only, and leaves an askedBy already set', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v48-'))
+    const file = join(dir, 'store.db')
+    try {
+      const fresh = new Store(file)
+      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      const base = { ...seeded().listSessions()[0]!, projectId: 'p1' }
+      const wt = (branch: string) => ({ path: `/tmp/wt/${branch}`, branch, base: 'abc' })
+      fresh.upsertSession({ ...base, id: 'mgr' })
+      fresh.upsertSession({ ...base, id: 'kid', worktree: wt('a'), parentSessionId: 'mgr' })
+      fresh.upsertSession({ ...base, id: 'asked', worktree: wt('b'), parentSessionId: 'mgr', askedBy: 'other' })
+      fresh.upsertSession({ ...base, id: 'plain-child', parentSessionId: 'mgr' })
+      fresh.upsertSession({ ...base, id: 'lone', worktree: wt('c') })
+      fresh.close()
+      const raw = new Database(file)
+      raw.exec(`UPDATE sessions SET asked_by_session_id = NULL WHERE id = 'kid'`)
+      raw.pragma('user_version = 47')
+      raw.close()
+
+      const s = new Store(file)
+      expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+      const by = Object.fromEntries(s.listSessions().map((x) => [x.id, x.askedBy ?? null]))
+      expect(by).toEqual({ mgr: null, kid: 'mgr', asked: 'other', 'plain-child': null, lone: null })
+      expect(s.listSessions().find((x) => x.id === 'kid')!.parentSessionId).toBe('mgr')
+      s.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

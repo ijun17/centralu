@@ -3794,14 +3794,15 @@ describe('a failed send returns what was written (#180)', () => {
     expect(useStore.getState().toast).toBe('Could not start the orchestrator: no tool')
   })
 
-  it('returns a failure to the calling window if a worktree manager could not be created', async () => {
+  it('returns a failure to the calling window if the worktree trunk could not be set', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/wm180')
     await useStore.getState().attach(mock)
-    vi.spyOn(mock.projects, 'createWorktreeManager').mockRejectedValueOnce(new Error('not a git repository'))
-    await expect(useStore.getState().createWorktreeManager(proj.id, 'main')).rejects.toThrow(
-      'Could not start the worktree manager: not a git repository',
-    )
+    vi.spyOn(mock.projects, 'setWorktreeTrunk').mockRejectedValueOnce(new Error('not a git repository'))
+    await expect(useStore.getState().setWorktreeTrunk(proj.id, 'main')).rejects.toThrow('Could not set the trunk: not a git repository')
+    // Set, it is the project's trunk on screen
+    await useStore.getState().setWorktreeTrunk(proj.id, 'develop')
+    expect(useStore.getState().projects[proj.id]?.worktreeManager?.baseBranch).toBe('develop')
   })
 
   it('counts an attachment while it is uploading — the composer refuses to send during that time', async () => {

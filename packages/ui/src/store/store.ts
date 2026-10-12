@@ -1166,12 +1166,10 @@ export type AppState = {
   /** Opens/closes the session-creation window (`null` closes it) */
   openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
   /**
-   * Creates a worktree manager's slot (#76) — **before** its first branch.
-   *
-   * Once created, it takes the person there: it exists so they can talk to the thing they just
-   * created, so stopping at just adding a row to the list would leave the job half done.
+   * Sets the project's worktree trunk (#76). It was chosen when making the worktree manager, which was folded into
+   * ordinary sessions (#561 part 3); a failure is thrown back to the dialog, which keeps it in place (#180).
    */
-  createWorktreeManager(projectId: string, baseBranch: string): Promise<void>
+  setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void>
 
   /** `machine`: a folder on that linked machine, its path in that machine's terms (#82) */
   addProject(path: string, machine?: string | null): Promise<ProjectInfo>
@@ -4465,38 +4463,21 @@ export const useStore = create<AppState>((set, get) => ({
     })
   },
 
-  async createWorktreeManager(projectId, baseBranch) {
+  async setWorktreeTrunk(projectId, baseBranch) {
     const platform = get().platform
     if (!platform) return
     try {
-      const info = await platform.projects.createWorktreeManager(projectId, baseBranch)
-      /*
-       * Registering the session is already done by the `session_created` event (#69). It is not
-       * added a second time here because that path is the only one that also runs on a restart or in
-       * a different window — adding it in two places lets one of them silently go stale. This only
-       * updates **the project's own link** and takes the person there.
-       */
-      set((s) => {
-        const p = s.projects[projectId]
-        return p
-          ? {
-              projects: {
-                ...s.projects,
-                [projectId]: { ...p, worktreeManager: { sessionId: info.id, baseBranch } },
-              },
-            }
-          : {}
-      })
-      get().focusSession(info.id)
+      await platform.projects.setWorktreeTrunk(projectId, baseBranch)
     } catch (e) {
-      /*
-       * A failure is **returned to the caller's window** (#180). While this used to be swallowed into
-       * a toast, it never reached the window's own `catch`, so the window closed anyway — the typed
-       * branch name and the reason vanished together, and the toast was dismissed 2.5 seconds later.
-       * The window keeps the reason in place instead.
-       */
-      throw new Error(`Could not start the worktree manager: ${(e as Error).message}`)
+      // Returned to the dialog, which keeps the typed branch and the reason in place (#180)
+      throw new Error(`Could not set the trunk: ${(e as Error).message}`)
     }
+    set((s) => {
+      const p = s.projects[projectId]
+      return p
+        ? { projects: { ...s.projects, [projectId]: { ...p, worktreeManager: { sessionId: p.worktreeManager?.sessionId ?? '', baseBranch } } } }
+        : {}
+    })
   },
 
   async addProject(path, machine) {
@@ -5332,13 +5313,9 @@ export const useStore = create<AppState>((set, get) => ({
     const mode = opts?.mode ?? 'agent'
     // The record mode's default is to **preserve** — the original of a session that cannot respond is kept until its successor is confirmed (#78)
     const deleteOld = opts?.deleteOld ?? mode === 'agent'
-    // The same rule as a manager's own delete — if a live child exists, the final delete is refused
-    // anyway. This filters it at the start instead of meeting the failure at the very end (right
-    // before destruction).
-    const liveKids = Object.values(s.sessions).filter(
-      (x) => x.parentSessionId === sessionId && !x.merged,
-    )
-    if (session.worktree || liveKids.length > 0) {
+    // A worktree session cannot hand off yet. A session with worktree children can since #561: they outlive it (they
+    // used to pin a worktree manager, whose delete refused while one was unmerged)
+    if (session.worktree) {
       set({ toast: 'Worktree sessions cannot hand off yet — merge or delete them first' })
       return
     }

@@ -182,9 +182,9 @@ describe('create_app (the orchestrator)', () => {
     expect(untrusted.text).toContain('does not make apps in a project it does not trust')
   })
 
-  it('only the orchestrator uses it — it is absent from the manager\'s and the coordinating session\'s profiles', () => {
+  it('only the orchestrator uses it — it is absent from the coordinating session\'s and the builder\'s profiles', () => {
     expect(profileAllows('orchestrator', 'create_app')).toBe(true)
-    expect(profileAllows('manager', 'create_app')).toBe(false)
+    expect(profileAllows('builder', 'create_app')).toBe(false)
     expect(profileAllows('scoped', 'create_app')).toBe(false)
   })
 })

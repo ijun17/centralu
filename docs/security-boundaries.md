@@ -122,11 +122,15 @@ front door" below).
 | Profile | Which sessions | What its tools see |
 |---|---|---|
 | `orchestrator` | The central orchestrator | Every session |
-| `manager` | A project's worktree manager: it has a worktree child or holds the project's manager slot | Its own worktree sessions |
 | `scoped` | A coordinating session | Its member sessions |
 | `builder` | An app's builder session | Its own app (`check`) |
-| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at their own project" is on | Its own project; another project only through a consent card |
+| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at their own project" is on | Its own project; acts only on the agents it started (`start_agent`, behind a consent card) and another project only through a consent card |
 | none | A session with the switch off, a session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
+
+The worktree manager's profile (`manager`: list, read and send to its worktree sessions, propose one, delete a merged
+one) was folded into ordinary sessions (#561 part 3): a session starts worktree agents itself with `start_agent`, works
+with them through `agent_session`, and cleans up a merged, clean one with `agent_session` `delete`, behind the same hard
+gate (#76). A former manager is an ordinary `reader` that owns the worktree sessions it held (store v48).
 
 The matrix below is checked against `profileAllows` and `toolDefsFor` by a test
 (`sessions/tool-matrix.test.ts`), so adding a tool or moving one between profiles fails until this
@@ -134,28 +138,26 @@ table says the same. "yes" means the session sees the tool and its calls run; "�
 is not listed for it and a call by name is refused (`Not a tool of this session`).
 
 <!-- tool-matrix:start -->
-| Tool | orchestrator | manager | scoped | builder | reader | none |
-|---|---|---|---|---|---|---|
-| `list_sessions` | yes | yes | yes | — | — | — |
-| `read_session` | yes | yes | yes | — | yes | — |
-| `send_to_session` | yes | yes | yes | — | — | — |
-| `recall` | yes | — | — | — | yes | — |
-| `app_guide` | yes | — | — | — | yes | — |
-| `update_session_settings` | yes | — | — | — | — | — |
-| `create_project` | yes | — | — | — | — | — |
-| `create_session` | yes | — | — | — | — | — |
-| `propose_worktree_session` | yes | yes | — | — | — | — |
-| `delete_worktree_session` | — | yes | — | — | — | — |
-| `propose_skill` | yes | — | — | — | — | — |
-| `propose_mcp_server` | yes | — | — | — | — | — |
-| `check` | — | — | — | yes | — | — |
-| `create_app` | yes | — | — | — | — | — |
-| `ask_project` | — | — | — | — | yes | — |
-| `start_agent` | — | — | — | — | yes | — |
-| `agent_session` | — | — | — | — | yes | — |
-| `find_apps` | — | — | — | — | yes | — |
-| `attach_app` | — | — | — | — | yes | — |
-| `detach_app` | — | — | — | — | yes | — |
+| Tool | orchestrator | scoped | builder | reader | none |
+|---|---|---|---|---|---|
+| `list_sessions` | yes | yes | — | — | — |
+| `read_session` | yes | yes | — | yes | — |
+| `send_to_session` | yes | yes | — | — | — |
+| `recall` | yes | — | — | yes | — |
+| `app_guide` | yes | — | — | yes | — |
+| `update_session_settings` | yes | — | — | — | — |
+| `create_project` | yes | — | — | — | — |
+| `create_session` | yes | — | — | — | — |
+| `propose_skill` | yes | — | — | — | — |
+| `propose_mcp_server` | yes | — | — | — | — |
+| `check` | — | — | yes | — | — |
+| `create_app` | yes | — | — | — | — |
+| `ask_project` | — | — | — | yes | — |
+| `start_agent` | — | — | — | yes | — |
+| `agent_session` | — | — | — | yes | — |
+| `find_apps` | — | — | — | yes | — |
+| `attach_app` | — | — | — | yes | — |
+| `detach_app` | — | — | — | yes | — |
 <!-- tool-matrix:end -->
 
 A reader's `read_session` without an id lists its project's sessions; that is why it has no
@@ -202,6 +204,7 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 | `start_agent` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `startAgent` (the project's trust, #382) |
 | `start_agent` past 4 running children in the project | refused | refused | refused | refused | refused | refused | refused | refused | `agentCeilingError` (`AGENT_CEILING`) |
 | `agent_session` on a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`askedBy` is the caller, same project) |
+| `agent_session` delete, a worktree child with uncommitted changes or a tip not proven on the trunk | refused | refused | refused | refused | refused | refused | refused | refused | `cleanUpWorktreeChild` (#76's hard gate, measured at the call: clean worktree, and trunk ancestry or a merged PR whose head is the tip); a proven one goes to the trash with its worktree and branch |
 | `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | asks | asks | asks | asks | asks | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
@@ -256,13 +259,13 @@ Codex source, and no logged-in app call was run.
 
 ### Turning things off
 
-| Change | orchestrator | manager | scoped | builder | reader |
-|---|---|---|---|---|---|
-| "Let sessions look at their own project" off | — | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
-| Its project loses trust | No change (reads no project files) | Settings files at the next start | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` refused (#382) |
-| The other project loses trust | — | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the session it opens there follows its trust |
-| The person revokes a pair in Settings | — | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again |
-| Sharing of an app turned off | — | — | — | — | Leaves every session that attached it |
+| Change | orchestrator | scoped | builder | reader |
+|---|---|---|---|---|
+| "Let sessions look at their own project" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
+| Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561) |
+| The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the session it opens there follows its trust |
+| The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again; for a project's `agents` row, the next `start_agent` asks again (a child already running is left to finish) |
+| Sharing of an app turned off | — | — | — | Leaves every session that attached it |
 
 ## Tool output in the store
 
@@ -382,8 +385,8 @@ session is, not from whether it carries Centralu's own tools (#152). Only the or
 coordinators read no settings files, trusted or not: they belong to no project and work in a folder
 other sessions can write to (in Claude, `settingSources: []`, which leaves out `~/.claude` too, except
 the person's own `defaultMode`, carried under `normal` since #382; in Codex, their folder is marked
-`untrusted` and `project_doc_max_bytes = 0`, while `~/.codex` still loads). Worktree managers and the builders of project apps follow their project's trust like any
-worker. The builder of a user-folder app counts as trusted, because that folder is the user's own
+`untrusted` and `project_doc_max_bytes = 0`, while `~/.codex` still loads). Agents a session started (in its folder or a worktree) and the builders of project apps follow their project's trust
+like any worker. The builder of a user-folder app counts as trusted, because that folder is the user's own
 (decision 3).
 
 The same switch decides whether the project's apps may run (M4 decision 3; [apps.md](apps.md) §3).

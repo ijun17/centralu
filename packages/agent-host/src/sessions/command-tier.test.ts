@@ -24,7 +24,7 @@ import { residentCost } from './tool-cost.js'
  * commands it may run: the tool matrix (docs/security-boundaries.md, tool-matrix.test.ts) still decides.
  */
 
-const PROFILES: ToolProfile[] = ['orchestrator', 'manager', 'scoped', 'builder', 'reader']
+const PROFILES: ToolProfile[] = ['orchestrator', 'scoped', 'builder', 'reader']
 const RARE = RARE_COMMANDS.orchestrator ?? []
 
 function fakeTools() {
@@ -88,9 +88,8 @@ describe('the commands tier', () => {
       }
     }
     expect(wrong).toEqual([])
-    // The other seats are as they were: the manager keeps its propose_worktree_session as a tool, and no seat but the orchestrator has the three
-    expect(toolDefsFor('manager').map((t) => t.name)).toContain('propose_worktree_session')
-    for (const p of ['manager', 'scoped', 'builder', 'reader'] as const) {
+    // The other seats are as they were: no seat but the orchestrator has the three
+    for (const p of ['scoped', 'builder', 'reader'] as const) {
       expect(toolDefsFor(p).some((t) => t.name.startsWith('centralu_')), p).toBe(false)
       expect(profileAllows(p, 'centralu_run'), p).toBe(false)
     }
@@ -99,7 +98,7 @@ describe('the commands tier', () => {
   it('refuses a command outside the profile: not listed, not described, not run', async () => {
     const tools = fakeTools()
     const listed = await runOrchestratorTool(tools, 'centralu_commands', {}, orchestrator)
-    for (const outside of ['delete_worktree_session', 'check', 'ask_project', 'send_to_session']) {
+    for (const outside of ['check', 'ask_project', 'start_agent', 'send_to_session']) {
       expect(listed.text).not.toContain(`- ${outside}:`)
       const help = await runOrchestratorTool(tools, 'centralu_help', { command: outside }, orchestrator)
       expect(help.isError).toBe(true)
@@ -107,11 +106,10 @@ describe('the commands tier', () => {
       expect(run.isError, outside).toBe(true)
       expect(run.text).toMatch(/No command "[a-z_]+" for this session/)
     }
-    expect(tools.deleteWorktreeSession).not.toHaveBeenCalled()
     expect(tools.checkApp).not.toHaveBeenCalled()
     // A seat without the tier runs none of it, even by a caller that knows the names
-    const manager = await runOrchestratorTool(tools, 'centralu_run', { command: 'propose_worktree_session', args: { branch: 'b' } }, { sessionId: 'm', profile: 'manager' })
-    expect(manager).toMatchObject({ isError: true, text: 'Not a tool of this session: centralu_run' })
+    const scoped = await runOrchestratorTool(tools, 'centralu_run', { command: 'create_app', args: { id: 'x', name: 'X' } }, { sessionId: 'm', profile: 'scoped' })
+    expect(scoped).toMatchObject({ isError: true, text: 'Not a tool of this session: centralu_run' })
     // And the orchestrator no longer reaches the commands by their own names: what it was not shown, it cannot call
     for (const c of RARE) expect(profileAllows('orchestrator', c)).toBe(false)
   })
@@ -178,6 +176,6 @@ describe('the deferred tier', () => {
     expect(cost.deferredChars).toBeGreaterThan(3_500)
     // Codex has no deferral of ours: all of it counts
     expect(residentCost('orchestrator', 'codex').deferredChars).toBe(0)
-    for (const p of ['manager', 'scoped', 'builder'] as const) expect(residentCost(p, 'claude').deferredChars, p).toBe(0)
+    for (const p of ['scoped', 'builder'] as const) expect(residentCost(p, 'claude').deferredChars, p).toBe(0)
   })
 })

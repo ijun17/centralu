@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 47, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 48, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 

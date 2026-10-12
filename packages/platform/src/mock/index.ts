@@ -1622,62 +1622,10 @@ export class MockPlatform implements Platform {
           }
         : null
       /*
-       * The same rule as the real thing (#69, manager.managerFor): a worktree session stands
-       * under a manager from the moment it is born. The manager is an ordinary session with
-       * children, and if there is none, only a row is created (live=false — the process is
-       * born when someone speaks to it).
+       * The same rule as the real thing (#561 part 3): a worktree session the person makes stands on its own; the
+       * worktree manager it used to hang under was folded into ordinary sessions.
        */
-      let parentSessionId: string | null = null
-      if (worktree && params.projectId) {
-        const projectId = params.projectId
-        const owner = this.projectsList.find((p) => p.id === projectId)
-        /*
-         * The lookup order is also exactly the real thing's (#76): where the project points →
-         * relationship → create. Skipping the first branch here once made a second manager
-         * stand up next to one already created (e2e caught it) — if the mock is lazier than
-         * the real thing, the contract splits on screen only.
-         */
-        const seated = owner?.worktreeManager && this.sessions.get(owner.worktreeManager.sessionId)
-        const withKids = new Set([...this.sessions.values()].map((x) => x.parentSessionId).filter(Boolean))
-        let mgr: SessionInfo | undefined =
-          seated ||
-          [...this.sessions.values()].find(
-            (x) => x.projectId === projectId && !x.worktree && withKids.has(x.id),
-          )
-        if (!mgr) {
-          const mgrId = `mock-manager-${++this.idc}`
-          mgr = {
-            id: mgrId,
-            projectId: params.projectId,
-            kind: 'worker',
-            tool: params.tool,
-            externalId: null,
-            name: 'Worktree manager',
-            autoNamed: false,
-            state: 'idle',
-            lastReadSeq: 0,
-            lastSeq: 0,
-            createdAt: this.now(),
-            waitingSince: null,
-            live: false,
-            model: null,
-            effort: null,
-            verbosity: null,
-            serviceTier: null,
-            permissionPreset: 'normal',
-            importedFrom: null,
-            worktree: null,
-            parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
-            ...sessionLiveDefaults(),
-          }
-          this.sessions.set(mgrId, mgr)
-          this.emit({ type: 'session_created', sessionId: mgrId, session: mgr })
-        }
-        // Whether found through the relationship or just created, has the project point to it too (the real thing's self-healing)
-        if (owner)
-          owner.worktreeManager = { sessionId: mgr.id, baseBranch: owner.worktreeManager?.baseBranch ?? '' }
-        parentSessionId = mgr.id
-      }
+      const parentSessionId: string | null = null
       const info: SessionInfo = {
         id,
         projectId: params.projectId,
@@ -2413,52 +2361,13 @@ export class MockPlatform implements Platform {
         : null
       p.worktreeSetup = clean && (clean.command || clean.copyFiles.length) ? clean : null
     },
-    /*
-     * The same rule as the real thing (#76): there is one slot per project, and calling this
-     * again **only rewrites the trunk**. The manager row is born as the worktree session's
-     * parent, so this also creates it as a process-less row (live:false) — if the mock created
-     * a live session, the screen would get ahead of the real thing.
-     */
-    createWorktreeManager: async (projectId: string, baseBranch: string) => {
+    /** The project's worktree trunk (#76), as the real host's `worktrees.setTrunk` sets it */
+    setWorktreeTrunk: async (projectId: string, baseBranch: string) => {
       const p = this.projectsList.find((x) => x.id === projectId)
       if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       const branch = baseBranch.trim()
-      if (!branch)
-        throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
-      const seated = p.worktreeManager && this.sessions.get(p.worktreeManager.sessionId)
-      if (seated) {
-        p.worktreeManager = { sessionId: seated.id, baseBranch: branch }
-        return { ...seated }
-      }
-      const id = `mock-session-${++this.idc}`
-      const manager: SessionInfo = {
-        id,
-        projectId,
-        kind: 'worker',
-        tool: p.defaultTool ?? this.detected[0]?.name ?? 'claude',
-        externalId: null,
-        name: 'Worktree manager',
-        autoNamed: false,
-        state: 'idle',
-        lastReadSeq: 0,
-        lastSeq: 0,
-        createdAt: this.now(),
-        waitingSince: null,
-        live: false,
-        model: null,
-        effort: null,
-        verbosity: null,
-        serviceTier: null,
-        permissionPreset: 'normal',
-        importedFrom: null,
-        worktree: null,
-        parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
-        ...sessionLiveDefaults(),
-      }
-      this.sessions.set(id, manager)
-      p.worktreeManager = { sessionId: id, baseBranch: branch }
-      this.emit({ type: 'session_created', sessionId: id, session: manager })
-      return { ...manager }
+      if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
+      p.worktreeManager = { sessionId: p.worktreeManager?.sessionId ?? '', baseBranch: branch }
     },
   }
 

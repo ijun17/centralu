@@ -19,7 +19,7 @@ import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
  *
  *   orchestrator, coordinating session          no files at all (Claude's `settingSources: []`, Codex
  *                                                turns off its store layer)
- *   worker, manager, a project app's building    exactly that project's trust
+ *   worker, worktree agent, a project app's building    exactly that project's trust
  *   session, an agent a project app assigned (D-1)
  *   a user-folder app's building session         trusted — that folder is the user's own
  *   an agent a user-folder app assigned (D-1)    only the person's own settings — the text was
@@ -151,7 +151,7 @@ type Kind =
   | 'orchestrator'
   | 'coordinator'
   | 'worker'
-  | 'manager'
+  | 'worktree agent'
   | 'project-app builder'
   | 'user-folder-app builder'
   | 'project-app agent'
@@ -165,7 +165,7 @@ const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
   orchestrator: () => 'none',
   coordinator: () => 'none',
   worker: (t) => (t ? 'all' : 'user'),
-  manager: (t) => (t ? 'all' : 'user'),
+  'worktree agent': (t) => (t ? 'all' : 'user'),
   'project-app builder': (t) => (t ? 'all' : 'user'),
   'user-folder-app builder': () => 'all',
   'project-app agent': (t) => (t ? 'all' : 'user'),
@@ -189,12 +189,11 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
     return id
   },
   worker: async (tool) => ((await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo).id,
-  manager: async (tool) => {
-    store.setProjectDefaultTool(projectId, tool)
-    const seat = (await rpc('worktrees.createManager', { projectId, baseBranch: 'main' })) as SessionInfo
-    // The manager's seat stands up first, on its own — it receives a tool and files only the first time it is woken
-    await mgr.resumeSession(seat.id)
-    return seat.id
+  // An agent another session started in a new worktree (#561), which took the retired worktree manager's place here
+  'worktree agent': async (tool) => {
+    await rpc('projects.setTrusted', { projectId, trusted: true })
+    const parent = ((await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo).id
+    return (await mgr.createSession({ projectId, cwd: repo, tool, permissionPreset: 'normal', worktree: true, askedBy: parent })).id
   },
   'project-app builder': async (tool) => {
     // An app and its building session only stand up in a trusted project
@@ -289,7 +288,6 @@ describe.each(['claude', 'codex'] as const)('%s — the session\'s kind decides 
     // An agent an app calls stands up as safe — the person's global bypass does not carry over to an app's instruction (runAppAgent)
     const born: PermissionPreset = kind === 'project-app agent' || kind === 'user-folder-app agent' ? 'safe' : 'normal'
     const seen = [launched(tool, id, born)]
-    // The manager stands up its seat first and only launches on its first wake — everything else launches at creation
     const want = [expected(tool, kind, trustedNow(), born, 'new')]
     for (const trusted of [false, true]) {
       await rpc('projects.setTrusted', { projectId, trusted })

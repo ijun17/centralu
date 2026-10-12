@@ -4,7 +4,6 @@ import type { ToolProfile } from '../apps/contract.js'
 import { APP_GUIDE_TOPICS } from './app-guide.js'
 import {
   APP_ACCESS_TOOLS,
-  MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
   AGENT_TOOLS,
@@ -62,7 +61,6 @@ function seatSection(text: string, heading: string): string {
 
 const SEATS: { profile: ToolProfile; heading: string }[] = [
   { profile: 'orchestrator', heading: 'Tools the orchestrator calls' },
-  { profile: 'manager', heading: 'Tools the worktree manager calls' },
   { profile: 'scoped', heading: 'Tools a coordinating session calls' },
   { profile: 'reader', heading: 'Tools every other session calls' },
 ]
@@ -74,7 +72,7 @@ describe('the app guide speaks only of tools that exist in the registry', () => 
   })
 
   it('the same holds for the instructions given to the model', () => {
-    const text = [ORCHESTRATOR_INSTRUCTIONS, MANAGER_INSTRUCTIONS, SCOPED_INSTRUCTIONS].join('\n')
+    const text = [ORCHESTRATOR_INSTRUCTIONS, SCOPED_INSTRUCTIONS].join('\n')
     expect(toolLikeWords(text).filter((w) => !KNOWN.has(w))).toEqual([])
   })
 
@@ -101,7 +99,7 @@ describe('the app guide speaks only of tools that exist in the registry', () => 
  */
 describe("app_guide's topic", () => {
   it("is offered as exactly the guide's topics, on every seat that has the guide", () => {
-    const seats = (['orchestrator', 'manager', 'scoped', 'reader'] as const).filter((p) => orchestratorToolSchemas(p).some((t) => t.name === 'app_guide'))
+    const seats = (['orchestrator', 'scoped', 'reader'] as const).filter((p) => orchestratorToolSchemas(p).some((t) => t.name === 'app_guide'))
     expect(seats).toContain('reader')
     expect(seats).toContain('orchestrator')
     for (const profile of seats) {

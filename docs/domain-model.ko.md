@@ -36,14 +36,13 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 세션 종류 | 세션이 무엇으로 만들어지는가: `worker`(평범한 세션 전부), `orchestrator`, `coordinator`. 그대로 저장하지 않는다. `is_orchestrator`와 코디네이터의 구성원 목록이 있는지에서 읽어 낸다 | `SessionKind`, `packages/protocol/src/commands.ts`; 읽어 내는 곳은 `Store`, `packages/agent-host/src/dev-services/store.ts` | |
 | 오케스트레이터 | 앱 전체에 하나뿐인, 모든 세션을 보고 지휘하는 세션. 어느 프로젝트에도 속하지 않는다 | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | 프로젝트 오케스트레이터(폐지) |
 | 평범한 세션 | 빌더도, 매니저도, 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션과 위임된 세션도). 설정에서 끌 수 있다 | `readsOwnProject`, `packages/agent-host/src/sessions/manager.ts` | |
-| 워크트리 매니저 | `<<role>>` 아래에 워크트리 세션을 둔 세션, 또는 프로젝트의 매니저 자리가 가리키는 세션. 자기 자식만 지휘한다 | `isWorktreeManager`, `manager.ts`; `projects.worktree_manager` | 리드, 부모 |
 | 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 언제나 매니저 아래에 있다(`parentSessionId`) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
 | 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 휴지통에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 오케스트레이터 |
 | 빌더 | `<<role>>` 앱 하나를 만드는 세션. `appId`를 달고 **그리고** 빌더 지도(`apps.builders`)에서 그 앱이 가리키는 세션 | `builderRefOf`, `manager.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다 | `isAppAgentSession`, `runAppAgent`, `manager.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | 위임된("부탁받은") 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 세우거나 다시 쓴 세션. `askedBy`로 표시한다 | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
 | 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 위임된 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `manager.ts`의 `startAgent`, `agentSession`; `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
-| 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `manager`, `scoped`, `builder`, `reader`, 또는 없음 | `toolProfileOf`, `manager.ts`; [agent-host.ko.md](agent-host.ko.md) §1.1 | |
+| 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `scoped`, `builder`, `reader`, 또는 없음(워크트리 매니저의 `manager`는 평범한 세션에 접혀 들어갔다, #561) | `toolProfileOf`, `manager.ts`; [agent-host.ko.md](agent-host.ko.md) §1.1 | |
 | 권한 프리셋 | 에이전트가 묻지 않고 해도 되는 범위: `safe`, `normal`, `auto` | `PermissionPreset`, `entities.ts` | 모드 |
 | 살아 있음 | 세션에 지금 프로세스가 있는가. 살아 있지 않은 세션은 말을 걸면 이어 띄운다 | `SessionInfo.live` | 보관(FR-20은 폐지) |
 | 잠듦 | 호스트가 유휴 세션의 프로세스를 끝냈거나(#568, 기본 15분) 재시작 뒤 아무것도 깨우지 않아 살아 있지 않은 상태. 입력하거나 메시지를 보내면 깨어난다. 고르기만 해서는 깨어나지 않는다 | `session_live`, `sessions/sleep.ts` | dormant, suspended, hibernated |
@@ -132,7 +131,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 말 | 두 뜻 |
 |---|---|
 | 인계(handoff) | 세션이 후임에게 일을 넘기는 것(§1.1). 키퍼가 더 새 키퍼에게 자신을 넘기는 것(§1.5). 스왑에서 다음 호스트로 열린 화면을 넘기는 것은 **화면 인계**(view handover)다 |
-| 매니저 | 워크트리 매니저(세션의 역할). 모든 세션을 돌리는 호스트의 클래스 `SessionManager` |
+| 매니저 | 모든 세션을 돌리는 호스트의 클래스 `SessionManager`. #561 3부 전에는 워크트리 매니저라는 역할이기도 했는데, 평범한 세션에 접혀 들어갔다(세션이 자기 워크트리 에이전트를 띄우고 가진다) |
 | 위임(delegate) | `DELEGATE_TOOLS`와 동의 종류 `delegate`는 `ask_project`의 **부르는** 쪽이다. 일을 하는 세션은 위임된 세션이다 |
 | 능력(capability) | `AdapterCapabilities`: 에이전트 도구가 지원하는 것. 앱의 능력: 앱이 중개자에게 부탁할 수 있는 것 |
 | 명령(commands) | 도구가 내놓는 슬래시 명령(`agents.commands`). 프로젝트에 저장한 명령(`projects.commands`)과, 그것을 pty에서 돌리는 **명령 실행** |
@@ -177,9 +176,6 @@ classDiagram
     scopeSessionIds
     roleAppend
   }
-  class WorktreeManager {
-    <<role>>
-  }
   class DelegatedSession {
     <<role>>
   }
@@ -187,13 +183,11 @@ classDiagram
     <<role>>
   }
   Project "0..1" o-- "*" Session : runs
-  Project "1" --> "0..1" Session : manager slot
   Session "1" --> "0..1" Worktree : works in
   Session <|-- Orchestrator : kind orchestrator, no project
   Session <|-- Coordinator : kind coordinator
-  Session <|-- WorktreeManager : has worktree children
   Session <|-- DelegatedSession : askedBy set
-  WorktreeManager "1" --> "*" Session : parentSessionId
+  Session "1" --> "*" StartedAgent : parentSessionId, a worktree child in the sidebar
   DelegatedSession "*" --> "1" Session : askedBy, in another project
   Session <|-- StartedAgent : askedBy set, same project
   StartedAgent "*" --> "1" Session : askedBy, start_agent
@@ -203,17 +197,16 @@ classDiagram
 - 세션은 프로젝트에 **많아야 하나** 속한다. 프로젝트가 없는 세션: 오케스트레이터, 코디네이터, 사용자 폴더 앱의
   빌더나 앱 에이전트 세션(사이드바에서 그 앱의 줄 아래에 선다), 그리고 휴지통의 세션(프로젝트는 휴지통 기록에
   남는다). 인박스와 팔레트는 프로젝트가 없는 세션을 모두 "Orchestrator"라고 적는다.
-- 세션이 만들어질 때 정해지는 것은 `kind`뿐이다. 다른 역할은 모두 그때그때 관계에서 읽어 낸다: 매니저는 자식이
-  있거나 프로젝트의 매니저 자리에 이름이 있고, 빌더는 빌더 지도에 이름이 있고, 앱 에이전트 세션은 빌더 지도가
+- 세션이 만들어질 때 정해지는 것은 `kind`뿐이다. 다른 역할은 모두 그때그때 관계에서 읽어 낸다: 빌더는 빌더 지도에 이름이 있고, 앱 에이전트 세션은 빌더 지도가
   되가리키지 않는 `appId`를 달고, 위임된 세션은 다른 프로젝트의 세션을, 띄운 에이전트는 같은 프로젝트의 세션을
   가리키는 `askedBy`를 가진다. 역할을 저장된 깃발로 옮기지 않은 것은
   일부러다. 깃발은 관계와 어긋날 수 있기 때문이다(#13, #80).
-- 도구 프로필은 여기서 따라 나온다. 처음 맞는 것이 이긴다: 오케스트레이터, 코디네이터(`scoped`), 빌더, 매니저,
+- 도구 프로필은 여기서 따라 나온다. 처음 맞는 것이 이긴다: 오케스트레이터, 코디네이터(`scoped`), 빌더,
   프로젝트 안의 평범한 세션(`reader`, 설정에서 끄지 않았다면), 없음(`toolProfileOf`).
 
 저장되는 곳:
 
-- `projects`: 프로젝트와 그 신뢰, 기본값, 저장한 명령, 워크트리 준비, 매니저 자리.
+- `projects`: 프로젝트와 그 신뢰, 기본값, 저장한 명령, 워크트리 준비, 그리고 워크트리 줄기(예전 매니저 자리의 줄, `worktree_manager`).
 - `sessions`: 세션. 종류, 워크트리, 부모, 앱, 부탁한 세션, 휴지통 표시까지.
 - `command_cache`: 도구가 한 폴더에서 내놓는 슬래시 명령(스킬). 살아 있지 않은 세션도 목록을 보일 수 있게.
 

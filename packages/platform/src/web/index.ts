@@ -272,8 +272,8 @@ class WebProjectPort implements ProjectPort {
     return this.rpc.call('projects.setCommands', { projectId, commands })
   }
 
-  createWorktreeManager(projectId: string, baseBranch: string) {
-    return this.rpc.call('worktrees.createManager', { projectId, baseBranch })
+  async setWorktreeTrunk(projectId: string, baseBranch: string) {
+    await this.rpc.call('worktrees.setTrunk', { projectId, baseBranch })
   }
   async setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null) {
     await this.rpc.call('projects.setWorktreeSetup', { projectId, setup })

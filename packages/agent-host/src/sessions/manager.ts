@@ -560,14 +560,12 @@ export class SessionManager {
         store.upsertSession(fixed)
       }
     }
-    this.adoptOrphanWorktrees()
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
      * in progress right now — a note being read mid-flight cannot be cleaned up out from under
      * someone. A failure here is no reason to block session restore, so it is not awaited.
      */
     void this.sweepOrphanHandoffNotes().catch(() => {})
-    this.renameLegacyManagers()
     this.nameUnnamedWorktrees()
     /*
      * Merge detection also runs once at startup (#69) — a merge could have happened in a terminal
@@ -581,93 +579,6 @@ export class SessionManager {
     }
   }
 
-  /**
-   * A worktree session never stands without a manager (#69).
-   *
-   * The number one documented failure in this category is the orphaned worktree (Vibe Kanban
-   * #1764, #2335, #1571 — not cleaned up after a merge, an overzealous garbage collector deleting a
-   * live one, and phantom runs left pointing at a tree that is gone). Orphans arise **when nobody
-   * is responsible for them**, so ownership is enforced on every startup: a parentless worktree
-   * session is attached to its project's manager, creating one if none exists.
-   *
-   * A manager is not a new kind of thing — it is **an ordinary session that happens to have
-   * worktree children**. Creating one here is also just a single row — no process is spawned (the
-   * same separation as the orchestrator's lazy-spawn: the row exists first, and it comes alive only
-   * when addressed). The same reasoning is why an existing session is never freely promoted when
-   * picking a manager to attach to: which session becomes a manager is exactly which session gets
-   * delete protection, so a quiet promotion would be a quiet lock.
-   *
-   * Because this is purely additive (it only writes links and deletes nothing), it is safe to rerun,
-   * and it needs no migration ritual like the row-rewrite in #66.
-   */
-  private adoptOrphanWorktrees(): void {
-    const all = [...this.meta.values()]
-    // Not just parentless sessions are orphans — a session **whose parent has disappeared** is also
-    // an orphan. If a manager is deleted while leaving only archived children, its link points into
-    // thin air (delete protection only guards a living child).
-    const orphans = all.filter(
-      (s) => s.worktree && s.projectId && (!s.parentSessionId || !this.meta.has(s.parentSessionId)),
-    )
-    if (orphans.length === 0) return
-
-    const byProject = new Map<string, SessionInfo[]>()
-    for (const o of orphans) {
-      const list = byProject.get(o.projectId as string) ?? []
-      list.push(o)
-      byProject.set(o.projectId as string, list)
-    }
-
-    for (const [projectId, kids] of byProject) {
-      let manager: SessionInfo
-      try {
-        manager = this.managerFor(projectId)
-      } catch {
-        continue // If the project row does not exist, try again on the next startup — do not fabricate it now
-      }
-      for (const kid of kids) {
-        const linked = { ...kid, parentSessionId: manager.id }
-        this.store.upsertSession(linked)
-        this.meta.set(kid.id, linked)
-      }
-      console.error(
-        `[agent-host] adopted ${kids.length} orphan worktree session(s) under manager ${manager.id.slice(0, 8)} (${projectId.slice(0, 8)})`,
-      )
-    }
-  }
-
-  /**
-   * This project's worktree manager — creates a single row if none exists (#69).
-   *
-   * How it is identified: **a non-worktree session that has worktree children.** Why no marker
-   * column is added: this is unchanged from the design — a manager is not a new kind of thing but
-   * the name of a relationship, and the relationship is already stated by parent_session_id. A
-   * separate marker would create a state where the link and the marker disagree (for the same
-   * reason #13 consolidated the scattered checks in is_orchestrator, a check belongs in one place
-   * only).
-   *
-   * Creating one only creates the row — no process comes up (the same separation as the
-   * orchestrator's lazy-spawn). An existing session is also never quietly promoted to manager:
-   * becoming a manager means getting delete protection, and a quiet promotion is a quiet lock.
-   */
-  /**
-   * The name for the manager slot (user request, 2026-09-07: "add 'manager' to the name").
-   *
-   * Its old name was 'Worktrees'. Seeing only that row in the sidebar read like a **list** of
-   * worktrees, and the name gave no hint that this was a session the person could address — a manager is
-   * a party to talk to, not a screen.
-   */
-  private static readonly MANAGER_NAME = 'Worktree manager'
-  /** The old name we used to give it. A name the person has changed is never one of these, so it is left
-   * alone. */
-  private static readonly LEGACY_MANAGER_NAMES = ['Worktrees']
-
-  /**
-   * Renames a manager still sitting under its old name to the new one (runs once at startup).
-   *
-   * Only renamed **when it is a name we gave it** — if the app overwrote a name the person had set,
-   * that would no longer be a name, it would be ours. This is purely additive, so it is safe to
-   * rerun.
-   */
   /**
    * **Seats the branch name** on a worktree session that has not received a name yet (runs once at
    * startup).
@@ -689,109 +600,16 @@ export class SessionManager {
     }
   }
 
-  private renameLegacyManagers(): void {
-    for (const s of [...this.meta.values()]) {
-      if (!SessionManager.LEGACY_MANAGER_NAMES.includes(s.name)) continue
-      // Only if it is registered as a manager slot or has worktree children (protects someone else's session
-      // that happens to share the name)
-      const seated = s.projectId ? this.store.worktreeManager(s.projectId)?.sessionId === s.id : false
-      const hasKids = [...this.meta.values()].some((k) => k.parentSessionId === s.id)
-      if (!seated && !hasKids) continue
-      const renamed = { ...s, name: SessionManager.MANAGER_NAME }
-      this.meta.set(s.id, renamed)
-      this.store.upsertSession(renamed)
-    }
-  }
-
-  private managerFor(projectId: string, baseBranch?: string): SessionInfo {
-    /*
-     * The lookup order is the history of this feature (#76).
-     *
-     * 1) The slot the project points at — a manager even with no children. Without this there was
-     *    no way to consult the manager before the first branch was even decided.
-     * 2) Look up by relationship — managers created before #76 have no link. If found, the link is
-     *    written on the spot (self-healing): next time it is caught directly by step 1, and the slot
-     *    does not disappear even after every child is cleaned up.
-     * 3) Create one if neither exists.
-     *
-     * If the pointed-to session is gone or archived, treat it as if it did not exist — holding on to
-     * a ghost would leave children hanging off a slot nobody can address.
-     */
-    const all = [...this.meta.values()]
-    const link = this.store.worktreeManager(projectId)
-    if (link) {
-      const seated = this.meta.get(link.sessionId)
-      if (seated) return seated
-    }
-
-    const withKids = new Set(all.filter((s) => s.parentSessionId).map((s) => s.parentSessionId as string))
-    const existing = all.find((s) => s.projectId === projectId && !s.worktree && withKids.has(s.id))
-    if (existing) {
-      this.store.setWorktreeManager(projectId, { sessionId: existing.id, baseBranch: link?.baseBranch ?? '' })
-      return existing
-    }
-
-    const stored = this.store.listProjects().find((p) => p.id === projectId)
-    if (!stored) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
-    const manager: SessionInfo = {
-      id: randomUUID(),
-      projectId,
-      kind: 'worker',
-      tool: stored.defaultTool === 'codex' ? 'codex' : 'claude',
-      externalId: null,
-      name: SessionManager.MANAGER_NAME,
-      autoNamed: false,
-      state: 'idle',
-      lastReadSeq: 0,
-      lastSeq: 0,
-      createdAt: Date.now(),
-      waitingSince: null,
-      // Only the row is created — since no process exists, live is correctly false (it wakes once addressed)
-      live: false,
-      model: null,
-      effort: null,
-      verbosity: null,
-      serviceTier: null,
-      permissionPreset: 'normal',
-      importedFrom: null,
-      worktree: null,
-      parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
-      ...sessionLiveDefaults(),
-    }
-    this.store.upsertSession(manager)
-    this.store.setSessionCwd(manager.id, stored.path)
-    this.store.setWorktreeManager(projectId, { sessionId: manager.id, baseBranch: baseBranch ?? link?.baseBranch ?? '' })
-    this.meta.set(manager.id, manager)
-    this.emit({ type: 'session_created', sessionId: manager.id, session: manager })
-    return manager
-  }
-
   /**
-   * Creates the manager slot **first** (#76) — even while it has no children at all.
-   *
-   * A manager with no children does not lose its tools — it just has **nothing to see**: it still
-   * gets the full tool bundle, but its view (childrenOf) is empty, so list_sessions returns an
-   * empty list and read/send are refused with "not a worktree session of this manager". So no
-   * separate profile was created for this — the scope check that already exists does the job.
-   *
-   * The trunk (baseBranch) is decided only here. Why we do not fabricate a default: which branch is
-   * the trunk differs per repository (main, master, develop), and a wrong default only shows up
-   * after a worktree has already branched off from the wrong place. The caller (the screen) fills in
-   * the current branch and sends it.
+   * `projects.createWorktreeManager` (#76), kept in the protocol for an older window: the worktree manager was folded
+   * into ordinary sessions (#561 part 3), so there is no slot to make. A session starts worktree agents itself
+   * (start_agent), and the person makes a worktree session from the new-session window.
    */
-  async createWorktreeManager(projectId: string, baseBranch: string): Promise<SessionInfo> {
-    const stored = this.store.listProjects().find((p) => p.id === projectId)
-    if (!stored) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
-    const branch = baseBranch.trim()
-    if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
-    if (!(await gitValidBranchName(branch))) {
-      throw Object.assign(new Error(`Not a branch name: ${branch}`), { code: 'internal' })
-    }
-    const manager = this.managerFor(projectId, branch)
-    // Write the trunk onto an existing slot too — this makes pressing "create" again a way to change the
-    // trunk
-    this.store.setWorktreeManager(projectId, { sessionId: manager.id, baseBranch: branch })
-    return { ...manager, live: this.handles.has(manager.id) }
+  async createWorktreeManager(_projectId: string, _baseBranch: string): Promise<SessionInfo> {
+    throw Object.assign(
+      new Error('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent'),
+      { code: 'internal' },
+    )
   }
 
   async addProject(path: string): Promise<ProjectInfo> {
@@ -1076,11 +894,13 @@ export class SessionManager {
       // Manager slot and trunk (#76). Treated as absent if the pointed-to session does not exist or
       // is archived — so the screen never navigates to a ghost slot, this side (which knows about
       // sessions) does the check
+      /*
+       * The trunk, in the shape the window has read since #76. The session is the former manager's, or empty: the
+       * manager was folded into ordinary sessions (#561 part 3), and the window reads only `baseBranch`
+       */
       worktreeManager: (() => {
-        const link = this.store.worktreeManager(id)
-        if (!link) return null
-        const seated = this.meta.get(link.sessionId)
-        return seated ? link : null
+        const trunk = this.store.worktreeTrunk(id)
+        return trunk ? { sessionId: this.store.worktreeManager(id)?.sessionId ?? '', baseBranch: trunk } : null
       })(),
       git: git.isRepo ? git : null,
     }
@@ -1297,7 +1117,7 @@ export class SessionManager {
     read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean }): Promise<{ state: string; lines: string[] }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
   } {
-    const view = this.orchestratorToolsFor('', undefined, undefined, undefined, true)
+    const view = this.orchestratorToolsFor('', undefined, undefined, true)
     return {
       sessions: () => view.listSessions(),
       read: async (sessionId, limit, opts) => {
@@ -1594,10 +1414,12 @@ export class SessionManager {
       permissionPreset: params.permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
       worktree,
-      // A worktree session stands under a manager from the moment it is born (#69) — no orphans are
-      // ever created. (If worktree exists, projectId exists too — a worktree is only ever created
-      // inside a project directory.)
-      parentSessionId: worktree && params.projectId ? this.managerFor(params.projectId).id : null,
+      /*
+       * A worktree session hangs in the sidebar under the session that started it with start_agent (#561); one the
+       * person makes stands on its own. It used to hang under the project's worktree manager, made for it if there
+       * was none (#69); that role was folded into ordinary sessions (#561 part 3).
+       */
+      parentSessionId: worktree && params.askedBy ? params.askedBy : null,
       ...sessionLiveDefaults(),
       // Started from what is installed now, until the process says (#297)
       agentVersion: this.versionHint?.(params.tool) ?? null,
@@ -1636,10 +1458,8 @@ export class SessionManager {
           ...this.handoffReadDirs(params.projectId, !!params.handoff?.fromSessionId),
           // Paths another project handed back to this session (#371), asked on every read
           mayRead: (path: string) => this.mayRead(id, path, cwd),
-          // An orchestrator gets all of them; a worktree manager (#69) gets a subset. A freshly
-          // created session has no children, so it cannot be a manager right here — becoming a
-          // manager happens the next time it wakes, after its first child is attached (the check on
-          // the wake side is what actually performs that promotion).
+          // An orchestrator gets all of them; an ordinary session the reader set (#320, #561). The same rule runs again
+          // on every wake
           orchestratorTools:
             info.kind === 'orchestrator' ? this.orchestratorToolsFor(id)
             // Builder session (M4 C-3): just its own app's check — the bundle (builder) blocks the rest
@@ -2269,21 +2089,17 @@ export class SessionManager {
             m.kind === 'orchestrator'
               ? this.orchestratorToolsFor(sessionId)
               : m.kind === 'coordinator'
-                ? this.orchestratorToolsFor(sessionId, undefined, m.scopeSessionIds ?? [])
+                ? this.orchestratorToolsFor(sessionId, m.scopeSessionIds ?? [])
                 : builds
                   ? this.orchestratorToolsFor(sessionId)
-                  : // Worktree manager (#69): having children makes it a manager, receiving child-only tools
-                    this.isWorktreeManager(sessionId)
-                    ? this.orchestratorToolsFor(sessionId, sessionId)
-                    : // Every other session: its own project, read-only (#320)
-                      this.readsOwnProject(m)
-                      ? this.readerToolsFor(sessionId)
-                      : undefined,
+                  : // Every other session: its own project (#320, #561)
+                    this.readsOwnProject(m)
+                    ? this.readerToolsFor(sessionId)
+                    : undefined,
           toolProfile:
             m.kind === 'orchestrator' ? 'orchestrator'
             : m.kind === 'coordinator' ? 'scoped'
             : builds ? 'builder'
-            : this.isWorktreeManager(sessionId) ? 'manager'
             : this.readsOwnProject(m) ? 'reader'
             : undefined,
           /*
@@ -2301,7 +2117,7 @@ export class SessionManager {
                 // for a builder session (C-2) even if the app is broken
                 (m.roleAppend ?? undefined),
           orchestratorBridge:
-            m.kind === 'orchestrator' || m.kind === 'coordinator' || builds || this.isWorktreeManager(sessionId) || apps || this.readsOwnProject(m)
+            m.kind === 'orchestrator' || m.kind === 'coordinator' || builds || apps || this.readsOwnProject(m)
               ? (this.endpoint?.(sessionId) ?? undefined)
               : undefined,
           // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
@@ -2511,25 +2327,11 @@ export class SessionManager {
       return
     }
     /*
-     * A manager with living worktree children cannot be deleted (#69).
-     *
-     * The number one failure in this category is the orphaned worktree, and an orphan is created
-     * when whoever is responsible for it disappears. If merged or finished work pinned the manager
-     * forever, the protection itself would become a punishment (by design: merged children do not
-     * pin the manager).
+     * A session with worktree children used to be undeletable while one was unmerged (#69): a worktree whose manager
+     * disappeared was an orphan nobody saw. Since #561 a child is an ordinary session that outlives the session that
+     * started it: deleted, the parent leaves its children in the sidebar on their own, each with its worktree, its
+     * branch and a "started by a session no longer here" mark, so nothing is hidden and nothing pins the parent.
      */
-    const liveKids = [...this.meta.values()].filter(
-      // A merged child does not hold it back — it is history, not ongoing work
-      (s) => s.parentSessionId === sessionId && !s.worktreeMerged,
-    )
-    if (liveKids.length > 0) {
-      throw Object.assign(
-        new Error(
-          `This session manages ${liveKids.length} worktree session(s) — delete them first`,
-        ),
-        { code: 'internal' },
-      )
-    }
     /*
      * A tool that cannot delete its conversation file is refused now, not when the trash is emptied: the person
      * choosing it is here, and "the file stays" is worth hearing before the dialog closes rather than as a purge
@@ -2715,8 +2517,6 @@ export class SessionManager {
       const fixed = LIVE_ONLY.includes(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (fixed !== back) this.store.upsertSession(fixed)
       this.meta.set(sessionId, fixed)
-      // Its manager may be in the trash or gone: a worktree session does not stand without one (#69)
-      this.adoptOrphanWorktrees()
       const session = { ...this.meta.get(sessionId)!, live: false }
       this.emit({ type: 'session_created', sessionId, session })
       return { session, project: registered }
@@ -4596,6 +4396,14 @@ export class SessionManager {
     const ids = new Set<string>()
     for (const d of this.delegations.values()) if (d.callerId === sessionId && !d.settled) ids.add(d.sessionId)
     for (const [child, caller] of this.awaitingReport) if (caller === sessionId && this.meta.has(child)) ids.add(child)
+    /*
+     * A session it owns (#561 part 3): a child it started, or a worktree session a former worktree manager held (store
+     * v48), while a turn runs there. A former manager sent its work with send_to_session, so no delegation stands for
+     * it; it is still the parent's work, about to be read back through agent_session
+     */
+    for (const s of this.meta.values()) {
+      if (s.askedBy === sessionId && s.projectId === this.meta.get(sessionId)?.projectId && inTurn(s.state)) ids.add(s.id)
+    }
     return [...ids]
   }
 
@@ -4683,7 +4491,7 @@ export class SessionManager {
    * check — the object itself cannot act.
    */
   private readerToolsFor(sessionId: string): OrchestratorTools {
-    const view = this.orchestratorToolsFor(sessionId, undefined, undefined, true)
+    const view = this.orchestratorToolsFor(sessionId, undefined, true)
     const error = 'This session can only read other sessions'
     const refuse = async () => ({ ok: false, error })
     /*
@@ -4703,7 +4511,6 @@ export class SessionManager {
       startAgent: async (opts, signal) => (off() ? { ok: false, error: offError } : this.startAgent(sessionId, opts, signal)),
       agentSession: async (opts, signal) => (off() ? { ok: false, error: offError } : this.agentSession(sessionId, opts, signal)),
       sendToSession: refuse,
-      deleteWorktreeSession: refuse,
       createSession: refuse,
       updateSessionSettings: refuse,
       proposeMcpServer: refuse,
@@ -4728,7 +4535,6 @@ export class SessionManager {
    */
   private orchestratorToolsFor(
     orchestratorId: string,
-    childrenOf?: string,
     scopeIds?: string[],
     ownProject?: boolean,
     /** A hub's view of this host (`hostReader`, #82 phase 4): what its window shows, with no calling session */
@@ -4736,42 +4542,31 @@ export class SessionManager {
   ): OrchestratorTools {
     const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
     /*
-     * The central orchestrator alone reads the linked machines too (#82 phase 4): a manager, a lead and an ordinary
+     * The central orchestrator alone reads the linked machines too (#82 phase 4): a lead and an ordinary
      * session each have a view inside one machine. Asked when the call runs, as the links are wired after a session
      * may already have started.
      */
-    const central = childrenOf === undefined && scopeIds === undefined && !ownProject && !hubView
+    const central = scopeIds === undefined && !ownProject && !hubView
     const linked = () => (central ? this.linkedReader : null)
     /** The links, when this id names a linked machine's session and this seat reaches the machines */
     const remoteOf = (id: string) => {
       const reader = linked()
       return reader?.machineOf(id) ? reader : null
     }
-    /**
-     * There are only two possible views. The **central orchestrator** sees everything, and a
-     * **worktree manager** (#69) sees only its own children. The set of children is evaluated at
-     * call time — a child created after the manager spawned still has to be visible.
-     *
-     * The middle tier this used to have, a per-project orchestrator (#13), was dropped: once every
-     * project had its own session-directing slot alongside a manager, even the people who built it
-     * confused the two (a dogfooding finding). It was one concept too many.
-     */
     /*
      * The reader's view (#320) is its own project, read when the call runs. A session with no project
      * sees nothing: `null === null` must not become "every session without a project".
      */
     const ownProjectId = () => this.meta.get(orchestratorId)?.projectId ?? null
     const inScope = (s: SessionInfo) =>
-      childrenOf !== undefined ? s.parentSessionId === childrenOf
       // Coordinator session (#80, #81): the allow list is its entire view
-      : scopeIds !== undefined ? scopeIds.includes(s.id)
+      scopeIds !== undefined ? scopeIds.includes(s.id)
       : ownProject ? (ownProjectId() !== null && s.projectId === ownProjectId())
       // What a hub's window shows of this host: never its orchestrator or coordinators (remote-hub.md §3.4)
       : hubView ? s.kind !== 'orchestrator' && s.kind !== 'coordinator'
       : true
     const scopeError = (id: string) =>
-      childrenOf !== undefined ? `Not a worktree session of this manager: ${id}`
-      : scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
+      scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
       : ownProject ? `Not a session in this project: ${id}`
       : hubView ? `Not a session this machine shares: ${id}`
       : `Not a session this app manages: ${id}`
@@ -5061,81 +4856,6 @@ export class SessionManager {
         }
       },
 
-      /*
-       * The one and only destructive power (#76's hard gate) — it is a power, not a mere proposal,
-       * because of the gate: it executes **only when losslessness can be proven.** If there are no
-       * uncommitted changes and it is measured, at this exact moment, that the branch's current tip
-       * has already landed on the trunk, then nothing in git is lost by deleting it. Every deletion
-       * outside that proof remains the person's own job (the sidebar's delete conversation).
-       *
-       * The check is **a measurement taken at the moment of deletion**, not the cached worktreeMerged
-       * badge — a new commit could have landed after the badge turned on (TOCTOU). Since this deletion
-       * is critical (acting on the person's instruction), it leans conservative: the tool's own
-       * conversation original is left in place (the last recovery path), and the tip sha is logged
-       * before the branch is deleted (a signpost for reflog recovery).
-       */
-      deleteWorktreeSession: async (sessionId) => {
-        if (sessionId === orchestratorId) return { ok: false, error: 'Cannot delete itself' }
-        const target = this.meta.get(sessionId)
-        if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
-        if (!target.worktree?.base || !target.projectId) {
-          return { ok: false, error: 'Not a worktree branch session — this tool only cleans up a branch that has finished merging' }
-        }
-        if (target.state === 'working' || target.state === 'waiting_approval') {
-          return { ok: false, error: `Still working: ${target.name} — clean it up once the turn ends` }
-        }
-        const cwd = this.cwdOf(target.projectId)
-        const { branch, path, base } = target.worktree
-
-        // Gate 1: uncommitted changes — anything not in any commit simply disappears if deleted.
-        // A failed measurement is also treated as dirty: not knowing is never treated as the safe side.
-        const wt = await gitWorktreeDirty(path, this.gitTrust(target.projectId)).catch(() => ({ dirty: true, changedFiles: -1 }))
-        if (wt.dirty) {
-          const n = wt.changedFiles >= 0 ? `${wt.changedFiles} ` : ''
-          return { ok: false, error: `There are ${n}uncommitted changes — have that session commit (or discard) them, then call this again` }
-        }
-
-        // Gate 2: has the branch's **current** tip landed on the trunk
-        const trunk = this.trunkOf(target.projectId) ?? 'HEAD'
-        let proof: string | null = null
-        if (await gitBranchMerged(cwd, branch, base, trunk).catch(() => false)) {
-          proof = 'trunk ancestry'
-        } else if (this.ghAvailable) {
-          const pr = await this.prLookup(cwd, branch).catch(() => null)
-          if (pr === 'unavailable') this.ghAvailable = false
-          else if (pr && pr.state === 'merged') {
-            const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
-            if (pr.headOid && tip && tip === pr.headOid) proof = `PR #${pr.number}`
-            else if (pr.headOid && tip) {
-              return {
-                ok: false,
-                error: `PR #${pr.number} was merged, but there is a new commit since then — this is deleted only once that new commit has also landed on the trunk`,
-              }
-            }
-          }
-        }
-        if (!proof) {
-          return {
-            ok: false,
-            error: `Could not prove that "${branch}" has landed on the trunk — this is deleted only once a merge (or PR merge) is confirmed. Discarding it without proof is the person's job, in the delete conversation`,
-          }
-        }
-
-        const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
-        /*
-         * The session goes to the trash (#204) like any other: an agent can put a session there but never delete it
-         * for good. The worktree is removed now, not at purge — it is proven merged and clean above, so it holds
-         * nothing that is not on trunk, and git will not delete a branch a worktree still has checked out.
-         * The tool's own conversation original is kept — the last recovery path for this deletion.
-         */
-        await this.trashSession(sessionId)
-        await gitWorktreeRemove(cwd, path, true).catch(() => {})
-        // Never rolled back on failure: a leftover branch ref costs nothing but a stray badge — it is not a
-        // loss
-        await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId)).catch(() => {})
-        console.error(`[worktree] manager cleaned up ${branch} (tip ${tip?.slice(0, 8) ?? '?'}, proof: ${proof})`)
-        return { ok: true }
-      },
 
       /*
        * Only proposes (propose-not-power). Installing and restarting only happen when the person's
@@ -5784,6 +5504,7 @@ export class SessionManager {
    *   send    gives it more: refused while a turn the caller gave it runs, while it works on the person's own
    *           message, or when the person has since raised its preset above the caller's
    *   stop    stops the turn the caller gave it; a turn the person started there is theirs
+   *   delete  cleans up a child's merged, clean worktree (`cleanUpWorktreeChild`, #76's hard gate, part 3)
    */
   async agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     const caller = this.meta.get(callerId)
@@ -5806,6 +5527,14 @@ export class SessionManager {
         await d.outcome
         this.delegations.delete(key)
         return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
+      }
+      case 'delete': {
+        // A merged, clean worktree child only: the hard gate the worktree manager had (#76), now its starter's
+        if (d && !d.settled) return { ok: false, error: `"${child.name}" is still working on what you gave it — stop it or wait first.` }
+        const r = await this.cleanUpWorktreeChild(child)
+        if (!r.ok) return r
+        if (d) this.delegations.delete(key)
+        return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, proof: r.proof }
       }
       case 'send': {
         if (d && !d.settled) {
@@ -5850,6 +5579,64 @@ export class SessionManager {
     const asked = opts.branch?.trim()
     if (asked) return (await gitValidBranchName(asked)) ? { branch: asked } : { error: `Not a valid branch name: ${asked}` }
     return { branch: agentBranch(opts.task, randomUUID()) }
+  }
+
+  /**
+   * Cleans up a child's merged worktree (#76's hard gate, moved from the retired worktree manager's tool to
+   * agent_session delete, #561 part 3). It runs **only when losslessness is proven at this moment**: no uncommitted
+   * changes, and the branch's current tip has landed on the trunk (by ancestry, or by a merged pull request whose head
+   * is that tip). Not the cached merged badge: a commit could have landed since (TOCTOU). Every deletion outside that
+   * proof stays the person's, in the delete dialog. The session goes to the trash like any other (an agent never
+   * deletes one for good), the worktree and branch are removed, the tool's own conversation is kept, and the tip is
+   * logged for reflog recovery.
+   */
+  private async cleanUpWorktreeChild(target: SessionInfo): Promise<{ ok: true; branch: string; proof: string } | { ok: false; error: string }> {
+    if (!target.worktree?.base || !target.projectId) {
+      return { ok: false, error: `"${target.name}" works in no worktree of its own, so there is nothing to clean up — the person deletes a session` }
+    }
+    if (target.state === 'working' || target.state === 'waiting_approval' || this.agentRuns.has(target.id)) {
+      return { ok: false, error: `"${target.name}" is still working — clean it up once its turn ends` }
+    }
+    const cwd = this.cwdOf(target.projectId)
+    const { branch, path, base } = target.worktree
+
+    // Gate 1: uncommitted changes. A failed measurement counts as dirty: not knowing is never the safe side
+    const wt = await gitWorktreeDirty(path, this.gitTrust(target.projectId)).catch(() => ({ dirty: true, changedFiles: -1 }))
+    if (wt.dirty) {
+      const n = wt.changedFiles >= 0 ? `${wt.changedFiles} ` : ''
+      return { ok: false, error: `There are ${n}uncommitted changes in "${target.name}" — have it commit (or discard) them, then delete again` }
+    }
+
+    // Gate 2: has the branch's **current** tip landed on the trunk
+    const trunk = this.trunkOf(target.projectId) ?? 'HEAD'
+    let proof: string | null = null
+    if (await gitBranchMerged(cwd, branch, base, trunk).catch(() => false)) {
+      proof = 'trunk ancestry'
+    } else if (this.ghAvailable) {
+      const pr = await this.prLookup(cwd, branch).catch(() => null)
+      if (pr === 'unavailable') this.ghAvailable = false
+      else if (pr && pr.state === 'merged') {
+        const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
+        if (pr.headOid && tip && tip === pr.headOid) proof = `PR #${pr.number}`
+        else if (pr.headOid && tip) {
+          return { ok: false, error: `PR #${pr.number} was merged, but "${branch}" has a new commit since — it is deleted only once that commit has landed on the trunk too` }
+        }
+      }
+    }
+    if (!proof) {
+      return {
+        ok: false,
+        error: `Could not prove that "${branch}" has landed on the trunk — it is deleted only once a merge (or a merged PR) is confirmed. Discarding it without proof is the person's job, in the delete dialog`,
+      }
+    }
+
+    const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
+    await this.trashSession(target.id)
+    await gitWorktreeRemove(cwd, path, true).catch(() => {})
+    // Never rolled back on failure: a leftover branch ref costs nothing but a stray badge
+    await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId)).catch(() => {})
+    console.error(`[worktree] cleaned up ${branch} (tip ${tip?.slice(0, 8) ?? '?'}, proof: ${proof})`)
+    return { ok: true, branch, proof }
   }
 
   /** Refuses a start when the project's children already running reach `AGENT_CEILING` (#561) */
@@ -6359,8 +6146,7 @@ export class SessionManager {
       throw Object.assign(new Error(`Not a tool of this session: ${name}`), { code: 'internal' })
     }
     const tools =
-      profile === 'manager' ? this.orchestratorToolsFor(sessionId, sessionId)
-      : profile === 'scoped' ? this.orchestratorToolsFor(sessionId, undefined, m.scopeSessionIds ?? [])
+      profile === 'scoped' ? this.orchestratorToolsFor(sessionId, m.scopeSessionIds ?? [])
       : profile === 'reader' ? this.readerToolsFor(sessionId)
       : this.orchestratorToolsFor(sessionId)
     return runOrchestratorTool(tools, name, args, { sessionId, profile })
@@ -6580,7 +6366,6 @@ export class SessionManager {
     // Builder session (M4 C-3) — checked before manager: the bundle that session received (check) has to
     // match the bundle the bridge asks about
     if (this.builderRefOf(m)) return 'builder'
-    if (this.isWorktreeManager(sessionId)) return 'manager'
     return this.readsOwnProject(m) ? 'reader' : null
   }
 
@@ -6607,28 +6392,22 @@ export class SessionManager {
     return p !== null && p !== 'reader'
   }
 
-  /**
-   * Is this a manager — true if either of two things holds.
-   *
-   *   1. It has a worktree child (including an archived one — tools are not dangerous, and it must
-   * still be able to propose things even after cleaning up its children). The original rule, dating from #69.
-   *   2. A project points at this session as its manager (#76). The slot before a child even exists.
-   *
-   * Both are links — the principle that this is decided by relationship instead of a flag on the
-   * session stays unchanged. A manager with no children still receives every tool, but **has nothing
-   * to see**: since its view is childrenOf, list_sessions comes back empty and read/send are refused.
-   * So all that is left for it to do is make a proposal.
-   */
-  private isWorktreeManager(sessionId: string): boolean {
-    if ([...this.meta.values()].some((s) => s.parentSessionId === sessionId)) return true
-    const projectId = this.meta.get(sessionId)?.projectId
-    return !!projectId && this.store.worktreeManager(projectId)?.sessionId === sessionId
+  /** This project's trunk branch (#76): the one chosen for the former worktree manager's slot, still read from its row (#561
+   * part 3). null if none was set — HEAD is then used as the baseline */
+  private trunkOf(projectId: string): string | null {
+    return this.store.worktreeTrunk(projectId)
   }
 
-  /** This project's trunk branch (#76). null if there is no manager or none was set — HEAD is then used as
-   * the baseline */
-  private trunkOf(projectId: string): string | null {
-    return this.store.worktreeManager(projectId)?.baseBranch || null
+  /** Sets the project's worktree trunk (`worktrees.setTrunk`, #76; the manager's dialog chose it before #561 part 3) */
+  async setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void> {
+    if (!this.store.listProjects().some((p) => p.id === projectId)) {
+      throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    }
+    const branch = baseBranch.trim()
+    if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
+    if (!(await gitValidBranchName(branch))) throw Object.assign(new Error(`Not a branch name: ${branch}`), { code: 'internal' })
+    this.store.setWorktreeTrunk(projectId, branch)
+    this.emit({ type: 'projects_changed' })
   }
 
   /**

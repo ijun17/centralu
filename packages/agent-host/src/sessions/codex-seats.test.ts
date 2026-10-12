@@ -148,12 +148,6 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
     expect(text).toContain(instructionsFor('orchestrator')!)
   })
 
-  it('the worktree manager', async () => {
-    const seat = (await rpc('worktrees.createManager', { projectId, baseBranch: 'main' })) as SessionInfo
-    await mgr.resumeSession(seat.id)
-    expect(developerInstructions()).toContain(instructionsFor('manager')!)
-  })
-
   it("an app's building session, after the role it was made with", async () => {
     await rpc('apps.create', { projectId: null, id: 'timer', name: 'Timer', tool: 'codex' })
     const text = developerInstructions()

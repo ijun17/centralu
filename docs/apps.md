@@ -737,8 +737,8 @@ session's apps (and so at every call):
 
 A session in an **untrusted** project attaches nothing: its repository's text could be the one
 asking, and an untrusted project runs none of its own apps either. Only a project's ordinary
-session has the tools (they ride with the reader set, below); the orchestrator, a worktree manager,
-a coordinator, a builder and an agent an app stood up do not.
+session has the tools (they ride with the reader set, below); the orchestrator, a coordinator, a
+builder and an agent an app stood up do not.
 
 **Sharing** is the person's choice, per project app: "Share with other projects" in Settings → Apps,
 or the Share button in the app's header (`apps.setShared`). It is kept in the store's settings table

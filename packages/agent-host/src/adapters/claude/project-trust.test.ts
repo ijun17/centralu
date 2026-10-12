@@ -215,8 +215,8 @@ describe('settings files and permissions the adapter passes to the CLI (#92)', (
    * in a trusted project could not read CLAUDE.md, nor the user's own ~/.claude (the global
    * bypass).
    */
-  it('a project session that receives tools (manager/builder) follows trust the same as a tool-less worker', async () => {
-    for (const toolProfile of ['manager', 'builder'] as const) {
+  it('a project session that receives tools (the reader set of an ordinary session, a builder) follows trust the same as a tool-less worker', async () => {
+    for (const toolProfile of ['reader', 'builder'] as const) {
       for (const projectTrusted of [true, false]) {
         const h = await new ClaudeAdapter().createSession(
           { sessionId: 'b', cwd: root, permissionPreset: 'normal', projectTrusted, orchestratorTools: {} as OrchestratorTools, toolProfile },

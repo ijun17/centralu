@@ -1144,6 +1144,15 @@ export const RpcMethods = {
     params: z.object({ projectId: ProjectId, baseBranch: z.string() }),
     result: SessionInfo,
   },
+  /**
+   * Sets the project's worktree trunk (#76): where a new worktree forks from by default and what "merged" is measured
+   * against. Since the worktree manager was folded into ordinary sessions (#561 part 3), `worktrees.createManager` is
+   * refused and this is how the trunk is chosen; `ProjectInfo.worktreeManager.baseBranch` still carries it.
+   */
+  'worktrees.setTrunk': {
+    params: z.object({ projectId: ProjectId, baseBranch: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   /** Saves worktree provisioning settings (#69) — edited by the worktree section of the new-session window */
   'projects.setWorktreeSetup': {
     params: z.object({

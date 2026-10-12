@@ -43,7 +43,7 @@ describe('the Claude in-process server', () => {
   })
 
   it('still loads every tool of the directing profiles, with their instructions', () => {
-    for (const profile of ['orchestrator', 'manager', 'scoped', 'builder'] as const) {
+    for (const profile of ['orchestrator', 'scoped', 'builder'] as const) {
       const { tools } = registered(profile)
       expect(Object.values(tools).length, profile).toBeGreaterThan(0)
       expect(Object.values(tools).every((t) => t === 'loaded'), profile).toBe(true)

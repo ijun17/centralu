@@ -37,7 +37,7 @@ export type GuideTool = { name: string; description: string }
  * imports this file's topic list to draw the app_guide schema — wiring the import the other way
  * too would create a cycle.
  */
-export type GuideSeats = { orchestrator: GuideTool[]; manager: GuideTool[]; scoped: GuideTool[]; reader: GuideTool[] }
+export type GuideSeats = { orchestrator: GuideTool[]; scoped: GuideTool[]; reader: GuideTool[] }
 
 const STATIC: Record<Exclude<AppGuideTopic, 'orchestrator'>, string> = {
   overview: `# Centralu overview
@@ -157,12 +157,9 @@ function toolLines(tools: readonly GuideTool[]): string {
 
 function orchestratorTopic(seats: GuideSeats): string {
   return `# The orchestrator and directing seats
-There are three seats that direct sessions.
+There are two seats that direct sessions, and every other session directs the agents it starts.
 - The orchestrator (this may be you): there is only one per app, and it watches and directs every
   session across projects.
-- The worktree manager: one per project. It appears automatically the first time a worktree session
-  is created, or it can be started ahead of time from the project's ⋯ menu → Start worktree manager.
-  It only watches and directs its own worktree children.
 - A coordinating session: it only watches and directs its assigned member sessions, and it cannot
   create or delete sessions. Nothing in the app creates a new one right now; one created earlier
   keeps working. It has no row in the sidebar; the person finds it by name in search or the command
@@ -175,14 +172,13 @@ The list below is generated directly from the app's tool registry.
 ## Tools the orchestrator calls
 ${toolLines(seats.orchestrator)}
 
-## Tools the worktree manager calls
-${toolLines(seats.manager)}
-
 ## Tools a coordinating session calls
 ${toolLines(seats.scoped)}
 
 ## Tools every other session calls
-Read-only, and only that session's own project. Settings → Orchestrator can turn them off.
+Only that session's own project: it reads its sessions, and with the person's consent starts other
+agents there (in its folder or a new worktree) and works with the ones it started; ask_project
+reaches another project. Settings → Orchestrator can turn them off.
 ${toolLines(seats.reader)}`
 }
 

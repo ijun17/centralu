@@ -622,3 +622,9 @@ that line belongs; this section is the before.
 
 **Not measured.** Opus and Sonnet as the parent; Korean prompts; a Codex parent starting a child live (the bridge
 serves it like every reader tool); the cost of a running child's reports to its parent over a long session.
+
+**Part 3: the worktree manager folded into ordinary sessions.** The `manager` seat is gone, so its row in the tables
+above is history (3,479 characters of tools and 2,785 of instructions in every manager request). `agent_session` gained
+`delete` (the manager's hard-gated clean-up): the agent set is 992 characters (budget 1,000), the reader seat 3,242 on
+Codex. The orchestrator lost `propose_worktree_session`: 10,029 → 9,278 resident characters on both CLIs (counted with
+`residentCost`, not measured live).

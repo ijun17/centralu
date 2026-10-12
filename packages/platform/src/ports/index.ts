@@ -288,12 +288,11 @@ export interface ProjectPort {
    */
   setTrusted(projectId: string, trusted: boolean): Promise<void>
   /**
-   * Creates the worktree manager slot (#76). If it already exists, returns that slot and just
-   * rewrites the trunk.
-   * baseBranch is decided by the caller — inventing a default further down would silently
-   * bake in the wrong trunk.
+   * Sets the project's worktree trunk (#76): where a new worktree forks from and what "merged" is measured against.
+   * baseBranch is decided by the caller — inventing a default further down would silently bake in the wrong trunk.
+   * It was chosen when making the worktree manager, which was folded into ordinary sessions (#561 part 3).
    */
-  createWorktreeManager(projectId: string, baseBranch: string): Promise<SessionInfo>
+  setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void>
 }
 
 /**

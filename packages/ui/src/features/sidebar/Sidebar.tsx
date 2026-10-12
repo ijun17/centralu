@@ -7,7 +7,7 @@ import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js
 import { BackgroundMark } from '../session/BackgroundTasks.jsx'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
-import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
+import { WorktreeTrunkDialog } from '../project/WorktreeTrunkDialog.jsx'
 import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import { CreateProjectDialog } from '../project/CreateProjectDialog.jsx'
 import {
@@ -98,7 +98,7 @@ function SessionRow({
    */
   draggable: boolean
   /**
-   * Is this a worktree session, drawn indented under its manager (#69)? Indentation plus a
+   * Is this a worktree session, drawn indented under the session that started it (#69, #561)? Indentation plus a
    * vertical guide line — hierarchy lives only in the sidebar (the grid is flat, a design
    * decision).
    */
@@ -483,8 +483,8 @@ function GridIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * Lays out the session list in tree order (#69): a manager immediately followed by its worktree
- * children.
+ * Lays out the session list in tree order (#69): a session immediately followed by the worktree sessions it started
+ * (#561; a former worktree manager's children keep their place under it).
  *
  * Hierarchy lives only in the sidebar — the grid, the inbox and the palette all stay flat lists
  * (design decision: "The hierarchy lives in the sidebar; the grid stays a flat set of panels").
@@ -495,7 +495,7 @@ function GridIcon({ size = 13 }: { size?: number }) {
  */
 function orderAsTree(
   sessions: SessionSummary[],
-): { s: SessionSummary; nested: boolean; managerOfLive: number }[] {
+): { s: SessionSummary; nested: boolean }[] {
   const here = new Set(sessions.map((x) => x.id))
   const kids = new Map<string, SessionSummary[]>()
   const roots: SessionSummary[] = []
@@ -509,8 +509,8 @@ function orderAsTree(
   return roots.flatMap((root) => {
     const children = kids.get(root.id) ?? []
     return [
-      { s: root, nested: false, managerOfLive: children.length },
-      ...children.map((c) => ({ s: c, nested: true, managerOfLive: 0 })),
+      { s: root, nested: false },
+      ...children.map((c) => ({ s: c, nested: true })),
     ]
   })
 }
@@ -544,7 +544,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const open = useIsProjectOpen(projectId)
   // Does the manager's worktree proposal point at this project (#69)? The + button lights up
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
-  const [managerDialog, setManagerDialog] = useState(false)
+  const [trunkDialog, setTrunkDialog] = useState(false)
   // New app dialog (M4 C-1) — opened from the project row's menu, like the new session dialog
   const [newAppOpen, setNewAppOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -688,7 +688,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           `+` (new session) used to be **always visible.** The reason at the time was "new session
           is the most frequent action, so it must not stay invisible until it suddenly appears,"
           and that reason is still right — except that in the meantime this row picked up three
-          actions (new session, worktree manager, delete project). Lining up all three as icons
+          actions (new session, worktree trunk, delete project). Lining up all three as icons
           would make the button row longer than the project name. So they are folded into one, and
           **it stays hidden by default** instead: a folded button that is always on screen only
           gets in the way of eyes reading the list.
@@ -748,7 +748,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             onNewSession={() => openNewSession(projectId)}
             // Making an app on another machine is not offered yet (#82): its views open here (remote-hub.md §11), its making does not
             onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
-            onStartManager={() => setManagerDialog(true)}
+            onSetTrunk={() => setTrunkDialog(true)}
             onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
             onFoldOthers={manyProjects ? () => foldOthers(projectId) : undefined}
             onOpenInVsCode={remoteIde ? () => void remoteIde.open('') : undefined}
@@ -773,7 +773,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       */}
       {!folded && (
         <ul className="mt-1.5">
-          {orderAsTree(sessions).map(({ s, nested, managerOfLive }) => {
+          {orderAsTree(sessions).map(({ s, nested }) => {
             const unread = s.lastSeq > s.lastReadSeq
             const focused = focusedSessionId === s.id
             return (
@@ -854,9 +854,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
                       {/*
                         Merged (#69) — this branch's work has landed on the trunk. A sign that it
-                        is history, not ongoing work, and a child in this state does not block the
-                        manager from being deleted. Cleaning up the tree is left to the person in
-                        the delete dialog (which already states what is left).
+                        is history, not ongoing work. Cleaning it up is the person's, in the delete
+                        dialog, or the session that started it (agent_session delete, #561).
                       */}
                       {s.merged && (
                         <span
@@ -937,11 +936,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     {sessionMenu?.id === s.id && (
                       <SessionMenu
                         session={s}
-                        managerOfLive={managerOfLive}
                         anchorEl={sessionMenu.el}
                         onClose={() => setSessionMenu(null)}
                         onRename={() => setRenaming(s.id)}
-                        onNewWorktree={() => openNewSession(projectId, { worktree: true })}
                         onHandoff={() => setHandingOff(s.id)}
                         onDelete={() => setConfirming(s.id)}
                       />
@@ -957,8 +954,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}
-      {managerDialog && (
-        <WorktreeManagerDialog projectId={projectId} onClose={() => setManagerDialog(false)} />
+      {trunkDialog && (
+        <WorktreeTrunkDialog projectId={projectId} onClose={() => setTrunkDialog(false)} />
       )}
       {deleting && <DeleteProjectDialog project={project} onClose={() => setDeleting(false)} />}
 
@@ -1725,7 +1722,7 @@ function ProjectMenu({
   onClose,
   onNewSession,
   onNewApp,
-  onStartManager,
+  onSetTrunk,
   onToggleTrust,
   onFoldOthers,
   onOpenInVsCode,
@@ -1736,7 +1733,7 @@ function ProjectMenu({
   onClose: () => void
   onNewSession: () => void
   onNewApp?: () => void
-  onStartManager: () => void
+  onSetTrunk: () => void
   onToggleTrust: () => void
   /** Only when there are two or more projects — with just one, there is no "other" to fold */
   onFoldOthers?: () => void
@@ -1766,15 +1763,15 @@ function ProjectMenu({
         <ActionRow label="Open in VS Code" onClick={pick(onOpenInVsCode)} testId={`open-vscode-${project.name}`} />
       )}
       {/*
-        The door to **first** create the manager slot (#76). Shown only when it is a git repo and
-        that slot does not exist yet — once created, that slot stands as a row in the session list,
-        so there never end up being two doors that do the same thing.
+        The project's worktree trunk (#76): where its worktree sessions fork from and what "merged" is measured
+        against. It was chosen by starting the worktree manager, which was folded into ordinary sessions (#561 part 3);
+        the row says the trunk it has, so the setting is visible without opening it.
       */}
-      {project.git?.isRepo && !project.worktreeManager && (
+      {project.git?.isRepo && (
         <ActionRow
-          label="Start worktree manager"
-          onClick={pick(onStartManager)}
-          testId={`start-worktree-manager-${project.name}`}
+          label={project.worktreeManager?.baseBranch ? `Worktree trunk: ${project.worktreeManager.baseBranch}…` : 'Set worktree trunk…'}
+          onClick={pick(onSetTrunk)}
+          testId={`worktree-trunk-${project.name}`}
         />
       )}
       {/*
@@ -1823,20 +1820,16 @@ function ProjectMenu({
  */
 function SessionMenu({
   session,
-  managerOfLive,
   anchorEl,
   onClose,
   onRename,
-  onNewWorktree,
   onHandoff,
   onDelete,
 }: {
   session: SessionSummary
-  managerOfLive: number
   anchorEl: HTMLElement | null
   onClose: () => void
   onRename: () => void
-  onNewWorktree: () => void
   onHandoff: () => void
   onDelete: () => void
 }) {
@@ -1847,14 +1840,6 @@ function SessionMenu({
   return (
     <RowMenu anchorEl={anchorEl} testId={`session-menu-open-${session.id}`} onClose={onClose}>
       <ActionRow label="Rename" onClick={pick(onRename)} testId={`rename-session-${session.id}`} />
-      {/* Manager rows only — add one more worktree session under this one (#69) */}
-      {managerOfLive > 0 && (
-        <ActionRow
-          label="New worktree session"
-          onClick={pick(onNewWorktree)}
-          testId={`new-worktree-session-${session.id}`}
-        />
-      )}
       {/* A worktree session cannot do this yet — the worktree's lifetime is tied to the session */}
       {!session.worktree && (
         <ActionRow

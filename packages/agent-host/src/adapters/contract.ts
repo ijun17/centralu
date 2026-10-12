@@ -155,6 +155,7 @@ export type AskProjectResult =
  *   working   still running past the wait's bound (or not waited on); `reported` says the caller will be told when it ends
  *   at_rest   nothing the caller gave it is running (agent_session status/wait); `answer` is its last final text
  *   stopped   agent_session stop ended the turn
+ *   deleted   agent_session delete put a merged, clean worktree child in the trash and removed its worktree and branch
  */
 export type ChildRunResult =
   | ({ ok: true; sessionId: string; sessionName: string; tool: string } & (
@@ -162,6 +163,7 @@ export type ChildRunResult =
       | { state: 'working'; notice?: string; reported: boolean }
       | { state: 'at_rest'; answer: string; sessionState: string }
       | { state: 'stopped' }
+      | { state: 'deleted'; branch: string; proof: string }
     ))
   | { ok: false; error: string }
 
@@ -169,7 +171,7 @@ export type ChildRunResult =
 export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean; worktree?: boolean; branch?: string }
 
 /** agent_session's arguments (#561) */
-export type AgentSessionOpts = { sessionId: string; action: 'status' | 'send' | 'wait' | 'stop'; text?: string }
+export type AgentSessionOpts = { sessionId: string; action: 'status' | 'send' | 'wait' | 'stop' | 'delete'; text?: string }
 
 export type OrchestratorTools = {
   /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions) */
@@ -182,15 +184,6 @@ export type OrchestratorTools = {
    * other, and would also double the turn cost.
    */
   sendToSession(sessionId: string, text: string, reportBack?: boolean): Promise<{ ok: boolean; error?: string }>
-  /**
-   * Cleans up a finished worktree-branch session (#76 hard gate) — manager only.
-   *
-   * The only destructive power, and it is a power rather than a propose because of the gate: it
-   * only runs once the host has measured at the moment of deletion that it is **provably
-   * lossless** (no uncommitted changes, and the current tip has landed on trunk). Any deletion
-   * outside that proof is still a human's job.
-   */
-  deleteWorktreeSession(sessionId: string): Promise<{ ok: boolean; error?: string }>
   /**
    * Reads a session's recent conversation.
    *
@@ -632,9 +625,8 @@ export type CreateSessionOpts = {
    */
   outputSchema?: Record<string, unknown>
   /**
-   * Which bundle of tools is received (#69). 'orchestrator' gets all of them; 'manager' gets a
-   * subset of the worktree manager's (propose, query, instruct); 'reader' is an ordinary session's
-   * light, read-only set (#320). Only meaningful when orchestratorTools is present. Both exposure and execution use the same decision
+   * Which bundle of tools is received (#69). 'orchestrator' gets all of them; 'reader' is an ordinary
+   * session's light set (#320), with ask_project and start_agent beside it. Only meaningful when orchestratorTools is present. Both exposure and execution use the same decision
    * (profileAllows) — narrowing only the exposure would let a caller who already knows the name
    * just call it anyway.
    */

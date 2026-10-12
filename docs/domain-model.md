@@ -34,14 +34,13 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Session kind | What a session is created as: `worker` (every ordinary session), `orchestrator` or `coordinator`. Not stored as such: read from `is_orchestrator` and from whether a coordinator's member list is set | `SessionKind`, `packages/protocol/src/commands.ts`; derivation in `Store`, `packages/agent-host/src/dev-services/store.ts` | |
 | Orchestrator | The one session of the whole app that sees and directs every session. Belongs to no project | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | project orchestrator (retired) |
 | Ordinary session | A `worker` in a project that is not a builder, a manager or an app's agent. Gets the read-only `reader` tools (worktree and delegated sessions too), unless Settings turns them off | `readsOwnProject`, `packages/agent-host/src/sessions/manager.ts` | |
-| Worktree manager | `<<role>>` A session with worktree sessions under it, or the one a project's manager slot names. Directs only its own children | `isWorktreeManager`, `manager.ts`; `projects.worktree_manager` | lead, parent |
 | Worktree session (worker) | A session working in its own git worktree and branch, always under a manager (`parentSessionId`) | `SessionInfo.worktree`, `parentSessionId` | branch session |
 | Coordinator | A session with a fixed list of sessions it may see (`scopeSessionIds`) and a role text (`roleAppend`), made only by the control app's tasks. That app was removed in #372 and the RPC that created one (`agents.createCoordinator`) after it, so nothing makes a new one; the kind stays for the ones already in people's stores, which are listed, read, woken and trashed like any session, and carry `appId: 'control'` | `kind: 'coordinator'`; `manager.ts` | sub-orchestrator |
 | Builder | `<<role>>` The session building one app. A session carrying `appId` **and** named by that app in the builder map (`apps.builders`) | `builderRefOf`, `manager.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app | `isAppAgentSession`, `runAppAgent`, `manager.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | Delegated ("asked by") session | `<<role>>` A session another project's session started or reused through `ask_project`; marked with `askedBy` | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.md](agent-host.md) §1.2 | delegate |
 | Started agent (child) | `<<role>>` A session another session of the same project started with `start_agent` (#561), in that session's folder and under its preset; marked with `askedBy`, and the only sessions that one may work with through `agent_session`. Like a delegated session it cannot start agents or ask a project | `SessionInfo.askedBy`; `startAgent`, `agentSession`, `manager.ts`; `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.md](agent-host.md) §1.2.1 | child, worker |
-| Tool profile | Which bundle of Centralu's own tools (`centralu` MCP server) a session gets: `orchestrator`, `manager`, `scoped`, `builder`, `reader`, or none | `toolProfileOf`, `manager.ts`; [agent-host.md](agent-host.md) §1.1 | |
+| Tool profile | Which bundle of Centralu's own tools (`centralu` MCP server) a session gets: `orchestrator`, `scoped`, `builder`, `reader`, or none (the worktree manager's `manager` was folded into ordinary sessions, #561) | `toolProfileOf`, `manager.ts`; [agent-host.md](agent-host.md) §1.1 | |
 | Permission preset | How much the agent may do without asking: `safe`, `normal`, `auto` | `PermissionPreset`, `entities.ts` | mode |
 | Live | Whether the session has a process now. A session that is not live is resumed when addressed | `SessionInfo.live` | archived (FR-20 was retired) |
 | Asleep | Not live because the host ended an idle session's process (#568, after 15 minutes by default) or nothing has woken it since a restart. Typing to it or sending it a message wakes it; selecting it does not | `session_live`, `sessions/sleep.ts` | dormant, suspended, hibernated |
@@ -130,7 +129,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Word | The two meanings |
 |---|---|
 | Handoff | A session handing its work to a successor (§1.1); a keeper handing itself to a newer keeper (§1.5). Open views passed to the next host in a swap are the **view handover** |
-| Manager | A worktree manager (a session's role); `SessionManager`, the host's class that runs every session |
+| Manager | `SessionManager`, the host's class that runs every session; before #561 part 3 also the worktree manager, a role folded into ordinary sessions (a session now starts and owns its worktree agents) |
 | Delegate | `DELEGATE_TOOLS` and the consent kind `delegate` are the **caller's** side of `ask_project`; the session doing the work is the delegated session |
 | Capability | `AdapterCapabilities`: what an agent tool supports; an app's capability: what it may ask the broker for |
 | Commands | Slash commands a tool offers (`agents.commands`); a project's saved commands (`projects.commands`), run as **command runs** in a pty |
@@ -175,9 +174,6 @@ classDiagram
     scopeSessionIds
     roleAppend
   }
-  class WorktreeManager {
-    <<role>>
-  }
   class DelegatedSession {
     <<role>>
   }
@@ -185,13 +181,11 @@ classDiagram
     <<role>>
   }
   Project "0..1" o-- "*" Session : runs
-  Project "1" --> "0..1" Session : manager slot
   Session "1" --> "0..1" Worktree : works in
   Session <|-- Orchestrator : kind orchestrator, no project
   Session <|-- Coordinator : kind coordinator
-  Session <|-- WorktreeManager : has worktree children
   Session <|-- DelegatedSession : askedBy set
-  WorktreeManager "1" --> "*" Session : parentSessionId
+  Session "1" --> "*" StartedAgent : parentSessionId, a worktree child in the sidebar
   DelegatedSession "*" --> "1" Session : askedBy, in another project
   Session <|-- StartedAgent : askedBy set, same project
   StartedAgent "*" --> "1" Session : askedBy, start_agent
@@ -202,17 +196,16 @@ classDiagram
   app-agent session of a user-folder app (it stands under that app's row in the sidebar), and a session in the trash
   (its project is kept in the trash record). The inbox and the palette label every session with no project
   "Orchestrator".
-- `kind` is all a session is created as. Every other role is read off a relationship each time: a manager has
-  children or is named in the project's manager slot; a builder is named in the builder map; an app-agent session
+- `kind` is all a session is created as. Every other role is read off a relationship each time: a builder is named in the builder map; an app-agent session
   carries an `appId` the builder map does not point back to; a delegated session has `askedBy` naming a session of
   another project, a started agent `askedBy` naming one of its own. Moving a role into a
   stored flag was avoided on purpose, so the flag cannot drift from the relationship (#13, #80).
-- The tool profile follows from these, first match wins: orchestrator, coordinator (`scoped`), builder, manager,
-  ordinary session in a project (`reader`, unless Settings turns it off), none (`toolProfileOf`).
+- The tool profile follows from these, first match wins: orchestrator, coordinator (`scoped`), builder, ordinary
+  session in a project (`reader`, unless Settings turns it off), none (`toolProfileOf`).
 
 Where it is stored:
 
-- `projects`: projects, their trust, defaults, saved commands, worktree setup and manager slot.
+- `projects`: projects, their trust, defaults, saved commands, worktree setup, and the worktree trunk (in the former manager slot's row, `worktree_manager`).
 - `sessions`: sessions, including kind, worktree, parent, app, asked-by and trash marks.
 - `command_cache`: the slash commands (skills) a tool offers in a folder, so a session that is not live can list them.
 

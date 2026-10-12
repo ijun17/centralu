@@ -595,7 +595,7 @@ class CodexSession implements SessionHandle {
    * `thread/resume` takes the same field and ignores it: resumed with other developer instructions, the model still
    * named the phrase from the first ones and the rollout gained no developer message (codex-cli 0.160.0,
    * `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12). So a thread keeps what it was started with; a session
-   * that changes profile while its thread lives on (one becoming a worktree manager when a child is linked to it)
+   * that changes profile while its thread lives on (a session the person turns the reader set off for, or back on)
    * keeps its tools' new rules from the tool descriptions alone until it starts a new thread.
    */
   private developerInstructions(): { developerInstructions?: string } {

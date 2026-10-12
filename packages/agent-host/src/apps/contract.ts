@@ -11,12 +11,13 @@ import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNamePro
  */
 
 /**
- * The set of tools a session receives (#69). The orchestrator gets all of them, the worktree manager
- * gets a subset, a coordination session gets the three within its scope, and an app's building
- * session (M4 C-3) gets exactly one, `check`, to check its own app. Every other session gets the
- * light, read-only `reader` set (#320): it sees its own project's sessions and directs none of them.
+ * The set of tools a session receives (#69). The orchestrator gets all of them, a coordination session
+ * gets the three within its scope, and an app's building session (M4 C-3) gets exactly one, `check`, to
+ * check its own app. Every other session gets the light `reader` set (#320): it reads its own project's
+ * sessions, and directs only the agents it started itself (#561). The worktree manager's seat went with
+ * the role (#561 part 3).
  */
-export type ToolProfile = 'orchestrator' | 'manager' | 'scoped' | 'builder' | 'reader'
+export type ToolProfile = 'orchestrator' | 'scoped' | 'builder' | 'reader'
 
 /** Whoever called a tool — sessionId=null means a person (the UI) */
 export type ToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
