@@ -63,6 +63,9 @@ commits ([docs/commit-conventions.md](docs/commit-conventions.md)), the pull req
 and its **Not exercised** field, and updating documents in the same pull request. When your
 session has the project board app's tools, they carry these rules as code: `open_pr`, `comment`,
 `file_issue`, `commit_check`, `rebase_stack`, `ci_status`, `release`; use them instead of `gh` by hand.
+The owner answers decisions on the board's screen, saved on their machine only: `list_owner_answers`
+lists those not recorded yet; record each on its issue in English with `comment`, then
+`mark_answer_recorded`. Never post the owner's text as written.
 
 Talk to the person in whatever language they use. Everything written down (code, comments,
 tests, documents, commits, issues, pull requests, reviews) is in English.

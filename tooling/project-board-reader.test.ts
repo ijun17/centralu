@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +7,27 @@ import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packag
 import { buildViewCsp } from '../packages/agent-host/src/views/csp.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { ALLOWED, decisionSummary, renderInline, renderMarkdown } from '../.centralu/apps/project-board/markdown.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+import { ANSWERS_MAX, answerFor, commentIdOf, markRecorded, saveAnswer, unrecorded } from '../.centralu/apps/project-board/answers.mjs'
+
+describe("the owner's saved answers", () => {
+  const save = (list: unknown[], number: number, text = 'x') => saveAnswer(list, { repository: 'o/r', number, text, now: `t${number}` }).list
+  it('keeps every answer waiting when the list is full, and lets the oldest recorded ones go', () => {
+    let list: unknown[] = []
+    for (let n = 1; n <= ANSWERS_MAX; n++) list = markRecorded(save(list, n), 'o/r', n, `u${n}`, 'r').list
+    list = save(list, ANSWERS_MAX + 1)
+    expect(list).toHaveLength(ANSWERS_MAX)
+    expect(answerFor(list, 'o/r', 1)).toBeNull()
+    expect(unrecorded(list)).toEqual([expect.objectContaining({ number: ANSWERS_MAX + 1 })])
+  })
+
+  it('reads a comment address only for the same item', () => {
+    expect(commentIdOf('https://github.com/O/R/issues/5#issuecomment-77', 'o/r', 5)).toEqual({ id: '77' })
+    expect(commentIdOf('https://github.com/o/r/pull/5#issuecomment-77', 'o/r', 5)).toEqual({ id: '77' })
+    expect(commentIdOf('https://github.com/o/r/issues/6#issuecomment-77', 'o/r', 5).problem).toMatch(/not on o\/r#5/)
+    expect(commentIdOf('https://example.com/o/r/issues/5#issuecomment-77', 'o/r', 5).problem).toMatch(/is not the address of a comment/)
+  })
+})
 
 /**
  * The board's reader (an issue or pull request read in the view, and a "Needs decision" item answered
@@ -225,11 +246,23 @@ if (args[0] === 'api' && args[1] === '-X' && args[2] === 'POST') {
   if (st.lockedPost) fail('gh: Unable to create comment because issue is locked. (HTTP 403)\n', 1, '{}')
   const { body } = JSON.parse(stdin)
   const n = t.comments.length + 1
-  const c = { id: 'IC_new' + n, url: t.url + '#issuecomment-new' + n, body, createdAt: '2026-10-12T10:00:0' + (n % 10) + 'Z', author: { login: 'owner' } }
+  const c = { id: 'IC_new' + n, restId: 9000 + n, url: t.url + '#issuecomment-' + (9000 + n), body, createdAt: '2026-10-12T10:00:0' + (n % 10) + 'Z', author: { login: 'owner' } }
   t.comments.push(c)
   save()
-  process.stdout.write(JSON.stringify({ id: 9000 + n, node_id: c.id, html_url: c.url, body, created_at: c.createdAt, user: { login: 'owner' } }))
+  process.stdout.write(JSON.stringify({ id: c.restId, node_id: c.id, html_url: c.url, body, created_at: c.createdAt, user: { login: 'owner' } }))
   process.exit(0)
+}
+// One comment by its id, as GET repos/{repo}/issues/comments/{id} answers it
+const one = args[0] === 'api' && /^repos\/([^/]+\/[^/]+)\/issues\/comments\/(\d+)$/.exec(args[1])
+if (one) {
+  for (const [key, t] of Object.entries(st.threads)) {
+    const c = t.comments.find((x) => String(x.restId) === one[2])
+    if (c) {
+      process.stdout.write(JSON.stringify({ id: c.restId, issue_url: 'https://api.github.com/repos/' + key.replace('#', '/issues/'), html_url: c.url, body: c.body, user: c.author }))
+      process.exit(0)
+    }
+  }
+  fail('gh: Not Found (HTTP 404)\n', 1, JSON.stringify({ message: 'Not Found' }))
 }
 const v = {}
 let query = ''
@@ -343,8 +376,9 @@ function runtime() {
   return rt
 }
 
-async function call(name: string, args: Record<string, unknown> = {}) {
-  const out = await rt!.call(ref, name, args, screen)
+const agent: AppCaller = { kind: 'session', sessionId: 's1' }
+async function call(name: string, args: Record<string, unknown> = {}, caller: AppCaller = screen) {
+  const out = await rt!.call(ref, name, args, caller)
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
@@ -366,7 +400,17 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
   it('passes check, and its screen declares GitHub image hosts, and only those, in the CSP Centralu reads', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
-    for (const line of ['read_item — reads, app', 'decision_summaries — reads, app', 'preview_answer — reads, app', 'post_answer — changes, app']) expect(r.text).toContain(line)
+    for (const line of [
+      'read_item — reads, app',
+      'decision_summaries — reads, app',
+      'save_answer — changes, app',
+      'delete_answer — changes, app',
+      'list_owner_answers — reads, model',
+      'mark_answer_recorded — changes, model',
+    ])
+      expect(r.text).toContain(line)
+    // Nothing on the screen posts the owner's text to GitHub any more
+    expect(r.text).not.toMatch(/post_answer|preview_answer/)
     const doc = (await rt!.readResource(ref, 'ui://project-board/index.html')).contents[0] as { text: string; _meta?: { ui?: { csp?: Record<string, string[]> } } }
     expect(doc.text).toContain('McpApp')
     expect(doc._meta?.ui?.csp).toEqual({ resourceDomains: ['https://github.com', 'https://*.githubusercontent.com'] })
@@ -451,42 +495,116 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
     expect(r.data.items[1].decision.question).toContain('fold it into')
   })
 
-  it('previews a comment without posting it, and refuses an empty one before reaching GitHub', async () => {
+  /*
+   * The repository is public and the owner answers in their own words and language: an answer from
+   * the screen is saved on this computer, in the app's data folder (a temporary folder here), and
+   * never reaches GitHub. An agent records the decision in English and marks the answer recorded.
+   */
+  const KOREAN = 'A로 갑니다. #406에 합칩니다.'
+  const answersFile = () => filesNamed(join(root, 'data'), 'owner-answers.json')
+
+  it("saves the owner's answer on this computer only: nothing goes to GitHub, and the item shows it", async () => {
     runtime()
-    const p = await call('preview_answer', { item: 113, body: '**Decision (owner, 2026-10-12):** A, see #406' })
-    expect(p.data).toMatchObject({ ok: true, ref: '#113', problems: [] })
-    expect(p.data.html).toBe(
-      '<p><strong>Decision (owner, 2026-10-12):</strong> A, see <a href="https://github.com/ijun17/centralu/issues/406" class="ref" data-item="ijun17/centralu#406">#406</a></p>',
-    )
-    expect((await call('preview_answer', { item: 113, body: '  \n ' })).data).toMatchObject({ ok: false, problems: ['The comment is empty.'] })
-    const empty = await call('post_answer', { item: 113, body: ' ' })
+    const r = await call('save_answer', { item: 113, text: KOREAN, title: 'Narrow-window reading' })
+    expect(r.isError).toBe(false)
+    expect(r.text).toBe('Saved the answer on #113 on this computer only; nothing went to GitHub. An agent records the decision on #113 in English.')
+    expect(posts()).toEqual([])
+    const [file] = answersFile()
+    expect(file).toBeDefined()
+    expect(file!.startsWith(join(root, 'data'))).toBe(true)
+    expect(JSON.parse(readFileSync(file!, 'utf8')).answers).toEqual([
+      expect.objectContaining({ repository: 'ijun17/centralu', number: 113, title: 'Narrow-window reading', text: KOREAN, recordedAt: null, recordedUrl: null }),
+    ])
+    // Never in the app's folder, which is in the (public) repository
+    expect(filesNamed(join(REPO_ROOT, '.centralu/apps/project-board'), 'owner-answers.json')).toEqual([])
+
+    const read = await call('read_item', { item: 113 })
+    expect(read.data.ownerAnswer).toMatchObject({ text: KOREAN, recordedAt: null })
+    const summaries = await call('decision_summaries')
+    const row = (n: number) => summaries.data.items.find((i: { number: number }) => i.number === n)
+    expect(row(113).ownerAnswer).toMatchObject({ text: KOREAN, recordedAt: null })
+    expect(row(101).ownerAnswer).toBeNull()
+
+    // Saving again changes the answer waiting, it does not add another
+    const again = await call('save_answer', { item: '#113', text: 'B로 바꿉니다.' })
+    expect(again.text).toMatch(/^Saved the changed answer on #113/)
+    expect(JSON.parse(readFileSync(file!, 'utf8')).answers.map((a: { text: string }) => a.text)).toEqual(['B로 바꿉니다.'])
+    const empty = await call('save_answer', { item: 113, text: '  \n ' })
     expect(empty.isError).toBe(true)
-    expect(empty.text).toBe('Not posted on #113: The comment is empty.')
-    const signed = await call('preview_answer', { item: 113, body: 'A.\n\nCo-Authored-By: Someone <a@b.c>' })
-    expect(signed.data).toMatchObject({ ok: false })
-    expect(signed.data.problems.join()).toMatch(/^The comment carries attribution lines \("Co-Authored-By: Someone <a@b.c>"\)\. Remove them/)
-    expect((await call('post_answer', { item: 113, body: 'A.\n\nCo-Authored-By: Someone <a@b.c>' })).isError).toBe(true)
+    expect(empty.text).toBe('Not saved: The answer is empty; write it first.')
     expect(posts()).toEqual([])
   })
 
-  // The owner answers decisions in their own language; the English rule is for what agents write
-  it("takes the owner's answer in Korean: the preview finds nothing to stop it, and it is posted as written", async () => {
+  it('shows an agent the answers not recorded yet, on the decision list and on their own', async () => {
     runtime()
-    const body = '**Decision (owner, 2026-10-12):** A로 갑니다. #406에 합칩니다.'
-    const preview = await call('preview_answer', { item: 113, body })
-    expect(preview.data).toMatchObject({ ok: true, problems: [] })
-    const posted = await call('post_answer', { item: 113, body })
-    expect(posted.isError).toBe(false)
-    expect(posts()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/issues/113/comments', '--input', '-'], stdin: JSON.stringify({ body }) }])
+    await call('save_answer', { item: 113, text: KOREAN })
+    const list = await call('list_owner_answers', {}, agent)
+    expect(list.data.count).toBe(1)
+    expect(list.data.summary).toMatch(/^1 owner answer not recorded yet\. For each: post the decision on its issue in English with comment/)
+    expect(list.data.answers).toEqual([expect.stringMatching(new RegExp(`^#113 Narrow-window reading — answered, not recorded yet, saved \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC\\n  ${KOREAN}$`))])
+    const needs = await call('list_needs_decision', {}, agent)
+    expect(needs.data.summary).toBe('Centralu: 2 items with Status Needs decision, 1 answered, not recorded yet (list_owner_answers).')
+    expect(needs.data.items).toEqual(['#101 Worktree management — Needs decision · High · Host', '#113 Narrow-window reading — Needs decision · Medium · UI · answered, not recorded yet'])
   })
 
-  it('posts an answer as a comment on the item, answers it rendered, and the next read shows it', async () => {
+  it('lets the owner delete an answer while it is not recorded', async () => {
     runtime()
-    await call('read_item', { item: 113 }) // cached without the answer
+    await call('save_answer', { item: 113, text: KOREAN })
+    const r = await call('delete_answer', { item: 113 })
+    expect(r.text).toBe('Deleted the answer on #113.')
+    expect(r.data.answer).toBeNull()
+    expect((await call('read_item', { item: 113 })).data.ownerAnswer).toBeNull()
+    expect((await call('delete_answer', { item: 113 })).text).toBe('Not deleted: #113: There is no saved answer for it.')
+    expect((await call('list_owner_answers', {}, agent)).data.count).toBe(0)
+  })
+
+  it('records the decision in English through comment, then marks the answer recorded with that comment', async () => {
+    runtime()
+    await call('save_answer', { item: 113, text: KOREAN })
+    // The owner's words as written are refused: comment holds agents to English
+    const raw = await call('comment', { item: 113, body: KOREAN }, agent)
+    expect(raw.isError).toBe(true)
+    expect(posts()).toEqual([])
+    const posted = await call('comment', { item: 113, body: '**Decision (owner, 2026-10-12):** A. Fold it into #406.' }, agent)
+    expect(posted.isError).toBe(false)
+    const url = posted.data.comment.url as string
+    expect(url).toBe('https://github.com/ijun17/centralu/issues/113#issuecomment-9004')
+
+    const marked = await call('mark_answer_recorded', { item: 113, url }, agent)
+    expect(marked.isError).toBe(false)
+    expect(marked.text).toBe(`Marked the owner's answer on #113 recorded: ${url}`)
+    expect((await call('list_owner_answers', {}, agent)).data.count).toBe(0)
+    expect((await call('list_owner_answers', { all: true }, agent)).data.answers[0]).toMatch(/^#113 Narrow-window reading — recorded \d{4}-\d{2}-\d{2}: https:\/\/github\.com\/ijun17\/centralu\/issues\/113#issuecomment-9004\n/)
+    expect((await call('list_needs_decision', {}, agent)).data.items[1]).toBe('#113 Narrow-window reading — Needs decision · Medium · UI')
+    expect((await call('read_item', { item: 113 })).data.ownerAnswer).toMatchObject({ text: KOREAN, recordedUrl: url })
+    // Recorded is history: not deleted from the screen, and a new answer starts beside it
+    expect((await call('delete_answer', { item: 113 })).text).toBe('Not deleted: #113: Its answer is recorded on GitHub already; it is not deleted here.')
+    // Only the agent's English comment went to GitHub
+    expect(posts().map((p) => JSON.parse(p.stdin!).body)).toEqual(['**Decision (owner, 2026-10-12):** A. Fold it into #406.'])
+  })
+
+  it('marks an answer recorded only with an English decision comment on that same item', async () => {
+    runtime()
+    await call('save_answer', { item: 113, text: KOREAN })
+    const mark = (url: string, item = 113) => call('mark_answer_recorded', { item, url }, agent)
+    expect((await mark('not a url')).text).toBe('Not marked: "not a url" is not the address of a comment on GitHub (https://github.com/owner/name/issues/N#issuecomment-ID).')
+    expect((await mark('https://github.com/ijun17/centralu/issues/8#issuecomment-1')).text).toBe(
+      'Not marked: https://github.com/ijun17/centralu/issues/8#issuecomment-1 is a comment on ijun17/centralu#8, not on ijun17/centralu#113.',
+    )
+    expect((await mark('https://github.com/ijun17/centralu/issues/113#issuecomment-123')).text).toBe('Not marked: GitHub has no comment 123 on #113.')
+    const plain = await call('comment', { item: 113, body: 'Going with A.' }, agent)
+    expect((await mark(plain.data.comment.url)).text).toBe('Not marked: The comment does not hold "Decision (owner, YYYY-MM-DD)", the form a decision is recorded in (CONTRIBUTING.md).')
+    expect((await mark('https://github.com/ijun17/centralu/issues/101#issuecomment-1', 101)).text).toBe('Not marked: #101 has no answer waiting to be recorded.')
+    expect((await call('list_owner_answers', {}, agent)).data.count).toBe(1)
+  })
+
+  it('posts an agent comment on the item, answers it rendered, and the next read shows it', async () => {
+    runtime()
+    await call('read_item', { item: 113 }) // cached without the comment
     const body = '**Decision (owner, 2026-10-12):** A.\n\nFold it into #406.'
-    const r = await call('post_answer', { item: '#113', body })
+    const r = await call('comment', { item: '#113', body }, agent)
     expect(r.isError).toBe(false)
-    expect(r.text).toBe('Posted a comment on #113: https://github.com/ijun17/centralu/issues/113#issuecomment-new4.')
+    expect(r.text).toBe('Posted a comment on #113: https://github.com/ijun17/centralu/issues/113#issuecomment-9004.')
     expect(r.data.comment).toMatchObject({ id: 'IC_new4', author: 'owner' })
     expect(r.data.comment.html).toContain('<strong>Decision (owner, 2026-10-12):</strong> A.')
     // The text went on stdin, never on the command line
@@ -498,9 +616,9 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
   })
 
   /*
-   * A read that began before an answer was posted ends after it with the thread as it was. Held back
+   * A read that began before a comment was posted ends after it with the thread as it was. Held back
    * by the fake, released after the post: it must not go into the cache, or the reader would show
-   * the item without the answer just posted until the cache ran out.
+   * the item without the comment just posted until the cache ran out.
    */
   it('a read that started before a post never refills the cache with the thread from before it', async () => {
     runtime()
@@ -509,7 +627,7 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
     // The slow read is under way (its gh call is logged) before the post goes out
     await expect.poll(() => threadReads().length, { timeout: 10_000 }).toBe(1)
     patch((s) => ((s as unknown as { threadDelayMs: number }).threadDelayMs = 0))
-    expect((await call('post_answer', { item: 113, body: 'An answer.' })).isError).toBe(false)
+    expect((await call('comment', { item: 113, body: 'An answer.' }, agent)).isError).toBe(false)
     const stale = await slow
     expect(stale.data.comments.map((c: { id: string }) => c.id)).toEqual(['IC_1', 'IC_2', 'IC_3'])
     const fresh = await call('read_item', { item: 113 })
@@ -519,16 +637,20 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
   it('says why a comment was not posted, and that an interrupted one may have been', async () => {
     runtime()
     patch((s) => ((s as unknown as { lockedPost: boolean }).lockedPost = true))
-    const locked = await call('post_answer', { item: 113, body: 'An answer.' })
+    const locked = await call('comment', { item: 113, body: 'An answer.' }, agent)
     expect(locked.isError).toBe(true)
     expect(locked.text).toBe('GitHub refused the comment on ijun17/centralu#113: Unable to create comment because issue is locked. (HTTP 403). Nothing was posted.')
-    const gone = await call('post_answer', { item: 9999, body: 'An answer.' })
+    const gone = await call('comment', { item: 9999, body: 'An answer.' }, agent)
     expect(gone.text).toBe('ijun17/centralu#9999 is not an issue or pull request this GitHub login can see. Nothing was posted.')
     patch((s) => (s.mode = 'offline'))
-    const offline = await call('post_answer', { item: 113, body: 'An answer.' })
+    const offline = await call('comment', { item: 113, body: 'An answer.' }, agent)
     expect(offline.isError).toBe(true)
     expect(offline.text).toContain('GitHub could not be reached')
     expect(offline.text).toContain('The comment may have been posted anyway: read the item again before posting it a second time.')
     expect((await call('read_item', { item: 113 })).data).toMatchObject({ ok: false, error: { kind: 'network' } })
   })
 })
+
+function filesNamed(dir: string, name: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesNamed(join(dir, e.name), name) : e.name === name ? [join(dir, e.name)] : []))
+}

@@ -634,6 +634,14 @@ export async function postComment(repo, number, body) {
   return { id: c.node_id ?? String(c.id), url: c.html_url ?? null, author: c.user?.login ?? 'ghost', createdAt: c.created_at ?? null, body: c.body ?? body }
 }
 
+/** One issue or pull request comment by its id: the item it is on, its body and author; null when there is none. */
+export async function readComment(repo, id) {
+  checkRepo(repo)
+  const c = await restJson(`repos/${repo}/issues/comments/${Number(id)}`, { missing: [404] })
+  if (!c) return null
+  return { number: Number(/\/issues\/(\d+)$/.exec(c.issue_url ?? '')?.[1] ?? 0), body: c.body ?? '', author: c.user?.login ?? 'ghost', url: c.html_url ?? null }
+}
+
 // --- The release (release.mjs) -----------------------------------------------------------------------
 // The release workflow's runs, their jobs and the environment approvals they wait on. `workflow` is the
 // file name (`release.yml`), which GitHub's REST paths take in place of the workflow's id.

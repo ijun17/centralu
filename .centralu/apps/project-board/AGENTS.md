@@ -38,13 +38,15 @@ length). Those are plain, non-secret values; change them there, not in code.
   worked.
 - Tests: `tooling/project-board-app.test.ts`, `tooling/project-board-ci.test.ts` and
   `tooling/project-board-reader.test.ts` run this server with a fake `gh` on PATH; the second also
-  tests `ci.mjs` directly, the third `markdown.mjs`. `e2e/fixtures/board-reader.ts` drives the
-  screen's reader in Chromium and WebKit.
+  tests `ci.mjs` directly, the third `markdown.mjs` and the owner's saved answers (in a temporary
+  data folder). `e2e/fixtures/board-reader.ts` drives the screen's reader and answer box in
+  Chromium and WebKit.
 
 ## Reading and answering in the view
 
 The owner reads an issue or pull request in the board instead of the browser, and answers a
-"Needs decision" item from it. All of it is screen-only (`visibility: ['app']`).
+"Needs decision" item from it. All of it is screen-only (`visibility: ['app']`), except the two
+tools agents use to record the owner's answers.
 
 - **The reader.** A card's title or number opens it in a modal dialog over the board (with ⌘ or
   Ctrl, on GitHub as before): kind, state, labels, Status/Priority/Area, the body, and the comments
@@ -72,15 +74,27 @@ The owner reads an issue or pull request in the board instead of the browser, an
   Question and Recommendation of its latest `## Decision needed (summary, …)` comment, and
   "Answered" when a `Decision (owner, …)` comment came after it (`decisionSummary` in markdown.mjs,
   `decision_summaries` in server.mjs).
-- **The answer box** shows under an item whose Status is the decision status. It starts with
-  `**Decision (owner, YYYY-MM-DD):** ` (CONTRIBUTING.md's form for a decision), "Review answer"
-  (or ⌘/Ctrl+Enter) shows it rendered by `preview_answer`, and only "Post comment" there posts it
-  with `post_answer` (`gh api … /issues/N/comments --input -`, the text on stdin). Both are
-  screen-only, and **the answer's language is not checked**: the owner answers decisions in their
-  own language, and the English rule is for what agents write (decided 2026-10-12). An empty
-  answer, an attribution line or a word from the private list is refused, and the preview says so
-  before the confirmation. Esc in the confirmation goes back to editing. The posted comment shows in the thread and takes the keyboard;
-  a refused one says why and keeps the text. Drafts live in the screen's memory only.
+- **The owner's answer never goes to GitHub as written** (owner decision, 2026-10-12: the
+  repository is public, and the owner answers in their own words and language). The answer box
+  under an item whose Status is the decision status saves it with `save_answer` ("Save answer" or
+  ⌘/Ctrl+Enter) in this app's data folder, `owner-answers.json` through
+  `centralu.readJson`/`writeJson`: the per-user app data Centralu gives the app, outside the
+  repository (`answers.mjs` holds the rules, pure). The screen then says plainly that nothing was
+  posted and that the agent records the decision in English, and shows the answer on the item
+  ("saved …, not recorded yet") with Edit and Delete (`delete_answer`) until it is recorded. Edit
+  opens it in the box; Esc steps back out of the change. Saving again replaces the answer waiting;
+  a recorded answer is history and shows with its decision comment ("recorded in English"). A
+  failed save says why and keeps the text. Drafts live in the screen's memory only. Both tools are
+  screen-only; nothing on the screen posts to GitHub.
+- **Agents record it** (both model-only): `list_owner_answers` (`all?`; read-only) lists the
+  answers not recorded yet with the item's title and the owner's text, which agents never post as
+  written. The agent posts the decision on the issue in English with `comment`, in CONTRIBUTING.md's
+  form `**Decision (owner, YYYY-MM-DD):** …`, then calls `mark_answer_recorded` (`item`, `url`) with
+  that comment's address. It reads the comment back from GitHub and refuses unless it is on that
+  item, holds "Decision (owner, YYYY-MM-DD)" and is in English. `list_needs_decision` marks an item
+  with an answer waiting "· answered, not recorded yet" (and counts them in its summary), the
+  screen's "Needs decision" cards say "Answered, not recorded yet", and `read_item` and
+  `decision_summaries` carry `ownerAnswer`.
 - **Input methods.** An Enter or Esc the input method took (ending or cancelling a Korean syllable)
   neither reviews, steps back nor closes: `composing` in the screen, the same three signs as
   Centralu's `composingKey` (docs/usability.md).
@@ -132,12 +146,9 @@ and refuses with every reason at once, sending nothing.
   2026-10-06). Matched whole, ignoring case, anywhere, code and addresses included ("Side Quest"
   also matches `side-quest` and `side_quest`). `private_words` reads it; `edit_private_words` and the
   screen's "Private words" dialog edit it.
-- **`comment`** (agents only) posts through the same code as the screen's `post_answer`, with the
-  English rule on top. **The owner's answers are taken in any language**: they answer decisions in
-  their own, and the English rule is for what agents write (decided 2026-10-12). `post_answer` and
-  `preview_answer` (screen only) still refuse a private word and an attribution line, and the
-  preview shows that before the confirmation. A server cannot tell who called it, so the two doors
-  are two tools and Centralu holds each to its caller (docs/apps.md §5.1).
+- **`comment`** (agents only) is the one way this app posts a comment: English, no private word,
+  no attribution line. The owner's own answers are not posted at all: the screen saves them on this
+  computer and an agent records them in English (above, "Reading and answering in the view").
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
   `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
@@ -224,6 +235,7 @@ step shows on the screen.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
+- `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; server.mjs keeps them in the data folder).
 - `stack.mjs`, `git.mjs` — rebase_stack's procedure, and local git through `execFile`.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).
 - `ui/index.html` — the screen. Change it. It is read on every open, so edits show without a restart.

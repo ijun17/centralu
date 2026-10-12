@@ -286,7 +286,7 @@ describe.skipIf(process.platform === 'win32')('the board app carries the contrib
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
     for (const line of [
       'comment — changes, model',
-      'post_answer — changes, app',
+      'save_answer — changes, app',
       'file_issue — changes, model',
       'open_pr — changes, model',
       'commit_check — reads, model',
@@ -312,46 +312,30 @@ describe.skipIf(process.platform === 'win32')('the board app carries the contrib
   })
 
   /*
-   * The owner answers decisions in Korean from the screen; agents write in English (decided
-   * 2026-10-12). The same text through the two doors: the owner's answer goes, the agent's comment
-   * does not. A private word and an attribution line stop both, and the screen's preview says so
-   * before its confirmation.
+   * The owner answers decisions in Korean on the screen, and that text is saved on this computer, not
+   * posted (tooling/project-board-reader.test.ts). What reaches GitHub is an agent's comment, held to
+   * English, the private list and no attribution.
    */
-  const screen: AppCaller = { kind: 'view' }
   const KOREAN = '**Decision (owner, 2026-10-12):** A로 갑니다. #406에 합칩니다.'
 
-  it("posts the owner's answer in Korean from the screen, and refuses the same text from an agent", async () => {
+  it("refuses an agent's comment that is not in English, and lets it quote the exact words in code", async () => {
     runtime()
-    const preview = await call('preview_answer', { item: 113, body: KOREAN }, screen)
-    expect(preview.data).toMatchObject({ ok: true, problems: [] })
-    const owner = await call('post_answer', { item: 113, body: KOREAN }, screen)
-    expect(owner.isError).toBe(false)
-    expect(writes()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/issues/113/comments', '--input', '-'], stdin: JSON.stringify({ body: KOREAN }) }])
-
     const agentTry = await call('comment', { item: 113, body: KOREAN })
     expect(agentTry.isError).toBe(true)
     expect(agentTry.text).toBe(
       'Not posted on #113: The comment is not in English ("로 갑니다"). Write it in English; a word whose exact form matters goes in backticks or a > quote (CONTRIBUTING.md, Language).',
     )
-    expect(writes()).toHaveLength(1)
-    // An agent may quote the exact words in code
+    expect(writes()).toEqual([])
     expect((await call('comment', { item: 113, body: 'The owner chose A: `A로 갑니다`.' })).isError).toBe(false)
+    expect(writes()).toHaveLength(1)
   })
 
   it.each([
-    ['a private word', '결정: Moonbase 빌드에서 확인했습니다.', 'Tested on the Moonbase build.', /private list: "Moonbase"/],
-    ['an attribution line', '결정: A.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)', 'Done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)', /attribution lines/],
-  ])('refuses %s from the owner and from an agent alike, and the preview says so first', async (_, ownerText, agentText, why) => {
+    ['a private word', 'Tested on the Moonbase build.', /private list: "Moonbase"/],
+    ['an attribution line', 'Done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)', /attribution lines/],
+  ])("refuses %s in an agent's comment", async (_, agentText, why) => {
     runtime()
     await call('edit_private_words', { add: ['Moonbase'] })
-    const preview = await call('preview_answer', { item: 113, body: ownerText }, screen)
-    expect(preview.data.ok).toBe(false)
-    expect(preview.data.problems.join()).toMatch(why)
-    // Only that problem: the owner's Korean is not one
-    expect(preview.data.problems).toHaveLength(1)
-    const owner = await call('post_answer', { item: 113, body: ownerText }, screen)
-    expect(owner.isError).toBe(true)
-    expect(owner.text).toMatch(why)
     const agentTry = await call('comment', { item: 113, body: agentText })
     expect(agentTry.isError).toBe(true)
     expect(agentTry.text).toMatch(why)

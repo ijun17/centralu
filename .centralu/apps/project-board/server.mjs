@@ -23,6 +23,7 @@ import {
   parseItemRef,
   pendingDeployments,
   postComment,
+  readComment,
   prsWithHead,
   readBoard,
   readChecks,
@@ -43,7 +44,8 @@ import {
 } from './github.mjs'
 import { NO_PERMISSION, canMerge, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { decisionSummary, renderInline, renderMarkdown } from './markdown.mjs'
-import { DEFAULT_CONVENTIONS, attributionProblems, commitProblems, fillTemplate, normalizeWords, parseConventions, privateWordProblems, publicTextProblems, subjectProblems } from './rules.mjs'
+import { DEFAULT_CONVENTIONS, commitProblems, englishProblems, fillTemplate, normalizeWords, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
+import { answerFor, answerKey, commentIdOf, deleteAnswer, markRecorded, saveAnswer, unrecorded } from './answers.mjs'
 import { GitError } from './git.mjs'
 import { StackRefusal, rebaseStack } from './stack.mjs'
 import { ReleaseRefusal, approveRelease, bumpRelease, guarded, rehearseRelease, releaseConfig, releaseStatus, tagRelease } from './release.mjs'
@@ -212,9 +214,9 @@ function pick(b, inputs) {
 }
 
 /** The read tools' answer: compact lines, or with `full` the whole items and where they came from. */
-function itemsAnswer(b, summary, items, detail, extra = []) {
+function itemsAnswer(b, summary, items, detail, extra = [], suffix = () => '') {
   const full = detail === 'full'
-  const lists = [['items', '', items.map(full ? fullLine : line)], ...extra]
+  const lists = [['items', '', items.map((i) => `${(full ? fullLine : line)(i)}${suffix(i)}`)], ...extra]
   if (!full) return linesAnswer(summary, lists)
   const a = linesAnswer(`${summary} ${where(b)}.`, lists, { project: b.project, fetchedAt: b.fetchedAt })
   a.structuredContent.items = items
@@ -836,6 +838,8 @@ async function readItem({ item, refresh, comments }) {
     needsDecision: decision,
     decisionStatus: config.decisionStatus,
     decision: summaryView(decisionSummary(t.comments), opts),
+    // The owner's answer saved on this machine: waiting to be recorded, or the latest recorded one
+    ownerAnswer: answerView(answerFor(await ownerAnswers(), want.repo, want.number)),
   })
 }
 
@@ -858,8 +862,9 @@ async function decisionSummaries({ refresh }) {
   const b = await board({ fresh: refresh === true })
   const decision = resolveOption(b.fields.status, config.decisionStatus).name
   const items = b.items.filter((i) => i.status === decision && i.number != null && i.repository).sort(byPriority)
+  const saved = await ownerAnswers()
   const rows = await mapLimit(items, 4, async (i) => {
-    const row = { ref: refOf(i.repository, i.number), repository: i.repository, number: i.number, title: i.title, url: i.url, type: i.type, ...fieldsOf(i) }
+    const row = { ref: refOf(i.repository, i.number), repository: i.repository, number: i.number, title: i.title, url: i.url, type: i.type, ...fieldsOf(i), ownerAnswer: answerView(answerFor(saved, i.repository, i.number)) }
     try {
       const t = await thread(i.repository, i.number, { fresh: refresh === true })
       return { ...row, comments: t?.totalComments ?? 0, decision: t ? summaryView(decisionSummary(t.comments), renderOpts(t)) : null }
@@ -873,38 +878,15 @@ async function decisionSummaries({ refresh }) {
 }
 
 /**
- * Checks a comment before it goes out: not empty, no word from the private list, no attribution
- * line, and for an agent (`agent: true`, the `comment` tool) in English too. The owner's answers
- * from the screen (`post_answer`) are taken in any language: the owner answers decisions in their
- * own, and the English rule is for what agents write (decided 2026-10-12). A server cannot tell who
- * called it, so the two are separate tools and Centralu holds each to its caller (docs/apps.md 5.1).
- * The screen's preview asks the same question as its post, so the confirmation shows what the post
- * will do. Answers the problems, in words for the person; none: it may go.
+ * Posts an agent's comment (the `comment` tool): not empty, in English, no word from the private list,
+ * no attribution line. The owner's own answers never come through here: the screen saves them on
+ * this machine (`save_answer`), and an agent records the decision in English (owner decision,
+ * 2026-10-12: the repository is public).
  */
-async function commentProblems(body, { agent = false } = {}) {
-  if (!String(body ?? '').trim()) return ['The comment is empty.']
-  const words = await privateWords()
-  if (agent) return publicTextProblems(body, words, 'The comment')
-  return [...privateWordProblems(body, words, 'The comment'), ...attributionProblems(body, 'The comment')]
-}
-
-async function previewComment({ item, body }) {
-  const want = parseItemRef(item, config.repository)
-  const problems = await commentProblems(body)
-  const ref = refOf(want.repo, want.number)
-  const base = `https://github.com/${want.repo}/issues/${want.number}`
-  return answer(problems.length ? `Not ready to post on ${ref}: ${problems.join(' ')}` : `Ready to post on ${ref}.`, {
-    ok: problems.length === 0,
-    ref,
-    problems,
-    html: renderMarkdown(body, { repo: want.repo, base }),
-  })
-}
-
-async function postItemComment({ item, body }, { agent = false } = {}) {
+async function postItemComment({ item, body }) {
   const want = parseItemRef(item, config.repository)
   const ref = refOf(want.repo, want.number)
-  const problems = await commentProblems(body, { agent })
+  const problems = String(body ?? '').trim() ? publicTextProblems(body, await privateWords(), 'The comment') : ['The comment is empty.']
   if (problems.length) throw new GitHubError('input', `Not posted on ${ref}: ${problems.join(' ')}`)
   let c
   try {
@@ -919,6 +901,97 @@ async function postItemComment({ item, body }, { agent = false } = {}) {
     ref,
     comment: { id: c.id, url: c.url, author: c.author, createdAt: c.createdAt, html: renderMarkdown(c.body, { repo: want.repo, base }) },
   })
+}
+
+// --- The owner's answers: on this machine, never on GitHub as written --------------------------------
+// The screen saves the owner's answer to a "Needs decision" item in this app's data folder (outside
+// the repository, which is public); an agent lists the answers not recorded yet, records each decision
+// on its issue in English with `comment`, and marks the answer recorded with that comment's address.
+const ANSWERS_FILE = 'owner-answers.json'
+let answers = null
+async function ownerAnswers() {
+  answers ??= (await centralu.readJson(ANSWERS_FILE, { answers: [] }))?.answers ?? []
+  return answers
+}
+async function keepAnswers(list) {
+  await centralu.writeJson(ANSWERS_FILE, { answers: list })
+  answers = list
+}
+
+/** What the screen and the decision lists show of an item's answer (null: none). */
+const answerView = (a) => (a ? { text: a.text, savedAt: a.savedAt, updatedAt: a.updatedAt, recordedAt: a.recordedAt, recordedUrl: a.recordedUrl } : null)
+const NOT_RECORDED = 'answered, not recorded yet'
+
+async function titleOf(want, given) {
+  if (given) return given
+  const b = await board().catch(() => null)
+  return b?.items.find(matches(want))?.title ?? null
+}
+
+async function saveOwnerAnswer({ item, text, title }) {
+  const want = parseItemRef(item, config.repository)
+  const ref = refOf(want.repo, want.number)
+  let r
+  try {
+    r = saveAnswer(await ownerAnswers(), { repository: want.repo, number: want.number, title: await titleOf(want, title), text, now: new Date().toISOString() })
+  } catch (e) {
+    throw new GitHubError('input', `Not saved: ${e.message}`)
+  }
+  await keepAnswers(r.list)
+  return answer(`${r.replaced ? 'Saved the changed answer' : 'Saved the answer'} on ${ref} on this computer only; nothing went to GitHub. An agent records the decision on ${ref} in English.`, {
+    ok: true,
+    ref,
+    answer: answerView(r.answer),
+  })
+}
+
+async function deleteOwnerAnswer({ item }) {
+  const want = parseItemRef(item, config.repository)
+  const ref = refOf(want.repo, want.number)
+  let r
+  try {
+    r = deleteAnswer(await ownerAnswers(), want.repo, want.number)
+  } catch (e) {
+    throw new GitHubError('input', `Not deleted: ${ref}: ${e.message}`)
+  }
+  await keepAnswers(r.list)
+  return answer(`Deleted the answer on ${ref}.`, { ok: true, ref, answer: answerView(answerFor(r.list, want.repo, want.number)) })
+}
+
+async function listOwnerAnswers({ all }) {
+  const list = await ownerAnswers()
+  const shown = all ? list : unrecorded(list)
+  const lines = shown.map(
+    (a) =>
+      `${refOf(a.repository, a.number)}${a.title ? ` ${a.title}` : ''} — ${a.recordedAt ? `recorded ${a.recordedAt.slice(0, 10)}: ${a.recordedUrl}` : `${NOT_RECORDED}, saved ${(a.updatedAt ?? a.savedAt).slice(0, 16).replace('T', ' ')} UTC`}\n  ${a.text.replace(/\n/g, '\n  ')}`,
+  )
+  const waiting = unrecorded(list).length
+  const summary = `${waiting} owner answer${waiting === 1 ? '' : 's'} not recorded yet${all ? `, ${list.length} kept` : ''}.${waiting ? ' For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**" (CONTRIBUTING.md), then mark_answer_recorded with that comment\'s address.' : ''}`
+  return linesAnswer(summary, [['answers', '', lines]], {
+    count: waiting,
+    items: shown.map((a) => ({ ref: refOf(a.repository, a.number), repository: a.repository, number: a.number, title: a.title, ...answerView(a) })),
+  })
+}
+
+async function markOwnerAnswer({ item, url }) {
+  const want = parseItemRef(item, config.repository)
+  const ref = refOf(want.repo, want.number)
+  const id = commentIdOf(url, want.repo, want.number)
+  if (id.problem) throw new GitHubError('input', `Not marked: ${id.problem}`)
+  const list = await ownerAnswers()
+  if (!unrecorded(list).some((a) => answerKey(a.repository, a.number) === answerKey(want.repo, want.number))) throw new GitHubError('input', `Not marked: ${ref} has no answer waiting to be recorded.`)
+  // The comment is read back: it exists, it is on this item, and it records the decision in English
+  const c = await readComment(want.repo, id.id)
+  const problems = []
+  if (!c || c.number !== want.number) problems.push(`GitHub has no comment ${id.id} on ${ref}.`)
+  else {
+    if (!/Decision \(owner, \d{4}-\d{2}-\d{2}\)/.test(c.body)) problems.push('The comment does not hold "Decision (owner, YYYY-MM-DD)", the form a decision is recorded in (CONTRIBUTING.md).')
+    problems.push(...englishProblems(c.body, 'The comment'))
+  }
+  if (problems.length) throw new GitHubError('input', `Not marked: ${problems.join(' ')}`)
+  const r = markRecorded(list, want.repo, want.number, url, new Date().toISOString())
+  await keepAnswers(r.list)
+  return answer(`Marked the owner's answer on ${ref} recorded: ${url}`, { ok: true, ref, answer: answerView(r.answer) })
 }
 
 // --- The contribution procedure: public text, pull requests, commits, stacks (#386 step 2) ----------
@@ -1204,42 +1277,88 @@ serveStdio(() => {
     },
   )
 
+  // The owner's answer, saved on this machine only (never posted as written: the repository is
+  // public). Screen-only; agents read and close them with the two tools after these.
   centralu.tool(
     server,
-    'preview_answer',
+    'save_answer',
     {
-      title: "Preview the owner's answer",
-      description: 'An answer from the screen as it will read on GitHub, and what would stop it from being posted. Posts nothing.',
-      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536) }),
-      annotations: { readOnlyHint: true },
+      title: "Save the owner's answer",
+      description:
+        "Save the person's answer to an item from the screen in this app's data folder on this computer, never on GitHub. Saving again replaces the answer not recorded yet. An agent records the decision on the issue in English and marks the answer recorded.",
+      inputSchema: z.object({
+        item: itemRef.describe(`The issue or pull request: ${REF_HELP}`),
+        text: z.string().max(65536).describe('The answer, in any language'),
+        title: z.string().max(512).optional().describe("The item's title, kept for the agent's list"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
       _meta: { ui: { visibility: ['app'] } },
+    },
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await saveOwnerAnswer(args)
+        } catch (e) {
+          return failure(e)
+        }
+      }),
+  )
+
+  centralu.tool(
+    server,
+    'delete_answer',
+    {
+      title: "Delete the owner's answer",
+      description: "Delete the person's saved answer to an item, while it is not recorded yet.",
+      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`) }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+      _meta: { ui: { visibility: ['app'] } },
+    },
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await deleteOwnerAnswer(args)
+        } catch (e) {
+          return failure(e)
+        }
+      }),
+  )
+
+  centralu.tool(
+    server,
+    'list_owner_answers',
+    {
+      title: "The owner's answers not recorded yet",
+      description:
+        'The answers the owner saved on the board\'s screen to "Needs decision" items and no agent has recorded yet (all: true adds the recorded ones), each with the item, its title and the text as the owner wrote it (often not English; never post it as written). For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**", then call mark_answer_recorded with that comment\'s address.',
+      inputSchema: z.object({ all: z.boolean().optional().describe('Also the answers already recorded; default false') }),
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { visibility: ['model'] } },
     },
     async (args) => {
       try {
-        return await previewComment(args)
+        return await listOwnerAnswers(args)
       } catch (e) {
-        return viewFailure(e)
+        return failure(e)
       }
     },
   )
 
   centralu.tool(
     server,
-    'post_answer',
+    'mark_answer_recorded',
     {
-      title: "Post the owner's answer",
+      title: "Mark the owner's answer recorded",
       description:
-        "Post the person's answer from the screen as a comment on an issue or pull request, as the gh login. Screen-only: the person writes in their own language, so the language is not checked here (agents comment through `comment`, which holds them to English). Refused when empty, holding a word from the private list, or carrying an attribution line. Answers the comment as GitHub stored it.",
-      // GitHub's own limit for a comment body
-      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536).describe('The comment, in Markdown') }),
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-      _meta: { ui: { visibility: ['app'] } },
+        'Mark the owner\'s saved answer on an item recorded, with the address of the English decision comment posted on it with comment (https://github.com/owner/name/issues/N#issuecomment-ID). The comment is read back from GitHub: it must be on that item, hold "Decision (owner, YYYY-MM-DD)" and be in English.',
+      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), url: z.string().describe("The decision comment's address on GitHub") }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
     },
-    // One at a time, like the board's writes: a double press posts in order, never interleaved
     (args) =>
       oneAtATime(async () => {
         try {
-          return await postItemComment(args)
+          return await markOwnerAnswer(args)
         } catch (e) {
           return failure(e)
         }
@@ -1257,11 +1376,10 @@ serveStdio(() => {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    // The same code as the owner's answer, with the English rule on top
     (args) =>
       oneAtATime(async () => {
         try {
-          return await postItemComment(args, { agent: true })
+          return await postItemComment(args)
         } catch (e) {
           return failure(e)
         }
@@ -1556,8 +1674,12 @@ serveStdio(() => {
         const decision = resolveOption(b.fields.status, config.decisionStatus).name
         const wantArea = area === undefined ? null : resolveOption(b.fields.area, area).name
         const items = b.items.filter((i) => i.status === decision && (!wantArea || i.area === wantArea)).sort(byPriority)
-        const summary = `${b.project.title}: ${items.length} item${items.length === 1 ? '' : 's'} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}.`
-        return itemsAnswer(b, summary, items, detail)
+        // An answer the owner saved on this machine and no agent recorded yet shows on its line
+        const waiting = new Set(unrecorded(await ownerAnswers()).map((a) => answerKey(a.repository, a.number)))
+        const answered = (i) => i.number != null && waiting.has(answerKey(i.repository, i.number))
+        const n = items.filter(answered).length
+        const summary = `${b.project.title}: ${items.length} item${items.length === 1 ? '' : 's'} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}${n ? `, ${n} ${NOT_RECORDED} (list_owner_answers)` : ''}.`
+        return itemsAnswer(b, summary, items, detail, [], (i) => (answered(i) ? ` · ${NOT_RECORDED}` : ''))
       } catch (e) {
         return failure(e)
       }

@@ -85,6 +85,12 @@ const THREADS: Record<string, unknown> = {
     { id: 'IC_2', author: 'someone', html: '<p>The newest comment.</p>' },
   ], true),
   [`${REPO}#8`]: thread(8, 'Polish the design', 'Ready', [], false),
+  [`${REPO}#101`]: thread(101, 'Worktree management', 'Needs decision', [], true),
+}
+
+const RECORDED = {
+  key: `${REPO}#101`,
+  answer: { text: '우리 쪽으로.', savedAt: '2026-10-12T09:00:00Z', updatedAt: '2026-10-12T09:00:00Z', recordedAt: '2026-10-12T09:30:00Z', recordedUrl: 'https://example.test/issues/101#issuecomment-1' },
 }
 
 const SUMMARIES = {
@@ -102,12 +108,14 @@ const SUMMARIES = {
 
 let fx: FixtureHost
 
-/** The board on the test bed, its tool calls answered as the server would. `failPosts`: how many posts fail first */
-async function showBoard(page: Page, { failPosts = 0 } = {}) {
+/** The board on the test bed, its tool calls answered as the server would. `failSaves`: how many saves fail first */
+async function showBoard(page: Page, { failSaves = 0 } = {}) {
   await page.evaluate(
-    ({ board, threads, summaries, failPosts }) => {
+    ({ board, threads, summaries, failSaves, recorded }) => {
       const w = window as any
-      let failures = failPosts
+      let failures = failSaves
+      // #101's last answer was recorded by an agent already
+      const saved: Record<string, any> = { [recorded.key]: recorded.answer }
       let words: string[] = ['Moonbase']
       const wordList = () => ({ content: [{ type: 'text', text: `${words.length} private words.` }], structuredContent: { count: words.length, words } })
       w.__mock.appToolHandler = async (_app: string, tool: string, args: any) => {
@@ -124,24 +132,25 @@ async function showBoard(page: Page, { failPosts = 0 } = {}) {
           words = [...words.filter((x) => !(args.remove ?? []).includes(x)), ...(args.add ?? [])].sort()
           return wordList()
         }
-        // The server's check, as preview_answer answers it for a private word
-        if (tool === 'preview_answer' && /moonbase/i.test(args.body))
-          return { content: [{ type: 'text', text: 'Not ready' }], structuredContent: { ok: false, ref: '#113', problems: ['The comment contains a word from the private list: "Moonbase". Leave it out or say it in general terms.'], html: '' } }
-        if (tool === 'read_item') return threads[args.item] ?? { content: [{ type: 'text', text: 'missing' }], structuredContent: { ok: false, error: { kind: 'not-found', message: `${args.item} is not there.` } } }
-        if (tool === 'decision_summaries') return summaries
-        if (tool === 'preview_answer')
-          return { content: [{ type: 'text', text: 'ok' }], structuredContent: { ok: true, ref: '#113', problems: [], html: `<p>${args.body.replace(/[<>&]/g, '')}</p>` } }
-        if (tool === 'post_answer') {
-          if (failures-- > 0) return { isError: true, content: [{ type: 'text', text: 'GitHub refused the comment: it is locked.' }], structuredContent: { summary: 'x', error: { kind: 'github', message: 'GitHub refused the comment: it is locked.' } } }
-          return {
-            content: [{ type: 'text', text: 'Posted' }],
-            structuredContent: { ok: true, ref: '#113', comment: { id: 'IC_new', url: 'https://example.test/issues/113#new', author: 'owner', createdAt: '2026-10-12T10:00:00Z', html: `<p>${args.body.replace(/[<>&]/g, '')}</p>` } },
-          }
+        // The owner's answers, as the server keeps them on this computer (save_answer, delete_answer)
+        const withAnswer = (t: any, key: string) => ({ ...t, structuredContent: { ...t.structuredContent, ownerAnswer: saved[key] ?? null } })
+        if (tool === 'read_item') return threads[args.item] ? withAnswer(threads[args.item], args.item) : { content: [{ type: 'text', text: 'missing' }], structuredContent: { ok: false, error: { kind: 'not-found', message: `${args.item} is not there.` } } }
+        if (tool === 'decision_summaries')
+          return { ...summaries, structuredContent: { ...summaries.structuredContent, items: summaries.structuredContent.items.map((i: any) => ({ ...i, ownerAnswer: saved[`${i.repository}#${i.number}`] ?? null })) } }
+        if (tool === 'save_answer') {
+          if (failures-- > 0) return { isError: true, content: [{ type: 'text', text: 'x' }], structuredContent: { summary: 'x', error: { kind: 'internal', message: 'the data folder could not be written.' } } }
+          const at = '2026-10-12T10:00:00Z'
+          saved[args.item] = { text: args.text.trim(), savedAt: saved[args.item]?.savedAt ?? at, updatedAt: at, recordedAt: null, recordedUrl: null }
+          return { content: [{ type: 'text', text: 'Saved' }], structuredContent: { ok: true, ref: '#113', answer: saved[args.item] } }
+        }
+        if (tool === 'delete_answer') {
+          delete saved[args.item]
+          return { content: [{ type: 'text', text: 'Deleted' }], structuredContent: { ok: true, ref: '#113', answer: null } }
         }
         return { content: [{ type: 'text', text: 'ok' }] }
       }
     },
-    { board: BOARD_STATE, threads: THREADS, summaries: SUMMARIES, failPosts },
+    { board: BOARD_STATE, threads: THREADS, summaries: SUMMARIES, failSaves, recorded: RECORDED },
   )
   const instanceId = fx.open({ projectId: null, appId: 'project-board' }, URI)
   await page.evaluate((p) => (window as any).__appFrame.mount('a', p), { appId: 'project-board', projectId: null, instanceId, fill: true, className: 'flex flex-col', changeSignal: 1 })
@@ -160,10 +169,6 @@ function view(page: Page): FrameLocator {
 const callsTo = (page: Page, tool: string) =>
   page.evaluate((t) => ((window as any).__mock.appToolCalls as { tool: string; args: unknown }[]).filter((c) => c.tool === t).map((c) => c.args), tool)
 
-const today = () => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 export function boardReaderTests(): void {
   test.describe('the project board reads an item in place and answers a decision', () => {
@@ -251,65 +256,76 @@ export function boardReaderTests(): void {
       await expect(title).toBeFocused()
     })
 
-    test('a decision is answered from the reader: prefilled, reviewed, confirmed and shown where it was posted', async ({ page }) => {
-      const v = await showBoard(page, { failPosts: 1 })
+    /*
+     * The repository is public: the owner's answer is saved on this computer and never posted as
+     * written. An agent records the decision in English; until then the answer can be changed or
+     * deleted on the item.
+     */
+    test('a decision is answered from the reader: saved on this computer, never posted, then changed and deleted', async ({ page }) => {
+      const v = await showBoard(page, { failSaves: 1 })
       await v.locator('.card[data-number="113"] .title').click()
       const text = v.locator('#answer-text')
       await expect(text).toBeVisible()
-      const prefill = `**Decision (owner, ${today()}):** `
-      await expect(text).toHaveValue(prefill)
+      await expect(text).toHaveValue('')
+      await expect(v.locator('#answer-hint')).toHaveText('Saved on this computer only, never posted to GitHub as you write it. An agent records the decision on #113 in English.')
       await expect(v.locator('.r-summary')).toContainText('Fold it into #406?')
 
-      // Typed the way a person does: into the field, then Ctrl+Enter to review it
+      // Typed the way a person does, then Ctrl+Enter
       await text.click()
-      await text.press('End')
-      await page.keyboard.type('A, fold it into #406.')
-      await page.keyboard.press('Control+Enter')
-      await expect(v.locator('#answer-confirm')).toBeVisible()
-      await expect(v.locator('#answer-preview p')).toHaveText(`**Decision (owner, ${today()}):** A, fold it into #406.`)
-      expect(await callsTo(page, 'post_answer')).toEqual([])
-      await expect(v.locator('#answer-post')).toBeFocused()
-
-      // Esc steps back to editing, with the reader still open and the keyboard in the answer
-      await page.keyboard.press('Escape')
-      await expect(v.locator('dialog#reader')).toBeVisible()
-      await expect(v.locator('#answer-confirm')).toBeHidden()
-      await expect(text).toBeFocused()
-      await page.keyboard.type(' Thanks.')
-      const body = `${prefill}A, fold it into #406. Thanks.`
-      await expect(text).toHaveValue(body)
-
-      // A Ctrl+Enter the input method took (ending a Korean syllable) is not a review: Playwright has
+      await page.keyboard.type('A로 갑니다. #406에 합칩니다.')
+      // A Ctrl+Enter the input method took (ending a Korean syllable) is not a save: Playwright has
       // no input method, so the key is sent as the event an engine gives for it
       await text.evaluate((el) => {
         el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }))
       })
-      await expect(v.locator('#answer-confirm')).toBeHidden()
-      expect(await callsTo(page, 'preview_answer')).toHaveLength(1)
+      expect(await callsTo(page, 'save_answer')).toEqual([])
+      // A save that fails says why and keeps the text; the second goes through
+      await page.keyboard.press('Control+Enter')
+      await expect(v.locator('#answer-error')).toHaveText('Not saved: the data folder could not be written.')
+      await expect(text).toHaveValue('A로 갑니다. #406에 합칩니다.')
+      await v.locator('#answer-save').click()
+      const saved = v.locator('#answer-saved')
+      await expect(saved).toBeVisible()
+      await expect(saved).toBeFocused()
+      await expect(v.locator('#answer-saved-text')).toHaveText('A로 갑니다. #406에 합칩니다.')
+      await expect(v.locator('#answer-saved-state')).toContainText('not recorded yet')
+      await expect(v.locator('#answer-note')).toHaveText(
+        'Saved on this computer; nothing was posted to GitHub. The agent will record the decision on #113 in English. Until then you can edit or delete it here.',
+      )
+      await expect(v.locator('#answer-edit')).toBeHidden()
+      expect(await callsTo(page, 'save_answer')).toEqual([
+        { item: `${REPO}#113`, text: 'A로 갑니다. #406에 합칩니다.', title: 'Narrow-window reading' },
+        { item: `${REPO}#113`, text: 'A로 갑니다. #406에 합칩니다.', title: 'Narrow-window reading' },
+      ])
+      // Nothing on the screen can post to GitHub
+      const tools = await page.evaluate(() => ((window as any).__mock.appToolCalls as { tool: string }[]).map((c) => c.tool))
+      expect(tools.filter((t) => /post|comment|preview/.test(t))).toEqual([])
 
-      // A post GitHub refuses says why and keeps the answer; the second goes through
-      await v.locator('#answer-review').click()
-      await v.locator('#answer-post').click()
-      await expect(v.locator('#answer-error')).toHaveText('Not posted: GitHub refused the comment: it is locked.')
-      await expect(v.locator('#answer-post')).toBeEnabled()
-      await v.locator('#answer-post').click()
-      const posted = v.locator('.post.posted')
-      await expect(posted).toContainText('A, fold it into #406. Thanks.')
-      await expect(posted).toBeFocused()
-      expect(await callsTo(page, 'post_answer')).toEqual([
-        { item: `${REPO}#113`, body },
-        { item: `${REPO}#113`, body },
-      ])
-      expect(await callsTo(page, 'preview_answer')).toEqual([
-        { item: `${REPO}#113`, body: `${prefill}A, fold it into #406.` },
-        { item: `${REPO}#113`, body },
-      ])
-      // Ready for the next answer
-      await expect(v.locator('#answer-confirm')).toBeHidden()
-      await expect(text).toHaveValue(prefill)
+      // Edit opens it in the box; Esc steps back out of the change, the saved answer as it was
+      await v.locator('#answer-change').click()
+      await expect(text).toBeFocused()
+      await expect(text).toHaveValue('A로 갑니다. #406에 합칩니다.')
+      await page.keyboard.type(' 아니요')
+      await page.keyboard.press('Escape')
+      await expect(v.locator('dialog#reader')).toBeVisible()
+      await expect(v.locator('#answer-saved-text')).toHaveText('A로 갑니다. #406에 합칩니다.')
+      await expect(v.locator('#answer-change')).toBeFocused()
+      // Changed and saved
+      await page.keyboard.press('Enter')
+      await text.press('End')
+      await page.keyboard.type(' B도 괜찮습니다.')
+      await v.locator('#answer-save').click()
+      await expect(v.locator('#answer-saved-text')).toHaveText('A로 갑니다. #406에 합칩니다. B도 괜찮습니다.')
+      // Deleted: the box takes a new answer
+      await v.locator('#answer-delete').click()
+      await expect(saved).toBeHidden()
+      await expect(v.locator('#answer-note')).toHaveText('Deleted the saved answer.')
+      await expect(text).toBeFocused()
+      await expect(text).toHaveValue('')
+      expect(await callsTo(page, 'delete_answer')).toEqual([{ item: `${REPO}#113` }])
     })
 
-    test('the Needs decision view shows what each item asks, and Read and answer puts the keyboard in the answer', async ({ page }) => {
+    test('the Needs decision view shows what each item asks and which answers wait to be recorded', async ({ page }) => {
       const v = await showBoard(page)
       await expect(v.locator('#mode-decisions')).toContainText('Needs decision2')
       await v.locator('#mode-decisions').click()
@@ -326,30 +342,30 @@ export function boardReaderTests(): void {
       await expect(v.locator('dialog#reader')).toBeVisible()
       await expect(v.locator('#answer-text')).toBeFocused()
       await page.keyboard.type('B')
-      await expect(v.locator('#answer-text')).toHaveValue(`**Decision (owner, ${today()}):** B`)
       // Closed, the draft waits, and the keyboard is back on the button
       await page.keyboard.press('Escape')
       await expect(answer).toBeFocused()
       await page.keyboard.press('Enter')
-      await expect(v.locator('#answer-text')).toHaveValue(`**Decision (owner, ${today()}):** B`)
+      await expect(v.locator('#answer-text')).toHaveValue('B')
+      await page.keyboard.press('Control+Enter')
+      await expect(v.locator('#answer-saved')).toBeFocused()
+      await page.keyboard.press('Escape')
+      // The card says the answer waits for an agent
+      await expect(cards.first()).toContainText('Answered, not recorded yet')
+      await expect(cards.first().getByRole('button', { name: 'Read your answer' })).toBeVisible()
+
+      // An answer an agent recorded shows with its decision comment, and a new one can be written
+      await cards.nth(1).getByRole('button').click()
+      await expect(v.locator('#answer-saved-title')).toHaveText('Your last answer')
+      await expect(v.locator('#answer-saved-state')).toContainText('recorded in English')
+      await expect(v.locator('#answer-saved-state a')).toHaveAttribute('href', 'https://example.test/issues/101#issuecomment-1')
+      await expect(v.locator('#answer-saved-actions')).toBeHidden()
+      await expect(v.locator('#answer-text')).toBeVisible()
       await page.keyboard.press('Escape')
 
       await v.locator('#mode-board').click()
       await expect(v.locator('#board')).toBeVisible()
       await expect(v.locator('#decisions')).toBeHidden()
-    })
-
-    test('an answer the rules refuse says why before any confirmation, and nothing is posted', async ({ page }) => {
-      const v = await showBoard(page)
-      await v.locator('.card[data-number="113"] .title').click()
-      const text = v.locator('#answer-text')
-      await text.click()
-      await text.press('End')
-      await page.keyboard.type('Tested on the Moonbase build.')
-      await v.locator('#answer-review').click()
-      await expect(v.locator('#answer-error')).toHaveText('The comment contains a word from the private list: "Moonbase". Leave it out or say it in general terms.')
-      await expect(v.locator('#answer-confirm')).toBeHidden()
-      expect(await callsTo(page, 'post_answer')).toEqual([])
     })
 
     test('the private word list is edited from the board: added by typing, removed by its button, and Esc gives the keyboard back', async ({ page }) => {

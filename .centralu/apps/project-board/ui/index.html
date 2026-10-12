@@ -238,7 +238,6 @@
       .r-summary dd { margin: 0; overflow-wrap: anywhere; }
       .post { margin-top: 12px; border: var(--border) solid var(--edge); border-radius: var(--radius-md); }
       .post:focus-visible { outline: var(--border) solid var(--ring); }
-      .post.posted { border-color: var(--ink-3); }
       .post-head { display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; padding: 6px 10px; border-bottom: var(--border) solid var(--edge); background: var(--surface); color: var(--ink-2); font-size: var(--text-sm); border-radius: var(--radius-md) var(--radius-md) 0 0; }
       .post-head .who { color: var(--ink); font-weight: var(--semibold); }
       .post-head a { color: var(--ink-2); }
@@ -265,9 +264,16 @@
       }
       .answer textarea:focus-visible { outline: var(--border) solid var(--ring); }
       .answer .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+      .answer .row[hidden] { display: none; }
       .answer .error { color: var(--danger); white-space: pre-wrap; margin-top: 6px; }
       .answer .error:empty { display: none; }
-      .answer .preview { margin: 8px 0; border: var(--border) solid var(--edge-strong); border-radius: var(--radius-md); padding: 8px 10px; }
+      .answer .saved { margin-bottom: 12px; padding: 8px 10px; border: var(--border) solid var(--edge-strong); border-radius: var(--radius-md); background: var(--surface); }
+      .answer .saved:focus-visible { outline: var(--border) solid var(--ring); }
+      .answer .saved-head { margin: 0; }
+      .answer .saved-text { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .answer .note { color: var(--ink-2); margin: 8px 0 0; }
+      .answer .note:empty { display: none; }
+      .dcard .waiting { color: var(--beacon); }
       button.primary { border-color: var(--ink-3); font-weight: var(--semibold); }
 
       /* The private word list: a short dialog over the board */
@@ -428,24 +434,27 @@
         <p class="r-status" id="reader-status" role="status"></p>
         <div id="reader-summary"></div>
         <div id="reader-thread"></div>
+        <!-- The owner's answer is saved on this computer only, never posted as written: an agent records the decision in English -->
         <form class="answer" id="answer" hidden>
+          <section id="answer-saved" class="saved" hidden tabindex="-1" aria-labelledby="answer-saved-title">
+            <p class="saved-head"><strong id="answer-saved-title">Your answer</strong> <span class="answered" id="answer-saved-state"></span></p>
+            <p class="saved-text" id="answer-saved-text"></p>
+            <div class="row" id="answer-saved-actions">
+              <button type="button" id="answer-change" tabindex="0">Edit</button>
+              <button type="button" id="answer-delete" tabindex="0">Delete</button>
+            </div>
+          </section>
           <div id="answer-edit">
-            <label for="answer-text">Answer this decision</label>
+            <label for="answer-text" id="answer-label">Answer this decision</label>
             <p class="hint" id="answer-hint"></p>
             <textarea id="answer-text" rows="6" spellcheck="true"></textarea>
             <div class="row">
-              <button type="submit" id="answer-review" tabindex="0">Review answer</button>
+              <button type="submit" class="primary" id="answer-save" tabindex="0">Save answer</button>
+              <button type="button" id="answer-cancel" tabindex="0" hidden>Cancel</button>
               <span class="quiet">⌘↩ or Ctrl+↩</span>
             </div>
           </div>
-          <div id="answer-confirm" hidden role="group" aria-labelledby="answer-confirm-title">
-            <p id="answer-confirm-title"></p>
-            <div class="md preview" id="answer-preview"></div>
-            <div class="row">
-              <button type="button" class="primary" id="answer-post" tabindex="0">Post comment</button>
-              <button type="button" id="answer-back" tabindex="0">Keep editing</button>
-            </div>
-          </div>
+          <p class="note" id="answer-note" role="status"></p>
           <div class="error" id="answer-error" role="alert"></div>
         </form>
       </div>
@@ -887,7 +896,9 @@
       function decisionCard(item, read) {
         const key = itemKey(item)
         const s = read?.decision
-        const fields = s ? [['Question', s.question], ['Recommendation', s.recommendation]].filter(([, v]) => v) : []
+        // The owner's answer saved on this computer, which no agent has recorded on GitHub yet
+        const waiting = read?.ownerAnswer && !read.ownerAnswer.recordedAt
+        const fields = s ?[['Question', s.question], ['Recommendation', s.recommendation]].filter(([, v]) => v) : []
         let body
         if (read?.error) body = el('p', { class: 'quiet' }, `Could not read it: ${read.error}`)
         else if (fields.length) body = el('dl', {}, ...fields.flatMap(([k, v]) => [el('dt', {}, k), htmlNode('dd', v, { class: 'md' })]))
@@ -905,12 +916,13 @@
             item.area ? el('span', { class: 'tag' }, item.area) : null,
             s?.date ? el('span', { class: 'quiet' }, `Summary of ${s.date}`) : null,
             s?.answered ? el('span', { class: 'answered' }, typeof s.answered === 'string' ? `Answered ${when(s.answered)}` : 'Answered') : null,
+            waiting ? el('span', { class: 'waiting' }, 'Answered, not recorded yet') : null,
           ),
           body,
           el(
             'div',
             { class: 'actions' },
-            el('button', { type: 'button', tabindex: '0', onclick: (e) => openReader(key, e.currentTarget, { focusAnswer: true }) }, s?.answered ? 'Read and answer again' : 'Read and answer'),
+            el('button', { type: 'button', tabindex: '0', onclick: (e) => openReader(key, e.currentTarget, { focusAnswer: true }) }, waiting ? 'Read your answer' : s?.answered ? 'Read and answer again' : 'Read and answer'),
           ),
         )
       }
@@ -926,12 +938,10 @@
         data: null, // the last read_item answer
         limit: null, // how many comments were asked for
         seq: 0,
-        drafts: new Map(), // key → text not posted yet
-        posted: new Map(), // key → comments posted from here, until a read shows them
-        confirming: false,
-        posting: false,
+        drafts: new Map(), // key → text written and not saved yet
+        editing: false, // the saved answer is open in the box
+        saving: false,
       }
-      const answerPrefill = () => `**Decision (owner, ${dayOf(new Date())}):** `
 
       function setReaderStatus(text, error = false) {
         const s = $('reader-status')
@@ -943,7 +953,7 @@
       function saveDraft() {
         if (!reader.key || $('answer').hidden) return
         const text = $('answer-text').value
-        if (text.trim() && text !== answerPrefill()) reader.drafts.set(reader.key, text)
+        if (text.trim() && !reader.editing) reader.drafts.set(reader.key, text)
         else reader.drafts.delete(reader.key)
       }
 
@@ -956,7 +966,8 @@
         reader.key = key
         reader.data = null
         reader.limit = null
-        showEdit()
+        reader.editing = false
+        $('answer-note').textContent = ''
         const known = state?.items?.find((i) => itemKey(i)?.toLowerCase() === key.toLowerCase())
         $('reader-kicker').replaceChildren(el('span', { class: 'num' }, shortRef(key)))
         $('reader-title').textContent = known?.title ?? shortRef(key)
@@ -991,23 +1002,22 @@
         }
         reader.data = sc
         renderReader()
-        if (focusAnswer && sc.needsDecision) {
+        if (focusAnswer && !$('answer').hidden) {
           $('answer').scrollIntoView({ block: 'nearest' })
-          $('answer-text').focus()
+          ;($('answer-edit').hidden ? $('answer-saved') : $('answer-text')).focus()
         }
       }
 
-      function post(c, { verb, posted = false } = {}) {
+      function post(c, { verb } = {}) {
         return el(
           'article',
-          { class: `post${posted ? ' posted' : ''}`, 'data-id': c.id ?? '', tabindex: '-1', 'aria-label': `${c.author} ${verb} ${when(c.createdAt)}` },
+          { class: 'post', 'data-id': c.id ?? '', tabindex: '-1', 'aria-label': `${c.author} ${verb} ${when(c.createdAt)}` },
           el(
             'div',
             { class: 'post-head' },
             el('span', { class: 'who' }, c.author),
             el('span', {}, verb),
             c.url ? el('a', { href: c.url, tabindex: '0', title: 'Open on GitHub' }, when(c.createdAt)) : el('span', {}, when(c.createdAt)),
-            posted ? el('span', { class: 'answered' }, '· posted from here') : null,
           ),
           htmlNode('div', c.html || '<p>No description.</p>', { class: 'md' }),
         )
@@ -1044,24 +1054,52 @@
               ]
             : []),
         )
-        const seen = new Set(d.comments.map((c) => c.id))
-        const mine = (reader.posted.get(reader.key) ?? []).filter((c) => !seen.has(c.id))
-        const postedIds = new Set((reader.posted.get(reader.key) ?? []).map((c) => c.id))
         const hidden = d.totalComments - shownCount
         $('reader-thread').replaceChildren(
           post({ author: it.author, createdAt: it.createdAt, url: it.url, html: it.html }, { verb: 'opened' }),
           ...(hidden > 0 && shownCount < d.loadedComments
             ? [el('button', { type: 'button', class: 'earlier', tabindex: '0', onclick: showEarlier }, `Show ${d.loadedComments - shownCount} earlier comment${d.loadedComments - shownCount === 1 ? '' : 's'}`)]
             : []),
-          el('ol', { class: 'thread', 'aria-label': 'Comments' }, ...[...d.comments, ...mine].map((c) => el('li', {}, post(c, { verb: 'commented', posted: postedIds.has(c.id) })))),
+          el('ol', { class: 'thread', 'aria-label': 'Comments' }, ...d.comments.map((c) => el('li', {}, post(c, { verb: 'commented' })))),
         )
-        const answerable = d.needsDecision
-        if (answerable && $('answer').hidden) {
-          $('answer').hidden = false
-          $('answer-text').value = reader.drafts.get(reader.key) ?? answerPrefill()
+        renderAnswer()
+      }
+
+      /**
+       * The owner's answer: saved on this computer only, never posted to GitHub as written (the
+       * repository is public). Shown on the item while no agent has recorded it, with Edit and Delete;
+       * once recorded, with the address of the English decision comment.
+       */
+      function renderAnswer() {
+        const d = reader.data
+        const a = d?.ownerAnswer ?? null
+        const waiting = !!a && !a.recordedAt
+        const answerable = !!d && (d.needsDecision || waiting)
+        const wasHidden = $('answer').hidden
+        $('answer').hidden = !answerable
+        if (!answerable) return
+        const ref = shortRef(reader.key)
+        $('answer-saved').hidden = !a
+        if (a) {
+          $('answer-saved-text').textContent = a.text
+          $('answer-saved-state').replaceChildren(
+            ...(waiting
+              ? [`saved ${when(a.updatedAt ?? a.savedAt)} on this computer, not recorded yet`]
+              : [`recorded in English ${when(a.recordedAt)}: `, el('a', { href: a.recordedUrl, tabindex: '0' }, 'the decision comment')]),
+          )
+          $('answer-saved-title').textContent = waiting ? 'Your answer' : 'Your last answer'
+          $('answer-saved-actions').hidden = !waiting || reader.editing
+        }
+        // A waiting answer is changed through Edit; without one (or once it is recorded) the box takes a new answer
+        $('answer-edit').hidden = waiting && !reader.editing
+        $('answer-cancel').hidden = !reader.editing
+        $('answer-label').textContent = reader.editing ? 'Change your answer' : 'Answer this decision'
+        $('answer-save').textContent = reader.editing ? 'Save changes' : 'Save answer'
+        $('answer-hint').textContent = `Saved on this computer only, never posted to GitHub as you write it. An agent records the decision on ${ref} in English.`
+        if (wasHidden && !reader.editing) {
+          $('answer-text').value = reader.drafts.get(reader.key) ?? ''
           $('answer-error').textContent = ''
-        } else if (!answerable) $('answer').hidden = true
-        $('answer-hint').textContent = `Posted as a comment on ${shortRef(reader.key)} from your GitHub login, after you confirm. Whoever coordinates the decision reads it there.`
+        }
       }
 
       async function showEarlier(e) {
@@ -1074,90 +1112,85 @@
         else e?.currentTarget?.focus?.()
       }
 
-      // The answer: write, review what will be posted, confirm, and see it in the thread
-      function showEdit() {
-        reader.confirming = false
-        $('answer-edit').hidden = false
-        $('answer-confirm').hidden = true
-        $('answer-post').disabled = false
-        $('answer-back').disabled = false
-        $('answer-post').textContent = 'Post comment'
+      /** Calls one of the answer tools; answers its structured part, or shows why it failed and answers null. */
+      async function answerCall(name, args, failed) {
+        let r
+        try {
+          r = await app.callServerTool({ name, arguments: args })
+        } catch (e) {
+          r = { isError: true, content: [{ type: 'text', text: String(e?.message ?? e) }] }
+        }
+        const sc = r?.structuredContent
+        if (r?.isError || !sc?.ok) {
+          $('answer-error').textContent = `${failed}: ${sc?.error?.message ?? (textOf(r) || 'the app gave no answer.')}`
+          return null
+        }
+        $('answer-error').textContent = ''
+        return sc
       }
 
-      async function review() {
-        if (reader.posting || reader.confirming) return
+      // The answer: saved on this computer, never posted; an agent records it in English
+      async function saveAnswer() {
+        if (reader.saving || !reader.data) return
         const key = reader.key
-        const body = $('answer-text').value
-        $('answer-error').textContent = ''
-        if (!body.trim() || body.trim() === answerPrefill().trim()) {
+        const text = $('answer-text').value
+        $('answer-note').textContent = ''
+        if (!text.trim()) {
           $('answer-error').textContent = 'Write the answer first.'
           return
         }
-        $('answer-review').disabled = true
-        let r
+        reader.saving = true
+        $('answer-save').disabled = true
+        let sc
         try {
-          r = await app.callServerTool({ name: 'preview_answer', arguments: { item: key, body } })
-        } catch (e) {
-          r = { content: [{ type: 'text', text: String(e?.message ?? e) }] }
+          sc = await answerCall('save_answer', { item: key, text, title: reader.data.item?.title }, 'Not saved')
         } finally {
-          $('answer-review').disabled = false
+          reader.saving = false
+          $('answer-save').disabled = false
         }
-        if (reader.key !== key || !dlg.open) return
-        const sc = r?.structuredContent
-        if (!sc?.ok) {
-          $('answer-error').textContent = sc?.problems?.length ? sc.problems.join('\n') : `It could not be checked: ${sc?.error?.message ?? (textOf(r) || 'the app gave no answer.')}`
-          return
-        }
-        reader.confirming = true
-        $('answer-confirm-title').replaceChildren(el('strong', {}, `Post this comment on ${shortRef(key)}?`), ' It goes to GitHub as it reads below, under your login.')
-        $('answer-preview').replaceChildren(htmlNode('div', sc.html, { class: 'md' }))
-        $('answer-edit').hidden = true
-        $('answer-confirm').hidden = false
-        $('answer-post').focus()
-      }
-
-      function backToEdit() {
-        if (reader.posting) return
-        showEdit()
-        $('answer-text').focus()
-      }
-
-      async function postAnswer() {
-        if (reader.posting) return
-        const key = reader.key
-        const body = $('answer-text').value
-        reader.posting = true
-        $('answer-post').disabled = true
-        $('answer-back').disabled = true
-        $('answer-post').textContent = 'Posting…'
-        $('answer-error').textContent = ''
-        let r
-        try {
-          r = await app.callServerTool({ name: 'post_answer', arguments: { item: key, body } })
-        } catch (e) {
-          r = { isError: true, content: [{ type: 'text', text: String(e?.message ?? e) }] }
-        } finally {
-          reader.posting = false
-        }
-        const sc = r?.structuredContent
-        if (r?.isError || !sc?.comment) {
-          $('answer-post').disabled = false
-          $('answer-back').disabled = false
-          $('answer-post').textContent = 'Post comment'
-          $('answer-error').textContent = `Not posted: ${sc?.error?.message ?? (textOf(r) || 'the app gave no answer.')}`
-          return
-        }
-        reader.posted.set(key, [...(reader.posted.get(key) ?? []), sc.comment])
+        if (!sc) return
         reader.drafts.delete(key)
         if (mode === 'decisions') loadDecisions(false)
         if (reader.key !== key || !dlg.open) return
-        showEdit()
-        $('answer-text').value = answerPrefill()
-        renderReader()
-        setReaderStatus('Posted to GitHub.')
-        const mineNode = $('reader-thread').querySelector(`.post[data-id="${CSS.escape(sc.comment.id)}"]`)
-        mineNode?.scrollIntoView({ block: 'nearest' })
-        mineNode?.focus()
+        reader.data.ownerAnswer = sc.answer
+        reader.editing = false
+        $('answer-text').value = ''
+        renderAnswer()
+        $('answer-note').textContent = `Saved on this computer; nothing was posted to GitHub. The agent will record the decision on ${shortRef(key)} in English. Until then you can edit or delete it here.`
+        $('answer-saved').focus()
+      }
+
+      function changeAnswer() {
+        const a = reader.data?.ownerAnswer
+        if (!a || a.recordedAt) return
+        reader.editing = true
+        $('answer-text').value = a.text
+        $('answer-note').textContent = ''
+        renderAnswer()
+        $('answer-text').focus()
+      }
+
+      function cancelChange() {
+        reader.editing = false
+        $('answer-text').value = ''
+        $('answer-error').textContent = ''
+        renderAnswer()
+        $('answer-change').focus()
+      }
+
+      async function deleteSavedAnswer() {
+        const key = reader.key
+        const sc = await answerCall('delete_answer', { item: key }, 'Not deleted')
+        if (!sc) return
+        if (mode === 'decisions') loadDecisions(false)
+        if (reader.key !== key || !dlg.open) return
+        reader.data.ownerAnswer = sc.answer
+        reader.editing = false
+        $('answer-text').value = ''
+        renderAnswer()
+        $('answer-note').textContent = 'Deleted the saved answer.'
+        if ($('answer').hidden) $('reader-scroll').focus()
+        else $('answer-text').focus()
       }
 
       /**
@@ -1168,13 +1201,14 @@
        */
       const composing = (e) => e.isComposing || e.key === 'Process' || e.keyCode === 229
 
-      $('answer').addEventListener('submit', (e) => (e.preventDefault(), review()))
+      $('answer').addEventListener('submit', (e) => (e.preventDefault(), saveAnswer()))
       $('answer-text').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !composing(e)) (e.preventDefault(), review())
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !composing(e)) (e.preventDefault(), saveAnswer())
       })
       $('answer-text').addEventListener('input', saveDraft)
-      $('answer-post').addEventListener('click', postAnswer)
-      $('answer-back').addEventListener('click', backToEdit)
+      $('answer-change').addEventListener('click', changeAnswer)
+      $('answer-cancel').addEventListener('click', cancelChange)
+      $('answer-delete').addEventListener('click', deleteSavedAnswer)
       $('reader-close').addEventListener('click', () => dlg.close())
 
       // An Esc the input method took neither steps back nor closes: the dialog's own close follows
@@ -1190,19 +1224,19 @@
         },
         true,
       )
-      // Esc steps back out of a confirmation first, then closes the reader
+      // Esc steps back out of changing a saved answer first (the saved one stays), then closes the reader
       dlg.addEventListener('cancel', (e) => {
         if (imeEscape) return e.preventDefault()
-        if (reader.confirming) {
+        if (reader.editing) {
           e.preventDefault()
-          backToEdit()
+          cancelChange()
         }
       })
       dlg.addEventListener('close', () => {
         saveDraft()
         reader.seq++
         reader.key = null
-        reader.confirming = false
+        reader.editing = false
         const visible = (n) => n && n.isConnected && n.getClientRects().length > 0
         let back = visible(reader.opener) ? reader.opener : null
         if (!back && reader.openerKey) back = [...document.querySelectorAll(`[data-ref="${CSS.escape(reader.openerKey)}"] .title`)].find(visible) ?? null
