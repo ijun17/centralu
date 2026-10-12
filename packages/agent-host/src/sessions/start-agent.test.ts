@@ -1,8 +1,11 @@
+import { execFileSync } from 'node:child_process'
+import { existsSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, presetWithin } from './start-agent.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -16,6 +19,15 @@ describe('the preset rule', () => {
     for (const [i, parent] of order.entries()) {
       for (const [j, child] of order.entries()) expect(presetWithin(child, parent)).toBe(j <= i)
     }
+  })
+})
+
+describe('the branch named from a job (part 2)', () => {
+  it('is a slug of the job under the prefix, with a few characters of the id; an empty slug is "agent"', () => {
+    expect(agentBranch('Write the parser!', '1A2b-3c')).toBe('centralu/write-the-parser-1a2b')
+    expect(agentBranch('파서를 써 줘', 'abcd')).toBe('centralu/agent-abcd')
+    expect(agentBranch('a'.repeat(80), 'abcd')).toBe(`centralu/${'a'.repeat(40)}-abcd`)
+    expect(agentBranch('fix: the --flag handling ', 'abcd')).toBe('centralu/fix-the-flag-handling-abcd')
   })
 })
 
@@ -225,6 +237,66 @@ describe('starting another agent in the same project', () => {
     await w.mgr.trashSession(s)
     expect(handleOf(c)!.interrupted).toBe(0)
     expect(w.mgr.listSessions().find((x) => x.id === c)?.askedBy).toBe(s)
+  })
+
+  describe('in a new worktree (part 2)', () => {
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' }).trim()
+    const repo = () => {
+      git(w.caller.path, 'init', '-q', '-b', 'main')
+      writeFileSync(join(w.caller.path, 'README.md'), 'x')
+      git(w.caller.path, 'add', '.')
+      git(w.caller.path, 'commit', '-qm', 'init')
+    }
+
+    it('opens the child in a worktree on a branch named from its job, said on the card, linked to its parent', async () => {
+      repo()
+      const s = await session()
+      const p = w.mgr.startAgent(s, { task: 'Write the parser!', worktree: true, wait: false })
+      await w.until(() => !!agentCard(s))
+      const branch = (agentCard(s)!.detail as { worktree?: { branch: string } }).worktree?.branch
+      expect(branch).toMatch(/^centralu\/write-the-parser-[a-z0-9]{4}$/)
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      expect(await p).toMatchObject({ ok: true, state: 'working' })
+      const c = childrenOf(s)[0]!
+      expect(c.worktree?.branch).toBe(branch)
+      expect(c.name).toBe(branch)
+      expect(c.askedBy).toBe(s)
+      expect(handleOf(c.id)!.opts.cwd).toBe(c.worktree!.path)
+      expect(c.worktree!.path.startsWith(w.caller.path)).toBe(false)
+      expect(git(c.worktree!.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(branch)
+    })
+
+    it('takes the branch asked for, and forks from the parent\'s own branch when the parent works in a worktree', async () => {
+      repo()
+      allowProject()
+      const s = await session()
+      const first = await w.mgr.startAgent(s, { task: 'x', branch: 'feat/parser', wait: false })
+      expect(first.ok).toBe(true)
+      const parentInWorktree = childrenOf(s)[0]!
+      writeFileSync(join(parentInWorktree.worktree!.path, 'parser.ts'), 'x')
+      git(parentInWorktree.worktree!.path, 'add', '.')
+      git(parentInWorktree.worktree!.path, 'commit', '-qm', 'parser')
+      // A session the person opened in that worktree's branch starts a child of its own in a new worktree
+      const own = await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', worktree: true, worktreeBranch: 'feat/lexer', worktreeBase: 'feat/parser' })
+      writeFileSync(join(own.worktree!.path, 'lexer.ts'), 'x')
+      git(own.worktree!.path, 'add', '.')
+      git(own.worktree!.path, 'commit', '-qm', 'lexer')
+      expect(await w.mgr.startAgent(own.id, { task: 'tests for the lexer', branch: 'feat/lexer-tests', wait: false })).toMatchObject({ ok: true })
+      const c = childrenOf(own.id)[0]!
+      expect(c.worktree?.branch).toBe('feat/lexer-tests')
+      expect(existsSync(join(c.worktree!.path, 'lexer.ts'))).toBe(true)
+    })
+
+    it('refuses before the card when the project is no git repository, or the branch name is not one', async () => {
+      const s = await session()
+      const r = await w.mgr.startAgent(s, { task: 'x', worktree: true })
+      expect(!r.ok && r.error).toContain('not a git repository')
+      repo()
+      const bad = await w.mgr.startAgent(s, { task: 'x', branch: 'no..dots' })
+      expect(!bad.ok && bad.error).toContain('Not a valid branch name')
+      expect(agentCard(s)).toBeUndefined()
+      expect(childrenOf(s)).toEqual([])
+    })
   })
 
   it('a session of an untrusted project cannot start agents: no card, nothing started', async () => {

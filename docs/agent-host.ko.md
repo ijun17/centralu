@@ -189,7 +189,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 
 | 도구 | 인자 → 돌아오는 것 |
 |---|---|
-| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working` |
+| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait?, worktree?, branch? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working` |
 | `agent_session` | `{ sessionId, action: status\|send\|wait\|stop, text? }` → 같은 상태들, 더해서 `at_rest`(부른 세션이 준 일이 돌지 않음, 마지막 답)와 `stopped` |
 
 `start_agent` 한 번(`SessionManager.startAgent`):
@@ -215,11 +215,19 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 일(사람의 것일 수 있다)로 바쁠 때, 사람이 그 자식의 프리셋을 부르는 세션보다 올렸을 때 거절한다(`presetWithin`).
 `stop`은 부르는 세션이 준 턴만 멈춘다.
 
+**새 작업 트리에서**(2부). `worktree: true`나 `branch`를 주면 자식은 부르는 세션의 폴더가 아니라 프로젝트 저장소의 새
+작업 트리에서 연다. 새 세션 창의 작업 트리 선택과 같은 길이다(`createSession`의 `worktree`, `worktreeBranch`,
+`worktreeBase`: 복사와 준비 단계, 믿는 프로젝트만). 가지는 부탁한 이름(git의 규칙으로 검사) 또는 일에서 딴 이름
+(`agentBranch`: `centralu/write-the-parser-1a2b`)이고, 카드보다 먼저 정해져 카드에 적힌다. 부르는 세션이 작업 트리
+세션이면 그 가지에서, 아니면 프로젝트의 줄기에서 갈라진다. git 저장소가 아닌 프로젝트는 카드 전에 거절한다. 자식은
+여느 작업 트리 세션처럼 보인다(가지가 이름, 병합과 PR 상태, #69/#76). 작업 트리 매니저를 평범한 세션에 접어 넣기
+전까지(#561 3부)는 사이드바에서 프로젝트의 매니저 자리 밑에도 달린다.
+
 **멈춤과 삭제.** 호출이 취소되거나(Claude의 MCP 신호), 호출이 자식을 기다리는 중에 부르는 세션을 멈추면 그 자식의
 턴도 멈춘다. 계속 돌게 둔 자식(`wait: false`, 또는 한도를 넘긴 것)은 자기 세션이라 부모의 멈춤이 닿지 않고 자기
 멈춤 버튼이 있다. 부르는 세션을 지우면 기다림과 세션 동의는 사라지고, 자식은 턴과 링크를 지킨다.
 
-**크기.** 두 정의는 918자(`AGENT_BUDGET_CHARS` 950). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
+**크기.** 두 정의는 974자(`AGENT_BUDGET_CHARS` 1,000. 작업 트리 인자 전에는 918자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
 (`start_agent`의 모든 답이 그 이름을 댄다). 잰 값은 tool-cost.md에 있다.
 
 **stdout은 예약되어 있다.** `main.ts`가 딱 한 줄을 찍는다: Tauri 수퍼바이저가 포트와 인증

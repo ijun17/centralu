@@ -165,8 +165,8 @@ export type ChildRunResult =
     ))
   | { ok: false; error: string }
 
-/** start_agent's arguments (#561): the task, and the tool, model and effort when the caller picks them */
-export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean }
+/** start_agent's arguments (#561): the task; the tool, model and effort when the caller picks them; a new worktree (part 2) */
+export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean; worktree?: boolean; branch?: string }
 
 /** agent_session's arguments (#561) */
 export type AgentSessionOpts = { sessionId: string; action: 'status' | 'send' | 'wait' | 'stop'; text?: string }

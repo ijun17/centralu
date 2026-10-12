@@ -89,7 +89,9 @@ export async function crossWorld(): Promise<CrossWorld> {
     ['claude', new CrossAdapter('claude')],
     ['codex', new CrossAdapter('codex')],
   ])
-  const mgr = new SessionManager(store, adapters as unknown as Map<ToolName, AgentAdapter>, (e) => events.push(e))
+  // Worktrees (start_agent's, #561) go under the temp root, never the data folder's; no gh is asked about pull requests
+  const mgr = new SessionManager(store, adapters as unknown as Map<ToolName, AgentAdapter>, (e) => events.push(e), undefined, join(root, 'worktrees'))
+  mgr.prLookup = async () => null
   const caller = await mgr.addProject(callerPath)
   const target = await mgr.addProject(targetPath)
   /*

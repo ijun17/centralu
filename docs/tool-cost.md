@@ -591,6 +591,7 @@ Claude, where `start_agent` is loaded and `agent_session` deferred.
 |---|---|---|
 | before (#522, §8) | 412 | +0 |
 | with the agent set | **582 (+170)** | +0 (Codex reaches MCP tools through its `exec` tool, §6) |
+| with `worktree` and `branch` (part 2; 974 characters, budget 1,000; 3,224 on Codex, budget 3,300) | **604 (+22)**, 2 runs | not measured (as above) |
 
 **Selection** (3 runs each):
 

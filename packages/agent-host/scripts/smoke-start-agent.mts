@@ -6,7 +6,8 @@
  * (preset normal) is told to have another agent write a file with a number only that agent knows, then read the file.
  * The script plays the person: it allows the start_agent card once, and allows any approval the child raises.
  *
- *   CHILD=codex (default: gpt-5.6-luna, low effort, the project's remembered choice) or CHILD=claude (haiku)
+ *   CHILD=codex (default: gpt-5.6-luna, low effort, the project's remembered choice) or CHILD=claude (haiku);
+ *   WORKTREE=1 makes the project a git repository and has the child work in a new worktree (#561 part 2)
  *
  * Passes when: the agent_start card stood in the parent with the parent's preset; a child opened in the same project
  * marked `askedBy` the parent, on the tool asked for, with the parent's preset; the file exists; and the parent's
@@ -14,14 +15,16 @@
  *
  * Run with: CHILD=codex node --import tsx packages/agent-host/scripts/smoke-start-agent.mts
  */
-import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { WebSocket } from 'ws'
 
 const CHILD = (process.env.CHILD ?? 'codex') as 'claude' | 'codex'
+// WORKTREE=1 (#561 part 2): the project is a git repository and the child works in a new worktree of it
+const WORKTREE = process.env.WORKTREE === '1'
 const TOKEN = randomBytes(16).toString('hex')
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-start-')))
 const website = join(root, 'website')
@@ -90,6 +93,13 @@ await new Promise<void>((r) => ws.on('open', () => r()))
 ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
 await new Promise((r) => setTimeout(r, 300))
 
+if (WORKTREE) {
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: website })
+  git('init', '-q', '-b', 'main')
+  writeFileSync(join(website, 'README.md'), 'scratch\n')
+  git('add', '.')
+  git('commit', '-qm', 'init')
+}
 const project = await rpc('projects.add', { path: website })
 await rpc('projects.setTrusted', { projectId: project.id, trusted: true })
 // The project's own choice for the child's tool, as a person who used it would have left it (the child takes it)
@@ -104,7 +114,7 @@ const toolName = CHILD === 'codex' ? 'Codex' : 'Claude'
 await rpc('agents.send', {
   sessionId: parentId,
   text:
-    `Use start_agent to have ${toolName} (tool "${CHILD}") write a file out/secret.txt in this folder containing a random 6-digit number of its own choosing. ` +
+    `Use start_agent to have ${toolName} (tool "${CHILD}") write a file out/secret.txt${WORKTREE ? ' in a new worktree (worktree: true)' : ' in this folder'} containing a random 6-digit number of its own choosing. ` +
     'Tell it not to put the number in its answer, only the absolute path of the file. Then read that file yourself and tell me the number.',
 })
 const ended = await new Promise<boolean>((resolve) => {
@@ -126,7 +136,7 @@ const answer = events
   .map((e) => e.text)
   .join('')
 const result = events.slice(mark).find((e) => e.sessionId === parentId && e.type === 'tool_result' && /answered|working|did not/.test(String(e.summary)))
-const file = join(website, 'out', 'secret.txt')
+const file = join(WORKTREE && child?.worktree ? child.worktree.path : website, 'out', 'secret.txt')
 const number = existsSync(file) ? readFileSync(file, 'utf8').trim() : null
 const consent = cards.find((c) => c.sessionId === parentId && c.detail.kind === 'agent_start')
 
@@ -137,6 +147,7 @@ const checks: [string, boolean][] = [
   ['the agent_start card stood in the parent, with its preset', !!consent && consent.detail.preset === 'normal'],
   ['a child opened in the same project, marked askedBy the parent', !!child && child.askedBy === parentId && child.projectId === project.id],
   [`the child runs ${CHILD} under the parent's preset`, !!child && child.tool === CHILD && child.permissionPreset === 'normal'],
+  ...(WORKTREE ? [['the child works in a new worktree, not the project folder', !!child?.worktree && child.worktree.path !== website] as [string, boolean]] : []),
   ['the child wrote out/secret.txt', !!number],
   ['the parent answered with the number in the file', !!number && answer.includes(number.replace(/\D/g, '').slice(0, 6))],
 ]

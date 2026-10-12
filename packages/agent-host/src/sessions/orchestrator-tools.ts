@@ -353,6 +353,10 @@ export const AGENT_TOOLS = [
       model: z.string().optional(),
       effort: z.string().optional(),
       wait: z.boolean().optional().describe('false: do not wait; you are told when it ends.'),
+      // A new worktree (#561 part 2): a boolean and a name rather than a workspace enum, each cheaper and either alone
+      // enough (a branch implies the worktree; without one the branch is named from the job)
+      worktree: z.boolean().optional(),
+      branch: z.string().optional(),
     }),
   },
   {
@@ -364,7 +368,7 @@ export const AGENT_TOOLS = [
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
 /** The ceiling for AGENT_TOOLS, counted like READER_BUDGET_CHARS (both tools, since Codex loads them). Measured in docs/tool-cost.md */
-export const AGENT_BUDGET_CHARS = 950
+export const AGENT_BUDGET_CHARS = 1000
 
 /**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
@@ -640,8 +644,20 @@ export async function runOrchestratorTool(
       const tool = str(args.tool)
       const model = str(args.model)
       const effort = str(args.effort)
+      const branch = str(args.branch)
       return agentRunText(
-        await tools.startAgent({ task, ...(tool ? { tool } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(args.wait === false ? { wait: false } : {}) }, signal),
+        await tools.startAgent(
+          {
+            task,
+            ...(tool ? { tool } : {}),
+            ...(model ? { model } : {}),
+            ...(effort ? { effort } : {}),
+            ...(args.wait === false ? { wait: false } : {}),
+            ...(args.worktree === true || branch ? { worktree: true } : {}),
+            ...(branch ? { branch } : {}),
+          },
+          signal,
+        ),
       )
     }
     const sessionId = str(args.sessionId)

@@ -98,7 +98,8 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
  * notification: which agent, on what, and with which permissions (the caller's own, which is the most it can have).
  */
 export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_start' }>): string {
-  return `Start ${d.tool}${d.model ? ` (${d.model})` : ''} in ${d.project.name}, with ${d.preset} permissions, to ${d.text}?`
+  const where = d.worktree ? `${d.project.name}, in a new worktree on ${d.worktree.branch},` : `${d.project.name},`
+  return `Start ${d.tool}${d.model ? ` (${d.model})` : ''} in ${where} with ${d.preset} permissions, to ${d.text}?`
 }
 
 /**

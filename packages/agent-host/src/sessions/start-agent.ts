@@ -1,4 +1,4 @@
-import type { PermissionPreset } from '@cc/protocol'
+import { APP_SLUG, type PermissionPreset } from '@cc/protocol'
 
 /**
  * start_agent and agent_session (#561) — an ordinary session starts another agent (Claude or Codex) in its own
@@ -36,6 +36,22 @@ export function agentFrame(parentName: string, task: string): string {
     '',
     task,
   ].join('\n')
+}
+
+/**
+ * The branch of a child's new worktree when the caller names none (#561 part 2): the job's first words as a slug under
+ * Centralu's prefix, so the branch says what it is for, with a few characters of the session's id so two children
+ * on the same job never collide. `centralu/write-the-parser-1a2b`.
+ */
+export function agentBranch(task: string, id: string, max = 40): string {
+  const slug = task
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, max)
+    .replace(/-+$/, '')
+  return `${APP_SLUG}/${slug || 'agent'}-${id.replace(/[^a-z0-9]/gi, '').slice(0, 4).toLowerCase()}`
 }
 
 /** The name a child starts with: its task's first words, like a session the person starts with a message */

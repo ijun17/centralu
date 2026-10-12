@@ -11,7 +11,7 @@ import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHos
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, underGrant } from './ask-project.js'
-import { AGENT_CEILING, agentFrame, agentName, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentFrame, agentName, presetWithin } from './start-agent.js'
 import { builderRole } from './app-builder.js'
 import { remember } from './folder-cache.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
@@ -5668,6 +5668,9 @@ export class SessionManager {
     if (wrong) return { ok: false, error: wrong }
     const found = await adapter.detect()
     if (!found.installed || !found.loggedIn) return { ok: false, error: `${adapter.descriptor.label} cannot take the task: ${found.detail}` }
+    // A new worktree (part 2): its branch is settled before the card, which names it
+    const worktree = opts.worktree || opts.branch ? await this.agentWorktreeBranch(project, opts) : null
+    if (worktree && 'error' in worktree) return { ok: false, error: worktree.error }
 
     const consent = await this.ensureAgentConsent(
       callerId,
@@ -5677,6 +5680,7 @@ export class SessionManager {
         tool: adapter.descriptor.label,
         ...(model ? { model } : {}),
         preset: caller.permissionPreset,
+        ...(worktree ? { worktree: { branch: worktree.branch } } : {}),
         text: taskLine(opts.task),
       },
       signal,
@@ -5686,8 +5690,9 @@ export class SessionManager {
     const fullNow = this.agentCeilingError(project.id)
     if (fullNow) return { ok: false, error: fullNow }
 
-    // The caller's own folder (a worktree session's is its worktree), so the two work on the same files
-    const cwd = this.store.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path
+    // The caller's own folder (a worktree session's is its worktree), so the two work on the same files; or a new
+    // worktree of the project's repository (part 2), which createSession makes in the worktree root
+    const cwd = worktree ? project.path : (this.store.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path)
     let child: SessionInfo
     try {
       child = await this.createSession({
@@ -5699,13 +5704,19 @@ export class SessionManager {
         // Never above the caller (#561): the caller's own preset, which the caller cannot change for it afterwards
         permissionPreset: caller.permissionPreset,
         askedBy: callerId,
+        /*
+         * A worktree forks from what the caller works on: its own branch when it is a worktree session itself, so
+         * the child starts from the caller's work; otherwise the project's trunk, as the new-session window does
+         */
+        ...(worktree ? { worktree: true, worktreeBranch: worktree.branch, ...(caller.worktree ? { worktreeBase: caller.worktree.branch } : {}) } : {}),
       })
     } catch (e) {
       return { ok: false, error: `Could not start the session: ${(e as Error).message}` }
     }
-    this.rename(child.id, agentName(opts.task))
+    // A worktree session is named by its branch, as every worktree session is; otherwise by its job
+    if (!worktree) this.rename(child.id, agentName(opts.task))
     const key = `${callerId}>${child.id}`
-    const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: cwd }, true)
+    const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? cwd }, true)
     try {
       await this.deliver(child.id, agentFrame(labelOf(this.store, caller), opts.task), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
     } catch (e) {
@@ -5779,6 +5790,19 @@ export class SessionManager {
         return this.awaitAgent(key, next, signal)
       }
     }
+  }
+
+  /**
+   * The branch a child's new worktree goes on (#561 part 2): the one asked for, checked by git's own rule, or one
+   * named from the job (`agentBranch`). Refused before the card when the project is no git repository, so the person
+   * is never asked about a worktree that cannot be made.
+   */
+  private async agentWorktreeBranch(project: { id: string; path: string }, opts: StartAgentOpts): Promise<{ branch: string } | { error: string }> {
+    const summary = await gitSummary(project.path, this.gitTrust(project.id))
+    if (!summary.isRepo) return { error: 'This project is not a git repository, so it has no worktrees. Start the agent without one.' }
+    const asked = opts.branch?.trim()
+    if (asked) return (await gitValidBranchName(asked)) ? { branch: asked } : { error: `Not a valid branch name: ${asked}` }
+    return { branch: agentBranch(opts.task, randomUUID()) }
   }
 
   /** Refuses a start when the project's children already running reach `AGENT_CEILING` (#561) */

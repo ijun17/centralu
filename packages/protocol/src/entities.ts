@@ -649,6 +649,8 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     model: z.string().optional(),
     /** The permission preset the new session gets: the caller's own, never more */
     preset: PermissionPreset,
+    /** A new worktree the session works in (#561 part 2), on this branch; absent: the caller's own folder */
+    worktree: z.object({ branch: z.string() }).optional(),
     /** One line for a person to read: the task, cut short */
     text: z.string(),
   }),

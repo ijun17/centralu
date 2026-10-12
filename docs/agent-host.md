@@ -220,7 +220,7 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 
 | Tool | Arguments → what comes back |
 |---|---|
-| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait? }` → the child's id and name, and its answer (`done`) or `working` |
+| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working` |
 | `agent_session` | `{ sessionId, action: status\|send\|wait\|stop, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer) and `stopped` |
 
 What one `start_agent` call does (`SessionManager.startAgent`):
@@ -248,6 +248,19 @@ What one `start_agent` call does (`SessionManager.startAgent`):
    `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
 
+**In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
+project's repository instead of the caller's folder, through the same path as the new-session window's worktree
+option (`createSession`'s `worktree`, `worktreeBranch`, `worktreeBase`: the copy-and-setup step, trusted projects
+only). The branch is the one asked for (git's own rule checks it) or one named from the job (`agentBranch`:
+`centralu/write-the-parser-1a2b`), settled before the card, which names it. It forks from the caller's own branch
+when the caller is itself a worktree session, so the child starts from the caller's work; otherwise from the
+project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
+session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
+worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
+either alone says what is meant. Until the worktree manager is folded into ordinary sessions (#561 part 3), a
+worktree child also hangs under the project's manager slot in the sidebar, which `createSession` opens if there is
+none.
+
 `agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` is refused while a turn
 the caller gave it runs, while it works on something else (the person may be using it), and when the person has
 since raised its preset above the caller's (`presetWithin`). `stop` ends the turn the caller gave it; a turn the
@@ -258,7 +271,7 @@ a child, stops that child's turn. A child left running (`wait: false`, or past t
 caller's Stop does not reach it, it has its own Stop. Deleting the caller drops its waits and its session consent;
 the children keep their turns and their link.
 
-**Size.** The two definitions are 918 characters (`AGENT_BUDGET_CHARS` 950). Claude loads `start_agent` (a request
+**Size.** The two definitions are 974 characters (`AGENT_BUDGET_CHARS` 1,000; 918 before the worktree arguments). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
 `start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
 is named from its task and the person renames it.
