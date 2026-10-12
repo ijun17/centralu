@@ -216,6 +216,7 @@ the keyboard. Since #529 every core task has a discoverable path, and the paths 
 | Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2240 |
 |  | mouse (typed by hand) | `H M P B B M P B B H 10K H P B B H 13K H M P B B` | 23 | 4 | 8 | 5 | 3 | 43 | 17.71 | 2161 |
 | Add an existing folder as a project | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.99 | 567 |
+| Create a new project (an empty folder in ~/Centralu, #515) | mouse | `H M P B B H 4K H M P B B` | 4 | 2 | 4 | 3 | 2 | 15 | 7.55 | 1048 |
 
 **Expert paths** (shortcuts; never the headline):
 
@@ -233,7 +234,7 @@ Pending:
 
 | Task | Access | Path | Waiting on |
 |---|---|---|---|
-| Create a new project (an empty folder) | discoverable | mouse | #515 |
+| Create a new project by asking the orchestrator | discoverable | mouse | The demo's orchestrator does not call `create_project`, so only a test handle raises its card |
 
 What the baseline shows:
 

@@ -30,7 +30,7 @@
         "R": 3
       },
       "seconds": 17.71,
-      "waitMs": 358,
+      "waitMs": 404,
       "travelPx": 2161,
       "steps": [
         {
@@ -49,7 +49,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 342
+          "waitMs": 386
         },
         {
           "kind": "click",
@@ -67,7 +67,7 @@
           "label": "the form",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 6
         },
         {
           "kind": "type",
@@ -108,7 +108,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 10
+          "waitMs": 12
         }
       ],
       "notes": [
@@ -131,7 +131,7 @@
         "R": 4
       },
       "seconds": 11.05,
-      "waitMs": 458,
+      "waitMs": 443,
       "travelPx": 2240,
       "steps": [
         {
@@ -150,7 +150,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 437
+          "waitMs": 396
         },
         {
           "kind": "click",
@@ -168,7 +168,7 @@
           "label": "the hosts",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 21
         },
         {
           "kind": "click",
@@ -191,7 +191,7 @@
           "label": "the probe",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 11
         },
         {
           "kind": "click",
@@ -209,7 +209,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 15
         }
       ],
       "notes": [
@@ -233,7 +233,7 @@
         "R": 1
       },
       "seconds": 2.99,
-      "waitMs": 3,
+      "waitMs": 21,
       "travelPx": 567,
       "steps": [
         {
@@ -252,7 +252,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 21
         }
       ],
       "notes": [
@@ -275,7 +275,7 @@
         "R": 2
       },
       "seconds": 3.82,
-      "waitMs": 250,
+      "waitMs": 109,
       "travelPx": 0,
       "steps": [
         {
@@ -289,7 +289,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 240
+          "waitMs": 99
         },
         {
           "kind": "press",
@@ -323,7 +323,7 @@
         "R": 2
       },
       "seconds": 5.56,
-      "waitMs": 32,
+      "waitMs": 15,
       "travelPx": 741,
       "steps": [
         {
@@ -342,7 +342,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 3
         },
         {
           "kind": "click",
@@ -360,7 +360,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 24
+          "waitMs": 11
         }
       ],
       "notes": [],
@@ -381,7 +381,7 @@
         "R": 3
       },
       "seconds": 8.35,
-      "waitMs": 47,
+      "waitMs": 31,
       "travelPx": 1050,
       "steps": [
         {
@@ -400,7 +400,7 @@
           "label": "the waiting list",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 12
+          "waitMs": 9
         },
         {
           "kind": "click",
@@ -410,7 +410,7 @@
           "pointer": {
             "D": 229,
             "W": 121,
-            "ID": 1.54
+            "ID": 1.53
           },
           "choice": {
             "n": 3,
@@ -423,7 +423,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 8
         },
         {
           "kind": "click",
@@ -441,12 +441,85 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 31
+          "waitMs": 14
         }
       ],
       "notes": [
         "Through the waiting list (the top-bar count), the way the app points to it when the session is not in sight",
         "waiting-list row \"Clean up leftover processes\": a choice among 3 (Hick–Hyman 0.3 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "create-project.mouse",
+      "task": "Create a new project (an empty folder)",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B H 4K H M P B B",
+      "counts": {
+        "K": 4,
+        "P": 2,
+        "B": 4,
+        "H": 3,
+        "M": 2,
+        "R": 3
+      },
+      "seconds": 7.55,
+      "waitMs": 260,
+      "travelPx": 1048,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "create-project",
+          "operators": "H M P B B",
+          "seconds": 3.01,
+          "pointer": {
+            "D": 453,
+            "W": 87,
+            "ID": 2.63
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the create-project dialog",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 8
+        },
+        {
+          "kind": "type",
+          "label": "\"game\"",
+          "operators": "H 4K",
+          "seconds": 1.52
+        },
+        {
+          "kind": "wait",
+          "label": "the folder it will make",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 238
+        },
+        {
+          "kind": "click",
+          "label": "create-project-confirm",
+          "operators": "H M P B B",
+          "seconds": 3.02,
+          "pointer": {
+            "D": 595,
+            "W": 112,
+            "ID": 2.65
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 14
+        }
+      ],
+      "notes": [
+        "The folder goes where the dialog says, ~/Centralu by default (#515); choosing another location is not counted"
       ],
       "breaches": []
     },
@@ -465,7 +538,7 @@
         "R": 3
       },
       "seconds": 4.66,
-      "waitMs": 267,
+      "waitMs": 234,
       "travelPx": 0,
       "steps": [
         {
@@ -479,7 +552,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 3
         },
         {
           "kind": "type",
@@ -492,7 +565,7 @@
           "label": "the conversation hits",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 252
+          "waitMs": 224
         },
         {
           "kind": "press",
@@ -510,7 +583,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 10
+          "waitMs": 6
         }
       ],
       "notes": [
@@ -533,7 +606,7 @@
         "R": 3
       },
       "seconds": 6.26,
-      "waitMs": 175,
+      "waitMs": 263,
       "travelPx": 633,
       "steps": [
         {
@@ -552,7 +625,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 4
         },
         {
           "kind": "type",
@@ -565,7 +638,7 @@
           "label": "the conversation hits",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 159
+          "waitMs": 246
         },
         {
           "kind": "press",
@@ -583,7 +656,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 14
         }
       ],
       "notes": [
@@ -607,7 +680,7 @@
         "R": 3
       },
       "seconds": 12.98,
-      "waitMs": 28,
+      "waitMs": 26,
       "travelPx": 1198,
       "steps": [
         {
@@ -626,7 +699,7 @@
           "label": "the new-session dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 8
         },
         {
           "kind": "click",
@@ -644,7 +717,7 @@
           "label": "the new session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 10
+          "waitMs": 4
         },
         {
           "kind": "type",
@@ -686,7 +759,7 @@
         "R": 4
       },
       "seconds": 11.89,
-      "waitMs": 24,
+      "waitMs": 32,
       "travelPx": 0,
       "steps": [
         {
@@ -700,7 +773,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 14
         },
         {
           "kind": "type",
@@ -724,7 +797,7 @@
           "label": "the new-session dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 3
         },
         {
           "kind": "press",
@@ -737,7 +810,7 @@
           "label": "the new session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 9
         },
         {
           "kind": "type",
@@ -756,7 +829,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 6
         }
       ],
       "notes": [
@@ -780,7 +853,7 @@
         "R": 1
       },
       "seconds": 3.01,
-      "waitMs": 115,
+      "waitMs": 128,
       "travelPx": 544,
       "steps": [
         {
@@ -799,7 +872,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 115
+          "waitMs": 128
         }
       ],
       "notes": [],
@@ -820,7 +893,7 @@
         "R": 3
       },
       "seconds": 4.94,
-      "waitMs": 32,
+      "waitMs": 52,
       "travelPx": 0,
       "steps": [
         {
@@ -834,7 +907,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 4
         },
         {
           "kind": "type",
@@ -847,7 +920,7 @@
           "label": "the app",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 4
         },
         {
           "kind": "press",
@@ -865,7 +938,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 22
+          "waitMs": 44
         }
       ],
       "notes": [
@@ -889,7 +962,7 @@
         "R": 3
       },
       "seconds": 13.57,
-      "waitMs": 24,
+      "waitMs": 18,
       "travelPx": 0,
       "steps": [
         {
@@ -903,7 +976,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 3
         },
         {
           "kind": "type",
@@ -927,7 +1000,7 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 6
         },
         {
           "kind": "type",
@@ -946,7 +1019,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 10
+          "waitMs": 9
         }
       ],
       "notes": [
@@ -969,7 +1042,7 @@
         "R": 2
       },
       "seconds": 13.39,
-      "waitMs": 15,
+      "waitMs": 20,
       "travelPx": 1141,
       "steps": [
         {
@@ -988,7 +1061,7 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 11
         },
         {
           "kind": "click",
@@ -1018,7 +1091,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 9
         }
       ],
       "notes": [],
@@ -1039,7 +1112,7 @@
         "R": 1
       },
       "seconds": 1.91,
-      "waitMs": 8,
+      "waitMs": 11,
       "travelPx": 0,
       "steps": [
         {
@@ -1053,7 +1126,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 11
         }
       ],
       "notes": [],
@@ -1074,7 +1147,7 @@
         "R": 2
       },
       "seconds": 4.94,
-      "waitMs": 10,
+      "waitMs": 25,
       "travelPx": 0,
       "steps": [
         {
@@ -1088,7 +1161,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 20
         },
         {
           "kind": "type",
@@ -1135,7 +1208,7 @@
         "R": 1
       },
       "seconds": 2.92,
-      "waitMs": 7,
+      "waitMs": 9,
       "travelPx": 525,
       "steps": [
         {
@@ -1154,7 +1227,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 9
         }
       ],
       "notes": [],
@@ -1175,7 +1248,7 @@
         "R": 1
       },
       "seconds": 3.21,
-      "waitMs": 10,
+      "waitMs": 6,
       "travelPx": 663,
       "steps": [
         {
@@ -1194,7 +1267,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 10
+          "waitMs": 6
         }
       ],
       "notes": [
@@ -1205,12 +1278,12 @@
   ],
   "pending": [
     {
-      "id": "create-project.mouse",
-      "task": "Create a new project (an empty folder)",
+      "id": "create-project.orchestrator",
+      "task": "Create a new project by asking the orchestrator",
       "path": "mouse",
       "access": "discoverable",
-      "waitingOn": "#515",
-      "reason": "creating a project folder from the dialog is not merged yet"
+      "waitingOn": "a scripted orchestrator reply in the demo",
+      "reason": "the mock's orchestrator does not call create_project, so the card can only be raised by a test handle, not by a person"
     }
   ]
 }
