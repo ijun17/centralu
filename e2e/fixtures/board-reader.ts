@@ -262,6 +262,14 @@ export function boardReaderTests(): void {
       const body = `${prefill}A, fold it into #406. Thanks.`
       await expect(text).toHaveValue(body)
 
+      // A Ctrl+Enter the input method took (ending a Korean syllable) is not a review: Playwright has
+      // no input method, so the key is sent as the event an engine gives for it
+      await text.evaluate((el) => {
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }))
+      })
+      await expect(v.locator('#answer-confirm')).toBeHidden()
+      expect(await callsTo(page, 'preview_comment')).toHaveLength(1)
+
       // A post GitHub refuses says why and keeps the answer; the second goes through
       await v.locator('#answer-review').click()
       await v.locator('#answer-post').click()

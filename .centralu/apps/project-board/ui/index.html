@@ -1097,17 +1097,39 @@
         mineNode?.focus()
       }
 
+      /**
+       * A key the input method took (Korean, Japanese, Chinese): the Enter that ends a syllable and
+       * the Esc that cancels one are not the person's Enter and Esc (docs/usability.md, Centralu's
+       * `composingKey`). WebKit can end the composition before it sends that Enter, which then
+       * arrives with `isComposing` false and only its keyCode, 229, says whose it was.
+       */
+      const composing = (e) => e.isComposing || e.key === 'Process' || e.keyCode === 229
+
       $('answer').addEventListener('submit', (e) => (e.preventDefault(), review()))
       $('answer-text').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) (e.preventDefault(), review())
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !composing(e)) (e.preventDefault(), review())
       })
       $('answer-text').addEventListener('input', saveDraft)
       $('answer-post').addEventListener('click', postAnswer)
       $('answer-back').addEventListener('click', backToEdit)
       $('reader-close').addEventListener('click', () => dlg.close())
 
+      // An Esc the input method took neither steps back nor closes: the dialog's own close follows
+      // the keydown, so the keydown is where it is stopped
+      let imeEscape = false
+      dlg.addEventListener(
+        'keydown',
+        (e) => {
+          if (e.key !== 'Escape' || !composing(e)) return
+          imeEscape = true
+          e.preventDefault()
+          setTimeout(() => (imeEscape = false))
+        },
+        true,
+      )
       // Esc steps back out of a confirmation first, then closes the reader
       dlg.addEventListener('cancel', (e) => {
+        if (imeEscape) return e.preventDefault()
         if (reader.confirming) {
           e.preventDefault()
           backToEdit()

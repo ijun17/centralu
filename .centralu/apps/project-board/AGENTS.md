@@ -78,6 +78,9 @@ The owner reads an issue or pull request in the board instead of the browser, an
   with `comment` (`gh api … /issues/N/comments --input -`, the text on stdin). Esc in the
   confirmation goes back to editing. The posted comment shows in the thread and takes the keyboard;
   a refused one says why and keeps the text. Drafts live in the screen's memory only.
+- **Input methods.** An Enter or Esc the input method took (ending or cancelling a Korean syllable)
+  neither reviews, steps back nor closes: `composing` in the screen, the same three signs as
+  Centralu's `composingKey` (docs/usability.md).
 
 ## CI and merging (#386)
 
