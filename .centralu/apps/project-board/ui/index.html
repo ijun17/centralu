@@ -270,6 +270,24 @@
       .answer .preview { margin: 8px 0; border: var(--border) solid var(--edge-strong); border-radius: var(--radius-md); padding: 8px 10px; }
       button.primary { border-color: var(--ink-3); font-weight: var(--semibold); }
 
+      /* The private word list: a short dialog over the board */
+      dialog.words { width: min(520px, calc(100vw - 24px)); height: auto; max-height: calc(100vh - 24px); }
+      .words-add { margin-top: 0; padding-top: 0; border-top: none; }
+      .words-add label { color: var(--ink); }
+      .words-add input {
+        flex: 1;
+        min-width: 0;
+        font: inherit;
+        color: var(--ink);
+        background: var(--surface);
+        border: var(--border) solid var(--edge);
+        border-radius: var(--radius-md);
+        padding: 3px 8px;
+      }
+      .word-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+      .word-list li { display: flex; align-items: center; gap: 8px; padding: 3px 0 3px 8px; border: var(--border) solid var(--edge); border-radius: var(--radius-md); }
+      .word-list li span { flex: 1; overflow-wrap: anywhere; }
+
       @media (max-width: 520px) {
         dialog.reader { width: 100vw; height: 100vh; margin: 0; border: none; border-radius: 0; }
         .r-head { padding: 10px 12px 8px; }
@@ -384,6 +402,7 @@
       <select id="priority" aria-label="Filter by Priority"><option value="">All priorities</option></select>
       <span class="stamp" id="stamp"></span>
       <button id="refresh" type="button">Refresh</button>
+      <button id="words-open" type="button" tabindex="0" title="Words that must not appear in public text">Private words</button>
     </header>
     <div id="notice" hidden></div>
     <nav class="tabs" id="tabs" aria-label="Statuses"></nav>
@@ -424,6 +443,29 @@
           </div>
           <div class="error" id="answer-error" role="alert"></div>
         </form>
+      </div>
+    </dialog>
+
+    <!-- The private word list: kept in the app's data folder, edited here and by edit_private_words -->
+    <dialog class="reader words" id="words" aria-labelledby="words-title">
+      <div class="r-head">
+        <div class="r-titles">
+          <h2 id="words-title">Private words</h2>
+          <div class="r-kicker">Never in a comment, issue, pull request or commit message this app sends. Kept on this machine only, not in the repository.</div>
+        </div>
+        <button class="r-close" id="words-close" type="button" tabindex="0">Close</button>
+      </div>
+      <div class="r-scroll">
+        <form class="answer words-add" id="words-form">
+          <label for="words-input">Add a word or a name</label>
+          <div class="row">
+            <input id="words-input" type="text" autocomplete="off" spellcheck="false" maxlength="100" />
+            <button type="submit" tabindex="0">Add</button>
+          </div>
+          <div class="error" id="words-error" role="alert"></div>
+        </form>
+        <p class="r-status" id="words-status" role="status"></p>
+        <ul class="word-list" id="words-list" aria-label="Private words"></ul>
       </div>
     </dialog>
 
@@ -1161,6 +1203,88 @@
           const img = e.target
           if (img?.tagName !== 'IMG') return
           img.replaceWith(el('a', { href: img.src, class: 'image-link' }, `Image${img.alt ? `: ${img.alt}` : ''} (opens on GitHub)`))
+        },
+        true,
+      )
+
+      // --- The private word list ------------------------------------------------------------------
+      const wordsDlg = $('words')
+      let wordsOpener = null
+
+      function renderWords(list) {
+        $('words-list').replaceChildren(
+          ...list.map((w) =>
+            el(
+              'li',
+              {},
+              el('span', {}, w),
+              el('button', { type: 'button', tabindex: '0', 'aria-label': `Remove ${w}`, onclick: () => editWords({ remove: [w] }) }, 'Remove'),
+            ),
+          ),
+        )
+        $('words-status').textContent = list.length ? `${list.length} word${list.length === 1 ? '' : 's'}.` : 'No words yet.'
+      }
+
+      async function callWords(name, args) {
+        let r
+        try {
+          r = await app.callServerTool({ name, arguments: args })
+        } catch (e) {
+          r = { isError: true, content: [{ type: 'text', text: String(e?.message ?? e) }] }
+        }
+        if (r?.isError || !Array.isArray(r?.structuredContent?.words)) {
+          $('words-error').textContent = r?.structuredContent?.error?.message ?? (textOf(r) || 'The app gave no answer.')
+          return null
+        }
+        $('words-error').textContent = ''
+        renderWords(r.structuredContent.words)
+        return r.structuredContent.words
+      }
+
+      async function openWords(opener) {
+        wordsOpener = opener
+        $('words-error').textContent = ''
+        $('words-status').textContent = 'Reading the list…'
+        $('words-list').replaceChildren()
+        wordsDlg.showModal()
+        $('words-input').focus()
+        await callWords('private_words', {})
+      }
+
+      async function editWords(change) {
+        const removing = change.remove?.[0]
+        const list = await callWords('edit_private_words', change)
+        if (list && removing) {
+          // The keyboard stays in the list: on the first word left, else the field
+          const next = $('words-list').querySelector('li button')
+          ;(next ?? $('words-input')).focus()
+          $('words-status').textContent = `Removed "${removing}". ${$('words-status').textContent}`
+        }
+        return list
+      }
+
+      $('words-open').addEventListener('click', (e) => openWords(e.currentTarget))
+      $('words-close').addEventListener('click', () => wordsDlg.close())
+      $('words-form').addEventListener('submit', async (e) => {
+        e.preventDefault()
+        const w = $('words-input').value.trim()
+        if (!w) return
+        if (await editWords({ add: [w] })) {
+          $('words-input').value = ''
+          $('words-status').textContent = `Added "${w}". ${$('words-status').textContent}`
+        }
+        $('words-input').focus()
+      })
+      wordsDlg.addEventListener('close', () => {
+        const back = wordsOpener?.isConnected ? wordsOpener : $('words-open')
+        back.focus()
+      })
+      wordsDlg.addEventListener('click', (e) => e.target === wordsDlg && wordsDlg.close())
+      // The input method's Enter does not add the word half-typed, and its Esc does not close the list
+      wordsDlg.addEventListener(
+        'keydown',
+        (e) => {
+          if ((e.key === 'Enter' || e.key === 'Escape') && composing(e)) e.preventDefault()
         },
         true,
       )

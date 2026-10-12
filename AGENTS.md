@@ -60,7 +60,9 @@ The layer rules are enforced by lint (`docs/architecture.md` §2). Where things 
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest: tests that must fail without their fix,
 commits ([docs/commit-conventions.md](docs/commit-conventions.md)), the pull request template
-and its **Not exercised** field, and updating documents in the same pull request.
+and its **Not exercised** field, and updating documents in the same pull request. When your
+session has the project board app's tools, they carry these rules as code: `open_pr`, `comment`,
+`file_issue`, `commit_check`, `rebase_stack`, `ci_status`; use them instead of `gh` by hand.
 
 Talk to the person in whatever language they use. Everything written down (code, comments,
 tests, documents, commits, issues, pull requests, reviews) is in English.

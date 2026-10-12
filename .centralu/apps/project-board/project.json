@@ -5,6 +5,10 @@
   "fields": { "status": "Status", "priority": "Priority", "area": "Area" },
   "decisionStatus": "Needs decision",
   "cacheSeconds": 30,
+  "rules": {
+    "prTemplate": ".github/PULL_REQUEST_TEMPLATE.md",
+    "commitConventions": "docs/commit-conventions.md"
+  },
   "ci": {
     "workflows": [".github/workflows/build.yml"],
     "knownFailuresIssue": 368,

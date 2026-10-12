@@ -108,8 +108,18 @@ async function showBoard(page: Page, { failPosts = 0 } = {}) {
     ({ board, threads, summaries, failPosts }) => {
       const w = window as any
       let failures = failPosts
+      let words: string[] = ['Moonbase']
+      const wordList = () => ({ content: [{ type: 'text', text: `${words.length} private words.` }], structuredContent: { count: words.length, words } })
       w.__mock.appToolHandler = async (_app: string, tool: string, args: any) => {
         if (tool === 'show') return { content: [{ type: 'text', text: 'board' }], structuredContent: board }
+        if (tool === 'private_words') return wordList()
+        if (tool === 'edit_private_words') {
+          words = [...words.filter((x) => !(args.remove ?? []).includes(x)), ...(args.add ?? [])].sort()
+          return wordList()
+        }
+        // The server's check, as preview_answer answers it for a private word
+        if (tool === 'preview_answer' && /moonbase/i.test(args.body))
+          return { content: [{ type: 'text', text: 'Not ready' }], structuredContent: { ok: false, ref: '#113', problems: ['The comment contains a word from the private list: "Moonbase". Leave it out or say it in general terms.'], html: '' } }
         if (tool === 'read_item') return threads[args.item] ?? { content: [{ type: 'text', text: 'missing' }], structuredContent: { ok: false, error: { kind: 'not-found', message: `${args.item} is not there.` } } }
         if (tool === 'decision_summaries') return summaries
         if (tool === 'preview_answer')
@@ -320,6 +330,40 @@ export function boardReaderTests(): void {
       await v.locator('#mode-board').click()
       await expect(v.locator('#board')).toBeVisible()
       await expect(v.locator('#decisions')).toBeHidden()
+    })
+
+    test('an answer the rules refuse says why before any confirmation, and nothing is posted', async ({ page }) => {
+      const v = await showBoard(page)
+      await v.locator('.card[data-number="113"] .title').click()
+      const text = v.locator('#answer-text')
+      await text.click()
+      await text.press('End')
+      await page.keyboard.type('Tested on the Moonbase build.')
+      await v.locator('#answer-review').click()
+      await expect(v.locator('#answer-error')).toHaveText('The comment contains a word from the private list: "Moonbase". Leave it out or say it in general terms.')
+      await expect(v.locator('#answer-confirm')).toBeHidden()
+      expect(await callsTo(page, 'post_answer')).toEqual([])
+    })
+
+    test('the private word list is edited from the board: added by typing, removed by its button, and Esc gives the keyboard back', async ({ page }) => {
+      const v = await showBoard(page)
+      const opener = v.locator('#words-open')
+      await opener.click()
+      await expect(v.locator('#words-list li')).toHaveText(['MoonbaseRemove'])
+      // The field takes the next keystroke
+      await expect(v.locator('#words-input')).toBeFocused()
+      await page.keyboard.type('Side Quest')
+      await page.keyboard.press('Enter')
+      await expect(v.locator('#words-list li span')).toHaveText(['Moonbase', 'Side Quest'])
+      await expect(v.locator('#words-input')).toHaveValue('')
+      await expect(v.locator('#words-input')).toBeFocused()
+      expect(await callsTo(page, 'edit_private_words')).toEqual([{ add: ['Side Quest'] }])
+      await v.getByRole('button', { name: 'Remove Moonbase' }).click()
+      await expect(v.locator('#words-list li span')).toHaveText(['Side Quest'])
+      await expect(v.locator('#words-status')).toContainText('Removed "Moonbase".')
+      await page.keyboard.press('Escape')
+      await expect(v.locator('dialog#words')).toBeHidden()
+      await expect(opener).toBeFocused()
     })
 
     test('in a panel-narrow view the reader fills the panel and nothing in it overflows sideways', async ({ page }) => {

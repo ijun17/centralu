@@ -78,8 +78,8 @@ The owner reads an issue or pull request in the board instead of the browser, an
   with `post_answer` (`gh api … /issues/N/comments --input -`, the text on stdin). Both are
   screen-only, and **the answer's language is not checked**: the owner answers decisions in their
   own language, and the English rule is for what agents write (decided 2026-10-12). An empty
-  answer or an attribution line is refused, and the preview says so before the confirmation. Esc in the
-  confirmation goes back to editing. The posted comment shows in the thread and takes the keyboard;
+  answer, an attribution line or a word from the private list is refused, and the preview says so
+  before the confirmation. Esc in the confirmation goes back to editing. The posted comment shows in the thread and takes the keyboard;
   a refused one says why and keeps the text. Drafts live in the screen's memory only.
 - **Input methods.** An Enter or Esc the input method took (ending or cancelling a Korean syllable)
   neither reviews, steps back nor closes: `composing` in the screen, the same three signs as
@@ -115,6 +115,60 @@ intermittent failures (#368), and how long a merge may wait.
   "still running" at 240 s and follows the call with `run_status`.
 - **Never call `merge_when_green` against a real PR in a test**; the tests use a fake `gh`.
 
+## Public text, pull requests, commits and stacks (#386 step 2)
+
+The rest of CONTRIBUTING.md as tools. The rules are pure functions in `rules.mjs`; their sources are
+read from the repository on GitHub (the pull request template from the base branch, so a pull
+request cannot change its own rules; `docs/commit-conventions.md` from the default branch; both kept
+10 minutes; paths in `project.json` `rules`). Every tool checks everything before its first write
+and refuses with every reason at once, sending nothing.
+
+- **Public text an agent writes** (`comment`, `file_issue`, `open_pr`, and commit messages): in English (letters of
+  another script are refused outside code, `> ` quotes and addresses; Greek and shared letters such
+  as µ pass; Latin-script languages are not told apart), no word from the private list, no
+  attribution line (`Co-Authored-By:`, "Generated with").
+- **The private word list** lives in the app's data folder (`private-words.json`, through
+  `centralu.readJson`/`writeJson`), never in this folder or the repository (owner decision,
+  2026-10-06). Matched whole, ignoring case, anywhere, code and addresses included ("Side Quest"
+  also matches `side-quest` and `side_quest`). `private_words` reads it; `edit_private_words` and the
+  screen's "Private words" dialog edit it.
+- **`comment`** (agents only) posts through the same code as the screen's `post_answer`, with the
+  English rule on top. **The owner's answers are taken in any language**: they answer decisions in
+  their own, and the English rule is for what agents write (decided 2026-10-12). `post_answer` and
+  `preview_answer` (screen only) still refuse a private word and an attribution line, and the
+  preview shows that before the confirmation. A server cannot tell who called it, so the two doors
+  are two tools and Centralu holds each to its caller (docs/apps.md §5.1).
+- **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
+- **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
+  `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
+  heading left out (the template says so) and refuses a name the template does not have. **Not
+  exercised** must name something ("Nothing" is a real answer; empty, "N/A", "TBD" are not); a
+  heading whose guidance says "keep the heading" (Usability) must not be empty. The title must pass
+  the commit subject rules, since it becomes the squash subject; a title that will run past the
+  length once ` (#N)` is added is a warning. `dryRun` answers the description without opening.
+- **`commit_check`** (`message` or `messages`, `repo?`): the subject (`<type>(<scope>)!?: <description>`,
+  a type from the conventions' table, lowercase scope and description, no trailing period, the
+  subject's length in characters), a blank second line, and the public text rules. Body lines past
+  the wrap and a description that reports ("added", "fixes") are warnings, not refusals. Without the
+  document, the usual Conventional Commits rules, and the answer says so.
+- **`rebase_stack`** (`pr`, `lower?`, `path?`, `push?`; `stack.mjs`, `git.mjs`): after the pull
+  request under `pr` was squash-merged. Reads both from GitHub and their commits from the remote
+  fresh at the call (the 2026-10-05 mistake was a base read earlier, which a restack had replaced),
+  replays only `pr`'s own commits (after the lower one's last head) onto its merge commit in a
+  temporary worktree (hooks off), and confirms before anything is pushed that the change is the one
+  CI tested: the same `git patch-id` of a zero-context diff (with context, a line the base changed
+  next to the pull request's edit made a clean restack look different). It then says whether the
+  tree is the tested tree, or which files differ and whether that is only what the base had. It
+  refuses when the lower one is not merged, `pr` does not contain the lower one's last head (it was
+  built on an older version), the replay conflicts (aborted), the branch moved since GitHub was
+  read, or the checkout has no remote for the repository. Without `push` it only reports; with it
+  it pushes with `--force-with-lease` on the head it read and moves the base. The person's checkout
+  never changes: the worktree and the app's temporary refs are removed whatever happens. `lower`
+  names the lower pull request when GitHub already moved `pr`'s base to main after deleting the
+  merged branch. `path` defaults to the checkout this app is in.
+- Tests: `tooling/project-board-contribute.test.ts`, with a fake `gh` and real git repositories
+  (a bare one standing for GitHub's).
+
 ## Files
 
 - `centralu.app.json` — the manifest. `id` is `project-board` and must stay equal to this folder's
@@ -123,6 +177,8 @@ intermittent failures (#368), and how long a merge may wait.
 - `github.mjs` — every call to GitHub, through `gh`. `project.json` — which project, and the CI settings.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
+- `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
+- `stack.mjs`, `git.mjs` — rebase_stack's procedure, and local git through `execFile`.
 - `ui/index.html` — the screen. Change it. It is read on every open, so edits show without a restart.
 - `runtime/` — **generated by Centralu. Never edit, format, move, or read it in full.** It is replaced
   when Centralu updates. Everything you need is imported from `./runtime/centralu-app-runtime.mjs`:

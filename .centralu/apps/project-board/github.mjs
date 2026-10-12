@@ -556,6 +556,66 @@ export async function readThread(repo, number, { max = THREAD_MAX_COMMENTS } = {
   }
 }
 
+// --- The contribution tools (open_pr, file_issue, rebase_stack) -------------------------------------
+
+/** A file of the repository as text, from `ref` (a branch or commit); null when there is none. */
+export async function readRepoFile(repo, path, ref) {
+  checkRepo(repo)
+  try {
+    return await runGh(['api', '-H', 'Accept: application/vnd.github.raw+json', `repos/${repo}/contents/${path}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`])
+  } catch (e) {
+    if (e instanceof GitHubError && !FATAL.has(e.kind) && httpStatus(e) === 404) return null
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `${path} could not be read from ${repo}: ${firstLine(e)}`)
+    throw e
+  }
+}
+
+/** POSTs JSON (on stdin) to a REST path and answers the JSON GitHub sends back. `what` names it in errors. */
+async function restWrite(method, path, payload, what) {
+  let out
+  try {
+    out = await runGh(['api', '-X', method, path, '--input', '-'], { input: JSON.stringify(payload) })
+  } catch (e) {
+    if (e instanceof GitHubError && e.kind === 'network') throw new GitHubError('network', `${e.message} ${what} may have gone through anyway: look on GitHub before trying again.`)
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    // GitHub explains a 422 in its JSON (a PR that exists already, a branch that does not)
+    const detail = parseJson(e?.stdout ?? '')?.errors?.map((x) => x?.message ?? x?.code).filter(Boolean)
+    throw new GitHubError('github', `GitHub refused ${what}: ${firstLine(e)}${detail?.length ? ` (${detail.join('; ')})` : ''}`)
+  }
+  const json = parseJson(out)
+  if (!json) throw new GitHubError('github', `GitHub answered ${what} with something that is not JSON. Look on GitHub before trying again.`)
+  return json
+}
+
+/** Opens a pull request; answers its number and address. */
+export async function createPr(repo, { title, head, base, body, draft }) {
+  checkRepo(repo)
+  const pr = await restWrite('POST', `repos/${repo}/pulls`, { title, head, base, body, draft: draft === true }, 'the pull request')
+  return { number: pr.number, url: pr.html_url ?? null }
+}
+
+/** Files an issue; answers its number and address. */
+export async function createIssue(repo, { title, body, labels }) {
+  checkRepo(repo)
+  const issue = await restWrite('POST', `repos/${repo}/issues`, { title, body, ...(labels?.length ? { labels } : {}) }, 'the issue')
+  return { number: issue.number, url: issue.html_url ?? null }
+}
+
+/** Moves a pull request onto another base branch. */
+export async function setPrBase(repo, number, base) {
+  checkRepo(repo)
+  await restWrite('PATCH', `repos/${repo}/pulls/${number}`, { base }, `the new base of #${number}`)
+}
+
+/** The pull requests whose head branch is `branch`, newest first, open or not. */
+export async function prsWithHead(repo, branch) {
+  checkRepo(repo)
+  if (!REF.test(String(branch))) return []
+  const out = await runGh(['pr', 'list', '-R', repo, '--head', branch, '--state', 'all', '--limit', '10', '--json', 'number,state,headRefName,baseRefName,headRefOid,mergeCommit'])
+  const list = parseJson(out)
+  return Array.isArray(list) ? list.sort((a, b) => b.number - a.number) : []
+}
+
 /** Posts a comment on an issue or pull request; answers it as GitHub stored it. */
 export async function postComment(repo, number, body) {
   checkRepo(repo)

@@ -7,31 +7,40 @@
 // GitHub (through the person's own `gh`, see github.mjs), with an in-memory cache of a few seconds,
 // and every write goes straight to GitHub and is read back before the tool answers.
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { McpServer, serveStdio, z, centralu } from './runtime/centralu-app-runtime.mjs'
 import {
   GitHubError,
   addContent,
+  createIssue,
+  createPr,
   deleteBranch,
   findContent,
   mergePr,
   THREAD_MAX_COMMENTS,
   parseItemRef,
   postComment,
+  prsWithHead,
   readBoard,
   readChecks,
   readIssueText,
   readJobLog,
   readPr,
   readRepo,
+  readRepoFile,
   readRequired,
   readThread,
   resolveOption,
   resolveRef,
   sameRepo,
   setOption,
+  setPrBase,
 } from './github.mjs'
-import { NO_PERMISSION, attributionLines, canMerge, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
+import { NO_PERMISSION, canMerge, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { decisionSummary, renderInline, renderMarkdown } from './markdown.mjs'
+import { DEFAULT_CONVENTIONS, attributionProblems, commitProblems, fillTemplate, normalizeWords, parseConventions, privateWordProblems, publicTextProblems, subjectProblems } from './rules.mjs'
+import { GitError } from './git.mjs'
+import { StackRefusal, rebaseStack } from './stack.mjs'
 
 const UI = 'ui://project-board/index.html'
 
@@ -857,19 +866,24 @@ async function decisionSummaries({ refresh }) {
 }
 
 /**
- * Checks the owner's answer before it goes out: not empty, no attribution line. Not its language:
- * the owner answers decisions in their own language, and the English rule is for what agents write
- * (their tool checks it). Answers the problems, in words for the person; none: it may go.
+ * Checks a comment before it goes out: not empty, no word from the private list, no attribution
+ * line, and for an agent (`agent: true`, the `comment` tool) in English too. The owner's answers
+ * from the screen (`post_answer`) are taken in any language: the owner answers decisions in their
+ * own, and the English rule is for what agents write (decided 2026-10-12). A server cannot tell who
+ * called it, so the two are separate tools and Centralu holds each to its caller (docs/apps.md 5.1).
+ * The screen's preview asks the same question as its post, so the confirmation shows what the post
+ * will do. Answers the problems, in words for the person; none: it may go.
  */
-function commentProblems(body) {
+async function commentProblems(body, { agent = false } = {}) {
   if (!String(body ?? '').trim()) return ['The comment is empty.']
-  const lines = attributionLines(body)
-  return lines.length ? [`The comment carries attribution lines (${lines.map((l) => `"${l.trim()}"`).join(', ')}). Remove them.`] : []
+  const words = await privateWords()
+  if (agent) return publicTextProblems(body, words, 'The comment')
+  return [...privateWordProblems(body, words, 'The comment'), ...attributionProblems(body, 'The comment')]
 }
 
 async function previewComment({ item, body }) {
   const want = parseItemRef(item, config.repository)
-  const problems = commentProblems(body)
+  const problems = await commentProblems(body)
   const ref = refOf(want.repo, want.number)
   const base = `https://github.com/${want.repo}/issues/${want.number}`
   return answer(problems.length ? `Not ready to post on ${ref}: ${problems.join(' ')}` : `Ready to post on ${ref}.`, {
@@ -880,10 +894,10 @@ async function previewComment({ item, body }) {
   })
 }
 
-async function postItemComment({ item, body }) {
+async function postItemComment({ item, body }, { agent = false } = {}) {
   const want = parseItemRef(item, config.repository)
   const ref = refOf(want.repo, want.number)
-  const problems = commentProblems(body)
+  const problems = await commentProblems(body, { agent })
   if (problems.length) throw new GitHubError('input', `Not posted on ${ref}: ${problems.join(' ')}`)
   let c
   try {
@@ -898,6 +912,146 @@ async function postItemComment({ item, body }) {
     ref,
     comment: { id: c.id, url: c.url, author: c.author, createdAt: c.createdAt, html: renderMarkdown(c.body, { repo: want.repo, base }) },
   })
+}
+
+// --- The contribution procedure: public text, pull requests, commits, stacks (#386 step 2) ----------
+// The rules come from the repository (the pull request template, the commit conventions) and the
+// private word list from this app's data folder. Each tool refuses with the reasons and writes
+// nothing when a rule fails; the checks run before the first call that changes anything on GitHub.
+
+// The private word list: in the data folder, never in the repository (owner decision, 2026-10-06)
+const WORDS_FILE = 'private-words.json'
+const WORDS_MAX = 500
+let words = null
+async function privateWords() {
+  words ??= normalizeWords((await centralu.readJson(WORDS_FILE, { words: [] }))?.words)
+  return words
+}
+async function editPrivateWords({ add = [], remove = [] }) {
+  const before = await privateWords()
+  const gone = new Set(remove.map((w) => String(w).replace(/\s+/g, ' ').trim().toLowerCase()))
+  const next = normalizeWords([...before.filter((w) => !gone.has(w.toLowerCase())), ...add])
+  if (next.length > WORDS_MAX) throw new GitHubError('input', `The list would hold ${next.length} words; it keeps at most ${WORDS_MAX}. Nothing changed.`)
+  const lower = new Set(before.map((w) => w.toLowerCase()))
+  const added = next.filter((w) => !lower.has(w.toLowerCase()))
+  const removed = before.filter((w) => gone.has(w.toLowerCase()))
+  await centralu.writeJson(WORDS_FILE, { words: next })
+  words = next
+  return { words: next, added, removed }
+}
+const wordsAnswer = (list, head) => answer([head, ...list.map((w) => `- ${w}`)].join('\n'), { count: list.length, words: list }, head)
+const wordCount = (n) => `${n} private word${n === 1 ? '' : 's'}`
+
+// Where GitHub looks for a pull request template; project.json can name the one to use
+const PR_TEMPLATES = ['.github/PULL_REQUEST_TEMPLATE.md', '.github/pull_request_template.md', 'PULL_REQUEST_TEMPLATE.md', 'docs/PULL_REQUEST_TEMPLATE.md']
+const RULES = {
+  prTemplates: config.rules?.prTemplate ? [config.rules.prTemplate, ...PR_TEMPLATES.filter((p) => p !== config.rules.prTemplate)] : PR_TEMPLATES,
+  commitConventions: config.rules?.commitConventions ?? 'docs/commit-conventions.md',
+}
+const RULES_TTL_MS = 10 * 60_000
+const ruleFiles = new Map() // `${repo} ${path} ${ref}` → { at, text }
+
+/** A rules file from the repository on GitHub, kept 10 minutes; null when the repository has none. */
+async function ruleFile(repo, path, ref) {
+  const key = `${repo.toLowerCase()} ${path} ${ref}`
+  const hit = ruleFiles.get(key)
+  if (hit && Date.now() - hit.at < RULES_TTL_MS) return hit.text
+  const text = await readRepoFile(repo, path, ref)
+  ruleFiles.set(key, { at: Date.now(), text })
+  return text
+}
+
+/** The commit conventions of `repo` (its default branch), or the usual ones with a note why. */
+async function conventionsOf(repo) {
+  const { defaultBranch } = await readRepo(repo)
+  const text = await ruleFile(repo, RULES.commitConventions, defaultBranch)
+  if (text === null) return { conventions: DEFAULT_CONVENTIONS, source: `the usual Conventional Commits rules (${repo} has no ${RULES.commitConventions})` }
+  return { conventions: parseConventions(text), source: RULES.commitConventions }
+}
+
+const repoOf = (repo) => {
+  const r = repo ?? config.repository
+  if (!/^[\w.-]+\/[\w.-]+$/.test(String(r))) throw new GitHubError('input', `"${r}" is not a repository; give owner/name.`)
+  return r
+}
+
+/** Refuses with every problem at once; warnings go along with a success. */
+const refusal = (prefix, problems, extra = {}) => ({
+  isError: true,
+  ...linesAnswer(`${prefix} ${problems.length === 1 ? 'One rule fails' : `${problems.length} rules fail`}; nothing was sent to GitHub.`, [['problems', '', problems]], { ok: false, ...extra }),
+})
+
+async function commitCheck({ message, messages, repo }) {
+  const list = messages ?? (message !== undefined ? [message] : null)
+  if (!list?.length) throw new GitHubError('input', 'Give message (one commit message) or messages (several).')
+  const r = repoOf(repo)
+  const { conventions, source } = await conventionsOf(r)
+  const privateList = await privateWords()
+  const results = list.map((m) => ({ subject: String(m).split('\n')[0], ...commitProblems(m, conventions, privateList) }))
+  const bad = results.filter((x) => x.problems.length)
+  const lines = results.flatMap((x, n) => {
+    const head = `${list.length > 1 ? `${n + 1}. ` : ''}"${x.subject}": ${x.problems.length ? 'refused' : 'ok'}`
+    return [head, ...x.problems.map((p) => `  ${p}`), ...x.warnings.map((w) => `  (warning) ${w}`)]
+  })
+  const summary = bad.length ? `${bad.length} of ${list.length} refused by ${source}.` : `${list.length === 1 ? 'The message follows' : `All ${list.length} follow`} ${source}.`
+  const a = linesAnswer(summary, [['results', '', lines]], { ok: bad.length === 0 })
+  return bad.length ? { isError: true, ...a } : a
+}
+
+const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', usability: 'Usability', notExercised: 'Not exercised', closes: 'Closes' }
+
+async function openPr({ title, head, base, draft, repo, sections, dryRun, ...named }) {
+  const r = repoOf(repo)
+  const info = await readRepo(r)
+  const target = base ?? info.defaultBranch
+  let template = null
+  for (const path of RULES.prTemplates) if ((template = await ruleFile(r, path, target)) !== null) break
+  if (template === null) throw new GitHubError('setup', `${r} has no pull request template on ${target} to fill (looked for ${RULES.prTemplates.join(', ')}). Nothing was opened.`)
+  const given = { ...sections }
+  for (const [k, heading] of Object.entries(PR_SECTIONS)) if (named[k] !== undefined) given[heading] = named[k]
+  const filled = fillTemplate(template, given)
+  const { conventions } = await conventionsOf(r)
+  const subject = subjectProblems(title, conventions)
+  const list = await privateWords()
+  const problems = [...subject.problems.map((p) => `Title: ${p}`), ...filled.problems, ...publicTextProblems(title, list, 'The title'), ...publicTextProblems(filled.body, list, 'The description')]
+  const warnings = [...subject.warnings.map((w) => `Title: ${w}`), ...filled.warnings]
+  // The squash commit's subject is "Title (#N)" (merge_when_green): it has to fit too
+  const squashLength = [...String(title)].length + ' (#9999)'.length
+  if (squashLength > conventions.subjectMax) warnings.push(`Merged, the subject "${title} (#N)" will be about ${squashLength} characters, over ${conventions.subjectMax}.`)
+  if (problems.length) return refusal('Not opened:', problems, { warnings })
+  if (dryRun) return linesAnswer(`Ready to open "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''} (dry run, nothing sent).`, [['warnings', 'Warnings:', warnings]], { ok: true, body: filled.body })
+  const pr = await createPr(r, { title, head, base: target, body: filled.body, draft })
+  return linesAnswer(`Opened ${refOf(r, pr.number)} "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''}: ${pr.url}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: pr.number, url: pr.url })
+}
+
+async function fileIssue({ title, body, labels, repo, dryRun }) {
+  const r = repoOf(repo)
+  const list = await privateWords()
+  const problems = [...(String(title ?? '').trim() ? [] : ['The title is empty.']), ...publicTextProblems(title, list, 'The title'), ...publicTextProblems(body, list, 'The body')]
+  if (problems.length) return refusal('Not filed:', problems)
+  if (dryRun) return answer(`Ready to file "${title}" on ${r} (dry run, nothing sent).`, { ok: true })
+  const issue = await createIssue(r, { title, body, labels })
+  return answer(`Filed ${refOf(r, issue.number)} "${title}": ${issue.url}`, { ok: true, number: issue.number, url: issue.url })
+}
+
+// The checkout rebase_stack works from by default: the one this app is committed in
+const APP_DIR = fileURLToPath(new URL('.', import.meta.url))
+
+async function restack({ pr, lower, path, push }) {
+  const want = parseItemRef(pr, config.repository)
+  const below = lower === undefined ? undefined : parseItemRef(lower, want.repo)
+  if (below && !sameRepo(below.repo, want.repo)) throw new GitHubError('input', 'lower must be a pull request of the same repository.')
+  try {
+    const r = await rebaseStack(
+      { repo: want.repo, pr: want.number, lower: below?.number, dir: path ?? APP_DIR, push: push === true },
+      { readPr, prsWithHead, setPrBase },
+      (n) => refOf(want.repo, n),
+    )
+    return linesAnswer(r.summary, [['steps', '', r.lines]], { ok: !r.partial, pushed: r.pushed, head: r.rebased, sameTree: r.sameTree })
+  } catch (e) {
+    if (e instanceof StackRefusal || e instanceof GitError) return { isError: true, ...answer(`Not restacked: ${e.message}`, { ok: false, pushed: false }) }
+    throw e
+  }
 }
 
 /**
@@ -1022,7 +1176,7 @@ serveStdio(() => {
     {
       title: "Post the owner's answer",
       description:
-        "Post the person's answer from the screen as a comment on an issue or pull request, as the gh login. Screen-only: the person writes in their own language, so the language is not checked here (agents comment through their own tool, which holds them to English). Answers the comment as GitHub stored it.",
+        "Post the person's answer from the screen as a comment on an issue or pull request, as the gh login. Screen-only: the person writes in their own language, so the language is not checked here (agents comment through `comment`, which holds them to English). Refused when empty, holding a word from the private list, or carrying an attribution line. Answers the comment as GitHub stored it.",
       // GitHub's own limit for a comment body
       inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536).describe('The comment, in Markdown') }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -1037,6 +1191,178 @@ serveStdio(() => {
           return failure(e)
         }
       }),
+  )
+
+  centralu.tool(
+    server,
+    'comment',
+    {
+      title: 'Comment on an issue or pull request',
+      description:
+        'Post a comment on an issue or pull request on GitHub, as the gh login. Refused, with nothing posted, when it is empty, not in English (code and > quotes aside), holds a word from the private list, or carries an attribution line (Co-Authored-By, "Generated with"). Answers the comment as GitHub stored it.',
+      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536).describe('The comment, in Markdown') }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    // The same code as the owner's answer, with the English rule on top
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await postItemComment(args, { agent: true })
+        } catch (e) {
+          return failure(e)
+        }
+      }),
+  )
+
+  centralu.tool(
+    server,
+    'file_issue',
+    {
+      title: 'File an issue',
+      description:
+        "File an issue on this project's repository (or repo). Refused, with nothing filed, when the title is empty or the title or body is not in English (code and > quotes aside), holds a word from the private list, or carries an attribution line. dryRun checks only.",
+      inputSchema: z.object({
+        title: z.string().max(256),
+        body: z.string().max(65536).describe('The issue, in Markdown'),
+        labels: z.array(z.string()).max(20).optional().describe('Labels; GitHub applies them only for a login that may'),
+        repo: z.string().optional().describe("owner/name; default this project's repository"),
+        dryRun: z.boolean().optional().describe('Check without filing'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await fileIssue(args)
+        } catch (e) {
+          return failure(e, 'Not filed: ')
+        }
+      }),
+  )
+
+  centralu.tool(
+    server,
+    'open_pr',
+    {
+      title: 'Open a pull request from the template',
+      description:
+        "Open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Usability: numbers, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening.",
+      inputSchema: z.object({
+        title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
+        head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),
+        base: z.string().optional().describe('The branch to merge into; default the repository default branch'),
+        why: z.string().optional(),
+        whatChanged: z.string().optional(),
+        verified: z.string().optional(),
+        usability: z.string().optional().describe('Discoverable-path numbers before and after for a change on screen, else "n/a" (docs/usability.md)'),
+        notExercised: z.string().optional().describe('Surfaces this change touches that were not run; required'),
+        closes: z.string().optional().describe('e.g. "Closes #386", or why there is no issue'),
+        sections: z.record(z.string(), z.string()).optional().describe('Any heading of the template by its name, e.g. { "Screenshots": "…" }'),
+        draft: z.boolean().optional(),
+        repo: z.string().optional().describe("owner/name; default this project's repository"),
+        dryRun: z.boolean().optional().describe('Fill and check without opening'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await openPr(args)
+        } catch (e) {
+          return failure(e, 'Not opened: ')
+        }
+      }),
+  )
+
+  centralu.tool(
+    server,
+    'commit_check',
+    {
+      title: 'Check commit messages',
+      description:
+        "Check one commit message (message) or several (messages) against the repository's docs/commit-conventions.md: <type>(<scope>): <description>, a type from its table, lowercase scope and description, no trailing period, the subject's length, a blank second line. Refuses attribution lines (Co-Authored-By, \"Generated with\"), text not in English and private words. Body lines past the wrap width and a description that reports (\"added\") are warnings.",
+      inputSchema: z.object({
+        message: z.string().optional().describe('One whole commit message, subject first'),
+        messages: z.array(z.string()).max(100).optional().describe('Several, each checked on its own'),
+        repo: z.string().optional().describe("owner/name whose conventions apply; default this project's repository"),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    async (args) => {
+      try {
+        return await commitCheck(args)
+      } catch (e) {
+        return failure(e)
+      }
+    },
+  )
+
+  centralu.tool(
+    server,
+    'rebase_stack',
+    {
+      title: 'Restack a pull request after the one under it was merged',
+      description:
+        "Move a stacked pull request (pr) onto its base after the pull request under it (its base branch's pull request, or lower) was squash-merged. Reads both fresh, replays only pr's own commits (after the lower one's last head) onto the lower one's merge commit in a temporary worktree, and confirms the change is the one CI tested and whether the tree is the tested tree. Refuses when the lower one is not merged, pr was built on an older version of it, the replay conflicts, or the change differs. Without push it only reports; push: true pushes with a lease on the head it read and moves the base.",
+      inputSchema: z.object({
+        pr: itemRef.describe(`The upper pull request: ${REF_HELP}`),
+        lower: itemRef.optional().describe('The pull request it was stacked on, when GitHub already moved its base'),
+        path: z.string().optional().describe('A checkout of the repository; default the one this app is in'),
+        push: z.boolean().optional().describe('Push the result and move the base; default false (report only)'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await restack(args)
+        } catch (e) {
+          return failure(e, 'Not restacked: ')
+        }
+      }),
+  )
+
+  centralu.tool(
+    server,
+    'private_words',
+    {
+      title: 'The private word list',
+      description: "The words that must not appear in public text (comments, issues, pull requests, commits), kept in this app's data folder and never in the repository.",
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const list = await privateWords()
+      return wordsAnswer(list, `${wordCount(list.length)}.`)
+    },
+  )
+
+  centralu.tool(
+    server,
+    'edit_private_words',
+    {
+      title: 'Edit the private word list',
+      description: 'Add or remove words of the private list (matched whole, ignoring case). Answers the list.',
+      inputSchema: z.object({
+        add: z.array(z.string().min(1).max(100)).max(100).optional(),
+        remove: z.array(z.string()).max(500).optional(),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async (args) => {
+      try {
+        const r = await editPrivateWords(args)
+        const said = [...(r.added.length ? [`added ${r.added.map((w) => `"${w}"`).join(', ')}`] : []), ...(r.removed.length ? [`removed ${r.removed.map((w) => `"${w}"`).join(', ')}`] : [])].join('; ')
+        return wordsAnswer(r.words, `${said ? `${said[0].toUpperCase()}${said.slice(1)}` : 'Nothing changed'}. ${wordCount(r.words.length)}.`)
+      } catch (e) {
+        return failure(e)
+      }
+    },
   )
 
   centralu.tool(
