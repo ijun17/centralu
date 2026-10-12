@@ -640,3 +640,60 @@ describe('resets, notices, retries and refusals (#304)', () => {
     ])
   })
 })
+
+/*
+ * Prompt cache accounting (docs/agent-host.md §6.1): one `request` per model request. The CLI can send one response as
+ * several assistant messages, one per content block, each repeating the response's usage under the same message id.
+ */
+describe('a model request, for prompt cache accounting', () => {
+  const usage = { input_tokens: 9, output_tokens: 40, cache_read_input_tokens: 80_412, cache_creation_input_tokens: 4_213 }
+  const block = (id: string, content: unknown[], extra: Record<string, unknown> = {}) => ({
+    type: 'assistant',
+    ...extra,
+    message: { id, role: 'assistant', content, usage },
+  })
+  const requests = (events: { type: string }[]) =>
+    events.flatMap((e) => (e.type === 'usage_update' && 'request' in e && e.request ? [e.request] : []))
+
+  it('is carried once per message id, however many messages repeat it', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const out = [
+      ...stream.push(block('msg_1', [{ type: 'thinking', thinking: '' }])),
+      ...stream.push(block('msg_1', [{ type: 'text', text: 'Reading it.' }])),
+      ...stream.push(block('msg_1', [{ type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: '/a' } }])),
+      ...stream.push(block('msg_2', [{ type: 'text', text: 'Done.' }])),
+    ]
+    expect(requests(out)).toEqual([
+      { inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 },
+      { inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 },
+    ])
+  })
+
+  it("counts a subagent's requests too, without its tokens taking the parent's reading", () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    stream.push(block('msg_parent', [{ type: 'tool_use', id: 'tu1', name: 'Agent', input: { prompt: 'look' } }]))
+    const sub = {
+      type: 'assistant',
+      parent_tool_use_id: 'tu1',
+      message: { id: 'msg_sub', role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 21_000 } },
+    }
+    const out = stream.push(sub)
+    expect(requests(out)).toEqual([{ inputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 21_000 }])
+    // The reading is still the parent's: the subagent's 21k write is not what the session's figures show
+    const reading = out.find((e) => e.type === 'usage_update')
+    expect(reading).toMatchObject({ tokens: { inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 } })
+    // Repeats of the same subagent message are not counted again
+    expect(requests(stream.push(sub))).toEqual([])
+  })
+
+  it("is not carried by the turn's result, which is a running total", () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const out = stream.push({
+      type: 'result',
+      subtype: 'success',
+      modelUsage: { m: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 10, cacheCreationInputTokens: 10 } },
+    })
+    expect(out.some((e) => e.type === 'usage_update')).toBe(true)
+    expect(requests(out)).toEqual([])
+  })
+})

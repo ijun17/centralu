@@ -1488,7 +1488,7 @@ limits are in scope; metered credits are not.
 This section used to describe something else entirely: a chokidar watcher parsing
 `~/.claude/projects/**` and `~/.codex/sessions/**` incrementally, writing `usage_facts` rows
 that a `usage.weekly` RPC would read, with aggregation in `core/usage`. **None of it exists** —
-chokidar is not a dependency, `core/usage` is not a directory, there is no `usage.weekly`
+chokidar is not a dependency, `core/usage` holds only the cache arithmetic of §6.1, there is no `usage.weekly`
 method, and no build ever wrote a row to `usage_facts`. It stays in `schema.sql` for now: released builds up to
 v0.1.0-beta.10 still delete a project's rows from it, and this build is the first that leaves it alone, so dropping it
 is a contract step for a later release (§5.1 rule 2). It was
@@ -1496,6 +1496,37 @@ also the *opposite* of the rule §8.1 states, and the two sections sat in this f
 contradicting each other. Reading a tool's private JSONL is exactly what §8.1 forbids, for
 the reason given there: an undocumented format breaks silently on upgrade, and a silent break
 in a number is worse than a missing number.
+
+### 6.1 The prompt cache
+
+The usage gauge also says how much of the agents' input came from the prompt cache, because a
+cache rebuild is what costs: a rebuilt prompt is paid at the write price and counts toward the
+limit the gauge shows. The donut's tooltip carries one line ("Cache hit 94% · last 5 h"), and the
+dropdown its click opens breaks it down per tool, for the last five hours and today (the host's
+local midnight): the hit rate, tokens read from cache, written to it and uncached, the rebuilds,
+and the few sessions that wrote most, each opening that session.
+
+**Counted from the sessions' own events, not from the tool's files** (the rule above). The
+adapters send one `request` per model request on `usage_update` (`RequestInput`): Claude per
+assistant message, deduplicated by its message id because the CLI can send one response as several
+messages that repeat its usage; Codex from `last` in `thread/tokenUsage/updated`, skipping a
+notification whose `total` has not moved (a repeat). `tokens` stays the running reading it always
+was. A Claude subagent's request counts too, carried on a `usage_update` that repeats the parent's
+last reading, so the subagent's tokens never stand in for the parent's figures (#98).
+`SessionManager` hands each request to `CacheLedger` (`sessions/cache-ledger.ts`), and
+`agents.usage` answers with `cache: CacheStats` summed at the moment it is asked. A linked
+machine's host counts its own, and the hub qualifies the session ids in its answer.
+
+| Decision | Reasoning |
+|---|---|
+| Hit rate = `cacheRead / (input + cacheRead + cacheCreation)` over the window | The three input fields do not overlap (`TokenUsage`), so their sum is all the input the model read. A write counts as a miss: a window that only rebuilt reads 0%. Computed where it is shown (`@cc/core` `cacheHitRate`), from sums, so a host and a UI of different builds cannot disagree on the meaning |
+| A **rebuild** is a request whose cache write is at least 50% of its whole input and at least 4,096 tokens | Normal work writes only what is new since the last request and reads the rest, a few percent; a request whose cached prefix expired or changed (another model, other tools) writes almost all of it. Claude Code's fixed prefix alone is well over 10,000 tokens, so the floor only drops small helper calls. Judged per request, not per turn: a turn of N tool calls is N+1 requests, and summing them would dilute the one rebuild under the later requests' reads. It needs no state, so interleaved subagent requests do not confuse it. `pnpm measure:tools` uses a finer rule (the input the previous request sent that this one did not read, [tool-cost.md](tool-cost.md) §2), which needs each conversation's previous request; this rule can miss a partial rebuild that still reads half its prompt, and can count a very large tool result early in a conversation |
+| Codex: reads only | Codex reports the input it read from cache inside its input count and nothing about writing to it. So its hit rate is cached input over all input, it has no rebuilds, its sessions are ranked by uncached input, and the screen says so in words. codex-cli 0.160's breakdown has a `cacheWriteInputTokens` field; whether it is ever non-zero for OpenAI models, and whether `inputTokens` includes it, is not measured, so it is not read |
+| Kept in the host's memory, a day at most and 50,000 requests per tool | The windows are hours, and the figure is read only when someone looks at the gauge. A table would be a migration and a write per request for that; a restart loses only what the screen then admits (`countingSince`: the window is named "since 14:02" and the dropdown says earlier requests are not known). Nothing runs on a timer: entries are appended as requests close, old ones dropped on the next append, and the sums are taken on `agents.usage`. The gauge already asks that every 5 minutes, so the tooltip costs no new question |
+| The donut's own window, not the gauge's weekly one | A week does not fit in memory across restarts, and what someone acts on (an idle session whose cache expired, a model switch) shows within hours |
+
+Not covered: a Codex child agent's requests (its notifications go to the parent's step list,
+not through this count), and the Codex request that a resumed thread may report once on resume.
 
 ## 8. Importing previous sessions (external sessions)
 

@@ -8,6 +8,7 @@ import {
   ApprovalDetail,
   ProtocolError,
   Question,
+  RequestInput,
   SessionActivity,
   SessionGoal,
   SessionState,
@@ -360,7 +361,17 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...base, type: z.literal('turn_complete'), output: z.unknown().optional() }),
   z.object({ ...base, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
-  z.object({ ...base, type: z.literal('usage_update'), tokens: TokenUsage }),
+  z.object({
+    ...base,
+    type: z.literal('usage_update'),
+    tokens: TokenUsage,
+    /**
+     * One model request's input, when this reading closes one (prompt cache accounting, docs/agent-host.md §6.1).
+     * `tokens` is a running reading; this is the request alone, sent once per request. Absent on readings that do
+     * not close a request (Claude's turn result, a Codex repeat).
+     */
+    request: RequestInput.optional(),
+  }),
   z.object({
     ...base,
     type: z.literal('context_update'),

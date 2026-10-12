@@ -730,6 +730,75 @@ export const TokenUsage = z.object({
 export type TokenUsage = z.infer<typeof TokenUsage>
 
 /**
+ * The input of **one model request**, split as `TokenUsage` splits it — what the prompt cache is judged by.
+ *
+ * `TokenUsage` is a running reading (Claude's result is cumulative over the process, Codex's `total` over the
+ * thread), so it cannot be put into a window of time. This is sent once per request, alongside it, by the adapter
+ * that can tell requests apart: Claude per assistant message (deduplicated by its message id), Codex per change of
+ * its thread's total (`last`).
+ *
+ * `cacheCreationTokens` is **absent when the tool does not report cache writes**: Codex reports the input it read
+ * from cache and nothing about writing it, and an absent figure must not read as "wrote nothing".
+ */
+export const RequestInput = z.object({
+  inputTokens: z.number(),
+  cacheReadTokens: z.number(),
+  cacheCreationTokens: z.number().optional(),
+})
+export type RequestInput = z.infer<typeof RequestInput>
+
+/** One session's share of a cache window (`CacheWindowStats.sessions`) */
+export const CacheSessionStats = z.object({
+  sessionId: z.string(),
+  /** The session's name when the host was asked; empty for a session that no longer exists */
+  name: z.string(),
+  requests: z.number(),
+  inputTokens: z.number(),
+  cacheReadTokens: z.number(),
+  cacheCreationTokens: z.number(),
+  rebuilds: z.number(),
+})
+export type CacheSessionStats = z.infer<typeof CacheSessionStats>
+
+/**
+ * The prompt cache over one window of time, summed from the requests in it (docs/agent-host.md §6.1).
+ *
+ * The sums, not the rate: the hit rate is `cacheReadTokens / (inputTokens + cacheReadTokens + cacheCreationTokens)`
+ * and is computed where it is shown (`@cc/core` `cacheHitRate`), so a host and a UI of different builds cannot
+ * disagree on what it means.
+ */
+export const CacheWindowStats = z.object({
+  /** `5h`, `today` */
+  id: z.string(),
+  /** How the window is named on screen ("last 5 h", "today") */
+  label: z.string(),
+  /** ISO8601, where the window begins */
+  since: z.string(),
+  requests: z.number(),
+  inputTokens: z.number(),
+  cacheReadTokens: z.number(),
+  cacheCreationTokens: z.number(),
+  /** Requests that wrote most of their prompt to the cache again (the threshold: docs/agent-host.md §6.1) */
+  rebuilds: z.number(),
+  /** The sessions that cost the cache most in this window, most first, a few at most */
+  sessions: z.array(CacheSessionStats),
+})
+export type CacheWindowStats = z.infer<typeof CacheWindowStats>
+
+/** What one tool's prompt cache did lately, on the machine that answers (`agents.usage`) */
+export const CacheStats = z.object({
+  /** The tool reports cache writes (Claude). False: reads only (Codex), and every write figure here is 0 */
+  writes: z.boolean(),
+  /**
+   * ISO8601, when this host began counting. The figures live in the host's memory, so a window that began before
+   * this is only partly known, and the screen says "since" this time instead of the window's name.
+   */
+  countingSince: z.string(),
+  windows: z.array(CacheWindowStats),
+})
+export type CacheStats = z.infer<typeof CacheStats>
+
+/**
  * An adapter's capability declaration — the UI enables or disables features based on this
  * (architecture §6.2).
  *

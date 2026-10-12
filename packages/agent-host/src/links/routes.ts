@@ -57,6 +57,22 @@ const sessionResult: ResultFix = (r, q) => q.sessionResult(r)
 const messages: ResultFix = (r, q) => q.messages(r)
 const builderSession: ResultFix = (r, q) => (r && typeof r === 'object' ? { ...(r as object), sessionId: q.maybeId((r as { sessionId?: unknown }).sessionId) } : r)
 
+const usageResult: ResultFix = (r, q) => {
+  const cache = r && typeof r === 'object' ? (r as { cache?: { windows?: unknown } }).cache : undefined
+  if (!cache || !Array.isArray(cache.windows)) return r
+  const windows = cache.windows.map((w: unknown) => {
+    const sessions = w && typeof w === 'object' ? (w as { sessions?: unknown }).sessions : undefined
+    if (!Array.isArray(sessions)) return w
+    return {
+      ...(w as object),
+      sessions: sessions.map((s: unknown) =>
+        s && typeof s === 'object' ? { ...(s as object), sessionId: q.maybeId((s as { sessionId?: unknown }).sessionId) } : s,
+      ),
+    }
+  })
+  return { ...(r as object), cache: { ...cache, windows } }
+}
+
 export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Sessions ───────────────────────────────────────────────────────────────────────────
   'agents.createSession': project(sessionInfo, (p, q) => {
@@ -167,7 +183,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
     },
   },
   'agents.models': { kind: 'machine' },
-  'agents.usage': { kind: 'machine' },
+  // The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host.md §6.1)
+  'agents.usage': { kind: 'machine', result: (r, q) => usageResult(r, q) },
   'projects.add': { kind: 'machine', result: (r, q) => q.project(r) },
   // Made by the host of the machine the project lives on, in its own home and path terms (#515)
   'projects.create': { kind: 'machine', result: (r, q) => q.project(r) },

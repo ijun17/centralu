@@ -391,6 +391,19 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     })
   })
 
+  it("qualifies the sessions a machine's prompt cache figures name, so the hub's screen can open them", async () => {
+    const { router, m1 } = rig()
+    const session = { sessionId: 's1', name: 'Work', requests: 1, inputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 9, rebuilds: 1 }
+    const window = { id: '5h', label: 'last 5 h', since: '2026-10-12T10:00:00.000Z', requests: 1, inputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 9, rebuilds: 1, sessions: [session] }
+    m1.answers['agents.usage'] = { supported: true, usage: null, cache: { writes: true, countingSince: '2026-10-12T00:00:00.000Z', windows: [window] } }
+    expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toMatchObject({
+      cache: { windows: [{ sessions: [{ sessionId: 'm1.s1', name: 'Work' }] }] },
+    })
+    // A machine whose host predates the figures answers without them, and that passes as it is
+    m1.answers['agents.usage'] = { supported: true, usage: null }
+    expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toEqual({ supported: true, usage: null })
+  })
+
   it('refuses a call that mixes two machines rather than passing a stranger’s id on', async () => {
     const { router, m1 } = rig()
     await expect(router.handle('sessions.reorder', { projectId: 'm1.p1', orderedIds: ['m1.a', 'm2.b'] })).rejects.toThrow(/another machine/)

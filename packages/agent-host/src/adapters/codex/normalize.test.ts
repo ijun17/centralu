@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { __resetWarningsForTest, approvalDetailFrom, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
+import { __resetWarningsForTest, approvalDetailFrom, CodexRequestInputs, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
 
 /**
  * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually
@@ -641,5 +641,36 @@ describe('approval decision mapping (the ones we use, out of the six confirmed i
       expect(spy).toHaveBeenCalled()
       spy.mockRestore()
     })
+  })
+})
+
+/*
+ * Prompt cache accounting (docs/agent-host.md §6.1): the request a token usage notification closes is `last`, once.
+ * Codex sends the count again with other updates; a repeat has the same `total`.
+ */
+describe('CodexRequestInputs', () => {
+  const breakdown = (input: number, cached: number) => ({
+    totalTokens: input + 10, inputTokens: input, cachedInputTokens: cached, cacheWriteInputTokens: 0, outputTokens: 10, reasoningOutputTokens: 0,
+  })
+  const params = (total: number, last: [number, number]) => ({
+    threadId: 't1',
+    turnId: 'turn1',
+    tokenUsage: { total: breakdown(total, 0), last: breakdown(...last), modelContextWindow: 200_000 },
+  })
+
+  it('gives the last request, cached input taken out of the uncached part, and no write figure', () => {
+    const r = new CodexRequestInputs()
+    expect(r.take(params(5_000, [5_000, 4_000]))).toEqual({ inputTokens: 1_000, cacheReadTokens: 4_000 })
+  })
+
+  it('gives nothing for a repeat of the same total, and the next request once the total moves', () => {
+    const r = new CodexRequestInputs()
+    expect(r.take(params(5_000, [5_000, 4_000]))).toBeDefined()
+    expect(r.take(params(5_000, [5_000, 4_000]))).toBeUndefined()
+    expect(r.take(params(11_000, [6_000, 5_000]))).toEqual({ inputTokens: 1_000, cacheReadTokens: 5_000 })
+  })
+
+  it('gives nothing for a notification without input', () => {
+    expect(new CodexRequestInputs().take({ tokenUsage: {} })).toBeUndefined()
   })
 })

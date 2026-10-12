@@ -9,6 +9,7 @@ import { SessionAppsHub } from './session-apps.js'
 import { AppAccess, writeShared } from './app-access.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, CapabilityQuestion, ExternalApps, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
+import { CacheLedger } from './cache-ledger.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, underGrant } from './ask-project.js'
 import { builderRole } from './app-builder.js'
 import { remember } from './folder-cache.js'
@@ -20,6 +21,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, rmSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
+  CacheStats,
   AppQuestion,
   AppReach,
   ApprovalDetail,
@@ -392,6 +394,8 @@ export class SessionManager {
   private externalIndex = new Map<string, { ids: Map<string, number>; complete: boolean; at: number }>()
   /** Usage cache — do not spin up the tool every time the modal opens and closes */
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
+  /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
+  private readonly cacheLedger = new CacheLedger()
   /** Session asked to be reported on completion -> orchestrator to notify (removed once notified) */
   private awaitingReport = new Map<string, string>()
   /**
@@ -3208,6 +3212,7 @@ export class SessionManager {
         break
       case 'usage_update':
         m.usage = e.tokens
+        if (e.request) this.cacheLedger.record(m.tool, m.id, e.request)
         break
       case 'context_update':
         m.context = { used: e.used, window: e.window, exactness: e.exactness }
@@ -3942,19 +3947,26 @@ export class SessionManager {
    * Cached briefly — spinning up a codex app-server every time the modal opens and closes would be
    * slow. Never throws on failure: failing to see usage is no reason to block the conversation.
    */
-  async usageFor(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }> {
+  async usageFor(
+    tool: ToolName,
+  ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache: CacheStats }> {
+    /*
+     * The cache figures are summed now, on the question, from what this host counted: a sum over a day's requests at
+     * most, cheap next to the tool call below, and nothing is kept up to date while nobody asks.
+     */
+    const cache = this.cacheLedger.stats(tool, (id) => this.meta.get(id)?.name)
     const adapter = this.adapters.get(tool)
-    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null }
+    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
 
     const hit = this.usageCache.get(tool)
-    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot }
+    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
 
     try {
       const snapshot = await withTimeout(adapter.listUsage(), 15_000)
       this.usageCache.set(tool, { snapshot, at: Date.now() })
-      return { supported: true, usage: snapshot }
+      return { supported: true, usage: snapshot, cache }
     } catch (err) {
-      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null }
+      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
     }
   }
 

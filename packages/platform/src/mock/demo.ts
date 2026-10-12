@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { CacheStats, NormalizedEvent } from '@cc/protocol'
 import type { MockPlatform } from './index.js'
 
 /**
@@ -265,6 +265,17 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   ])
   mock.emit({ type: 'turn_complete', sessionId: done.id })
 
+  mock.cacheStats = demoCache(
+    [
+      { sessionId: working.id, name: 'Finish the collapsed composer', write: 1_120_000, rebuilds: 3 },
+      { sessionId: asking.id, name: 'Pick the hero copy', write: 540_000, rebuilds: 2 },
+    ],
+    [
+      { sessionId: approving.id, name: 'Clean up leftover processes', input: 260_000 },
+      { sessionId: done.id, name: 'Optimize images', input: 150_000 },
+    ],
+  )
+
   if (scene === 'grid') {
     // The grid scene's purpose is the screen with several panels — collapsing, the ring, and reading space all show up here
     const extra = await session(mock, centralu.id, 'claude', 'Put together the release notes')
@@ -283,6 +294,67 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   } else {
     const saved = (await mock.workspace.load()) ?? {}
     await mock.workspace.save({ ...saved, view: 'focus', focusedSessionId: working.id })
+  }
+}
+
+/**
+ * The prompt cache the gauge's dropdown shows: a Claude that mostly hits and rebuilt a few times, a Codex that reports
+ * reads only. Counted since well before both windows, so they show under their own names.
+ */
+function demoCache(
+  claude: { sessionId: string; name: string; write: number; rebuilds: number }[],
+  codex: { sessionId: string; name: string; input: number }[],
+): Record<string, CacheStats> {
+  const now = Date.now()
+  const midnight = new Date(now)
+  midnight.setHours(0, 0, 0, 0)
+  const countingSince = new Date(now - 26 * 3600_000).toISOString()
+  const window = (id: string, label: string, since: number, scale: number) => ({ id, label, since: new Date(since).toISOString(), scale })
+  const windows = [window('5h', 'last 5 h', now - 5 * 3600_000, 1), window('today', 'today', midnight.getTime(), 2.6)]
+  const n = (x: number, scale: number) => Math.round(x * scale)
+  return {
+    claude: {
+      writes: true,
+      countingSince,
+      windows: windows.map(({ scale, ...w }) => ({
+        ...w,
+        requests: n(412, scale),
+        inputTokens: n(18_400, scale),
+        cacheReadTokens: n(31_200_000, scale),
+        cacheCreationTokens: n(1_940_000, scale),
+        rebuilds: n(6, scale),
+        sessions: claude.map((s) => ({
+          sessionId: s.sessionId,
+          name: s.name,
+          requests: n(140, scale),
+          inputTokens: n(6_000, scale),
+          cacheReadTokens: n(9_800_000, scale),
+          cacheCreationTokens: n(s.write, scale),
+          rebuilds: n(s.rebuilds, scale),
+        })),
+      })),
+    },
+    codex: {
+      writes: false,
+      countingSince,
+      windows: windows.map(({ scale, ...w }) => ({
+        ...w,
+        requests: n(96, scale),
+        inputTokens: n(410_000, scale),
+        cacheReadTokens: n(3_900_000, scale),
+        cacheCreationTokens: 0,
+        rebuilds: 0,
+        sessions: codex.map((s) => ({
+          sessionId: s.sessionId,
+          name: s.name,
+          requests: n(40, scale),
+          inputTokens: n(s.input, scale),
+          cacheReadTokens: n(1_600_000, scale),
+          cacheCreationTokens: 0,
+          rebuilds: 0,
+        })),
+      })),
+    },
   }
 }
 

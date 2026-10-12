@@ -72,7 +72,7 @@ type NormalizedEvent =
   // session state and gauges
   | { type: 'turn_complete';    sessionId }
   | { type: 'state_change';     sessionId, state: SessionState, reason? }
-  | { type: 'usage_update';     sessionId, tokens: TokenUsage }
+  | { type: 'usage_update';     sessionId, tokens: TokenUsage, request?: RequestInput }  // request: one model request's input, for the prompt cache (agent-host.md §6.1)
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: human-given, never overwritten
@@ -207,7 +207,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
-| usage | `agents.usage` | the account's limit windows, asked of the tool itself ([agent-host.md](agent-host.md) §6) |
+| usage | `agents.usage` | the account's limit windows, asked of the tool itself, and the prompt cache over the last hours as the host counted it (`cache`, [agent-host.md](agent-host.md) §6, §6.1) |
 
 The request and response types of the git/fs/store RPCs are **1:1 with the port interfaces**. Deliberate duplication — the port is the original contract, and RPC and Tauri invoke are just two carriers of that contract.
 

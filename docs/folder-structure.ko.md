@@ -48,7 +48,7 @@ centralu/
 │  │     ├─ unread/             # read rules (FR-16)
 │  │     ├─ approval/           # always-allow rule matching, in-place approval policy
 │  │     ├─ machines/           # linked machines: away rows, link errors in words, the version prompt
-│  │     └─ usage/              # weekly aggregation (the calculation, not the parser)
+│  │     └─ usage/              # 프롬프트 캐시 계산: 적중률, 창 이름 (agent-host.ko.md §6.1)
 │  │
 │  ├─ platform/                 # the firewall for C1/C2
 │  │  └─ src/

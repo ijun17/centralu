@@ -20,6 +20,7 @@ import {
   AppReview,
   AppVersions,
   AgentVersions,
+  CacheStats,
   UsageSnapshot,
   GitFileStatus,
   GridPanel,
@@ -1824,7 +1825,17 @@ export const RpcMethods = {
   },
   'agents.usage': {
     params: z.object({ tool: ToolName, ...machineParam }),
-    result: z.object({ supported: z.boolean(), reason: z.string().optional(), usage: UsageSnapshot.nullable() }),
+    result: z.object({
+      supported: z.boolean(),
+      reason: z.string().optional(),
+      usage: UsageSnapshot.nullable(),
+      /**
+       * The prompt cache over the last hours, counted by this host from its sessions' requests (docs/agent-host.md
+       * §6.1). Independent of `supported`: a limit the tool would not tell does not hide what the host counted.
+       * Absent from a host that predates it.
+       */
+      cache: CacheStats.optional(),
+    }),
   },
   /** File search for `@` autocomplete (within the project only) */
   /**

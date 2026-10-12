@@ -2511,6 +2511,26 @@ describe('while-alive facts are carried in the list', () => {
     expect(m.limit).toBeNull()
   })
 
+  it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const h = adapter.handleOf(s.id)!
+    const emit = (e: NormalizedEvent) => (h as unknown as { emit: (e: NormalizedEvent) => void }).emit(e)
+    const tokens = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 }
+
+    emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000 } })
+    emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 5, cacheReadTokens: 30_000, cacheCreationTokens: 500 } })
+    // A running reading without a request is not a request
+    emit({ type: 'usage_update', sessionId: s.id, tokens })
+    await listed(s.id)
+
+    const r = (await rpc('agents.usage', { tool: 'claude' })) as { cache?: { writes: boolean; windows: { id: string; requests: number; cacheReadTokens: number; cacheCreationTokens: number; rebuilds: number; sessions: { sessionId: string; name: string }[] }[] } }
+    expect(r.cache?.writes).toBe(true)
+    const five = r.cache!.windows.find((w) => w.id === '5h')!
+    expect(five).toMatchObject({ requests: 2, cacheReadTokens: 30_000, cacheCreationTokens: 30_500, rebuilds: 1 })
+    expect(five.sessions).toMatchObject([{ sessionId: s.id, name: 'New session' }])
+  })
+
   it('clears approvals and questions for dead requestIds when an error arrives', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

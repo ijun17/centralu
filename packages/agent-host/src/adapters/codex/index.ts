@@ -33,6 +33,7 @@ import {
   CodexChildTracker,
   CODEX_KNOWN_NOTIFICATIONS,
   CompactionMarks,
+  CodexRequestInputs,
   fileChangesOf,
   goalFromCodex,
   normalizeNotification,
@@ -346,6 +347,8 @@ class CodexSession implements SessionHandle {
   private readonly children: CodexChildTracker
   /** One compaction marker per compaction, from the item, the deprecated notification, or both (#303) */
   private readonly compactions = new CompactionMarks()
+  /** Each model request's input, once (prompt cache accounting, see `CodexRequestInputs`) */
+  private readonly requests = new CodexRequestInputs()
   /** What the thread said it runs with — a `thread/settings/updated` is measured against this (#304, `threadSettingsChanged`) */
   private threadSettings: CodexThreadSettings | null = null
   /**
@@ -825,6 +828,13 @@ class CodexSession implements SessionHandle {
         continue
       }
       if (e.type === 'compaction' && !this.compactions.admit(n)) continue
+      if (e.type === 'usage_update') {
+        const request = this.requests.take(n.params)
+        if (request) {
+          this.emit({ ...e, request })
+          continue
+        }
+      }
       if (e.type === 'activity') {
         // Each attempt sends its own notice; one indication is enough
         if (e.activity === 'retrying' && this.retrying) continue
